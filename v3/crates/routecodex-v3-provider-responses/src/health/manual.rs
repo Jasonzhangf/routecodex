@@ -27,8 +27,12 @@ fn invalid_manual_cooldown(detail: impl Into<String>) -> V3ProviderHealthError {
 /// 写入手动 probe 冷却，返回实际生效的 `blocked_until_ms`。
 ///
 /// 幂等：已存在同 identity 的 probe 时只把 `blocked_until_ms` 与
-/// `next_probe_at_ms` 延长到较晚者，并保留既有的失败计数、档位与单飞标记，
-/// 与失败驱动的 `upsert_provider_cooldown_probe_with_interval` 同形。
+/// `next_probe_at_ms` 延长到较晚者，并保留既有的失败计数、档位与单飞标记。
+/// 注意这与失败驱动的 `upsert_provider_cooldown_probe_with_interval` **不同形**：
+/// 后者会把 `observed_attempts` / `observed_failures` 归零、把
+/// `cooldown_started_at_ms` 设为 `now`，并把 `next_probe_at_ms` 重置为
+/// `now + interval`；手动冷却必须保留这些状态，否则操作员的加入动作会伪装成
+/// 一次新的失败。
 fn upsert_manual_probe_cooldown(
     state: &mut V3ProviderHealthState,
     provider_id: &str,

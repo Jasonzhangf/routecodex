@@ -99,9 +99,11 @@ pub(super) struct ProbeCooldownRequest {
 
 /// Shared transport for every manual cooldown action: keep the requested port
 /// inside the listeners this admin actually serves, then POST the action to the
-/// listener that owns the cooldown and project its body back verbatim. A non-2xx
-/// listener answer becomes BAD_GATEWAY carrying that same body, so the caller
-/// always sees the runtime's own error instead of a rewritten one.
+/// listener that owns the cooldown and project its body back verbatim. A
+/// listener 4xx is passed through unchanged because the listener owns the manual
+/// cooldown bounds, so its rejection is the operator's real answer; only a
+/// listener-side (non-4xx) failure becomes BAD_GATEWAY. Either way the caller
+/// sees the runtime's own body instead of a rewritten one.
 async fn forward_cooldown_action<T: Serialize>(
     state: &AppState,
     port: u16,
@@ -187,16 +189,18 @@ pub(super) async fn remove_cooldown(
     forward_cooldown_action(&state, request.port, "", &request).await
 }
 
-/// Manual add. The operator may only name an identity that selection can key on
-/// directly, so `session` is rejected here; the duration bound above one
-/// millisecond belongs to the listener that owns the cooldown ladder.
+/// Manual add. The admin only decides what it can decide locally: an empty
+/// identity, and a `kind` that is not a manual kind (`session` is a valid
+/// *release* kind, so it cannot be forwarded as an add). The whole duration
+/// bound, zero included, belongs to the listener that owns the cooldown ladder;
+/// restating even the zero half here would replace the listener's precise
+/// "duration_ms 0 is outside 1..=86400000" with a generic message.
 pub(super) async fn add_cooldown(
     State(state): axum::extract::State<AppState>,
     Json(request): Json<AddCooldownRequest>,
 ) -> Response {
     if request.provider_id.trim().is_empty()
         || !matches!(request.kind.as_str(), "auth_key" | "probe")
-        || request.duration_ms == 0
     {
         return (
             StatusCode::BAD_REQUEST,

@@ -47,8 +47,12 @@ badly at every width. Add three explicit operator actions and rewrite the panel.
 loop then observes it as due and runs the same
 `build_v3_provider_global_probe_target` / `probe_v3_provider_global_target`
 path a scheduled probe uses. A manual click therefore cannot bypass the
-provider wire, cannot run a probe that the ladder would refuse, and cannot
-leave probe state inconsistent if the runtime is mid-tick.
+provider wire and cannot leave probe state inconsistent if the runtime is
+mid-tick. There is no separate "the ladder would refuse it" gate to bypass: the
+probe schedule already decouples `next_probe_at_ms` from `blocked_until_ms`, so a
+manual probe deliberately makes the probe due before the cooldown deadline and a
+successful probe releases the cooldown early. That early release is the
+requested feature; an operator could already do the same via release.
 Rationale: any design that executes the probe synchronously inside the HTTP
 handler would duplicate the probe transport and the permit/generation
 bookkeeping. That is a second implementation of an owned behaviour.
@@ -62,9 +66,9 @@ manual add rejects `session`. Manual *release* keeps supporting all three kinds
 because it only matches existing keys.
 
 **D3. Manual add duration is explicit and bounded.**
-The request carries `duration_ms`. The store clamps it to
-`1 ..= V3_COOLDOWN_MANUAL_MAX_MS` (24 h) and rejects anything outside rather
-than silently coercing. `until_ms = now_ms + duration_ms`. A `probe`-kind add
+The request carries `duration_ms`. The store accepts only
+`1 ..= V3_COOLDOWN_MANUAL_MAX_MS` (24 h) and rejects anything outside; it never
+clamps. `until_ms = now_ms + duration_ms`. A `probe`-kind add
 sets `blocked_until_ms = until_ms`, `next_probe_at_ms = until_ms`, and starts
 from ladder position 0, so the first recovery probe is due when the manual
 cooldown expires. Manual state must be indistinguishable to the runtime from a
@@ -77,18 +81,23 @@ failure count; it does not stack duplicate entries (the store maps are keyed by
 identity, so this falls out of the data model — do not add a second map).
 
 **D4a. `auth_key` add must write the same pair a failure writes, and must
-normalize the key to `model_id = None`.** Verified facts:
-`record_provider_failure_action` writes *both* `auth_key_cooldowns` and a paired
-`provider_cooldown_probes` entry at `(provider, auth, None)` (health.rs:631-650);
-`provider_cooldown_persistence_entries` serializes **only**
-`provider_cooldown_probes` (persistence.rs:304-327); startup restore rebuilds
-**only** `provider_cooldown_probes` (health.rs:451-470); and
-`global_availability_projection` blocks selection by reading
-`provider_cooldown_probes` at the exact key (health.rs:1809+). Therefore a manual
-`auth_key` cooldown that writes only the auth_key map would be non-durable,
-would not match failure-driven shape, and would not block selection at all.
-`auth_key` add writes the pair, at `model_id = None`, so the projection shows
-`model_id: null` for those rows exactly as a real auth-key failure does.
+normalize the key to `model_id = None`.** Verified facts: the failure-driven
+pair writer is `record_provider_failure_in_session_with_policy` (health.rs:521;
+the pair write is at health.rs:631-650), reached from production policy at
+`provider_failure_runtime_policy.rs:701,760`. It writes *both*
+`auth_key_cooldowns` and a paired `provider_cooldown_probes` entry at
+`(provider, auth, None)`. `provider_cooldown_persistence_entries` serializes
+**only** `provider_cooldown_probes` (persistence.rs:304-327), and startup
+restore rebuilds **only** `provider_cooldown_probes` (health.rs:451-470).
+`global_availability_projection` blocks on *either* an exact-key
+`provider_cooldown_probes` entry (health.rs:1809+) *or* an `auth_key_cooldowns`
+entry matched by provider+auth alone (health.rs:1834-1843). So a manual
+`auth_key` cooldown that wrote only the auth_key map **would** still block
+selection while the process is up — durability is the argument that actually
+forces the pair, because the auth_key map is never persisted and such a cooldown
+would vanish on restart. `auth_key` add therefore writes the pair, at
+`model_id = None`, so the projection shows `model_id: null` for those rows
+exactly as a real auth-key failure does.
 
 **D4b. Probe-kind add on an existing entry extends; it does not reset.**
 Extension preserves `probe_failure_count`, `probe_interval_ms`,

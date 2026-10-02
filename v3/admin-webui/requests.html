@@ -57,6 +57,10 @@
     gap: 4px;
     min-width: 0;
   }
+  /* An author-origin `display` outranks the UA sheet's `[hidden]` rule, so the
+     hidden attribute needs an author rule of its own or the custom-duration
+     field stays visible while a preset is selected. */
+  .cooldown-add label[hidden] { display: none; }
   .cooldown-add label > span {
     font-size: 11px;
     color: var(--muted);
