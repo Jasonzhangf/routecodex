@@ -27,16 +27,17 @@
     gap: 10px;
   }
   .cooldown-card {
-    border: 1px solid var(--line, rgba(255, 255, 255, 0.1));
-    border-radius: 6px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
     padding: 10px 12px;
   }
   .cooldown-card h4 { margin: 0 0 6px; font-size: 13px; }
-  .cooldown-remaining { font-variant-numeric: tabular-nums; color: var(--amb-emit-amber, #d9a441); }
+  .cooldown-remaining { font-variant-numeric: tabular-nums; color: var(--warn); }
   .modal-backdrop {
     position: fixed;
     inset: 0;
-    background: color-mix(in srgb, hsl(var(--amb-light-hue) 30% 4%), transparent 35%);
+    background: color-mix(in srgb, #02040a 68%, transparent);
     z-index: 70;
   }
   .modal {
@@ -54,7 +55,15 @@
   }
   .modal[hidden], .modal-backdrop[hidden] { display: none; }
   .modal-head { display: flex; align-items: center; gap: 12px; }
-  .modal-head h2 { flex: 1; margin: 0; font-size: 16px; }
+  .modal-head h2 {
+    flex: 1;
+    margin: 0;
+    font-size: 16px;
+    font-weight: 620;
+    letter-spacing: -0.01em;
+    text-transform: none;
+    color: var(--label);
+  }
   .modal-body { overflow-y: auto; margin-top: 12px; flex: 1 1 auto; min-height: 0; }
   .modal-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
   .detail-section { margin-top: 14px; }
@@ -64,16 +73,22 @@
 </style>
 </head>
 <body class="ambient">
-<aside id="sidebar" class="sidebar amb-surface amb-elevation-1 amb-chamfer" aria-label="Primary"></aside>
+<aside id="sidebar" class="sidebar" aria-label="Primary"></aside>
 <div class="shell">
-  <div class="topbar">
-    <div class="spacer"></div>
-    <button class="btn primary amb-button amb-button-cap amb-light-tl" id="reload-btn" type="button">Reload</button>
-  </div>
+  <header class="page-header">
+    <div class="page-header-inner">
+      <div class="page-heading">
+        <p class="eyebrow">Monitor</p>
+        <h1 id="page-title">Requests</h1>
+        <p id="page-sub" class="sub">Persistent request records — grouped by port, then by status code</p>
+      </div>
+      <div class="page-actions">
+        <button class="btn primary" id="reload-btn" type="button">Reload</button>
+      </div>
+    </div>
+  </header>
 
   <main>
-    <h1 id="page-title">Requests</h1>
-    <div id="page-sub" class="sub">Persistent request records — grouped by port, then by status code</div>
     <div id="status-bar" class="status-bar" role="status" aria-live="polite" style="display:none"></div>
 
     <div class="section">

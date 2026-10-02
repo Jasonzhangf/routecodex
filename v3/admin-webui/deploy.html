@@ -49,30 +49,43 @@
   #doctor-panel .table td { vertical-align: top; }
   #lifecycle-panel .actions { margin-bottom: 8px; }
   .confirm-dialog {
-    border: 1px solid var(--line, rgba(255, 255, 255, 0.14));
+    border: 1px solid var(--line-strong);
     border-radius: var(--radius);
     padding: 0;
     max-width: 440px;
     color: var(--label);
   }
-  .confirm-dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
+  .confirm-dialog::backdrop { background: color-mix(in srgb, #02040a 68%, transparent); }
   .confirm-dialog-shell { padding: 16px; display: flex; flex-direction: column; gap: 10px; }
-  .confirm-dialog-shell h2 { margin: 0; font-size: 15px; }
+  .confirm-dialog-shell h2 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 620;
+    letter-spacing: -0.01em;
+    text-transform: none;
+    color: var(--label);
+  }
   .confirm-dialog-message { margin: 0; color: var(--muted); font-size: 13px; }
   .confirm-dialog .actions { display: flex; justify-content: flex-end; gap: 8px; }
 </style>
 </head>
 <body class="ambient">
-<aside id="sidebar" class="sidebar amb-surface amb-elevation-1 amb-chamfer" aria-label="Primary"></aside>
+<aside id="sidebar" class="sidebar" aria-label="Primary"></aside>
 <div class="shell">
-  <div class="topbar">
-    <div class="spacer"></div>
-    <button class="btn amb-button amb-button-cap" id="refresh-btn" type="button">Refresh</button>
-    <button class="btn primary amb-button amb-button-cap amb-light-tl" id="deploy-reload-btn" type="button">Reload config</button>
-  </div>
+  <header class="page-header">
+    <div class="page-header-inner">
+      <div class="page-heading">
+        <p class="eyebrow">Setup</p>
+        <h1 id="page-title">Deploy</h1>
+        <p id="page-sub" class="sub">Runtime environment, self-check and lifecycle control</p>
+      </div>
+      <div class="page-actions">
+        <button class="btn" id="refresh-btn" type="button">Refresh</button>
+        <button class="btn primary" id="deploy-reload-btn" type="button">Reload config</button>
+      </div>
+    </div>
+  </header>
   <main>
-    <h1 id="page-title">Deploy</h1>
-    <div id="page-sub" class="sub">Runtime environment, self-check and lifecycle control</div>
     <div id="status-bar" class="status-bar" role="status" aria-live="polite" style="display:none"></div>
     <section id="first-run-guide" class="panel amb-surface amb-elevation-1" aria-label="First run guide" hidden></section>
     <div class="section">

@@ -8,38 +8,40 @@
 <title>Routes — RouteCodex</title>
 </head>
 <body class="ambient">
-<aside id="sidebar" class="sidebar amb-surface amb-elevation-1 amb-chamfer" aria-label="Primary"></aside>
+<aside id="sidebar" class="sidebar" aria-label="Primary"></aside>
 <div class="shell">
-  <div class="topbar">
-    <div class="spacer"></div>
-    <span class="route-save-state" id="save-state">Saved</span>
-    <button class="btn amb-button amb-button-cap" id="discard-btn" disabled>Discard</button>
-    <button class="btn primary amb-button amb-button-cap amb-light-tl" id="save-btn" disabled>Save routes</button>
-  </div>
-  <main class="routes-page">
-    <section class="routes-intro" aria-labelledby="routes-title">
-      <div>
-        <p class="eyebrow">Routing</p>
-        <h1 id="routes-title">Choose what runs first</h1>
-        <p class="sub">Tier 1 is tried first. Put alternatives in the same tier to share traffic; add lower tiers as backups.</p>
+  <header class="page-header">
+    <div class="page-header-inner">
+      <div class="page-heading">
+        <p class="eyebrow">Setup</p>
+        <h1 id="page-title">Routes</h1>
+        <p id="page-sub" class="sub">Tier 1 is tried first. Put alternatives in the same tier to share traffic; add lower tiers as backups.</p>
       </div>
-      <button class="btn amb-button amb-button-cap" id="validate-btn">Validate</button>
-    </section>
+      <div class="page-actions">
+        <span class="route-save-state" id="save-state">Saved</span>
+        <button class="btn" id="validate-btn">Validate</button>
+        <button class="btn" id="discard-btn" disabled>Discard</button>
+        <button class="btn primary" id="save-btn" disabled>Save routes</button>
+      </div>
+    </div>
+  </header>
 
-    <div class="status-bar info amb-surface amb-groove" id="status-bar" role="status" aria-live="polite">Loading routes…</div>
+  <main>
+    <div class="status-bar info" id="status-bar" role="status" aria-live="polite">Loading routes…</div>
 
     <div class="routes-toolbar" aria-label="Route filters">
       <label for="search-filter">Find a pool or model</label>
       <input id="search-filter" type="search" placeholder="Search pools, providers, or models" autocomplete="off">
+      <span class="spacer"></span>
+      <label for="server-selector">Server</label>
+      <select id="server-selector" aria-label="Server"></select>
     </div>
 
-    <label for="server-selector">Server</label>
-    <select id="server-selector" aria-label="Server"></select>
     <section id="route-tree" class="route-editor" aria-busy="true"></section>
   </main>
 </div>
 
-<dialog id="provider-picker" class="route-picker amb-surface amb-elevation-3" aria-labelledby="picker-title">
+<dialog id="provider-picker" class="route-picker" aria-labelledby="picker-title">
   <form method="dialog" class="route-picker-shell">
     <div class="route-picker-head">
       <div>
