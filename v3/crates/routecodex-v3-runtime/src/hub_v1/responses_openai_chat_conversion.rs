@@ -151,7 +151,7 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
     }
     if let Some(usage) = payload
         .get("usage")
-        .and_then(normalize_v3_hub_responses_usage_from_openai_chat_usage)
+        .and_then(project_v3_responses_usage_from_canonical)
     {
         response.insert("usage".to_string(), usage);
     }
@@ -312,44 +312,12 @@ pub(crate) fn v3_reasoning_summary_text_entry(text: String) -> Value {
     json!({"type":"summary_text","text":text})
 }
 
-pub(crate) fn normalize_v3_hub_responses_usage_from_openai_chat_usage(
-    usage: &Value,
-) -> Option<Value> {
-    let source = usage.as_object()?;
-    let mut response = Map::new();
-    if let Some(value) = source
-        .get("input_tokens")
-        .or_else(|| source.get("prompt_tokens"))
-        .cloned()
-    {
-        response.insert("input_tokens".to_string(), value);
-    }
-    if let Some(value) = source
-        .get("output_tokens")
-        .or_else(|| source.get("completion_tokens"))
-        .cloned()
-    {
-        response.insert("output_tokens".to_string(), value);
-    }
-    if let Some(value) = source.get("total_tokens").cloned() {
-        response.insert("total_tokens".to_string(), value);
-    }
-    if let Some(details) = source
-        .get("input_tokens_details")
-        .or_else(|| source.get("prompt_tokens_details"))
-        .cloned()
-    {
-        response.insert("input_tokens_details".to_string(), details);
-    }
-    if let Some(details) = source
-        .get("output_tokens_details")
-        .or_else(|| source.get("completion_tokens_details"))
-        .cloned()
-    {
-        response.insert("output_tokens_details".to_string(), details);
-    }
-    (!response.is_empty()).then_some(Value::Object(response))
-}
+/// Canonical usage -> Responses client wire usage 唯一归一化入口（JSON 响应与 SSE 终帧共用）。
+///
+/// 输入侧语义判定与 `effective_input` / `cached` 推导唯一真源是
+/// `crate::hub_v1::usage_normalization::split_v3_canonical_usage_cache`；
+/// Anthropic 私有字段不得出现在 Responses client payload。
+pub(crate) use crate::hub_v1::usage_normalization::project_v3_responses_usage_from_canonical;
 
 pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
     call: &Value,

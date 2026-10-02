@@ -1,0 +1,45 @@
+{
+  "id": "v3.usage_cache_hit_rate",
+  "version": "3",
+  "inputs": [
+    {
+      "id": "observability-query-row",
+      "schema": "Object",
+      "schema_ref": "v3.usage.observability_query_row"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "usage_hit_rate_m01_canonical_cache",
+      "operator": "routecodex.v3.admin.observability.row_canonical_usage_cache",
+      "operator_version": "1",
+      "inputs": [
+        "observability-query-row"
+      ],
+      "output": {
+        "id": "canonical-usage-cache",
+        "schema": "Object",
+        "schema_ref": "v3.usage.canonical_usage_cache"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [],
+        "writes": []
+      }
+    }
+  ],
+  "edges": [],
+  "outputs": [
+    "canonical-usage-cache"
+  ]
+}

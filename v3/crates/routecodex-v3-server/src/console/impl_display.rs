@@ -1,4 +1,5 @@
 use crate::*;
+use routecodex_v3_runtime::hub_v1::usage_normalization::split_v3_canonical_usage_cache;
 use serde_json::Value;
 
 pub(crate) fn format_v3_console_usage_summary(usage: Option<&V3RuntimeUsageSummary>) -> String {
@@ -43,17 +44,21 @@ pub(crate) fn format_v3_console_human_usage_summary(
 }
 
 fn format_v3_console_cache_summary(usage: &V3RuntimeUsageSummary) -> Option<String> {
-    // OpenAI-compatible usage reports cached tokens as a sub-count of input.
-    let (cached, denominator) = if let Some(cached) = usage.cached_tokens {
-        (cached, usage.input_tokens.map(|input| input as f64))
-    } else {
-        // Anthropic-compatible usage reports the uncached increment separately.
-        let cached = usage.cache_read_input_tokens?;
-        (
-            cached,
-            usage.input_tokens.map(|input| cached as f64 + input as f64),
-        )
-    };
+    // Shared canonical split: OpenAI-compatible usage reports cached tokens as a
+    // sub-count of input, while Anthropic-compatible usage reports the uncached
+    // increment separately, so its read and creation counts both belong in the
+    // denominator.
+    let cache = split_v3_canonical_usage_cache(
+        usage.input_tokens,
+        usage.cached_tokens,
+        usage.cache_read_input_tokens,
+        usage.cache_creation_input_tokens,
+    );
+    let cached = cache.cached_tokens?;
+    // An unreported input keeps the denominator unknown, as before.
+    let denominator = usage
+        .input_tokens
+        .map(|_| cache.effective_input_tokens as f64);
     Some(match denominator {
         Some(denominator) if denominator > 0.0 => {
             format!(

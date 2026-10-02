@@ -1,3 +1,4 @@
+use super::usage_normalization::project_v3_anthropic_usage_from_canonical;
 use super::{
     project_v3_responses_reasoning_item_as_anthropic_content, V3AnthropicCodecError,
     V3HubProviderWireProtocol, V3HubTransportIntent,
@@ -77,8 +78,11 @@ pub fn project_v3_responses_json_as_anthropic_message(
     if let Some(model) = object.get("model") {
         message["model"] = model.clone();
     }
-    if let Some(usage) = object.get("usage") {
-        message["usage"] = usage.clone();
+    if let Some(usage) = object
+        .get("usage")
+        .and_then(project_v3_anthropic_usage_from_canonical)
+    {
+        message["usage"] = usage;
     }
     Ok(message)
 }
@@ -191,13 +195,11 @@ pub fn project_v3_openai_chat_completion_as_anthropic_message(
     if let Some(model) = object.get("model") {
         message["model"] = model.clone();
     }
-    if let Some(usage) = object.get("usage").and_then(Value::as_object) {
-        message["usage"] = json!({
-            "input_tokens":usage.get("prompt_tokens").cloned().unwrap_or(Value::Null),
-            "output_tokens":usage.get("completion_tokens").cloned().unwrap_or(Value::Null)
-        });
-    } else if let Some(usage) = object.get("usage") {
-        message["usage"] = usage.clone();
+    if let Some(usage) = object
+        .get("usage")
+        .and_then(project_v3_anthropic_usage_from_canonical)
+    {
+        message["usage"] = usage;
     }
     Ok(message)
 }

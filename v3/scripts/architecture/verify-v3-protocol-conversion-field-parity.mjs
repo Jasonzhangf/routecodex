@@ -423,7 +423,7 @@ for (const phrase of [
   'fn build_v3_responses_provider_response_from_openai_chat_payload',
   'if let Some(model) = payload.get("model") {\n        response.insert("model".to_string(), model.clone());\n    }',
   'payload.get("created_at").or_else(|| payload.get("created"))',
-  'normalize_v3_hub_responses_usage_from_openai_chat_usage',
+  'project_v3_responses_usage_from_canonical',
   'build_v3_responses_reasoning_item_from_openai_chat_message',
   'build_v3_responses_function_call_from_openai_chat_tool_call',
 ]) requireText(chatToResponses, `${paths.responsesOpenaiChatConversion}::chat_to_responses_projection`, phrase);

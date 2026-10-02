@@ -1,0 +1,45 @@
+{
+  "id": "v3.usage_responses_client_projection",
+  "version": "3",
+  "inputs": [
+    {
+      "id": "provider-wire-usage",
+      "schema": "Object",
+      "schema_ref": "v3.usage.provider_wire_usage"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "usage_responses_m01_client_wire_usage",
+      "operator": "routecodex.v3.hub_v1.usage_normalization.project_v3_responses_usage_from_canonical",
+      "operator_version": "1",
+      "inputs": [
+        "provider-wire-usage"
+      ],
+      "output": {
+        "id": "responses-client-wire-usage",
+        "schema": "Object",
+        "schema_ref": "v3.usage.responses_client_wire_usage"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [],
+        "writes": []
+      }
+    }
+  ],
+  "edges": [],
+  "outputs": [
+    "responses-client-wire-usage"
+  ]
+}

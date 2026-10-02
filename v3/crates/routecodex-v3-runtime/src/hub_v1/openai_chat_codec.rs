@@ -299,73 +299,9 @@ pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
 /// Responses 语义 usage -> OpenAI Chat wire usage 唯一归一化入口（JSON 响应与
 /// SSE 终帧共用；禁止在投影层各自复制一份转换）。
 ///
-/// 输入侧两种语义必须择一，不能同时套用（见 `V3RuntimeUsageSummary` 字段契约）：
-/// - OpenAI/Responses 语义：`input_tokens` 已含缓存，`input_tokens_details.cached_tokens`
-///   只是它的子计数；`prompt_tokens` 直接取 `input_tokens`。
-/// - Anthropic 语义：`input_tokens` 只记未命中缓存的增量，`cache_read_input_tokens` /
-///   `cache_creation_input_tokens` 独立计数；OpenAI Chat 的 `prompt_tokens` 是完整
-///   输入，必须把读/写缓存加回，并把读缓存投影为子计数。
-///
-/// 客户端 usage 识别（dsh `parseChunkUsage`）从 `prompt_tokens_details.cached_tokens`
-/// 读取命中缓存，并用 `prompt_tokens - cached_tokens` 反推未命中增量；丢掉子计数
-/// 会把全部输入计成未命中，并把缓存读计为 0。
-pub(crate) fn project_v3_chat_usage_from_canonical(usage: &Value) -> Option<Value> {
-    let usage = usage.as_object()?;
-    let input_tokens = usage
-        .get("input_tokens")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let output_tokens = usage
-        .get("output_tokens")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let cached_subcount = usage
-        .get("input_tokens_details")
-        .and_then(Value::as_object)
-        .and_then(|details| details.get("cached_tokens"))
-        .and_then(Value::as_u64);
-    let cache_read = usage.get("cache_read_input_tokens").and_then(Value::as_u64);
-    let cache_creation = usage
-        .get("cache_creation_input_tokens")
-        .and_then(Value::as_u64);
-    let (prompt_tokens, cached_tokens) = match cached_subcount {
-        Some(cached) => (input_tokens, Some(cached)),
-        None => match cache_read {
-            Some(read) => (
-                input_tokens
-                    .saturating_add(read)
-                    .saturating_add(cache_creation.unwrap_or(0)),
-                Some(read),
-            ),
-            None => (input_tokens, None),
-        },
-    };
-    let mut projected = serde_json::Map::new();
-    projected.insert("prompt_tokens".to_string(), Value::from(prompt_tokens));
-    projected.insert("completion_tokens".to_string(), Value::from(output_tokens));
-    projected.insert(
-        "total_tokens".to_string(),
-        Value::from(prompt_tokens.saturating_add(output_tokens)),
-    );
-    if let Some(cached) = cached_tokens {
-        projected.insert(
-            "prompt_tokens_details".to_string(),
-            serde_json::json!({"cached_tokens": cached}),
-        );
-    }
-    if let Some(reasoning) = usage
-        .get("output_tokens_details")
-        .and_then(Value::as_object)
-        .and_then(|details| details.get("reasoning_tokens"))
-        .and_then(Value::as_u64)
-    {
-        projected.insert(
-            "completion_tokens_details".to_string(),
-            serde_json::json!({"reasoning_tokens": reasoning}),
-        );
-    }
-    Some(Value::Object(projected))
-}
+/// 输入侧语义判定与 `effective_input` / `cached` 推导唯一真源是
+/// `super::usage_normalization::split_v3_canonical_usage_cache`，本模块只做字段名投影。
+pub(crate) use super::usage_normalization::project_v3_chat_usage_from_canonical;
 
 /// Incremental Anthropic wire-event to OpenAI Chat client transducer.
 ///

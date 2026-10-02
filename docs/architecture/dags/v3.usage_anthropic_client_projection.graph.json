@@ -1,0 +1,45 @@
+{
+  "id": "v3.usage_anthropic_client_projection",
+  "version": "3",
+  "inputs": [
+    {
+      "id": "provider-wire-usage",
+      "schema": "Object",
+      "schema_ref": "v3.usage.provider_wire_usage"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "usage_anthropic_m01_client_wire_usage",
+      "operator": "routecodex.v3.hub_v1.usage_normalization.project_v3_anthropic_usage_from_canonical",
+      "operator_version": "1",
+      "inputs": [
+        "provider-wire-usage"
+      ],
+      "output": {
+        "id": "anthropic-client-wire-usage",
+        "schema": "Object",
+        "schema_ref": "v3.usage.anthropic_client_wire_usage"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [],
+        "writes": []
+      }
+    }
+  ],
+  "edges": [],
+  "outputs": [
+    "anthropic-client-wire-usage"
+  ]
+}
