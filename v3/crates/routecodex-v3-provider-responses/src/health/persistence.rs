@@ -48,7 +48,7 @@ impl V3ProviderHealthPersistenceWriter {
         let (sender, receiver) = mpsc::sync_channel(V3_PROVIDER_HEALTH_PERSISTENCE_QUEUE_CAPACITY);
         let alarm = Arc::new(RwLock::new(None));
         let writer_alarm = Arc::clone(&alarm);
-        std::thread::Builder::new()
+        let spawned = std::thread::Builder::new()
             .name("v3-provider-health-persistence".to_string())
             .spawn(move || {
                 let mut persisted_entries = coordinator.persisted_entries();
@@ -99,7 +99,16 @@ impl V3ProviderHealthPersistenceWriter {
                         }
                     }
                 }
-            })
+            });
+        Self::after_spawn(sender, alarm, spawned)
+    }
+
+    fn after_spawn(
+        sender: mpsc::SyncSender<V3ProviderHealthPersistenceCommand>,
+        alarm: Arc<RwLock<Option<String>>>,
+        spawned: std::io::Result<std::thread::JoinHandle<()>>,
+    ) -> Result<Self, String> {
+        spawned
             .map_err(|error| format!("provider health persistence writer start failed: {error}"))?;
         Ok(Self { sender, alarm })
     }
@@ -734,5 +743,30 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
         let alarm = writer.alarm().expect("persistence alarm");
         assert!(alarm.contains("decode provider cooldown state"), "{alarm}");
         assert_eq!(std::fs::read(path).expect("read original state"), contents);
+    }
+
+    #[test]
+    fn persistence_writer_start_failure_is_disabled_without_panicking() {
+        let (sender, receiver) = mpsc::sync_channel(V3_PROVIDER_HEALTH_PERSISTENCE_QUEUE_CAPACITY);
+        drop(receiver);
+        let alarm = Arc::new(RwLock::new(None));
+        let error = V3ProviderHealthPersistenceWriter::after_spawn(
+            sender,
+            Arc::clone(&alarm),
+            Err(std::io::Error::other("injected writer start failure")),
+        )
+        .expect_err("a failed writer start must be returned to the startup caller");
+
+        assert!(
+            error.contains("provider health persistence writer start failed"),
+            "{error}"
+        );
+        let writer = disabled_persistence_writer(error);
+        assert!(writer
+            .alarm()
+            .expect("disabled writer must retain the startup failure")
+            .contains("provider health persistence writer start failed"));
+        writer.enqueue(Vec::new());
+        assert!(writer.flush_snapshot(Vec::new()).is_err());
     }
 }
