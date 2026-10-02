@@ -525,59 +525,322 @@ async function loadCooldown() {
   if (state.detailKey) renderDetailCooldown();
 }
 
+const COOLDOWN_ADD_KINDS = ["auth_key", "probe"];
+const COOLDOWN_MANUAL_MAX_MS = 24 * 60 * 60 * 1000;
+const COOLDOWN_STATE_BADGE = {
+  session_cooldown: "failed",
+  auth_key_cooldown: "failed",
+  blocked: "warning",
+  probing: "warning",
+};
+let cooldownAddOpen = false;
+
+// The panel host keeps two JS-rendered regions plus the static add form, so the
+// operator's half-typed add request survives the 5 s pool refresh.
 function renderCooldownPanel() {
-  const host = document.getElementById("cooldown-panel");
-  if (!host) return;
+  const head = document.getElementById("cooldown-panel-head");
+  const body = document.getElementById("cooldown-panel-body");
+  if (!head || !body) return;
   if (state.cooldownError) {
-    host.replaceChildren(el("div", "error-summary", `cooldown pool unavailable: ${state.cooldownError}`));
+    head.replaceChildren();
+    body.replaceChildren(el("div", "error-summary", `cooldown pool unavailable: ${state.cooldownError}`));
+    syncCooldownAddState();
     return;
   }
   if (!state.cooldown) {
-    host.replaceChildren(el("div", "loading", "loading…"));
+    head.replaceChildren();
+    body.replaceChildren(el("div", "loading", "loading…"));
+    syncCooldownAddState();
     return;
   }
   const listeners = Array.isArray(state.cooldown.listeners) ? state.cooldown.listeners : [];
+  const entryCount = listeners.reduce((n, listener) => n + (Array.isArray(listener.entries) ? listener.entries.length : 0), 0);
+
+  const title = el("h3", "cooldown-head-title",
+    `${listeners.length} listener${listeners.length === 1 ? "" : "s"} · ${entryCount} active cooldown ${entryCount === 1 ? "entry" : "entries"}`);
+  const addToggle = el("button", "btn", "Add cooldown");
+  addToggle.id = "cooldown-add-toggle";
+  addToggle.setAttribute("aria-expanded", String(cooldownAddOpen));
+  addToggle.setAttribute("aria-controls", "cooldown-add-form");
+  addToggle.addEventListener("click", () => toggleCooldownAddForm());
+  head.replaceChildren(title, addToggle);
+
   if (!listeners.length) {
-    host.replaceChildren(el("div", "empty-state", "No listener returned a cooldown pool."));
+    body.replaceChildren(el("div", "empty-state", "No listener returned a cooldown pool."));
+  } else {
+    body.replaceChildren(...listeners.map((listener) => renderCooldownListener(listener)));
+  }
+  body.appendChild(el("div", "muted cooldown-foot", state.cooldownFetchedAtMs ? `pool read at ${timeText(state.cooldownFetchedAtMs)} · refreshes every 5 s` : ""));
+  syncCooldownAddForm(listeners);
+  syncCooldownAddState();
+}
+
+function syncCooldownAddState() {
+  const form = document.getElementById("cooldown-add-form");
+  const toggle = document.getElementById("cooldown-add-toggle");
+  const poolReady = Boolean(state.cooldown) && !state.cooldownError;
+  if (toggle) {
+    toggle.disabled = !poolReady;
+    toggle.title = poolReady ? "Inject a cooldown for a provider/auth/model" : "the cooldown pool must be readable before an entry can be added";
+  }
+  if (form) form.hidden = !(cooldownAddOpen && poolReady);
+}
+
+function renderCooldownListener(listener) {
+  const entries = Array.isArray(listener.entries) ? listener.entries : [];
+  const section = el("section", "cooldown-listener");
+  const header = el("header", "cooldown-listener-head");
+  header.appendChild(el("h4", "cooldown-listener-id", `${listener.server_id ?? "unknown"} :${listener.port ?? "—"}`));
+  header.appendChild(el("span", "cooldown-count muted", `${entries.length} ${entries.length === 1 ? "entry" : "entries"}`));
+  section.appendChild(header);
+
+  const table = el("table", "cooldown-table");
+  const columns = [
+    ["Provider", "col-provider"],
+    ["Auth", "col-auth"],
+    ["Model", "col-model"],
+    ["Kind", "col-kind"],
+    ["State", "col-state"],
+    ["Remaining", "num col-remaining"],
+    ["Failures", "num"],
+    ["Reason", "col-reason"],
+    ["Actions", "col-actions"],
+  ];
+  const thead = el("thead");
+  const headRow = el("tr");
+  for (const [label, cls] of columns) headRow.appendChild(el("th", cls, label));
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  const tbody = el("tbody");
+  if (!entries.length) {
+    const row = el("tr");
+    const cell = el("td", "muted", "no active cooldown entries");
+    cell.colSpan = columns.length;
+    row.appendChild(cell);
+    tbody.appendChild(row);
+  } else {
+    for (const entry of entries) tbody.appendChild(cooldownRow(listener, entry));
+  }
+  table.appendChild(tbody);
+  section.appendChild(table);
+  return section;
+}
+
+function cooldownRow(listener, entry) {
+  const tr = el("tr");
+  const providerId = entry.provider_id ?? "unknown";
+  const authAlias = entry.auth_alias || null;
+  const modelId = entry.model_id || null;
+  const kind = entry.kind ?? "auth_key";
+  const identity = { port: Number(listener.port), provider_id: providerId, auth_alias: authAlias, model_id: modelId, kind };
+
+  const providerCell = el("td", "col-provider");
+  providerCell.appendChild(el("span", "cooldown-provider mono", providerId));
+  const secondary = el("span", "cooldown-secondary");
+  const secondaryParts = [];
+  if (authAlias) secondaryParts.push(`key ${authAlias}`);
+  if (modelId) secondaryParts.push(`model ${modelId}`);
+  if (entry.reason) secondaryParts.push(entry.reason);
+  secondary.textContent = secondaryParts.join(" · ");
+  providerCell.appendChild(secondary);
+  tr.appendChild(providerCell);
+  tr.appendChild(el("td", "col-auth", authAlias ?? "—"));
+  tr.appendChild(el("td", "col-model mono", modelId ?? "—"));
+  tr.appendChild(el("td", "col-kind mono", kind));
+  const stateCell = el("td", "col-state");
+  stateCell.appendChild(cooldownBadge(entry.state ?? "unknown"));
+  tr.appendChild(stateCell);
+
+  const remainingCell = el("td", "num col-remaining");
+  if (entry.remaining_ms != null) {
+    const remaining = el("span", "cooldown-remaining", fmtMs(Math.max(0, Number(entry.remaining_ms))));
+    remaining.dataset.remainingMs = String(entry.remaining_ms);
+    remainingCell.appendChild(remaining);
+  } else {
+    remainingCell.appendChild(el("span", "muted", "unknown"));
+  }
+  tr.appendChild(remainingCell);
+  tr.appendChild(el("td", "num", entry.failure_count != null ? String(entry.failure_count) : "—"));
+  tr.appendChild(el("td", "col-reason", entry.reason ?? "—"));
+
+  const actionsCell = el("td", "col-actions");
+  const probeBtn = el("button", "btn cooldown-action", "Probe now");
+  const releaseBtn = el("button", "btn cooldown-action cooldown-release", "Release");
+  if (kind === "session") {
+    probeBtn.disabled = true;
+    probeBtn.title = "Probes only apply to auth_key/probe entries";
+  }
+  probeBtn.addEventListener("click", () => manualCooldownProbe(identity, [probeBtn, releaseBtn]));
+  releaseBtn.addEventListener("click", () => manualCooldownRelease(identity, [probeBtn, releaseBtn]));
+  actionsCell.append(probeBtn, releaseBtn);
+  tr.appendChild(actionsCell);
+  return tr;
+}
+
+function cooldownBadge(state) {
+  const node = badge(COOLDOWN_STATE_BADGE[state] || "neutral");
+  node.textContent = state || "unknown";
+  return node;
+}
+
+function cooldownIdentityText({ provider_id, auth_alias, model_id }) {
+  const parts = [provider_id ?? "unknown"];
+  if (auth_alias) parts.push(`key ${auth_alias}`);
+  if (model_id) parts.push(`model ${model_id}`);
+  return parts.join(" · ");
+}
+
+// Every action disables its own buttons while in flight, reports the outcome
+// through showStatus, and re-reads GET /api/observability/cooldown-pool. No
+// optimistic mutation of state.cooldown: the pool stays the only truth.
+async function runCooldownAction(buttons, run, errorPrefix) {
+  for (const button of buttons) if (button) button.disabled = true;
+  try {
+    try {
+      await run();
+    } catch (error) {
+      showStatus("err", `${errorPrefix}: ${error.message}`);
+    }
+    await loadCooldown();
+  } finally {
+    for (const button of buttons) if (button) button.disabled = false;
+  }
+}
+
+// Release is a direct POST: the row already names the exact identity and kind
+// being cleared, and the entry stays visible until the pool re-read confirms it
+// is gone, so a second modal step would only add a failure mode.
+async function manualCooldownRelease(identity, buttons) {
+  const label = cooldownIdentityText(identity);
+  await runCooldownAction(buttons, async () => {
+    const body = { port: identity.port, provider_id: identity.provider_id, kind: identity.kind };
+    if (identity.auth_alias) body.auth_alias = identity.auth_alias;
+    if (identity.model_id) body.model_id = identity.model_id;
+    const result = await api("/api/observability/cooldown-pool", { method: "POST", body: JSON.stringify(body) });
+    const removed = result?.removed === true ? "removed" : "no matching entry";
+    showStatus("ok", `Released ${label}: ${removed}.`);
+  }, `release failed for ${label}`);
+}
+
+async function manualCooldownProbe(identity, buttons) {
+  const label = cooldownIdentityText(identity);
+  await runCooldownAction(buttons, async () => {
+    const body = { port: identity.port, provider_id: identity.provider_id };
+    if (identity.auth_alias) body.auth_alias = identity.auth_alias;
+    if (identity.model_id) body.model_id = identity.model_id;
+    const result = await api("/api/observability/cooldown-pool/probe", { method: "POST", body: JSON.stringify(body) });
+    if (result?.scheduled === false) {
+      showStatus("warn", `Probe: no probe state exists for ${label}; nothing scheduled.`);
+    } else {
+      showStatus("ok", `Probe now applied for ${label}; recovery probe will run on the next health tick.`);
+    }
+  }, `probe failed for ${label}`);
+}
+
+function toggleCooldownAddForm(force) {
+  cooldownAddOpen = force !== undefined ? force : !cooldownAddOpen;
+  syncCooldownAddState();
+  if (cooldownAddOpen) {
+    const providerInput = document.getElementById("cooldown-add-provider");
+    if (providerInput) providerInput.focus();
+  }
+}
+
+function syncCooldownAddForm(listeners) {
+  const portSelect = document.getElementById("cooldown-add-port");
+  if (!portSelect) return;
+  const selected = portSelect.value;
+  portSelect.replaceChildren(...listeners.map((listener) => {
+    const option = el("option", null, `${listener.server_id ?? "unknown"} :${listener.port ?? "—"}`);
+    option.value = String(listener.port ?? "");
+    return option;
+  }));
+  if ([...portSelect.options].some((option) => option.value === selected)) portSelect.value = selected;
+}
+
+// The custom duration input only exists while the operator chose "custom";
+// resyncing after a reset keeps the hidden/disabled state honest.
+function syncCooldownAddDuration() {
+  const preset = document.getElementById("cooldown-add-preset");
+  const customField = document.getElementById("cooldown-add-custom-field");
+  const custom = document.getElementById("cooldown-add-custom");
+  if (!preset || !customField || !custom) return;
+  const usesCustom = preset.value === "custom";
+  customField.hidden = !usesCustom;
+  custom.disabled = !usesCustom;
+}
+
+function resetCooldownAddForm() {
+  const form = document.getElementById("cooldown-add-form");
+  if (form) form.reset();
+  const errorHost = document.getElementById("cooldown-add-error");
+  if (errorHost) errorHost.textContent = "";
+  syncCooldownAddDuration();
+}
+
+function initCooldownAddForm() {
+  const form = document.getElementById("cooldown-add-form");
+  const preset = document.getElementById("cooldown-add-preset");
+  const custom = document.getElementById("cooldown-add-custom");
+  const cancel = document.getElementById("cooldown-add-cancel");
+  if (!form || !preset || !custom || !cancel) return;
+
+  preset.addEventListener("change", syncCooldownAddDuration);
+  syncCooldownAddDuration();
+
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitCooldownAdd([
+      document.getElementById("cooldown-add-submit"),
+      document.getElementById("cooldown-add-cancel"),
+    ]);
+  });
+  cancel.addEventListener("click", () => {
+    resetCooldownAddForm();
+    toggleCooldownAddForm(false);
+  });
+}
+
+async function submitCooldownAdd(buttons) {
+  const errorHost = document.getElementById("cooldown-add-error");
+  if (!errorHost) return;
+  const port = Number(document.getElementById("cooldown-add-port")?.value);
+  const provider = (document.getElementById("cooldown-add-provider")?.value || "").trim();
+  const auth = (document.getElementById("cooldown-add-auth")?.value || "").trim();
+  const model = (document.getElementById("cooldown-add-model")?.value || "").trim();
+  const kind = document.getElementById("cooldown-add-kind")?.value || "auth_key";
+  const preset = document.getElementById("cooldown-add-preset");
+  const custom = document.getElementById("cooldown-add-custom");
+  const rawDuration = preset && preset.value === "custom" ? custom?.value : preset?.value;
+  const durationMs = Number(rawDuration);
+
+  let invalid = null;
+  if (!Number.isFinite(port) || port <= 0) invalid = "choose a listener port";
+  else if (!provider) invalid = "provider id is required";
+  else if (!COOLDOWN_ADD_KINDS.includes(kind)) invalid = "kind must be auth_key or probe";
+  else if (!Number.isInteger(durationMs) || durationMs < 1 || durationMs > COOLDOWN_MANUAL_MAX_MS) {
+    invalid = `duration must be a whole number of 1..${COOLDOWN_MANUAL_MAX_MS} ms (24 h)`;
+  }
+  if (invalid) {
+    errorHost.textContent = invalid;
+    showStatus("err", `add cooldown: ${invalid}`);
     return;
   }
-  const grid = el("div", "cooldown-grid");
-  for (const listener of listeners) {
-    const card = el("div", "cooldown-card");
-    card.appendChild(el("h4", null, `${listener.server_id ?? "unknown"} :${listener.port ?? "—"}`));
-    const entries = Array.isArray(listener.entries) ? listener.entries : [];
-    if (!entries.length) {
-      card.appendChild(el("div", "muted", "no active cooldown entries"));
-    } else {
-      for (const entry of entries) {
-        const line = el("div", "kv");
-        line.appendChild(el("span", "kv-key", entry.provider_id ?? "unknown"));
-        const value = el("span", "kv-value");
-        value.appendChild(badge(entry.state ?? "unknown"));
-        const parts = [];
-        if (entry.kind) parts.push(`kind ${entry.kind}`);
-        if (entry.auth_alias) parts.push(`key ${entry.auth_alias}`);
-        if (entry.model_id) parts.push(`model ${entry.model_id}`);
-        if (parts.length) value.appendChild(document.createTextNode(` · ${parts.join(" · ")}`));
-        if (entry.remaining_ms != null) {
-          const remaining = el("span", "cooldown-remaining", ` · ${fmtMs(Math.max(0, Number(entry.remaining_ms)))}`);
-          remaining.dataset.remainingMs = String(entry.remaining_ms);
-          value.appendChild(remaining);
-        } else {
-          value.appendChild(document.createTextNode(" · remaining unknown"));
-        }
-        if (entry.reason) value.appendChild(document.createTextNode(` · ${entry.reason}`));
-        if (entry.failure_count != null) value.appendChild(document.createTextNode(` · failures ${entry.failure_count}`));
-        line.appendChild(value);
-        card.appendChild(line);
-      }
-    }
-    grid.appendChild(card);
-  }
-  host.replaceChildren(
-    grid,
-    el("div", "muted", state.cooldownFetchedAtMs ? `pool read at ${timeText(state.cooldownFetchedAtMs)} · refreshes every 5 s` : ""),
-  );
+
+  const body = { port, provider_id: provider, kind, duration_ms: durationMs };
+  if (auth) body.auth_alias = auth;
+  if (model) body.model_id = model;
+  const label = cooldownIdentityText(body);
+
+  await runCooldownAction(buttons, async () => {
+    const result = await api("/api/observability/cooldown-pool/add", { method: "POST", body: JSON.stringify(body) });
+    const until = result?.until_ms ? `, until ${new Date(result.until_ms).toLocaleTimeString([], { hour12: false })}` : "";
+    const applied = result?.applied ? ` (${result.applied})` : "";
+    showStatus("ok", `Added ${kind} cooldown for ${label}${applied}${until}.`);
+    resetCooldownAddForm();
+    toggleCooldownAddForm(false);
+  }, `add cooldown failed for ${label}`);
 }
 
 function tickCooldowns() {
@@ -586,7 +849,7 @@ function tickCooldowns() {
     const base = Number(node.dataset.remainingMs);
     if (!Number.isFinite(base)) return;
     const left = base - elapsed;
-    node.textContent = ` · ${left > 0 ? fmtMs(left) : "expired (pool refresh pending)"}`;
+    node.textContent = left > 0 ? fmtMs(left) : "expired (pool refresh pending)";
   });
 }
 
@@ -1938,6 +2201,10 @@ document.getElementById("live-mode").addEventListener("change", (event) => {
   if (event.currentTarget.checked) startLive();
   else stopLive();
 });
+
+// The add form is static and survives the 5 s pool refresh; its port options
+// are repopulated on every render while the operator keeps typing.
+initCooldownAddForm();
 
 // Polling stays the fallback path and is suppressed while the stream is live.
 startAutoRefresh(() => { if (!state.live) loadRecords(); }, 5000);

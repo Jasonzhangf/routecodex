@@ -657,3 +657,202 @@ async fn observability_records_expose_the_entry_protocol_facet() {
     // groups under its real external status code.
     assert_eq!(body["facets"]["error_status_codes"]["502"], 1);
 }
+
+// ---------------------------------------------------------------------------
+// Manual cooldown actions (add / probe).
+//
+// The admin router is a passthrough: the listener owns every cooldown decision.
+// These tests therefore stay on the admin side of the boundary and never let a
+// request reach a listener, so they cannot mutate a live runtime on the
+// fixture's 4444/7777 ports. Every case is rejected before the forward.
+// ---------------------------------------------------------------------------
+
+/// The token `AppState::new` provisions under `<config_dir>/state/admin-token`.
+fn admin_token(home: &Path) -> String {
+    std::fs::read_to_string(home.join("state").join("admin-token"))
+        .expect("admin token provisioned under <config_dir>/state/admin-token")
+        .trim()
+        .to_string()
+}
+
+/// POST carrying the admin token every mutating admin route requires.
+async fn post_json_with_token(
+    url: &str,
+    token: &str,
+    body: &Value,
+) -> (reqwest::StatusCode, Value) {
+    let response = http_client()
+        .post(url)
+        .header("x-routecodex-admin-token", token)
+        .json(body)
+        .send()
+        .await
+        .expect("http response");
+    let status = response.status();
+    let body = response.json::<Value>().await.unwrap_or(Value::Null);
+    (status, body)
+}
+
+async fn status_of(request: reqwest::RequestBuilder) -> reqwest::StatusCode {
+    request.send().await.expect("http response").status()
+}
+
+/// A validation rejection proves the handler ran: auth let the request through
+/// and the route exists. 401/403/503 would mean we never reached it.
+fn assert_reached_handler(status: reqwest::StatusCode, body: &Value) {
+    assert!(
+        !matches!(
+            status,
+            reqwest::StatusCode::UNAUTHORIZED
+                | reqwest::StatusCode::FORBIDDEN
+                | reqwest::StatusCode::SERVICE_UNAVAILABLE
+                | reqwest::StatusCode::NOT_FOUND
+                | reqwest::StatusCode::METHOD_NOT_ALLOWED
+        ),
+        "request must reach the cooldown handler past auth and routing, got {status}: {body}"
+    );
+}
+
+#[tokio::test]
+async fn cooldown_add_rejects_session_kind() {
+    let (base, _state, home) = bind_test_server().await;
+    let (status, body) = post_json_with_token(
+        &format!("{base}/api/observability/cooldown-pool/add"),
+        &admin_token(&home),
+        &json!({
+            "port": 4444,
+            "provider_id": "p1",
+            "auth_alias": "k1",
+            "model_id": "m1",
+            "kind": "session",
+            "duration_ms": 60000,
+        }),
+    )
+    .await;
+    assert_reached_handler(status, &body);
+    assert_eq!(
+        status,
+        reqwest::StatusCode::BAD_REQUEST,
+        "a manual add may not name a session cooldown: {body}"
+    );
+}
+
+#[tokio::test]
+async fn cooldown_add_rejects_unconfigured_port() {
+    let (base, _state, home) = bind_test_server().await;
+    let (status, body) = post_json_with_token(
+        &format!("{base}/api/observability/cooldown-pool/add"),
+        &admin_token(&home),
+        &json!({
+            "port": 9999,
+            "provider_id": "p1",
+            "auth_alias": "k1",
+            "model_id": "m1",
+            "kind": "auth_key",
+            "duration_ms": 60000,
+        }),
+    )
+    .await;
+    assert_reached_handler(status, &body);
+    assert_eq!(
+        status,
+        reqwest::StatusCode::BAD_REQUEST,
+        "9999 is not one of the configured listeners: {body}"
+    );
+}
+
+#[tokio::test]
+async fn cooldown_add_rejects_empty_provider_id() {
+    let (base, _state, home) = bind_test_server().await;
+    let (status, body) = post_json_with_token(
+        &format!("{base}/api/observability/cooldown-pool/add"),
+        &admin_token(&home),
+        &json!({
+            "port": 4444,
+            "provider_id": "   ",
+            "kind": "probe",
+            "duration_ms": 60000,
+        }),
+    )
+    .await;
+    assert_reached_handler(status, &body);
+    assert_eq!(
+        status,
+        reqwest::StatusCode::BAD_REQUEST,
+        "a cooldown must name the provider it belongs to: {body}"
+    );
+}
+
+#[tokio::test]
+async fn cooldown_probe_rejects_unconfigured_port() {
+    let (base, _state, home) = bind_test_server().await;
+    let (status, body) = post_json_with_token(
+        &format!("{base}/api/observability/cooldown-pool/probe"),
+        &admin_token(&home),
+        &json!({
+            "port": 9999,
+            "provider_id": "p1",
+            "auth_alias": "k1",
+            "model_id": "m1",
+        }),
+    )
+    .await;
+    assert_reached_handler(status, &body);
+    assert_eq!(
+        status,
+        reqwest::StatusCode::BAD_REQUEST,
+        "9999 is not one of the configured listeners: {body}"
+    );
+}
+
+#[tokio::test]
+async fn cooldown_manual_action_routes_are_registered_behind_admin_auth() {
+    let (base, _state, home) = bind_test_server().await;
+    let add_url = format!("{base}/api/observability/cooldown-pool/add");
+    let probe_url = format!("{base}/api/observability/cooldown-pool/probe");
+
+    // Both paths are POST-only: a GET reaches the route table and is refused by
+    // the method, not by a missing path.
+    assert_eq!(
+        status_of(http_client().get(&add_url)).await,
+        reqwest::StatusCode::METHOD_NOT_ALLOWED,
+        "POST /api/observability/cooldown-pool/add must be registered"
+    );
+    assert_eq!(
+        status_of(http_client().get(&probe_url)).await,
+        reqwest::StatusCode::METHOD_NOT_ALLOWED,
+        "POST /api/observability/cooldown-pool/probe must be registered"
+    );
+
+    // Without the token the shared admin middleware fails closed before the
+    // handler, which is what makes the token-bearing cases above meaningful.
+    let (status, body) = {
+        let response = http_client()
+            .post(&add_url)
+            .json(&json!({ "port": 9999, "provider_id": "p1", "kind": "probe", "duration_ms": 1 }))
+            .send()
+            .await
+            .expect("http response");
+        let status = response.status();
+        let body = response.json::<Value>().await.unwrap_or(Value::Null);
+        (status, body)
+    };
+    assert_eq!(
+        status,
+        reqwest::StatusCode::UNAUTHORIZED,
+        "a mutating cooldown action must require the admin token: {body}"
+    );
+
+    // With the token the same rejected body reaches validation on both routes.
+    for (url, body) in [
+        (
+            &add_url,
+            json!({ "port": 9999, "provider_id": "p1", "kind": "probe", "duration_ms": 1 }),
+        ),
+        (&probe_url, json!({ "port": 9999, "provider_id": "p1" })),
+    ] {
+        let (status, body) = post_json_with_token(url, &admin_token(&home), &body).await;
+        assert_reached_handler(status, &body);
+        assert_eq!(status, reqwest::StatusCode::BAD_REQUEST, "body: {body}");
+    }
+}

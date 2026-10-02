@@ -1,5 +1,8 @@
+mod manual;
 mod persistence;
 mod probe_schedule;
+
+pub use manual::V3_COOLDOWN_MANUAL_MAX_MS;
 
 use crate::global_cooldown::V3ProviderCooldownFailureClass;
 use crate::key_health::{
@@ -305,6 +308,16 @@ struct V3ProviderConsecutiveFailure {
 pub enum V3ProviderHealthError {
     #[error("provider health state lock poisoned: {0}")]
     Poisoned(String),
+    #[error("invalid manual cooldown request: {0}")]
+    InvalidManualCooldown(String),
+}
+
+impl V3ProviderHealthError {
+    /// 供无法命名本枚举的调用边界（listener / admin）区分操作员输入错误与
+    /// 状态损坏：输入错误映射 400，其余映射 500。
+    pub fn is_invalid_manual_cooldown(&self) -> bool {
+        matches!(self, Self::InvalidManualCooldown(_))
+    }
 }
 
 impl V3ProviderHealthStore {
