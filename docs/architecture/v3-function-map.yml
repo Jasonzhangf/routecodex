@@ -5488,6 +5488,10 @@ features:
   - v3/admin-webui/app/views/usage.js
   - v3/admin-webui/app/views/providers.js
   - v3/admin-webui/app/views/provider-models.js
+  - v3/admin-webui/app/views/provider-model-api.js
+  - v3/admin-webui/app/views/provider-model-capabilities.js
+  - v3/admin-webui/app/views/provider-model-dialog.js
+  - v3/admin-webui/app/views/provider-model-picker.js
   - v3/admin-webui/app/views/routes.js
   - v3/admin-webui/requests-filter-smoke.mjs
   - v3/admin-webui/requests-usage-layout-smoke.mjs
