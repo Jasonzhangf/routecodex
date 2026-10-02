@@ -166,13 +166,12 @@ async fn chat_direct_success_baseline_json_and_sse() {
     wait_ports_closed(&client, &ports.all()).await;
 }
 
-/// Parity with the Responses entry (`bug_705d624_real_http_429_retains_status_and_error_in_json_and_sse`):
-/// a real upstream HTTP response is an external failure and keeps its real
-/// status; only transport-level absence of a provider response breaks the
-/// client transport. The chat entry must not rewrite this into an internal
-/// `network_error` frame.
+/// The chat entry is decoupled from the provider. A real upstream HTTP 429 is a
+/// provider error: it is classified in the typed Error chain and never projected
+/// to the client. With the pool exhausted the client observes a transport break,
+/// not the upstream status and not the upstream error body.
 #[tokio::test]
-async fn chat_direct_real_upstream_http_429_retains_status_and_error() {
+async fn chat_direct_real_upstream_http_429_never_reaches_client() {
     let success = start_controlled_upstream(ProviderMode::Success).await;
     let mut rate_a = start_controlled_upstream(ProviderMode::RateLimited).await;
     let mut rate_b = start_controlled_upstream(ProviderMode::RateLimited).await;
@@ -182,41 +181,19 @@ async fn chat_direct_real_upstream_http_429_retains_status_and_error() {
     let mut cli = start_cli_server(&config, ports.all());
     wait_for_health(&client, &mut cli, ports.exhausted, "chat_exhausted").await;
 
-    for stream in [false, true] {
-        let response = client
-            .post(format!("http://127.0.0.1:{}/v1/chat/completions", ports.exhausted))
-            .json(&json!({"model":"client-test","messages":[{"role":"user","content":"429 parity"}],"stream":stream}))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(
-            response.status(),
-            ReqwestStatusCode::TOO_MANY_REQUESTS,
-            "stream={stream} a real upstream status must reach the client unchanged"
-        );
-        let body = response.text().await.unwrap();
-        assert!(
-            body.contains("rate_limit_error"),
-            "stream={stream} the real external error must be preserved: {body}"
-        );
-        assert!(
-            !body.contains("network_error"),
-            "stream={stream} a real external failure must not be rewritten: {body}"
-        );
-    }
+    assert_chat_no_front_http_headers(ports.exhausted).await;
+    assert_chat_front_sse_transport_break(ports.exhausted).await;
     next_capture(&mut rate_a.captures, "429 first upstream").await;
     next_capture(&mut rate_b.captures, "429 second upstream").await;
     drop(cli);
     wait_ports_closed(&client, &ports.all()).await;
 }
 
-/// Parity with the Responses entry (`h2_p6_controlled_replay.rs`, "last real
-/// upstream HTTP 503 response must retain its external error meaning"): when the
-/// pool is exhausted and the last provider attempt was a real external 503, the
-/// chat client must still receive that external status and error, not a
-/// fabricated internal failure.
+/// The same boundary for a real external 503: a provider terminal is provider-private,
+/// so an exhausted pool breaks the client transport instead of projecting the
+/// upstream status and body.
 #[tokio::test]
-async fn chat_direct_real_upstream_http_503_retains_status_and_error() {
+async fn chat_direct_real_upstream_http_503_never_reaches_client() {
     let success = start_controlled_upstream(ProviderMode::Success).await;
     let mut unavailable_a =
         start_controlled_upstream(ProviderMode::UpstreamServiceUnavailable).await;
@@ -228,28 +205,8 @@ async fn chat_direct_real_upstream_http_503_retains_status_and_error() {
     let mut cli = start_cli_server(&config, ports.all());
     wait_for_health(&client, &mut cli, ports.exhausted, "chat_exhausted").await;
 
-    for stream in [false, true] {
-        let response = client
-            .post(format!("http://127.0.0.1:{}/v1/chat/completions", ports.exhausted))
-            .json(&json!({"model":"client-test","messages":[{"role":"user","content":"503 parity"}],"stream":stream}))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(
-            response.status(),
-            ReqwestStatusCode::SERVICE_UNAVAILABLE,
-            "stream={stream} a terminal real upstream 503 must reach the client unchanged"
-        );
-        let body = response.text().await.unwrap();
-        assert!(
-            body.contains("upstream_unavailable"),
-            "stream={stream} the real external error must be preserved: {body}"
-        );
-        assert!(
-            !body.contains("network_error"),
-            "stream={stream} a real external failure must not be rewritten: {body}"
-        );
-    }
+    assert_chat_no_front_http_headers(ports.exhausted).await;
+    assert_chat_front_sse_transport_break(ports.exhausted).await;
     next_capture(&mut unavailable_a.captures, "503 first upstream").await;
     next_capture(&mut unavailable_b.captures, "503 second upstream").await;
     drop(cli);
@@ -325,15 +282,13 @@ async fn chat_direct_real_upstream_error_survives_as_transport_isolation_then_re
     wait_ports_closed(&client, &ports.all()).await;
 }
 
-/// Parity with `bug_705d624_last_real_429_survives_later_transport_failure_and_reselection_succeeds`.
-///
 /// A provider first answers with a real 429 and a later candidate drops the
-/// connection: the terminal projection must keep the last real external status
-/// (429 + `rate_limit_error`) instead of collapsing to an internal
-/// `network_error` frame, and a following request on the same session scope must
+/// connection. Both are provider terminals: the client observes one transport
+/// break, never the 429 status, the provider error body, or an internal
+/// `network_error` frame. A following request on the same session scope must
 /// resume from the healthy candidate.
 #[tokio::test]
-async fn chat_direct_last_real_429_survives_later_transport_failure_and_reselect_succeeds() {
+async fn chat_direct_last_provider_failure_breaks_transport_and_reselect_succeeds() {
     let mut success = start_controlled_upstream(ProviderMode::Success).await;
     let mut rate = start_controlled_upstream(ProviderMode::RateLimited).await;
     let mut no_response = start_no_response_upstream().await;
@@ -344,25 +299,14 @@ async fn chat_direct_last_real_429_survives_later_transport_failure_and_reselect
     wait_for_health(&client, &mut cli, ports.exhausted, "chat_exhausted").await;
     wait_for_health(&client, &mut cli, ports.reselect, "chat_reselect").await;
 
-    let failure_response = client
+    let failure_result = client
         .post(format!("http://127.0.0.1:{}/v1/chat/completions", ports.exhausted))
         .json(&json!({"model":"client-test","messages":[{"role":"user","content":"429 then no response"}]}))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        failure_response.status(),
-        ReqwestStatusCode::TOO_MANY_REQUESTS,
-        "the last real upstream status must survive a later transport failure"
-    );
-    let body = failure_response.text().await.unwrap();
+        .await;
     assert!(
-        body.contains("rate_limit_error"),
-        "the real external error must be preserved: {body}"
-    );
-    assert!(
-        !body.contains("network_error"),
-        "an internal transport failure must not rewrite a real external 429: {body}"
+        failure_result.is_err(),
+        "a provider terminal must break the client transport instead of projecting a provider error"
     );
     next_capture(&mut rate.captures, "429 before transport failure").await;
     next_capture(&mut no_response.captures, "transport after 429").await;
@@ -573,11 +517,11 @@ async fn chat_relay_cross_protocol_error_then_reselect_succeeds() {
     wait_ports_closed(&client, &ports.all()).await;
 }
 
-/// The same terminal external 503 preservation on the cross-protocol lane: an
-/// exhausted pool of `responses`-type providers must project the last real
-/// external status and error to the chat client.
+/// The same provider-private boundary on the cross-protocol lane: an exhausted
+/// pool of `responses`-type providers must break the chat client transport
+/// instead of projecting the last real external status and error.
 #[tokio::test]
-async fn chat_relay_cross_protocol_real_upstream_http_503_retains_status_and_error() {
+async fn chat_relay_cross_protocol_real_upstream_http_503_never_reaches_client() {
     let success = start_controlled_responses_upstream(ProviderMode::Success).await;
     let mut unavailable_a =
         start_controlled_responses_upstream(ProviderMode::UpstreamServiceUnavailable).await;
@@ -595,28 +539,8 @@ async fn chat_relay_cross_protocol_real_upstream_http_503_retains_status_and_err
     let mut cli = start_cli_server(&config, ports.all());
     wait_for_health(&client, &mut cli, ports.exhausted, "chat_exhausted").await;
 
-    for stream in [false, true] {
-        let response = client
-            .post(format!("http://127.0.0.1:{}/v1/chat/completions", ports.exhausted))
-            .json(&json!({"model":"client-test","messages":[{"role":"user","content":"relay 503 parity"}],"stream":stream}))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(
-            response.status(),
-            ReqwestStatusCode::SERVICE_UNAVAILABLE,
-            "stream={stream} a terminal real upstream 503 must reach the chat client unchanged"
-        );
-        let body = response.text().await.unwrap();
-        assert!(
-            body.contains("upstream_unavailable"),
-            "stream={stream} the real external error must be preserved: {body}"
-        );
-        assert!(
-            !body.contains("network_error"),
-            "stream={stream} a real external failure must not be rewritten: {body}"
-        );
-    }
+    assert_chat_no_front_http_headers(ports.exhausted).await;
+    assert_chat_front_sse_transport_break(ports.exhausted).await;
     next_capture(&mut unavailable_a.captures, "relay 503 first upstream").await;
     next_capture(&mut unavailable_b.captures, "relay 503 second upstream").await;
     drop(cli);
