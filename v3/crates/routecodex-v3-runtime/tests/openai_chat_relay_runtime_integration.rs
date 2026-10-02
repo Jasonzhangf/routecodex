@@ -568,12 +568,28 @@ impl ResponsesTransport for IncompleteWireThenChatSuccessTransport {
                     Ok::<Vec<u8>, V3ProviderError>(b"data: [DONE]\n\n".to_vec()),
                 ]
             } else {
+                // A well-formed Anthropic stream whose terminal is a genuine
+                // provider refusal. The previous fixture started at
+                // content_block_delta with no message_start, so the transducer
+                // rejected it before terminal admission ran and the test passed
+                // without exercising reselection at all. `max_tokens` is no
+                // longer a rejecting terminal (it is valid partial output), so
+                // the rejection arm under test is `refusal`.
                 vec![
+                    Ok::<Vec<u8>, V3ProviderError>(
+                        b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg-primary-refusal\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"MiniMax-M3\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}\n\n".to_vec(),
+                    ),
+                    Ok::<Vec<u8>, V3ProviderError>(
+                        b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n".to_vec(),
+                    ),
                     Ok::<Vec<u8>, V3ProviderError>(
                         b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"primary-partial-must-not-commit\"}}\n\n".to_vec(),
                     ),
                     Ok::<Vec<u8>, V3ProviderError>(
-                        b"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"},\"usage\":{\"output_tokens\":2}}\n\n".to_vec(),
+                        b"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n".to_vec(),
+                    ),
+                    Ok::<Vec<u8>, V3ProviderError>(
+                        b"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"refusal\"},\"usage\":{\"output_tokens\":2}}\n\n".to_vec(),
                     ),
                     Ok::<Vec<u8>, V3ProviderError>(
                         b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec(),
@@ -591,6 +607,54 @@ impl ResponsesTransport for IncompleteWireThenChatSuccessTransport {
                 Ok::<Vec<u8>, V3ProviderError>(b"data: [DONE]\n\n".to_vec()),
             ]
         };
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            provider_id,
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(futures_util::stream::iter(frames)),
+        ))
+    }
+}
+
+struct AnthropicOutputCapThroughChatEntryTransport {
+    provider_ids: Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl ResponsesTransport for AnthropicOutputCapThroughChatEntryTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let provider_id = request.provider_id().to_string();
+        self.provider_ids.lock().unwrap().push(provider_id.clone());
+        // A well-formed Anthropic stream that stops at the provider output cap
+        // while carrying real partial text. An output-cap terminal is valid
+        // partial output, so this attempt must be admitted rather than reselected.
+        let frames = vec![
+            Ok::<Vec<u8>, V3ProviderError>(
+                b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg-primary-cap\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"MiniMax-M3\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}\n\n".to_vec(),
+            ),
+            Ok::<Vec<u8>, V3ProviderError>(
+                b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n".to_vec(),
+            ),
+            Ok::<Vec<u8>, V3ProviderError>(
+                b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"capped-partial-output\"}}\n\n".to_vec(),
+            ),
+            Ok::<Vec<u8>, V3ProviderError>(
+                b"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n".to_vec(),
+            ),
+            Ok::<Vec<u8>, V3ProviderError>(
+                b"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"},\"usage\":{\"output_tokens\":2}}\n\n".to_vec(),
+            ),
+            Ok::<Vec<u8>, V3ProviderError>(
+                b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec(),
+            ),
+        ];
         Ok(V3ProviderResp14Raw::from_sse(
             request.request_id().to_string(),
             provider_id,
@@ -910,7 +974,7 @@ async fn openai_chat_provider_incomplete_reselects_before_client_commit() {
 }
 
 #[tokio::test]
-async fn anthropic_provider_incomplete_reselects_before_client_commit() {
+async fn anthropic_provider_refusal_reselects_before_client_commit() {
     use futures_util::StreamExt;
     let server_id = "anthropic_wire_incomplete_reselect";
     let manifest = manifest_with_two_anthropic_providers_for_scope(server_id);
@@ -937,7 +1001,7 @@ async fn anthropic_provider_incomplete_reselects_before_client_commit() {
         &transport,
     )
     .await
-    .expect("incomplete Anthropic provider attempt must reselect");
+    .expect("a refused Anthropic provider attempt must reselect");
     let provider_ids = transport.provider_ids.lock().unwrap().clone();
     assert_eq!(output.status, 200, "{provider_ids:?} {output:?}");
     assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
@@ -960,6 +1024,63 @@ async fn anthropic_provider_incomplete_reselects_before_client_commit() {
         .unwrap();
     assert!(text.contains("secondary-after-incomplete"), "{text}");
     assert!(!text.contains("primary-partial-must-not-commit"), "{text}");
+}
+
+#[tokio::test]
+async fn anthropic_provider_output_cap_through_chat_entry_commits_partial_output() {
+    use futures_util::StreamExt;
+    let server_id = "anthropic_wire_incomplete_reselect";
+    let manifest = manifest_with_two_anthropic_providers_for_scope(server_id);
+    let transport = AnthropicOutputCapThroughChatEntryTransport {
+        provider_ids: Mutex::new(Vec::new()),
+    };
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-anthropic-wire-output-cap-chat-entry".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"cap the output"}],
+                "stream":true,
+                "max_tokens":16
+            }),
+        },
+        &transport,
+    )
+    .await
+    .expect("an Anthropic output-cap terminal is valid partial output and must be admitted");
+    let provider_ids = transport.provider_ids.lock().unwrap().clone();
+    assert_eq!(
+        provider_ids,
+        [format!("{server_id}_primary")],
+        "an admitted output-cap truncation must not reselect"
+    );
+    assert_eq!(output.status, 200, "{output:?}");
+    assert!(
+        !output.node_trace.contains(&"V3TargetLocalReselected"),
+        "output-cap terminal must not reselect: {:?}",
+        output.node_trace
+    );
+    let V3OpenAiChatRelayClientBody::Sse(stream) = output.client_body else {
+        panic!("expected Chat SSE client body");
+    };
+    let text = stream
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .map(String::from_utf8)
+        .collect::<Result<String, _>>()
+        .unwrap();
+    assert!(text.contains("capped-partial-output"), "{text}");
+    assert!(text.contains("\"finish_reason\":\"length\""), "{text}");
+    assert!(text.contains("[DONE]"), "{text}");
 }
 
 #[tokio::test]
