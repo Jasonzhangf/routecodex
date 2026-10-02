@@ -40,11 +40,12 @@
   --surface-sunken: color-mix(in srgb, var(--amb-lit), #04060b 38%);
 
   /* Text. Measured on every surface these actually render on: --label 10.5:1 on
-     a panel / 14.1:1 on the page, --muted 4.9:1 on the lightest chip surface and
-     7.6:1 on the page. --muted is deliberately light enough to clear AA even on
-     --surface-2/--surface-3, which are lighter than the panels. */
+     a panel / 14.0:1 on the page; --muted 4.7:1 on the lightest surface in the
+     system (--surface-3), 5.4:1 on --surface-2, 6.2:1 on a panel, 8.4:1 on the
+     page. --muted is deliberately light enough to clear AA on --surface-2 and
+     --surface-3, which are lighter than the panels. */
   --label: #e9edf5;
-  --muted: #a6b1c6;
+  --muted: #aeb9cd;
   --line: color-mix(in srgb, #ffffff 10%, transparent);
   --line-strong: color-mix(in srgb, #ffffff 18%, transparent);
 
@@ -58,8 +59,9 @@
   /* Status. The vendor emits status colours only through `.amb-emit-*`
      (--amb-emit-color); --amb-emit-red / --amb-emit-amber are not defined
      anywhere, so the previous values resolved to the inherited colour and no
-     danger/warning styling ever rendered. These are the vendor's own emit
-     values, lifted one step for contrast on a dark surface. */
+     danger/warning styling ever rendered. These are lifted one step from the
+     vendor's emit values: measured on a panel, danger 6.0:1, warn 7.4:1,
+     ok 7.1:1. */
   --danger: #fb9a9a;
   --warn: #fbbf24;
   --ok: #4ade80;
@@ -284,14 +286,6 @@ a:hover { text-decoration: underline; }
   gap: 10px;
   flex: none;
   padding-bottom: 2px;
-}
-
-/* Retained so an un-migrated page still lays its actions out correctly. */
-.topbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 14px var(--content-pad) 0;
 }
 
 main {
@@ -547,7 +541,7 @@ tbody tr:hover { background: color-mix(in srgb, #ffffff 4%, transparent); }
 .btn:active:not(:disabled) { background: color-mix(in srgb, var(--surface-2), #000 12%); }
 
 /* The one filled control: accent fill with the accent's own near-black ink
-   (6.1:1 measured). */
+   (7.3:1 measured). */
 .btn.primary {
   color: var(--accent-fg);
   background: var(--accent-bg);
@@ -559,18 +553,14 @@ tbody tr:hover { background: color-mix(in srgb, #ffffff 4%, transparent); }
   background: color-mix(in srgb, var(--accent-bg), #ffffff 12%);
 }
 
+/* A disabled primary drops its fill: keeping the accent while switching the
+   text to --muted would put mid-grey on cyan. */
 .btn:disabled {
   color: var(--muted);
   background: none;
   border-color: var(--line);
   box-shadow: none;
   cursor: not-allowed;
-}
-
-.btn.primary:disabled {
-  color: var(--muted);
-  background: none;
-  border-color: var(--line);
 }
 
 .btn.close {
