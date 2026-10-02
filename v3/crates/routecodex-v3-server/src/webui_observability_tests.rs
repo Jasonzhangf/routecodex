@@ -936,3 +936,37 @@ fn relay_lane_absence_marker_survives_when_no_typed_projection_exists() {
     );
     assert!(observed_after_second_marker.chain.is_empty());
 }
+
+#[test]
+fn persistence_writer_start_failure_raises_alarm_instead_of_panicking() {
+    // A failed spawn drops the receive side; the writer must degrade to the
+    // persistence alarm instead of unwrapping the thread at listener startup.
+    let (sender, receiver) = mpsc::sync_channel(V3_WEBUI_PERSISTENCE_QUEUE_CAPACITY);
+    drop(receiver);
+    let alarm = Arc::new(RwLock::new(None));
+    let writer = V3WebuiObservabilityPersistenceWriter::after_spawn(
+        sender,
+        Arc::clone(&alarm),
+        Err(std::io::Error::other("injected writer start failure")),
+    );
+
+    let failure = alarm
+        .read()
+        .expect("observability alarm lock")
+        .clone()
+        .expect("a failed writer start must raise the persistence alarm");
+    assert!(
+        failure.contains("observability persistence writer start failed"),
+        "{failure}"
+    );
+
+    // The listener keeps serving: append and flush fail loudly instead of
+    // unwrapping the writer thread.
+    writer.enqueue(V3ObsRequestRow::default());
+    assert!(writer.flush().is_err());
+    assert!(alarm
+        .read()
+        .expect("observability alarm lock")
+        .as_deref()
+        .is_some_and(|failure| failure.contains("observability persistence writer start failed")));
+}

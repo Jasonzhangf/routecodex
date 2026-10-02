@@ -573,7 +573,7 @@ impl V3WebuiObservabilityPersistenceWriter {
     fn start(path: PathBuf, alarm: Arc<RwLock<Option<String>>>) -> Self {
         let (sender, receiver) = mpsc::sync_channel(V3_WEBUI_PERSISTENCE_QUEUE_CAPACITY);
         let writer_alarm = Arc::clone(&alarm);
-        std::thread::Builder::new()
+        let spawned = std::thread::Builder::new()
             .name("v3-webui-observability-writer".to_string())
             .spawn(move || {
                 while let Ok(command) = receiver.recv() {
@@ -604,10 +604,26 @@ impl V3WebuiObservabilityPersistenceWriter {
                         }
                     }
                 }
-            })
-            .unwrap_or_else(|error| {
-                panic!("observability persistence writer start failed: {error}")
             });
+        Self::after_spawn(sender, alarm, spawned)
+    }
+
+    fn after_spawn(
+        sender: mpsc::SyncSender<V3WebuiObservabilityPersistenceCommand>,
+        alarm: Arc<RwLock<Option<String>>>,
+        spawned: std::io::Result<std::thread::JoinHandle<()>>,
+    ) -> Self {
+        if let Err(error) = spawned {
+            // The writer thread is the only owner of the receive side. If it
+            // cannot start, every append/flush fails the channel and is surfaced
+            // through the persistence alarm instead of crashing the listener at
+            // startup. Persisted observability is advisory, not business truth.
+            eprintln!("[RouteCodexV3] webui observability persistence disabled: {error}");
+            set_v3_webui_observability_alarm(
+                &alarm,
+                format!("observability persistence writer start failed: {error}"),
+            );
+        }
         Self { sender, alarm }
     }
 
@@ -638,7 +654,9 @@ impl V3WebuiObservabilityPersistenceWriter {
 
 fn set_v3_webui_observability_alarm(alarm: &RwLock<Option<String>>, message: String) {
     if let Ok(mut alarm) = alarm.write() {
-        *alarm = Some(message);
+        if alarm.is_none() {
+            *alarm = Some(message);
+        }
     }
 }
 
