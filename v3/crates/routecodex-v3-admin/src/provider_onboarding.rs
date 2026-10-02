@@ -21,7 +21,7 @@ use routecodex_v3_config_mgmt::provider::{
     ProviderFieldError, V2_PROVIDER_CONFIG_FILE_NAME,
 };
 use routecodex_v3_config_mgmt::{bind_user_route_member, user_route_groups_from_selection};
-use routecodex_v3_provider_responses::discover_v3_provider_models;
+use routecodex_v3_provider_responses::discover_v3_provider_model_entries;
 use routecodex_v3_runtime::build_v3_provider_global_probe_target;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -40,9 +40,9 @@ pub fn routes() -> Router<AppState> {
         )
 }
 
-type ApiError = (StatusCode, Json<Value>);
+pub(crate) type ApiError = (StatusCode, Json<Value>);
 
-fn api_error(status: StatusCode, code: &str, message: impl Into<String>) -> ApiError {
+pub(crate) fn api_error(status: StatusCode, code: &str, message: impl Into<String>) -> ApiError {
     (
         status,
         Json(json!({
@@ -53,7 +53,7 @@ fn api_error(status: StatusCode, code: &str, message: impl Into<String>) -> ApiE
     )
 }
 
-fn candidate_invalid_error(validation: &ProviderCandidateValidation) -> ApiError {
+pub(crate) fn candidate_invalid_error(validation: &ProviderCandidateValidation) -> ApiError {
     (
         StatusCode::UNPROCESSABLE_ENTITY,
         Json(json!({
@@ -296,8 +296,10 @@ pub struct DiscoverModelsRequest {
     pub model: Option<String>,
 }
 
-/// 上游模型发现：只返回上游真实返回的模型名，不猜测、不落盘。
+/// 上游模型发现：只返回上游真实返回的模型名与结构化条目，不猜测、不落盘。
 ///
+/// `models: [String]` 是既有兼容视图（onboarding wizard 依赖其形状）；`entries` 由
+/// **同一次** HTTP 响应派生，能力/限额只在 provider 明确声明时出现。
 /// 凭据解析发生在 `routecodex-v3-provider-responses` 内部；本 handler 只把
 /// 编译链产出的 auth handle 传进去，并把 auth alias（非 secret）作为证据返回。
 async fn discover_models(
@@ -361,15 +363,16 @@ async fn discover_models(
     let provider_type = target.provider_type.clone();
     let base_url = target.base_url.clone();
     let auth_alias = target.auth.alias.clone();
-    match discover_v3_provider_models(&id, &provider_type, &base_url, &target.auth).await {
-        Ok(models) => Ok(Json(json!({
+    match discover_v3_provider_model_entries(&id, &provider_type, &base_url, &target.auth).await {
+        Ok(entries) => Ok(Json(json!({
             "ok": true,
             "provider_id": id,
             "provider_type": provider_type,
             "base_url": base_url,
             "auth_alias": auth_alias,
-            "count": models.len(),
-            "models": models,
+            "count": entries.len(),
+            "models": entries.iter().map(|entry| entry.name.clone()).collect::<Vec<_>>(),
+            "entries": entries,
         }))),
         Err(error) => Err(api_error(
             StatusCode::BAD_GATEWAY,

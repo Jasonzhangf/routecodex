@@ -252,7 +252,7 @@ export function createDirtyGuard(options = {}) {
 
 /**
  * Modal confirm built on the native `<dialog>` element. Resolves true only when the user
- * explicitly confirms.
+ * explicitly confirms, and false on cancel, Escape or backdrop dismissal.
  */
 export function confirmDialog(options = {}) {
   const title = options.title || "Confirm";
@@ -262,24 +262,38 @@ export function confirmDialog(options = {}) {
   return new Promise((resolve) => {
     const dialog = el("dialog", "confirm-dialog amb-surface amb-elevation-3");
     dialog.setAttribute("aria-labelledby", "confirm-dialog-title");
-    const shell = el("form", "confirm-dialog-shell");
-    shell.method = "dialog";
-    shell.appendChild(el("h2", null, title));
+    const shell = el("div", "confirm-dialog-shell");
+    const heading = el("h2", null, title);
+    heading.id = "confirm-dialog-title";
+    shell.appendChild(heading);
     if (message) shell.appendChild(el("p", "confirm-dialog-message", message));
     const actions = el("div", "actions");
     const cancel = el("button", "btn", cancelLabel);
-    cancel.value = "cancel";
     const confirm = el("button", `btn primary${options.danger ? " danger" : ""}`, confirmLabel);
-    confirm.value = "confirm";
     actions.appendChild(cancel);
     actions.appendChild(confirm);
     shell.appendChild(actions);
     dialog.appendChild(shell);
-    dialog.addEventListener("close", () => {
-      const accepted = dialog.returnValue === "confirm";
+
+    let settled = false;
+    // `el()` forces `type="button"` on every button it creates, so a
+    // `<form method="dialog">` never submits and its `close` event never fires —
+    // which left this promise pending forever. The dialog is therefore driven by
+    // explicit handlers and closed here, so both outcomes resolve.
+    function settle(accepted) {
+      if (settled) return;
+      settled = true;
+      if (dialog.open) dialog.close();
       dialog.remove();
       resolve(accepted);
+    }
+    cancel.addEventListener("click", () => settle(false));
+    confirm.addEventListener("click", () => settle(true));
+    dialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      settle(false);
     });
+    dialog.addEventListener("close", () => settle(dialog.returnValue === "confirm"));
     document.body.appendChild(dialog);
     dialog.showModal();
   });
