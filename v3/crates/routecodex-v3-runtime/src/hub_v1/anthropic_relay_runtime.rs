@@ -1363,6 +1363,7 @@ async fn anthropic_provider_stream_failure_from_closeout_error(
     .ok()?;
     Some(V3RelayProviderFailure {
         status: failure.status,
+        provider_status: failure.provider_status,
         client_response: json!({
             "type": "error",
             "error": {

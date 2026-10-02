@@ -4,10 +4,10 @@
 //! keep that file under the 1500-line limit enforced by `verify:v3-file-size`.
 
 use super::{
-    error_category_status_code, row_cache_creation_value, row_cache_hit_numerator,
-    row_cache_read_value, row_cached_value, row_effective_input, row_error_origin,
-    row_error_origin_opt, row_input_value, row_output_value, row_total_value, QueryRow,
-    SourceScope,
+    attempt_status_code, error_category_status_code, row_cache_creation_value,
+    row_cache_hit_numerator, row_cache_read_value, row_cached_value, row_effective_input,
+    row_error_origin, row_error_origin_opt, row_input_value, row_output_value, row_status_code,
+    row_total_value, QueryRow, SourceScope,
 };
 use serde_json::{json, Value};
 
@@ -182,4 +182,40 @@ fn build_usage_row(usage: Value) -> QueryRow {
         servertool: false,
         raw_artifact_ref: None,
     }
+}
+
+fn build_attempt_row(meta: Value) -> QueryRow {
+    let mut row = build_usage_row(json!({}));
+    row.event_type = "request.provider_attempt_failed".to_string();
+    row.result = Some("failed-attempt".to_string());
+    row.meta = meta;
+    row
+}
+
+#[test]
+fn transport_failure_without_upstream_status_renders_as_network_not_599() {
+    // Direct lane identity for a network transport failure.
+    let row = build_attempt_row(json!({
+        "provider_status": null,
+        "error_category": "provider_transport_error",
+    }));
+    assert_eq!(row_status_code(&row), "network");
+    assert_eq!(attempt_status_code(&row), Some("network".to_string()));
+
+    // The relay lane records the same transport failure under its generic
+    // provider runtime identity; it must be non-599 as well.
+    let row = build_attempt_row(json!({
+        "provider_status": null,
+        "error_category": "provider_runtime_error",
+    }));
+    assert_eq!(row_status_code(&row), "network");
+    assert_eq!(attempt_status_code(&row), Some("network".to_string()));
+
+    // A genuine upstream HTTP failure keeps rendering its own status.
+    let row = build_attempt_row(json!({
+        "provider_status": 502,
+        "error_category": "provider_http_502",
+    }));
+    assert_eq!(row_status_code(&row), "502");
+    assert_eq!(attempt_status_code(&row), Some("502".to_string()));
 }

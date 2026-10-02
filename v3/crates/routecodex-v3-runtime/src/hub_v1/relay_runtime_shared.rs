@@ -42,6 +42,9 @@ use std::pin::Pin;
 #[derive(Debug, Clone)]
 pub struct V3RelayProviderFailure {
     pub status: u16,
+    /// The upstream provider's real HTTP status; `None` when no HTTP response was
+    /// received. Never the client-facing projection status.
+    pub provider_status: Option<u16>,
     pub client_response: Value,
     pub source_stage: &'static str,
     pub terminal_projection: Option<V3Error06ClientProjected>,
@@ -206,7 +209,7 @@ pub async fn handle_provider_failure(
     if failure.terminal_projection.is_some() {
         return Ok(Some(failure));
     }
-    let result = run_v3_relay_provider_failure_policy(
+    let mut result = run_v3_relay_provider_failure_policy(
         context,
         selected,
         failure.source_stage,
@@ -218,6 +221,9 @@ pub async fn handle_provider_failure(
     )
     .await
     .map_err(|error| error.to_string())?;
+    // The policy event carries the real upstream HTTP status (if any) alongside
+    // the observed/projection status, so downstream records stay separable.
+    result.event.provider_status = failure.provider_status;
     match result.decision.action {
         V3Error05ExecutionAction::WaitThenReselect { recovery } => {
             *retry_selected = result.retry_selected.map(|selected| *selected);
@@ -274,6 +280,7 @@ pub fn provider_http_failure(
     };
     V3RelayProviderFailure {
         status,
+        provider_status: Some(status),
         client_response: body,
         source_stage: "V3ProviderReqOutbound09TransportRequest",
         terminal_projection: None,
@@ -323,6 +330,9 @@ pub fn provider_http_body_read_failure(
         provider_id,
     );
     failure.status = response.status;
+    // The upstream did return an HTTP status; only its error body could not be
+    // read, so the real status still belongs in `provider_status`.
+    failure.provider_status = Some(response.status);
     failure
 }
 
@@ -334,6 +344,8 @@ pub fn provider_request_failure(
 ) -> V3RelayProviderFailure {
     V3RelayProviderFailure {
         status: 502,
+        // Request-construction failure: no upstream HTTP response exists.
+        provider_status: None,
         client_response: json!({"error":{"code":error_type,"message":error.to_string()}}),
         source_stage,
         terminal_projection: None,
@@ -349,6 +361,9 @@ pub fn provider_terminal_admission_failure(
 ) -> V3RelayProviderFailure {
     V3RelayProviderFailure {
         status,
+        // Callers pass the raw status of the HTTP response whose body was
+        // inadmissible, so this IS a real upstream HTTP status.
+        provider_status: Some(status),
         client_response: json!({
             "error": {
                 "code": failure.code,
@@ -393,6 +408,8 @@ pub fn provider_runtime_failure(
             ));
         return V3RelayProviderFailure {
             status: projected.status,
+            // Internal transport handoff failure: no upstream HTTP response exists.
+            provider_status: None,
             client_response: json!({
                 "error": {
                     "code": "provider_internal_transport_error",
@@ -431,6 +448,12 @@ pub fn provider_runtime_failure(
             499
         } else {
             502
+        },
+        // Only a real upstream HTTP status may be recorded here; a transport or
+        // other response-less failure stays `None` instead of the projected 502.
+        provider_status: match &error {
+            V3ProviderError::HttpStatus { response } => Some(response.status),
+            _ => None,
         },
         client_response: json!({"error":{"code":error_code,"message":error.to_string()}}),
         source_stage: provider_runtime_failure_stage(&error),

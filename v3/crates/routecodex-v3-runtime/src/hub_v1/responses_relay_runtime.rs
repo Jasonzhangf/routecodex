@@ -315,7 +315,11 @@ async fn handle_v3_responses_relay_provider_failure(
     )
     .await
     .map_err(V3ResponsesRelayRuntimeError::ProviderHealth)?;
-    let event = build_v3_runtime_provider_failure_observation_from_policy_event(&result.event);
+    // Carry the real upstream HTTP status (if any) into the policy event so the
+    // failure observation can separate it from the client projection status.
+    let mut policy_event = result.event.clone();
+    policy_event.provider_status = failure.provider_status;
+    let event = build_v3_runtime_provider_failure_observation_from_policy_event(&policy_event);
     state.provider_failure_events.push(event.clone());
     if let Some(sink) = state.provider_failure_event_sink {
         let mut observability = state.selected_observability.clone();
@@ -398,7 +402,8 @@ fn build_v3_runtime_provider_failure_observation_from_policy_event(
         error_type: event.error_type.clone(),
         external_error_kind: None,
         external_error_code: event.error_type.clone(),
-        external_error_status: Some(event.status),
+        // The real upstream HTTP status; `None` for a response-less failure.
+        external_error_status: event.provider_status,
         internal_code: None,
         // V3RelayProviderFailurePolicyEvent does not carry the upstream request
         // id: record an honest unknown rather than a synthesised value.

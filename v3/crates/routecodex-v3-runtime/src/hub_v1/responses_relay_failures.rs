@@ -57,6 +57,7 @@ pub(crate) fn provider_http_failure(
     let policy_error_message = v3_provider_failure_message_from_body(&body);
     V3ResponsesRelayProviderFailure {
         status,
+        provider_status: Some(status),
         policy_error_type,
         policy_error_message,
         provider_id: provider_id.to_string(),
@@ -97,6 +98,8 @@ pub(crate) fn provider_runtime_failure(
             ));
         return V3ResponsesRelayProviderFailure {
             status: projected.status,
+            // Internal transport handoff failure: no upstream HTTP response exists.
+            provider_status: None,
             policy_error_type: "provider_internal_transport_error".to_string(),
             policy_error_message: projected.error_detail.clone(),
             provider_id: provider_id.to_string(),
@@ -136,8 +139,17 @@ pub(crate) fn provider_runtime_failure(
             _ => 502,
         }
     };
+    // `status` above is the client-facing projection (502 for a network failure).
+    // `provider_status` carries only a real upstream HTTP status: a transport or
+    // other response-less failure must stay `None` so it cannot be mistaken for a
+    // genuine upstream HTTP 502.
+    let provider_status = match &error {
+        V3ProviderError::HttpStatus { response } => Some(response.status),
+        _ => None,
+    };
     V3ResponsesRelayProviderFailure {
         status,
+        provider_status,
         policy_error_type,
         policy_error_message: policy_error_message.clone(),
         provider_id: provider_id.to_string(),
@@ -160,6 +172,10 @@ pub(crate) fn provider_semantic_failure(
     let matched_policy = error.matched_policy.clone();
     V3ResponsesRelayProviderFailure {
         status,
+        // A provider *semantic* failure is a synthesized projection status
+        // (`V3ProviderSemanticErrorProjection` uses 200/429/502 to select the
+        // Error05 lane); it is not an upstream HTTP status, so record none.
+        provider_status: None,
         policy_error_type,
         policy_error_message,
         provider_id: provider_id.to_string(),
@@ -179,6 +195,9 @@ pub(crate) fn provider_terminal_admission_failure(
 ) -> V3ResponsesRelayProviderFailure {
     V3ResponsesRelayProviderFailure {
         status,
+        // Callers pass the raw status of the HTTP response that carried the
+        // inadmissible body, so this IS a real upstream HTTP status.
+        provider_status: Some(status),
         policy_error_type: failure.code,
         policy_error_message: failure.message,
         provider_id: provider_id.to_string(),
@@ -203,6 +222,8 @@ pub(crate) fn provider_response_stream_relay_failure(
             message,
         } => V3ResponsesRelayProviderFailure {
             status,
+            // Synthesized stream-semantic status (see `provider_semantic_failure`).
+            provider_status: None,
             policy_error_type: code.clone(),
             policy_error_message: message.clone(),
             provider_id: provider_id.to_string(),
@@ -233,6 +254,9 @@ fn provider_response_codec_relay_failure(
 ) -> V3ResponsesRelayProviderFailure {
     V3ResponsesRelayProviderFailure {
         status: 502,
+        // Internal response codec failure: the 502 is the client projection, not
+        // an upstream HTTP status.
+        provider_status: None,
         policy_error_type: "provider_response_event_codec_failure".to_string(),
         policy_error_message: format!("provider response event codec failed: {reason}"),
         provider_id: provider_id.to_string(),
@@ -319,6 +343,8 @@ pub(crate) fn provider_request_relay_failure(
         status: terminal_projection
             .as_ref()
             .map_or(502, |projection| projection.status),
+        // Request-stage compat/wire failures happen before any upstream response.
+        provider_status: None,
         policy_error_type: error_type.to_string(),
         policy_error_message: message.clone(),
         provider_id: provider_id.to_string(),
@@ -448,6 +474,8 @@ pub(crate) fn provider_response_hook_failure(
             let message = format!("provider response event codec failed: {other}");
             V3ResponsesRelayProviderFailure {
                 status: 502,
+                // Internal response-hook codec failure: no upstream HTTP status.
+                provider_status: None,
                 policy_error_type: "provider_response_event_codec_failure".to_string(),
                 policy_error_message: message,
                 provider_id: provider_id.to_string(),
@@ -482,7 +510,9 @@ pub(crate) fn provider_failure_output_with_observation(
     if let Some(observability) = observability.as_mut() {
         observability.response_status = Some("error".to_string());
         if observability.provider_status.is_none() {
-            observability.provider_status = Some(failure.status);
+            // Only a real upstream HTTP status may fill this side channel; the
+            // client-facing projection status must never be mirrored into it.
+            observability.provider_status = failure.provider_status;
         }
         if observability.provider_id.is_none() && failure.provider_id != "none" {
             observability.provider_id = Some(failure.provider_id);
@@ -521,9 +551,9 @@ pub(crate) fn error_output(
     trace.extend(V3_ERROR_CHAIN_NODE_IDS);
     if let Some(observability) = observability.as_mut() {
         observability.response_status = Some("error".to_string());
-        if observability.provider_status.is_none() {
-            observability.provider_status = Some(status);
-        }
+        // `status` is the internal projection status (598/599/400/500), not an
+        // upstream HTTP status, so it must not populate `provider_status`. Keep
+        // whatever real upstream status the lane already observed.
         if observability.provider_id.is_none() && provider_id != "none" {
             observability.provider_id = Some(provider_id.to_string());
         }
@@ -734,5 +764,66 @@ mod tests {
             "SSE first-frame header wait timeout must project as the health-neutral transient hang"
         );
         assert_eq!(failure.status, 502);
+    }
+
+    /// Regression: a network transport failure received no HTTP response, so the
+    /// upstream-status side channel must stay `None` while the client-facing
+    /// projection stays 502. A genuine upstream HTTP failure keeps its real status.
+    #[test]
+    fn transport_failure_has_no_upstream_status_while_http_failure_keeps_its_own() {
+        let transport_failure = provider_runtime_failure(
+            V3ProviderError::Transport {
+                request_id: "req-transport-no-response".to_string(),
+                provider_id: "goaichat".to_string(),
+                reason: "connection closed before response headers".to_string(),
+            },
+            "goaichat",
+            Some(V3RuntimeObservability::default()),
+        );
+        // Client-visible projection is unchanged: a network failure still projects 502.
+        assert_eq!(transport_failure.status, 502);
+        let transport_output = provider_failure_output(
+            terminalize_v3_responses_relay_provider_failure(transport_failure, None),
+            vec!["V3ProviderRespInbound01Raw"],
+            0,
+        );
+        assert_eq!(transport_output.status, 502);
+        assert_eq!(
+            transport_output
+                .observability
+                .expect("provider failure keeps observability")
+                .provider_status,
+            None,
+            "a network transport failure has no upstream HTTP status and must not record the projected 502"
+        );
+
+        let http_failure = provider_runtime_failure(
+            V3ProviderError::HttpStatus {
+                response: Box::new(routecodex_v3_provider_responses::V3ProviderHttpFailure {
+                    request_id: "req-http-502".to_string(),
+                    provider_id: "goaichat".to_string(),
+                    status: 502,
+                    headers: Vec::new(),
+                    body: br#"{"error":{"type":"server_error"}}"#.to_vec(),
+                    body_read_failure: None,
+                }),
+            },
+            "goaichat",
+            Some(V3RuntimeObservability::default()),
+        );
+        assert_eq!(http_failure.status, 502);
+        let http_output = provider_failure_output(
+            terminalize_v3_responses_relay_provider_failure(http_failure, None),
+            vec!["V3ProviderReqOutbound09TransportRequest"],
+            0,
+        );
+        assert_eq!(
+            http_output
+                .observability
+                .expect("provider failure keeps observability")
+                .provider_status,
+            Some(502),
+            "a real upstream HTTP 502 keeps its own status"
+        );
     }
 }

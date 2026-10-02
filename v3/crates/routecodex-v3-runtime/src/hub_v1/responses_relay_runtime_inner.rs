@@ -189,6 +189,8 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 } => {
                     let failure = V3ResponsesRelayProviderFailure {
                         status: 502,
+                        // Target exhaustion is local: no upstream HTTP response.
+                        provider_status: None,
                         policy_error_type: "selected_target_exhausted".to_string(),
                         policy_error_message: format!(
                             "selected target exhausted after {attempted_candidates:?}"

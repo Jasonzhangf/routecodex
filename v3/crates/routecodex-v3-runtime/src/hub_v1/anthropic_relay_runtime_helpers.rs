@@ -205,6 +205,7 @@ pub(crate) fn project_v3_anthropic_relay_runtime_failure_with_trace(
 fn provider_http_failure(status: u16, body: &[u8], _provider_id: &str) -> V3RelayProviderFailure {
     V3RelayProviderFailure {
         status,
+        provider_status: Some(status),
         client_response: project_v3_responses_error_as_anthropic_error(body),
         source_stage: "V3ProviderReqOutbound09TransportRequest",
         terminal_projection: None,
@@ -221,6 +222,8 @@ fn provider_request_failure(
 ) -> V3RelayProviderFailure {
     V3RelayProviderFailure {
         status: 502,
+        // Request-construction failure: no upstream HTTP response exists.
+        provider_status: None,
         client_response: json!({"type":"error","error":{"type":error_type,"message":error.to_string()}}),
         source_stage,
         terminal_projection: None,
@@ -236,6 +239,9 @@ fn provider_terminal_admission_failure(
 ) -> V3RelayProviderFailure {
     V3RelayProviderFailure {
         status,
+        // Callers pass the raw status of the HTTP response whose body was
+        // inadmissible, so this IS a real upstream HTTP status.
+        provider_status: Some(status),
         client_response: json!({
             "type": "error",
             "error": {
@@ -277,6 +283,8 @@ fn provider_runtime_failure(error: V3ProviderError, provider_id: &str) -> V3Rela
         );
         return V3RelayProviderFailure {
             status: projected.status,
+            // Internal transport handoff failure: no upstream HTTP response exists.
+            provider_status: None,
             client_response: json!({
                 "type": "error",
                 "error": {
@@ -312,6 +320,11 @@ fn provider_runtime_failure(error: V3ProviderError, provider_id: &str) -> V3Rela
             499
         } else {
             502
+        },
+        // Only a real upstream HTTP status may be recorded here.
+        provider_status: match &error {
+            V3ProviderError::HttpStatus { response } => Some(response.status),
+            _ => None,
         },
         client_response: json!({"type":"error","error":{"type":error_type,"message":error.to_string()}}),
         source_stage: provider_runtime_failure_stage(&error),

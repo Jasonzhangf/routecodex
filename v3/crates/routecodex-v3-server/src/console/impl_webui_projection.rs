@@ -158,7 +158,10 @@ pub(crate) fn record_v3_webui_provider_failure(
         session: Some(context.identity.session_id.clone()),
     };
     let mut meta = build_v3_webui_meta_for_context(context, observability);
-    meta.provider_status = Some(status);
+    // `provider_status` carries only the upstream provider's real HTTP status. A
+    // response-less failure (network transport) keeps `None` so the record falls
+    // back to its error identity instead of the projected 502.
+    meta.provider_status = event.external_error_status;
     meta.response_status = Some("error".to_string());
     meta.finish_reason = Some("error".to_string());
     meta.error_category = Some(
