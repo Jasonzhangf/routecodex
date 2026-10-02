@@ -15,7 +15,7 @@ export const PROBE_STAGES = ["l1_contract", "l2_reachability_auth", "l3_semantic
 export const PROBE_STAGE_LABELS = {
   l1_contract: "L1 contract (offline candidate validation)",
   l2_reachability_auth: "L2 reachability + auth",
-  l3_semantic: "L3 semantic minimal chat",
+  l3_semantic: "L3 HTTP status probe (2xx)",
 };
 
 /** Normalise a probe stage id to the ladder order used for row rendering. */

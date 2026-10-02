@@ -165,7 +165,7 @@ features:
   - admin provider candidate validation rejects an invalid candidate without writing any file
   - admin provider create writes provider/<id>/config.v2.toml atomically with backup and correct revision fields
   - admin provider delete refuses when the provider is referenced by a route pool and lists the references
-  - admin provider probe reports L1 contract / L2 reachability / L3 semantic stages with raw evidence and redacted secrets
+  - admin provider probe reports L1 contract / L2 reachability / L3 HTTP 2xx status stages with raw evidence and redacted secrets
   - admin provider patrol plan persists and patrol results append without mutating runtime provider health
   - admin environment projection derives version, binary hash, instance, and listeners without owning runtime truth
   - admin doctor reports FAIL for binary build_version drift and for a listener port conflict
