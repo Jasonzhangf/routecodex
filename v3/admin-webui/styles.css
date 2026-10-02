@@ -1693,6 +1693,10 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent-bg); }
 .model-cap-name { font-family: var(--mono); font-size: 12px; color: var(--label); }
 .model-cap-source { font-size: 11px; color: var(--muted); }
 .model-cap-source.bad { color: var(--danger); }
+/* Capabilities outside the canonical vocabulary: shown locked, written verbatim. */
+.model-cap-preserved .model-cap-name { color: var(--muted); }
+.model-cap-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.model-cap-preserved .model-cap { border-style: dashed; color: var(--muted); }
 .model-write-preview { font-size: 11px; color: var(--muted); margin: 0; font-family: var(--mono); }
 
 .model-picker-state { color: var(--muted); padding: 12px 0; }

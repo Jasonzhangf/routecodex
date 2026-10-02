@@ -16,18 +16,44 @@
 
 import { api, el, showStatus } from "../core.js";
 
-// The capability vocabulary the runtime understands. `text` is the baseline every
-// model gets, so it is always present and is never an operator claim.
+// The canonical capability vocabulary the runtime and the candidate validator
+// accept (`validate.rs`). `text` is the baseline every model gets, so it is always
+// present and is never an operator claim.
+//
+// `thinking` and `web_search_direct` are deliberately NOT rows: the V2->V3 boundary
+// folds them into `reasoning` and `web_search` (`normalize_v2_capabilities`), so a
+// separate row for each alias would offer the operator two controls for one
+// capability and a write carrying both would be rejected as a duplicate.
 export const MODEL_CAPABILITIES = [
   "text",
   "reasoning",
-  "thinking",
   "tools",
+  "web_search",
   "multimodal",
   "vision",
   "longcontext",
-  "web_search_direct",
+  "no_reasoning_summary",
+  "tool_outputs",
 ];
+
+// The exact alias map `normalize_v2_capabilities` applies at the V2->V3 boundary.
+const CAPABILITY_ALIASES = {
+  thinking: "reasoning",
+  web_search_direct: "web_search",
+};
+
+/**
+ * Canonical name for a stored/discovered capability, or `null` when the canonical
+ * vocabulary does not model it. Callers must preserve a `null` verbatim rather than
+ * drop it: the write replaces the whole entry, so anything omitted here is deleted
+ * from the provider file.
+ */
+export function normalizeCapability(capability) {
+  const name = String(capability ?? "").trim();
+  if (!name) return null;
+  const canonical = CAPABILITY_ALIASES[name] || name;
+  return MODEL_CAPABILITIES.includes(canonical) ? canonical : null;
+}
 
 // E1 refuses `add` for an existing name with `409 model_exists` unless that name
 // is listed in the request's top-level `replace` list. The marker is a list of
@@ -127,19 +153,41 @@ function closeAndRemove(dialog) {
 //              after its capability test returned `tested && passed` here.
 // ---------------------------------------------------------------------------
 
-function createCapabilitySession({ stored, detected }) {
+/**
+ * Build the dialog's capability state.
+ *
+ * Returns `{ session, preserved }`:
+ *   * `session` holds one entry per CANONICAL capability, with a stored alias
+ *     (`thinking`) pre-ticking the row it normalizes to (`reasoning`).
+ *   * `preserved` holds the authored capabilities the canonical vocabulary does not
+ *     model. They are not operator claims, so they never go through the E4 gate, but
+ *     they MUST ride through the write: the E1 request replaces the whole entry, so
+ *     omitting them would silently delete them from the provider file.
+ */
+export function createCapabilitySession({ stored, detected }) {
   const session = new Map();
   for (const capability of MODEL_CAPABILITIES) {
     session.set(capability, { source: null, tested: false, passed: false, detail: null, refused: false });
   }
   session.get("text").source = "default";
+
+  const preserved = [];
   for (const capability of stored || []) {
-    if (session.has(capability)) session.get(capability).source = "detected";
+    const canonical = normalizeCapability(capability);
+    if (canonical) {
+      session.get(canonical).source = "detected";
+      continue;
+    }
+    const name = String(capability ?? "").trim();
+    if (name && !preserved.includes(name)) preserved.push(name);
   }
+  // Discovery may only propose capabilities the validator can check; adopting an
+  // unknown name would author an unchecked claim, so those are ignored.
   for (const capability of detected || []) {
-    if (session.has(capability)) session.get(capability).source = "detected";
+    const canonical = normalizeCapability(capability);
+    if (canonical) session.get(canonical).source = "detected";
   }
-  return session;
+  return { session, preserved };
 }
 
 /**
@@ -158,6 +206,35 @@ function writableCapabilities(session) {
   return out;
 }
 
+/**
+ * The capability array actually written: the ticked canonical rows plus every
+ * preserved-verbatim capability. Both halves are deduplicated by their canonical
+ * name, so an authored `thinking` next to `reasoning` cannot produce the duplicate
+ * the candidate validator rejects.
+ */
+export function writtenCapabilities(session, preserved) {
+  const out = writableCapabilities(session);
+  for (const capability of preserved || []) {
+    if (!out.includes(capability)) out.push(capability);
+  }
+  return out;
+}
+
+/**
+ * Canonical, de-duplicated array for a capability set proposed by discovery. A
+ * discovered name the canonical vocabulary does not model is dropped rather than
+ * authored: it is a proposal, not an existing claim, and writing an unknown name
+ * would make the candidate validator reject the whole request.
+ */
+function canonicalCapabilities(capabilities) {
+  const out = [];
+  for (const capability of capabilities || []) {
+    const canonical = normalizeCapability(capability);
+    if (canonical && !out.includes(canonical)) out.push(canonical);
+  }
+  return out;
+}
+
 function capabilitySourceLabel(entry) {
   if (entry.refused) return `refused — ${entry.detail || "capability test did not pass"}`;
   if (entry.source === "default") return "default — baseline, always on";
@@ -167,6 +244,60 @@ function capabilitySourceLabel(entry) {
     return "manual — test passed in this session";
   }
   return "not set";
+}
+
+// ---------------------------------------------------------------------------
+// E1 payload construction
+// ---------------------------------------------------------------------------
+
+function positiveInteger(key, raw) {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`${key} must be a positive number`);
+  return Math.trunc(parsed);
+}
+
+/**
+ * Build one `add` entry for `POST /api/providers/:id/models`.
+ *
+ * The server applies `add` as a WHOLE-ENTRY replacement, so an entry assembled only
+ * from this dialog's controls resets every `V2ProviderModelConfig` field the dialog
+ * does not render (`maxContext`, `contextWindow`, `aliases`, `features`,
+ * `contextTokenEstimateScaleBps`, `webSearchExecutionMode`, `webSearchBackend`, …)
+ * back to its schema default. The payload therefore starts from the entry already on
+ * disk and overlays ONLY the controls the operator actually changed; an untouched
+ * control leaves the stored value exactly as it was, including a stored `null`.
+ *
+ * `capabilities` is the one field always written: it is the resolved union, so the
+ * stored array is normalized to canonical names (aliases folded) in a single place.
+ */
+export function buildModelWritePayload({ isNew, existing, values, capabilities }) {
+  const before = isNew ? {} : existing || {};
+  const payload = { ...before };
+
+  const overlayText = (key, transform) => {
+    const raw = String(values[key] ?? "").trim();
+    const previous = before[key] == null ? "" : String(before[key]);
+    if (raw === previous) return;
+    if (!raw) {
+      delete payload[key];
+      return;
+    }
+    payload[key] = transform ? transform(key, raw) : raw;
+  };
+  overlayText("wireName");
+  overlayText("thinking");
+  overlayText("maxTokens", positiveInteger);
+  overlayText("maxContextTokens", positiveInteger);
+
+  for (const key of ["supportsStreaming", "supportsThinking"]) {
+    const next = Boolean(values[key]);
+    // An untouched checkbox must not narrow a stored `null` into an explicit `false`.
+    if (next === Boolean(before[key])) continue;
+    payload[key] = next;
+  }
+
+  payload.capabilities = capabilities;
+  return payload;
 }
 
 // ---------------------------------------------------------------------------
@@ -249,7 +380,7 @@ function openModelDialog({ providerId, modelName, entry, detectedCapabilities, i
   body.appendChild(boolRow);
 
   // --- capability gate -----------------------------------------------------
-  const session = createCapabilitySession({
+  const { session, preserved } = createCapabilitySession({
     stored: existing.capabilities,
     detected: detectedCapabilities,
   });
@@ -283,7 +414,7 @@ function openModelDialog({ providerId, modelName, entry, detectedCapabilities, i
   const checkboxes = new Map();
 
   function renderPreview() {
-    const write = writableCapabilities(session);
+    const write = writtenCapabilities(session, preserved);
     preview.textContent = `Will write capabilities: ${write.length ? write.join(", ") : "(none)"}`;
   }
 
@@ -327,6 +458,22 @@ function openModelDialog({ providerId, modelName, entry, detectedCapabilities, i
           renderPreview();
         }
       });
+    }
+
+    // Capabilities outside the canonical vocabulary are shown but not editable: they
+    // are not operator claims (so they never go through the E4 gate) and they must
+    // ride through the write verbatim, because `add` replaces the whole entry.
+    if (preserved.length) {
+      const row = el("div", "model-cap-row model-cap-preserved");
+      row.dataset.capability = "preserved";
+      row.appendChild(el("span", "model-cap-name", "preserved"));
+      const chips = el("span", "model-cap-chips");
+      for (const capability of preserved) {
+        chips.appendChild(el("span", "model-cap chip", `${capability} — kept verbatim`));
+      }
+      row.appendChild(chips);
+      row.appendChild(el("span", "model-cap-source", "authored — outside the canonical set, preserved on write"));
+      capRows.appendChild(row);
     }
     renderPreview();
   }
@@ -385,18 +532,21 @@ function openModelDialog({ providerId, modelName, entry, detectedCapabilities, i
       const name = isNew ? nameInput.value.trim() : modelName;
       if (!name) throw new Error("model name is required");
 
-      const payload = { capabilities: writableCapabilities(session) };
-      if (inputs.wireName.value.trim()) payload.wireName = inputs.wireName.value.trim();
-      if (inputs.thinking.value.trim()) payload.thinking = inputs.thinking.value.trim();
-      for (const key of ["maxTokens", "maxContextTokens"]) {
-        const raw = inputs[key].value.trim();
-        if (!raw) continue;
-        const parsed = Number(raw);
-        if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`${key} must be a positive number`);
-        payload[key] = Math.trunc(parsed);
-      }
-      payload.supportsStreaming = boolInputs.supportsStreaming.checked;
-      payload.supportsThinking = boolInputs.supportsThinking.checked;
+      // `add` is a whole-entry replacement, so the payload round-trips the stored
+      // entry and overlays only what the operator changed. See buildModelWritePayload.
+      const payload = buildModelWritePayload({
+        isNew,
+        existing,
+        values: {
+          wireName: inputs.wireName.value,
+          thinking: inputs.thinking.value,
+          maxTokens: inputs.maxTokens.value,
+          maxContextTokens: inputs.maxContextTokens.value,
+          supportsStreaming: boolInputs.supportsStreaming.checked,
+          supportsThinking: boolInputs.supportsThinking.checked,
+        },
+        capabilities: writtenCapabilities(session, preserved),
+      });
 
       const body = { add: { [name]: payload }, reason: isNew ? REASON.manualAdd : REASON.edit };
       // Editing an existing name needs the top-level replacement marker; without
@@ -579,7 +729,8 @@ async function openModelPicker({ providerId, config, onChanged }) {
       for (const item of entries) {
         if (!selected.has(item.name)) continue;
         const payload = {};
-        if (Array.isArray(item.capabilities) && item.capabilities.length) payload.capabilities = item.capabilities;
+        const capabilities = canonicalCapabilities(item.capabilities);
+        if (capabilities.length) payload.capabilities = capabilities;
         if (item.maxTokens != null) payload.maxTokens = item.maxTokens;
         if (item.maxContextTokens != null) payload.maxContextTokens = item.maxContextTokens;
         add[item.name] = payload;

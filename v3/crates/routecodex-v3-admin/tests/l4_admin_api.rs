@@ -956,8 +956,10 @@ async fn every_webui_asset_is_served_by_the_admin_router() {
     }
 }
 
-/// Collect browser-requestable assets: pages, modules and stylesheets. `*.mjs` files are node
-/// smoke scripts and are never requested by the browser, so they are not part of the served set.
+/// Collect every file the browser could request. The rule is inverted on purpose: everything in
+/// `admin-webui` must be served, and the only exclusion is an explicit one, so adding an asset
+/// type the allowlist does not know about (an `.svg`, a font, a source map) fails this test
+/// instead of 404ing in the browser while the test still passes.
 fn collect_webui_assets(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<String>) {
     let entries =
         std::fs::read_dir(dir).unwrap_or_else(|error| panic!("read_dir {dir:?}: {error}"));
@@ -971,11 +973,8 @@ fn collect_webui_assets(root: &std::path::Path, dir: &std::path::Path, out: &mut
             .file_name()
             .and_then(|value| value.to_str())
             .unwrap_or_default();
-        let requestable = name.ends_with(".html")
-            || name.ends_with(".js")
-            || name.ends_with(".css")
-            || name == "app.embedded.txt";
-        if !requestable || name.ends_with(".mjs") {
+        // Node-only smoke scripts: they run under `node`, the browser never requests them.
+        if name.ends_with(".mjs") {
             continue;
         }
         let relative = path
