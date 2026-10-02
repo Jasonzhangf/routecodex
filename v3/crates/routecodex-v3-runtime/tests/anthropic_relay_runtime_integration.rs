@@ -73,7 +73,7 @@ struct MatrixJsonTransport {
 }
 
 #[tokio::test]
-async fn anthropic_json_codec_represents_max_tokens_but_provider_materialization_rejects_it() {
+async fn anthropic_max_tokens_is_admitted_as_incomplete_not_a_provider_failure() {
     let json_response = project_v3_anthropic_message_as_responses_response(&json!({
         "id":"msg_terminal_parity",
         "type":"message",
@@ -112,12 +112,14 @@ data: {"type":"message_stop"}
 
 "#.to_vec()),
     ]);
-    let sse_error = materialize_v3_provider_sse_as_canonical_response(
+    let materialized = materialize_v3_provider_sse_as_canonical_response(
         V3HubProviderWireProtocol::Anthropic,
         Box::pin(stream),
     )
     .await
-    .expect_err("provider max_tokens must not be admitted as a successful attempt");
+    .expect(
+        "Anthropic max_tokens is valid partial output and must be admitted, not a provider failure",
+    );
 
     assert_eq!(json_response["status"], "incomplete");
     assert_eq!(
@@ -130,11 +132,10 @@ data: {"type":"message_stop"}
         json_response.get("finish_reason").is_none(),
         "{json_response}"
     );
-    assert!(
-        sse_error
-            .to_string()
-            .contains("provider response ended before completion: max_tokens"),
-        "unexpected provider materialization error: {sse_error}"
+    assert_eq!(materialized["status"], "incomplete", "{materialized}");
+    assert_eq!(
+        materialized["incomplete_details"]["reason"], "max_output_tokens",
+        "{materialized}"
     );
 }
 

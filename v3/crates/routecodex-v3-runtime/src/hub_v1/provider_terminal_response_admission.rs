@@ -67,7 +67,12 @@ fn anthropic_incomplete_reason(payload: &Value) -> Option<&str> {
         .or_else(|| payload.pointer("/delta/stop_reason"))
         .and_then(Value::as_str);
     match stop_reason {
-        Some("max_tokens") => return Some("max_tokens"),
+        // Anthropic `max_tokens` is the output-cap terminal, i.e. the same
+        // valid partial output as the Chat aliases handled above. Rejecting it
+        // here would send a representable truncation into the provider
+        // failure/cooldown/switch path and surface a transport error to a
+        // client that should have received `incomplete`.
+        Some("max_tokens") => return None,
         Some("refusal") => return Some("content_filter"),
         _ => {}
     }
@@ -117,16 +122,6 @@ mod tests {
             ),
             (
                 V3HubProviderWireProtocol::Anthropic,
-                json!({"type": "message", "stop_reason": "max_tokens"}),
-                "max_tokens",
-            ),
-            (
-                V3HubProviderWireProtocol::Anthropic,
-                json!({"type": "message_delta", "delta": {"stop_reason": "max_tokens"}}),
-                "max_tokens",
-            ),
-            (
-                V3HubProviderWireProtocol::Anthropic,
                 json!({"type": "message", "stop_reason": "refusal"}),
                 "content_filter",
             ),
@@ -171,6 +166,18 @@ mod tests {
             (
                 V3HubProviderWireProtocol::Anthropic,
                 json!({"type": "message", "stop_reason": "tool_use"}),
+            ),
+            // Anthropic `max_tokens` is the output-cap terminal. It is valid
+            // partial output, exactly like the Chat aliases above, and the
+            // Responses projection already renders it as `incomplete` +
+            // `incomplete_details.reason=max_output_tokens`.
+            (
+                V3HubProviderWireProtocol::Anthropic,
+                json!({"type": "message", "stop_reason": "max_tokens"}),
+            ),
+            (
+                V3HubProviderWireProtocol::Anthropic,
+                json!({"type": "message_delta", "delta": {"stop_reason": "max_tokens"}}),
             ),
         ] {
             assert_eq!(
