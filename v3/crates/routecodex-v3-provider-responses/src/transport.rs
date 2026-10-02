@@ -2,7 +2,9 @@ use crate::adaptive_concurrency::{
     V3AdaptiveConcurrencyController, V3AdaptiveConcurrencyLease, V3AdaptiveConcurrencyPermitGuard,
     V3AdaptiveConcurrencyProbeResult,
 };
-use crate::provider_auth::{discovery_models_url, extract_discovered_models, resolve_secret};
+use crate::provider_auth::{
+    discovery_models_url, extract_discovered_models, resolve_secret, V3DiscoveredModel,
+};
 use crate::raw_response::{V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderSseStream};
 use crate::shared::{
     collect_response_headers, content_type, send_http_await, validated_sse_stream,
@@ -1426,18 +1428,18 @@ async fn read_response_body_bytes(
 pub(crate) const DISCOVERY_REQUEST_ID: &str = "admin-discover";
 const DISCOVERY_TIMEOUT_SECS: u64 = 15;
 
-/// 上游模型发现：按 provider 协议发一次带真实凭据的 GET，只返回模型名列表。
+/// 上游模型发现：按 provider 协议发一次带真实凭据的 GET，返回结构化条目。
 ///
 /// 凭据在本模块内解析（`resolve_secret`），明文 secret 既不出现在返回值，也不进入错误
 /// 变体或日志；URL 不使用 query 参数承载 secret。HTTP 只在 transport surface 实现，
 /// generic provider 的其他模块不得直接使用 reqwest。
 /// 失败一律返回 typed `V3ProviderError`，绝不返回猜测或空列表。
-pub async fn discover_v3_provider_models(
+pub async fn discover_v3_provider_model_entries(
     provider_id: &str,
     provider_type: &str,
     base_url: &str,
     auth: &V3ProviderAuthHandle,
-) -> Result<Vec<String>, V3ProviderError> {
+) -> Result<Vec<V3DiscoveredModel>, V3ProviderError> {
     let url = discovery_models_url(provider_id, provider_type, base_url)?;
     let secret = resolve_secret(DISCOVERY_REQUEST_ID, provider_id, auth).await?;
     let client = reqwest::Client::builder()
@@ -1499,6 +1501,22 @@ pub async fn discover_v3_provider_models(
         });
     }
     Ok(models)
+}
+
+/// 兼容视图：只保留模型名（onboarding wizard 与 provider health test 依赖的既有形状）。
+pub async fn discover_v3_provider_models(
+    provider_id: &str,
+    provider_type: &str,
+    base_url: &str,
+    auth: &V3ProviderAuthHandle,
+) -> Result<Vec<String>, V3ProviderError> {
+    Ok(
+        discover_v3_provider_model_entries(provider_id, provider_type, base_url, auth)
+            .await?
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect(),
+    )
 }
 
 #[cfg(test)]

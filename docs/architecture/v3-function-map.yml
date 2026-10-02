@@ -5454,6 +5454,7 @@ features:
   - v3/crates/routecodex-v3-admin/src/metrics.rs
   - v3/crates/routecodex-v3-admin/src/auth.rs
   - v3/crates/routecodex-v3-admin/src/provider_onboarding.rs
+  - v3/crates/routecodex-v3-admin/src/provider_models.rs
   - v3/crates/routecodex-v3-admin/src/provider_probe.rs
   - v3/crates/routecodex-v3-admin/src/provider_patrol.rs
   - v3/crates/routecodex-v3-admin/src/api/mod.rs
@@ -5467,6 +5468,7 @@ features:
   - v3/crates/routecodex-v3-admin/src/api/timeseries.rs
   - v3/crates/routecodex-v3-admin/tests/l4_admin_api.rs
   - v3/crates/routecodex-v3-admin/tests/l4_admin_provider_onboarding.rs
+  - v3/crates/routecodex-v3-admin/tests/l4_admin_provider_models.rs
   - v3/crates/routecodex-v3-admin/tests/l4_admin_deploy.rs
   - v3/admin-webui/index.html
   - v3/admin-webui/providers.html
@@ -5485,6 +5487,7 @@ features:
   - v3/admin-webui/app/views/deploy.js
   - v3/admin-webui/app/views/usage.js
   - v3/admin-webui/app/views/providers.js
+  - v3/admin-webui/app/views/provider-models.js
   - v3/admin-webui/app/views/routes.js
   - v3/admin-webui/requests-filter-smoke.mjs
   - v3/admin-webui/requests-usage-layout-smoke.mjs
@@ -5515,6 +5518,9 @@ features:
   - update_provider
   - delete_provider
   - discover_models
+  - mutate_provider_models
+  - test_provider_model_capabilities
+  - renderModelsSection
   - import_providers
   - bind_provider_to_route
   - probe_candidate
@@ -5538,6 +5544,7 @@ features:
   - v3/crates/routecodex-v3-admin/src/metrics.rs
   - v3/crates/routecodex-v3-admin/src/auth.rs
   - v3/crates/routecodex-v3-admin/src/provider_onboarding.rs
+  - v3/crates/routecodex-v3-admin/src/provider_models.rs
   - v3/crates/routecodex-v3-admin/src/provider_probe.rs
   - v3/crates/routecodex-v3-admin/src/provider_patrol.rs
   - v3/crates/routecodex-v3-admin/src/api/mod.rs

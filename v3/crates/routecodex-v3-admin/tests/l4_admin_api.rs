@@ -896,3 +896,93 @@ async fn observability_filters_by_error_origin() {
     let rejected_body: serde_json::Value = rejected.json().await.expect("bogus origin json");
     assert_eq!(rejected_body["error"], "invalid error_origin: bogus");
 }
+
+/// Every browser-requestable WebUI asset must really be served by the admin router.
+///
+/// `api/mod.rs` serves static assets from an exhaustive allowlist - there is no `ServeDir`, no
+/// wildcard and no fallback - so shipping a new view module without registering it in three
+/// places (`include_str!` const, `build_router` route, `static_serve` match arm) makes the
+/// browser 404 the module, the ES module graph fails to resolve, and the whole page dies.
+/// That is invisible to the smoke scripts, which read files from disk: only a request through
+/// the real router can see it. This walks the real `admin-webui` directory and GETs every asset.
+#[tokio::test]
+async fn every_webui_asset_is_served_by_the_admin_router() {
+    let (base, _state, _home) = bind_test_server().await;
+    let client = http_client();
+
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../admin-webui");
+    let root = root
+        .canonicalize()
+        .unwrap_or_else(|error| panic!("canonicalize {}: {error}", root.display()));
+    let mut assets = Vec::new();
+    collect_webui_assets(&root, &root, &mut assets);
+    assets.sort();
+
+    // Guard the walk itself: an empty or tiny set would make the assertion below vacuous.
+    assert!(
+        assets.len() >= 15,
+        "expected the real admin-webui asset set, found {}: {assets:?}",
+        assets.len()
+    );
+    for required in [
+        "providers.html",
+        "app/views/providers.js",
+        "app/views/provider-models.js",
+        "app/core.js",
+        "styles.css",
+        "vendor/ambient.css",
+    ] {
+        assert!(
+            assets.iter().any(|asset| asset == required),
+            "asset walk missed {required}; found {assets:?}"
+        );
+    }
+
+    for asset in &assets {
+        let response = client
+            .get(format!("{base}/{asset}"))
+            .send()
+            .await
+            .unwrap_or_else(|error| panic!("GET /{asset} failed: {error}"));
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::OK,
+            "/{asset} is a browser-requestable WebUI asset but the admin router does not serve it. \
+             Register it in api/mod.rs (build_router route + static_serve match arm) and add the \
+             include_str! const in lib.rs."
+        );
+        let body = response.text().await.expect("asset body");
+        assert!(!body.is_empty(), "/{asset} was served with an empty body");
+    }
+}
+
+/// Collect browser-requestable assets: pages, modules and stylesheets. `*.mjs` files are node
+/// smoke scripts and are never requested by the browser, so they are not part of the served set.
+fn collect_webui_assets(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<String>) {
+    let entries =
+        std::fs::read_dir(dir).unwrap_or_else(|error| panic!("read_dir {dir:?}: {error}"));
+    for entry in entries {
+        let path = entry.expect("dir entry").path();
+        if path.is_dir() {
+            collect_webui_assets(root, &path, out);
+            continue;
+        }
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default();
+        let requestable = name.ends_with(".html")
+            || name.ends_with(".js")
+            || name.ends_with(".css")
+            || name == "app.embedded.txt";
+        if !requestable || name.ends_with(".mjs") {
+            continue;
+        }
+        let relative = path
+            .strip_prefix(root)
+            .expect("asset lives under admin-webui")
+            .to_string_lossy()
+            .replace('\\', "/");
+        out.push(relative);
+    }
+}

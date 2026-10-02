@@ -10,6 +10,7 @@ import { renderDonut } from "../charts.js";
 import { initShell, requireAdminSession } from "../shell.js";
 import { confirmDialog, createDirtyGuard, createField, createForm, validators } from "../form.js";
 import { PROBE_STAGES, createProbeTerminal, probeStageLabel } from "../probe.js";
+import { describeApiError, renderModelsSection } from "./provider-models.js";
 
 wireDrawer();
 initShell("providers", {
@@ -40,6 +41,9 @@ const state = {
   wizardStep: 0,
   patrolProvider: null,
   importText: "",
+  // Bulk-action selection over the provider list. Kept here so it survives the
+  // auto-refresh re-render; pruned whenever a provider disappears from the list.
+  selectedProviders: new Set(),
 };
 
 /** Raw request helper for endpoints whose error bodies carry structured detail. */
@@ -113,13 +117,26 @@ function renderSummary(providers, overview) {
 function renderList(providers) {
   const panel = document.getElementById("providers-panel");
   panel.innerHTML = "";
+  // A provider that vanished from the list (deleted here or elsewhere) cannot
+  // stay selected, or a later bulk action would target a stale id.
+  for (const id of [...state.selectedProviders]) {
+    if (!providers.some((provider) => provider.id === id)) state.selectedProviders.delete(id);
+  }
   if (!providers.length) {
     panel.appendChild(el("div", "loading", "no providers configured — add one or run `rccv3 init`"));
+    renderProviderBulkBar();
     return;
   }
   const table = el("table");
   const head = el("thead");
   const headRow = el("tr");
+  const checkHead = el("th", "col-check");
+  const selectAll = el("input");
+  selectAll.type = "checkbox";
+  selectAll.id = "providers-select-all";
+  selectAll.setAttribute("aria-label", "Select all providers");
+  checkHead.appendChild(selectAll);
+  headRow.appendChild(checkHead);
   for (const label of ["Provider", "Type", "Endpoint", "Status", "Latency", "Models", "Actions"]) {
     headRow.appendChild(el("th", null, label));
   }
@@ -128,6 +145,19 @@ function renderList(providers) {
   const body = el("tbody");
   for (const provider of providers) {
     const row = el("tr");
+    const checkCell = el("td", "col-check");
+    const box = el("input");
+    box.type = "checkbox";
+    box.dataset.providerId = provider.id;
+    box.checked = state.selectedProviders.has(provider.id);
+    box.setAttribute("aria-label", `Select provider ${provider.id}`);
+    checkCell.appendChild(box);
+    row.appendChild(checkCell);
+    box.addEventListener("change", () => {
+      if (box.checked) state.selectedProviders.add(provider.id);
+      else state.selectedProviders.delete(provider.id);
+      renderProviderBulkBar();
+    });
     row.appendChild(el("td", null, provider.id));
     row.appendChild(el("td", "mono", provider.provider_type));
     row.appendChild(el("td", "mono", provider.base_url));
@@ -146,6 +176,251 @@ function renderList(providers) {
   }
   table.appendChild(body);
   panel.appendChild(table);
+
+  const visibleIds = providers.map((provider) => provider.id);
+  selectAll.checked = visibleIds.length > 0 && visibleIds.every((id) => state.selectedProviders.has(id));
+  selectAll.addEventListener("change", () => {
+    for (const id of visibleIds) {
+      if (selectAll.checked) state.selectedProviders.add(id);
+      else state.selectedProviders.delete(id);
+    }
+    renderList(state.providers);
+  });
+
+  renderProviderBulkBar();
+}
+
+// ---------------------------------------------------------------------------
+// provider list bulk actions (E7) and bulk route binding (E8)
+// ---------------------------------------------------------------------------
+
+function bulkButton(label, handler) {
+  const button = el("button", "btn", label);
+  button.addEventListener("click", handler);
+  return button;
+}
+
+function selectedProviderIds() {
+  return state.providers.filter((provider) => state.selectedProviders.has(provider.id)).map((provider) => provider.id);
+}
+
+/** Route targets come from the same `GET /api/routes` truth the routes view edits. */
+function routeTargets() {
+  const targets = [];
+  for (const server of state.routes?.servers || []) {
+    (server.pools || []).forEach((pool, poolIndex) => {
+      const poolLabel = pool.id || pool.name || `pool ${poolIndex + 1}`;
+      (pool.tiers || []).forEach((tier, tierIndex) => {
+        targets.push({
+          value: `${server.server_id}\u0000${poolIndex}\u0000${tierIndex}`,
+          label: `${server.server_id || "server"} · ${poolLabel} · tier ${tierIndex + 1}`,
+        });
+      });
+    });
+  }
+  return targets;
+}
+
+function renderProviderBulkBar() {
+  const bar = document.getElementById("providers-bulk-bar");
+  if (!bar) return;
+  const ids = selectedProviderIds();
+  bar.textContent = "";
+  bar.hidden = ids.length === 0;
+  if (!ids.length) return;
+
+  bar.appendChild(el("span", "bulk-count", `${ids.length} selected`));
+  bar.appendChild(bulkButton("Enable", () => setProvidersEnabled(ids, true)));
+  bar.appendChild(bulkButton("Disable", () => setProvidersEnabled(ids, false)));
+  bar.appendChild(bulkButton("Probe", () => probeProviders(ids)));
+  bar.appendChild(bulkButton(`Delete ${ids.length}`, () => deleteProviders(ids)));
+
+  const select = el("select", "bulk-route-target");
+  select.id = "bulk-route-target";
+  select.setAttribute("aria-label", "Route pool tier for bulk binding");
+  const placeholder = el("option", null, "Route target…");
+  placeholder.value = "";
+  select.appendChild(placeholder);
+  for (const target of routeTargets()) {
+    const option = el("option", null, target.label);
+    option.value = target.value;
+    select.appendChild(option);
+  }
+  bar.appendChild(select);
+
+  const bindBtn = bulkButton("Bind to route", () => bindProvidersToRoute(ids, select.value));
+  // Binding must not guess a target, so the action stays disabled until one is chosen.
+  bindBtn.disabled = true;
+  select.addEventListener("change", () => {
+    bindBtn.disabled = !select.value;
+  });
+  bar.appendChild(bindBtn);
+
+  const status = el("span", "hint bulk-status");
+  status.id = "bulk-status";
+  bar.appendChild(status);
+}
+
+async function setProvidersEnabled(ids, enabled) {
+  const status = document.getElementById("bulk-status");
+  const failures = [];
+  let applied = 0;
+  for (const id of ids) {
+    try {
+      const detail = await api(`/api/providers/${encodeURIComponent(id)}`);
+      const config = detail.config;
+      config.provider.enabled = enabled;
+      await api(`/api/providers/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        body: JSON.stringify({ config, reason: `webui bulk ${enabled ? "enable" : "disable"}` }),
+      });
+      applied += 1;
+    } catch (error) {
+      failures.push(`${id}: ${describeApiError(error)}`);
+    }
+  }
+  const message = `${applied}/${ids.length} ${enabled ? "enabled" : "disabled"}${failures.length ? ` · ${failures.join(" · ")}` : ""}`;
+  if (status) status.textContent = message;
+  showStatus(failures.length ? "warn" : "ok", `bulk ${enabled ? "enable" : "disable"}: ${message}`);
+  load();
+}
+
+/** Bulk probe runs the single existing probe ladder, one provider at a time. */
+async function probeProviders(ids) {
+  const panel = document.getElementById("probe-panel");
+  if (!panel) return;
+  panel.hidden = false;
+  const host = document.getElementById("probe-host");
+  const target = document.getElementById("probe-target");
+  host.textContent = "";
+  for (const [index, id] of ids.entries()) {
+    if (target) target.textContent = `bulk probe ${index + 1}/${ids.length} · provider ${id}`;
+    const terminal = createProbeTerminal();
+    host.appendChild(terminal.element);
+    await terminal.run({ id, model: null, stages: PROBE_STAGES });
+  }
+  if (target) target.textContent = `bulk probe complete for ${ids.length} provider(s)`;
+}
+
+/**
+ * E7: bulk delete is destructive, so it is confirmed first and the confirmation
+ * names the count. It reuses the shared `confirmDialog` primitive and the
+ * existing per-provider DELETE endpoint (which already refuses referenced
+ * providers with 409 and reports the references).
+ */
+async function deleteProviders(ids) {
+  const confirmed = await confirmDialog({
+    title: `Delete ${ids.length} provider(s)`,
+    message: `This removes ${ids.length} provider director${ids.length === 1 ? "y" : "ies"}: ${ids.join(", ")}. Configs are backed up under state/provider-backups. Providers still referenced by a route are refused.`,
+    confirmLabel: `Delete ${ids.length}`,
+    danger: true,
+  });
+  if (!confirmed) {
+    showStatus("info", "bulk delete cancelled");
+    return;
+  }
+  await runBulkDelete(ids);
+}
+
+async function runBulkDelete(ids) {
+  const failures = [];
+  let deleted = 0;
+  for (const id of ids) {
+    const result = await apiRaw(`/api/providers/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (result.ok) {
+      deleted += 1;
+      state.selectedProviders.delete(id);
+      continue;
+    }
+    if (result.status === 409) {
+      const references = (result.body?.references || []).map((ref) => `${ref.group}/${ref.pool} (port ${ref.port})`);
+      const forwarders = (result.body?.forwarder_references || []).map((name) => `forwarder ${name}`);
+      const all = [...references, ...forwarders];
+      failures.push(`${id}: still referenced by ${all.length ? all.join(", ") : "route configuration"}`);
+      continue;
+    }
+    failures.push(`${id}: ${result.body?.error_code || "delete failed"} ${result.body?.error || `HTTP ${result.status}`}`);
+  }
+  showStatus(
+    failures.length ? "warn" : "ok",
+    `bulk delete: ${deleted}/${ids.length} deleted${failures.length ? ` · ${failures.join(" · ")}` : ""}`,
+  );
+  load();
+}
+
+/**
+ * E8: bind the checked providers into an existing route pool tier through
+ * `PUT /api/routes`. This writes the same route truth the routes view owns; it
+ * never introduces a second routing source. One member per provider, using the
+ * provider's default model (falling back to its first authored model).
+ */
+async function bindProvidersToRoute(ids, target) {
+  const status = document.getElementById("bulk-status");
+  const [serverId, poolIndexRaw, tierIndexRaw] = String(target || "").split("\u0000");
+  let routes;
+  try {
+    // Route truth is read at action time. The bulk bar's snapshot may be stale,
+    // and binding must never write a second, drifting copy of the route config.
+    routes = await api("/api/routes");
+  } catch (error) {
+    showStatus("err", `route config unavailable: ${describeApiError(error)}`);
+    return;
+  }
+  state.routes = routes;
+  const server = (routes.servers || []).find((item) => item.server_id === serverId);
+  const tier = server?.pools?.[Number(poolIndexRaw)]?.tiers?.[Number(tierIndexRaw)];
+  if (!tier) {
+    showStatus("err", "route target is no longer available — pick a target again");
+    renderProviderBulkBar();
+    return;
+  }
+  const added = [];
+  const skipped = [];
+  for (const id of ids) {
+    try {
+      const detail = await api(`/api/providers/${encodeURIComponent(id)}`);
+      const models = Object.keys(detail.config?.provider?.models || {});
+      const model = detail.config?.provider?.defaultModel || models[0];
+      if (!model) {
+        skipped.push(`${id} (no model authored)`);
+        continue;
+      }
+      const use = `${id}/${model}`;
+      if ((tier.members || []).some((member) => member.use === use)) {
+        skipped.push(`${use} (already in tier)`);
+        continue;
+      }
+      tier.members = tier.members || [];
+      tier.members.push({ use, weight: null });
+      added.push(use);
+    } catch (error) {
+      skipped.push(`${id} (${describeApiError(error)})`);
+    }
+  }
+  if (!added.length) {
+    const message = `nothing bound · ${skipped.join(" · ") || "no providers selected"}`;
+    if (status) status.textContent = message;
+    showStatus("warn", message);
+    return;
+  }
+  try {
+    const result = await api("/api/routes", {
+      method: "PUT",
+      body: JSON.stringify({
+        servers: routes.servers,
+        reason: `webui bulk bind ${added.length} provider(s)`,
+      }),
+    });
+    state.routes = { ...routes, servers: result.servers || routes.servers };
+    const message = `bound ${added.join(", ")}${skipped.length ? ` · skipped ${skipped.join(" · ")}` : ""}`;
+    if (status) status.textContent = message;
+    showStatus("ok", `route revision ${result.revision_seq} · ${message}`);
+  } catch (error) {
+    // The local tier edit was never committed; re-read route truth instead of
+    // keeping a mutation the server rejected.
+    showStatus("err", `route bind failed: ${describeApiError(error)}`);
+    loadRoutes();
+  }
 }
 
 function actionButton(label, handler) {
@@ -177,9 +452,11 @@ async function openDetail(id) {
     const config = detail.config;
     const grid = el("div", "detail-grid");
     grid.appendChild(detailField("Name", config.provider_id || config.provider.id));
-    grid.appendChild(detailField("Type", config.provider.provider_type));
-    grid.appendChild(detailField("Endpoint", config.provider.base_url));
-    grid.appendChild(detailField("Default model", config.provider.default_model));
+    // The detail payload carries the provider file as serde serializes it
+    // (`type`, `baseURL`, `defaultModel`), unlike the list DTO's snake_case.
+    grid.appendChild(detailField("Type", config.provider.type));
+    grid.appendChild(detailField("Endpoint", config.provider.baseURL));
+    grid.appendChild(detailField("Default model", config.provider.defaultModel));
     grid.appendChild(detailField("Enabled", String(config.provider.enabled !== false)));
     grid.appendChild(detailField("Timeout (ms)", config.provider.timeout === null || config.provider.timeout === undefined ? "default 300000" : String(config.provider.timeout)));
     body.appendChild(grid);
@@ -233,13 +510,14 @@ async function openDetail(id) {
     body.appendChild(el("div", "section"));
     body.appendChild(el("h2", null, "Models"));
     const modelsPanel = el("div", "panel");
-    for (const [modelName, model] of Object.entries(config.provider.models)) {
-      const row = el("div", "row");
-      row.appendChild(el("span", "name mono", modelName));
-      row.appendChild(el("span", "meta", (model.capabilities || []).join(", ")));
-      modelsPanel.appendChild(row);
-    }
     body.appendChild(modelsPanel);
+    // Editable model authoring lives in app/views/provider-models.js (E4/E5/E6).
+    renderModelsSection(modelsPanel, {
+      providerId: id,
+      config,
+      // No optimistic state: a write is followed by a fresh provider read.
+      onChanged: () => openDetail(id),
+    });
 
     const actions = el("div", "actions");
     actions.appendChild(actionButton("Probe this provider", () => {

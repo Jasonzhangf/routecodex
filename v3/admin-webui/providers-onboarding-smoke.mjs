@@ -13,6 +13,7 @@ const MODULES = [
   "./app/form.js",
   "./app/probe.js",
   "./app/views/providers.js",
+  "./app/views/provider-models.js",
 ];
 
 function source(relativePath) {
@@ -47,6 +48,7 @@ assert.match(markup, /href="\/styles.css"/);
 for (const id of [
   "summary-cards",
   "providers-panel",
+  "providers-bulk-bar",
   "health-donut",
   "status-bar",
   "add-provider-btn",
@@ -92,6 +94,18 @@ for (const primitive of [
 ]) {
   assert.match(form, new RegExp(`export function ${primitive}\\(`), `form.js must own ${primitive}`);
 }
+
+// confirmDialog is driven by explicit handlers, not by `<form method="dialog">`:
+// `el()` forces `type="button"`, so a dialog form never submits and its `close`
+// event never fires, which left the promise pending forever.
+assert.doesNotMatch(
+  form,
+  /shell\.method = "dialog"/,
+  "confirmDialog must not depend on form submission",
+);
+assert.match(form, /function settle\(accepted\)/);
+assert.match(form, /confirm\.addEventListener\("click", \(\) => settle\(true\)\)/);
+assert.match(form, /cancel\.addEventListener\("click", \(\) => settle\(false\)\)/);
 
 // ---------------------------------------------------------------------------
 // streaming probe terminal
@@ -160,5 +174,40 @@ assert.match(view, /method: "PUT"/);
 assert.match(view, /method: "DELETE"/);
 assert.match(view, /runImport\(true\)/);
 assert.match(view, /runImport\(false\)/);
+
+// ---------------------------------------------------------------------------
+// provider model authoring (E4/E5/E6 live in their own module; E7/E8 in providers.js)
+// ---------------------------------------------------------------------------
+
+assert.match(
+  view,
+  /import \{ describeApiError, renderModelsSection \} from "\.\/provider-models\.js";/,
+  "providers.js must delegate model authoring to app/views/provider-models.js",
+);
+assert.match(view, /renderModelsSection\(modelsPanel, \{/);
+assert.match(view, /providers-bulk-bar/);
+assert.match(view, /providers-select-all/);
+assert.match(view, /setProvidersEnabled/);
+assert.match(view, /bindProvidersToRoute/);
+assert.match(view, /await confirmDialog\(\{/);
+
+const models = source("./app/views/provider-models.js");
+assert.match(models, /export function renderModelsSection\(/);
+assert.match(models, /export function describeApiError\(/);
+assert.match(models, /encodeURIComponent\(providerId\)\}\/models`/);
+assert.match(models, /models\/capability-test`/);
+assert.match(models, /api\("\/api\/providers\/discover", \{/);
+assert.match(models, /body: JSON\.stringify\(\{ id: providerId \}\)/);
+// E1: the replacement marker is a top-level list of names, never an entry key.
+assert.match(models, /REPLACE_FIELD\] = \[name\]/);
+assert.doesNotMatch(
+  models,
+  /payload\[REPLACE_FIELD\]|MODEL_ENTRY_REPLACE_FLAG/,
+  "the replacement marker must not be written into the model entry",
+);
+// E4: a manual capability is written only after its test returned tested && passed.
+assert.match(models, /entry\.source === "manual" && entry\.tested && entry\.passed/);
+assert.match(models, /if \(!\(state\.tested && state\.passed\)\) failure = state\.detail;/);
+assert.match(models, /state\.source = null;/);
 
 console.log("providers onboarding smoke passed");

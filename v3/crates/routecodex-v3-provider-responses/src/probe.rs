@@ -12,13 +12,13 @@ pub fn build_v3_provider_global_probe_request(
     target: V3ResponsesProviderTarget,
     request_id: String,
 ) -> Result<V3Transport13ResponsesRequest, String> {
-    let provider_type = target.provider_type.clone();
-    let provider_headers: Vec<V3ProviderRequestHeader> = target
-        .headers
-        .iter()
-        .map(|(name, value)| V3ProviderRequestHeader::new(name, value))
-        .collect();
-    let body = match provider_type.as_str() {
+    let body = probe_request_body(&target)?;
+    build_v3_provider_global_request(target, request_id, body)
+}
+
+/// probe 请求体：每个 provider 协议一条最小真实请求。
+fn probe_request_body(target: &V3ResponsesProviderTarget) -> Result<serde_json::Value, String> {
+    Ok(match target.provider_type.as_str() {
         "responses" => serde_json::json!({
             "model": target.wire_model,
             "input": [{"role":"user","content":[{"type":"input_text","text":"routecodex health probe"}]}],
@@ -41,7 +41,24 @@ pub fn build_v3_provider_global_probe_request(
             "generationConfig": {"maxOutputTokens": 1},
         }),
         other => return Err(format!("unsupported provider probe protocol {other}")),
-    };
+    })
+}
+
+/// 用调用方提供的请求体构造一次真实 provider 请求（诊断用途）。
+///
+/// 与 probe 请求共用同一条 URL / 协议 header / 超时 / 并发准入路径：真实 provider 请求
+/// 的构造只在这里实现一次，调用方只提供协议请求体。
+pub fn build_v3_provider_global_request(
+    target: V3ResponsesProviderTarget,
+    request_id: String,
+    body: serde_json::Value,
+) -> Result<V3Transport13ResponsesRequest, String> {
+    let provider_type = target.provider_type.clone();
+    let provider_headers: Vec<V3ProviderRequestHeader> = target
+        .headers
+        .iter()
+        .map(|(name, value)| V3ProviderRequestHeader::new(name, value))
+        .collect();
     if provider_type == "responses" {
         let wire = build_v3_provider_12_responses_wire_payload(request_id, target, body)
             .map_err(|error| error.to_string())?;
@@ -74,7 +91,7 @@ pub fn build_v3_provider_global_probe_request(
             ),
             Vec::new(),
         ),
-        _ => unreachable!(),
+        other => return Err(format!("unsupported provider request protocol {other}")),
     };
     build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
         request_id,

@@ -6,6 +6,7 @@
 pub mod api;
 pub mod auth;
 pub mod metrics;
+pub mod provider_models;
 pub mod provider_onboarding;
 pub mod provider_patrol;
 pub mod provider_probe;
@@ -33,6 +34,8 @@ pub const STATIC_VIEW_DASHBOARD_JS: &str =
 pub const STATIC_VIEW_USAGE_JS: &str = include_str!("../../../admin-webui/app/views/usage.js");
 pub const STATIC_VIEW_PROVIDERS_JS: &str =
     include_str!("../../../admin-webui/app/views/providers.js");
+pub const STATIC_VIEW_PROVIDER_MODELS_JS: &str =
+    include_str!("../../../admin-webui/app/views/provider-models.js");
 pub const STATIC_VIEW_ROUTES_JS: &str = include_str!("../../../admin-webui/app/views/routes.js");
 pub const STATIC_VIEW_DEPLOY_JS: &str = include_str!("../../../admin-webui/app/views/deploy.js");
 

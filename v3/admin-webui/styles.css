@@ -1611,6 +1611,109 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent-bg); }
 
 .confirm-dialog .actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
 
+/* ---------- provider model authoring (providers.html) ----------
+   The provider list bulk bar, the drawer's editable Models section and the
+   add/edit/pick dialogs. Colours come from the shared tokens, and every state
+   also carries a text label, so nothing depends on colour alone. */
+
+.bulk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+/* The bar is `display: flex`, so the `hidden` attribute needs its own rule. */
+.bulk-bar[hidden] { display: none; }
+
+.bulk-count { color: var(--label); font-size: 13px; font-weight: 600; }
+.bulk-route-target { min-width: 200px; }
+.bulk-status { flex: 1 1 100%; }
+
+.model-editor { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.model-editor-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.model-editor-filter { flex: 1 1 220px; margin-bottom: 0; }
+.model-editor-selection { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.model-editor-selection .muted { font-size: 12px; }
+.model-editor-empty:empty { display: none; }
+
+.model-table-wrap { overflow-x: auto; }
+
+.model-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.model-table th,
+.model-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+.model-table th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+.model-table td.mono { font-family: var(--mono); }
+.model-table .col-check { width: 34px; }
+.model-row-actions { display: flex; gap: 6px; white-space: nowrap; }
+
+.model-caps { display: flex; flex-wrap: wrap; gap: 4px; }
+.model-cap {
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.model-cap.configured { border-color: var(--warn); color: var(--warn); }
+
+.model-dialog,
+.model-picker {
+  width: min(720px, 92vw);
+  max-height: 86vh;
+  overflow: auto;
+}
+.model-picker { width: min(760px, 92vw); }
+.model-dialog-title { margin: 0 0 14px; font-size: 16px; color: var(--label); }
+.model-dialog-body { display: flex; flex-direction: column; gap: 4px; }
+.model-bool-row { display: flex; flex-wrap: wrap; gap: 18px; margin-bottom: 12px; }
+.model-bool { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--label); }
+
+.model-cap-fieldset {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  margin: 0 0 12px;
+}
+.model-cap-fieldset legend { color: var(--muted); font-size: 12px; padding: 0 4px; }
+.model-cap-rows { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.model-cap-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.model-cap-check { display: flex; align-items: center; gap: 6px; min-width: 170px; }
+.model-cap-name { font-family: var(--mono); font-size: 12px; color: var(--label); }
+.model-cap-source { font-size: 11px; color: var(--muted); }
+.model-cap-source.bad { color: var(--danger); }
+.model-write-preview { font-size: 11px; color: var(--muted); margin: 0; font-family: var(--mono); }
+
+.model-picker-state { color: var(--muted); padding: 12px 0; }
+.model-picker-state.error { color: var(--danger); }
+.model-picker-count { margin-right: auto; font-size: 12px; }
+.model-picker .actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+.model-picker-error { color: var(--danger); }
+
+@media (max-width: 860px) {
+  .bulk-route-target { min-width: 0; flex: 1 1 100%; }
+  .model-dialog,
+  .model-picker { width: 94vw; }
+}
+
 /* ---------- narrow viewports ----------
    The shell is a fixed sidebar plus a content column. Below the width where a
    232px rail leaves a usable content column, the rail becomes a horizontal

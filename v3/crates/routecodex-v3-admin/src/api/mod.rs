@@ -18,6 +18,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::routes())
         .merge(providers::routes())
         .merge(crate::provider_onboarding::routes())
+        .merge(crate::provider_models::routes())
         .merge(crate::provider_probe::routes())
         .merge(crate::provider_patrol::routes())
         .merge(deploy::routes())
@@ -35,6 +36,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/app/views/dashboard.js", get(static_serve))
         .route("/app/views/usage.js", get(static_serve))
         .route("/app/views/providers.js", get(static_serve))
+        .route("/app/views/provider-models.js", get(static_serve))
         .route("/app/views/routes.js", get(static_serve))
         .route("/app/views/deploy.js", get(static_serve))
         .route("/index.html", get(static_serve))
@@ -96,6 +98,10 @@ async fn static_serve(State(state): State<AppState>, uri: axum::http::Uri) -> Re
         ),
         "app/views/providers.js" => (
             crate::STATIC_VIEW_PROVIDERS_JS,
+            "text/javascript; charset=utf-8",
+        ),
+        "app/views/provider-models.js" => (
+            crate::STATIC_VIEW_PROVIDER_MODELS_JS,
             "text/javascript; charset=utf-8",
         ),
         "app/views/routes.js" => (

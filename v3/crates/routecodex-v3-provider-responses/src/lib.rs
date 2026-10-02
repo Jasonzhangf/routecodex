@@ -31,7 +31,8 @@ pub use key_health::{
     V3ProviderHealthProbePermit, V3ProviderKeyHealthProjection, V3ProviderKeyHealthStore,
     V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
 };
-pub use probe::build_v3_provider_global_probe_request;
+pub use probe::{build_v3_provider_global_probe_request, build_v3_provider_global_request};
+pub use provider_auth::{V3DiscoveredModel, V3DiscoveredModelSource};
 pub use raw_response::{
     V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderResponseBodyKind,
     V3ProviderResponseHeader, V3ProviderSseStream,
@@ -46,7 +47,8 @@ pub use transport::{
     build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency,
     build_v3_transport_13_responses_http_request_from_v3_provider_12,
     build_v3_transport_13_responses_http_request_with_provider_headers_from_parts,
-    build_v3_transport_13_responses_request_from_v3_provider_12, discover_v3_provider_models,
+    build_v3_transport_13_responses_request_from_v3_provider_12,
+    discover_v3_provider_model_entries, discover_v3_provider_models,
     is_v3_anthropic_provider_request_header_name, ProviderResponsesTransport,
     ReqwestResponsesTransport, ResponsesTransport, V3ProviderCancellation, V3ProviderRequestHeader,
     V3Transport13ResponsesHttpRequest, V3Transport13ResponsesRequest,
