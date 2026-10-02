@@ -110,16 +110,15 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
             }
         }
     }
-    let status = if output.iter().any(|item| {
-        matches!(
-            item.get("type").and_then(Value::as_str),
-            Some("function_call" | "tool_call" | "custom_tool_call" | "tool_search_call")
-        )
-    }) || finish_reason.as_deref() == Some("tool_calls")
-    {
-        "requires_action"
-    } else {
-        "completed"
+    // A tool call is a normal Responses output item, so a completed provider turn
+    // keeps the terminal status `completed`. `requires_action` is not a Responses
+    // status; fabricating it here makes clients that wait for a terminal status
+    // hang. The presence of tool calls is carried by `output`, not by `status`.
+    // Only an explicit truncation is a non-success terminal, and it must use the
+    // Responses `incomplete` shape rather than a Chat `finish_reason` field.
+    let status = match finish_reason.as_deref() {
+        Some("length") => "incomplete",
+        _ => "completed",
     };
     let mut response = Map::new();
     response.insert(
@@ -144,8 +143,11 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
             Value::String(output_text_parts.join("")),
         );
     }
-    if let Some(finish_reason) = finish_reason {
-        response.insert("finish_reason".to_string(), Value::String(finish_reason));
+    if status == "incomplete" {
+        response.insert(
+            "incomplete_details".to_string(),
+            json!({"reason": "max_output_tokens"}),
+        );
     }
     if let Some(usage) = payload
         .get("usage")

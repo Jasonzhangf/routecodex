@@ -895,8 +895,8 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
         return Err(V3AnthropicCodecError::InvalidTerminalField {
             field: "stop_reason",
             reason: format!(
-                "{} contradicts response.content[].type=tool_use",
-                terminal.source_stop_reason
+                "{:?} contradicts response.content[].type=tool_use",
+                terminal.kind
             ),
         });
     }
@@ -1153,10 +1153,9 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
     if let Some(usage) = anthropic_usage_as_responses_usage(object.get("usage")) {
         response.insert("usage".to_string(), usage);
     }
-    response.insert(
-        "finish_reason".to_string(),
-        Value::String(terminal.source_stop_reason),
-    );
+    // Responses has no `finish_reason` field. Terminality is carried by
+    // `status` alone; carrying the Anthropic `stop_reason` as `finish_reason`
+    // would fabricate a Chat-only field into a Responses client projection.
     if let Some(reason) = terminal.incomplete_reason {
         response.insert("incomplete_details".to_string(), json!({"reason": reason}));
     }

@@ -44,7 +44,23 @@ for (const entry of manifest.modules) {
   if (result.error || result.status !== 0) fail(`${entry.id} graph validation: ${result.error?.message || result.stderr || result.stdout}`);
   console.log(`[v3-dagpipe] VALID ${entry.id}: ${entry.graph}`);
 }
+const extensions = Array.isArray(manifest.extensions) ? manifest.extensions : [];
+for (const entry of extensions) {
+  if (!entry.id || !entry.status) fail(`extension entry must declare id/status`);
+  if (entry.status === 'pending' && entry.graph === null) {
+    console.log(`[v3-dagpipe] PENDING ${entry.id}`);
+    continue;
+  }
+  if (entry.status !== 'graph' || typeof entry.graph !== 'string') fail(`invalid status/graph for ${entry.id}`);
+  const graph = projectFile(entry.graph);
+  if (dirname(graph) !== directory || !graph.endsWith('.graph.json')) fail(`graph must be in DAGPipe directory: ${entry.graph}`);
+  if (registered.has(graph)) fail(`graph shared by modules: ${entry.graph}`);
+  registered.add(graph);
+  const result = spawnSync('dagpipe', ['graph', 'validate', graph], { encoding: 'utf8' });
+  if (result.error || result.status !== 0) fail(`${entry.id} graph validation: ${result.error?.message || result.stderr || result.stdout}`);
+  console.log(`[v3-dagpipe] VALID ${entry.id}: ${entry.graph}`);
+}
 for (const name of readdirSync(directory)) {
   if (name.endsWith('.graph.json') && !registered.has(resolve(directory, name))) fail(`unregistered graph: ${name}`);
 }
-console.log(`[v3-dagpipe] governance checked; ${registered.size}/${expected.length} static graphs registered`);
+console.log(`[v3-dagpipe] governance checked; ${registered.size} static graphs registered (${expected.length} modules, ${extensions.length} extensions)`);

@@ -239,7 +239,7 @@ Anthropic. No provider response object is reused as a client response object.
 | Provider response field family | Chat response semantic | Responses client | OpenAI Chat client | Anthropic client |
 | --- | --- | --- | --- | --- |
 | identity: `id`, `model`, `created`/`created_at` | response identity/time/model | exact fieldwise mapping; created units validated | exact `id/model/created` | exact `id/model` with generated message id only where Anthropic requires it |
-| terminal: `status`, `finish_reason`, `stop_reason`, `stop_sequence` | terminal reason + terminality | `status` plus `incomplete_details`/finish projection | `choices[].finish_reason` | `stop_reason`/`stop_sequence` |
+| terminal: `status`, `finish_reason`, `stop_reason`, `stop_sequence` | terminal reason + terminality; canonical `finish_reason` is an internal carrier only | `status` plus `incomplete_details`/`stop_sequence`/`stop_details` (Responses wire has no `finish_reason` field) | `choices[].finish_reason` | `stop_reason`/`stop_sequence` |
 | text message content and annotations | ordered output text parts + annotations | ordered `message.content[].output_text` and aggregate `output_text` | `choices[].message.content` and annotations | ordered `content[].text` blocks |
 | refusal/error content | refusal semantic or Error chain | `refusal`/`error` only at client projection owner | `message.refusal` or protocol error | provider error schema or text refusal per declared field |
 | function call: id/call_id/name/arguments/status | function call semantic with exact argument bytes | `output[].function_call` | native function `tool_calls[].function` | `tool_use` only when arguments are valid JSON; malformed bytes follow explicit reversible error path |
@@ -264,14 +264,23 @@ then projected by the single typed terminal owner in the Anthropic response
 codec. The following table is closed-world; a value not listed here is not a
 successful terminal response.
 
-| Anthropic `stop_reason` | Hub terminal semantic | Responses projection | Mapping class | Additional contract |
+Column contract: "Hub canonical semantic" is the canonical response owned by
+Chat Process, which legitimately carries `finish_reason` as an internal
+terminal-reason carrier for cross-protocol projection; the "Responses wire
+projection" column states exactly what the client-visible `/v1/responses`
+object carries — the Responses protocol has no `finish_reason` field, so
+terminality on the wire is `status` (plus `incomplete_details` /
+`stop_sequence` / `stop_details` only where a row declares them) and the
+`finish_reason=` fragments below never reach a Responses client object.
+
+| Anthropic `stop_reason` | Hub terminal semantic | Responses wire projection | Mapping class | Additional contract |
 | --- | --- | --- | --- | --- |
-| `end_turn` | `stop` | `status=completed`, `finish_reason=end_turn` | `mapped_exact` | `stop_sequence` and `stop_details` must be absent/null. |
-| `tool_use` | `tool_calls` | `status=requires_action`, `finish_reason=tool_use` | `mapped_compatible_registered` | RouteCodex's registered local tool-continuation status; output must contain a typed tool call. |
-| `max_tokens` | `max_tokens` | `status=incomplete`, `incomplete_details.reason=max_output_tokens`, `finish_reason=max_tokens` | `mapped_exact` | Partial output remains business response data, not a provider error. |
-| `stop_sequence` | `stop_sequence` | `status=completed`, exact `finish_reason=stop_sequence` and exact `stop_sequence` | `mapped_exact` | A non-empty `stop_sequence` is required. |
-| `pause_turn` | `pause_turn` | `status=in_progress`, `finish_reason=pause_turn` | `mapped_compatible_registered` | Preserves Anthropic's resumable non-terminal meaning without fabricating a tool result or incomplete reason. |
-| `refusal` | `content_filter` | `status=incomplete`, `incomplete_details.reason=content_filter`, `finish_reason=refusal`, exact `stop_details` when present | `mapped_compatible_registered` | Refusal is response terminal semantics, not transport/provider failure. |
+| `end_turn` | `stop`, canonical `finish_reason=stop` | `status=completed` | `mapped_exact` | `stop_sequence` and `stop_details` must be absent/null. |
+| `tool_use` | `tool_calls`, canonical `finish_reason=tool_calls` | `status=completed`, tool call carried by `output` function_call items | `mapped_compatible_registered` | Responses has no tool-continuation status: a tool call is a completed response whose `output` carries the typed tool call. RouteCodex must never fabricate `requires_action`, and no `finish_reason` field is written to the Responses wire object. |
+| `max_tokens` | `max_tokens`, canonical `finish_reason=length` | `status=incomplete`, `incomplete_details.reason=max_output_tokens` | `mapped_exact` | Partial output remains business response data, not a provider error. |
+| `stop_sequence` | `stop_sequence`, canonical `finish_reason=stop_sequence` | `status=completed`, exact `stop_sequence` | `mapped_exact` | A non-empty `stop_sequence` is required. |
+| `pause_turn` | `pause_turn`, canonical `finish_reason=pause_turn` | `status=in_progress` | `mapped_compatible_registered` | Preserves Anthropic's resumable non-terminal meaning without fabricating a tool result or incomplete reason. |
+| `refusal` | `content_filter`, canonical `finish_reason=content_filter` | `status=incomplete`, `incomplete_details.reason=content_filter`, exact `stop_details` when present | `mapped_compatible_registered` | Refusal is response terminal semantics, not transport/provider failure. |
 | `model_context_window_exceeded` | `context_window_exceeded` | no exact Responses incomplete reason | `unsupported_fail_fast` | Fail with the exact source value; never relabel input-context exhaustion as `max_output_tokens`. |
 
 `stop_reason=null` is valid only on the Anthropic streaming `message_start`

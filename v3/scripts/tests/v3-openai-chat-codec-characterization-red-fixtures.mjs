@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const repoRoot = process.cwd();
-const verifier = resolve(repoRoot, 'scripts/architecture/verify-v3-openai-chat-codec-characterization.mjs');
+const verifier = resolve(repoRoot, 'v3/scripts/architecture/verify-v3-openai-chat-codec-characterization.mjs');
 const fixtures = [
   ['hook registration', 'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs', 'use super::{', 'use super::{ compile_v3_hub_v1_static_registry,', /forbidden.*compile_v3_hub_v1_static_registry/],
   ['protocol branch', 'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs', 'V3HubEntryProtocol::OpenAiChat', 'V3HubEntryProtocol::Responses', /missing V3HubEntryProtocol::OpenAiChat|forbidden.*Responses/],

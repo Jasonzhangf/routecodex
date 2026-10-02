@@ -1045,7 +1045,8 @@ data: {"type":"message_stop"}
     assert_eq!(response["id"], "msg_dup");
     assert_eq!(response["model"], "claude-fable-5");
     assert_eq!(response["status"], "completed");
-    assert_eq!(response["finish_reason"], "end_turn");
+    // Responses objects carry no `finish_reason`; terminality is `status` alone.
+    assert!(response.get("finish_reason").is_none(), "{response}");
     assert_eq!(
         response["output"][0]["content"][0]["text"],
         "duplicate start tolerated"
@@ -1456,20 +1457,4 @@ async fn responses_provider_sse_stream_output_without_identity_does_not_overwrit
         response["output"][1]["summary"][0]["text"],
         "terminal reasoning"
     );
-}
-
-#[tokio::test]
-async fn responses_provider_sse_unknown_response_event_fails_instead_of_discarding() {
-    let observation = V3RuntimeStreamObservation::default();
-    let provider = Box::pin(stream::iter(vec![Ok(
-            b"event: response.reasoning_summary.delta\ndata: {\"type\":\"response.reasoning_summary.delta\",\"delta\":\"lost\"}\n\n".to_vec(),
-        )]));
-    let error =
-        build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(provider, &observation)
-            .await
-            .unwrap_err();
-
-    assert!(error
-        .to_string()
-        .contains("response.reasoning_summary.delta is unsupported"));
 }

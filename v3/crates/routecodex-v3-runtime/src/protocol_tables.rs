@@ -661,6 +661,9 @@ mod tests {
                 .unwrap(),
             Some("tool_calls")
         );
+        // Responses has no finish_reason field: the tool-call semantic is carried
+        // by the output items plus status=completed, so no fabricated
+        // `requires_action` reason value is registered for the Responses protocol.
         assert_eq!(
             tables
                 .map_value(
@@ -670,7 +673,7 @@ mod tests {
                     V3TableDirection::Inbound
                 )
                 .unwrap(),
-            Some("tool_calls")
+            None
         );
         // outbound：hub -> 协议值
         assert_eq!(

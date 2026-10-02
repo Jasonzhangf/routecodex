@@ -151,7 +151,6 @@ forbid(
 requireAll(text.responseCommon, files.responseCommon, ['pub enum V3HubRelayToolKind']);
 requireAll(text.responseChatProcess, files.responseChatProcess, [
   'pub(crate) fn classify_v3_hub_relay_tool_kind',
-  'fn complete_or_repair_v3_resp03_tool_frames',
   'fn inspect_v3_resp03_finish_reason',
   'fn project_v3_apply_patch_freeform_calls_at_resp03',
   'normalize_v3_apply_patch_freeform_input_for_client',
@@ -160,6 +159,12 @@ requireAll(text.responseChatProcess, files.responseChatProcess, [
   'servertool_action',
   'V3HubServertoolResponseAction::FollowupRequired',
 ]);
+forbid(
+  text.responseChatProcess,
+  files.responseChatProcess,
+  /complete_or_repair_v3_resp03_tool_frames/,
+  'fabricating Responses tool-continuation repair in Resp03',
+);
 requireAll(text.servertoolHooks, files.servertoolHooks, [
   'apply_v3_tool_call_servertool_hook_at_resp03',
 ]);
@@ -171,7 +176,6 @@ if (resp03GovernStart < 0 || resp03GovernEnd < 0) {
   const resp03Govern = text.responseChatProcess.slice(resp03GovernStart, resp03GovernEnd);
   requireOrdered(resp03Govern, files.responseChatProcess, [
     'harvest_v3_think_blocks_at_resp03',
-    'complete_or_repair_v3_resp03_tool_frames',
     'inspect_v3_resp03_finish_reason',
     'apply_v3_tool_call_servertool_hook_at_resp03',
     'project_v3_apply_patch_freeform_calls_at_resp03',
@@ -258,14 +262,14 @@ requireAll(text.tests, files.tests, [
   'attachment_history_missing_resource_is_preserved_as_client_data',
 ]);
 requireAll(text.responseSemanticsTests, files.responseSemanticsTests, [
-  'resp03_repairs_tool_call_finish_reason_before_tool_governance',
-  'resp05_consumes_resp03_repaired_payload_without_semantic_repair',
+  'resp03_preserves_completed_tool_call_response_before_tool_governance',
+  'resp05_consumes_resp03_governed_payload_without_semantic_repair',
 ]);
 requireAll(text.requestSemanticsTests, files.requestSemanticsTests, [
 ]);
 requireAll(text.functionMap, files.functionMap, [
   'feature_id: v3.resp03_tool_governance_gap_closeout',
-  'complete_or_repair_v3_resp03_tool_frames',
+  'resp05_consumes_resp03_governed_payload_without_semantic_repair',
   'apply_v3_tool_call_servertool_hook_at_resp03',
 ]);
 requireAll(text.mainlineMap, files.mainlineMap, [

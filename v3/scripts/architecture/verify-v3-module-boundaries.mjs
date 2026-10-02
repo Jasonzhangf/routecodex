@@ -244,8 +244,7 @@ for (const path of all) {
   const semanticProductionText = productionText
     .replace(/\.method_not_allowed_fallback\(method_not_allowed\)/g, '')
     .replace(/\.fallback\(path_not_found\)/g, '')
-    .replace(/fallback-credit-2026-06-01/g, 'provider-credit-beta-2026-06-01')
-    .replace(/\bcomplete_or_repair_v3_resp03_tool_frames\b/g, 'complete_v3_resp03_tool_frames');
+    .replace(/fallback-credit-2026-06-01/g, 'provider-credit-beta-2026-06-01');
   const isTest = isRustTestSource(path);
   const isRouteCodexV3Crate = path.includes('/crates/routecodex-v3-');
   const isErrorOwner = path.includes('routecodex-v3-error/src/');

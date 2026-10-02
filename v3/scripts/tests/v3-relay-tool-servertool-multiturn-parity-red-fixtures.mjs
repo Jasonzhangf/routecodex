@@ -78,19 +78,19 @@ const cases = [
     diagnostic: /project_v3_apply_patch_freeform_calls_at_resp03/,
   },
   {
-    name: 'Resp03 semantic repair reordered after apply_patch projection',
+    name: 'Responses tool-continuation fabrication revived in Resp03',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
-    marker: '    let input = complete_or_repair_v3_resp03_tool_frames(input);',
+    marker: 'fn inspect_v3_resp03_finish_reason(',
     mutation:
-      '    let input = project_v3_apply_patch_freeform_calls_at_resp03(input);\n    let input = complete_or_repair_v3_resp03_tool_frames(input);',
-    diagnostic: /Resp03 response governance/,
+      'fn complete_or_repair_v3_resp03_tool_frames(mut input: V3HubRespInbound02Normalized) -> V3HubRespInbound02Normalized {\n    let mut next = input.provider_payload().as_ref().clone();\n    if let Some(object) = next.as_object_mut() {\n        if let Some(status) = object.get("status").and_then(Value::as_str) {\n            if status == "completed" {\n                object.insert("status".to_string(), Value::String("requires_action".to_string()));\n            }\n        }\n        object.insert("finish_reason".to_string(), Value::String("tool_calls".to_string()));\n    }\n    input\n}\nfn inspect_v3_resp03_finish_reason(',
+    diagnostic: /fabricating Responses tool-continuation repair in Resp03/,
   },
   {
-    name: 'Resp03 repair step removed',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
-    marker: 'complete_or_repair_v3_resp03_tool_frames',
-    mutation: 'resp03_tool_frame_repair_removed',
-    diagnostic: /complete_or_repair_v3_resp03_tool_frames|Resp03 response governance/,
+    name: 'Resp03 completed tool-call preservation characterization renamed away',
+    file: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs',
+    marker: 'fn resp03_preserves_completed_tool_call_response_before_tool_governance()',
+    mutation: 'fn resp03_preserves_completed_tool_call_response_removed()',
+    diagnostic: /resp03_preserves_completed_tool_call_response_before_tool_governance/,
   },
   {
     name: 'Resp03 finish reason inspector removed',

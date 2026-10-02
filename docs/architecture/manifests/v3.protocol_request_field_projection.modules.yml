@@ -89,7 +89,8 @@ modules:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs
     allowed_operations:
-      - validate canonical Responses completed, requires_action, incomplete, and registered nonterminal status semantics after adjacent response codec projection
+      - validate canonical Responses completed, incomplete, and registered nonterminal status semantics after adjacent response codec projection
+      - never fabricate a Responses tool-continuation status: a tool call is a completed response whose output carries the typed tool call
       - reject malformed or contradictory incomplete_details before continuation commit and client projection
     forbidden_operations:
       - parse Anthropic source wire or SSE frames

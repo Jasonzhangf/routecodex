@@ -1,0 +1,52 @@
+{
+  "id": "v3.dsh_responses_function_call_terminal",
+  "version": "2",
+  "inputs": [
+    { "id": "provider-response", "schema": "Object", "schema_ref": "v3.operation_runner.arc.canonical_response" }
+  ],
+  "output_contracts": [
+    { "id": "governed-tool-response", "schema": "Object", "schema_ref": "v3.operation_runner.arc.governed_response" },
+    { "id": "completed-function-call", "schema": "Object", "schema_ref": "v3.operation_runner.arc.client_semantic_response" },
+    { "id": "client-tool-call", "schema": "Object", "schema_ref": "v3.operation_runner.arc.client_frame" }
+  ],
+  "nodes": [
+    {
+      "id": "保留工具调用响应",
+      "operator": "routecodex.v3.operation.govern_chat_response",
+      "operator_version": "1",
+      "inputs": ["provider-response"],
+      "output": { "id": "governed-tool-response", "schema": "Object", "schema_ref": "v3.operation_runner.arc.governed_response" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.operation_runner.attempt_declaration_map"], "writes": ["v3.operation_runner.response_tool_binding", "v3.operation_runner.execution_disposition"] }
+    },
+    {
+      "id": "投影为已结束的工具调用响应",
+      "operator": "routecodex.v3.operation.project_completed_function_call_response",
+      "operator_version": "2",
+      "inputs": ["governed-tool-response"],
+      "output": { "id": "completed-function-call", "schema": "Object", "schema_ref": "v3.operation_runner.arc.client_semantic_response" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.operation_runner.response_tool_binding", "v3.operation_runner.execution_disposition"], "writes": [] }
+    },
+    {
+      "id": "交付完整工具调用",
+      "operator": "routecodex.v3.operation.frame_committed_client_response",
+      "operator_version": "1",
+      "inputs": ["completed-function-call"],
+      "output": { "id": "client-tool-call", "schema": "Object", "schema_ref": "v3.operation_runner.arc.client_frame" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": [], "writes": [] }
+    }
+  ],
+  "edges": [
+    { "from": "保留工具调用响应", "to": "投影为已结束的工具调用响应", "arc_id": "governed-tool-response" },
+    { "from": "投影为已结束的工具调用响应", "to": "交付完整工具调用", "arc_id": "completed-function-call" }
+  ],
+  "outputs": ["client-tool-call"]
+}

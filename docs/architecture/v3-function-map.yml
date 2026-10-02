@@ -3305,9 +3305,10 @@ features:
   status: source_gate_verified
   change_risk: critical
   owner_kind: rust_project_v3_runtime_chat_process_gate
-  owner_scope: Resp03 owns provider-neutral response text harvest, tool-frame repair,
-    finish_reason branch selection, the registered tool_call servertool hook, and ordinary
-    tool governance before Resp05 client projection.
+  owner_scope: Resp03 owns provider-neutral response text harvest, finish_reason branch
+    selection, the registered tool_call servertool hook, and ordinary tool governance
+    before Resp05 client projection; it preserves a completed tool-call response as
+    completed/tool_calls and never fabricates a Responses tool-continuation status.
   owner_files:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
@@ -3326,11 +3327,10 @@ features:
   - v3-resp03-tool-governance-06
   entry_symbols:
   - govern_v3_hub_relay_response
-  - complete_or_repair_v3_resp03_tool_frames
   - inspect_v3_resp03_finish_reason
   - apply_v3_tool_call_servertool_hook_at_resp03
   - project_v3_apply_patch_freeform_calls_at_resp03
-  - resp05_consumes_resp03_repaired_payload_without_semantic_repair
+  - resp05_consumes_resp03_governed_payload_without_semantic_repair
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
@@ -5191,6 +5191,8 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_extra_tests.rs
   resource_bindings:
   - v3.request.normal_payload
   - v3.request.tool_thinking_turn_context

@@ -88,7 +88,6 @@ pub(super) enum V3AnthropicTerminalKind {
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct V3AnthropicResponsesTerminalProjection {
     pub(super) kind: V3AnthropicTerminalKind,
-    pub(super) source_stop_reason: String,
     pub(super) responses_status: &'static str,
     pub(super) incomplete_reason: Option<&'static str>,
     pub(super) stop_sequence: Option<String>,
@@ -186,11 +185,15 @@ pub(super) fn project_v3_anthropic_terminal_as_responses_terminal(
         }
     };
 
+    // A `tool_use` stop reason is Anthropic's native expression of "the model
+    // returned tool calls". The same semantic is a normal output item in the
+    // Responses protocol, so the terminal status stays `completed`. Fabricating
+    // `requires_action` here leaks a non-Responses status to the client.
     let (responses_status, incomplete_reason) = match kind {
         V3AnthropicTerminalKind::EndTurn | V3AnthropicTerminalKind::StopSequence => {
             ("completed", None)
         }
-        V3AnthropicTerminalKind::ToolUse => ("requires_action", None),
+        V3AnthropicTerminalKind::ToolUse => ("completed", None),
         V3AnthropicTerminalKind::MaxTokens => ("incomplete", Some("max_output_tokens")),
         V3AnthropicTerminalKind::PauseTurn => ("in_progress", None),
         V3AnthropicTerminalKind::Refusal => ("incomplete", Some("content_filter")),
@@ -198,7 +201,6 @@ pub(super) fn project_v3_anthropic_terminal_as_responses_terminal(
 
     Ok(V3AnthropicResponsesTerminalProjection {
         kind,
-        source_stop_reason: stop_reason.to_string(),
         responses_status,
         incomplete_reason,
         stop_sequence,
