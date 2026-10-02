@@ -195,17 +195,30 @@ pub(super) fn provider_response_semantic_error_from_manifest(
 fn provider_terminal_without_visible_output_error(
     payload: &Value,
 ) -> Option<V3ProviderSemanticErrorProjection> {
-    let terminal_choice = payload
-        .get("choices")
-        .and_then(Value::as_array)?
+    let choices = payload.get("choices").and_then(Value::as_array)?;
+    // 是否存在终态 choice：与修复前一致，只有非空 finish_reason 才算终态，
+    // 因此 finish_reason 缺失或为空的响应不会被这里改判。
+    let terminal_choice = choices.iter().any(|choice| {
+        choice
+            .get("finish_reason")
+            .and_then(Value::as_str)
+            .is_some_and(|reason| !reason.trim().is_empty())
+    });
+    if !terminal_choice {
+        return None;
+    }
+    // 截断判定必须与 responses_openai_chat_conversion 的投影取同一个 reason：
+    // 投影取第一个字符串 finish_reason，因此 guard 也只认它。否则多 choice 场景
+    // （首个是 stop、后续是 length）会出现 guard 豁免而投影输出空成功响应。
+    let projected_reason = choices
         .iter()
-        .any(|choice| {
-            choice
-                .get("finish_reason")
-                .and_then(Value::as_str)
-                .is_some_and(|reason| !reason.trim().is_empty())
-        });
-    if !terminal_choice || provider_payload_has_valid_model_output(payload) {
+        .find_map(|choice| choice.get("finish_reason").and_then(Value::as_str));
+    // 输出上限截断是合法的部分输出：上游 Responses 参考以 status=incomplete +
+    // incomplete_details.reason=max_output_tokens 表示，客户端投影已按此实现。
+    // 因此截断响应必须走 incomplete 投影，不得进入 provider 失败/冷却/切换路径。
+    if projected_reason.is_some_and(openai_chat_finish_reason_is_output_cap)
+        || provider_payload_has_valid_model_output(payload)
+    {
         return None;
     }
     Some(V3ProviderSemanticErrorProjection {
