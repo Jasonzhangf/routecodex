@@ -145,7 +145,6 @@ pub(crate) async fn probe_v3_provider_global_target_impl(
     target: V3ResponsesProviderTarget,
 ) -> Result<(), V3ProviderHealthProbeFailure> {
     let provider_id = target.provider_id.clone();
-    let provider_type = target.provider_type.clone();
     let provider_key = format!("{}:{}", target.provider_id, target.auth.alias);
     let initial_concurrency_budget = target.initial_concurrency_budget;
     let request = build_v3_provider_global_probe_request(
@@ -166,20 +165,17 @@ pub(crate) async fn probe_v3_provider_global_target_impl(
         .send(request.with_pre_acquired_admission(admission))
         .await
         .map_err(provider_probe_error)?;
-    if !(200..=299).contains(&response.status()) {
+    if !provider_probe_status_is_success(response.status()) {
         return Err(V3ProviderHealthProbeFailure::Provider(format!(
             "provider global probe returned {}",
             response.status()
         )));
     }
-    let json = response.json_body().ok_or_else(|| {
-        V3ProviderHealthProbeFailure::Provider(format!(
-            "provider global probe returned non-JSON body for {provider_id}"
-        ))
-    })?;
-    validate_v3_provider_probe_json(&provider_id, &provider_type, json)
-        .map_err(V3ProviderHealthProbeFailure::Provider)?;
     Ok(())
+}
+
+fn provider_probe_status_is_success(status: u16) -> bool {
+    (200..=299).contains(&status)
 }
 
 fn provider_probe_error(error: V3ProviderError) -> V3ProviderHealthProbeFailure {
@@ -198,67 +194,9 @@ fn provider_probe_error(error: V3ProviderError) -> V3ProviderHealthProbeFailure 
     }
 }
 
-fn validate_v3_provider_probe_json(
-    provider_id: &str,
-    provider_type: &str,
-    json: &[u8],
-) -> Result<(), String> {
-    let value = serde_json::from_slice::<serde_json::Value>(json).map_err(|error| {
-        format!("provider global probe returned invalid JSON for {provider_id}: {error}")
-    })?;
-    let object = value.as_object().ok_or_else(|| {
-        format!("provider global probe returned non-object JSON for {provider_id}")
-    })?;
-    if object.contains_key("error") {
-        return Err(format!(
-            "provider global probe returned 2xx with embedded error payload for {provider_id}"
-        ));
-    }
-    let completed = match provider_type {
-        "responses" => {
-            object.get("status").and_then(serde_json::Value::as_str) == Some("completed")
-        }
-        "openai_chat" => object
-            .get("choices")
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|choices| {
-                choices.first().is_some_and(|choice| {
-                    choice
-                        .get("finish_reason")
-                        .and_then(serde_json::Value::as_str)
-                        .is_some_and(|reason| !reason.is_empty())
-                })
-            }),
-        "anthropic" => {
-            object.get("type").and_then(serde_json::Value::as_str) == Some("message")
-                && object
-                    .get("stop_reason")
-                    .and_then(serde_json::Value::as_str)
-                    .is_some_and(|reason| !reason.is_empty())
-        }
-        "gemini" => object
-            .get("candidates")
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|candidates| {
-                candidates.first().is_some_and(|candidate| {
-                    candidate
-                        .get("finishReason")
-                        .and_then(serde_json::Value::as_str)
-                        .is_some_and(|reason| !reason.is_empty())
-                })
-            }),
-        other => return Err(format!("unsupported provider probe protocol {other}")),
-    };
-    completed.then_some(()).ok_or_else(|| {
-        format!(
-            "provider global probe returned no successful terminal payload for {provider_id} ({provider_type})"
-        )
-    })
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{provider_probe_error, validate_v3_provider_probe_json};
+    use super::{provider_probe_error, provider_probe_status_is_success};
     use crate::provider_failure_runtime_policy::V3ProviderHealthProbeFailure;
     use routecodex_v3_provider_responses::V3ProviderError;
 
@@ -305,79 +243,10 @@ mod tests {
     }
 
     #[test]
-    fn http_200_error_payload_is_probe_failure() {
-        let error = validate_v3_provider_probe_json(
-            "provider-a",
-            "responses",
-            br#"{"error":{"code":"invalid_api_key"}}"#,
-        )
-        .expect_err("embedded provider error must fail the probe");
-        assert!(error.contains("embedded error payload"));
-    }
-
-    #[test]
-    fn malformed_or_failed_json_is_probe_failure() {
-        assert!(validate_v3_provider_probe_json("provider-a", "responses", b"not-json").is_err());
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "responses",
-            br#"{"status":"failed"}"#,
-        )
-        .is_err());
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "responses",
-            br#"{"status":"completed"}"#,
-        )
-        .is_ok());
-    }
-
-    #[test]
-    fn each_provider_protocol_requires_its_terminal_success_shape() {
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "openai_chat",
-            br#"{"choices":[{"finish_reason":"stop"}]}"#,
-        )
-        .is_ok());
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "openai_chat",
-            br#"{"choices":[{}]}"#,
-        )
-        .is_err());
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "openai_chat",
-            br#"{"choices":[{"finish_reason":""}]}"#,
-        )
-        .is_err());
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "anthropic",
-            br#"{"type":"message","stop_reason":"max_tokens"}"#,
-        )
-        .is_ok());
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "gemini",
-            br#"{"candidates":[{"finishReason":"MAX_TOKENS"}]}"#,
-        )
-        .is_ok());
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "anthropic",
-            br#"{"type":"message","stop_reason":""}"#,
-        )
-        .is_err());
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "gemini",
-            br#"{"candidates":[{"finishReason":""}]}"#,
-        )
-        .is_err());
-        assert!(validate_v3_provider_probe_json("provider-a", "openai_chat", br#"{}"#).is_err());
-        assert!(validate_v3_provider_probe_json("provider-a", "anthropic", br#"{}"#).is_err());
-        assert!(validate_v3_provider_probe_json("provider-a", "gemini", br#"{}"#).is_err());
+    fn provider_global_probe_uses_http_status_only() {
+        assert!(provider_probe_status_is_success(200));
+        assert!(provider_probe_status_is_success(299));
+        assert!(!provider_probe_status_is_success(199));
+        assert!(!provider_probe_status_is_success(300));
     }
 }

@@ -237,6 +237,7 @@ pub fn build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_
             sse_first_frame_timeout_ms,
             cancellation: None,
             compatibility_profile: None,
+            status_only: false,
         },
     ))
 }

@@ -46,6 +46,7 @@ pub fn build_v3_provider_global_probe_request(
         let wire = build_v3_provider_12_responses_wire_payload(request_id, target, body)
             .map_err(|error| error.to_string())?;
         return build_v3_transport_13_responses_http_request_from_v3_provider_12(wire)
+            .map(|request| request.with_status_only())
             .map_err(|error| error.to_string());
     }
     let (url, headers) = match provider_type.as_str() {
@@ -88,6 +89,7 @@ pub fn build_v3_provider_global_probe_request(
         target.concurrency_acquire_timeout_ms,
         None,
     )
+    .map(|request| request.with_status_only())
     .map_err(|error| error.to_string())
 }
 
