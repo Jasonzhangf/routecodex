@@ -946,7 +946,7 @@ pub(crate) fn build_v3_provider_error_source(
     }
 }
 
-fn source_code_for_external_provider_error(error: &V3ProviderError) -> String {
+pub(crate) fn source_code_for_external_provider_error(error: &V3ProviderError) -> String {
     match error {
         V3ProviderError::HttpStatus { response } => format!("provider_http_{}", response.status),
         V3ProviderError::Transport { .. } | V3ProviderError::WebSocketTransport { .. } => {

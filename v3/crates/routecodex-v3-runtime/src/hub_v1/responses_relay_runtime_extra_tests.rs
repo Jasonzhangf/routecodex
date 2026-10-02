@@ -309,7 +309,9 @@ fn provider_runtime_http_status_preserves_upstream_429_for_policy_projection() {
         None,
     );
     assert_eq!(failure.status, 429);
-    assert_eq!(failure.policy_error_type, "provider_runtime_error");
+    // A real upstream 429 takes the typed upstream code, not a catch-all.
+    assert_eq!(failure.policy_error_type, "provider_http_429");
+    assert_eq!(failure.provider_status, Some(429));
 }
 
 #[test]

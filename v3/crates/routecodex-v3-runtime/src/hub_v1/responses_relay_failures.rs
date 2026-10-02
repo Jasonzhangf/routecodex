@@ -129,7 +129,10 @@ pub(crate) fn provider_runtime_failure(
     ) {
         V3_TRANSIENT_TRANSPORT_HANG_CODE.to_string()
     } else {
-        "provider_runtime_error".to_string()
+        // Category comes from the typed provider error so a transport failure and
+        // a provider response-body failure stay distinct instead of collapsing
+        // into one catch-all code that no lane can interpret.
+        crate::hooks::source_code_for_external_provider_error(&error)
     };
     let status = if terminal_projection.is_some() {
         499
@@ -769,6 +772,36 @@ mod tests {
     /// Regression: a network transport failure received no HTTP response, so the
     /// upstream-status side channel must stay `None` while the client-facing
     /// projection stays 502. A genuine upstream HTTP failure keeps its real status.
+    #[test]
+    fn relay_category_comes_from_the_typed_provider_error() {
+        let transport = provider_runtime_failure(
+            V3ProviderError::Transport {
+                request_id: "req-typed-transport".to_string(),
+                provider_id: "goaichat".to_string(),
+                reason: "connection closed before response headers".to_string(),
+            },
+            "goaichat",
+            None,
+        );
+        assert_eq!(transport.policy_error_type, "provider_transport_error");
+
+        let response_body = provider_runtime_failure(
+            V3ProviderError::ResponseBody {
+                request_id: "req-typed-body".to_string(),
+                provider_id: "goaichat".to_string(),
+                reason: "provider JSON response decode failed: expected value".to_string(),
+            },
+            "goaichat",
+            None,
+        );
+        // A complete-body decode failure is not a network event; the typed code
+        // must survive so the display layer cannot label it `network`.
+        assert_eq!(
+            response_body.policy_error_type,
+            "provider_response_body_error"
+        );
+    }
+
     #[test]
     fn transport_failure_has_no_upstream_status_while_http_failure_keeps_its_own() {
         let transport_failure = provider_runtime_failure(

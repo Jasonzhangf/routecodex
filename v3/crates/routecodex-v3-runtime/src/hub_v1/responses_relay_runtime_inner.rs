@@ -485,6 +485,10 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         Some(selected_observability.clone()),
                     );
                     failure.status = response.status;
+                    // The upstream did return an HTTP status; only its error body
+                    // could not be read, so the real status still belongs in
+                    // `provider_status`.
+                    failure.provider_status = Some(response.status);
                     failure
                 } else {
                     provider_http_failure(

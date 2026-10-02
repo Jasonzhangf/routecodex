@@ -573,6 +573,8 @@ fn error_category_status_code(category: Option<&str>) -> Option<String> {
         // A provider failure that received no upstream HTTP response has no
         // numeric HTTP status. Render it as a distinct `network` label instead of
         // falling through to the 599 internal-response-lane default.
+        // `provider_runtime_error` is the pre-typed-code relay category; it stays
+        // listed so rows persisted before the typed category still render.
         "provider_transport_error"
         | "provider_runtime_error"
         | "provider_response_header_timeout"

@@ -221,9 +221,6 @@ pub async fn handle_provider_failure(
     )
     .await
     .map_err(|error| error.to_string())?;
-    // The policy event carries the real upstream HTTP status (if any) alongside
-    // the observed/projection status, so downstream records stay separable.
-    result.event.provider_status = failure.provider_status;
     match result.decision.action {
         V3Error05ExecutionAction::WaitThenReselect { recovery } => {
             *retry_selected = result.retry_selected.map(|selected| *selected);
@@ -727,6 +724,8 @@ mod tests {
         assert!(eligible_external_http_witness(&response).is_none());
         let failure = provider_http_body_read_failure(&response, "provider-a");
         assert_eq!(failure.status, 429);
+        // The upstream did return HTTP 429; only its error body read failed.
+        assert_eq!(failure.provider_status, Some(429));
         assert!(provider_failure_message(&failure).contains("connection closed while reading body"));
         assert!(failure.terminal_disposition.is_none());
     }
