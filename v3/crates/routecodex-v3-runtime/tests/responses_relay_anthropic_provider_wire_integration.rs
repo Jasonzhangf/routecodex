@@ -165,7 +165,7 @@ data: {"type":"content_block_start","index":0,"content_block":{"type":"text","te
 "#
             .to_vec()),
             Ok(br#"event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial-must-not-commit"}}
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial-truncated-output"}}
 
 "#
             .to_vec()),
@@ -783,7 +783,7 @@ async fn responses_relay_anthropic_cyber_refusal_json_keeps_retryable_saturation
 }
 
 #[tokio::test]
-async fn responses_relay_anthropic_incomplete_exhaustion_keeps_typed_terminal_error() {
+async fn responses_relay_anthropic_max_tokens_commits_partial_incomplete_output() {
     let transport = AnthropicIncompleteExhaustionTransport {
         provider_ids: Mutex::new(Vec::new()),
     };
@@ -808,42 +808,38 @@ async fn responses_relay_anthropic_incomplete_exhaustion_keeps_typed_terminal_er
         &transport,
     )
     .await
-    .expect("Anthropic provider exhaustion must project a typed terminal error");
+    .expect("Anthropic max_tokens must project the partial incomplete response");
 
-    assert_eq!(output.status, 502);
-    let mut attempted_provider_ids = transport.provider_ids.lock().unwrap().clone();
-    attempted_provider_ids.sort();
+    assert_eq!(output.status, 200);
+    assert!(output.error_chain.is_none());
+    // The pool tries one candidate at a time; an admitted truncation is a
+    // committed client response, so no further candidate may be attempted.
+    let attempted_provider_ids = transport.provider_ids.lock().unwrap().clone();
     assert_eq!(
-        attempted_provider_ids,
-        [
-            "anthropic_incomplete_primary",
-            "anthropic_incomplete_secondary"
-        ]
+        attempted_provider_ids.len(),
+        1,
+        "an admitted output-cap truncation must not switch provider: {attempted_provider_ids:?}"
+    );
+    let observability = output.observability.as_ref().expect("observability");
+    assert!(
+        observability.provider_failure_events.is_empty(),
+        "output-cap truncation is valid partial output, not a provider failure: {observability:?}"
     );
     let V3ResponsesRelayClientBody::Json(body) = output.client_body else {
-        panic!("expected typed JSON error body")
+        panic!("expected JSON client body")
     };
-    assert_eq!(body["error"]["code"], "network_error");
-    assert_eq!(body["error"]["message"], "network error");
-    assert!(
-        !body.to_string().contains("partial-must-not-commit"),
-        "partial incomplete output must not be committed: {body}"
-    );
+    assert_eq!(body["status"], "incomplete", "{body}");
     assert_eq!(
-        output.error_chain.as_deref(),
-        Some(routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS.as_slice())
+        body["incomplete_details"]["reason"], "max_output_tokens",
+        "{body}"
     );
-    let usage = output
-        .stream_observation
-        .as_ref()
-        .expect("terminal incomplete failure must retain the final attempt observation")
-        .snapshot()
-        .expect("terminal incomplete failure observation must be readable")
-        .usage
-        .expect("terminal incomplete failure must retain provider usage");
-    assert_eq!(usage.input_tokens, Some(10));
-    assert_eq!(usage.output_tokens, Some(2));
-    assert_eq!(usage.total_tokens, Some(12));
+    assert!(
+        body.to_string().contains("partial-truncated-output"),
+        "truncated partial output must reach the client: {body}"
+    );
+    assert_eq!(body["usage"]["input_tokens"], 10, "{body}");
+    assert_eq!(body["usage"]["output_tokens"], 2, "{body}");
+    assert_eq!(body["usage"]["total_tokens"], 12, "{body}");
 }
 
 #[tokio::test]

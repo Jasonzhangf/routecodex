@@ -989,9 +989,9 @@ const cases = [
   {
     name: 'Provider admission boundary regression is removed',
     file: 'v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs',
-    from: 'anthropic_json_codec_represents_max_tokens_but_provider_materialization_rejects_it',
+    from: 'anthropic_max_tokens_is_admitted_as_incomplete_not_a_provider_failure',
     to: 'anthropic_provider_terminal_admission_boundary_removed',
-    diagnostic: /anthropic_json_codec_represents_max_tokens_but_provider_materialization_rejects_it/u,
+    diagnostic: /anthropic_max_tokens_is_admitted_as_incomplete_not_a_provider_failure/u,
   },
   {
     name: 'Anthropic refusal finish-reason registry loses content_filter identity',
