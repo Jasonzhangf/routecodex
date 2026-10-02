@@ -570,6 +570,16 @@ fn error_category_status_code(category: Option<&str>) -> Option<String> {
         "malformed_json" | "content_type_required" | "content_type_unsupported" => {
             Some("400".to_string())
         }
+        // A provider failure that received no upstream HTTP response has no
+        // numeric HTTP status. Render it as a distinct `network` label instead of
+        // falling through to the 599 internal-response-lane default.
+        // `provider_runtime_error` is the pre-typed-code relay category; it stays
+        // listed so rows persisted before the typed category still render.
+        "provider_transport_error"
+        | "provider_runtime_error"
+        | "provider_response_header_timeout"
+        | "provider_websocket_protocol_error"
+        | "provider_websocket_event_error" => Some("network".to_string()),
         "internal_request_lane" | "v3_debug_failure" | "debug_sink" => Some("598".to_string()),
         "internal_response_lane"
         | "provider_response_sse_event_invalid"
@@ -589,7 +599,10 @@ fn attempt_status_code(row: &QueryRow) -> Option<String> {
     {
         return None;
     }
-    Some(status_code_label(row.meta.get("provider_status")))
+    // Use the same projection as the `error_status_codes` facet so filtering by
+    // that label matches the facet, including the `network` label for a
+    // response-less provider failure.
+    Some(row_status_code(row))
 }
 
 /// Projects the raw lifecycle stream into the WebUI query surface.

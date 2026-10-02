@@ -1310,6 +1310,90 @@ async fn provider_failure_reselects_without_router_reentry() {
     );
 }
 
+/// Regression: the direct lane publishes the upstream provider's real HTTP
+/// status to observability. A network transport failure received no HTTP
+/// response, so the published observability must carry `None` while the failure
+/// observation itself keeps its client-facing 502 fallback status.
+#[tokio::test]
+async fn transport_provider_failure_publishes_no_upstream_status_to_observability() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    struct FirstTransportFailsSecondSucceeds {
+        sends: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl ResponsesTransport for FirstTransportFailsSecondSucceeds {
+        async fn send(
+            &self,
+            request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            if self.sends.fetch_add(1, Ordering::SeqCst) == 0 {
+                return Err(V3ProviderError::Transport {
+                    request_id: request.request_id().to_string(),
+                    provider_id: request.provider_id().to_string(),
+                    reason: "connection closed before response headers".to_string(),
+                });
+            }
+            Ok(V3ProviderResp14Raw::from_json(
+                request.request_id(),
+                request.provider_id(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"application/json".to_vec(),
+                }],
+                br#"{"id":"resp_second","output_text":"ok"}"#.to_vec(),
+            ))
+        }
+    }
+
+    let published = Arc::new(Mutex::new(Vec::<(Option<u16>, u16)>::new()));
+    let sink_published = Arc::clone(&published);
+    let transport = FirstTransportFailsSecondSucceeds {
+        sends: AtomicUsize::new(0),
+    };
+    let routing_group = "transport_failure_no_upstream_status";
+    let manifest = scoped_test_manifest(reselection_manifest(), routing_group);
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let raw = test_responses_raw(
+        routing_group,
+        "req",
+        "exec",
+        json!({"model":"client-model","input":"hello"}),
+    );
+    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::new()
+            .with_provider_health(provider_health)
+            .with_initial_plan(&plan)
+            .with_provider_failure_event_sink(Some(Arc::new(move |observability, event| {
+                sink_published
+                    .lock()
+                    .unwrap()
+                    .push((observability.provider_status, event.status));
+            }))),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &transport,
+    )
+    .await;
+
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
+    let published = published.lock().unwrap();
+    assert_eq!(published.len(), 1, "one failed provider attempt");
+    assert_eq!(
+        published[0].0, None,
+        "a transport failure received no HTTP response; the published observability must not mirror the projected 502"
+    );
+    assert_eq!(
+        published[0].1, 502,
+        "the observation keeps the client-facing 502 fallback status"
+    );
+}
+
 #[tokio::test]
 async fn provider_internal_transport_request_lane_projects_598_without_provider_policy() {
     use std::sync::atomic::{AtomicUsize, Ordering};

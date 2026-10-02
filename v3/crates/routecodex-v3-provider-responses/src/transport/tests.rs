@@ -756,6 +756,91 @@ async fn transport_http_status_preserves_real_code_on_body_decode_failure() {
 }
 
 #[tokio::test]
+async fn transport_success_body_read_failure_is_a_network_failure() {
+    let addr = spawn_http_error_response(
+        200,
+        &[
+            ("content-type", "application/json"),
+            ("content-length", "64"),
+        ],
+        b"short",
+    )
+    .await;
+    let request = http_transport_request(
+        "req-success-corrupt-body",
+        format!("http://{addr}/v1/responses"),
+        None,
+    );
+    let error = ProviderResponsesTransport::default()
+        .send(request)
+        .await
+        .expect_err("truncated success body must fail");
+    // No usable upstream response body arrived, so this is a network transport
+    // failure and must not project as a response-stage 599.
+    match error {
+        V3ProviderError::Transport { reason, .. } => {
+            assert!(
+                reason.contains("error decoding response body"),
+                "unexpected reason: {reason}"
+            );
+        }
+        other => panic!("expected transport error, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn transport_sse_stream_read_failure_is_a_network_failure() {
+    use futures_util::StreamExt;
+
+    let addr = spawn_http_error_response(
+        200,
+        &[
+            ("content-type", "text/event-stream"),
+            ("content-length", "64"),
+        ],
+        b"data: {\"a\":1}\n\n",
+    )
+    .await;
+    let request = build_v3_transport_13_responses_http_request_from_parts(
+        "req-sse-corrupt-stream",
+        "sse-provider",
+        format!("http://{addr}/v1/responses"),
+        V3ProviderAuthHandle {
+            alias: "key1".into(),
+            secret: V3ProviderAuthSecretHandle::ApiKey("sk-test-sse".into()),
+        },
+        V3ResponsesStreamIntent::Sse,
+        json!({"model":"status-model","input":"hello","stream":true}),
+    )
+    .unwrap();
+    let raw = ProviderResponsesTransport::default()
+        .send(request)
+        .await
+        .expect("SSE response must be accepted");
+    let crate::V3ProviderResponseBody::Sse(mut stream) = raw.into_body() else {
+        panic!("expected an SSE body");
+    };
+    let mut failure = None;
+    while let Some(item) = stream.next().await {
+        if let Err(error) = item {
+            failure = Some(error);
+            break;
+        }
+    }
+    // A truncated SSE stream is a network read failure, not a response-body
+    // failure, and must not project as a response-stage 599.
+    match failure.expect("truncated SSE stream must fail") {
+        V3ProviderError::Transport { reason, .. } => {
+            assert!(
+                reason.contains("error decoding response body"),
+                "unexpected reason: {reason}"
+            );
+        }
+        other => panic!("expected transport error, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn transport_http_status_body_read_cancellation_remains_client_disconnect() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 

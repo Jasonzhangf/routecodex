@@ -2607,6 +2607,74 @@ fn provider_attempt_failure_does_not_close_webui_request_before_terminal_error()
     let _ = std::fs::remove_file(&log_file);
 }
 
+/// Regression: the provider attempt row's `provider_status` carries only the
+/// upstream provider's real HTTP status. A transport failure (no HTTP response)
+/// keeps `None` and falls back to its transport error identity, while a genuine
+/// upstream HTTP failure keeps its own status.
+#[test]
+fn provider_attempt_row_keeps_no_upstream_status_for_transport_failure() {
+    let log_file = test_v3_console_log_file("provider-transport-no-upstream-status");
+    let _ = std::fs::remove_file(&log_file);
+    let state = test_v3_listener_state(&log_file, 7778);
+    let headers = test_direct_console_headers();
+    let context = test_v3_console_emission_context(
+        &state,
+        "responses",
+        "/v1/responses",
+        "req-provider-transport-status",
+        &headers,
+        &json!({"model":"gpt-5.5"}),
+    );
+    let sink = build_v3_provider_failure_event_sink(&context);
+
+    // Transport failure: the observed/projected status is the client-facing 502,
+    // but no HTTP response was ever received, so `external_error_status` is None
+    // and the lane's own observability carries no upstream status either.
+    let mut transport = test_provider_failure_observation();
+    transport.status = 502;
+    transport.error_type = Some("provider_transport_error".to_string());
+    transport.external_error_status = None;
+    let mut transport_observability = test_direct_observability(vec![transport.clone()]);
+    transport_observability.provider_status = transport.external_error_status;
+    sink(&transport_observability, &transport);
+    let row = state
+        .webui_observability
+        .rows()
+        .unwrap()
+        .remove("7778:req-provider-transport-status")
+        .expect("provider attempt row");
+    assert_eq!(
+        row.meta.provider_status, None,
+        "a transport failure must not record the projected 502 as the upstream status"
+    );
+    assert_eq!(
+        row.meta.error_category.as_deref(),
+        Some("provider_transport_error"),
+        "the record falls back to its original transport error identity"
+    );
+
+    // Real upstream HTTP failure: the attempt row keeps the real status.
+    let mut http = test_provider_failure_observation();
+    http.status = 502;
+    http.error_type = Some("provider_http_502".to_string());
+    http.external_error_status = Some(502);
+    let mut http_observability = test_direct_observability(vec![http.clone()]);
+    http_observability.provider_status = http.external_error_status;
+    sink(&http_observability, &http);
+    let row = state
+        .webui_observability
+        .rows()
+        .unwrap()
+        .remove("7778:req-provider-transport-status")
+        .expect("provider attempt row");
+    assert_eq!(row.meta.provider_status, Some(502));
+    assert_eq!(
+        row.meta.error_category.as_deref(),
+        Some("provider_http_502")
+    );
+    let _ = std::fs::remove_file(&log_file);
+}
+
 #[test]
 fn openai_chat_relay_does_not_accept_sse_before_terminal_provider_outcome() {
     let source = include_str!("../executors.rs");

@@ -1080,41 +1080,11 @@ impl ProviderResponsesTransport {
         let headers = collect_response_headers(response.headers());
         let response_content_type = content_type(response.headers());
         if status >= 400 {
-            let body = match read_response_body_bytes(
-                response,
-                &request_id,
-                &provider_id,
-                cancellation.clone(),
-            )
-            .await
-            {
-                Ok(body) => body,
-                Err(V3ProviderError::ClientDisconnect {
-                    request_id: client_request_id,
-                    provider_id: client_provider_id,
-                }) => {
-                    return Err(V3ProviderError::ClientDisconnect {
-                        request_id: client_request_id,
-                        provider_id: client_provider_id,
-                    });
-                }
-                Err(V3ProviderError::ResponseBody { reason, .. }) => {
-                    // 错误 body 读取失败不允许静默空化：把读失败原因并入
-                    // HttpStatus 错误，客户端/错误链仍能看到原始 provider status
-                    // 与 body 读取失败原因，而不是一个无 detail 的空错误体。
-                    return Err(V3ProviderError::HttpStatus {
-                        response: Box::new(V3ProviderHttpFailure {
-                            request_id,
-                            provider_id,
-                            status,
-                            headers,
-                            body: Vec::new(),
-                            body_read_failure: Some(reason),
-                        }),
-                    });
-                }
-                Err(other) => return Err(other),
-            };
+            // `read_response_body_bytes` already carries the received status and
+            // any read failure reason into its own typed error.
+            let body =
+                read_response_body_bytes(response, &request_id, &provider_id, cancellation.clone())
+                    .await?;
             return Err(V3ProviderError::HttpStatus {
                 response: Box::new(V3ProviderHttpFailure {
                     request_id,
@@ -1402,6 +1372,13 @@ async fn read_response_body_bytes(
     provider_id: &str,
     cancellation: Option<V3ProviderCancellation>,
 ) -> Result<Vec<u8>, V3ProviderError> {
+    let status = response.status().as_u16();
+    // Only an error status needs to survive a failed body read.
+    let headers = if status >= 400 {
+        collect_response_headers(response.headers())
+    } else {
+        Vec::new()
+    };
     let read = response.bytes();
     let bytes = match cancellation {
         Some(cancellation) => {
@@ -1417,10 +1394,30 @@ async fn read_response_body_bytes(
         }
         None => read.await,
     }
-    .map_err(|error| V3ProviderError::ResponseBody {
-        request_id: request_id.to_string(),
-        provider_id: provider_id.to_string(),
-        reason: crate::shared::format_v3_provider_transport_error(&error),
+    // A failed body read is never a response-stage decode failure, so it must
+    // not project as 599. When the upstream already returned an error status,
+    // that real status survives; otherwise no usable response body arrived and
+    // this is a network transport failure.
+    .map_err(|error| {
+        let reason = crate::shared::format_v3_provider_transport_error(&error);
+        if status >= 400 {
+            V3ProviderError::HttpStatus {
+                response: Box::new(V3ProviderHttpFailure {
+                    request_id: request_id.to_string(),
+                    provider_id: provider_id.to_string(),
+                    status,
+                    headers,
+                    body: Vec::new(),
+                    body_read_failure: Some(reason),
+                }),
+            }
+        } else {
+            V3ProviderError::Transport {
+                request_id: request_id.to_string(),
+                provider_id: provider_id.to_string(),
+                reason,
+            }
+        }
     })?;
     Ok(bytes.to_vec())
 }

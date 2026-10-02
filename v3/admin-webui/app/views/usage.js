@@ -30,6 +30,11 @@ function statusText(row) {
   if (/^\d+$/.test(errorCode)) {
     return errorCode;
   }
+  // A provider failure with no upstream HTTP response renders as its transport
+  // identity, never as a fabricated HTTP code.
+  if (errorCode === "network") {
+    return "network";
+  }
   const fallback = row.result;
   if (fallback) {
     if (fallback === "success") return "200";
@@ -54,6 +59,13 @@ function compactErrorReason(row) {
     provider_http_503: "503",
     provider_http_504: "504",
     target_pool: "exhausted",
+    // Provider failures that received no upstream HTTP response keep their
+    // transport identity instead of a fabricated HTTP status code.
+    provider_transport_error: "network",
+    provider_runtime_error: "network",
+    provider_response_header_timeout: "network",
+    provider_websocket_protocol_error: "network",
+    provider_websocket_event_error: "network",
     internal_request_lane: "598",
     v3_debug_failure: "598",
     debug_sink: "598",

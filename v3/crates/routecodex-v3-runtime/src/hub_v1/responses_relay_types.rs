@@ -246,6 +246,10 @@ pub struct V3RuntimeToolreasonObservation {
 #[derive(Clone)]
 pub(crate) struct V3ResponsesRelayProviderFailure {
     pub(crate) status: u16,
+    /// The upstream provider's real HTTP status; `None` when no HTTP response was
+    /// received (network/transport failure or an internally synthesized failure).
+    /// Never the client-facing projection status.
+    pub(crate) provider_status: Option<u16>,
     pub(crate) policy_error_type: String,
     pub(crate) policy_error_message: String,
     pub(crate) provider_id: String,

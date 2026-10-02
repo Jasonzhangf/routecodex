@@ -204,7 +204,10 @@ pub(crate) fn validated_sse_stream(
                 Some(Err(error)) => {
                     state.ended = true;
                     return Some((
-                        Err(V3ProviderError::ResponseBody {
+                        // A stream read failure after a 2xx is a network
+                        // transport failure, not a response-body failure: it
+                        // must not project as a response-stage 599.
+                        Err(V3ProviderError::Transport {
                             request_id: state.request_id.clone(),
                             provider_id: state.provider_id.clone(),
                             reason: format_v3_provider_transport_error(&error),

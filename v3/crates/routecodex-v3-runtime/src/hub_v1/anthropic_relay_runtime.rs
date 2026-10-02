@@ -811,6 +811,10 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         &selected_target_provider_id,
                     );
                     failure.status = response.status;
+                    // The upstream did return an HTTP status; only its error body
+                    // could not be read, so the real status still belongs in
+                    // `provider_status`.
+                    failure.provider_status = Some(response.status);
                     failure
                 } else {
                     provider_http_failure(
@@ -1363,6 +1367,7 @@ async fn anthropic_provider_stream_failure_from_closeout_error(
     .ok()?;
     Some(V3RelayProviderFailure {
         status: failure.status,
+        provider_status: failure.provider_status,
         client_response: json!({
             "type": "error",
             "error": {

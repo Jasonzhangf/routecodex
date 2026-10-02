@@ -559,7 +559,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     &selected,
                     "responses",
                     "json",
-                    Some(event.status),
+                    // Published observability carries only the real upstream HTTP
+                    // status; `event.status` keeps the observed/projection value.
+                    event.external_error_status,
                     &provider_failure_events,
                     &event,
                     total_attempts(&accumulator, send_attempts),
@@ -855,7 +857,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         &policy.target,
                         "responses",
                         "json",
-                        Some(event.status),
+                        event.external_error_status,
                         &provider_failure_events,
                         &event,
                         total_attempts(&accumulator, send_attempts),
@@ -1025,7 +1027,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         } else {
                             "json"
                         },
-                        Some(event.status),
+                        event.external_error_status,
                         &provider_failure_events,
                         &event,
                         total_attempts(&accumulator, send_attempts),
@@ -1311,7 +1313,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                     &policy.target,
                                     "responses",
                                     "sse",
-                                    Some(event.status),
+                                    event.external_error_status,
                                     &provider_failure_events,
                                     &event,
                                     total_attempts(&accumulator, send_attempts),

@@ -15,6 +15,9 @@ fn build_v3_relay_provider_failure_policy_event(
     V3RelayProviderFailurePolicyEvent {
         candidate: input.candidate,
         status: input.status,
+        // Populated by the relay handler that owns the real upstream status; the
+        // policy event itself has no access to it.
+        provider_status: None,
         error_type: input.error_type,
         message: input.message,
         health_record: input.health_record,

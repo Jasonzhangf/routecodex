@@ -245,6 +245,9 @@ impl V3RelayProviderFailureRetryPolicy {
 pub(crate) struct V3RelayProviderFailurePolicyEvent {
     pub(crate) candidate: V3TargetCandidate,
     pub(crate) status: u16,
+    /// The upstream provider's real HTTP status; `None` when no HTTP response was
+    /// received. Distinct from `status`, which is the observed/projection status.
+    pub(crate) provider_status: Option<u16>,
     pub(crate) error_type: Option<String>,
     pub(crate) message: String,
     pub(crate) health_record: V3ProviderFailureRecord,
