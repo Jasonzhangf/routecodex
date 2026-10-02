@@ -2915,7 +2915,9 @@ async fn responses_relay_endpoint_uses_hub_relay_runtime_for_json_and_sse() {
     );
     let sse_body = sse_response.text().await.unwrap();
     assert!(sse_body.starts_with(": keepalive\n\n"), "{sse_body}");
-    assert!(sse_body.contains("[DONE]"));
+    // Responses 客户端帧只由协议终态收口，不得追加 Chat Completions 的 [DONE]。
+    assert!(!sse_body.contains("[DONE]"), "{sse_body}");
+    assert!(sse_body.contains("event: response.completed"), "{sse_body}");
     let second_capture = captures.recv().await.unwrap();
     assert_eq!(second_capture.body["model"], "wire-test");
     assert_eq!(second_capture.body["stream"], true);
@@ -3488,11 +3490,13 @@ async fn p6_responses_endpoint_projects_sse_without_materialize_repair() {
     let body = response.text().await.unwrap();
     assert!(
         body.contains("event: response.created")
-            && body.contains("event: response.completed")
-            && body.contains("event: response.done")
-            && body.ends_with("data: [DONE]\n\n"),
-        "relay SSE stream must project created/completed/done terminal frames: {body}"
+            && body.contains("event: response.in_progress")
+            && body.contains("event: response.completed"),
+        "relay SSE stream must project created/in_progress/completed frames: {body}"
     );
+    // Responses 客户端帧只由协议终态收口：不得追加 response.done 或 [DONE]。
+    assert!(!body.contains("event: response.done"), "{body}");
+    assert!(!body.contains("data: [DONE]"), "{body}");
     let capture = captures.recv().await.unwrap();
     assert_eq!(capture.accept.as_deref(), Some("text/event-stream"));
     assert_eq!(capture.body["stream"], true);

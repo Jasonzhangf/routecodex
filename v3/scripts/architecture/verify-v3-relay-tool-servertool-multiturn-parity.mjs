@@ -42,6 +42,7 @@ const files = {
   verificationMap: 'docs/architecture/v3-verification-map.yml',
   resourceMap: 'docs/architecture/v3-resource-operation-map.yml',
   wiki: 'docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md',
+  serverFrameBuilders: 'v3/crates/routecodex-v3-server/src/frame_builders.rs',
   packageJson: 'package.json',
 };
 
@@ -224,6 +225,40 @@ if (clientSseProjectionStart < 0 || clientSseProjectionEnd < 0) {
     /"response\.requires_action"/,
     'response.requires_action client SSE terminal projection',
   );
+}
+// 整个 Responses 客户端帧 owner 文件都不允许出现非协议终止帧：新增的
+// client-frame helper 也必须受约束，不能因为切片边界而逃过门禁。
+forbid(
+  text.responsesRelayRuntime,
+  files.responsesRelayRuntime,
+  /"response\.done"|data: \[DONE\]/,
+  'non-Responses client SSE terminator (response.done / [DONE]) in the Responses client framing owner',
+);
+{
+  const responsesErrorChunkStart = text.serverFrameBuilders.indexOf(
+    'fn v3_responses_sse_error_event_chunk(',
+  );
+  const responsesErrorChunkEnd = text.serverFrameBuilders.indexOf(
+    '\nfn v3_sse_runtime_error_source_chunk_for_protocol',
+    responsesErrorChunkStart,
+  );
+  if (responsesErrorChunkStart < 0 || responsesErrorChunkEnd < 0) {
+    fail(
+      `${files.serverFrameBuilders}: unable to isolate Responses client SSE error terminal owner`,
+    );
+  } else {
+    const responsesErrorChunk = text.serverFrameBuilders.slice(
+      responsesErrorChunkStart,
+      responsesErrorChunkEnd,
+    );
+    requireAll(responsesErrorChunk, files.serverFrameBuilders, ['"response.failed"']);
+    forbid(
+      responsesErrorChunk,
+      files.serverFrameBuilders,
+      /data: \[DONE\]/,
+      'Chat-completions [DONE] terminator on the Responses client SSE error path',
+    );
+  }
 }
 forbid(
   text.responsesRelayRuntime,

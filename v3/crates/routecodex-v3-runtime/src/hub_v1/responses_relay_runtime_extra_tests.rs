@@ -854,13 +854,20 @@ async fn client_sse_completed_response_projects_output_text_items_to_message_sha
         created.contains(r#""status":"in_progress""#) && created.contains(r#""output":[]"#),
         "response.created must carry an in-progress snapshot with empty output: {created}"
     );
+    // in-progress 快照不得携带只在终态成立的字段（usage / incomplete_details）。
+    let created_frame = &created[..created.find('\n').unwrap_or(created.len())];
+    assert!(!created_frame.contains(r#""usage":{"#), "{created_frame}");
+    assert!(
+        !created_frame.contains(r#""incomplete_details":{"#),
+        "{created_frame}"
+    );
 }
 
 #[tokio::test]
 async fn client_sse_incomplete_terminal_streams_partial_output_not_failed() {
     // response.incomplete 是 Responses 协议合法终态：必须保留部分输出并投影
-    // response.created + output_item.done + response.incomplete + response.done
-    // + [DONE]，禁止映射成 response.failed 丢弃部分输出。
+    // response.created + output_item.done + response.incomplete，禁止映射成
+    // response.failed 丢弃部分输出，也不得追加非协议终止帧。
     let projected = collect_projected_sse(
         build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(json!({
             "id": "resp_incomplete_shape",

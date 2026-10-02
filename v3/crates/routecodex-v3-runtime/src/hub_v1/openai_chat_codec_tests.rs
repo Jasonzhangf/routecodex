@@ -407,6 +407,7 @@ fn non_stream_projection_resolves_item_id_and_projects_custom_tool_call() {
     let tool_calls = projected["choices"][0]["message"]["tool_calls"]
         .as_array()
         .expect("tool_calls array");
+
     assert_eq!(tool_calls.len(), 2, "{projected}");
     assert_eq!(tool_calls[0]["id"], json!("fc_item_only"));
     assert_eq!(tool_calls[0]["function"]["name"], json!("lookup"));
@@ -420,6 +421,25 @@ fn non_stream_projection_resolves_item_id_and_projects_custom_tool_call() {
         projected["choices"][0]["finish_reason"],
         json!("tool_calls")
     );
+}
+
+// canonical `status:"in_progress"` 是 Responses 语义；投影到 Chat 时不得产出
+// Chat 协议之外的 `finish_reason:null`，按普通结束收口。
+#[test]
+fn non_stream_projection_never_emits_null_chat_finish_reason_for_in_progress_canonical() {
+    for status in ["in_progress", "queued", "completed"] {
+        let projected = project_v3_openai_chat_client_response_from_canonical(&json!({
+            "status": status,
+            "output": [{"type": "output_text", "text": "pong"}]
+        }))
+        .expect("text output must project");
+        let finish_reason = &projected["choices"][0]["finish_reason"];
+        assert!(
+            !finish_reason.is_null(),
+            "status={status} must not project a null Chat finish_reason: {projected}"
+        );
+        assert_eq!(finish_reason.as_str(), Some("stop"), "{projected}");
+    }
 }
 
 // Issue #2: the helper's middle `tool_call_id` key must resolve too.

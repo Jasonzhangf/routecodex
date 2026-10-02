@@ -37,6 +37,7 @@ const copyPaths = [
   'docs/architecture/v3-mainline-call-map.yml',
   'docs/architecture/v3-verification-map.yml',
   'docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md',
+  'v3/crates/routecodex-v3-server/src/frame_builders.rs',
   'package.json',
 ];
 
@@ -123,6 +124,13 @@ const cases = [
     mutation:
       'frames.push(build_v3_runtime_sse_json_frame(\n            "response.done",\n            &json!({\n                "type": "response.done",\n                "response": terminal_response,\n            }),\n        ));\n        frames.push(build_v3_runtime_sse_json_frame(\n            terminal_event,',
     diagnostic: /non-Responses client SSE terminator/,
+  },
+  {
+    name: 'Responses client SSE error path regains the Chat [DONE] terminator',
+    file: 'v3/crates/routecodex-v3-server/src/frame_builders.rs',
+    marker: 'format!("event: response.failed\\ndata: {event}\\n\\n").into_bytes()',
+    mutation: 'format!("event: response.failed\\ndata: {event}\\n\\ndata: [DONE]\\n\\n").into_bytes()',
+    diagnostic: /Chat-completions \[DONE\] terminator on the Responses client SSE error path/,
   },
   {
     name: 'Responses client SSE incomplete remerged into failed terminal',

@@ -108,7 +108,7 @@ flowchart LR
 | tool call request | `assistant.tool_calls[]` | `output.function_call` + `required_action.submit_tool_outputs.tool_calls[]` | `content[].tool_use` | governed tool-call response |
 | tool-call id | `tool_calls[].id` | `call_id` / `id` | `tool_use.id` | same semantic tool-call identity |
 | tool result linkage | `tool_call_id` in next request | `function_call_output.call_id` | `tool_result.tool_use_id` | same semantic linkage id |
-| terminal marker | `finish_reason` | `response.completed` / `response.done` | content-block terminal / final completion | unified terminal response state |
+| terminal marker | `finish_reason` | `response.completed` | content-block terminal / final completion | unified terminal response state |
 | continuation resume truth | internal only | rebuilt protocol fields only | internal only | `semantics.continuation` |
 | hidden reasoning | hidden/internal | replay-safe retained subset only | hidden/internal native carrier | internal carrier only |
 
@@ -116,7 +116,7 @@ flowchart LR
 
 | Semantic | JSON surface | SSE surface | Must hold |
 | --- | --- | --- | --- |
-| terminal completion | final JSON body | `response.completed` / `response.done` | same terminal truth |
+| terminal completion | final JSON body | `response.completed` | same terminal truth |
 | tool call availability | final `assistant.tool_calls` or `required_action` | completed event / final SSE frame | same consumer-visible tool call set |
 | tool-call ids | final body ids | terminal SSE frame ids | ids must match exactly |
 | plain text output | final text field | accumulated SSE visible output | semantic equality, not necessarily byte-for-byte chunking |

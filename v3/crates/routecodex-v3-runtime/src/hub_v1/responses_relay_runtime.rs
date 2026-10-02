@@ -1064,8 +1064,9 @@ fn project_v3_responses_client_event_output_item_done_item(item: &Value) -> Valu
 }
 
 /// `response.created`/`response.in_progress` 的响应快照：保留 provider 身份
-/// 与模型字段，但按 Responses 协议把状态固定为 `in_progress` 且清空 output
-/// （此刻尚未产生任何输出条目）。禁止在这里携带终态 status 或最终 output。
+/// 与模型字段，但按 Responses 协议把状态固定为 `in_progress`、清空 output
+/// （此刻尚未产生任何输出条目），并清掉只在终态成立的字段。禁止在
+/// in-progress 帧里携带终态 status、最终 output、usage 或 incomplete_details。
 fn build_v3_responses_client_progress_response(response: &Value, response_id: &str) -> Value {
     let mut progress = response.clone();
     if let Some(object) = progress.as_object_mut() {
@@ -1075,6 +1076,10 @@ fn build_v3_responses_client_progress_response(response: &Value, response_id: &s
             Value::String("in_progress".to_string()),
         );
         object.insert("output".to_string(), Value::Array(Vec::new()));
+        object.insert("usage".to_string(), Value::Null);
+        object.insert("incomplete_details".to_string(), Value::Null);
+        object.remove("completed_at");
+        object.remove("stop_details");
     }
     progress
 }

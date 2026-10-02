@@ -230,15 +230,11 @@ pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
             _ => {}
         }
     }
-    let status = object
-        .get("status")
-        .and_then(Value::as_str)
-        .unwrap_or("completed");
     // A tool call is expressed by the projected `tool_calls` themselves; the
     // canonical `status` no longer carries a fabricated `requires_action`.
     // `finish_reason` is a Chat-only field: it is derived here from the
-    // canonical `status`/`incomplete_details`, never read from a Responses
-    // client object, which has no such field.
+    // canonical `incomplete_details`, never read from a Responses client
+    // object, which has no such field.
     let finish_reason = if !tool_calls.is_empty() {
         Value::from("tool_calls")
     } else if let Some(reason) = object
@@ -251,11 +247,10 @@ pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
             "content_filter" => Value::from("content_filter"),
             _ => Value::from("stop"),
         }
-    } else if status == "in_progress" {
-        // Non-terminal canonical response: Chat has no in-progress terminal,
-        // so the final chunk carries a null `finish_reason`.
-        Value::Null
     } else {
+        // Chat 终态只有 stop/length/content_filter/tool_calls/stop_sequence：
+        // canonical 的 in_progress 是 Responses 语义，投影到 Chat 时按普通
+        // 结束收口，不得产出 Chat 协议之外的 null finish_reason。
         Value::from("stop")
     };
     let mut message = Map::new();
