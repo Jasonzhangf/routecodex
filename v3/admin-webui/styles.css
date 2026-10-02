@@ -1,49 +1,102 @@
-/* RouteCodex V3 admin webui — Ambient light-based skin.
-   Depth, volume and highlights come from /vendor/ambient.css surfaces only;
-   this file owns layout, type and interaction states. No hand-written
-   box-shadow, no gradient fills; the single brand accent is a fixed teal
-   that survives albedo changes (see --accent below). */
+/* RouteCodex V3 admin WebUI — dark console skin.
+   Surface colour, elevation and highlight all trace back to the Ambient scene
+   declared below; this file owns layout, type, component states and the
+   elevation shadows (Ambient emits its shadow only on `.ambient`, i.e. the
+   page root, so surfaces carry an explicit shadow derived from the same light
+   vector — direction follows --amb-light-x/y, so the scene stays the single
+   source of the light direction).
+
+   Text and status colours are pinned rather than inherited from Ambient's
+   --amb-label: that token is derived for a lit room (key 0.9 -> 26% lightness)
+   and collapses toward the surface in a dark scene. The values below are
+   measured against the surfaces they render on; see the contrast table in the
+   redesign evidence. */
 
 :root {
-  /* Ambient scene: the vendor-default lit clay room. Albedo is neutral grey
-     and the key is bright (vendor default 0.9) so the curve-delta separates
-     elevations and the surface actually has volume; the fill softens the
-     shadow side. The teal hue below is the only brand-specific override on
-     the scene. */
+  /* Ambient scene: one overhead-left key light in a dark machine room.
+     Albedo is a dark slate; the key/fill ratio keeps the elevation curve
+     visible without washing the surface out. */
   --amb-light-x: -1;
   --amb-light-y: -1;
-  --amb-key-light-intensity: 0.9;
-  --amb-fill-light-intensity: 0.7;
-  --amb-light-hue: 234;
-  --amb-light-saturation: 15%;
-  --amb-albedo: color(srgb-linear .82 .82 .82);
-  --amb-lume-hue: 172;
+  --amb-key-light-intensity: 0.4;
+  --amb-fill-light-intensity: 0.24;
+  --amb-light-hue: 220;
+  --amb-light-saturation: 8%;
+  --amb-albedo: color(srgb-linear .086 .095 .113);
+  --amb-lume-hue: 190;
 
-  /* Derived tokens.
-     --label traces back to Ambient's own --amb-label so text contrast follows
-     the scene: at the strong key above it lands near 26% lightness on a light
-     surface (≈9:1, comfortably above WCAG AA). --muted pulls 18% toward the
-     lit surface so card labels and headings stay readable but lighter than
-     primary text.
-     --accent is the brand teal and stays fixed across albedo changes so AC3
-     (--amb-albedo change re-colors surfaces and preserves teal accent) holds.
-     --accent-bg / --accent-fg give the primary button a dark teal fill with
-     light text. In a light scene Ambient's own --amb-lume and --amb-label
-     collapse onto each other (both ≈25%), so we pin the button's colors
-     directly instead of asking Ambient for a light-theme primary action. */
-  --label: var(--amb-label);
-  --muted: color-mix(in srgb, var(--label), var(--amb-lit) 10%);
-  --line: color-mix(in srgb, var(--label), transparent 82%);
-  --accent: hsl(var(--amb-lume-hue) 62% 22%);
-  --accent-bg: hsl(var(--amb-lume-hue) 62% 22%);
-  --accent-fg: hsl(var(--amb-lume-hue) 60% 90%);
-  --danger: var(--amb-emit-red);
+  /* Type */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Surfaces. --amb-lit is Ambient's lit surface for the scene above; every
+     other surface is a step off it, so an --amb-albedo change re-colours the
+     whole console while text and status colours stay measured. */
+  --bg: color-mix(in srgb, var(--amb-lit), #04060b 46%);
+  --surface-1: var(--amb-lit);
+  --surface-2: color-mix(in srgb, var(--amb-lit), #ffffff 5%);
+  --surface-3: color-mix(in srgb, var(--amb-lit), #ffffff 9%);
+  --surface-header: color-mix(in srgb, var(--amb-lit), #04060b 28%);
+  --surface-sunken: color-mix(in srgb, var(--amb-lit), #04060b 38%);
+
+  /* Text. Measured on every surface these actually render on: --label 10.5:1 on
+     a panel / 14.0:1 on the page; --muted 4.7:1 on the lightest surface in the
+     system (--surface-3), 5.4:1 on --surface-2, 6.2:1 on a panel, 8.4:1 on the
+     page. --muted is deliberately light enough to clear AA on --surface-2 and
+     --surface-3, which are lighter than the panels. */
+  --label: #e9edf5;
+  --muted: #aeb9cd;
+  --line: color-mix(in srgb, #ffffff 10%, transparent);
+  --line-strong: color-mix(in srgb, #ffffff 18%, transparent);
+
+  /* One accent: the scene's lume hue. */
+  --accent: hsl(var(--amb-lume-hue) 88% 68%);
+  --accent-bg: hsl(var(--amb-lume-hue) 84% 46%);
+  --accent-fg: hsl(var(--amb-lume-hue) 92% 7%);
+  --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+  --accent-rail: color-mix(in srgb, var(--accent) 72%, transparent);
+
+  /* Status. The vendor emits status colours only through `.amb-emit-*`
+     (--amb-emit-color); --amb-emit-red / --amb-emit-amber are not defined
+     anywhere, so the previous values resolved to the inherited colour and no
+     danger/warning styling ever rendered. These are lifted one step from the
+     vendor's emit values: measured on a panel, danger 6.0:1, warn 7.4:1,
+     ok 7.1:1. */
+  --danger: #fb9a9a;
+  --warn: #fbbf24;
+  --ok: #4ade80;
+
+  /* Geometry. Outer radius = inner radius + padding, so a panel at 12px that
+     pads 16px holds 8px controls and 6px chips. */
   --radius: 12px;
-  --content-pad: 24px;
-  --sidebar-w: 216px;
+  --radius-sm: 8px;
+  --radius-xs: 6px;
+  --content-pad: 28px;
+  --content-max: 1320px;
+  --sidebar-w: 232px;
   --modal-close-dur: 150ms;
   --ease-state: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Elevation. Layered, low-alpha, and steered by the scene's light vector:
+     the shadow falls away from the key light and the top edge keeps a
+     highlight. No surface is a flat same-colour patch. */
+  --light-dx: calc(var(--amb-light-x) * -1);
+  --light-dy: calc(var(--amb-light-y) * -1);
+  --edge-light: inset 0 1px 0 color-mix(in srgb, #ffffff 7%, transparent);
+  --shadow-1:
+    var(--edge-light),
+    calc(var(--light-dx) * 1px) calc(var(--light-dy) * 1px + 1px) 2px color-mix(in srgb, #02040a 45%, transparent),
+    calc(var(--light-dx) * 2px) calc(var(--light-dy) * 2px + 4px) 10px color-mix(in srgb, #02040a 40%, transparent);
+  --shadow-2:
+    var(--edge-light),
+    calc(var(--light-dx) * 2px) calc(var(--light-dy) * 2px + 3px) 6px color-mix(in srgb, #02040a 50%, transparent),
+    calc(var(--light-dx) * 4px) calc(var(--light-dy) * 4px + 12px) 28px color-mix(in srgb, #02040a 45%, transparent);
+  --shadow-3:
+    var(--edge-light),
+    calc(var(--light-dx) * 4px) calc(var(--light-dy) * 4px + 8px) 18px color-mix(in srgb, #02040a 55%, transparent),
+    calc(var(--light-dx) * 8px) calc(var(--light-dy) * 8px + 32px) 64px color-mix(in srgb, #02040a 55%, transparent);
 }
+
 
 * { box-sizing: border-box; }
 
@@ -53,47 +106,67 @@ html, body {
   min-height: 100%;
 }
 
+html { color-scheme: dark; }
+
 body {
-  font: 14px/1.5 ui-sans-serif, system-ui, "Segoe UI", "PingFang SC", sans-serif;
+  font: 14px/1.5 var(--font-sans);
+  font-optical-sizing: auto;
   color: var(--label);
-  /* The room the panels sit in: one step below the lit surface so elevation
-     reads as relief against the page, not as a same-color patch. */
-  background: hsl(from var(--amb-lit) h s calc(l - 6));
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
 }
 
 body.ambient {
   display: flex;
+  align-items: stretch;
 }
 
-code, .mono, input[type="search"], input[type="number"], pre {
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+code, .mono, input[type="search"], input[type="number"], pre, textarea {
+  font-family: var(--mono);
+}
+
+code {
+  font-size: 0.92em;
+  background: color-mix(in srgb, #ffffff 8%, transparent);
+  border-radius: var(--radius-xs);
+  padding: 1px 5px;
 }
 
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
+
+::selection { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+
 
 /* ---------- sidebar shell ---------- */
 
 .sidebar {
   width: var(--sidebar-w);
   flex: 0 0 var(--sidebar-w);
-  min-height: 100vh;
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  padding: 20px 16px;
+  gap: 18px;
+  padding: 22px 14px 18px;
   position: sticky;
   top: 0;
   align-self: flex-start;
   height: 100vh;
   overflow-y: auto;
+  /* One step below the header so the shell reads as a frame around the
+     content, and the content edge is the brightest structural line. */
+  background: var(--surface-sunken);
+  border-right: 1px solid var(--line);
 }
 
 .sidebar .brand {
-  font-size: 17px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  color: var(--accent);
+  display: flex;
+  align-items: baseline;
+  gap: 1px;
+  padding: 0 10px;
+  font-size: 16px;
+  font-weight: 680;
+  letter-spacing: -0.01em;
+  color: var(--label);
 }
 
 .sidebar .brand .accent { color: var(--accent); }
@@ -101,132 +174,239 @@ a:hover { text-decoration: underline; }
 .sidebar nav {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
 .sidebar nav a {
-  display: block;
-  padding: 9px 12px;
-  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
   color: var(--muted);
-  font-weight: 500;
+  font-size: 13.5px;
+  font-weight: 520;
   transition: color 120ms var(--ease-state), background-color 120ms var(--ease-state);
+}
+
+/* Nav glyphs are 16px monochrome masks so they inherit the link colour.
+   Geometry follows Remix Icon's 24px grid, re-authored inline to keep the
+   zero-dependency/offline embedding contract (no icon font, no CDN). */
+.sidebar nav a::before {
+  content: "";
+  flex: none;
+  width: 16px;
+  height: 16px;
+  background: currentColor;
+  -webkit-mask: var(--nav-icon) center / 16px 16px no-repeat;
+  mask: var(--nav-icon) center / 16px 16px no-repeat;
+}
+
+.sidebar nav a[href="/"] {
+  --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='3' y='3' width='7.6' height='7.6' rx='2'/%3E%3Crect x='13.4' y='3' width='7.6' height='7.6' rx='2'/%3E%3Crect x='3' y='13.4' width='7.6' height='7.6' rx='2'/%3E%3Crect x='13.4' y='13.4' width='7.6' height='7.6' rx='2'/%3E%3C/svg%3E");
+}
+
+.sidebar nav a[href="/requests.html"] {
+  --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='5' cy='6.5' r='1.7'/%3E%3Crect x='9.2' y='5.1' width='11.8' height='2.8' rx='1.4'/%3E%3Ccircle cx='5' cy='12' r='1.7'/%3E%3Crect x='9.2' y='10.6' width='11.8' height='2.8' rx='1.4'/%3E%3Ccircle cx='5' cy='17.5' r='1.7'/%3E%3Crect x='9.2' y='16.1' width='7.6' height='2.8' rx='1.4'/%3E%3C/svg%3E");
+}
+
+.sidebar nav a[href="/providers.html"] {
+  --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='3' y='3.6' width='18' height='7.4' rx='2.4'/%3E%3Ccircle cx='7.2' cy='7.3' r='1.4' fill='%23fff'/%3E%3Crect x='10.8' y='6' width='7' height='2.6' rx='1.3' fill='%23fff'/%3E%3Crect x='3' y='13' width='18' height='7.4' rx='2.4'/%3E%3Ccircle cx='7.2' cy='16.7' r='1.4' fill='%23fff'/%3E%3Crect x='10.8' y='15.4' width='7' height='2.6' rx='1.3' fill='%23fff'/%3E%3C/svg%3E");
+}
+
+.sidebar nav a[href="/routes.html"] {
+  --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8h13.5'/%3E%3Cpath d='M13.6 4.4 17.2 8l-3.6 3.6'/%3E%3Cpath d='M20.5 16H7'/%3E%3Cpath d='M10.4 12.4 6.8 16l3.6 3.6'/%3E%3C/g%3E%3C/svg%3E");
+}
+
+.sidebar nav a[href="/deploy.html"] {
+  --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='3' y='4' width='18' height='16' rx='2.6' fill='none' stroke='%23000' stroke-width='2'/%3E%3Cg fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7.6 9.4 3 2.6-3 2.6'/%3E%3Cpath d='M13.2 15.4h3.8'/%3E%3C/g%3E%3C/svg%3E");
 }
 
 .sidebar nav a:hover {
   color: var(--label);
   text-decoration: none;
-  background: color-mix(in srgb, var(--label), transparent 92%);
+  background: color-mix(in srgb, #ffffff 6%, transparent);
 }
 
 .sidebar nav a.active {
-  /* Accent-tinted chip: the tint is mixed toward the lit surface (not toward
-     transparent over an unknown backdrop) so the dark teal text keeps its
-     contrast instead of sitting on a near-identical teal. */
+  /* Solid chip plus a left rail: the tint alone is too close to the sunken
+     sidebar to read as "current" in a dark scene. */
   color: var(--accent);
-  background: color-mix(in srgb, var(--accent), var(--amb-lit) 88%);
-  border-left: 3px solid var(--accent);
-  padding-left: 9px;
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent-rail);
 }
+
+.sidebar nav a.active::before { opacity: 1; }
+
+/* Space, not a rule, separates the monitoring pages from the setup pages. */
+.sidebar nav a[href="/providers.html"] { margin-top: 12px; }
 
 .sidebar-foot {
   margin-top: auto;
+  padding: 0 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
 }
 
 .shell {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
-.topbar {
+/* ---------- page header ----------
+   Every page renders the same band: eyebrow, title, one-line purpose, and the
+   page's actions. Header and content share --content-max / --content-pad, so
+   the title, the body and the buttons sit on the same two vertical edges. */
+
+.page-header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: var(--surface-header);
+  border-bottom: 1px solid var(--line);
+}
+
+.page-header-inner {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  width: 100%;
+  max-width: var(--content-max);
+  padding: 20px var(--content-pad) 16px;
+}
+
+.page-heading { min-width: 0; }
+
+.page-actions {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 14px var(--content-pad) 0;
+  flex: none;
+  padding-bottom: 2px;
 }
 
 main {
-  padding: 12px var(--content-pad) 48px;
-  max-width: 1280px;
+  width: 100%;
+  max-width: var(--content-max);
+  padding: 22px var(--content-pad) 72px;
 }
 
 h1 {
-  font-size: 22px;
-  margin: 8px 0 4px;
+  font-size: 20px;
+  line-height: 1.25;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  margin: 0;
+  text-wrap: balance;
 }
 
 h2 {
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 620;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
   margin: 0 0 10px;
-  color: var(--label);
-  text-transform: none;
 }
 
 .sub {
   color: var(--muted);
-  margin-bottom: 18px;
+  font-size: 13px;
+  max-width: 76ch;
+  margin: 6px 0 0;
+  text-wrap: pretty;
 }
 
 .eyebrow {
   color: var(--accent);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
+  font-size: 11px;
+  font-weight: 620;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
-  margin: 0 0 6px;
+  margin: 0 0 4px;
 }
 
-.section { margin-top: 22px; }
+/* Group by space: 30px between page sections, 16px inside one. */
+.section { margin-top: 30px; }
+
+.section:first-of-type { margin-top: 0; }
+
+.section > .sub,
+.section > .help { margin-bottom: 12px; }
 
 /* ---------- surfaces ---------- */
 
+/* Every panel is a lit plate: scene surface, hairline structure, and an
+   elevation shadow whose direction follows the scene light vector. */
+.panel,
+.card,
+.route-pool-card,
+.filter-rail {
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-1);
+}
+
 .panel {
   border-radius: var(--radius);
-  padding: 14px 16px;
+  padding: 16px 18px;
   overflow-x: auto;
 }
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 12px;
 }
 
 .card {
-  border: 0;
   text-align: left;
   border-radius: var(--radius);
-  padding: 12px 14px;
+  padding: 14px 16px;
   cursor: default;
   color: inherit;
   font: inherit;
   min-width: 0;
+  transition: background-color 120ms var(--ease-state), box-shadow 120ms var(--ease-state);
 }
 
 button.card { cursor: pointer; }
 
+button.card:hover {
+  background: var(--surface-2);
+  box-shadow: var(--shadow-2);
+}
+
 .card .label {
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--muted);
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
 .card .value {
-  font-size: 22px;
+  font-size: 24px;
+  line-height: 1.15;
   font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
   color: var(--label);
 }
 
 .card .value.bad { color: var(--danger); }
 .card .value.ok { color: var(--accent); }
-.card .value.warn { color: var(--amb-emit-amber); }
+.card .value.warn { color: var(--warn); }
 .card .value.neutral { color: var(--muted); }
 
 .card .hint {
   font-size: 12px;
   color: var(--muted);
-  margin-top: 2px;
+  margin-top: 4px;
 }
 
 .layout {
@@ -246,7 +426,7 @@ button.card { cursor: pointer; }
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 9px 2px;
+  padding: 10px 2px;
 }
 
 .row + .row { border-top: 1px solid var(--line); }
@@ -260,17 +440,19 @@ button.card { cursor: pointer; }
 
 .traffic-meter {
   flex: 1;
-  height: 10px;
-  border-radius: 5px;
+  height: 8px;
+  border-radius: 999px;
   overflow: hidden;
   min-width: 80px;
+  background: var(--surface-sunken);
+  box-shadow: inset 0 1px 2px color-mix(in srgb, #02040a 60%, transparent);
 }
 
 .traffic-meter span {
   display: block;
   height: 100%;
   background: var(--accent);
-  border-radius: 5px;
+  border-radius: 999px;
 }
 
 .rev-list { display: flex; flex-direction: column; }
@@ -278,11 +460,14 @@ button.card { cursor: pointer; }
 .rev {
   display: flex;
   gap: 12px;
-  padding: 6px 0;
+  padding: 7px 0;
   font-size: 13px;
+  border-bottom: 1px solid var(--line);
 }
 
-.rev .seq { color: var(--accent); font-family: ui-monospace, Menlo, monospace; }
+.rev:last-child { border-bottom: 0; }
+
+.rev .seq { color: var(--accent); font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .rev .ts { color: var(--muted); }
 
 table {
@@ -294,77 +479,88 @@ table {
 th {
   text-align: left;
   font-weight: 600;
+  font-size: 11.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   color: var(--muted);
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--line);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line-strong);
   white-space: nowrap;
+  background: var(--surface-1);
 }
 
 td {
-  padding: 8px 10px;
+  padding: 9px 12px;
   border-bottom: 1px solid var(--line);
   vertical-align: top;
 }
 
+tbody tr:last-child td { border-bottom: 0; }
+
 th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
 
-tbody tr:hover { background: color-mix(in srgb, var(--amb-label), transparent 94%); }
+tbody tr:hover { background: color-mix(in srgb, #ffffff 4%, transparent); }
 
 .status-success td:first-child { color: var(--accent); }
 .status-error td:first-child { color: var(--danger); }
-.status-active td:first-child { color: var(--amb-emit-amber); }
+.status-active td:first-child { color: var(--warn); }
 
 /* ---------- controls ---------- */
 
-/* Secondary buttons stay ghost controls: --label text directly on the lit
-   surface (≈9:1) with a hairline edge so they still read as buttons. This
-   overrides the vendor .amb-button fill on purpose — at this scene's light
-   exposure Ambient's --amb-lume and --amb-label are both ≈25% grey, so a
-   lume-filled pill with label text would be unreadable. */
+/* One button owner. The vendor `.amb-button*` classes are still present in the
+   markup, so the properties they add (uppercase, 100% width, grid centring)
+   are normalised here instead of being left half-applied. */
 .btn {
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 8px 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: auto;
+  min-width: 0;
+  min-height: 34px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 7px 13px;
   font: inherit;
+  font-size: 13px;
   font-weight: 550;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--label);
-  background: none;
+  background: var(--surface-2);
+  box-shadow: var(--edge-light);
   cursor: pointer;
   transition: color 120ms var(--ease-state), background-color 120ms var(--ease-state);
 }
 
 .btn:hover:not(:disabled) {
   color: var(--label);
-  background: color-mix(in srgb, var(--label), transparent 92%);
+  background: var(--surface-3);
 }
 
-/* Primary action: the one filled control. Dark teal fill + light text clears
-   AA in both directions and keeps the brand accent fixed across albedo
-   changes. */
+.btn:active:not(:disabled) { background: color-mix(in srgb, var(--surface-2), #000 12%); }
+
+/* The one filled control: accent fill with the accent's own near-black ink
+   (7.3:1 measured). */
 .btn.primary {
   color: var(--accent-fg);
   background: var(--accent-bg);
-  border-color: transparent;
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
 .btn.primary:hover:not(:disabled) {
   color: var(--accent-fg);
-  background: color-mix(in srgb, var(--accent-bg), var(--label) 18%);
+  background: color-mix(in srgb, var(--accent-bg), #ffffff 12%);
 }
 
+/* A disabled primary drops its fill: keeping the accent while switching the
+   text to --muted would put mid-grey on cyan. */
 .btn:disabled {
-  color: var(--muted);
-  cursor: not-allowed;
-}
-
-/* A disabled primary drops its fill entirely: keeping the dark teal while
-   switching the text to --muted would put mid-grey on dark teal (≈1.1:1).
-   Dropping to the ghost treatment keeps the disabled state readable and makes
-   "not actionable" unmistakable. */
-.btn.primary:disabled {
   color: var(--muted);
   background: none;
   border-color: var(--line);
+  box-shadow: none;
+  cursor: not-allowed;
 }
 
 .btn.close {
@@ -375,34 +571,50 @@ tbody tr:hover { background: color-mix(in srgb, var(--amb-label), transparent 94
 }
 
 .icon-btn {
-  border: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  border: 1px solid transparent;
   background: none;
   color: var(--muted);
   font-size: 15px;
-  padding: 6px 9px;
-  border-radius: 8px;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
+  transition: color 120ms var(--ease-state), background-color 120ms var(--ease-state);
 }
 
-.icon-btn:hover:not(:disabled) { color: var(--label); }
-.icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.icon-btn:hover:not(:disabled) {
+  color: var(--label);
+  background: color-mix(in srgb, #ffffff 7%, transparent);
+}
+
+.icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .icon-btn.danger:hover:not(:disabled) { color: var(--danger); }
 
-select, input[type="search"], input[type="number"], input:not([type]) {
-  background: none;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+select, input[type="search"], input[type="number"], input:not([type]), textarea {
+  background: var(--surface-sunken);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
   color: var(--label);
   font: inherit;
+  font-size: 13px;
   padding: 7px 10px;
 }
 
-select:focus-visible, input:focus-visible, button:focus-visible, a:focus-visible {
+select:hover:not(:disabled), input:hover:not(:disabled) { border-color: color-mix(in srgb, #ffffff 26%, transparent); }
+
+select:focus-visible, input:focus-visible, button:focus-visible, a:focus-visible, textarea:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
-input::placeholder { color: var(--muted); }
+input::placeholder { color: color-mix(in srgb, var(--muted) 80%, transparent); }
+
+input[type="checkbox"], input[type="radio"] { accent-color: var(--accent-bg); }
 
 /* ---------- badges & status ---------- */
 
@@ -410,36 +622,45 @@ input::placeholder { color: var(--muted); }
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 600;
   border-radius: 999px;
-  padding: 2px 10px;
+  padding: 2px 9px 2px 8px;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 24%, transparent);
 }
 
-.badge.ok { color: var(--accent); }
-.badge.warn { color: var(--amb-emit-amber); }
+.badge.ok { color: var(--ok); }
+.badge.warn { color: var(--warn); }
 .badge.bad { color: var(--danger); }
 .badge.neutral { color: var(--muted); }
 
 .badge::before {
   content: "";
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: currentColor;
 }
 
 .status-bar {
-  border-radius: 10px;
-  padding: 10px 14px;
-  margin: 10px 0;
-  font-size: 13px;
   display: none;
+  align-items: center;
+  gap: 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--muted);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-1);
+  padding: 10px 14px;
+  margin: 0 0 18px;
+  font-size: 13px;
+  color: var(--label);
 }
 
-.status-bar.ok { color: var(--accent); }
-.status-bar.err { color: var(--danger); }
-.status-bar.info { color: var(--muted); }
+.status-bar.ok { border-left-color: var(--ok); }
+.status-bar.err { border-left-color: var(--danger); color: var(--danger); }
+.status-bar.info { border-left-color: var(--accent); }
 
 .status-bar.is-shaking {
   animation: status-shake 320ms var(--ease-state);
@@ -563,11 +784,11 @@ input::placeholder { color: var(--muted); }
 }
 
 /* Donut segment hues: derived from lume hue, spread within one accent family. */
-.donut-ring { --donut-seg-0: color-mix(in srgb, var(--accent), white 10%); }
-.donut-ring { --donut-seg-1: color-mix(in srgb, var(--accent), var(--amb-label) 45%); }
-.donut-ring { --donut-seg-2: color-mix(in srgb, var(--accent), var(--amb-label) 75%); }
-.donut-ring { --donut-seg-3: color-mix(in srgb, var(--amb-label), transparent 45%); }
-.donut-ring { --donut-seg-4: color-mix(in srgb, var(--amb-label), transparent 65%); }
+.donut-ring { --donut-seg-0: color-mix(in srgb, var(--accent), #ffffff 10%); }
+.donut-ring { --donut-seg-1: color-mix(in srgb, var(--accent), var(--label) 45%); }
+.donut-ring { --donut-seg-2: color-mix(in srgb, var(--accent), var(--label) 75%); }
+.donut-ring { --donut-seg-3: color-mix(in srgb, var(--label), transparent 45%); }
+.donut-ring { --donut-seg-4: color-mix(in srgb, var(--label), transparent 65%); }
 
 .donut-legend {
   display: flex;
@@ -598,16 +819,25 @@ input::placeholder { color: var(--muted); }
 
 .requests-grid {
   display: grid;
-  grid-template-columns: 250px 1fr;
+  grid-template-columns: 250px minmax(0, 1fr);
   gap: 18px;
   margin-top: 16px;
+  align-items: start;
 }
 
 @media (max-width: 1000px) {
   .requests-grid { grid-template-columns: 1fr; }
 }
 
-.filter-rail { align-self: start; }
+.filter-rail {
+  align-self: start;
+  position: sticky;
+  top: 104px;
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  max-height: calc(100vh - 128px);
+  overflow-y: auto;
+}
 
 .filter-search { margin-bottom: 12px; }
 
@@ -619,17 +849,21 @@ input::placeholder { color: var(--muted); }
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--muted);
   margin: 0 0 6px;
-  font-weight: 600;
+  font-weight: 620;
 }
 
 .filter-group .layer {
-  border-radius: 5px;
+  border-radius: 999px;
   padding: 1px 6px;
   font-size: 11px;
-  background: color-mix(in srgb, var(--amb-label), transparent 90%);
+  letter-spacing: 0;
+  text-transform: none;
+  background: color-mix(in srgb, #ffffff 9%, transparent);
 }
 
 .filter-clear {
@@ -659,7 +893,7 @@ input::placeholder { color: var(--muted); }
   cursor: pointer;
 }
 
-.filter-item:hover { background: color-mix(in srgb, var(--amb-label), transparent 94%); }
+.filter-item:hover { background: color-mix(in srgb, #ffffff 6%, transparent); }
 
 .filter-item .n {
   margin-left: auto;
@@ -701,8 +935,10 @@ input::placeholder { color: var(--muted); }
 .segmented {
   display: inline-flex;
   gap: 2px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   padding: 3px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
 }
 
 .segmented button {
@@ -712,11 +948,17 @@ input::placeholder { color: var(--muted); }
   font: inherit;
   font-size: 13px;
   padding: 5px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
 }
 
-.segmented button[aria-pressed="true"] { color: var(--label); }
+.segmented button:hover { color: var(--label); }
+
+.segmented button[aria-pressed="true"] {
+  color: var(--label);
+  background: var(--surface-3);
+  box-shadow: var(--edge-light);
+}
 
 .port-tab-bar, .requests-tab-bar, .entries-sub-tab-bar {
   display: flex;
@@ -726,18 +968,23 @@ input::placeholder { color: var(--muted); }
 }
 
 .port-tab, .tab-btn, .sub-tab-btn {
-  border: 0;
+  border: 1px solid transparent;
   background: none;
   color: var(--muted);
   font: inherit;
   font-size: 13px;
-  padding: 6px 13px;
-  border-radius: 9px;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
+  transition: color 120ms var(--ease-state), background-color 120ms var(--ease-state);
 }
+
+.port-tab:hover, .tab-btn:hover, .sub-tab-btn:hover { color: var(--label); }
 
 .port-tab[aria-selected="true"], .tab-btn.active, .sub-tab-btn.active {
   color: var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
 .tab-count {
@@ -837,7 +1084,7 @@ input::placeholder { color: var(--muted); }
 
 .exclude-chip {
   font-size: 11px;
-  color: var(--amb-emit-amber);
+  color: var(--warn);
 }
 
 .status-text { font-weight: 600; }
@@ -851,7 +1098,10 @@ input::placeholder { color: var(--muted); }
   display: none;
   align-items: center;
   gap: 12px;
-  border-radius: 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-strong);
+  background: var(--surface-3);
+  box-shadow: var(--shadow-3);
   padding: 10px 16px;
   z-index: 40;
   transition: transform 150ms var(--ease-state), display 150ms;
@@ -868,36 +1118,29 @@ input::placeholder { color: var(--muted); }
 
 /* ---------- routes page ---------- */
 
-.routes-page { max-width: none; }
-
-.routes-intro {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
 .routes-toolbar {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 16px 0;
+  margin: 0 0 18px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12.5px;
 }
 
-.routes-toolbar input { flex: 1; max-width: 420px; }
+.routes-toolbar label { flex: none; }
 
-main.routes-page > label[for="server-selector"] {
-  display: block;
-  font-size: 13px;
-  color: var(--muted);
-  margin-top: 14px;
-}
+.routes-toolbar input { flex: 1 1 260px; max-width: 420px; }
 
-#server-selector { margin-top: 6px; min-width: 240px; }
+.routes-toolbar select { min-width: 220px; }
 
-.route-pool-card { margin-bottom: 18px; border-radius: var(--radius); padding: 14px 16px; }
+/* Nesting reads as containment, not as three same-colour plates: the pool is a
+   raised card, the tier is a recessed row inside it, the member is a chip on
+   that row. */
+.route-pool-card { margin-bottom: 14px; border-radius: var(--radius); padding: 16px 18px; }
 
 .route-pool-head {
   display: flex;
@@ -915,17 +1158,50 @@ main.routes-page > label[for="server-selector"] {
   color: var(--label);
   font: inherit;
   cursor: pointer;
-  padding: 4px 0;
+  padding: 2px 0;
 }
 
-.pool-toggle h2 { margin: 0; color: var(--label); }
-.pool-toggle .caret, .tier-toggle .caret { color: var(--muted); }
+.pool-toggle h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+  text-transform: none;
+  color: var(--label);
+}
+
+.pool-toggle .caret, .tier-toggle .caret {
+  /* The text caret glyph (▾) is rendered as a bullet on the headless
+     font stack, so draw a CSS chevron instead. */
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  color: var(--muted);
+  font-size: 0;
+  line-height: 0;
+  flex: none;
+  transform: rotate(45deg);
+  transition: transform 120ms var(--ease-state);
+  margin-right: 2px;
+}
+
+.pool-toggle[aria-expanded="false"] .caret,
+.tier-toggle[aria-expanded="false"] .caret { transform: rotate(-45deg); }
+
 .route-pool.collapsed .route-tier-list { display: none; }
 
 .route-tier {
-  margin: 12px 0 0;
-  border-radius: 10px;
+  margin: 10px 0 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
   padding: 10px 12px;
+}
+
+/* Tier 1 is the primary route; the rail states that without extra copy. */
+.route-tier-list > .route-tier:first-child {
+  border-left: 3px solid var(--accent-rail);
 }
 
 .route-tier-head {
@@ -935,8 +1211,8 @@ main.routes-page > label[for="server-selector"] {
   gap: 10px;
 }
 
-.tier-toggle h3 { margin: 0; font-size: 13px; }
-.tier-toggle .role { color: var(--muted); font-size: 12px; }
+.tier-toggle h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.tier-toggle .role { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em; }
 
 .route-tier-actions { display: flex; gap: 4px; }
 
@@ -945,7 +1221,7 @@ main.routes-page > label[for="server-selector"] {
 .route-members {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
   margin: 10px 0;
 }
 
@@ -953,12 +1229,14 @@ main.routes-page > label[for="server-selector"] {
   display: flex;
   align-items: center;
   gap: 10px;
-  border-radius: 9px;
-  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: 7px 10px 7px 12px;
 }
 
 .route-member-name strong { font-weight: 600; }
-.route-member-name span { color: var(--muted); margin-left: 6px; font-size: 12px; }
+.route-member-name span { color: var(--muted); margin-left: 6px; font-size: 12px; font-family: var(--mono); }
 
 .route-weight {
   display: flex;
@@ -980,19 +1258,22 @@ main.routes-page > label[for="server-selector"] {
   padding: 4px 0;
 }
 
-.route-empty { padding: 40px 0; text-align: center; color: var(--muted); }
+.route-add-member:hover { text-decoration: underline; }
+
+.route-empty { padding: 48px 0; text-align: center; color: var(--muted); }
 .route-empty.error h2 { color: var(--danger); }
 
 .route-picker {
-  border: 0;
-  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
   padding: 0;
   color: var(--label);
-  background: none;
+  background: var(--surface-1);
+  box-shadow: var(--shadow-3);
 }
 
 .route-picker::backdrop {
-  background: color-mix(in srgb, hsl(var(--amb-light-hue) 30% 4%), transparent 25%);
+  background: color-mix(in srgb, #02040a 68%, transparent);
 }
 
 .route-picker-shell {
@@ -1033,13 +1314,13 @@ main.routes-page > label[for="server-selector"] {
   cursor: pointer;
 }
 
-.route-picker-option:hover { background: color-mix(in srgb, var(--amb-label), transparent 94%); }
+.route-picker-option:hover { background: color-mix(in srgb, #ffffff 6%, transparent); }
 
 .route-picker-state { color: var(--muted); padding: 16px 0; }
 .route-picker-state.error { color: var(--danger); }
 
 .route-save-state { font-size: 13px; color: var(--muted); }
-.route-save-state.dirty { color: var(--amb-emit-amber); }
+.route-save-state.dirty { color: var(--warn); }
 
 .sr-only {
   position: absolute;
@@ -1054,7 +1335,7 @@ main.routes-page > label[for="server-selector"] {
 .drawer-backdrop {
   position: fixed;
   inset: 0;
-  background: color-mix(in srgb, hsl(var(--amb-light-hue) 30% 4%), transparent 35%);
+  background: color-mix(in srgb, #02040a 68%, transparent);
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--modal-close-dur) var(--ease-state);
@@ -1074,6 +1355,9 @@ main.routes-page > label[for="server-selector"] {
   width: min(560px, 92vw);
   padding: 18px 22px 22px;
   overflow-y: auto;
+  background: var(--surface-1);
+  border-left: 1px solid var(--line-strong);
+  box-shadow: var(--shadow-3);
   transform: translateX(calc(100% + 40px));
   transition: transform var(--modal-close-dur) var(--ease-state);
   z-index: 60;
@@ -1193,11 +1477,11 @@ main.routes-page > label[for="server-selector"] {
 .ff textarea {
   width: 100%;
   box-sizing: border-box;
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--surface-sunken);
   color: var(--label);
-  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
-  border-radius: 4px;
-  padding: 7px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
   font: inherit;
   font-size: 13px;
 }
@@ -1211,9 +1495,11 @@ main.routes-page > label[for="server-selector"] {
 .ff .ff-row { display: flex; gap: 8px; align-items: center; }
 
 .error-summary {
-  border: 1px solid var(--danger);
-  border-radius: 4px;
-  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  border-left: 3px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface-1));
+  padding: 10px 12px;
   margin-bottom: 12px;
   font-size: 13px;
 }
@@ -1243,21 +1529,25 @@ main.routes-page > label[for="server-selector"] {
   font-size: 12px;
   padding: 4px 10px;
   border-radius: 999px;
-  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  border: 1px solid var(--line-strong);
   color: var(--muted);
 }
 
-.wizard-step.active { color: var(--label); border-color: var(--accent); }
+.wizard-step.active {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: var(--accent-soft);
+}
 
-.wizard-step.done { color: var(--accent); }
+.wizard-step.done { color: var(--ok); }
 
 /* streaming probe terminal */
 
 .terminal {
-  background: rgba(0, 0, 0, 0.42);
-  border: 1px solid var(--line, rgba(255, 255, 255, 0.1));
-  border-radius: 4px;
-  padding: 10px;
+  background: color-mix(in srgb, var(--bg), #000000 22%);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
   max-height: 420px;
   overflow: auto;
   font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
@@ -1288,17 +1578,95 @@ main.routes-page > label[for="server-selector"] {
   grid-template-columns: 96px 1fr;
   gap: 10px;
   padding: 6px 0 6px 12px;
-  border-left: 2px solid var(--line, rgba(255, 255, 255, 0.12));
+  border-left: 2px solid var(--line-strong);
   font-size: 13px;
 }
 
 .timeline-node.raised { border-left-color: var(--danger); }
 
-.timeline-node.observed { border-left-color: var(--amb-emit-amber, #d9a441); }
+.timeline-node.observed { border-left-color: var(--warn); }
 
 .timeline-node.cleared { border-left-color: var(--accent); }
 
 .timeline-node .node-id { color: var(--muted); font-size: 12px; }
+
+/* ---------- dialogs ---------- */
+
+/* `.modal` and `.confirm-dialog` carry `amb-surface amb-elevation-*` in the
+   markup; those set the fill only, so the plate treatment lives here. */
+.modal,
+.confirm-dialog {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  padding: 20px 22px;
+  color: var(--label);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-3);
+}
+
+.modal::backdrop,
+.confirm-dialog::backdrop {
+  background: color-mix(in srgb, #02040a 68%, transparent);
+}
+
+.confirm-dialog .actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
+
+/* ---------- narrow viewports ----------
+   The shell is a fixed sidebar plus a content column. Below the width where a
+   232px rail leaves a usable content column, the rail becomes a horizontal
+   top bar instead of squeezing the page. */
+
+@media (max-width: 860px) {
+  :root { --content-pad: 16px; }
+
+  body.ambient { flex-direction: column; }
+
+  .sidebar {
+    position: static;
+    flex: none;
+    width: 100%;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 14px;
+    padding: 10px 14px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .sidebar .brand { padding: 0; }
+
+  .sidebar nav { flex-direction: row; gap: 2px; }
+
+  .sidebar nav a { white-space: nowrap; padding: 7px 10px; }
+
+  .sidebar nav a[href="/providers.html"] { margin-top: 0; margin-left: 10px; }
+
+  .sidebar-foot { display: none; }
+
+  .page-header { position: static; }
+
+  .page-header-inner {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    padding: 16px var(--content-pad) 14px;
+  }
+
+  .page-actions { flex-wrap: wrap; padding-bottom: 0; }
+
+  main { padding-top: 16px; padding-bottom: 56px; }
+
+  .section { margin-top: 22px; }
+
+  .filter-rail { position: static; max-height: none; }
+
+  .routes-toolbar { flex-wrap: wrap; }
+  .routes-toolbar input, .routes-toolbar select { max-width: none; flex: 1 1 100%; }
+  .routes-toolbar .spacer { display: none; }
+}
 
 /* ---------- reduced motion ---------- */
 

@@ -9,16 +9,22 @@
 <link rel="stylesheet" href="/styles.css">
 </head>
 <body class="ambient">
-<aside id="sidebar" class="sidebar amb-surface amb-elevation-1 amb-chamfer" aria-label="Primary"></aside>
+<aside id="sidebar" class="sidebar" aria-label="Primary"></aside>
 <div class="shell">
-  <div class="topbar">
-    <div class="spacer"></div>
-    <button class="btn amb-button amb-button-cap" id="refresh-btn" type="button">Refresh</button>
-    <button class="btn primary amb-button amb-button-cap amb-light-tl" id="reload-btn" type="button">Reload</button>
-  </div>
+  <header class="page-header">
+    <div class="page-header-inner">
+      <div class="page-heading">
+        <p class="eyebrow">Monitor</p>
+        <h1 id="page-title">Dashboard</h1>
+        <p id="page-sub" class="sub">Runtime status, ports, providers and traffic overview</p>
+      </div>
+      <div class="page-actions">
+        <button class="btn" id="refresh-btn" type="button">Refresh</button>
+        <button class="btn primary" id="reload-btn" type="button">Reload</button>
+      </div>
+    </div>
+  </header>
   <main>
-    <h1 id="page-title">Dashboard</h1>
-    <div id="page-sub" class="sub">Runtime status, ports, providers and traffic overview</div>
     <div id="status-bar" class="status-bar" role="status" aria-live="polite" style="display:none"></div>
     <div class="cards" id="summary-cards"></div>
     <div class="section">
