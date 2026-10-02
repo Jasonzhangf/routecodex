@@ -61,9 +61,11 @@ struct ProviderCapture {
 #[derive(Debug, Clone)]
 enum ProviderMode {
     Success,
-    /// HTTP 200 whose terminal shape is a provider-attempt failure: the wire
-    /// status is a success, but the response never reached a terminal state.
-    IncompleteTerminal,
+    /// HTTP 200 that opens a provider stream, emits one partial delta, and then
+    /// ends without any terminal frame and without `[DONE]`. The provider
+    /// attempt never reached a terminal state, so it is a failed attempt and
+    /// must not be projected to the client.
+    NonTerminalAttempt,
     RateLimited,
     UpstreamBadGateway,
     UpstreamServiceUnavailable,
@@ -363,12 +365,21 @@ async fn controlled_responses_upstream(
                 r#"{"id":"resp_json","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}"#,
             ))
             .unwrap(),
-        ProviderMode::IncompleteTerminal => Response::builder()
+        ProviderMode::NonTerminalAttempt
+            if parsed.get("stream").and_then(Value::as_bool) == Some(true) =>
+        {
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "text/event-stream")
+                .body(Body::from(
+                    "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n",
+                ))
+                .unwrap()
+        }
+        ProviderMode::NonTerminalAttempt => Response::builder()
             .status(StatusCode::OK)
             .header("content-type", "application/json")
-            .body(Body::from(
-                r#"{"id":"resp_incomplete","object":"response","status":"incomplete","incomplete_details":{"reason":"content_filter"},"output":[]}"#,
-            ))
+            .body(Body::from(r#"{"id":"resp_partial","object":"response","output":["#))
             .unwrap(),
         ProviderMode::RateLimited => Response::builder()
             .status(StatusCode::TOO_MANY_REQUESTS)
@@ -513,16 +524,16 @@ async fn chat_relay_cross_protocol_error_then_reselect_succeeds() {
     wait_ports_closed(&client, &ports.all()).await;
 }
 
-/// A provider that answers HTTP 200 without a completed terminal is a failed
-/// provider attempt, not client output. The Responses lane was explicitly
+/// A provider that answers HTTP 200 but never reaches a terminal state is a
+/// failed provider attempt, not client output. The Responses lane was explicitly
 /// narrowed to this contract (`9eea26f3`, "stop projecting provider failure to
 /// client after exhaustion"); the chat entry must isolate the same boundary
-/// instead of forwarding the incomplete provider payload.
+/// instead of forwarding the non-terminal provider payload.
 #[tokio::test]
 async fn chat_direct_incomplete_provider_terminal_breaks_client_transport() {
     let mut success = start_controlled_upstream(ProviderMode::Success).await;
-    let mut incomplete_a = start_controlled_upstream(ProviderMode::IncompleteTerminal).await;
-    let mut incomplete_b = start_controlled_upstream(ProviderMode::IncompleteTerminal).await;
+    let mut incomplete_a = start_controlled_upstream(ProviderMode::NonTerminalAttempt).await;
+    let mut incomplete_b = start_controlled_upstream(ProviderMode::NonTerminalAttempt).await;
     let ports = ChatPorts::allocate();
     let config = write_chat_config(&ports, &success, Some(&incomplete_a), Some(&incomplete_b));
     let client = reqwest::Client::new();
@@ -538,15 +549,15 @@ async fn chat_direct_incomplete_provider_terminal_breaks_client_transport() {
 }
 
 /// The same boundary on the cross-protocol lane: the chat entry relays to a
-/// `responses`-type provider whose terminal is incomplete. The client transport
-/// must break rather than receive the provider-derived frame.
+/// `responses`-type provider whose stream never reaches a terminal frame. The
+/// client transport must break rather than receive the provider-derived frame.
 #[tokio::test]
 async fn chat_relay_cross_protocol_incomplete_provider_terminal_breaks_client_transport() {
     let mut success = start_controlled_responses_upstream(ProviderMode::Success).await;
     let mut incomplete_a =
-        start_controlled_responses_upstream(ProviderMode::IncompleteTerminal).await;
+        start_controlled_responses_upstream(ProviderMode::NonTerminalAttempt).await;
     let mut incomplete_b =
-        start_controlled_responses_upstream(ProviderMode::IncompleteTerminal).await;
+        start_controlled_responses_upstream(ProviderMode::NonTerminalAttempt).await;
     let ports = ChatPorts::allocate();
     let config = write_chat_config_for_provider_type(
         &ports,
@@ -678,12 +689,21 @@ async fn controlled_chat_upstream(
                 r#"{"id":"chat_json","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}"#,
             ))
             .unwrap(),
-        ProviderMode::IncompleteTerminal => Response::builder()
+        ProviderMode::NonTerminalAttempt
+            if parsed.get("stream").and_then(Value::as_bool) == Some(true) =>
+        {
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "text/event-stream")
+                .body(Body::from(
+                    "data: {\"id\":\"chat_partial\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"wire-partial\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\n",
+                ))
+                .unwrap()
+        }
+        ProviderMode::NonTerminalAttempt => Response::builder()
             .status(StatusCode::OK)
             .header("content-type", "application/json")
-            .body(Body::from(
-                r#"{"id":"chat_incomplete","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"partial"},"finish_reason":"content_filter"}]}"#,
-            ))
+            .body(Body::from(r#"{"id":"chat_partial","object":"chat.completion","choices":["#))
             .unwrap(),
         ProviderMode::RateLimited => Response::builder()
             .status(StatusCode::TOO_MANY_REQUESTS)
