@@ -7,6 +7,11 @@ use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc, RwLock, RwLockWriteGuard};
 
+#[cfg(test)]
+thread_local! {
+    static TEST_SPAWN_FAILURE: std::cell::Cell<Option<String>> = const { std::cell::Cell::new(None) };
+}
+
 const V3_PROVIDER_HEALTH_PERSISTENCE_QUEUE_CAPACITY: usize = 32;
 const MAX_PROVIDER_COOLDOWN_MS: u64 = 5 * 60 * 60_000;
 
@@ -45,9 +50,7 @@ impl V3ProviderHealthPersistenceTicket {
 
 impl V3ProviderHealthPersistenceWriter {
     fn start(coordinator: V3ProviderCooldownCoordinator) -> Result<Self, String> {
-        Self::start_with_spawn(coordinator, |name, work| {
-            std::thread::Builder::new().name(name).spawn(work)
-        })
+        Self::start_with_spawn(coordinator, spawn_health_persistence_thread)
     }
 
     fn start_with_spawn(
@@ -159,6 +162,17 @@ impl V3ProviderHealthPersistenceWriter {
     }
 }
 
+fn spawn_health_persistence_thread(
+    name: String,
+    work: Box<dyn FnOnce() + Send + 'static>,
+) -> std::io::Result<std::thread::JoinHandle<()>> {
+    #[cfg(test)]
+    if let Some(message) = TEST_SPAWN_FAILURE.with(std::cell::Cell::take) {
+        return Err(std::io::Error::other(message));
+    }
+    std::thread::Builder::new().name(name).spawn(work)
+}
+
 impl V3ProviderHealthPersistenceWriter {
     fn disabled(message: String) -> Self {
         let (sender, _receiver) = mpsc::sync_channel(V3_PROVIDER_HEALTH_PERSISTENCE_QUEUE_CAPACITY);
@@ -177,26 +191,6 @@ pub(super) fn start_provider_health_persistence(
     V3ProviderHealthPersistenceWriter,
     V3ProviderCooldownPersistenceEntries,
 )> {
-    start_provider_health_persistence_with_writer(
-        manifest,
-        persistence_path,
-        legacy_persistence_path,
-        V3ProviderHealthPersistenceWriter::start,
-    )
-}
-
-fn start_provider_health_persistence_with_writer<F>(
-    manifest: &V3Config05ManifestPublished,
-    persistence_path: Option<PathBuf>,
-    legacy_persistence_path: Option<PathBuf>,
-    start_writer: F,
-) -> Option<(
-    V3ProviderHealthPersistenceWriter,
-    V3ProviderCooldownPersistenceEntries,
-)>
-where
-    F: FnOnce(V3ProviderCooldownCoordinator) -> Result<V3ProviderHealthPersistenceWriter, String>,
-{
     let path = persistence_path?;
     let mut coordinator =
         match load_provider_cooldown_coordinator(manifest, path, legacy_persistence_path) {
@@ -220,7 +214,7 @@ where
         ));
     }
     let entries = coordinator.persisted_entries();
-    match start_writer(coordinator) {
+    match V3ProviderHealthPersistenceWriter::start(coordinator) {
         Ok(writer) => Some((writer, entries)),
         Err(error) => Some((disabled_persistence_writer(error), entries)),
     }
@@ -790,18 +784,11 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
             )
             .expect("seed persisted cooldown");
         let manifest = manifest("s", "127.0.0.1", 1);
+        TEST_SPAWN_FAILURE
+            .with(|failure| failure.set(Some("injected writer start failure".to_string())));
 
-        let (writer, entries) = start_provider_health_persistence_with_writer(
-            &manifest,
-            Some(path),
-            None,
-            |coordinator| {
-                V3ProviderHealthPersistenceWriter::start_with_spawn(coordinator, |_name, _work| {
-                    Err(std::io::Error::other("injected writer start failure"))
-                })
-            },
-        )
-        .expect("spawn failure must degrade provider health persistence");
+        let (writer, entries) = start_provider_health_persistence(&manifest, Some(path), None)
+            .expect("spawn failure must degrade provider health persistence");
 
         assert_eq!(
             entries.len(),
@@ -814,5 +801,6 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
             .contains("provider health persistence writer start failed"));
         writer.enqueue(Vec::new());
         assert!(writer.flush_snapshot(Vec::new()).is_err());
+        assert!(TEST_SPAWN_FAILURE.with(std::cell::Cell::take).is_none());
     }
 }
