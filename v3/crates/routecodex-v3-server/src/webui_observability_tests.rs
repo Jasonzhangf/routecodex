@@ -938,22 +938,25 @@ fn relay_lane_absence_marker_survives_when_no_typed_projection_exists() {
 }
 
 #[test]
-fn persistence_writer_start_failure_raises_alarm_instead_of_panicking() {
-    // A failed spawn drops the receive side; the writer must degrade to the
-    // persistence alarm instead of unwrapping the thread at listener startup.
-    let (sender, receiver) = mpsc::sync_channel(V3_WEBUI_PERSISTENCE_QUEUE_CAPACITY);
-    drop(receiver);
-    let alarm = Arc::new(RwLock::new(None));
-    let writer = V3WebuiObservabilityPersistenceWriter::after_spawn(
-        sender,
-        Arc::clone(&alarm),
-        Err(std::io::Error::other("injected writer start failure")),
-    );
+fn startup_writer_spawn_failure_raises_alarm_instead_of_panicking() {
+    // Force the real spawn inside V3WebuiObservabilityPersistenceWriter::start to
+    // fail, then enter through the listener startup path
+    // (V3WebuiObservability::load_persisted -> with_persistence_path -> start) so
+    // the regression covers the boundary that panicked, not just the seam.
+    let path = std::env::temp_dir().join(format!(
+        "v3-webui-records-spawn-failure-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos()
+    ));
+    set_v3_webui_force_writer_spawn_failure();
 
-    let failure = alarm
-        .read()
-        .expect("observability alarm lock")
-        .clone()
+    let observability = V3WebuiObservability::load_persisted(&path);
+
+    let failure = observability
+        .alarm()
         .expect("a failed writer start must raise the persistence alarm");
     assert!(
         failure.contains("observability persistence writer start failed"),
@@ -962,6 +965,14 @@ fn persistence_writer_start_failure_raises_alarm_instead_of_panicking() {
 
     // The listener keeps serving: append and flush fail loudly instead of
     // unwrapping the writer thread.
-    writer.enqueue(V3ObsRequestRow::default());
-    assert!(writer.flush().is_err());
+    record_observed(
+        &observability,
+        V3ObsEventType::Started,
+        "spawn-failure-row",
+        scope(4444),
+        meta_with_full("req-spawn-failure"),
+        &crate::V3RuntimeObservability::default(),
+    )
+    .expect("an advisory persistence failure must not fail the projection");
+    assert!(observability.flush_persistence().is_err());
 }

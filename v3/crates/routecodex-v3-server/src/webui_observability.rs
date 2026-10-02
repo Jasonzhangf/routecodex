@@ -573,6 +573,23 @@ impl V3WebuiObservabilityPersistenceWriter {
     fn start(path: PathBuf, alarm: Arc<RwLock<Option<String>>>) -> Self {
         let (sender, receiver) = mpsc::sync_channel(V3_WEBUI_PERSISTENCE_QUEUE_CAPACITY);
         let writer_alarm = Arc::clone(&alarm);
+        let spawned = Self::spawn_writer(path, receiver, writer_alarm);
+        Self::after_spawn(sender, alarm, spawned)
+    }
+
+    fn spawn_writer(
+        path: PathBuf,
+        receiver: mpsc::Receiver<V3WebuiObservabilityPersistenceCommand>,
+        writer_alarm: Arc<RwLock<Option<String>>>,
+    ) -> std::io::Result<std::thread::JoinHandle<()>> {
+        #[cfg(test)]
+        {
+            if take_v3_webui_force_writer_spawn_failure() {
+                return Err(std::io::Error::other(
+                    "injected observability persistence writer start failure",
+                ));
+            }
+        }
         let spawned = std::thread::Builder::new()
             .name("v3-webui-observability-writer".to_string())
             .spawn(move || {
@@ -605,7 +622,7 @@ impl V3WebuiObservabilityPersistenceWriter {
                     }
                 }
             });
-        Self::after_spawn(sender, alarm, spawned)
+        spawned
     }
 
     fn after_spawn(
@@ -655,6 +672,26 @@ fn set_v3_webui_observability_alarm(alarm: &RwLock<Option<String>>, message: Str
     if let Ok(mut alarm) = alarm.write() {
         *alarm = Some(message);
     }
+}
+
+// Test-only fault injection: a real thread spawn only fails under OS resource
+// exhaustion, so tests force the failure to exercise the listener startup path
+// without exhausting the process. The flag is thread-local and consumed once, so
+// it never leaks into another test's writer.
+#[cfg(test)]
+thread_local! {
+    static V3_WEBUI_FORCE_WRITER_SPAWN_FAILURE: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+fn set_v3_webui_force_writer_spawn_failure() {
+    V3_WEBUI_FORCE_WRITER_SPAWN_FAILURE.with(|flag| flag.set(true));
+}
+
+#[cfg(test)]
+fn take_v3_webui_force_writer_spawn_failure() -> bool {
+    V3_WEBUI_FORCE_WRITER_SPAWN_FAILURE.with(|flag| flag.replace(false))
 }
 
 impl Default for V3WebuiObservability {
