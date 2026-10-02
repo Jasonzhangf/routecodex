@@ -7,6 +7,7 @@ use crate::transport::{
 use crate::wire::{
     build_v3_provider_12_responses_wire_payload, V3ResponsesProviderTarget, V3ResponsesStreamIntent,
 };
+use routecodex_v3_config::V3ResponsesTransportKind;
 
 pub fn build_v3_provider_global_probe_request(
     target: V3ResponsesProviderTarget,
@@ -43,6 +44,11 @@ pub fn build_v3_provider_global_probe_request(
         other => return Err(format!("unsupported provider probe protocol {other}")),
     };
     if provider_type == "responses" {
+        let mut target = target;
+        // Provider probes are HTTP status-only. A websocket_v2 target's
+        // protocol terminal event is intentionally not a probe condition.
+        target.responses_transport = V3ResponsesTransportKind::Http;
+        target.websocket_v2_url = None;
         let wire = build_v3_provider_12_responses_wire_payload(request_id, target, body)
             .map_err(|error| error.to_string())?;
         return build_v3_transport_13_responses_http_request_from_v3_provider_12(wire)
@@ -97,7 +103,6 @@ pub fn build_v3_provider_global_probe_request(
 mod tests {
     use super::*;
     use crate::{V3ProviderAuthHandle, V3ProviderAuthSecretHandle};
-    use routecodex_v3_config::V3ResponsesTransportKind;
     use std::collections::BTreeMap;
 
     #[test]
@@ -135,6 +140,42 @@ mod tests {
                 .any(|header| header.name() == "x-openai-actor-authorization"
                     && header.value() == "local-image-extension"),
             "provider authoring headers must reach non-responses cooldown probe requests"
+        );
+    }
+
+    #[test]
+    fn responses_probe_forces_http_status_only_for_websocket_target() {
+        let target = V3ResponsesProviderTarget {
+            provider_id: "ws-provider".into(),
+            provider_type: "responses".into(),
+            base_url: "https://provider.example/v1".into(),
+            canonical_model_id: "model".into(),
+            wire_model: "model".into(),
+            compatibility_profile: None,
+            headers: BTreeMap::new(),
+            auth: V3ProviderAuthHandle {
+                alias: "key1".into(),
+                secret: V3ProviderAuthSecretHandle::ApiKey("sk-test".into()),
+            },
+            responses_transport: V3ResponsesTransportKind::WebsocketV2,
+            websocket_v2_url: Some("wss://provider.example/v1/responses".into()),
+            provider_request_cleanup: Default::default(),
+            request_timeout_ms: 120_000,
+            sse_first_frame_timeout_ms: None,
+            initial_concurrency_budget: 8,
+            concurrency_acquire_timeout_ms: 60_000,
+        };
+        let request = build_v3_provider_global_probe_request(target, "probe-ws".into())
+            .expect("websocket provider probe builds an HTTP status-only request");
+        assert!(
+            matches!(
+                request.kind,
+                crate::transport::V3Transport13ResponsesRequestKind::Http {
+                    status_only: true,
+                    ..
+                }
+            ),
+            "websocket_v2 provider probe must use HTTP status-only transport"
         );
     }
 }
