@@ -223,11 +223,12 @@ if (clientSseProjectionStart < 0 || clientSseProjectionEnd < 0) {
 }
 // 整个 Responses 客户端帧 owner 文件都不允许出现非协议终止帧：新增的
 // client-frame helper 也必须受约束，不能因为切片边界而逃过门禁。注释里可以
-// 说明被禁止的协议终止符，因此这里只在去掉行注释后的代码视图上判定。
+// 说明被禁止的协议终止符，因此这里只在去掉注释后的代码视图上判定。
+// `data:` 后的空白不固定，`data:[DONE]` / `data:  [DONE]` 同样是合法 SSE 编码。
 forbid(
   stripRustComments(text.responsesRelayRuntime),
   files.responsesRelayRuntime,
-  /"response\.done"|data: \[DONE\]/,
+  /"response\.done"|data:\s*\[DONE\]/,
   'non-Responses client SSE terminator (response.done / [DONE]) in the Responses client framing owner',
 );
 {
@@ -251,7 +252,7 @@ forbid(
     forbid(
       responsesErrorChunk,
       files.serverFrameBuilders,
-      /data: \[DONE\]/,
+      /data:\s*\[DONE\]/,
       'Chat-completions [DONE] terminator on the Responses client SSE error path',
     );
   }
@@ -404,13 +405,23 @@ function rustCharLiteralLength(source, index) {
   return source[cursor] === "'" ? cursor + 1 - index : 0;
 }
 
+// Rust raw 字符串前缀 `r"` / `r#"` / `r##"`…，哈希数可达 255。必须按实际
+// 哈希数量判定，固定窗口会在 >=11 个 `#` 时误判成普通字符串，从而把后续
+// 真实违规当作注释清掉（fail-open）。
+function rustRawStringOpenLength(source, index) {
+  if (source[index] !== 'r') return 0;
+  let cursor = index + 1;
+  while (source[cursor] === '#') cursor += 1;
+  if (source[cursor] !== '"') return 0;
+  return cursor + 1 - index;
+}
+
 function stripRustComments(source) {
-  // 就地构造，避免依赖函数外的 `const`（顶层门禁逻辑在该 `const` 初始化前调用本函数）。
-  const rawStringOpen = /^r(#*)"/;
   let out = '';
   let index = 0;
   let state = 'code';
   let rawStringHashes = '';
+  let blockCommentDepth = 0;
   while (index < source.length) {
     const char = source[index];
     const next = source[index + 1];
@@ -422,15 +433,17 @@ function stripRustComments(source) {
       }
       if (char === '/' && next === '*') {
         state = 'blockComment';
+        blockCommentDepth = 1;
         index += 2;
         continue;
       }
-      const rawMatch = rawStringOpen.exec(source.slice(index, index + 12));
-      if (rawMatch) {
-        rawStringHashes = rawMatch[1];
+      const rawOpenLength = rustRawStringOpenLength(source, index);
+      if (rawOpenLength > 0) {
+        const prefix = source.slice(index, index + rawOpenLength);
+        rawStringHashes = prefix.slice(1, -1);
         // 保留 `r#"` 前缀，使 raw 字符串内容保持可见。
-        out += rawMatch[0];
-        index += rawMatch[0].length;
+        out += prefix;
+        index += rawOpenLength;
         state = 'rawString';
         continue;
       }
@@ -464,9 +477,17 @@ function stripRustComments(source) {
       continue;
     }
     if (state === 'blockComment') {
-      if (char === '*' && next === '/') {
-        state = 'code';
+      // Rust 块注释可嵌套；只在深度归零时结束，否则内层 `*/` 会提前关闭
+      // 注释并把后续说明文字当成代码判定（false positive）。
+      if (char === '/' && next === '*') {
+        blockCommentDepth += 1;
         index += 2;
+        continue;
+      }
+      if (char === '*' && next === '/') {
+        blockCommentDepth -= 1;
+        index += 2;
+        if (blockCommentDepth === 0) state = 'code';
         continue;
       }
       if (char === '\n') out += char;

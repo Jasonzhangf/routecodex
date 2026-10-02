@@ -846,21 +846,26 @@ async fn client_sse_completed_response_projects_output_text_items_to_message_sha
         text.contains("event: response.in_progress"),
         "response.in_progress frame must be present: {text}"
     );
-    let created = text
-        .find("event: response.created")
-        .map(|index| &text[index..])
-        .expect("response.created frame must be present");
+    let created_frame = {
+        let rest = text
+            .find("event: response.created")
+            .map(|index| &text[index..])
+            .expect("response.created frame must be present");
+        // 截到该 SSE 帧结束（空行）；只截首个换行会退化成 `event:` 行而永真。
+        &rest[..rest.find("\n\n").unwrap_or(rest.len())]
+    };
     assert!(
-        created.contains(r#""status":"in_progress""#) && created.contains(r#""output":[]"#),
-        "response.created must carry an in-progress snapshot with empty output: {created}"
+        created_frame.contains(r#""status":"in_progress""#)
+            && created_frame.contains(r#""output":[]"#),
+        "response.created must carry an in-progress snapshot with empty output: {created_frame}"
     );
-    // in-progress 快照不得携带只在终态成立的字段（usage / incomplete_details）。
-    let created_frame = &created[..created.find('\n').unwrap_or(created.len())];
-    assert!(!created_frame.contains(r#""usage":{"#), "{created_frame}");
-    assert!(
-        !created_frame.contains(r#""incomplete_details":{"#),
-        "{created_frame}"
-    );
+    // in-progress 快照必须以 null 显式表达终态字段尚未产生，而不是省略或填充。
+    for absent in [r#""usage":{"#, r#""incomplete_details":{"#] {
+        assert!(!created_frame.contains(absent), "{created_frame}");
+    }
+    for present in [r#""usage":null"#, r#""incomplete_details":null"#] {
+        assert!(created_frame.contains(present), "{created_frame}");
+    }
 }
 
 #[tokio::test]
