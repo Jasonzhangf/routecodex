@@ -137,7 +137,7 @@ client usage**。当前 active config 无 Gemini provider，该格不可达；�
 | console 第三份命中率规则 | `routecodex-v3-server/src/console/impl_display.rs:46-72` | `split_v3_canonical_usage_cache` |
 | timeseries 桶级二次分类 | `routecodex-v3-admin/src/api/timeseries.rs`（改为逐行累加 canonical） | `split_v3_canonical_usage_cache` |
 | timeseries 旧 read/cached 回退 | `routecodex-v3-admin/src/api/timeseries.rs`（`row_cache_read` 已删） | 同上 |
-| observability 命中率规则 | `routecodex-v3-admin/src/api/observability.rs:689-707` | `row_canonical_usage_cache` → 同上 |
+| observability 命中率规则 | `routecodex-v3-admin/src/api/observability.rs:697-715` | `row_canonical_usage_cache` → 同上 |
 
 **未收敛（合法不同契约，非重复分类）**：`extract_v3_console_usage_summary`
 （`console/impl_display.rs:126-182`）**未**改为调用共享规则——它是**字段提取/别名表**，
@@ -150,7 +150,7 @@ v2 文档曾把该提取器写成"已收敛到 `split_v3_canonical_usage_cache`"
 `webui_observability.rs:531-543`、`TimeseriesRow.usage`），Value 级 reader
 `read_v3_canonical_usage_cache_fields` 只读嵌套 `*_details.cached_tokens` + 顶层
 `cache_read/creation` + `cachedContentTokenCount`，**不读扁平 `cached_tokens`**。因此扁平消费方
-直接调用 `split_v3_canonical_usage_cache(input, cached, read, creation)`（`observability.rs:689-707`
+直接调用 `split_v3_canonical_usage_cache(input, cached, read, creation)`（`observability.rs:697-715`
 `row_canonical_usage_cache`、`console/impl_display.rs:49-57`、`timeseries.rs` 逐行累加点），
 而不是 `canonical_usage_cache_for_value`。这是同一分类规则的两种入参形状，不是第二规则。
 
@@ -190,7 +190,7 @@ Anthropic 行同样会低估分母；但属 webui 展示面，需 `verify:webui-
 | `anthropic_relay_runtime_integration.rs:539-541` | Anthropic client `usage.total_tokens == 21` | 输入 `{input_tokens:13,output_tokens:8,total_tokens:21}` **无缓存字段**，新输出为 `{input_tokens:13,output_tokens:8}`：无 `total_tokens`、无 `input_tokens_details`，也**不产生** `cache_read_input_tokens` |
 | `timeseries.rs:478`（断言在 `:516`） | 期望 `Some(70.0)`（input=1000/read=700/creation=200） | 期望 `Some(36.8)`（700/1900） |
 | `timeseries.rs` 新增混桶单测 | — | `timeseries_mixed_semantics_bucket_accumulates_canonical_per_row`（850/2500） |
-| `observability.rs:1327-1377` | 命中率单测 | 按共享规则复核 |
+| `observability.rs:1335-1385`（`openai_cached_subcount_keeps_raw_input_as_denominator` / `split_anthropic_cache_fields_keep_read_and_creation_distinct` / `split_cache_read_zero_does_not_use_creation_as_hit`） | 命中率单测 | 按共享规则复核 |
 | `usage_normalization.rs` 新增单测 | — | `projections_skip_usage_without_recognizable_tokens`、`responses_projection_skips_total_only_usage_instead_of_zeroing_it` |
 | console 测试 `routecodex-v3-server/src/tests/mod.rs:1312-1332` | 分母 101826 | 改为 101833（59842+41984+7，含 creation）；`:3152` 同批复核 |
 
