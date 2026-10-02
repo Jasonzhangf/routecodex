@@ -635,6 +635,7 @@ impl V3WebuiObservabilityPersistenceWriter {
             // cannot start, every append/flush fails the channel and is surfaced
             // through the persistence alarm instead of crashing the listener at
             // startup. Persisted observability is advisory, not business truth.
+            eprintln!("[RouteCodexV3] webui observability persistence disabled: {error}");
             set_v3_webui_observability_alarm(
                 &alarm,
                 format!("observability persistence writer start failed: {error}"),
@@ -670,7 +671,9 @@ impl V3WebuiObservabilityPersistenceWriter {
 
 fn set_v3_webui_observability_alarm(alarm: &RwLock<Option<String>>, message: String) {
     if let Ok(mut alarm) = alarm.write() {
-        *alarm = Some(message);
+        if alarm.is_none() {
+            *alarm = Some(message);
+        }
     }
 }
 

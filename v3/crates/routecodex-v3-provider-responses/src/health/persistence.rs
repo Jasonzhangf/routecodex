@@ -44,18 +44,11 @@ impl V3ProviderHealthPersistenceTicket {
 }
 
 impl V3ProviderHealthPersistenceWriter {
-    fn start(coordinator: V3ProviderCooldownCoordinator) -> Self {
-        Self::start_with_alarm(coordinator, None)
-    }
-
-    fn start_with_alarm(
-        mut coordinator: V3ProviderCooldownCoordinator,
-        initial_alarm: Option<String>,
-    ) -> Self {
+    fn start(mut coordinator: V3ProviderCooldownCoordinator) -> Result<Self, String> {
         let (sender, receiver) = mpsc::sync_channel(V3_PROVIDER_HEALTH_PERSISTENCE_QUEUE_CAPACITY);
-        let alarm = Arc::new(RwLock::new(initial_alarm));
+        let alarm = Arc::new(RwLock::new(None));
         let writer_alarm = Arc::clone(&alarm);
-        if let Err(error) = std::thread::Builder::new()
+        std::thread::Builder::new()
             .name("v3-provider-health-persistence".to_string())
             .spawn(move || {
                 let mut persisted_entries = coordinator.persisted_entries();
@@ -107,16 +100,8 @@ impl V3ProviderHealthPersistenceWriter {
                     }
                 }
             })
-        {
-            // The writer thread is the only owner of the receive side. Without it
-            // every update fails the queue send and is surfaced through the
-            // persistence alarm instead of crashing the startup process.
-            set_persistence_alarm(
-                &alarm,
-                format!("provider health persistence writer start failed: {error}"),
-            );
-        }
-        Self { sender, alarm }
+            .map_err(|error| format!("provider health persistence writer start failed: {error}"))?;
+        Ok(Self { sender, alarm })
     }
 
     fn enqueue(&self, entries: V3ProviderCooldownPersistenceEntries) {
@@ -156,6 +141,16 @@ impl V3ProviderHealthPersistenceWriter {
     }
 }
 
+impl V3ProviderHealthPersistenceWriter {
+    fn disabled(message: String) -> Self {
+        let (sender, _receiver) = mpsc::sync_channel(V3_PROVIDER_HEALTH_PERSISTENCE_QUEUE_CAPACITY);
+        Self {
+            sender,
+            alarm: Arc::new(RwLock::new(Some(message))),
+        }
+    }
+}
+
 pub(super) fn start_provider_health_persistence(
     manifest: &V3Config05ManifestPublished,
     persistence_path: Option<PathBuf>,
@@ -164,39 +159,38 @@ pub(super) fn start_provider_health_persistence(
     V3ProviderHealthPersistenceWriter,
     V3ProviderCooldownPersistenceEntries,
 )> {
-    persistence_path.map(|path| {
-        let mut alarm = None;
-        // Provider health is advisory state, not business truth: a persisted file
-        // that cannot be read (unreadable, corrupt, or written by a schema this
-        // build does not accept) must not crash the startup process. Start from a
-        // fresh coordinator at the same path and surface the failure through the
-        // persistence alarm; the next write replaces the unreadable file.
-        let mut coordinator = match load_provider_cooldown_coordinator(
-            manifest,
-            path.clone(),
-            legacy_persistence_path,
-        ) {
+    let path = persistence_path?;
+    let mut coordinator =
+        match load_provider_cooldown_coordinator(manifest, path, legacy_persistence_path) {
             Ok(coordinator) => coordinator,
             Err(error) => {
-                alarm = Some(format!(
-                    "provider cooldown persistence load failed: {error}"
-                ));
-                V3ProviderCooldownCoordinator::new(path, MAX_PROVIDER_COOLDOWN_MS)
+                return Some((
+                    disabled_persistence_writer(format!(
+                        "provider cooldown persistence load failed: {error}"
+                    )),
+                    Vec::new(),
+                ))
             }
         };
-        if let Err(error) = coordinator.reset_probe_schedule_for_startup() {
-            let reset = format!("provider cooldown startup probe reset failed: {error}");
-            alarm = Some(match alarm {
-                Some(existing) => format!("{existing}; {reset}"),
-                None => reset,
-            });
-        }
+    if let Err(error) = coordinator.reset_probe_schedule_for_startup() {
         let entries = coordinator.persisted_entries();
-        (
-            V3ProviderHealthPersistenceWriter::start_with_alarm(coordinator, alarm),
+        return Some((
+            disabled_persistence_writer(format!(
+                "provider cooldown startup probe reset failed: {error}"
+            )),
             entries,
-        )
-    })
+        ));
+    }
+    let entries = coordinator.persisted_entries();
+    match V3ProviderHealthPersistenceWriter::start(coordinator) {
+        Ok(writer) => Some((writer, entries)),
+        Err(error) => Some((disabled_persistence_writer(error), entries)),
+    }
+}
+
+fn disabled_persistence_writer(error: String) -> V3ProviderHealthPersistenceWriter {
+    eprintln!("[RouteCodexV3] provider cooldown persistence disabled: {error}");
+    V3ProviderHealthPersistenceWriter::disabled(error)
 }
 
 fn load_provider_cooldown_coordinator(
@@ -394,7 +388,9 @@ impl V3ProviderHealthStore {
 
 fn set_persistence_alarm(alarm: &RwLock<Option<String>>, message: String) {
     if let Ok(mut alarm) = alarm.write() {
-        *alarm = Some(message);
+        if alarm.is_none() {
+            *alarm = Some(message);
+        }
     }
 }
 
@@ -534,7 +530,8 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
         let writer = V3ProviderHealthPersistenceWriter::start(V3ProviderCooldownCoordinator::new(
             path.clone(),
             60_000,
-        ));
+        ))
+        .expect("start persistence writer");
         let store = V3ProviderHealthStore {
             state: Arc::new(RwLock::new(V3ProviderHealthState {
                 persistence: Some(writer),
@@ -598,7 +595,8 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
                 crate::global_cooldown::V3ProviderCooldownObservation::default(),
             )
             .expect("seed auth cooldown");
-        let writer = V3ProviderHealthPersistenceWriter::start(coordinator);
+        let writer = V3ProviderHealthPersistenceWriter::start(coordinator)
+            .expect("start persistence writer");
         let store = V3ProviderHealthStore {
             state: Arc::new(RwLock::new(V3ProviderHealthState {
                 persistence: Some(writer),
@@ -647,7 +645,8 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
         let writer = V3ProviderHealthPersistenceWriter::start(V3ProviderCooldownCoordinator::new(
             root.clone(),
             60_000,
-        ));
+        ))
+        .expect("start persistence writer");
         let store = V3ProviderHealthStore {
             state: Arc::new(RwLock::new(V3ProviderHealthState {
                 persistence: Some(writer),
@@ -682,15 +681,16 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
     }
 
     #[test]
-    fn unsupported_provider_cooldown_schema_starts_with_an_alarm_instead_of_panicking() {
+    fn unsupported_provider_cooldown_schema_disables_persistence_without_overwriting() {
         let root = tempfile::tempdir().expect("create isolated persistence directory");
         let path = root.path().join("provider-cooldowns.json");
-        std::fs::write(&path, br#"{"schema_version": 99, "entries": []}"#)
-            .expect("write unsupported cooldown state");
+        let contents = br#"{"schema_version": 3, "entries": []}"#;
+        std::fs::write(&path, contents).expect("write unsupported cooldown state");
         let manifest = manifest("s", "127.0.0.1", 1);
 
-        let (writer, entries) = start_provider_health_persistence(&manifest, Some(path), None)
-            .expect("an unreadable cooldown state must not stop provider health persistence");
+        let (writer, entries) =
+            start_provider_health_persistence(&manifest, Some(path.clone()), None)
+                .expect("an unreadable cooldown state must not stop provider health persistence");
 
         assert!(
             entries.is_empty(),
@@ -704,23 +704,35 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
             "{alarm}"
         );
         assert!(
-            alarm.contains("unsupported provider cooldown state schema 99"),
+            alarm.contains("unsupported provider cooldown state schema 3"),
             "{alarm}"
         );
+        assert_eq!(std::fs::read(&path).expect("read original state"), contents);
+
+        writer.enqueue(Vec::new());
+        assert!(writer.flush_snapshot(Vec::new()).is_err());
+        assert_eq!(std::fs::read(path).expect("read original state"), contents);
+        assert!(writer
+            .alarm()
+            .expect("disabled persistence must retain its first failure")
+            .contains("unsupported provider cooldown state schema 3"));
     }
 
     #[test]
-    fn corrupt_provider_cooldown_state_starts_with_an_alarm_instead_of_panicking() {
+    fn corrupt_provider_cooldown_state_disables_persistence_without_overwriting() {
         let root = tempfile::tempdir().expect("create isolated persistence directory");
         let path = root.path().join("provider-cooldowns.json");
-        std::fs::write(&path, b"{not json").expect("write corrupt cooldown state");
+        let contents = b"{not json";
+        std::fs::write(&path, contents).expect("write corrupt cooldown state");
         let manifest = manifest("s", "127.0.0.1", 1);
 
-        let (writer, entries) = start_provider_health_persistence(&manifest, Some(path), None)
-            .expect("a corrupt cooldown state must not stop provider health persistence");
+        let (writer, entries) =
+            start_provider_health_persistence(&manifest, Some(path.clone()), None)
+                .expect("a corrupt cooldown state must not stop provider health persistence");
 
         assert!(entries.is_empty());
         let alarm = writer.alarm().expect("persistence alarm");
         assert!(alarm.contains("decode provider cooldown state"), "{alarm}");
+        assert_eq!(std::fs::read(path).expect("read original state"), contents);
     }
 }
