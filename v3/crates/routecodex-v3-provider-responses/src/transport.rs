@@ -1080,41 +1080,11 @@ impl ProviderResponsesTransport {
         let headers = collect_response_headers(response.headers());
         let response_content_type = content_type(response.headers());
         if status >= 400 {
-            let body = match read_response_body_bytes(
-                response,
-                &request_id,
-                &provider_id,
-                cancellation.clone(),
-            )
-            .await
-            {
-                Ok(body) => body,
-                Err(V3ProviderError::ClientDisconnect {
-                    request_id: client_request_id,
-                    provider_id: client_provider_id,
-                }) => {
-                    return Err(V3ProviderError::ClientDisconnect {
-                        request_id: client_request_id,
-                        provider_id: client_provider_id,
-                    });
-                }
-                Err(V3ProviderError::ResponseBody { reason, .. }) => {
-                    // 错误 body 读取失败不允许静默空化：把读失败原因并入
-                    // HttpStatus 错误，客户端/错误链仍能看到原始 provider status
-                    // 与 body 读取失败原因，而不是一个无 detail 的空错误体。
-                    return Err(V3ProviderError::HttpStatus {
-                        response: Box::new(V3ProviderHttpFailure {
-                            request_id,
-                            provider_id,
-                            status,
-                            headers,
-                            body: Vec::new(),
-                            body_read_failure: Some(reason),
-                        }),
-                    });
-                }
-                Err(other) => return Err(other),
-            };
+            // `read_response_body_bytes` already carries the received status and
+            // any read failure reason into its own typed error.
+            let body =
+                read_response_body_bytes(response, &request_id, &provider_id, cancellation.clone())
+                    .await?;
             return Err(V3ProviderError::HttpStatus {
                 response: Box::new(V3ProviderHttpFailure {
                     request_id,

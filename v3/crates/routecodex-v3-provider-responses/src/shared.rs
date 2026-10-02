@@ -204,7 +204,10 @@ pub(crate) fn validated_sse_stream(
                 Some(Err(error)) => {
                     state.ended = true;
                     return Some((
-                        Err(V3ProviderError::ResponseBody {
+                        // A stream read failure after a 2xx is a network
+                        // transport failure, not a response-body failure: it
+                        // must not project as a response-stage 599.
+                        Err(V3ProviderError::Transport {
                             request_id: state.request_id.clone(),
                             provider_id: state.provider_id.clone(),
                             reason: format_v3_provider_transport_error(&error),
@@ -228,18 +231,10 @@ fn map_sse_transport_error(
             request_id: request_id.to_string(),
             provider_id: provider_id.to_string(),
         },
-        // A failed upstream read and a read timeout are network transport
-        // failures, not response-body or SSE framing failures: they must not
-        // project as a response-stage 599.
-        SseTransportError::UpstreamRead { message } => V3ProviderError::Transport {
+        SseTransportError::UpstreamRead { message } => V3ProviderError::ResponseBody {
             request_id: request_id.to_string(),
             provider_id: provider_id.to_string(),
             reason: message,
-        },
-        SseTransportError::Timeout { timeout } => V3ProviderError::Transport {
-            request_id: request_id.to_string(),
-            provider_id: provider_id.to_string(),
-            reason: format!("SSE transport timed out after {timeout:?}"),
         },
         other => V3ProviderError::MalformedSse {
             request_id: request_id.to_string(),
