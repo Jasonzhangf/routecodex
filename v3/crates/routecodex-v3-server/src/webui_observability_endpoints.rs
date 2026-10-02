@@ -192,8 +192,11 @@ pub(crate) struct ProbeCooldownRequest {
 /// This only advances the existing probe schedule for the identity. The probe
 /// itself is still executed by the runtime's own probe loop through the same
 /// provider wire a scheduled probe uses, so a manual click cannot bypass the
-/// ladder or run a probe the runtime would refuse. `scheduled=false` means the
-/// identity has no probe state and is a successful no-op, not an error.
+/// provider wire. The schedule already decouples `next_probe_at_ms` from
+/// `blocked_until_ms`, so this deliberately makes the probe due before the
+/// cooldown deadline: a successful probe then releases the cooldown early, which
+/// is the point of the action. `scheduled=false` means the identity has no probe
+/// state and is a successful no-op, not an error.
 pub(crate) async fn probe_cooldown(
     State(state): State<Arc<V3ListenerState>>,
     ConnectInfo(remote): ConnectInfo<SocketAddr>,
