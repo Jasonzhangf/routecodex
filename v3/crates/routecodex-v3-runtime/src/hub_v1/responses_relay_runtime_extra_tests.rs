@@ -1082,21 +1082,16 @@ data: {"type":"message_stop"}
         response["output"][0]["content"][0]["text"],
         "duplicate start tolerated"
     );
-    // Anthropic provider usage carries the uncached increment separately:
-    // the Responses client wire must fold cache reads into `input_tokens`,
-    // expose them as the `input_tokens_details.cached_tokens` sub-count, and
-    // must not leak the Anthropic-private field.
-    assert_eq!(response["usage"]["input_tokens"], 12);
-    assert_eq!(response["usage"]["output_tokens"], 3);
-    assert_eq!(response["usage"]["total_tokens"], 15);
-    assert_eq!(
-        response["usage"]["input_tokens_details"]["cached_tokens"],
-        5
-    );
-    assert!(response["usage"].get("cache_read_input_tokens").is_none());
-    assert!(response["usage"]
-        .get("cache_creation_input_tokens")
-        .is_none());
+    // Anthropic provider usage folds cache reads into the Responses client
+    // `input_tokens`, exposes `input_tokens_details.cached_tokens`, and must not
+    // leak the Anthropic-private cache fields.
+    let usage = &response["usage"];
+    assert_eq!(usage["input_tokens"], 12);
+    assert_eq!(usage["output_tokens"], 3);
+    assert_eq!(usage["total_tokens"], 15);
+    assert_eq!(usage["input_tokens_details"]["cached_tokens"], 5);
+    assert!(usage.get("cache_read_input_tokens").is_none());
+    assert!(usage.get("cache_creation_input_tokens").is_none());
 }
 
 #[tokio::test]

@@ -55,7 +55,7 @@ usage 对象不含任何可识别计数字段（空对象、只有 `service_tier
 **入参来源修正（review ADVISORY）**：`project_v3_chat_usage_from_canonical` 与
 `project_v3_responses_usage_from_canonical` 的入参是 provider-wire / 上游 canonical usage `Value`；
 但 Anthropic **client** 格的入参是 Responses 投影后的 usage（
-`anthropic_relay_runtime.rs:1195-1203` → `anthropic_relay_runtime_codec.rs:81-86`），
+`anthropic_relay_runtime.rs:1206` → `anthropic_relay_runtime_codec.rs:81-86`），
 即跨了一次 Responses canonical 中间态。该 hop 的后果见 §4「已知缺口（relay 同协议 Anthropic）」。
 
 `extract_v3_runtime_usage_summary`（`responses_relay_runtime.rs:597`）返回 `V3RuntimeUsageSummary`，
@@ -105,7 +105,8 @@ client usage**。当前 active config 无 Gemini provider，该格不可达；�
 避免把未接线的能力写成已覆盖。
 
 **已知缺口（review MINOR-2，显式声明，不在本次范围）**：Anthropic provider → Anthropic client 若被
-配置强制走 **Relay**（同协议默认是 Direct 直通，`nodes.rs:732-736` 只在 direct 不可用或
+配置强制走 **Relay**（同协议默认是 Direct 直通，`v3/crates/routecodex-v3-runtime/src/nodes.rs:734`
+只在 direct 不可用或
 `responses_process=chat` 时选 Relay），中间会经过 Responses canonical，而 Responses wire 无法表达
 "缓存写入"，`project_v3_responses_usage_from_canonical` 把 creation 折进 effective input 后不再输出它。
 于是 `project_v3_anthropic_usage_from_canonical` 的 creation 分支在该 hop 上不可达：
@@ -116,7 +117,7 @@ client usage**。当前 active config 无 Gemini provider，该格不可达；�
 "Anthropic 目标形状含 creation" 写成在 Relay 同协议 hop 上已覆盖。
 
 **其它 client-facing usage writer 的角色声明（F4）**：
-- `materialize_v3_responses_terminal_usage`（`responses_relay_runtime.rs:856`）：仅补缺失
+- `materialize_v3_responses_terminal_usage`（`responses_relay_runtime.rs:858`）：仅补缺失
   `input_tokens`/`output_tokens`/`total_tokens` 的填充器，不重算缓存语义。
 - `materialize_v3_runtime_input_usage_estimate_from_request`（`responses_relay_runtime.rs:664`，
   调用点 `responses_relay_runtime_inner.rs:857,1216`）：provider 语义缺 usage 时写入**估算**
