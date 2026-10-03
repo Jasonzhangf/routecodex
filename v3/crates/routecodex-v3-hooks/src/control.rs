@@ -481,6 +481,15 @@ impl ControlServer {
                     let worker_cancellation = cancellation.clone();
                     let stream_registration = match cancellation.track_stream(&stream) {
                         Ok(registration) => registration,
+                        Err(error)
+                            if error.kind() == std::io::ErrorKind::Interrupted
+                                && cancellation.is_cancelled() =>
+                        {
+                            // Release can race the accept already in progress.
+                            // The registry closed this stream; drain the same
+                            // project workers through normal cancellation.
+                            break;
+                        }
                         Err(error) => {
                             result = Err(error);
                             cancellation.cancel();

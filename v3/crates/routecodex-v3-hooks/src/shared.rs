@@ -67,7 +67,21 @@ impl SharedHooksResponse {
 
 pub fn shared_hooks_root() -> io::Result<PathBuf> {
     let home = std::env::var_os("HOME").ok_or_else(|| io::Error::other("HOME is unavailable"))?;
-    Ok(fs::canonicalize(home)?.join(".rcc/hooks"))
+    let config_root = fs::canonicalize(home)?.join(".rcc");
+    match fs::canonicalize(&config_root) {
+        Ok(root) => Ok(root.join("hooks")),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            // A dangling configured link is an error; only an absent directory
+            // may be created by the shared service.
+            match fs::symlink_metadata(&config_root) {
+                Err(absent) if absent.kind() == io::ErrorKind::NotFound => {
+                    Ok(config_root.join("hooks"))
+                }
+                _ => Err(error),
+            }
+        }
+        Err(error) => Err(error),
+    }
 }
 
 pub fn shared_hooks_socket(root: &Path) -> PathBuf {

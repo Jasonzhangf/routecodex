@@ -44,7 +44,7 @@ fn send_request(stream: &mut UnixStream, request: &ControlRequest) -> ControlRes
 fn wait_for_socket(path: &std::path::Path) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
-        if path.exists() {
+        if UnixStream::connect(path).is_ok() {
             return;
         }
         std::thread::sleep(Duration::from_millis(10));

@@ -46,7 +46,16 @@ struct Daemon {
 
 impl Daemon {
     fn start() -> Self {
+        Self::start_with_config_link(false)
+    }
+
+    fn start_with_config_link(link_config: bool) -> Self {
         let home = tempfile::tempdir().unwrap();
+        if link_config {
+            let target = home.path().join("external-rcc");
+            std::fs::create_dir(&target).unwrap();
+            std::os::unix::fs::symlink(&target, home.path().join(".rcc")).unwrap();
+        }
         let socket = home.path().join(".rcc/hooks/daemon.sock");
         let child = Command::new(env!("CARGO_BIN_EXE_rccv3-hooksd"))
             .arg("--shared-daemon")
@@ -99,6 +108,20 @@ impl Daemon {
         });
         assert!(!self.socket.exists());
     }
+}
+
+#[test]
+fn configured_rcc_symlink_uses_one_canonical_daemon_and_reclaims_project() {
+    let mut daemon = Daemon::start_with_config_link(true);
+    let project = daemon.project("project");
+    let (mut lease, response) = daemon.register(&project);
+    assert_eq!(response["ok"], true, "{response}");
+    assert_eq!(response["daemon_pid"], daemon.child.id());
+    assert!(daemon.home.path().join("external-rcc/hooks/daemon.sock").exists());
+    daemon.release(&mut lease);
+    assert!(!project.join("hooks-sidecar.sock").exists());
+    daemon.idle_exit();
+    assert!(daemon.home.path().join(".rcc").is_symlink());
 }
 
 impl Drop for Daemon {
