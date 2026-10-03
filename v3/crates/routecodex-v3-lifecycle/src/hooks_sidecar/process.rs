@@ -531,15 +531,6 @@ fn control_socket_exists_as_socket(path: &Path) -> Result<bool, V3LifecycleError
     }
 }
 
-pub(super) fn remove_control_socket_if_present(path: &Path) -> Result<(), V3LifecycleError> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_socket() => remove_file_if_present(path),
-        Ok(_) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error.into()),
-    }
-}
-
 async fn wait_for_process_group_shutdown(
     child: &mut Option<&mut Child>,
     group_leader: &mut Child,

@@ -6,23 +6,31 @@ features:
   status: source_active_live_verification_required
   change_risk: high
   owner_kind: rust_v3_internal_hooks_sidecar
-  owner_scope: Optional RouteCodex-owned hooks sidecar process and native Codex App Server communication boundary.
+  owner_scope: Optional per-user shared hooks daemon, isolated project leases and their reclamation, and native Codex App Server communication boundary.
   owner_modules:
   - routecodex-v3-hooks
   - routecodex-v3-lifecycle
   contract:
   - docs/design/rcc-internal-hooks-sidecar-contract.md
+  - docs/design/hooksd-global-lifecycle.md
+  - docs/architecture/dags/hooksd-project-registration.graph.json
   - docs/goals/rcc-internal-hooks-sidecar-plan.md
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   required_positive:
-  - An enabled install record declares internal_hooksd and starts the installed rccv3-hooksd without selecting another runtime.
+  - An enabled internal_hooksd install record registers its project with the installed per-user rccv3-hooksd without selecting another runtime.
+  - Concurrent projects share one daemon PID and retain independent handlers, schedules, intents, persisted state, and control sockets.
+  - Normal project release acknowledges completed reclamation; owner connection EOF also reclaims the project without disrupting another live registration.
+  - The last project release and failed or abandoned initialization lead to bounded idle exit; 30 registration/release cycles do not accumulate processes, threads, or sockets.
   - Forwarding, mounted hook dispatch, and timers use the same typed send gate and preserve intent identity.
   - Session status and send operations use only the Codex default TUI/Desktop App Server socket.
   - Queue acceptance remains accepted until native receipt/reply evidence is observed; read evidence requires an actual read observation.
   - Sidecar missing, crash, timeout, or invalid readiness leaves RouteCodex Running with hooks_unavailable:<reason> and preserves lifecycle control resources.
   required_negative:
+  - A duplicate daemon cannot replace the live global socket, and a duplicate active project registration is explicitly rejected.
+  - A slow registration handshake cannot indefinitely reserve the daemon; unknown or missing binary arguments terminate instead of becoming unowned sleepers.
+  - Project cleanup cannot unlink replaced or foreign socket/state paths, and retained persisted state remains usable after registration release.
   - A missing rccv3-hooksd with the default internal_hooksd declaration fails with hooks_unavailable:missing and never falls back to legacy_supervisor.
   - Unknown hook kinds and unmounted handlers fail closed; handler errors are not swallowed.
   - Same-session forwarding, unknown/disconnected targets, and idle_only while working fail or defer explicitly.
@@ -31,6 +39,7 @@ features:
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-hooks
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-lifecycle internal_hooksd_tests -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-cli --test managed_lifecycle hooks
   - node --test v3/tests/scripts/v3-cli-distribution.spec.mjs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
@@ -38,6 +47,7 @@ features:
   - npm run verify:v3-architecture-docs
   - git diff --check
   live_required:
+  - Installed-binary concurrent project registration, owner crash, last-release exit, same-name state isolation, and repeated reclamation behavior.
   - Real TUI/TUI and TUI/Desktop same-entry replay with native accepted/delivered/replied/read evidence, or an explicit highest-layer capability gap.
   - Real sidecar failure injection proves RouteCodex health remains available with hooks_unavailable:<reason>.
   completion_boundary:

@@ -1,0 +1,25 @@
+{
+  "id": "v3.hooks.project_registration", "version": "1",
+  "inputs": [{"id": "registration", "schema": "Object"}],
+  "output_contracts": [
+    {"id": "service", "schema": "Object"},
+    {"id": "project", "schema": "Object"},
+    {"id": "released", "schema": "Object"},
+    {"id": "cleaned", "schema": "Object"},
+    {"id": "disposition", "schema": "Object"}
+  ],
+  "nodes": [
+    {"id": "获取共享服务", "operator": "rcc.hooks.acquire_shared_service", "operator_version": "1", "inputs": ["registration"], "output": {"id": "service", "schema": "Object"}, "input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole","resources":{"reads":[],"writes":["v3.hooks.global_daemon"]}},
+    {"id": "建立隔离项目", "operator": "rcc.hooks.register_project", "operator_version": "1", "inputs": ["service"], "output": {"id": "project", "schema": "Object"}, "input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole","resources":{"reads":[],"writes":["v3.hooks.project_registration"]}},
+    {"id": "服务项目直到释放", "operator": "rcc.hooks.serve_project_lease", "operator_version": "1", "inputs": ["project"], "output": {"id": "released", "schema": "Object"}, "input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole","resources":{"reads":["v3.hooks.project_registration"],"writes":[]}},
+    {"id": "回收本次注册", "operator": "rcc.hooks.reclaim_project", "operator_version": "1", "inputs": ["released"], "output": {"id": "cleaned", "schema": "Object"}, "input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole","resources":{"reads":[],"writes":["v3.hooks.project_registration"]}},
+    {"id": "记录注册终点", "operator": "rcc.hooks.record_disposition", "operator_version": "1", "inputs": ["cleaned"], "output": {"id": "disposition", "schema": "Object"}, "input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole","resources":{"reads":[],"writes":[]}}
+  ],
+  "edges": [
+    {"from": "获取共享服务", "to": "建立隔离项目", "arc_id": "service"},
+    {"from": "建立隔离项目", "to": "服务项目直到释放", "arc_id": "project"},
+    {"from": "服务项目直到释放", "to": "回收本次注册", "arc_id": "released"},
+    {"from": "回收本次注册", "to": "记录注册终点", "arc_id": "cleaned"}
+  ],
+  "outputs": ["disposition"]
+}

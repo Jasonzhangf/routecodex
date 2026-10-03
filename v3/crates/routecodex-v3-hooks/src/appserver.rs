@@ -252,6 +252,7 @@ impl AppServerSocketConfig {
 }
 
 pub struct NativeAppServerTransport {
+    cancellation: HookCancellation,
     sockets: AppServerSocketConfig,
     baseline_cache: BTreeMap<String, NativeBaselineSnapshot>,
 }
@@ -263,6 +264,7 @@ impl NativeAppServerTransport {
 
     pub fn with_sockets(sockets: AppServerSocketConfig) -> Self {
         Self {
+            cancellation: HookCancellation::new(),
             sockets,
             baseline_cache: BTreeMap::new(),
         }
@@ -272,7 +274,7 @@ impl NativeAppServerTransport {
         let socket_path = self.sockets.for_namespace(namespace).ok_or_else(|| {
             AppServerError::SocketMissing(format!("{} app server socket", namespace.as_str()))
         })?;
-        let mut client = UnixWsJsonRpc::connect(Path::new(socket_path))?;
+        let mut client = UnixWsJsonRpc::connect(Path::new(socket_path), &self.cancellation)?;
         client.call(
             "initialize",
             native_initialize_params("rccv3-hooksd", "RCC Hooks Sidecar", "0.1.0"),
@@ -517,6 +519,9 @@ fn is_unmaterialized_history_read_error(reason: &str, status: &SessionStatus) ->
 }
 
 impl AppServerTransport for NativeAppServerTransport {
+    fn bind_project_cancellation(&mut self, cancellation: HookCancellation) {
+        self.cancellation = cancellation;
+    }
     fn session_status(&mut self, target: &SessionTarget) -> Result<SessionStatus, AppServerError> {
         let mut client = self.client_for(target.namespace)?;
         let result = client.call("thread/read", native_thread_read_params(&target.thread_id))?;
@@ -702,14 +707,22 @@ pub fn correlate_delivery_evidence(
 }
 
 struct UnixWsJsonRpc {
+    _project_stream: StreamCancellationRegistration,
+    cancellation: HookCancellation,
     stream: UnixStream,
     next_id: u64,
 }
 
 impl UnixWsJsonRpc {
-    fn connect(socket_path: &Path) -> Result<Self, AppServerError> {
+    fn connect(
+        socket_path: &Path,
+        cancellation: &HookCancellation,
+    ) -> Result<Self, AppServerError> {
         let mut stream = UnixStream::connect(socket_path)
             .map_err(|error| AppServerError::SocketMissing(format!("{socket_path:?}: {error}")))?;
+        let project_stream = cancellation
+            .track_stream(&stream)
+            .map_err(io_transport_error)?;
         stream
             .set_read_timeout(Some(NATIVE_TRANSPORT_TIMEOUT))
             .map_err(io_transport_error)?;
@@ -717,7 +730,12 @@ impl UnixWsJsonRpc {
             .set_write_timeout(Some(NATIVE_TRANSPORT_TIMEOUT))
             .map_err(io_transport_error)?;
         upgrade_websocket(&mut stream)?;
-        Ok(Self { stream, next_id: 1 })
+        Ok(Self {
+            stream,
+            next_id: 1,
+            _project_stream: project_stream,
+            cancellation: cancellation.clone(),
+        })
     }
 
     fn call(
@@ -734,6 +752,11 @@ impl UnixWsJsonRpc {
             &serde_json::to_vec(&payload).map_err(transport_error)?,
         )?;
         loop {
+            if self.cancellation.is_cancelled() {
+                return Err(AppServerError::Transport(
+                    "project released during native RPC".into(),
+                ));
+            }
             let frame = read_server_frame(&mut self.stream)?;
             match frame.opcode {
                 0x8 => {

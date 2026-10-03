@@ -6,78 +6,14 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::AsRawFd;
 use tempfile::TempDir;
 
-#[tokio::test]
-#[cfg(unix)]
-async fn default_install_record_mode_is_internal_hooksd() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
-    let root = TempDir::new().unwrap();
-    let instance_dir = root.path().join("instance");
-    let record_path = root.path().join("install.json");
-    let bin_directory = root.path().join("bin");
-    let supervisor_wrapper = root.path().join("supervisor-wrapper");
-    let hooksd_started = root.path().join("hooksd-started");
-    let legacy_started = root.path().join("legacy-started");
-    fs::create_dir(&instance_dir).unwrap();
-    fs::create_dir(&bin_directory).unwrap();
-    fs::write(
-        bin_directory.join("rccv3-hooksd"),
-        format!(
-            "#!/bin/sh\nprintf 'started\\n' > '{}'\nprintf '%s\\n' '{{\"protocol\":\"rcc-hooks-sidecar/v1\",\"ready\":true}}'\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n",
-            hooksd_started.display()
-        ),
-    )
-    .unwrap();
-    let mut permissions = fs::metadata(bin_directory.join("rccv3-hooksd"))
-        .unwrap()
-        .permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(bin_directory.join("rccv3-hooksd"), permissions).unwrap();
-    fs::write(
-        &supervisor_wrapper,
-        format!(
-            "#!/bin/sh\nprintf 'started\\n' > '{}'\nprintf '%s\\n' '{{\"protocol\":\"routecodex-hooks-supervisor/v1\",\"ready\":true}}'\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n",
-            legacy_started.display()
-        ),
-    )
-    .unwrap();
-    let mut permissions = fs::metadata(&supervisor_wrapper).unwrap().permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&supervisor_wrapper, permissions).unwrap();
-    fs::write(
-        &record_path,
-        serde_json::json!({
-            "supervisor_enabled": true,
-            "supervisor_wrapper": supervisor_wrapper,
-            "bin_directory": bin_directory,
-            "install_root": root.path(),
-        })
-        .to_string(),
-    )
-    .unwrap();
-    std::env::set_var(HOOKS_INSTALL_RECORD_ENV, &record_path);
-
-    let (sidecar, detail) = start_managed_hooks_sidecar(&instance_dir).await.unwrap();
-    let sidecar = sidecar.expect("default install record must start internal hooksd");
-
-    assert!(
-        detail.is_none(),
-        "internal hooksd started without hooks_unavailable detail"
+#[test]
+fn default_install_record_mode_is_internal_hooksd() {
+    let record =
+        serde_json::json!({"supervisor_enabled":true, "supervisor_wrapper":"declared-legacy-path"});
+    assert_eq!(
+        hooks_runtime_mode(&record, Path::new("install.json")).unwrap(),
+        HooksRuntimeMode::InternalHooksd
     );
-    assert!(
-        hooksd_started.exists(),
-        "default must launch installed rccv3-hooksd"
-    );
-    assert!(
-        !legacy_started.exists(),
-        "default must not launch the legacy supervisor wrapper"
-    );
-
-    sidecar.stop().await.unwrap();
-    assert!(
-        !instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE).exists(),
-        "test sidecar must be stopped before teardown"
-    );
-    std::env::remove_var(HOOKS_INSTALL_RECORD_ENV);
 }
 
 #[tokio::test]
@@ -643,10 +579,15 @@ async fn supervisor_readiness_is_a_pending_barrier_until_protocol_ready() {
         .permissions();
     permissions.set_mode(0o755);
     fs::set_permissions(bin_directory.join("rccv3-hooksd"), permissions).unwrap();
+    fs::write(bin_directory.join("rccv3-codexapp"), "fixture").unwrap();
+    fs::write(root.path().join("daemon.json"), "{}").unwrap();
     fs::write(
         &record_path,
         serde_json::json!({
             "supervisor_enabled": true,
+            "hooks_runtime": "legacy_supervisor",
+            "supervisor_wrapper": bin_directory.join("rccv3-hooksd"),
+            "daemon_config": root.path().join("daemon.json"),
             "bin_directory": bin_directory,
             "install_root": root.path(),
         })
@@ -681,7 +622,7 @@ async fn supervisor_readiness_is_a_pending_barrier_until_protocol_ready() {
 #[cfg(unix)]
 async fn supervisor_timeout_force_reaps_owned_group_and_record() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
-    let root = TempDir::new().unwrap();
+    let root = TempDir::new_in("/tmp").unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");
     let bin_directory = root.path().join("bin");
@@ -703,10 +644,15 @@ async fn supervisor_timeout_force_reaps_owned_group_and_record() {
         .permissions();
     permissions.set_mode(0o755);
     fs::set_permissions(bin_directory.join("rccv3-hooksd"), permissions).unwrap();
+    fs::write(bin_directory.join("rccv3-codexapp"), "fixture").unwrap();
+    fs::write(root.path().join("daemon.json"), "{}").unwrap();
     fs::write(
         &record_path,
         serde_json::json!({
             "supervisor_enabled": true,
+            "hooks_runtime": "legacy_supervisor",
+            "supervisor_wrapper": bin_directory.join("rccv3-hooksd"),
+            "daemon_config": root.path().join("daemon.json"),
             "bin_directory": bin_directory,
             "install_root": root.path(),
         })
@@ -715,34 +661,23 @@ async fn supervisor_timeout_force_reaps_owned_group_and_record() {
     .unwrap();
     std::env::set_var(HOOKS_INSTALL_RECORD_ENV, &record_path);
 
-    let supervisor = V3HooksSidecarSupervisor::spawn(
+    let mut supervisor = V3HooksSidecarSupervisor::spawn(
         instance_dir.clone(),
         "hooks-force-stop-instance".to_string(),
     );
     let process_record_path = instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE);
-    // Wait until the supervisor has consumed readiness and rewritten the
-    // record with the control-socket identity; only then is the sidecar
-    // adopted and the bounded-stop path reachable.
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    loop {
-        let adopted = read_json::<V3HooksSidecarProcessRecord>(&process_record_path)
-            .map(|record| record.control_socket_identity.is_some())
-            .unwrap_or(false);
-        if adopted {
-            break;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "hooks sidecar was not adopted after readiness"
-        );
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    let record: V3HooksSidecarProcessRecord = read_json(&process_record_path).unwrap();
+    assert!(supervisor.wait_for_readiness().await.unwrap().is_none());
+    // This explicit legacy fixture creates a control socket; bind its actual
+    // identity in the owned test record before exercising persisted cleanup.
+    let mut record: V3HooksSidecarProcessRecord = read_json(&process_record_path).unwrap();
+    record.control_socket_identity = Some(codexapp_socket_identity(
+        &fs::symlink_metadata(&control_socket).unwrap(),
+    ));
+    write_json_atomic(&process_record_path, &record).unwrap();
     let process_group_id = record.process_group_id;
 
     // The bounded stop returns a typed timeout to the main lifecycle; the
-    // detached supervisor task stays the cleanup owner and completes the
-    // identity-validated SIGTERM/SIGKILL termination afterwards.
+    // supervisor completes the identity-validated force cleanup and is joined.
     let stop_error = supervisor.stop().await.unwrap_err();
     assert!(
         matches!(stop_error, V3LifecycleError::Timeout(_)),
@@ -758,7 +693,7 @@ async fn supervisor_timeout_force_reaps_owned_group_and_record() {
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "detached supervisor cleanup did not reap the owned group and record"
+            "supervisor cleanup did not reap the owned group and record"
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
@@ -811,21 +746,6 @@ fn persisted_non_socket_identity_never_authorizes_file_removal() {
     remove_file_if_identity_matches(&path, identity).unwrap();
 
     assert!(path.exists(), "non-socket identity must not delete a file");
-}
-
-#[test]
-#[cfg(unix)]
-fn control_socket_cleanup_without_identity_never_deletes_regular_file() {
-    let root = TempDir::new_in("/tmp").unwrap();
-    let path = root.path().join("hooks-sidecar.sock");
-    fs::write(&path, "replacement regular file").unwrap();
-
-    remove_control_socket_if_present(&path).unwrap();
-
-    assert!(
-        path.exists(),
-        "socket-only cleanup must preserve a regular file"
-    );
 }
 
 #[test]

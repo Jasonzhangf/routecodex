@@ -7,7 +7,6 @@ use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -139,7 +138,7 @@ pub fn handle_control_request<T: AppServerTransport>(
     request: ControlRequest,
 ) -> ControlResponse {
     match request {
-        ControlRequest::Health => ControlResponse::ok(json!({ "status": "ok" })),
+        ControlRequest::Health => control_health_response(),
         ControlRequest::RegisterHandler {
             handler_id,
             hook_kind,
@@ -284,6 +283,10 @@ pub fn handle_control_request<T: AppServerTransport>(
     }
 }
 
+fn control_health_response() -> ControlResponse {
+    ControlResponse::ok(json!({ "status": "ok" }))
+}
+
 pub struct ControlServer {
     listener: UnixListener,
     socket_path: std::path::PathBuf,
@@ -407,18 +410,41 @@ impl ControlServer {
     }
 
     pub fn serve_forever(self) -> std::io::Result<()> {
+        let cancellation = self
+            .core
+            .lock()
+            .map_err(|_| std::io::Error::other("hooks core poisoned"))?
+            .cancellation();
+        self.serve_with_cancellation(cancellation)
+    }
+
+    pub fn serve_in_background(self) -> std::io::Result<ControlHandle> {
+        let cancellation = self
+            .core
+            .lock()
+            .map_err(|_| std::io::Error::other("hooks core poisoned"))?
+            .cancellation();
+        let worker_cancellation = cancellation.clone();
+        let join = std::thread::Builder::new()
+            .name("hooks-project".into())
+            .spawn(move || self.serve_with_cancellation(worker_cancellation))?;
+        Ok(ControlHandle::new(cancellation, join))
+    }
+
+    fn serve_with_cancellation(self, cancellation: HookCancellation) -> std::io::Result<()> {
         self.listener.set_nonblocking(true)?;
-        let running = Arc::new(AtomicBool::new(true));
         let timer = {
-            let running = Arc::clone(&running);
+            let cancellation = cancellation.clone();
             let core = Arc::clone(&self.core);
             std::thread::spawn(move || {
-                while running.load(Ordering::Relaxed) {
-                    std::thread::sleep(Duration::from_secs(TIMER_TICK_INTERVAL_SECS));
-                    if !running.load(Ordering::Relaxed) {
+                while !wait_for_cancellation(
+                    &cancellation,
+                    Duration::from_secs(TIMER_TICK_INTERVAL_SECS),
+                ) {
+                    let mut core = core.lock().expect("hooks sidecar core mutex poisoned");
+                    if cancellation.is_cancelled() {
                         break;
                     }
-                    let mut core = core.lock().expect("hooks sidecar core mutex poisoned");
                     let outcomes = timer_tick(&mut core, &now_iso8601_utc());
                     if !outcomes.is_empty() {
                         eprintln!("rccv3-hooksd timer tick: {outcomes:?}");
@@ -427,7 +453,20 @@ impl ControlServer {
             })
         };
         let mut result = Ok(());
-        while running.load(Ordering::Relaxed) {
+        let mut workers: Vec<std::thread::JoinHandle<()>> = Vec::new();
+        while !cancellation.is_cancelled() {
+            let mut index = 0;
+            while index < workers.len() {
+                if workers[index].is_finished() {
+                    let worker = workers.swap_remove(index);
+                    if worker.join().is_err() {
+                        result = Err(std::io::Error::other("hooks connection worker panicked"));
+                        cancellation.cancel();
+                    }
+                } else {
+                    index += 1;
+                }
+            }
             match self.listener.accept() {
                 Ok((mut stream, _)) => {
                     // The listener is non-blocking so the accept loop can also
@@ -439,27 +478,58 @@ impl ControlServer {
                     }
                     let core = Arc::clone(&self.core);
                     let web_search_execution = Arc::clone(&self.web_search_execution);
-                    let running = Arc::clone(&running);
-                    std::thread::spawn(move || {
+                    let worker_cancellation = cancellation.clone();
+                    let stream_registration = match cancellation.track_stream(&stream) {
+                        Ok(registration) => registration,
+                        Err(error)
+                            if error.kind() == std::io::ErrorKind::Interrupted
+                                && cancellation.is_cancelled() =>
+                        {
+                            // Release can race the accept already in progress.
+                            // The registry closed this stream; drain the same
+                            // project workers through normal cancellation.
+                            break;
+                        }
+                        Err(error) => {
+                            result = Err(error);
+                            cancellation.cancel();
+                            continue;
+                        }
+                    };
+                    let worker = std::thread::spawn(move || {
+                        let _stream_registration = stream_registration;
                         match serve_connection(&core, &web_search_execution, &mut stream) {
                             Ok(true) => {}
-                            Ok(false) => running.store(false, Ordering::Relaxed),
+                            Ok(false) => worker_cancellation.cancel(),
                             Err(error) => {
-                                eprintln!("rccv3-hooksd control connection failed: {error}")
+                                if !worker_cancellation.is_cancelled() {
+                                    eprintln!("rccv3-hooksd control connection failed: {error}");
+                                }
                             }
                         }
                     });
+                    workers.push(worker);
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     std::thread::sleep(Duration::from_millis(20));
                 }
                 Err(error) => {
                     result = Err(error);
-                    running.store(false, Ordering::Relaxed);
+                    cancellation.cancel();
                 }
             }
         }
-        let _ = timer.join();
+        cancellation.cancel();
+        // Close retained descriptors first to wake readers, then drain every
+        // worker before acknowledging this project's release.
+        for worker in workers {
+            if worker.join().is_err() {
+                result = Err(std::io::Error::other("hooks connection worker panicked"));
+            }
+        }
+        if timer.join().is_err() {
+            result = Err(std::io::Error::other("hooks timer worker panicked"));
+        }
         // The server owns this path. Removing it after the loop exits keeps a
         // clean restart from failing with AddrInUse on a stale socket left by
         // an explicit shutdown. The identity check keeps shutdown from
@@ -481,6 +551,15 @@ fn remove_owned_control_socket(
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
+    }
+}
+
+impl Drop for ControlServer {
+    fn drop(&mut self) {
+        // Also covers a background-thread spawn failure after bind.
+        if let Err(error) = remove_owned_control_socket(&self.socket_path, self.socket_identity) {
+            eprintln!("hooks project socket cleanup failed: {error}");
+        }
     }
 }
 
@@ -512,6 +591,7 @@ fn serve_connection<T: AppServerTransport>(
             }
         };
         let response = match &request {
+            ControlRequest::Health => control_health_response(),
             ControlRequest::ExecuteWebSearch { request } => {
                 execute_web_search_outside_core(core, web_search_execution, request)
             }
@@ -806,10 +886,14 @@ mod tests {
             !socket_path.exists(),
             "shutdown must remove the owned control socket"
         );
-        ControlServer::new(&socket_path).expect("rebind after shutdown");
+        let rebound_server = ControlServer::new(&socket_path).expect("rebind after shutdown");
         let rebound = std::fs::metadata(&socket_path);
         assert!(rebound.is_ok(), "rebound control socket must exist");
-        let _ = std::fs::remove_file(socket_path);
+        drop(rebound_server);
+        assert!(
+            !socket_path.exists(),
+            "dropping an unserved owner must reclaim its socket"
+        );
     }
 
     #[test]

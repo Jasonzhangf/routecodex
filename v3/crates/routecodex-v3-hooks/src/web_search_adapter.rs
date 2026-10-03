@@ -38,18 +38,28 @@ impl std::fmt::Display for WebSearchAdapterError {
 impl std::error::Error for WebSearchAdapterError {}
 
 pub trait WebSearchAdapter {
+    fn bind_project_cancellation(&mut self, _cancellation: crate::HookCancellation) {}
+
     fn execute(
         &mut self,
         request: &WebSearchHookRequest,
     ) -> Result<WebSearchHookOutcome, WebSearchAdapterError>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct CommandWebSearchAdapter {
     command: String,
     args: Vec<String>,
     timeout: Duration,
+    cancellation: crate::HookCancellation,
 }
+
+impl PartialEq for CommandWebSearchAdapter {
+    fn eq(&self, other: &Self) -> bool {
+        self.command == other.command && self.args == other.args && self.timeout == other.timeout
+    }
+}
+impl Eq for CommandWebSearchAdapter {}
 
 impl CommandWebSearchAdapter {
     pub fn new(command: String, args: Vec<String>, timeout: Duration) -> Self {
@@ -57,6 +67,7 @@ impl CommandWebSearchAdapter {
             command,
             args,
             timeout,
+            cancellation: crate::HookCancellation::new(),
         }
     }
 
@@ -79,6 +90,10 @@ impl CommandWebSearchAdapter {
 }
 
 impl WebSearchAdapter for CommandWebSearchAdapter {
+    fn bind_project_cancellation(&mut self, cancellation: crate::HookCancellation) {
+        self.cancellation = cancellation;
+    }
+
     fn execute(
         &mut self,
         request: &WebSearchHookRequest,
@@ -117,7 +132,7 @@ impl WebSearchAdapter for CommandWebSearchAdapter {
             stderr.as_raw_fd(),
         ] {
             if let Err(error) = set_nonblocking(pipe) {
-                terminate_child(&mut child);
+                terminate_child(&mut child)?;
                 return Err(error);
             }
         }
@@ -131,6 +146,12 @@ impl WebSearchAdapter for CommandWebSearchAdapter {
         let mut exit_status = None;
         let mut stdin_error = None;
         loop {
+            if self.cancellation.is_cancelled() {
+                terminate_child(&mut child)?;
+                return Err(WebSearchAdapterError::Unavailable(
+                    "project released during web_search".into(),
+                ));
+            }
             let mut pipe_progress = false;
             if stdin_open && payload_offset < payload.len() {
                 match stdin
@@ -139,7 +160,7 @@ impl WebSearchAdapter for CommandWebSearchAdapter {
                     .write(&payload[payload_offset..])
                 {
                     Ok(0) => {
-                        terminate_child(&mut child);
+                        terminate_child(&mut child)?;
                         return Err(WebSearchAdapterError::Unavailable(
                             "web_search subagent stdin closed before request completed".to_string(),
                         ));
@@ -164,7 +185,7 @@ impl WebSearchAdapter for CommandWebSearchAdapter {
                         pipe_progress |= progressed;
                     }
                     Err(error) => {
-                        terminate_child(&mut child);
+                        terminate_child(&mut child)?;
                         return Err(error);
                     }
                 }
@@ -176,7 +197,7 @@ impl WebSearchAdapter for CommandWebSearchAdapter {
                         pipe_progress |= progressed;
                     }
                     Err(error) => {
-                        terminate_child(&mut child);
+                        terminate_child(&mut child)?;
                         return Err(error);
                     }
                 }
@@ -186,7 +207,7 @@ impl WebSearchAdapter for CommandWebSearchAdapter {
                     Ok(Some(status)) => exit_status = Some(status),
                     Ok(None) => {}
                     Err(error) => {
-                        terminate_child(&mut child);
+                        terminate_child(&mut child)?;
                         return Err(WebSearchAdapterError::Unavailable(format!(
                             "web_search subagent wait failed: {error}"
                         )));
@@ -197,7 +218,7 @@ impl WebSearchAdapter for CommandWebSearchAdapter {
                 break;
             }
             if std::time::Instant::now() >= deadline {
-                terminate_child(&mut child);
+                terminate_child(&mut child)?;
                 return Err(WebSearchAdapterError::Timeout(
                     "web_search subagent exceeded request deadline".to_string(),
                 ));
@@ -297,15 +318,12 @@ fn drain_pipe(
     }
 }
 
-fn terminate_child(child: &mut Child) {
-    let process_group_id = child.id() as libc::pid_t;
-    if process_group_id > 0 {
-        unsafe {
-            libc::kill(-process_group_id, libc::SIGKILL);
-        }
-    }
-    let _ = child.kill();
-    let _ = child.wait();
+fn terminate_child(child: &mut Child) -> Result<(), WebSearchAdapterError> {
+    crate::hook_control::terminate_project_command(child).map_err(|error| {
+        WebSearchAdapterError::Unavailable(format!(
+            "web_search process group cleanup failed: {error}"
+        ))
+    })
 }
 
 fn request_payload(request: &WebSearchHookRequest) -> Result<String, WebSearchAdapterError> {
@@ -478,11 +496,15 @@ mod tests {
             Duration::from_secs(2),
         );
         let started = std::time::Instant::now();
-        assert!(matches!(
-            adapter.execute(&request(future_deadline())),
-            Err(WebSearchAdapterError::MalformedResponse(reason))
-                if reason.contains("stdout exceeded")
-        ));
+        let outcome = adapter.execute(&request(future_deadline()));
+        assert!(
+            matches!(
+                &outcome,
+                Err(WebSearchAdapterError::MalformedResponse(reason))
+                    if reason.contains("stdout exceeded")
+            ),
+            "{outcome:?}"
+        );
         assert!(
             started.elapsed() < Duration::from_secs(1),
             "oversized stdout must fail before the request deadline"
@@ -504,11 +526,15 @@ mod tests {
             Duration::from_secs(2),
         );
         let started = std::time::Instant::now();
-        assert!(matches!(
-            adapter.execute(&request(future_deadline())),
-            Err(WebSearchAdapterError::MalformedResponse(reason))
-                if reason.contains("stderr exceeded")
-        ));
+        let outcome = adapter.execute(&request(future_deadline()));
+        assert!(
+            matches!(
+                &outcome,
+                Err(WebSearchAdapterError::MalformedResponse(reason))
+                    if reason.contains("stderr exceeded")
+            ),
+            "{outcome:?}"
+        );
         assert!(
             started.elapsed() < Duration::from_secs(1),
             "oversized stderr must fail before the request deadline"

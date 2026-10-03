@@ -20,14 +20,16 @@ fn unique_path(label: &str) -> PathBuf {
 }
 
 fn unique_socket(label: &str) -> PathBuf {
+    let _ = label;
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let next = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    PathBuf::from("/tmp").join(format!(
-        "rcc-hk-{label}-{}-{nanos}.sock",
-        std::process::id()
-    ))
+    PathBuf::from("/tmp")
+        .join(format!("rhk-{}-{nanos}-{next}", std::process::id()))
+        .join("hooks-sidecar.sock")
 }
 
 fn send_request(stream: &mut UnixStream, request: &ControlRequest) -> ControlResponse {
@@ -42,7 +44,7 @@ fn send_request(stream: &mut UnixStream, request: &ControlRequest) -> ControlRes
 fn wait_for_socket(path: &std::path::Path) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
-        if path.exists() {
+        if UnixStream::connect(path).is_ok() {
             return;
         }
         std::thread::sleep(Duration::from_millis(10));
@@ -78,14 +80,80 @@ fn try_read_response(
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
 }
 
-struct ChildGuard(std::process::Child);
+struct SharedFixture {
+    child: std::process::Child,
+    _home: tempfile::TempDir,
+    project: PathBuf,
+    lease: Option<UnixStream>,
+}
 
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        if self.0.try_wait().ok().flatten().is_none() {
-            let _ = self.0.kill();
-            let _ = self.0.wait();
+impl SharedFixture {
+    fn start(socket: &std::path::Path, config: Option<&std::path::Path>) -> Self {
+        let home = tempfile::tempdir().unwrap();
+        let project = socket.parent().unwrap().to_owned();
+        std::fs::create_dir(&project).unwrap();
+        let child = Command::new(env!("CARGO_BIN_EXE_rccv3-hooksd"))
+            .arg("--shared-daemon")
+            .env("HOME", home.path())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap();
+        let global = home.path().join(".rcc/hooks/daemon.sock");
+        wait_for_socket(&global);
+        let mut lease = UnixStream::connect(global).unwrap();
+        let config: Option<Value> =
+            config.map(|path| serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap());
+        writeln!(
+            lease,
+            "{}",
+            serde_json::json!({"method":"register", "params":{
+                "instance_dir":std::fs::canonicalize(&project).unwrap(),
+                "appserver_sockets":{}, "handlers_config":config
+            }})
+        )
+        .unwrap();
+        lease
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut line = String::new();
+        BufReader::new(lease.try_clone().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        let response: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(response["ok"], true, "{response}");
+        Self {
+            child,
+            _home: home,
+            project,
+            lease: Some(lease),
         }
+    }
+
+    fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
+        if let Some(mut lease) = self.lease.take() {
+            writeln!(lease, "{{\"method\":\"release\"}}")?;
+            let mut line = String::new();
+            BufReader::new(lease).read_line(&mut line)?;
+            assert_eq!(
+                serde_json::from_str::<Value>(&line).unwrap()["ok"],
+                true,
+                "{line}"
+            );
+        }
+        self.child.wait()
+    }
+}
+
+impl Drop for SharedFixture {
+    fn drop(&mut self) {
+        drop(self.lease.take());
+        if self.child.try_wait().ok().flatten().is_none() {
+            self.child.kill().expect("test daemon cleanup");
+            self.child.wait().expect("test daemon reap");
+        }
+        std::fs::remove_dir_all(&self.project).expect("test project cleanup");
     }
 }
 
@@ -127,23 +195,7 @@ fn binary_loads_mounted_handler_config_and_fails_closed_for_unknown_hook() {
     )
     .unwrap();
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_rccv3-hooksd"))
-        .arg("--socket")
-        .arg(&control_socket)
-        .arg("--handlers-config")
-        .arg(&handlers_config)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("rccv3-hooksd should start");
-    let stdout = child.stdout.take().expect("sidecar stdout");
-    let mut readiness_line = String::new();
-    BufReader::new(stdout)
-        .read_line(&mut readiness_line)
-        .expect("read readiness");
-    let readiness: Value = serde_json::from_str(&readiness_line).unwrap();
-    assert_eq!(readiness["protocol"], "rcc-hooks-sidecar/v1");
-    assert_eq!(readiness["ready"], true);
+    let mut child = SharedFixture::start(&control_socket, Some(&handlers_config));
 
     wait_for_socket(&control_socket);
     let mut stream = UnixStream::connect(&control_socket).unwrap();
@@ -234,22 +286,7 @@ fn binary_handler_only_config_has_no_native_socket_and_fails_closed_on_send() {
     });
     std::fs::write(&handlers_config, handlers.to_string()).unwrap();
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_rccv3-hooksd"))
-        .arg("--socket")
-        .arg(&control_socket)
-        .arg("--handlers-config")
-        .arg(&handlers_config)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("rccv3-hooksd should start");
-    let stdout = child.stdout.take().expect("sidecar stdout");
-    let mut readiness_line = String::new();
-    BufReader::new(stdout)
-        .read_line(&mut readiness_line)
-        .expect("read readiness");
-    let readiness: Value = serde_json::from_str(&readiness_line).unwrap();
-    assert_eq!(readiness["ready"], true);
+    let mut child = SharedFixture::start(&control_socket, Some(&handlers_config));
 
     wait_for_socket(&control_socket);
     let mut stream = UnixStream::connect(&control_socket).unwrap();
@@ -287,20 +324,7 @@ fn binary_handler_only_config_has_no_native_socket_and_fails_closed_on_send() {
 #[test]
 fn control_execute_web_search_requires_a_mounted_adapter() {
     let control_socket = unique_socket("web-search-unmounted");
-    let mut child = Command::new(env!("CARGO_BIN_EXE_rccv3-hooksd"))
-        .arg("--socket")
-        .arg(&control_socket)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("rccv3-hooksd should start");
-    let stdout = child.stdout.take().expect("sidecar stdout");
-    let mut readiness_line = String::new();
-    BufReader::new(stdout)
-        .read_line(&mut readiness_line)
-        .expect("read readiness");
-    let readiness: Value = serde_json::from_str(&readiness_line).unwrap();
-    assert_eq!(readiness["ready"], true);
+    let mut child = SharedFixture::start(&control_socket, None);
 
     wait_for_socket(&control_socket);
     let mut stream = UnixStream::connect(&control_socket).unwrap();
@@ -345,22 +369,7 @@ fn handlers_config_mounts_command_web_search_adapter() {
     });
     std::fs::write(&handlers_config, serde_json::to_vec(&config).unwrap()).unwrap();
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_rccv3-hooksd"))
-        .arg("--socket")
-        .arg(&control_socket)
-        .arg("--handlers-config")
-        .arg(&handlers_config)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("rccv3-hooksd should start");
-    let stdout = child.stdout.take().expect("sidecar stdout");
-    let mut readiness_line = String::new();
-    BufReader::new(stdout)
-        .read_line(&mut readiness_line)
-        .expect("read readiness");
-    let readiness: Value = serde_json::from_str(&readiness_line).unwrap();
-    assert_eq!(readiness["ready"], true);
+    let mut child = SharedFixture::start(&control_socket, Some(&handlers_config));
 
     wait_for_socket(&control_socket);
     let mut stream = UnixStream::connect(&control_socket).unwrap();
@@ -415,24 +424,7 @@ fn binary_slow_web_search_does_not_block_health_or_shutdown() {
     std::fs::write(&handlers_config, serde_json::to_vec(&config).unwrap()).unwrap();
     let _release_guard = ReleaseGuard(release_marker.clone());
 
-    let mut child = ChildGuard(
-        Command::new(env!("CARGO_BIN_EXE_rccv3-hooksd"))
-            .arg("--socket")
-            .arg(&control_socket)
-            .arg("--handlers-config")
-            .arg(&handlers_config)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("rccv3-hooksd should start"),
-    );
-    let stdout = child.0.stdout.take().expect("sidecar stdout");
-    let mut readiness_line = String::new();
-    BufReader::new(stdout)
-        .read_line(&mut readiness_line)
-        .expect("read readiness");
-    let readiness: Value = serde_json::from_str(&readiness_line).unwrap();
-    assert_eq!(readiness["ready"], true);
+    let mut child = SharedFixture::start(&control_socket, Some(&handlers_config));
 
     wait_for_socket(&control_socket);
     let mut search_stream = UnixStream::connect(&control_socket).unwrap();
@@ -480,7 +472,7 @@ fn binary_slow_web_search_does_not_block_health_or_shutdown() {
         "web search must still be blocked when shutdown completes"
     );
 
-    let status = child.0.wait().unwrap();
+    let status = child.wait().unwrap();
     assert!(status.success(), "{status:?}");
 
     let _ = std::fs::remove_file(control_socket);
@@ -519,34 +511,14 @@ fn web_search_adapter_trait_is_available_to_the_sidecar_boundary() {
 }
 
 #[test]
-fn binary_handler_config_invalid_schema_fails_before_readiness() {
+fn binary_rejects_retired_per_project_daemon_arguments_without_creating_a_socket() {
     let control_socket = unique_socket("invalid-handler-control");
-    let handlers_config = unique_path("invalid-handlers.json");
-    std::fs::write(&handlers_config, r#"{"schema_version":2,"handlers":[]}"#).unwrap();
-
-    let mut child = Command::new(env!("CARGO_BIN_EXE_rccv3-hooksd"))
+    let output = Command::new(env!("CARGO_BIN_EXE_rccv3-hooksd"))
         .arg("--socket")
         .arg(&control_socket)
-        .arg("--handlers-config")
-        .arg(&handlers_config)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+        .output()
         .unwrap();
-    let status = child.wait().unwrap();
-    assert!(!status.success());
-    let mut stderr = String::new();
-    use std::io::Read;
-    child
-        .stderr
-        .take()
-        .unwrap()
-        .read_to_string(&mut stderr)
-        .unwrap();
-    assert!(
-        stderr.contains("unsupported hooks handlers config schema version"),
-        "{stderr}"
-    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unknown argument: --socket"));
     assert!(!control_socket.exists());
-    let _ = std::fs::remove_file(handlers_config);
 }
