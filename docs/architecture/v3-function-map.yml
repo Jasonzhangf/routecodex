@@ -3603,6 +3603,9 @@ features:
   - path: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_timing.rs
     owner: kernel
     responsibility: Finalize typed timing for committed SSE, live SSE and JSON.
+  - path: v3/crates/routecodex-v3-server/src/live_snapshot_terminal_evidence.rs
+    owner: live_snapshot
+    responsibility: Persist provider-private terminal error evidence (request.json/error.json) and project the relay Error chain; moved from live_snapshot.rs to satisfy the file-size ratchet.
   decomposition_edges:
   - caller: execute_v3_anthropic_relay_runtime_inner
     callees: [closeout_anthropic_relay_response, closeout_anthropic_relay_sse_response]
@@ -4234,6 +4237,7 @@ features:
   - v3/crates/routecodex-v3-debug
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/live_snapshot.rs
+  - v3/crates/routecodex-v3-server/src/live_snapshot_terminal_evidence.rs
   - v3/crates/routecodex-v3-server/tests
   - v3/scripts/architecture/verify-v3-debug-payload-budget.mjs
   - v3/Cargo.lock
@@ -4269,11 +4273,15 @@ features:
   - v3.debug.codex_sample_persist_failure
   entry_symbols:
   - persist_v3_error_evidence_payload
+  - persist_v3_responses_relay_terminal_error_evidence
+  - persist_v3_projected_terminal_error_evidence
+  - project_v3_responses_relay_error_chain
   - capture_v3_responses_relay_provider_snapshots
   - finalize_v3_responses_relay_server_output
   allowed_paths:
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/live_snapshot.rs
+  - v3/crates/routecodex-v3-server/src/live_snapshot_terminal_evidence.rs
   - v3/crates/routecodex-v3-debug/src/sample_store.rs
   - v3/crates/routecodex-v3-server/tests
   - docs/architecture

@@ -41,6 +41,12 @@ const server = readRequired("v3/crates/routecodex-v3-server/src/lib.rs");
 const serverLiveSnapshot = readRequired(
   "v3/crates/routecodex-v3-server/src/live_snapshot.rs",
 );
+// Terminal error evidence persistence and relay error-chain projection moved
+// out of live_snapshot.rs (V3 module-decomposition size limit); the mapped
+// debug-fidelity checks below must read the module that now owns them.
+const serverLiveSnapshotTerminalEvidence = readRequired(
+  "v3/crates/routecodex-v3-server/src/live_snapshot_terminal_evidence.rs",
+);
 const serverFrameBuilders = readRequired(
   "v3/crates/routecodex-v3-server/src/frame_builders.rs",
 );
@@ -136,6 +142,11 @@ for (const leaked of [
     leaked,
     "Server live-snapshot module must not reimplement codex-sample persistence (unique owner is V3CodexSampleStore)",
   );
+  forbidMatch(
+    serverLiveSnapshotTerminalEvidence,
+    leaked,
+    "Server terminal-evidence module must not reimplement codex-sample persistence (unique owner is V3CodexSampleStore)",
+  );
 }
 requireMatch(
   server,
@@ -146,6 +157,11 @@ requireMatch(
   serverLiveSnapshot,
   /persist_v3_error_evidence_payload[\s\S]*?state\s*\.codex_sample_store\s*\.enqueue_persist\([\s\S]*?V3CodexSamplePersistJob[\s\S]*?force:\s*true,/,
   "Error evidence must enqueue force-write samples even when sampling is disabled",
+);
+requireMatch(
+  serverLiveSnapshotTerminalEvidence,
+  /fn persist_v3_terminal_error_evidence_pair[\s\S]*?persist_v3_error_evidence_payload\([\s\S]*?"request\.json"[\s\S]*?persist_v3_error_evidence_payload\([\s\S]*?"error\.json"/,
+  "The single terminal-error writer must emit both request.json and error.json through the shared force-write sink",
 );
 requireMatch(
   sampleStore,

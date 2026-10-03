@@ -2813,6 +2813,7 @@ features:
   owner_modules:
   - v3/crates/routecodex-v3-debug
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/live_snapshot_terminal_evidence.rs
   contract:
   - docs/goals/v3-codex-sample-retention-snap-scope-test-design.md
   - docs/architecture/v3-function-map.yml
@@ -2853,6 +2854,7 @@ features:
   owner_scope: Server persists verbatim request, Error chain, and provider wire snapshots only after terminal failure; artifacts remain outside MetadataCenter and normal payload.
   owner_modules:
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/live_snapshot_terminal_evidence.rs
   contract:
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-resource-operation-map.yml
