@@ -81,13 +81,15 @@ After the route-group scope is fixed, V3 derives these client capability fields 
 
 ## Visible model rules for V3
 
-V3 lists the visible model ids reachable from the current listener route group. Among Codex built-in ids, only `gpt-5.5` may be projected today. `gpt-5.6-*` entries are intentionally hidden from `/v1/models`, including configured provider model ids and aliases, until the gpt-5.6 client surface is explicitly enabled.
+V3 lists model ids on three surfaces: the visible ids reachable from the current listener route group (narrowed by a non-empty `expose_models`), the `provider.model` direct surface (every enabled provider model, never narrowed by `expose_models`), and `expose_models` client entry names that no earlier surface published. Among Codex built-in ids, only `gpt-5.5` may be projected today. `gpt-5.6-*` entries are intentionally hidden from `/v1/models`, including configured provider model ids and aliases, until the gpt-5.6 client surface is explicitly enabled.
 
 Projection priority is explicit:
 
-1. If the current listener route group does not reference a visible or canonical model id, do not list it.
-2. If the route group references `gpt-5.5`, project the stable Codex `gpt-5.5` preset while deriving capability fields from the reachable provider model capabilities.
-3. For non-built-in route-group visible ids, project provider metadata from the reachable provider model and derive capability fields from its `capabilities`.
+1. Route-group reachable visible or canonical model ids are listed unless a non-empty `expose_models` narrows them out.
+2. Every enabled provider model is listed as a `provider.model` direct entry (`direct_route: true`) regardless of `expose_models`, because an `expose_models` name is a client entry name rather than a provider model id.
+3. Every `expose_models` name that surfaces 1 and 2 did not publish is published as a virtual entry with `direct_route: false`; such a name pins no provider and takes the same normal Virtual Router path as `auto`.
+4. If the route group references `gpt-5.5`, project the stable Codex `gpt-5.5` preset while deriving capability fields from the reachable provider model capabilities.
+5. For non-built-in route-group visible ids, project provider metadata from the reachable provider model and derive capability fields from its `capabilities`.
 
 This is not a fallback path during request execution; it is only catalog construction truth.
 
