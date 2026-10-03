@@ -388,6 +388,15 @@ pub(crate) fn responses_direct_output_response_with_console_for_protocol(
     builder.body(Body::from(body)).expect("typed response")
 }
 
+/// Project a provider-terminal outcome onto the client boundary.
+///
+/// The client entry is never coupled to a provider. A provider terminal is either
+/// absorbed by a remaining candidate (the runtime keeps rotating before it reaches
+/// this point) or becomes a client transport break. The provider's own status,
+/// headers, and body are provider-private: they stay in the typed Error chain and in
+/// provider evidence, and they must not be projected as a client response. The
+/// disposition is matched exhaustively so a new terminal shape has to state its client
+/// boundary explicitly instead of inheriting provider passthrough.
 pub(crate) fn provider_terminal_response(
     state: &V3ListenerState,
     connection: Option<V3FrontConnectionIdentity>,
@@ -395,75 +404,38 @@ pub(crate) fn provider_terminal_response(
     requested_stream: bool,
 ) -> Response<Body> {
     match disposition {
-        routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness) => {
-            let mut hop_by_hop: Vec<String> = vec![
-                "connection",
-                "keep-alive",
-                "proxy-authenticate",
-                "proxy-authorization",
-                "te",
-                "trailer",
-                "transfer-encoding",
-                "upgrade",
-                "content-length",
-            ]
-            .into_iter()
-            .map(str::to_string)
-            .collect();
-            for (name, value) in witness.headers() {
-                if name.eq_ignore_ascii_case("connection") {
-                    if let Ok(value) = std::str::from_utf8(value) {
-                        hop_by_hop.extend(value.split(',').map(|name| name.trim().to_string()));
-                    }
-                }
-            }
-            let mut response = Response::new(Body::from(witness.body().to_vec()));
-            *response.status_mut() =
-                StatusCode::from_u16(witness.status()).expect("eligible external HTTP status");
-            for (name, value) in witness.headers() {
-                if hop_by_hop
-                    .iter()
-                    .any(|excluded| name.eq_ignore_ascii_case(excluded))
-                {
-                    continue;
-                }
-                let name = axum::http::header::HeaderName::from_bytes(name.as_bytes())
-                    .expect("eligible external HTTP header name");
-                let value = axum::http::HeaderValue::from_bytes(&value)
-                    .expect("eligible external HTTP header value");
-                response.headers_mut().append(name, value);
-            }
-            response
-        }
-        routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => {
-            if requested_stream {
-                // A streaming client must observe a transport failure. The response
-                // head is written so the client stays in streaming mode and retries
-                // the same request, instead of reading a header-less close as a
-                // normal end of stream. No client payload and no fabricated upstream
-                // status is sent; the typed Error chain keeps the real cause.
-                if let Some(connection) = connection {
-                    // Claim the boundary before Hyper can enqueue the response head, so
-                    // a concurrent restart replacement defers instead of closing the
-                    // socket and dropping that head. A closeout that already committed
-                    // keeps its `503` as the client-visible boundary.
-                    state
-                        .front_transport_broker
-                        .claim_current_connection_transport_break(connection);
-                }
-                return v3_sse_transport_disconnect_response(state, connection);
-            }
-            let connection = connection.expect("accepted Front connection identity");
-            assert!(
-                state
-                    .front_transport_broker
-                    .abort_current_connection_without_response(connection),
-                "current Front connection must be registered before no-response abort"
-            );
-            // The socket has been closed before Hyper can write this return value.
-            Response::new(Body::empty())
-        }
+        // A real compatible upstream HTTP error is still a provider error. It is
+        // recorded in the Error chain with its real status and body, and the client
+        // observes a transport break instead of the provider's response.
+        routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(_)
+        | routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => {}
     }
+    if requested_stream {
+        // A streaming client must observe a transport failure. The response
+        // head is written so the client stays in streaming mode and retries
+        // the same request, instead of reading a header-less close as a
+        // normal end of stream. No client payload and no fabricated upstream
+        // status is sent; the typed Error chain keeps the real cause.
+        if let Some(connection) = connection {
+            // Claim the boundary before Hyper can enqueue the response head, so
+            // a concurrent restart replacement defers instead of closing the
+            // socket and dropping that head. A closeout that already committed
+            // keeps its `503` as the client-visible boundary.
+            state
+                .front_transport_broker
+                .claim_current_connection_transport_break(connection);
+        }
+        return v3_sse_transport_disconnect_response(state, connection);
+    }
+    let connection = connection.expect("accepted Front connection identity");
+    assert!(
+        state
+            .front_transport_broker
+            .abort_current_connection_without_response(connection),
+        "current Front connection must be registered before no-response abort"
+    );
+    // The socket has been closed before Hyper can write this return value.
+    Response::new(Body::empty())
 }
 
 /// Break the client SSE transport for a provider terminal that has no client payload.

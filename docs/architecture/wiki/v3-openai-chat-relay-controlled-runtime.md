@@ -60,6 +60,7 @@ provider invocation, response governance, and Error01–06 projection.
 
 ```text
 npm run test:v3-openai-chat-relay-runtime-integration
+npm run test:v3-h2-chat-direct-isolation
 npm run verify:v3-openai-chat-relay-runtime-integration
 npm run test:v3-openai-chat-relay-runtime-integration-red-fixtures
 npm run verify:v3-module-boundaries

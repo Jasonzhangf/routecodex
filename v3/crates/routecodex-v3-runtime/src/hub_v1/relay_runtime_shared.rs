@@ -116,7 +116,8 @@ pub fn server_routing_group<'a>(
 /// Build the only public-facing source for an exhausted provider pool.
 ///
 /// Candidate details stay in the typed Error01/Error02 side-channel. Error06
-/// owns the stable client projection (`502 network_error`).
+/// stages no client candidate for a provider terminal: the client boundary is
+/// the `client_transport_break` disposition owned by Error05 and Server/SSE.
 pub(crate) fn provider_pool_exhausted_source(
     source_stage: &'static str,
     attempted_candidates: &[String],
