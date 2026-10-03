@@ -1,6 +1,6 @@
 use crate::*;
 use axum::body::Body;
-use axum::extract::{Request, State, WebSocketUpgrade};
+use axum::extract::{Extension, Request, State, WebSocketUpgrade};
 use axum::http::{HeaderMap, Response, StatusCode};
 use futures_util::StreamExt;
 use serde_json::{json, Value};
@@ -8,6 +8,20 @@ use std::sync::Arc;
 
 pub(crate) async fn responses_websocket_endpoint(
     State(state): State<Arc<V3ListenerState>>,
+    headers: HeaderMap,
+    connection: Option<Extension<V3FrontConnectionIdentity>>,
+    ws: Option<WebSocketUpgrade>,
+) -> Response<Body> {
+    let response = responses_websocket_upgrade(state.clone(), headers, ws).await;
+    commit_model_transport_outcome(
+        &state,
+        connection.map(|Extension(identity)| identity),
+        response,
+    )
+}
+
+async fn responses_websocket_upgrade(
+    state: Arc<V3ListenerState>,
     headers: HeaderMap,
     ws: Option<WebSocketUpgrade>,
 ) -> Response<Body> {
@@ -689,14 +703,14 @@ pub(crate) async fn send_responses_websocket_error(
 }
 
 async fn send_responses_websocket_projected_error(
-    socket: &mut WebSocket,
+    _socket: &mut WebSocket,
     projected: routecodex_v3_error::V3Error06ClientProjected,
 ) -> Result<(), ()> {
-    let event = json!({
-        "type": "error",
-        "error": projected.body["error"].clone()
-    });
-    send_responses_websocket_json(socket, &event).await
+    eprintln!(
+        "[v3-websocket-internal-error] class={} cause={}",
+        projected.error_class, projected.error_detail
+    );
+    Err(())
 }
 
 pub(crate) async fn send_responses_websocket_json(

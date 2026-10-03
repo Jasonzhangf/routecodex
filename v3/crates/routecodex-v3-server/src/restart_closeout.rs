@@ -18,6 +18,7 @@ struct V3FrontTransportRequestCycle {
     request_started: bool,
     response_started: bool,
     terminal_frame_suppressed: bool,
+    restart_deferred: bool,
 }
 
 impl V3FrontTransportCloseoutState {
@@ -48,6 +49,7 @@ impl V3FrontTransportCloseoutState {
         request_cycle.frame = None;
         request_cycle.request_started = true;
         request_cycle.response_started = false;
+        request_cycle.restart_deferred = false;
         self.transport_wrote.store(false, Ordering::Release);
     }
 
@@ -71,23 +73,20 @@ impl V3FrontTransportCloseoutState {
     /// already owns the client-visible boundary and its response bytes have not
     /// reached the client yet. Closing there signals the biased write-worker close,
     /// which can drop the queued SSE head and turn the transport break back into the
-    /// silent zero-byte close it replaces, so the restart `503` stays pending without
-    /// signalling. The streaming terminal settles that boundary once the transport
-    /// reports the write, so the client always observes either the SSE transport break
-    /// or the restart `503` frame.
+    /// silent zero-byte close it replaces. Only a typed deferred close is retained;
+    /// restart must never fabricate a client error response.
     pub(crate) fn close_for_exec_replacement(&self) -> bool {
         let mut request_cycle = self
             .request_cycle
             .lock()
             .expect("front closeout request cycle lock");
         if request_cycle.terminal_frame_suppressed && !self.transport_wrote() {
-            request_cycle.frame = Some(build_v3_restart_closeout_http_error());
+            request_cycle.restart_deferred = true;
+            request_cycle.frame = None;
             return false;
         }
         self.closed.store(true, Ordering::Release);
-        if request_cycle.request_started && !request_cycle.response_started {
-            request_cycle.frame = Some(build_v3_restart_closeout_http_error());
-        }
+        request_cycle.frame = None;
         true
     }
 
@@ -95,8 +94,8 @@ impl V3FrontTransportCloseoutState {
     /// and its response bytes never reached the client.
     ///
     /// Called from the streaming terminal right before its body fails, so a restart
-    /// replacement that raced the transport break still delivers its `503` frame
-    /// instead of leaving the client with zero response bytes. Returns `true` when the
+    /// replacement that raced the transport break closes without an error frame.
+    /// Returns `true` when the
     /// closeout must be signalled; response bytes that did reach the client make the
     /// SSE transport break the client boundary and drop the deferred frame.
     pub(crate) fn commit_deferred_restart_closeout(&self) -> bool {
@@ -104,11 +103,14 @@ impl V3FrontTransportCloseoutState {
             .request_cycle
             .lock()
             .expect("front closeout request cycle lock");
-        if self.transport_wrote() || request_cycle.frame.is_none() {
+        if self.transport_wrote() || !request_cycle.restart_deferred {
             request_cycle.frame = None;
+            request_cycle.restart_deferred = false;
             return false;
         }
         self.closed.store(true, Ordering::Release);
+        request_cycle.frame = None;
+        request_cycle.restart_deferred = false;
         true
     }
 
@@ -129,14 +131,13 @@ impl V3FrontTransportCloseoutState {
     /// Suppress a pending restart closeout frame for a terminal that owns its own
     /// client-visible boundary.
     ///
-    /// The streaming no-response terminal writes the SSE transport break itself, so a
-    /// concurrent restart replacement must not also queue the `503` closeout frame.
+    /// The streaming no-response terminal owns the incomplete SSE transfer, so a
+    /// concurrent restart replacement must not queue another client frame.
     /// Unlike `abort_without_response` this leaves the connection open, because Hyper
     /// still has to write the response head before the body fails.
     ///
     /// Returns `false` when a restart closeout already committed on this connection.
-    /// The committed `503` is the client-visible boundary then, and clearing it would
-    /// leave the client with the same silent zero-byte close this terminal removes.
+    /// The committed transport close is the client-visible boundary then.
     pub(crate) fn suppress_restart_closeout_frame(&self) -> bool {
         let mut request_cycle = self
             .request_cycle
@@ -207,16 +208,4 @@ impl V3FrontTransportCloseoutState {
             .take()
             .map(|tx| tx.send(()));
     }
-}
-
-fn build_v3_restart_closeout_http_error() -> Vec<u8> {
-    let body = br#"{"error":{"type":"server_error","code":"server_restart_in_progress","message":"RouteCodex restarted before this request completed","status":503}}"#;
-    format!(
-        "HTTP/1.1 503 Service Unavailable\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
-        body.len()
-    )
-    .into_bytes()
-    .into_iter()
-    .chain(body.iter().copied())
-    .collect()
 }

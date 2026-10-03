@@ -283,7 +283,7 @@
         <span>Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-caller-flow.md</code></span>
         <span>Edge source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
         <span>84 functional paths</span>
-        <span>489 caller edges</span>
+        <span>492 caller edges</span>
       </div>
     </header>
 
@@ -472,7 +472,7 @@ flowchart TD
 <tr><td>Missing caller/callee fields</td><td><strong>none</strong></td></tr>
 <tr><td>Binding-pending edges</td><td><strong>22</strong></td></tr>
 <tr><td>typed-test-only edges</td><td><strong>15</strong></td></tr>
-<tr><td>live-bound source edges</td><td><strong>378</strong></td></tr>
+<tr><td>live-bound source edges</td><td><strong>380</strong></td></tr>
 <tr><td>aggregate-only wrapper edges</td><td><strong>2</strong></td></tr>
 </tbody>
 </table>
@@ -619,7 +619,7 @@ flowchart TD
 <tr><td><a href="#chain-v3_protocol_openai_chat_characterization"><code>v3.protocol.openai_chat.characterization</code></a><br/>v 3.protocol.openai_chat.characterization</td><td><span class="status audited_locked">locked by Jason</span></td><td>4</td><td>7</td><td><code>v3.protocol_openai_chat_codec_characterization</code></td><td><code>sha256:09e2d27ad992…</code></td></tr>
 <tr><td><a href="#chain-v3_protocol_gemini_characterization"><code>v3.protocol.gemini.characterization</code></a><br/>v 3.protocol.gemini.characterization</td><td><span class="status audited_locked">locked by Jason</span></td><td>8</td><td>9</td><td><code>v3.protocol_gemini_codec_characterization</code></td><td><code>sha256:9541ae7753f5…</code></td></tr>
 <tr><td><a href="#chain-v3_hub_pipeline_v1_relay_payload_copy_runtime_probes"><code>v3.hub_pipeline.v1.relay_payload_copy_runtime_probes</code></a><br/>v 3.hub_pipeline.v 1.relay_payload_copy_runtime_probes</td><td><span class="status audited_locked">locked by Jason</span></td><td>5</td><td>6</td><td><code>v3.hub_relay_payload_copy_runtime_probes</code></td><td><code>sha256:1db038838f15…</code></td></tr>
-<tr><td><a href="#chain-v3_server_startup"><code>v3.server.startup</code></a><br/>03 Server 接入</td><td><span class="status audited_locked">locked by Jason</span></td><td>6</td><td>7</td><td><code>v3.foundation_p0_p2</code></td><td><code>sha256:edd1d4d6c653…</code></td></tr>
+<tr><td><a href="#chain-v3_server_startup"><code>v3.server.startup</code></a><br/>03 Server 接入</td><td><span class="status audited_locked">locked by Jason</span></td><td>9</td><td>8</td><td><code>v3.foundation_p0_p2</code></td><td><code>sha256:e09b3524db55…</code></td></tr>
 <tr><td><a href="#chain-v3_debug_error_foundation_mainline"><code>v3.debug_error_foundation.mainline</code></a><br/>E Error handler / Health owner</td><td><span class="status audited_locked">locked by Jason</span></td><td>22</td><td>24</td><td><code>v3.debug_error_foundation</code></td><td><code>sha256:c520e6d65c78…</code></td></tr>
 <tr><td><a href="#chain-v3_anthropic_relay_controlled_runtime"><code>v3.anthropic_relay.controlled_runtime</code></a><br/>v 3.anthropic_relay.controlled_runtime</td><td><span class="status audited_locked">locked by Jason</span></td><td>15</td><td>20</td><td><code>v3.anthropic_relay_runtime_integration</code></td><td><code>sha256:6a9a534d2058…</code></td></tr>
 <tr><td><a href="#chain-v3_responses_websocket_v2_transport_hardening"><code>v3.responses.websocket_v2.transport_hardening</code></a><br/>v 3.responses.websocket_v 2.transport_hardening</td><td><span class="status audited_locked">locked by Jason</span></td><td>2</td><td>5</td><td><code>v3.responses_websocket_v2_transport_hardening</code></td><td><code>sha256:ab4f1ac48776…</code></td></tr>
@@ -1100,7 +1100,7 @@ flowchart TD
             <span class="chain-id">03 Server 接入</span>
             <span>HTTP listener 只做入口分发和最终 frame；不拥有 Hub 语义。</span>
             <span><code>v3.server.startup</code></span>
-            <span>6 edges · 7 resources · v3-debug, v3-error, v3-server</span>
+            <span>9 edges · 8 resources · v3-debug, v3-error, v3-server, v3/vendor</span>
             <span class="status audited_locked">locked by Jason</span>
           </a>
 <a class="branch-card" href="#chain-v3_entry_protocol_registry_contract_mainline">
@@ -2667,15 +2667,15 @@ flowchart TD
       <summary>
         <span class="summary-main">03 Server 接入</span>
         <span class="summary-sub">HTTP listener 只做入口分发和最终 frame；不拥有 Hub 语义。</span>
-        <span class="summary-sub">6 edges · <code>v3.server.startup</code> · V3Config05ManifestPublished → V3Server16HttpFrame</span>
+        <span class="summary-sub">9 edges · <code>v3.server.startup</code> · V3Config05ManifestPublished → HyperConnectionParserPolicy</span>
       </summary>
       <div class="branch-body">
         <p class="chain-summary">Atomic multi-listener startup plus strict HTTP boundary; valid business requests enter Runtime and invalid input enters the global typed Error chain before Runtime.</p>
         <div class="branch-meta">
           <span>owner: <code>v3.foundation_p0_p2</code></span>
           <span>audit: <span class="status audited_locked">locked by Jason</span></span>
-          <span>modules: <code>v3-debug · v3-error · v3-server</code></span>
-          <span>resources: <code>7</code></span>
+          <span>modules: <code>v3-debug · v3-error · v3-server · v3/vendor</code></span>
+          <span>resources: <code>8</code></span>
 
 
         </div>
@@ -2688,16 +2688,23 @@ flowchart TD
   n_v3_server_startup_3[&quot;&lt;b&gt;Error source&lt;/b&gt;&lt;br/&gt;错误唯一入口；记录 source/stage/code，不在 Server/provider 本地分叉&lt;br/&gt;&lt;small&gt;V3Error01SourceRaised&lt;/small&gt;&quot;]
   n_v3_server_startup_4[&quot;&lt;b&gt;Debug 01 Node Event Registered&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3Debug01NodeEventRegistered&lt;/small&gt;&quot;]
   n_v3_server_startup_5[&quot;&lt;b&gt;Client error projection&lt;/b&gt;&lt;br/&gt;唯一客户端错误投影；禁止包装成成功&lt;br/&gt;&lt;small&gt;V3Error06ClientProjected&lt;/small&gt;&quot;]
-  n_v3_server_startup_6[&quot;&lt;b&gt;HTTP frame&lt;/b&gt;&lt;br/&gt;server 只发送最终 HTTP/SSE frame&lt;br/&gt;&lt;small&gt;V3Server16HttpFrame&lt;/small&gt;&quot;]
+  n_v3_server_startup_6[&quot;&lt;b&gt;Model Client No Response&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3ModelClientNoResponse&lt;/small&gt;&quot;]
+  n_v3_server_startup_7[&quot;&lt;b&gt;Front Transport Closeout State&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3FrontTransportCloseoutState&lt;/small&gt;&quot;]
+  n_v3_server_startup_8[&quot;&lt;b&gt;Server Http Framing Policy&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3ServerHttpFramingPolicy&lt;/small&gt;&quot;]
+  n_v3_server_startup_9[&quot;&lt;b&gt;Hyper Http 1 Parser Policy&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;HyperHttp1ParserPolicy&lt;/small&gt;&quot;]
+  n_v3_server_startup_10[&quot;&lt;b&gt;Hyper Connection Parser Policy&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;HyperConnectionParserPolicy&lt;/small&gt;&quot;]
   n_v3_server_startup_0 --&gt;|v3-srv-01&lt;br/&gt;v3-server → v3-server| n_v3_server_startup_1
   n_v3_server_startup_1 --&gt;|v3-srv-02&lt;br/&gt;v3-server → v3-server| n_v3_server_startup_2
   n_v3_server_startup_2 --&gt;|v3-srv-http-error-01&lt;br/&gt;v3-server → v3-error| n_v3_server_startup_3
   n_v3_server_startup_2 --&gt;|v3-srv-03&lt;br/&gt;v3-server → v3-debug| n_v3_server_startup_4
   n_v3_server_startup_4 --&gt;|v3-srv-04&lt;br/&gt;v3-server → v3-error| n_v3_server_startup_5
   n_v3_server_startup_5 --&gt;|v3-srv-05&lt;br/&gt;v3-server → v3-server| n_v3_server_startup_6
+  n_v3_server_startup_6 --&gt;|v3-srv-06&lt;br/&gt;v3-server → v3-server| n_v3_server_startup_7
+  n_v3_server_startup_8 --&gt;|v3-srv-07&lt;br/&gt;v3-server → v3/vendor| n_v3_server_startup_9
+  n_v3_server_startup_9 --&gt;|v3-srv-08&lt;br/&gt;v3/vendor → v3/vendor| n_v3_server_startup_10
   classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
   classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
-  class n_v3_server_startup_0,n_v3_server_startup_1,n_v3_server_startup_2,n_v3_server_startup_3,n_v3_server_startup_4,n_v3_server_startup_5,n_v3_server_startup_6 node;</pre>
+  class n_v3_server_startup_0,n_v3_server_startup_1,n_v3_server_startup_2,n_v3_server_startup_3,n_v3_server_startup_4,n_v3_server_startup_5,n_v3_server_startup_6,n_v3_server_startup_7,n_v3_server_startup_8,n_v3_server_startup_9,n_v3_server_startup_10 node;</pre>
         </div>
         <table>
 <thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
@@ -2707,7 +2714,10 @@ flowchart TD
 <tr><td><code>v3-srv-http-error-01</code></td><td><code>V3Server03HttpRequestRaw</code><br/>→ <code>V3Error01SourceRaised</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.server.validated_http_input</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.error.chain</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.error.chain</code></div></td><td><code>read_json_payload</code><br/><small>routecodex-v3-server/src/frame_builders.rs</small></td><td><code>project_v3_http_boundary_error</code><br/><small>routecodex-v3-error/src/lib.rs</small></td></tr>
 <tr><td><code>v3-srv-03</code></td><td><code>V3Server03HttpRequestRaw</code><br/>→ <code>V3Debug01NodeEventRegistered</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.request.protocol_fields</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.debug.artifact</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.debug.artifact</code></div></td><td><code>pending_endpoint</code><br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small></td><td><code>register_v3_debug_01_pending_endpoint_event</code><br/><small>routecodex-v3-debug/src/lib.rs</small></td></tr>
 <tr><td><code>v3-srv-04</code></td><td><code>V3Debug01NodeEventRegistered</code><br/>→ <code>V3Error06ClientProjected</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.debug.artifact</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.error.chain</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.debug.artifact</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.error.chain</code></div></td><td><code>pending_endpoint</code><br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small></td><td><code>project_v3_pending_endpoint_error</code><br/><small>routecodex-v3-error/src/lib.rs</small></td></tr>
-<tr><td><code>v3-srv-05</code></td><td><code>V3Error06ClientProjected</code><br/>→ <code>V3Server16HttpFrame</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.error.chain</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.response.client_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.error.chain</code></div></td><td><code>pending_endpoint</code><br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small></td><td><code>build_v3_server_16_http_frame_from_v3_error_06</code><br/><small>routecodex-v3-server/src/frame_builders.rs</small></td></tr>
+<tr><td><code>v3-srv-05</code></td><td><code>V3Error06ClientProjected</code><br/>→ <code>V3ModelClientNoResponse</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.error.chain</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.server.model_transport_outcome</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.error.chain</code></div></td><td><code>responses_direct_output_response_with_console_for_protocol</code><br/><small>routecodex-v3-server/src/frame_builders.rs</small></td><td><code>model_no_response_output</code><br/><small>routecodex-v3-server/src/frame_builders.rs</small></td></tr>
+<tr><td><code>v3-srv-06</code></td><td><code>V3ModelClientNoResponse</code><br/>→ <code>V3FrontTransportCloseoutState</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.server.model_transport_outcome</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.error.chain</code></div></td><td><code>commit_model_transport_outcome</code><br/><small>routecodex-v3-server/src/frame_builders.rs</small></td><td><code>provider_terminal_response</code><br/><small>routecodex-v3-server/src/frame_builders.rs</small></td></tr>
+<tr><td><code>v3-srv-07</code></td><td><code>V3ServerHttpFramingPolicy</code><br/>→ <code>HyperHttp1ParserPolicy</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>produces:</strong> <code>v3.server.http_parse_error_policy</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.server.http_parse_error_policy</code></div></td><td><code>serve_v3_front_http_connection</code><br/><small>routecodex-v3-server/src/restart_handoff.rs</small></td><td><code>automatic_error_responses</code><br/><small>v3/vendor/hyper/src/server/conn/http1.rs</small></td></tr>
+<tr><td><code>v3-srv-08</code></td><td><code>HyperHttp1ParserPolicy</code><br/>→ <code>HyperConnectionParserPolicy</code></td><td><span class="status anchored">anchored</span></td><td><span class="status anchored" title="map status from edge record">anchored</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.server.http_parse_error_policy</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.server.http_parse_error_policy</code></div></td><td><code>serve_connection</code><br/><small>v3/vendor/hyper/src/server/conn/http1.rs</small></td><td><code>set_automatic_error_responses</code><br/><small>v3/vendor/hyper/src/proto/h1/conn.rs</small></td></tr>
 </tbody>
 </table>
       </div>
@@ -4932,7 +4942,7 @@ flowchart TD
         <span class="summary-sub">3 edges · <code>v3.direct_sse_accept_skeleton</code> · V3DirectSseAccept01ClientChannel → V3DirectResp14TypedHookCatalog</span>
       </summary>
       <div class="branch-body">
-        <p class="chain-summary">Protocol-typed client SSE establishes a shared Front transport channel and heartbeat before the execution-plan-selected Direct or Relay attempt finishes; only runtime-projected client frames or typed Error06 terminal frames cross the channel, never reparsed HTTP JSON.</p>
+        <p class="chain-summary">Protocol-typed client SSE establishes a shared Front transport channel and heartbeat before the execution-plan-selected Direct or Relay attempt finishes; only successful runtime-projected client frames cross the channel, while typed terminal failure aborts the affected transport without an error frame or reparsed HTTP JSON.</p>
         <div class="branch-meta">
           <span>owner: <code>v3.direct_sse_accept_skeleton</code></span>
           <span>audit: <span class="status pending_review">pending review</span></span>

@@ -94,54 +94,22 @@ pub(crate) fn responses_relay_output_response(
     requested_stream: bool,
 ) -> Response<Body> {
     let successful_sse = output.error_chain.is_none() && output.status < 400;
-    let projected_error_frame = if requested_stream && !successful_sse {
-        match &output.client_body {
-            V3ResponsesRelayClientBody::Json(client_response) => {
-                let frame = V3Server16HttpFrame {
-                    status: output.status,
-                    content_type: "application/json".to_string(),
-                    body: V3Server16Body::Json(client_response.clone()),
-                    debug_node: "V3Debug01NodeEventRegistered",
-                    error_node: "V3Error06ClientProjected",
-                    error_chain: output.error_chain.clone().unwrap_or_default(),
-                    error_body: None,
-                    node_trace: output.node_trace.clone(),
-                    observability: output.observability.clone(),
-                    stream_observation: output.stream_observation.clone(),
-                };
-                Some(project_v3_responses_relay_stream_error_frame_if_requested(
-                    frame, true,
-                ))
-            }
-            V3ResponsesRelayClientBody::Sse(_) => None,
-        }
-    } else {
-        None
+    if output.error_chain.is_some() {
+        return model_no_response_output(requested_stream);
+    }
+    let content_type = match &output.client_body {
+        V3ResponsesRelayClientBody::Json(_) => "application/json",
+        V3ResponsesRelayClientBody::Sse(_) => "text/event-stream",
     };
-    let content_type = projected_error_frame
-        .as_ref()
-        .map(|frame| frame.content_type.as_str())
-        .unwrap_or_else(|| match &output.client_body {
-            V3ResponsesRelayClientBody::Json(_) => "application/json",
-            V3ResponsesRelayClientBody::Sse(_) => "text/event-stream",
-        });
     let builder = Response::builder()
         .status(StatusCode::from_u16(output.status).expect("typed V3 Responses Relay status"))
         .header("content-type", content_type);
-    let body = match (output.client_body, projected_error_frame) {
-        (V3ResponsesRelayClientBody::Sse(client_stream), _) => v3_client_sse_body(
+    let body = match output.client_body {
+        V3ResponsesRelayClientBody::Sse(client_stream) => v3_client_sse_body(
             wrap_v3_responses_relay_sse_console_stream(client_stream, stream_console_finalizer),
             successful_sse.then_some(keepalive_interval).flatten(),
         ),
-        (V3ResponsesRelayClientBody::Json(_), Some(frame)) => match frame.body {
-            V3Server16Body::CommittedSse(stream) => v3_client_sse_body(stream, None),
-            V3Server16Body::Sse(stream) => v3_live_client_sse_body(stream, None),
-            V3Server16Body::Json(value) => Body::from(
-                serde_json::to_vec(&value).expect("typed V3 Responses Relay error projection"),
-            ),
-            V3Server16Body::Bytes(bytes) => Body::from(bytes),
-        },
-        (V3ResponsesRelayClientBody::Json(client_response), None) => Body::from(
+        V3ResponsesRelayClientBody::Json(client_response) => Body::from(
             serde_json::to_vec(&client_response).expect("typed V3 Responses Relay projection"),
         ),
     };
@@ -179,6 +147,9 @@ pub(crate) fn openai_chat_relay_output_response(
     keepalive_interval: Duration,
     requested_stream: bool,
 ) -> Response<Body> {
+    if output.error_chain.is_some() {
+        return model_no_response_output(requested_stream);
+    }
     let status = output.status;
     let node_trace = output.node_trace.clone();
     let error_chain = output.error_chain.clone();
@@ -469,6 +440,9 @@ pub(crate) fn gemini_relay_output_response(
     keepalive_interval: Duration,
     requested_stream: bool,
 ) -> Response<Body> {
+    if output.error_chain.is_some() {
+        return model_no_response_output(requested_stream);
+    }
     let status = output.status;
     let node_trace = output.node_trace.clone();
     let error_chain = output.error_chain.clone();
@@ -510,6 +484,9 @@ pub(crate) fn anthropic_relay_output_response(
     output: V3AnthropicRelayRuntimeOutput,
     requested_stream: bool,
 ) -> Response<Body> {
+    if output.error_chain.is_some() {
+        return model_no_response_output(requested_stream);
+    }
     let status = output.status;
     let node_trace = output.node_trace.clone();
     let error_chain = output.error_chain.clone();

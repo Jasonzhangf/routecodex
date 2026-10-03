@@ -1162,7 +1162,7 @@ features:
   - Provider wire preserves the complete client history byte-for-byte, including historical tool-output images and reasoning encrypted content; only the selected wire model binding and current-turn validation
     may differ
   - The Responses provider wire preserves client history byte-for-byte; only the selected wire model binding and current-turn validation may differ
-  - Provider wire rejects malformed current-turn data:image payloads before Provider transport and projects them as client input errors, while valid current images remain normal payload
+  - Provider wire records malformed current-turn data:image input failure internally before transport and never projects a model-client error; valid current images remain normal payload
   - Provider transport resolves env and token-file auth only at send boundary
   - Provider raw response preserves JSON bytes and validated SSE event bytes
   - Provider HTTP transport accepts application/json raw response bodies for SSE-intent requests while preserving request-side Accept/stream SSE intent
@@ -1231,6 +1231,7 @@ features:
   - docs/architecture/wiki/v3-responses-direct-mainline.md
   test_design:
   - docs/goals/v3-debug-error-foundation-plan.md
+  - docs/goals/provider-terminal-no-502-dag-20260930.md
   required_unit:
   - routecodex-v3-debug ordered events, sinks, verbatim diagnostic projection, raw capture, snapshot sessions, dry-run fixture plans
   - routecodex-v3-error six adjacent builders, taxonomy, action scope, target exhaustion, client projection
@@ -1245,14 +1246,16 @@ features:
   - Error generates action plans only; Provider alone mutates health state
   - Target-facing availability is read-only; Router has no Provider health dependency
   - Dry Run uses Runtime foundation kernel and terminal no-network effect
-  - Server projects Debug/Error/Dry Run through HTTP only and does not duplicate policy
+  - Management APIs project diagnostic Debug/Error/Dry Run results only; model entries never project error status/body/events and do not duplicate Runtime/Error policy
   - Debug sink and malformed/disabled Dry Run failures enter the six-node Error chain without panic or silent success
   - Provider health mutation methods are crate-private and external Target-style compile fixtures cannot call them
   - External provider/upstream/transport errors keep external_error identity and never receive internal_code
   - RouteCodex-owned runtime failures receive stable internal_code 500-* by node and never receive external_error
   - Client-input malformed request projection has neither internal_code nor external_error
   required_integration:
-  - Server pending endpoint emits Debug events and full six-node Error projection
+  - All model entry errors stay internal even on pool exhaustion; multi_listener_server model_entries_never_deliver_provider_or_sse_decode_errors_blackbox captures real HTTP bytes for Chat, Responses including compact, Messages, and Gemini JSON/SSE with upstream503 and malformed SSE; responses_inbound_websocket_sse_decode_failure_never_sends_client_error and the provider429/binary/502, malformed input, pool exhaustion, session isolation, and successful tool tests are mandatory in test:v3-server-debug-error-blackbox and the V3 cargo workspace CI run
+  - multi_listener_server malformed_http_framing_never_sends_client_error_blackbox proves fresh, reused and pipelined HTTP parse failures terminate with zero new bytes; front_http_framing_preserves_authorized_responses_blackbox preserves control errors, opaque/multi-flush bodies and Expect/100-continue; hyper_default_error_policy_preserves_upstream_behavior_blackbox proves the dependency default and explicit true preserve native 400/431; existing success gates preserve SSE and WebSocket
+  - Server model pending endpoint emits internal Debug/Error evidence and returns only complete success or a typed incomplete transport outcome
   - Debug status/logs/snapshots endpoints expose shared runtime state without secrets
   - Debug dry-run endpoint reports stopped_before_provider_send and no_network_send
   - Debug response dry-run replays captured provider-response SSE through RespInbound and Resp03, exposes the client projection as a diagnostic artifact, and strips reason only when a valid toolreason was harvested
@@ -1260,7 +1263,7 @@ features:
   - Provider health scoped action tests prove cross-provider/key/model isolation
   - Direct shared-health blackbox proves three cross-request failures cool the first provider before network send
   - Direct dry-run blackbox proves provider-request dry-run does not clear shared provider cooldown
-  - Direct last-default blackbox proves two blocking 5s waits and third-failure client projection
+  - Direct last-default blackbox proves two blocking 5s waits and third-failure incomplete transport without client error projection
   required_gates:
   - npm run test:v3-debug-contract
   - npm run test:v3-error-contract
@@ -2200,7 +2203,7 @@ features:
   - controlled stream=true response.create projects Runtime SSE output as WebSocket events without full materialization
   - malformed client WebSocket event fails before provider send; missing type, unsupported response.cancel, and nested response.create response payload also fail before provider send
   - a second response.create carrying previous_response_id is rejected before provider send instead of re-entering Router as a continuation
-  - a provider terminal closes the current WebSocket without any client payload so no provider status, code, header, or body reaches the client; a runtime/validation error still projects an explicit WebSocket error event without HTTP fallback
+  - provider WebSocket/runtime errors remain internal; exhausted or uncompletable model requests end transport without HTTP errors, WebSocket error messages/application codes, or fabricated completion
   - client disconnect during incremental Runtime SSE projection drops the provider stream/connection instead of draining to terminal behind the client
   - Server owns only client upgrade and framing while provider WebSocket state remains provider-owned
   - control fields do not enter provider/client normal payloads
@@ -3286,7 +3289,7 @@ features:
   - Direct provider failure at any point before semantic client commitment remains in the existing Error chain and can reselect without exposing the failed attempt buffer.
   - A replacement provider must complete a protocol-valid terminal attempt before client semantic commit.
   - Only execution-plan-selected runtime projected client frames cross the channel; raw provider SSE does not.
-  - Candidate exhaustion reaches the Front only as a protocol-typed Error06 client frame; the Front does not parse an HTTP JSON payload to reconstruct error or routing state.
+  - Candidate exhaustion reaches the Front only as a typed no-response transport outcome; no error frame reaches the client, and the Front never parses an HTTP JSON payload to reconstruct error or routing state.
   required_negative:
   - Relay and Direct requests enter the same Front skeleton; the Front does not choose between them.
   - The accept skeleton does not parse provider business events or own routing, health, or retry.
@@ -3646,7 +3649,7 @@ features:
   - request_inverse_context and explicit_history_pairing are request-scoped; they initialize only for client_entry, are preserved on retry/internal_followup, and release only at RuntimeRequestFinalizer
   - response_tool_binding is written by Resp03 for the new provider call returned in this successful attempt and read only by RespOutbound05
   - the response graph sink is v3.operation_runner.client_frame_candidate; the candidate is staged and never enters a client body directly
-  - the error graph sink is v3.error.client_projection_candidate; Error06 always runs and emits an empty candidate for retry, while terminal_client_error is submitted only through Server/SSE
+  - the legacy-named error graph sink v3.error.client_projection_candidate carries internal evidence only; Error06 never authorizes a model-client error candidate; Runtime consumes retry or terminal no-commit decisions and Server/SSE commits only success or aborts the affected transport
   - retry belongs to Error05 typed error execution decision, not to the response graph; cancel/disconnect belong to Runtime ownership and the unified finalizer
   - no protocol-configurable optional flow or second runner bypasses the fixed request/response/error graphs
   - Config publishes declarations only and references the field/operator profile manifest; legacy conversion tables are migration baselines and cannot remain a competing field-mapping owner after cutover

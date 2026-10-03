@@ -1160,6 +1160,7 @@ where
         }
     });
     let connection = hyper::server::conn::http1::Builder::new()
+        .automatic_error_responses(false)
         .serve_connection(
             TokioIo::new(V3FrontHttpIo {
                 read_half,

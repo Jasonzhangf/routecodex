@@ -232,30 +232,12 @@ forbid(
   'non-Responses client SSE terminator (response.done / [DONE]) in the Responses client framing owner',
 );
 {
-  const responsesErrorChunkStart = text.serverFrameBuilders.indexOf(
-    'fn v3_responses_sse_error_event_chunk(',
+  forbid(
+    text.serverFrameBuilders,
+    files.serverFrameBuilders,
+    /event: (?:error|response\.failed)/,
+    'client error event construction is forbidden',
   );
-  const responsesErrorChunkEnd = text.serverFrameBuilders.indexOf(
-    '\nfn v3_sse_runtime_error_source_chunk_for_protocol',
-    responsesErrorChunkStart,
-  );
-  if (responsesErrorChunkStart < 0 || responsesErrorChunkEnd < 0) {
-    fail(
-      `${files.serverFrameBuilders}: unable to isolate Responses client SSE error terminal owner`,
-    );
-  } else {
-    const responsesErrorChunk = text.serverFrameBuilders.slice(
-      responsesErrorChunkStart,
-      responsesErrorChunkEnd,
-    );
-    requireAll(responsesErrorChunk, files.serverFrameBuilders, ['"response.failed"']);
-    forbid(
-      responsesErrorChunk,
-      files.serverFrameBuilders,
-      /data:\s*\[DONE\]/,
-      'Chat-completions [DONE] terminator on the Responses client SSE error path',
-    );
-  }
 }
 forbid(
   text.responsesRelayRuntime,
