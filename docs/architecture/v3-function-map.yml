@@ -430,6 +430,7 @@ features:
   - v3.config.published_manifest
   - v3.server.listener_set
   - v3.server.validated_http_input
+  - v3.server.model_transport_outcome
   - v3.request.protocol_fields
   - v3.debug.artifact
   - v3.error.chain
@@ -440,9 +441,14 @@ features:
   - v3-srv-03
   - v3-srv-04
   - v3-srv-05
+  - v3-srv-06
   entry_symbols:
   - spawn_v3_server_aggregate
   - pending_endpoint
+  - pending_model_request
+  - model_no_response_output
+  - commit_model_transport_outcome
+  - V3ModelClientNoResponse
   - build_v3_server_startup_01_listener_set_from_config_05
   - build_v3_server_03_http_request_raw
   - register_v3_debug_01_pending_endpoint_event
@@ -3603,6 +3609,9 @@ features:
   - path: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_timing.rs
     owner: kernel
     responsibility: Finalize typed timing for committed SSE, live SSE and JSON.
+  - path: v3/crates/routecodex-v3-server/src/live_snapshot_projection.rs
+    owner: live_snapshot
+    responsibility: Start and close diagnostic snapshot sessions and select protocol-native diagnostic error bodies; function bodies and caller behavior are preserved.
   decomposition_edges:
   - caller: execute_v3_anthropic_relay_runtime_inner
     callees: [closeout_anthropic_relay_response, closeout_anthropic_relay_sse_response]
@@ -3617,6 +3626,7 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
+  - v3/crates/routecodex-v3-server/src/live_snapshot_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/provider-compat-core/src/lib.rs

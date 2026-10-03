@@ -8,7 +8,7 @@ title: V3 unified error-path audit
 
 Every direct and relay failure enters the typed chain in order:
 
-`ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified -> ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision -> ErrorErr06ClientProjected` for an eligible client error response. A terminal provider failure with no eligible upstream HTTP response ends at Error05 and closes only the current client connection before headers; it does not fabricate Error06 `502` or an SSE success/error event.
+`ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified -> ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision` retains internal failure and recovery truth. The existing `ErrorErr06ClientProjected` symbol does not authorize a model-client error response. Follow AGENTS.md's mandatory all-entry prohibition and `docs/goals/provider-terminal-no-502-dag-20260930.md`: every upstream/internal error remains internal, including full pool exhaustion; only complete real success or an incomplete transport outcome may reach DSH Chat, Codex Responses HTTP/WebSocket, or Claude Code Messages. No HTTP error status, error body/event, or fabricated successful terminal is permitted. The old eligible-upstream-error exception is superseded.
 
 The error chain is a control-plane side channel. It must not be copied into request or response business payloads.
 
@@ -18,8 +18,8 @@ The error chain is a control-plane side channel. It must not be copied into requ
 2. Search direct, relay, provider, executor, handler, SSE, and HTTP projection owners.
 3. Prove each error edge has a typed carrier and one owner.
 4. Reject any `mapErrorToHttp` fallback, local retry/reroute policy, direct Error06 builder call, or generic wrapper that loses source stage/kind.
-5. Add a failing static fixture before changing the owner.
-6. Run focused Rust/TS gates, then install, aggregate restart, and replay one direct and one relay failure.
+5. Add real public-entry blackbox regressions for the affected success, recoverable-failure, and exhausted-failure paths before changing the owner; static fixtures can only supplement them.
+6. Run focused Rust gates, then the applicable installed-runtime managed restart and same-entry replay. Cover all affected HTTP/SSE/WebSocket entries; a single Direct/Relay pair cannot prove the all-entry boundary.
 
 ## Forbidden bypasses
 

@@ -2534,19 +2534,33 @@ chains:
     status: anchored
   - step_id: v3-srv-05
     from_node: V3Error06ClientProjected
-    to_node: V3Server16HttpFrame
-    caller_symbol: pending_endpoint
-    caller_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
-    callee_symbol: build_v3_server_16_http_frame_from_v3_error_06
+    to_node: V3ModelClientNoResponse
+    caller_symbol: responses_direct_output_response_with_console_for_protocol
+    caller_file: v3/crates/routecodex-v3-server/src/frame_builders.rs
+    callee_symbol: model_no_response_output
     callee_file: v3/crates/routecodex-v3-server/src/frame_builders.rs
     owner_feature_id: v3.foundation_p0_p2
     resource_flow:
       consumes:
       - v3.error.chain
       produces:
-      - v3.response.client_payload
+      - v3.server.model_transport_outcome
       side_channel_reads:
       - v3.error.chain
+      side_channel_writes: []
+    status: anchored
+  - step_id: v3-srv-06
+    from_node: V3ModelClientNoResponse
+    to_node: V3FrontTransportCloseoutState
+    caller_symbol: commit_model_transport_outcome
+    caller_file: v3/crates/routecodex-v3-server/src/frame_builders.rs
+    callee_symbol: provider_terminal_response
+    callee_file: v3/crates/routecodex-v3-server/src/frame_builders.rs
+    owner_feature_id: v3.foundation_p0_p2
+    resource_flow:
+      consumes: [v3.server.model_transport_outcome]
+      produces: []
+      side_channel_reads: [v3.error.chain]
       side_channel_writes: []
     status: anchored
 - chain_id: v3.debug_error_foundation.mainline
@@ -7969,7 +7983,7 @@ chains:
 
 - chain_id: v3.direct_sse_accept_skeleton
   owner_feature_id: v3.direct_sse_accept_skeleton
-  summary: Protocol-typed client SSE establishes a shared Front transport channel and heartbeat before the execution-plan-selected Direct or Relay attempt finishes; only runtime-projected client frames or typed Error06 terminal frames cross the channel, never reparsed HTTP JSON.
+  summary: Protocol-typed client SSE establishes a shared Front transport channel and heartbeat before the execution-plan-selected Direct or Relay attempt finishes; only successful runtime-projected client frames cross the channel, while typed terminal failure aborts the affected transport without an error frame or reparsed HTTP JSON.
   manifest: docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml
   implementation_symbols: [V3FrontSseAcceptSkeleton, v3_request_wants_sse]
   supporting_callers: [pending_endpoint_after_responses_admission, execute_responses_direct_server_outcome]

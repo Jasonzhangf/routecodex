@@ -1,46 +1,80 @@
-# Provider terminal response DAG (2026-09-30)
+# All model entries: internal failure and client transport boundary
 
-## Goal and evidence
+## Authoritative contract
 
-Bug `705d624` owns this repair and its worktree.
+The current rule is **AGENTS.md: Mandatory: No Client Error Responses, Across Every Model Entry**. It supersedes this document's 2026-09-30 permission to forward selected upstream HTTP errors. The old restriction on fabricated 502 was insufficient: real upstream 4xx/5xx and internal 598/599 are forbidden at the model-client boundary as well.
 
-The 4444 `/v1/responses` requests ending `574079-8453` and `574080-8454` received real upstream HTTP 429 with `rate_limit_error`, yet the client received `502 network_error`. Request `574024-8398` had a transport failure with no upstream HTTP response and also produced client 502. The source artifacts are in the corresponding `~/.rcc/codex-samples/openai-responses/ports/4444/` request directories.
+The rule applies equally to DSH `/v1/chat/completions`, Codex `/v1/responses` (HTTP and WebSocket) and `/v1/responses/compact`, Claude Code `/v1/messages`, and enabled Gemini `generateContent` entries; JSON, SSE, Direct, and Relay have the same semantics. No source of failure, including invalid client input, admission failure, provider errors, timeouts, cooldown, unavailable routes, or complete pool exhaustion, authorizes a client error response. Management and diagnostic APIs are separate control-plane entries; they are not model requests.
 
-The proxy must preserve an eligible real upstream status and compatible error payload. HTTP 502 is excluded by this bug's explicit client boundary. A transport failure with no upstream response cannot be invented as HTTP 502 or successful completion. On a streaming client boundary it may end the stream without a completed response. Do not reinterpret an upstream no-response as a client disconnect.
+HTTP error statuses, error JSON/chunks, Responses `error`/`response.failed` or failed objects, Anthropic `event: error`, and WebSocket error messages/application error codes are forbidden. HTTP 200 does not make an error payload acceptable. No fabricated completion, normal success terminator, or `[DONE]` may conceal an unsuccessful request. A transport abort can remain observable to the client; this rule does not promise that failed requests always succeed or that clients never observe a connection failure.
 
-Revision 2026-10-01: a header-less close is read as a normal end of stream by the streaming clients this proxy serves, so the streaming boundary must instead flush the SSE response head and then abort the transfer. The client observes a transport failure, retries the same request, and the session survives provider exhaustion and recovers when a candidate becomes eligible again. The nonstreaming boundary keeps the header-less close.
-
-## Single-entry, single-exit model
+## One request, one finalizer
 
 ```mermaid
 flowchart TD
-  A[Client request accepted] --> B[Attempt and recovery]
-  B -->|valid response| D[Commit compatible response]
-  B -->|no success, eligible real HTTP error observed| I[Project selected real external HTTP response]
-  B -->|no eligible external response| J[Terminate client transport without fabricated response]
-  B -->|client cancelled| M[Record client cancellation]
-  D --> K[Request finalizer]
-  I --> K
-  J --> K
-  M --> K
-  K --> L[Release attempt and request resources]
+  A[接收任一模型入口请求] --> B[形成请求执行结果]
+  B --> C[决策客户端交付结果]
+  C --> D[提交完整成功响应或终止未完成传输]
+  D --> E[释放本请求资源并记录内部结果]
 ```
 
-Candidate selection, provider attempts, Error01-05, cooldown, and recovery are internal to B. B retains the last compatible real upstream HTTP error response across all attempts as a request-local typed witness containing status, headers, and original body bytes; a later transport failure does not erase it. This is error-side evidence, not business payload or Debug state, and it is provider-private: no client boundary projects it. Revision 2026-10-03: the witness is retained as typed evidence only; whether or not an eligible real response exists, the client boundary is the transport break, so the entry never observes a provider status, code, or body. HTTP 502 is ineligible for client projection under this bug's explicit no-502 contract. Each request enters at A and leaves at L once. Client cancellation is independent of upstream no-response. The typed failure side channel owns source attribution, candidate decision and health effects. Provider owns wire and health mutation. Runtime owns attempt buffering and finalizer. Server owns HTTP framing/connection termination; its WebSocket adapter owns post-upgrade framing/close. Debug records evidence and does not decide outcomes.
+Attempt/recovery is internal to B; a new attempt has a distinct identity and never adds a cross-node back edge. C consumes typed execution facts, never payload fields or logs. D consumes a typed successful response or transport outcome; it has no client-error variant. E is the single exit for success, exhausted/uncompletable failure, and client cancellation. Failure before provider execution still reaches C/D/E; it cannot escape through a Server error response helper.
 
-## Current breaks and repair boundary
+```mermaid
+stateDiagram-v2
+  [*] --> 执行请求
+  执行请求 --> 内部恢复: 尝试失败且仍有契约允许的候选
+  内部恢复 --> 执行请求: 新尝试已获准
+  执行请求 --> 完整成功: 完整有效的业务响应已验证
+  执行请求 --> 无法完成: 候选耗尽或请求无法继续
+  内部恢复 --> 无法完成: 恢复耗尽或执行预算用尽
+  执行请求 --> 客户端取消: 客户端主动结束
+  内部恢复 --> 客户端取消: 客户端主动结束
+  完整成功 --> 资源已释放: 提交真实成功响应并收尾
+  无法完成 --> 资源已释放: 中止传输并收尾
+  客户端取消 --> 资源已释放: 取消本请求并收尾
+  资源已释放 --> [*]
+```
 
-1. `routecodex-v3-error` Error06 currently overwrites every exhausted provider failure with `502 network_error`, including real 429. Provider transport already has status, headers, and body; Responses Relay drops headers/body before Error06, while other relay/direct paths also discard them at terminal projection. Preserve the last eligible real upstream HTTP witness through Error05 to Error06, then project status and compatible error semantics without reconstructing them from diagnostic text.
-2. `provider_failure_runtime_policy` currently records synthesized transport 502 as `external_error.status`. Carry upstream HTTP presence as a typed distinction so no-response never acquires a fake external status.
-3. Server's existing SSE disconnect detector searches for `V3Error04TargetPoolExhaustion`, which is absent from the real Error chain (`V3Error04TargetExhaustionDecision`). Remove status/body/node-name heuristics. Carry a typed terminal disposition from Error/Runtime to Server; for no-response, close only the current Front connection by its `V3FrontConnectionIdentity` before Hyper writes headers. The broker resolves this identity from either `front_sockets` or a bound `connection_leases` entry and its `client_sockets` key. This requires one scoped broker operation; a plain `front_socket(identity)` lookup fails after lease binding. The socket operation must clear a pending restart closeout frame before signaling close, and the connection task must remove its registry entries at termination. Revision 2026-10-01: the header-less close is correct only for a nonstreaming client. On the streaming boundary the SSE transport-break primitive is restored, because a header-less close there is indistinguishable from a normal end of stream. The response head plus one SSE comment frame are flushed, then the body fails, so the transfer never carries a valid final chunk and the client observes an aborted transfer. No client payload, fabricated status, `response.failed`, or `response.completed` is sent; the typed Error chain keeps the real cause.
-4. Keep successful responses and admitted candidate recovery unchanged. A selected HTTP 429 must not be converted to a disconnect; a final no-response must not be converted to a fabricated response payload, 502, `response.failed` or `response.completed`. The streaming boundary writes only the SSE transport-break framing declared in item 3 (response head plus one comment frame, then a failed body); it is a transport signal, not a projected response payload.
+## Owner and representation boundaries
 
-## Acceptance evidence
+| Responsibility | Unique owner | Required boundary |
+| --- | --- | --- |
+| Failure cause/classification, action, exhaustion | Error | Retain upstream status/body/header evidence internally; never authorize client error projection. |
+| Eligible candidate selection/reselection | Target, coordinated by Runtime | Follow typed routing/execution policy; a failed attempt cannot close a recoverable request. |
+| Wire attempts and health mutation | Provider | Cool the exact provider/auth-key/model identity; client cancellation is health-neutral. |
+| Attempt buffering and request finalizer | Runtime | Deliver only complete successful data or a typed transport outcome; release each request/attempt permit once. |
+| HTTP and WebSocket connection framing | Server/Front | Close only the affected transport; no HTTP error, stale restart error frame, or WebSocket error message. |
+| Client streaming framing | SSE | Successful protocol data only; an unsuccessful transfer has no semantic terminal or clean final chunk. |
+| Samples and logs | Debug | Observe truthful causes with identities; never decide routing or reconstruct lifecycle truth. |
 
-- Controlled upstream HTTP 429 through the real Responses SSE and JSON entrances never reaches the client: the client observes the transport break declared in item 3, and the real 429 stays in the typed Error chain as provider-private evidence. When another candidate remains eligible, the runtime rotates and the client receives that candidate's real response instead.
-- Controlled upstream transport failure or upstream HTTP 502 with no eligible response across all candidates terminates the client boundary without a fabricated response. A nonstreaming client observes a header-less close: zero HTTP status bytes and no 502, completion, or failed event. A streaming client observes an aborted SSE transfer: `HTTP/1.1 200` with `content-type: text/event-stream` and one flushed SSE comment frame, then an unterminated body that never carries the final chunk, so a retrying client classifies a transport failure and recovers when a candidate becomes eligible again. The broker must resolve the current identity in both unbound and bound socket registries, clear a pending restart frame, close only that socket, then release identity/lease socket entries after the connection task ends. Do not use `close_active_client_transports`, affect a second client, or leave a stale socket entry. Prove zero header bytes through the real HTTP/1 entry for the nonstreaming boundary, including a reused socket, and prove no restart `503` frame is written. The capability baseline currently fails bound lookup, pending-frame suppression, and registry cleanup; the nonstreaming branch of product code waits for corrected capability proof.
-- A selection-time pool exhaustion is a provider terminal too: when every candidate is excluded before any provider attempt, no upstream HTTP witness exists, so both client transports observe the same transport break declared in item 3 and the synthesized Error06 body stays provider-private evidence on disk. No 502, `network_error`, `response.failed`, or `response.completed` reaches the client. Revision 2026-10-03: the protocol-plan failure path previously projected that synthesized 502 body directly at the server boundary, bypassing the terminal disposition entirely.
-- A failed provider followed by a successful candidate returns the latter's real response, once.
-- Client cancellation and provider no-response remain distinct; each finalizer runs once and releases resources.
-- Through the real Responses WebSocket entry, a terminal eligible upstream HTTP error never projects its status, headers, or body: the adapter closes the current WebSocket without any client payload, exactly like the HTTP/SSE transport break, so a WebSocket client cannot observe a provider status, code, or body. Terminal no-response closes only the current WebSocket without fabricated `network_error`, `response.failed`, or completed content; connection and request resources release once. Revision 2026-10-03: the former `provider_headers`/`provider_body` error event is retired together with the rest of client-side provider projection.
-- The old sample shapes above are replayed through the installed 4444 entry after candidate validation. Exact candidate, binary hash, restart identity and post-restart sample window are recorded separately.
+For a nonstreaming uncompletable request, close without status/header/body bytes. For SSE, use the existing transport-break primitive: a success-class transport head and an SSE comment establish framing, then abort without error payload or semantic terminal. That framing is never business success. For an upgraded WebSocket, end the affected transport without an application error message/code or fabricated completion. Independent sessions and the listener remain live.
+
+## Confirmed implementation divergence and provenance
+
+Issue `797e1b2` covers provider/runtime errors escaping to clients; `2630112` covers exhausted pools. Original evidence remains in runtime samples, including the 2026-09-30 Responses requests ending `574079-8453`, `574080-8454`, and `574024-8398`. These samples establish observed failures; they do not authorize forwarding them.
+
+- Commit `ed9cc3be7` (2026-09-30) changed AGENTS.md from forbidding Provider status/body forwarding to permitting eligible real upstream errors, while retaining internal 598/599 projection.
+- Commit `054ea0333` (2026-10-01) maintained the server Responses `response.failed` path while fixing its framing. Correct framing does not make a failure event an allowed response.
+- `V3ProviderTerminalDisposition::ExternalHttp`, Error06 client-error candidates, server error-frame builders, and WebSocket error senders still implement the obsolete permission. Existing tests requiring real 429/error events also encode it.
+
+This is a confirmed contract/implementation conflict, not proof of every DSH disconnection's cause. The `dsh-plugins` fast `TRANSPORT` retries require separate ingress/lifecycle correlation. This document and source checks do not prove the installed runtime fixed.
+
+Reuse the existing registered request, response, and error SESE graphs at `docs/architecture/dagpipe/v3.operation_runner.{request,response,error}.graph.json`. The Error graph's legacy-named projection candidate is internal evidence only, as specified in `docs/design/v3-unified-operation-runner-design.md`; it cannot enter a client body. Runtime consumes that control outcome and Server terminates the affected transport. The Server-owned typed `v3.server.model_transport_outcome` records no-response intent and is consumed by `commit_model_transport_outcome`; its writer and caller edges are declared in the existing maps. This repair adds no orchestration Operator or second lifecycle graph. The semantic lifecycle diagram above maps the existing owners; it does not claim a new executable graph cutover.
+
+## Required blackbox regression and release gate
+
+Use real public HTTP/stream/WebSocket consumers with controlled upstreams. Mock private state and source-pattern assertions cannot substitute for behavior. Cover each HTTP entry in JSON/SSE, Responses WebSocket, and supported Direct/Relay combinations. Bind results to the candidate SHA, input/config, upstream observations, and client wire capture.
+
+| Case | Required external result and side effects |
+| --- | --- |
+| Valid success | Preserve complete text, tools/history, and real protocol terminal; no false abort. |
+| Failed attempt, eligible candidate succeeds | Only the latter's complete real response reaches the client; no premature close/error or duplicate response. |
+| Provider HTTP 400/401/403/413/429/500/502/503, including binary bodies | Errors remain internal; declared recovery continues; terminal failure has no client error response. |
+| Network/TLS EOF, header/body timeout, malformed provider JSON/SSE, internal request/response failure | Same client boundary; truthful typed cause; no success-wrapped error. |
+| Empty/unavailable/cooled pool and full attempt/residence exhaustion | No exception: no HTTP error, failure event, normal terminal, or fabricated completion; assert incomplete transfer. |
+| Invalid JSON/input or pre-provider admission/debug failure | No model-entry error helper bypasses typed transport outcome; trust-boundary rejection remains internal. |
+| Client cancellation and independent session | Request-local, health-neutral cancellation; resources release once; the other session succeeds and listener stays live. |
+| Reused connection and concurrent managed lifecycle | No stale restart 503/error frame, no registry leak; only the affected transport ends. |
+
+Replace tests expecting forwarded 429, Error06 SSE errors, `response.failed`, or WebSocket provider-error envelopes. Cases must run in the mapped required gate and CI before merge. Architecture review follows author debug/development tests and real-entry E2E; candidate/main/remote equivalence and installed-runtime replay are separate delivery requirements. Keep the defect open until all applicable gates and owned-resource cleanup are proved.

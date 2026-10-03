@@ -601,11 +601,9 @@ impl V3EligibleExternalHttpResponse {
     }
 }
 
-/// The provider failure terminal is either a real compatible upstream HTTP
-/// error or no HTTP response at all. Neither branch fabricates a proxy 502.
+/// Provider failures never authorize a client error payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum V3ProviderTerminalDisposition {
-    ExternalHttp(V3EligibleExternalHttpResponse),
     NoResponse,
 }
 
@@ -1034,7 +1032,7 @@ pub struct V3ErrorHandlingCenter;
 impl V3ErrorHandlingCenter {
     pub fn provider_terminal_disposition(
         terminal: V3Error05TerminalDecision,
-        witness: Option<V3EligibleExternalHttpResponse>,
+        _witness: Option<V3EligibleExternalHttpResponse>,
     ) -> V3ProviderTerminalDisposition {
         debug_assert_eq!(
             terminal
@@ -1046,10 +1044,9 @@ impl V3ErrorHandlingCenter {
                 .source_kind,
             V3ErrorSourceKind::ProviderFailure,
         );
-        match witness {
-            Some(response) => V3ProviderTerminalDisposition::ExternalHttp(response),
-            None => V3ProviderTerminalDisposition::NoResponse,
-        }
+        // Upstream HTTP evidence is internal. Exhaustion never authorizes a
+        // client error response, including a real upstream HTTP error.
+        V3ProviderTerminalDisposition::NoResponse
     }
 
     pub fn project_terminal_decision(

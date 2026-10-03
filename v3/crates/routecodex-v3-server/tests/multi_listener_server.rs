@@ -14,7 +14,7 @@ use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
 use std::{ffi::OsString, fs, net::TcpListener, path::PathBuf, sync::Arc};
 use tokio::{
-    io::AsyncWriteExt,
+    io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
     sync::{mpsc, oneshot, Mutex, Semaphore},
     time::{sleep, timeout, Duration},
@@ -30,6 +30,41 @@ use tokio_tungstenite::{
 };
 
 static TEST_LOCK: Mutex<()> = Mutex::const_new(());
+
+async fn assert_websocket_closes_without_data(
+    socket: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>,
+) {
+    let terminal = timeout(Duration::from_secs(30), socket.next())
+        .await
+        .expect("failed request must close its WebSocket");
+    assert!(
+        matches!(terminal, None | Some(Err(_)) | Some(Ok(Message::Close(_)))),
+        "no error or success payload may be sent for a failed request: {terminal:?}"
+    );
+}
+
+async fn assert_incomplete_sse_or_no_response(response: Result<reqwest::Response, reqwest::Error>) {
+    if let Ok(mut response) = response {
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["content-type"], "text/event-stream");
+        let mut wire = Vec::new();
+        loop {
+            match response.chunk().await {
+                Ok(Some(chunk)) => wire.extend_from_slice(&chunk),
+                Err(_) => break,
+                Ok(None) => panic!("failed request must not complete its SSE transfer"),
+            }
+        }
+        let text = String::from_utf8_lossy(&wire);
+        assert!(
+            !text.contains("error")
+                && !text.contains("response.failed")
+                && !text.contains("[DONE]")
+                && !text.contains("response.completed"),
+            "{text}"
+        );
+    }
+}
 
 struct TestHomeGuard {
     previous: Option<OsString>,
@@ -1209,7 +1244,13 @@ async fn start_controlled_terminal_upstream_with_body(
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let app = Router::new()
         .route("/v1/responses", post(controlled_terminal_upstream))
+        .route("/v1/responses/compact", post(controlled_terminal_upstream))
+        .route(
+            "/v1beta/models/*operation",
+            post(controlled_terminal_upstream),
+        )
         .route("/v1/messages", post(controlled_terminal_upstream))
+        .route("/v1/chat/completions", post(controlled_terminal_upstream))
         .with_state(Arc::new(ControlledTerminalState {
             captures: captures_tx,
             status,
@@ -1543,14 +1584,10 @@ async fn starts_all_listeners_and_routes_gemini_runtime_input_errors_through_err
             ))
             .json(&json!({}))
             .send()
-            .await
-            .unwrap();
-        assert_eq!(invalid_gemini.status().as_u16(), 598);
-        let body: serde_json::Value = invalid_gemini.json().await.unwrap();
-        assert_eq!(body["error"]["code"], "gemini_relay_runtime_error");
-        assert_eq!(
-            body["error"]["message"],
-            "V3 Gemini target resolution failed: Gemini request contents must be an array"
+            .await;
+        assert!(
+            invalid_gemini.is_err(),
+            "invalid Gemini input must not receive an error response"
         );
     }
     handle.shutdown().await;
@@ -1634,20 +1671,20 @@ async fn entry_protocol_binding_dispatches_relay_without_body_leakage() {
         ))
         .json(&json!({}))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(disabled.status(), StatusCode::NOT_IMPLEMENTED);
-    let disabled_body: Value = disabled.json().await.unwrap();
-    assert_eq!(disabled_body["error"]["code"], "endpoint_not_enabled");
+        .await;
+    assert!(
+        disabled.is_err(),
+        "disabled model entry must not receive an error response"
+    );
 
     let unknown = client
         .post(format!("{disabled_base}/v1/unknown"))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
-    let unknown_body: Value = unknown.json().await.unwrap();
-    assert_eq!(unknown_body["error"]["code"], "path_not_found");
+        .await;
+    assert!(
+        unknown.is_err(),
+        "unknown model path must close without error response"
+    );
 
     disabled_handle.shutdown().await;
     handle.shutdown().await;
@@ -2191,14 +2228,11 @@ async fn responses_relay_client_metadata_cannot_authorize_tool_output_without_pa
             }
         }))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(second.status(), 598);
-    let second_body: Value = second.json().await.unwrap();
-    assert!(second_body["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("orphan tool output"));
+        .await;
+    assert!(
+        second.is_err(),
+        "orphan tool output must fail without client error response"
+    );
 
     let first_capture = timeout(Duration::from_secs(2), captures.recv())
         .await
@@ -2263,14 +2297,11 @@ async fn responses_relay_different_client_metadata_still_cannot_authorize_tool_o
             }
         }))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(second.status(), 598);
-    let second_body: Value = second.json().await.unwrap();
-    assert!(second_body["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("orphan tool output"));
+        .await;
+    assert!(
+        second.is_err(),
+        "wrong scope must fail without client error response"
+    );
     let _first_capture = captures.recv().await.unwrap();
     assert!(
         timeout(Duration::from_millis(100), captures.recv())
@@ -2330,14 +2361,11 @@ async fn responses_relay_orphan_tool_output_fails_before_provider_send() {
             }]
         }))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 598);
-    let body: Value = response.json().await.unwrap();
-    assert!(body["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("orphan tool output"));
+        .await;
+    assert!(
+        response.is_err(),
+        "missing scope must fail without client error response"
+    );
     assert!(
         timeout(Duration::from_millis(100), captures.recv())
             .await
@@ -3448,19 +3476,11 @@ async fn capture_node_preconnection_matches_responses_http_success_and_failure()
     let captured_invalid = routecodex_v3_runtime::operation_runner::execute_v3_operation_runner_request_capture_client_json(invalid.clone())
         .expect("capture preserves invalid protocol shape");
     assert_eq!(captured_invalid, invalid);
-    let original = client.post(&endpoint).json(&invalid).send().await.unwrap();
-    let projected = client
-        .post(&endpoint)
-        .json(&captured_invalid)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(original.status(), projected.status());
-    let original_body: Value = original.json().await.unwrap();
-    let projected_body: Value = projected.json().await.unwrap();
-    assert_eq!(
-        original_body["error"]["code"],
-        projected_body["error"]["code"]
+    let original = client.post(&endpoint).json(&invalid).send().await;
+    let projected = client.post(&endpoint).json(&captured_invalid).send().await;
+    assert!(
+        original.is_err() && projected.is_err(),
+        "both invalid shapes must close without a client error"
     );
 
     handle.shutdown().await;
@@ -3791,14 +3811,11 @@ async fn responses_direct_previous_response_id_is_rejected_after_continuation_re
             "input":[{"type":"function_call_output","call_id":"call_server_1","output":"ok"}]
         }))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(second.status(), 598);
-    let second_body: Value = second.json().await.unwrap();
-    assert!(second_body["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("continuation is retired"));
+        .await;
+    assert!(
+        second.is_err(),
+        "retired continuation must fail without client error response"
+    );
 
     let handshake_capture = captures.recv().await.unwrap();
     assert_eq!(
@@ -3871,15 +3888,8 @@ async fn responses_direct_sse_previous_response_id_is_rejected_after_continuatio
             "input":[{"type":"function_call_output","call_id":"call_server_1","output":"ok"}]
         }))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(second.status(), 598);
-    assert_eq!(second.headers()["content-type"], "text/event-stream");
-    assert!(second
-        .text()
-        .await
-        .unwrap()
-        .contains("continuation is retired"));
+        .await;
+    assert_incomplete_sse_or_no_response(second).await;
 
     let handshake_capture = captures.recv().await.unwrap();
     assert_eq!(
@@ -3911,22 +3921,23 @@ async fn responses_inbound_websocket_requires_beta_upgrade_and_handles_ping() {
         .get(&http_endpoint)
         .header("openai-beta", "responses_websockets=2026-02-06")
         .send()
-        .await
-        .unwrap();
-    assert_eq!(plain_get.status(), StatusCode::BAD_REQUEST);
-    let plain_body: Value = plain_get.json().await.unwrap();
-    assert_eq!(plain_body["error"]["code"], "websocket_upgrade_required");
+        .await;
+    assert!(
+        plain_get.is_err(),
+        "invalid upgrade must not receive an error response"
+    );
 
     let ws_endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
     let missing_beta_error = connect_async(ws_endpoint.clone())
         .await
         .expect_err("missing beta handshake must be rejected");
-    match missing_beta_error {
-        tokio_tungstenite::tungstenite::Error::Http(response) => {
-            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        }
-        other => panic!("unexpected missing beta error: {other}"),
-    }
+    assert!(
+        !matches!(
+            missing_beta_error,
+            tokio_tungstenite::tungstenite::Error::Http(_)
+        ),
+        "invalid beta must close without an HTTP error: {missing_beta_error}"
+    );
 
     let mut request = ws_endpoint.into_client_request().unwrap();
     request.headers_mut().insert(
@@ -4237,10 +4248,7 @@ async fn responses_inbound_websocket_rejects_malformed_client_event_without_prov
         let (mut socket, handshake) = connect_async(request).await.unwrap();
         assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
         socket.send(Message::Text(invalid_event)).await.unwrap();
-        let message = socket.next().await.unwrap().unwrap();
-        let event: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
-        assert_eq!(event["type"], "error");
-        assert_eq!(event["error"]["code"], "invalid_client_event");
+        assert_websocket_closes_without_data(&mut socket).await;
         let _ = socket.close(None).await;
     }
     assert!(captures.try_recv().is_err());
@@ -4317,15 +4325,7 @@ async fn responses_inbound_websocket_rejects_second_previous_response_id_without
         ))
         .await
         .unwrap();
-    let second_event = loop {
-        let second_message = socket.next().await.unwrap().unwrap();
-        let second_event: Value = serde_json::from_str(second_message.to_text().unwrap()).unwrap();
-        if second_event["type"] == "response.completed" || second_event["type"] == "error" {
-            break second_event;
-        }
-    };
-    assert_eq!(second_event["type"], "error");
-    assert_eq!(second_event["error"]["code"], "invalid_request");
+    assert_websocket_closes_without_data(&mut socket).await;
 
     let handshake_capture = captures.recv().await.unwrap();
     assert_eq!(
@@ -4419,10 +4419,7 @@ async fn responses_inbound_websocket_scope_mismatch_fails_before_provider_send()
         ))
         .await
         .unwrap();
-    let second_message = second_socket.next().await.unwrap().unwrap();
-    let second_event: Value = serde_json::from_str(second_message.to_text().unwrap()).unwrap();
-    assert_eq!(second_event["type"], "error");
-    assert_eq!(second_event["error"]["code"], "invalid_request");
+    assert_websocket_closes_without_data(&mut second_socket).await;
 
     let _handshake_capture = captures.recv().await.unwrap();
     let first_capture = captures.recv().await.unwrap();
@@ -4541,16 +4538,7 @@ async fn responses_inbound_websocket_provider_429_never_reaches_the_client() {
         ))
         .await
         .unwrap();
-    let message = timeout(Duration::from_secs(30), socket.next())
-        .await
-        .expect("an exhausted provider terminal must close the WebSocket");
-    assert!(
-        !matches!(
-            message,
-            Some(Ok(Message::Text(_))) | Some(Ok(Message::Binary(_)))
-        ),
-        "a provider HTTP failure must not project its status, headers, or body to the client"
-    );
+    assert_websocket_closes_without_data(&mut socket).await;
     assert_eq!(captures.recv().await.unwrap().body["model"], "wire-test");
 
     let _ = socket.close(None).await;
@@ -4635,16 +4623,7 @@ async fn responses_inbound_websocket_binary_provider_error_body_never_reaches_th
         ))
         .await
         .unwrap();
-    let message = timeout(Duration::from_secs(30), socket.next())
-        .await
-        .expect("an exhausted provider terminal must close the WebSocket");
-    assert!(
-        !matches!(
-            message,
-            Some(Ok(Message::Text(_))) | Some(Ok(Message::Binary(_)))
-        ),
-        "a non-UTF-8 provider error body must never reach the client"
-    );
+    assert_websocket_closes_without_data(&mut socket).await;
     assert_eq!(captures.recv().await.unwrap().body["model"], "wire-test");
 
     handle.shutdown().await;
@@ -5103,6 +5082,166 @@ async fn responses_direct_provider_http_error_never_reaches_the_client() {
 }
 
 #[tokio::test]
+async fn model_entries_never_deliver_provider_or_sse_decode_errors_blackbox() {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_P6_TEST_KEY", "controlled-no-client-errors");
+    for (status, content_type, provider_body) in [
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "application/json",
+            r#"{"error":"controlled_unavailable"}"#,
+        ),
+        (
+            StatusCode::TOO_MANY_REQUESTS,
+            "application/json",
+            r#"{"error":{"message":"controlled_unavailable","type":"rate_limit_error"}}"#,
+        ),
+        (
+            StatusCode::OK,
+            "application/json",
+            r#"{"error":{"message":"controlled_unavailable","type":"provider_error"}}"#,
+        ),
+        (
+            StatusCode::OK,
+            "text/event-stream",
+            "event: error\ndata: {\"type\":\"error\",\"code\":\"provider_error\",\"message\":\"controlled_unavailable\"}\n\n",
+        ),
+        (
+            StatusCode::OK,
+            "text/event-stream",
+            "data: {invalid-json}\n\n",
+        ),
+    ] {
+        for endpoint in [
+            "/v1/responses",
+            "/v1/responses/compact",
+            "/v1/chat/completions",
+            "/v1/messages",
+            "/v1beta/models/wire-test/generateContent",
+        ] {
+            for streaming in [false, true] {
+                let (provider_url, mut captures, shutdown) =
+                    start_controlled_terminal_upstream_with_body(
+                        status,
+                        content_type,
+                        provider_body.as_bytes().to_vec(),
+                    )
+                    .await;
+                let mut config = p6_manifest(free_port(), free_port(), &provider_url);
+                if endpoint.starts_with("/v1beta/") {
+                    let provider = config.providers.get_mut("test").unwrap();
+                    provider.provider_type = "gemini".to_owned();
+                    provider.base_url = provider_url.trim_end_matches("/v1").to_owned() + "/v1beta";
+                    provider.responses = None;
+                }
+                if endpoint == "/v1/responses/compact" {
+                    let group = config.route_groups.get_mut("default").unwrap();
+                    group.compact_route_object = Some("controlled-compact".to_owned());
+                    let mut pool = group.pools["client_test"].clone();
+                    pool.id = "compact".to_owned();
+                    pool.route_object = Some("controlled-compact".to_owned());
+                    group.pools.insert("compact".to_owned(), pool);
+                }
+                for server in config.servers.values_mut() {
+                    server.endpoints.push("openai_chat".to_owned());
+                    server.endpoints.push("anthropic".to_owned());
+                    server.endpoints.push("gemini".to_owned());
+                }
+                let handle = spawn_v3_server_aggregate(config).await.unwrap();
+                let addr = handle.listeners[0].addr;
+                let payload = if endpoint.starts_with("/v1/responses") {
+                    json!({"model":"client-test", "input":"hello", "stream":streaming})
+                } else if endpoint.starts_with("/v1beta/") {
+                    json!({"model":"client-test", "contents":[{"role":"user","parts":[{"text":"hello"}]}], "stream":streaming})
+                } else {
+                    json!({"model":"client-test", "max_tokens":64, "messages":[{"role":"user","content":"hello"}], "stream":streaming})
+                };
+                let body = serde_json::to_vec(&payload).unwrap();
+                let mut socket = TcpStream::connect(addr).await.unwrap();
+                socket.write_all(format!("POST {endpoint} HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).as_bytes()).await.unwrap();
+                socket.write_all(&body).await.unwrap();
+                let mut wire = Vec::new();
+                let received =
+                    timeout(Duration::from_secs(40), socket.read_to_end(&mut wire)).await;
+                // Shutdown our servers before asserting, including the red baseline.
+                handle.shutdown().await;
+                shutdown.send(()).unwrap();
+                assert!(
+                    captures.try_recv().is_ok(),
+                    "{endpoint} must exercise actual provider transport"
+                );
+                assert!(
+                    received.is_ok(),
+                    "{endpoint} failed to reach a terminal transport outcome"
+                );
+                let text = String::from_utf8_lossy(&wire);
+                assert!(
+                    !text.contains("controlled_unavailable")
+                        && !text.contains("response.failed")
+                        && !text.contains("event: error")
+                        && !text.contains("\"error\""),
+                    "{endpoint} stream={streaming} upstream={status} leaked client error: {text}"
+                );
+                if !streaming {
+                    assert!(
+                        wire.is_empty(),
+                        "{endpoint} JSON failure must have zero response bytes: {text}"
+                    );
+                } else if !wire.is_empty() {
+                    assert!(
+                        text.starts_with("HTTP/1.1 200") && text.contains("text/event-stream"),
+                        "{endpoint} sent an error status: {text}"
+                    );
+                    assert!(
+                        !text.contains("response.completed")
+                            && !text.contains("[DONE]")
+                            && !wire.ends_with(b"0\r\n\r\n"),
+                        "{endpoint} disguised failure as a completed transfer: {text}"
+                    );
+                }
+            }
+        }
+    }
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_inbound_websocket_sse_decode_failure_never_sends_client_error() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "text/event-stream",
+        b"data: {invalid-json}\n\n".to_vec(),
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "controlled-ws-sse-decode-error");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_url,
+    ))
+    .await
+    .unwrap();
+    let mut request = format!("ws://{}/v1/responses", handle.listeners[0].addr)
+        .into_client_request()
+        .unwrap();
+    request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    let (mut socket, _) = connect_async(request).await.unwrap();
+    socket.send(Message::Text(json!({"type":"response.create", "model":"client-test", "input":"hello", "stream":true}).to_string())).await.unwrap();
+    assert_websocket_closes_without_data(&mut socket).await;
+    assert!(
+        captures.try_recv().is_ok(),
+        "decode failure must exercise real provider transport"
+    );
+    handle.shutdown().await;
+    let _ = shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
 async fn p6_all_transport_failures_close_without_http_response() {
     let _test_guard = TEST_LOCK.lock().await;
     let closed_a = {
@@ -5160,14 +5299,8 @@ async fn p6_provider_503_never_reaches_a_streaming_client() {
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
         .json(&json!({"model":"client-test","input":"hello","stream":true}))
         .send()
-        .await
-        .expect("a streaming client must receive the SSE response head");
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(response.headers()["content-type"], "text/event-stream");
-    assert!(
-        response.text().await.is_err(),
-        "the streaming body must abort without a provider status, code, or body"
-    );
+        .await;
+    assert_incomplete_sse_or_no_response(response).await;
 
     std::env::remove_var("V3_P6_TEST_KEY");
     handle.shutdown().await;
@@ -5263,14 +5396,8 @@ async fn anthropic_messages_provider_failure_never_reaches_the_client() {
             "stream":true
         }))
         .send()
-        .await
-        .expect("a streaming client must receive the SSE response head");
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(response.headers()["content-type"], "text/event-stream");
-    assert!(
-        response.text().await.is_err(),
-        "the streaming body must abort without a provider status, code, or body"
-    );
+        .await;
+    assert_incomplete_sse_or_no_response(response).await;
 
     handle.shutdown().await;
     let json_handle = spawn_v3_server_aggregate(anthropic_failure_manifest(
@@ -5867,18 +5994,12 @@ async fn responses_direct_binding_protocol_mismatch_without_relay_allowed_fails_
             "stream": false
         }))
         .send()
-        .await
-        .unwrap();
-    let status = response.status();
-    let body: Value = response.json().await.unwrap();
+        .await;
     handle.shutdown().await;
     std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
-
-    assert_eq!(status, 598, "unexpected response body: {body}");
-    assert_eq!(body["error"]["code"], "protocol_mismatch_relay_not_allowed");
     assert!(
-        body.get("dry_run").is_none(),
-        "failed admission cannot fabricate dry-run success"
+        response.is_err(),
+        "failed admission must not fabricate any client response"
     );
 }
 
@@ -6080,9 +6201,11 @@ async fn debug_endpoints_project_shared_runtime_state_and_dry_run_no_send() {
             "Authorization": "Bearer sk-v3-secret"
         }))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(runtime_error.status(), 598);
+        .await;
+    assert!(
+        runtime_error.is_err(),
+        "runtime error must remain off the client response"
+    );
 
     let status: serde_json::Value = client
         .get(format!("http://{}/_routecodex/debug/status", listener.addr))
@@ -6615,91 +6738,41 @@ async fn invalid_http_boundaries_fail_before_runtime_with_typed_error_chain() {
     let base = format!("http://{}", handle.listeners[0].addr);
     let client = reqwest::Client::new();
 
-    let cases = [
+    for (path, method, content_type, body) in [
+        ("/v1/messages", "POST", Some("application/json"), "{}"),
+        ("/v1/responses", "GET", None, ""),
+        ("/v1/unknown", "POST", None, ""),
+        ("/v1/responses", "POST", None, r#"{"input":"hello"}"#),
         (
-            client
-                .post(format!("{base}/v1/messages"))
-                .header("content-type", "application/json")
-                .body("{}")
-                .send()
-                .await
-                .unwrap(),
-            StatusCode::NOT_IMPLEMENTED,
-            "endpoint_not_enabled",
+            "/v1/responses",
+            "POST",
+            Some("text/plain"),
+            r#"{"input":"hello"}"#,
         ),
-        (
-            client
-                .get(format!("{base}/v1/responses"))
-                .send()
-                .await
-                .unwrap(),
-            StatusCode::BAD_REQUEST,
-            "websocket_upgrade_required",
-        ),
-        (
-            client
-                .post(format!("{base}/v1/unknown"))
-                .send()
-                .await
-                .unwrap(),
-            StatusCode::NOT_FOUND,
-            "path_not_found",
-        ),
-        (
-            client
-                .post(format!("{base}/v1/responses"))
-                .body(r#"{"input":"hello"}"#)
-                .send()
-                .await
-                .unwrap(),
-            StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            "content_type_required",
-        ),
-        (
-            client
-                .post(format!("{base}/v1/responses"))
-                .header("content-type", "text/plain")
-                .body(r#"{"input":"hello"}"#)
-                .send()
-                .await
-                .unwrap(),
-            StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            "content_type_unsupported",
-        ),
-        (
-            client
-                .post(format!("{base}/v1/responses"))
-                .header("content-type", "application/json")
-                .body("{")
-                .send()
-                .await
-                .unwrap(),
-            StatusCode::BAD_REQUEST,
-            "malformed_json",
-        ),
-        (
-            client
-                .post(format!("{base}/v1/responses"))
-                .header("content-type", "application/json")
-                .body(vec![b'x'; 256 * 1024 * 1024 + 1])
-                .send()
-                .await
-                .unwrap(),
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "body_too_large",
-        ),
-    ];
-
-    for (response, expected_status, expected_code) in cases {
-        assert_eq!(response.status(), expected_status);
-        let body: Value = response.json().await.unwrap();
-        assert_eq!(body["error"]["code"], expected_code);
+        ("/v1/responses", "POST", Some("application/json"), "{"),
+    ] {
+        let mut request = client.request(method.parse().unwrap(), format!("{base}{path}"));
+        if let Some(content_type) = content_type {
+            request = request.header("content-type", content_type);
+        }
+        let response = timeout(Duration::from_secs(5), request.body(body).send())
+            .await
+            .expect("invalid boundary must reach terminal transport outcome");
         assert!(
-            body["error"].get("stage").is_none(),
-            "Error06 body must not carry the source stage: {}",
-            body["error"]
+            response.is_err(),
+            "{method} {path} must not deliver an error response"
         );
     }
+    assert!(
+        client
+            .post(format!("{base}/v1/responses"))
+            .header("content-type", "application/json")
+            .body(vec![b'x'; 256 * 1024 * 1024 + 1])
+            .send()
+            .await
+            .is_err(),
+        "oversized input must not deliver an error response"
+    );
 
     let logs: Value = client
         .get(format!("{base}/_routecodex/debug/logs"))

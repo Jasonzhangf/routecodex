@@ -61,10 +61,10 @@ Use this SOP when `/v1/responses` returns success on the wrong provider/model, a
 4. Apply provider-error rules:
    - every provider/runtime error, including 429/401/403/413/5xx/transport/codec failures, enters `V3Error01SourceRaised -> ... -> V3Error06ClientProjected`.
    - if a selected/explicit pool or default floor candidate remains, action must be provider reselect/switch, not client projection.
-   - after the selected route candidates and default floor are exhausted, project only an eligible real upstream HTTP error through Error06; with no eligible response, terminate the current client connection without a fabricated status: a nonstreaming client is closed before response headers with zero bytes, and a streaming client observes the SSE transport-break framing (response head plus one comment frame, then a failed body) so it classifies a transport failure instead of a normal end of stream. Never fabricate a client 502.
+   - after exhaustion or any uncompletable model request, retain upstream/internal errors in typed internal resources and terminate only the affected transport. No HTTP error status, error body, SSE failure event, or WebSocket application error may reach any model client: DSH Chat, Codex Responses, and Claude Code Messages follow the same rule. Nonstreaming clients observe zero response bytes; SSE observes transport-break framing without a semantic terminal or clean final chunk; an upgraded WebSocket ends without an application error message/code. Full pool exhaustion is not an exception. Follow AGENTS.md's mandatory no-client-error contract and `docs/goals/provider-terminal-no-502-dag-20260930.md` for owner boundaries and the blackbox release gate.
 5. Required proof:
    - dry-run shows selected provider and provider request body `model`.
-   - live replay or exact old sample shows `[provider-error]` and `[provider-switch]` for failing candidates, then final success, a compatible real upstream error, or a no-response connection close.
+   - live replay or exact old sample proves typed internal recovery/failure decisions and either complete real success or an incomplete transport outcome with zero client error responses. Logs alone do not prove client wire behavior.
    - marker-only 200 is not evidence unless logs/body prove selected provider/model.
 
 ## rccv3 Live Closeout SOP

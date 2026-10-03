@@ -1,14 +1,12 @@
 use super::super::*;
 
 #[test]
-fn restart_closeout_has_explicit_terminal_for_request_before_response_headers() {
+fn restart_closeout_closes_without_error_for_request_before_response_headers() {
     let frame = V3FrontTransportCloseoutState::new();
     frame.mark_request_started();
     frame.close_for_exec_replacement();
-    let frame = frame.take_frame().expect("restart closeout frame");
-    let text = String::from_utf8(frame).expect("restart response is HTTP bytes");
-    assert!(text.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
-    assert!(text.contains("server_restart_in_progress"));
+    assert!(frame.is_closed());
+    assert!(frame.take_frame().is_none());
     let unstarted = V3FrontTransportCloseoutState::new();
     unstarted.close_for_exec_replacement();
     assert!(unstarted.take_frame().is_none());
@@ -30,12 +28,11 @@ fn persistent_connection_second_request_gets_preheader_restart_terminal() {
     state.mark_request_started();
     state.close_for_exec_replacement();
 
-    let frame = state
-        .take_frame()
-        .expect("a new keep-alive request must not inherit the previous response phase");
-    let text = String::from_utf8(frame).expect("restart response is HTTP bytes");
-    assert!(text.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
-    assert!(text.contains("server_restart_in_progress"));
+    assert!(state.is_closed());
+    assert!(
+        state.take_frame().is_none(),
+        "restart must clear stale response bytes"
+    );
 }
 
 #[test]
@@ -58,15 +55,10 @@ fn deferred_restart_closeout_commits_when_the_enqueued_head_never_reached_the_cl
     );
     assert!(
         state.commit_deferred_restart_closeout(),
-        "the pending restart 503 must be committed when the head never reached the client"
+        "the deferred close must commit when the head never reached the client"
     );
     assert!(state.is_closed());
-    let frame = state
-        .take_frame()
-        .expect("the deferred restart frame must still reach the client");
-    let text = String::from_utf8(frame).expect("restart response is HTTP bytes");
-    assert!(text.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
-    assert!(text.contains("server_restart_in_progress"));
+    assert!(state.take_frame().is_none());
 }
 
 #[test]
@@ -107,7 +99,7 @@ fn deferred_restart_closeout_stays_pending_until_the_transport_reports_the_write
 }
 
 #[test]
-fn committed_restart_closeout_keeps_its_frame_over_a_late_suppression() {
+fn committed_restart_closeout_has_no_frame_after_late_suppression() {
     let state = V3FrontTransportCloseoutState::new();
     state.mark_request_started();
     assert!(state.close_for_exec_replacement());
@@ -115,12 +107,7 @@ fn committed_restart_closeout_keeps_its_frame_over_a_late_suppression() {
         !state.suppress_restart_closeout_frame(),
         "a committed restart closeout must not be cleared by a late suppression"
     );
-    let frame = state
-        .take_frame()
-        .expect("committed restart closeout frame");
-    let text = String::from_utf8(frame).expect("restart response is HTTP bytes");
-    assert!(text.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
-    assert!(text.contains("server_restart_in_progress"));
+    assert!(state.take_frame().is_none());
 }
 
 #[tokio::test]
@@ -187,7 +174,7 @@ async fn front_socket_deferred_closeout_keeps_the_sse_head_writable() {
 }
 
 #[tokio::test]
-async fn front_socket_deferred_closeout_without_a_head_delivers_the_restart_503() {
+async fn front_socket_deferred_closeout_without_a_head_delivers_zero_bytes() {
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
         .await
         .unwrap();
@@ -214,17 +201,15 @@ async fn front_socket_deferred_closeout_without_a_head_delivers_the_restart_503(
     .await
     .expect("a committed deferred closeout must terminate the client transport")
     .expect("client read must succeed");
-    let response = String::from_utf8(response).expect("restart response must be HTTP bytes");
     assert!(
-        response.starts_with("HTTP/1.1 503 Service Unavailable\r\n"),
-        "a head that never reached the client must observe the restart boundary: {response:?}"
+        response.is_empty(),
+        "restart must not write an error: {response:?}"
     );
-    assert!(response.contains("server_restart_in_progress"));
     accept.await.unwrap();
 }
 
 #[tokio::test]
-async fn front_socket_committed_closeout_keeps_the_restart_503() {
+async fn front_socket_committed_closeout_delivers_zero_bytes() {
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
         .await
         .unwrap();
@@ -249,17 +234,15 @@ async fn front_socket_committed_closeout_keeps_the_restart_503() {
     .await
     .expect("a committed restart closeout must terminate the client transport")
     .expect("client read must succeed");
-    let response = String::from_utf8(response).expect("restart response must be HTTP bytes");
     assert!(
-        response.starts_with("HTTP/1.1 503 Service Unavailable\r\n"),
-        "a committed restart closeout stays the client boundary: {response:?}"
+        response.is_empty(),
+        "restart must not write an error: {response:?}"
     );
-    assert!(response.contains("server_restart_in_progress"));
     accept.await.unwrap();
 }
 
 #[tokio::test]
-async fn front_socket_writes_restart_terminal_after_request_acceptance() {
+async fn front_socket_restart_after_request_acceptance_delivers_zero_bytes() {
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
         .await
         .unwrap();
@@ -280,14 +263,15 @@ async fn front_socket_writes_restart_terminal_after_request_acceptance() {
     .await
     .expect("restart closeout must terminate the client transport")
     .expect("client read must succeed");
-    let response = String::from_utf8(response).expect("restart response must be HTTP bytes");
-    assert!(response.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
-    assert!(response.contains("server_restart_in_progress"));
+    assert!(
+        response.is_empty(),
+        "restart must not write an error: {response:?}"
+    );
     accept.await.unwrap();
 }
 
 #[tokio::test]
-async fn front_socket_writes_configured_sse_terminal_after_headers() {
+async fn front_socket_discards_configured_error_terminal_after_headers() {
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
         .await
         .unwrap();
@@ -312,7 +296,10 @@ async fn front_socket_writes_configured_sse_terminal_after_headers() {
     .await
     .expect("SSE restart closeout must terminate the client transport")
     .expect("client read must succeed");
-    assert_eq!(response, expected);
+    assert!(
+        response.is_empty(),
+        "restart must discard error frames: {response:?}"
+    );
     accept.await.unwrap();
 }
 
