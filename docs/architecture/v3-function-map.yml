@@ -4235,6 +4235,7 @@ features:
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/live_snapshot.rs
   - v3/crates/routecodex-v3-server/tests
+  - v3/scripts/architecture/verify-v3-debug-payload-budget.mjs
   - v3/Cargo.lock
   - docs/goals/v3-codex-sample-retention-snap-scope-test-design.md
   - docs/architecture
