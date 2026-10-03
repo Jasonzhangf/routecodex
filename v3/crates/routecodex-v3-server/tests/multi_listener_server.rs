@@ -3153,7 +3153,7 @@ async fn responses_relay_endpoint_uses_hub_relay_runtime_for_json_and_sse() {
 }
 
 #[tokio::test]
-async fn responses_relay_provider_503_preserves_external_error_body() {
+async fn responses_relay_provider_503_never_reaches_the_client() {
     let _test_guard = TEST_LOCK.lock().await;
     let (failure_base_url, failure_shutdown) =
         start_controlled_failure_upstream_all_protocols().await;
@@ -3168,6 +3168,9 @@ async fn responses_relay_provider_503_preserves_external_error_body() {
     let client = reqwest::Client::new();
     let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
 
+    // A provider HTTP failure is provider-private. The client boundary is the
+    // transport break owned by the terminal disposition, so no provider status,
+    // code, or body may be projected onto the client.
     let json_response = client
         .post(&endpoint)
         .json(&json!({
@@ -3176,12 +3179,11 @@ async fn responses_relay_provider_503_preserves_external_error_body() {
             "stream":false
         }))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(json_response.status(), StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(json_response.headers()["content-type"], "application/json");
-    let json_body: Value = json_response.json().await.unwrap();
-    assert_eq!(json_body, json!({"error":"controlled_unavailable"}));
+        .await;
+    assert!(
+        json_response.is_err(),
+        "a provider HTTP failure must not fabricate a client HTTP response"
+    );
 
     handle.shutdown().await;
     failure_shutdown.send(()).unwrap();
@@ -5059,7 +5061,7 @@ async fn responses_direct_provider_request_dry_run_does_not_send_to_any_provider
 }
 
 #[tokio::test]
-async fn responses_direct_preserves_last_real_provider_http_error() {
+async fn responses_direct_provider_http_error_never_reaches_the_client() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_capturing_failure_upstream().await;
@@ -5070,19 +5072,18 @@ async fn responses_direct_preserves_last_real_provider_http_error() {
             .unwrap();
     let client = reqwest::Client::new();
 
+    // The last real upstream HTTP error is provider-side evidence only. The
+    // client boundary is the transport break, so the direct entry must not
+    // forward the provider status or body.
     let response = client
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
         .json(&json!({"model":"test","input":"preserve provider HTTP error"}))
         .send()
-        .await
-        .unwrap();
-    let status = response.status();
-    let body: Value = response.json().await.unwrap();
-
-    assert_eq!(status, 503);
-    assert_eq!(body["error"], "controlled_unavailable");
-    assert!(body["error"].get("external_error").is_none());
-    assert!(body["error"].get("internal_code").is_none());
+        .await;
+    assert!(
+        response.is_err(),
+        "a provider HTTP error must not fabricate a client HTTP response"
+    );
     let capture = captures.recv().await.unwrap();
     assert_eq!(capture.body["model"], "wire-test");
     assert!(
@@ -5152,7 +5153,7 @@ async fn p6_all_transport_failures_close_without_http_response() {
 }
 
 #[tokio::test]
-async fn p6_provider_503_preserves_real_status_and_body_for_streaming_client() {
+async fn p6_provider_503_never_reaches_a_streaming_client() {
     let _test_guard = TEST_LOCK.lock().await;
     let (failure_base_url, failure_shutdown) =
         start_controlled_failure_upstream_all_protocols().await;
@@ -5161,18 +5162,20 @@ async fn p6_provider_503_preserves_real_status_and_body_for_streaming_client() {
         spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &failure_base_url))
             .await
             .unwrap();
+    // A streaming client observes the SSE boundary and then an aborted transfer,
+    // never a provider status or a synthesized JSON error body.
     let response = reqwest::Client::new()
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
         .json(&json!({"model":"client-test","input":"hello","stream":true}))
         .send()
         .await
-        .unwrap();
-    let status = response.status();
-    let content_type = response.headers()["content-type"].clone();
-    let response_body = response.text().await.unwrap();
-    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{response_body}");
-    assert_eq!(content_type, "application/json");
-    assert_eq!(response_body, r#"{"error":"controlled_unavailable"}"#);
+        .expect("a streaming client must receive the SSE response head");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    assert!(
+        response.text().await.is_err(),
+        "the streaming body must abort without a provider status, code, or body"
+    );
 
     std::env::remove_var("V3_P6_TEST_KEY");
     handle.shutdown().await;
@@ -5180,7 +5183,7 @@ async fn p6_provider_503_preserves_real_status_and_body_for_streaming_client() {
 }
 
 #[tokio::test]
-async fn anthropic_messages_provider_failure_preserves_real_external_http_error() {
+async fn anthropic_messages_provider_failure_never_reaches_the_client() {
     let _test_guard = TEST_LOCK.lock().await;
     let (failure_base_url, failure_shutdown) =
         start_controlled_failure_upstream_all_protocols().await;
@@ -5197,6 +5200,9 @@ async fn anthropic_messages_provider_failure_preserves_real_external_http_error(
     .await
     .unwrap();
     let client = reqwest::Client::new();
+    // A provider HTTP failure is provider-private on both transports: the
+    // streaming client observes the SSE boundary and then an aborted transfer,
+    // and the nonstreaming client observes zero response bytes.
     let response = client
         .post(format!("http://{}/v1/messages", handle.listeners[0].addr))
         .header("anthropic-version", "2023-06-01")
@@ -5208,17 +5214,14 @@ async fn anthropic_messages_provider_failure_preserves_real_external_http_error(
         }))
         .send()
         .await
-        .unwrap();
-    let status = response.status();
-    let content_type = response.headers()["content-type"].clone();
-    let response_body = response.text().await.unwrap();
-    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{response_body}");
-    assert_eq!(content_type, "application/json");
-    assert_eq!(response_body, r#"{"error":"controlled_unavailable"}"#);
+        .expect("a streaming client must receive the SSE response head");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    assert!(
+        response.text().await.is_err(),
+        "the streaming body must abort without a provider status, code, or body"
+    );
 
-    // Error projection is checked for both transports with fresh provider
-    // health. The streaming failure cools this sole provider, so another
-    // request on the same aggregate correctly waits for recovery.
     handle.shutdown().await;
     let json_handle = spawn_v3_server_aggregate(anthropic_failure_manifest(
         free_port(),
@@ -5244,12 +5247,11 @@ async fn anthropic_messages_provider_failure_preserves_real_external_http_error(
             .send(),
     )
     .await
-    .expect("fresh JSON request must receive a terminal provider error")
-    .unwrap();
-    assert_eq!(json_response.status(), StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(json_response.headers()["content-type"], "application/json");
-    let json_body: Value = json_response.json().await.unwrap();
-    assert_eq!(json_body, json!({"error":"controlled_unavailable"}));
+    .expect("fresh JSON request must finish without a fabricated provider error");
+    assert!(
+        json_response.is_err(),
+        "a provider HTTP failure must not fabricate a client HTTP response"
+    );
 
     std::env::remove_var("V3_P6_ANTHROPIC_KEY");
     json_handle.shutdown().await;
