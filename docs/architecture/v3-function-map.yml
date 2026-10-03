@@ -4989,6 +4989,8 @@ features:
   - v3/Cargo.lock
   - v3/scripts/run-admission-gate.mjs
   - scripts/verify-fast.mjs
+  - scripts/tests/verify-fast-scope.mjs
+  - v3/scripts/tests/v3-compile-fail-boundaries.mjs
   - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
   - v3/crates/routecodex-v3-server/src/restart_handoff/tests/restart_handoff_closeout.rs
   - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs

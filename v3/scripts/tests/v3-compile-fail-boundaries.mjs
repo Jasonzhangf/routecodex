@@ -68,7 +68,7 @@ for (const fixture of [
     mkdirSync(sourceDir);
     writeFileSync(
       join(root, 'Cargo.toml'),
-      `[package]\nname = "v3-${name}-shortcut-fixture"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\n${dependencyName} = { path = "${dependencyPath}" }\n\n[workspace]\n`,
+      `[package]\nname = "v3-${name}-shortcut-fixture"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\n${dependencyName} = { path = "${dependencyPath}" }\n\n[patch.crates-io]\nhyper = { path = ${JSON.stringify(resolve(v3Root, 'vendor/hyper'))} }\n\n[workspace]\n`,
     );
     writeFileSync(
       join(sourceDir, 'main.rs'),
