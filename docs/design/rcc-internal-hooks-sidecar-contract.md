@@ -2,6 +2,12 @@
 
 Status: implementation slice landed in `routecodex-v3-hooks` with install wiring.
 
+Current lifecycle contract: [shared daemon and project leases](hooksd-global-lifecycle.md).
+The internal runtime registers each project on the per-user daemon rather than
+creating a project process group. Historical receipts below describe their
+bound versions; the retired standalone `--socket` entry and internal anchor
+tests are not the current lifecycle or acceptance path.
+
 ## Purpose
 
 This contract is the RCC-side typed boundary for the optional hooks sidecar daemon. It replaces the external `codex-hooks` daemon as the production source of truth.
@@ -57,8 +63,8 @@ AppServerTransport      -> session_status + send_message trait boundary
 - `HooksSidecarCore` stores schedules and returns due intents to registrants.
 - `HooksSidecarCore::run_due_schedules` removes fired schedules and sends the
   timer intent back to the registrant through the same typed send path.
-- `rccv3-hooksd --socket <path>` starts a Unix JSON-lines control server and
-  only prints readiness after the control socket is bound.
+- `rccv3-hooksd --shared-daemon` owns the global registry; a typed project
+  registration binds its isolated Unix JSON-lines control server before ACK.
 - The control server drives a 1s timer tick against the shared core and
   handles each control connection on its own thread, so an idle client cannot
   starve timers.
@@ -140,19 +146,19 @@ AppServerTransport      -> session_status + send_message trait boundary
   `thread/turns/list` instead of blocking the send before `thread/queue/add`.
 - `rccv3-hooksd --once --probe-appserver <socket>` outputs JSON evidence for
   native `thread/loaded/list`.
-- `rccv3-hooksd --socket <path> --appserver-socket <path>` can now run the
-  control server with `NativeAppServerTransport`; without it the control
-  server stays fail-closed via `AnyAppServerTransport::Disabled`.
-- RCC lifecycle optional startup now prefers an installed `rccv3-hooksd` from
-  `bin_directory`, starts it with a control socket and optional
-  `appserver_socket` from the install record, and accepts its
-  `rcc-hooks-sidecar/v1` readiness record.
+- Typed project registration carries namespace-specific native sockets and
+  handlers from the install record. Missing native sockets preserve the
+  explicit `AnyAppServerTransport::Disabled` behavior.
+- RCC lifecycle uses the installed `rccv3-hooksd` in `bin_directory` to acquire
+  one per-user service and holds a CLOEXEC registration lease. Registration
+  ACK follows project setup; release ACK follows worker, timer, command and
+  native-connection reclamation. Owner EOF performs the same cleanup.
 - RCC lifecycle failure injection covers internal `rccv3-hooksd` binary
   missing, crash-before-readiness, and readiness-timeout paths. Each reports
   `hooks_unavailable:<reason>` and preserves runtime control resources. If the
-  failed attempt created the internal control socket, the lifecycle removes
-  that socket only after the owned process group is confirmed stopped, so the
-  next start does not fail with `AddrInUse`.
+  failed registration created resources, the daemon reclaims only that
+  registration. Shared-daemon loss removes the lifecycle's identity-bound
+  project socket and keeps RCC Running with an explicit hooks failure.
 
 ## Next workstreams
 

@@ -1,21 +1,45 @@
-use std::path::Path;
-use std::thread;
-use std::time::Duration;
-
 use routecodex_v3_hooks::{
-    hooks_unavailable, AppServerSocketConfig, ControlServer, HookHandlersConfig,
-    HooksUnavailableReason, NativeAppServerTransport, PROTOCOL,
+    hooks_unavailable, shared_hooks_root, HooksUnavailableReason, NativeAppServerTransport,
+    SharedHooksDaemon, PROTOCOL, SHARED_HOOKS_PROTOCOL,
 };
 
 fn main() {
     let args = std::env::args().collect::<Vec<_>>();
+    if args.len() == 2 && args[1] == "--help" {
+        println!("Usage: rccv3-hooksd --shared-daemon | --once | --probe-appserver <socket>");
+        return;
+    }
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--once" | "--shared-daemon" => index += 1,
+            "--probe-appserver" => {
+                if args
+                    .get(index + 1)
+                    .is_none_or(|value| value.starts_with("--"))
+                {
+                    eprintln!("missing value for {}", args[index]);
+                    std::process::exit(2);
+                }
+                index += 2;
+            }
+            _ => {
+                eprintln!("unknown argument: {}", args[index]);
+                std::process::exit(2);
+            }
+        }
+    }
+    if args.iter().any(|arg| arg == "--shared-daemon") {
+        let result = shared_hooks_root()
+            .and_then(|root| SharedHooksDaemon::bind(&root))
+            .and_then(SharedHooksDaemon::serve);
+        if let Err(error) = result {
+            eprintln!("shared hooks daemon failed: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     let once = args.iter().any(|arg| arg == "--once");
-    let socket = next_arg(&args, "--socket");
-    let appserver_socket = next_arg(&args, "--appserver-socket");
-    let tui_appserver_socket = next_arg(&args, "--tui-appserver-socket");
-    let desktop_appserver_socket = next_arg(&args, "--desktop-appserver-socket");
-    let handlers_config = next_arg(&args, "--handlers-config");
-    let state_file = next_arg(&args, "--state-file");
     let probe_appserver = next_arg(&args, "--probe-appserver");
 
     if once {
@@ -23,7 +47,7 @@ fn main() {
             print_probe_appserver(appserver_socket);
             return;
         }
-        print_ready(socket.as_deref(), state_file.as_deref());
+        print_ready();
         return;
     }
 
@@ -32,70 +56,15 @@ fn main() {
         return;
     }
 
-    if let Some(socket) = socket.as_deref() {
-        let appserver_sockets = AppServerSocketConfig {
-            default: appserver_socket,
-            codex_tui: tui_appserver_socket,
-            codex_app: desktop_appserver_socket,
-        };
-        let handlers_config = match handlers_config.as_deref() {
-            Some(path) => match std::fs::File::open(path)
-                .map_err(|error| error.to_string())
-                .and_then(|file| {
-                    serde_json::from_reader::<_, HookHandlersConfig>(file)
-                        .map_err(|error| error.to_string())
-                }) {
-                Ok(config) => Some(config),
-                Err(error) => {
-                    eprintln!("rccv3-hooksd handler config failed: {error}");
-                    std::process::exit(1);
-                }
-            },
-            None => None,
-        };
-        // The transport is selected from the actual socket configuration, but
-        // handlers and persisted state load whenever either is supplied. A
-        // handler-only configuration therefore mounts its registry and fails
-        // closed on send instead of advertising an unreachable native route.
-        let server = if appserver_sockets.has_any_socket() || handlers_config.is_some() {
-            ControlServer::with_appserver_sockets_handlers_and_state(
-                Path::new(socket),
-                appserver_sockets,
-                handlers_config,
-                state_file.as_deref().map(Path::new),
-            )
-        } else if state_file.is_some() {
-            ControlServer::with_state(Path::new(socket), state_file.as_deref().map(Path::new))
-        } else {
-            ControlServer::new(Path::new(socket))
-        };
-        let server = match server {
-            Ok(server) => server,
-            Err(error) => {
-                eprintln!("rccv3-hooksd control socket failed: {error}");
-                std::process::exit(1);
-            }
-        };
-        print_ready(Some(socket), state_file.as_deref());
-        if let Err(error) = server.serve_forever() {
-            eprintln!("rccv3-hooksd control server failed: {error}");
-            std::process::exit(1);
-        }
-        return;
-    }
-
-    print_ready(socket.as_deref(), state_file.as_deref());
-    loop {
-        thread::sleep(Duration::from_secs(3600));
-    }
+    eprintln!("rccv3-hooksd requires --shared-daemon, --once or --probe-appserver");
+    std::process::exit(2);
 }
 
-fn print_ready(socket: Option<&str>, state_file: Option<&str>) {
+fn print_ready() {
     let readiness = serde_json::json!({
         "protocol": PROTOCOL,
+        "shared_registry_protocol": SHARED_HOOKS_PROTOCOL,
         "ready": true,
-        "control_socket": socket,
-        "state_file": state_file,
         "hooks": {
             "unavailable": hooks_unavailable(HooksUnavailableReason::Disabled),
             "message": "rccv3-hooksd readiness"

@@ -18,6 +18,10 @@ mod daemon;
 pub use daemon::*;
 mod handler;
 pub use handler::*;
+mod hook_control;
+pub use hook_control::*;
+mod shared;
+pub use shared::*;
 mod web_search_adapter;
 pub use web_search_adapter::*;
 
@@ -525,6 +529,7 @@ pub struct SendAttemptEvidence {
 }
 
 pub trait AppServerTransport {
+    fn bind_project_cancellation(&mut self, _cancellation: HookCancellation) {}
     fn session_status(&mut self, target: &SessionTarget) -> Result<SessionStatus, AppServerError>;
 
     fn send_message(
@@ -665,6 +670,7 @@ impl Default for SidecarPersistentState {
 }
 
 pub struct HooksSidecarCore<T> {
+    cancellation: HookCancellation,
     transport: T,
     web_search_adapter: Option<Box<dyn WebSearchAdapter + Send>>,
     registry: HookRegistry,
@@ -676,8 +682,11 @@ pub struct HooksSidecarCore<T> {
 }
 
 impl<T: AppServerTransport> HooksSidecarCore<T> {
-    pub fn new(transport: T) -> Self {
+    pub fn new(mut transport: T) -> Self {
+        let cancellation = HookCancellation::new();
+        transport.bind_project_cancellation(cancellation.clone());
         Self {
+            cancellation,
             transport,
             web_search_adapter: None,
             registry: HookRegistry::default(),
@@ -710,16 +719,11 @@ impl<T: AppServerTransport> HooksSidecarCore<T> {
         if recovered {
             write_sidecar_state(&state_path, &state)?;
         }
-        let mut core = Self {
-            transport,
-            web_search_adapter: None,
-            registry: HookRegistry::default(),
-            schedules: state.schedules,
-            paused_schedule_ids: state.paused_schedule_ids,
-            handlers: Vec::new(),
-            intents: state.intents,
-            state_path: Some(state_path),
-        };
+        let mut core = Self::new(transport);
+        core.schedules = state.schedules;
+        core.paused_schedule_ids = state.paused_schedule_ids;
+        core.intents = state.intents;
+        core.state_path = Some(state_path);
         for handler in state.handlers {
             core.mount_handler_config(handler);
         }
@@ -742,7 +746,15 @@ impl<T: AppServerTransport> HooksSidecarCore<T> {
         )
     }
 
-    pub fn mount_web_search_adapter(&mut self, adapter: impl WebSearchAdapter + Send + 'static) {
+    pub fn cancellation(&self) -> HookCancellation {
+        self.cancellation.clone()
+    }
+
+    pub fn mount_web_search_adapter(
+        &mut self,
+        mut adapter: impl WebSearchAdapter + Send + 'static,
+    ) {
+        adapter.bind_project_cancellation(self.cancellation.clone());
         self.web_search_adapter = Some(Box::new(adapter));
     }
 
@@ -786,7 +798,11 @@ impl<T: AppServerTransport> HooksSidecarCore<T> {
             HookHandlerStrategy::Command { command, args } => self.mount_handler(
                 &config.handler_id,
                 &config.hook_kind,
-                CommandHookHandler::new(command.clone(), args.clone()),
+                CommandHookHandler::with_cancellation(
+                    command.clone(),
+                    args.clone(),
+                    self.cancellation.clone(),
+                ),
             ),
         }
         self.handlers
@@ -1246,6 +1262,12 @@ pub enum AnyAppServerTransport {
 }
 
 impl AppServerTransport for AnyAppServerTransport {
+    fn bind_project_cancellation(&mut self, cancellation: HookCancellation) {
+        match self {
+            Self::Disabled(transport) => transport.bind_project_cancellation(cancellation),
+            Self::Native(transport) => transport.bind_project_cancellation(cancellation),
+        }
+    }
     fn session_status(&mut self, target: &SessionTarget) -> Result<SessionStatus, AppServerError> {
         match self {
             Self::Disabled(transport) => transport.session_status(target),

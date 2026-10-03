@@ -13,6 +13,10 @@ features:
   - v3/crates/routecodex-v3-hooks/src/lib.rs
   - v3/crates/routecodex-v3-hooks/src/appserver.rs
   - v3/crates/routecodex-v3-hooks/src/control.rs
+  - v3/crates/routecodex-v3-hooks/src/shared.rs
+  - v3/crates/routecodex-v3-hooks/src/hook_control.rs
+  - v3/crates/routecodex-v3-hooks/src/handler.rs
+  - v3/crates/routecodex-v3-hooks/src/web_search_adapter.rs
   - v3/crates/routecodex-v3-hooks/src/bin/rccv3-hooksd.rs
   - v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
   - v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar/hooks_install.rs
@@ -27,6 +31,12 @@ features:
   - v3.hooks.mounted_handler_registry
   - v3.hooks.session_status
   entry_symbols:
+  - register_shared_project_cancelable
+  - SharedHooksDaemon::bind
+  - SharedHooksDaemon::serve
+  - SharedProjectLease::release
+  - ControlHandle::stop
+  - HookCancellation::cancel
   - HooksSidecarCore::forward
   - HooksSidecarCore::dispatch_hook_event
   - HooksSidecarCore::run_due_schedules
@@ -40,6 +50,7 @@ features:
   - v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
   - v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar
   - v3/crates/routecodex-v3-lifecycle/src/internal_hooksd_tests.rs
+  - v3/crates/routecodex-v3-cli/tests/managed_lifecycle.rs
   - v3/scripts/copy-cli-bin.mjs
   - v3/scripts/install-cli.mjs
   - v3/scripts/pack-release.mjs
@@ -63,6 +74,7 @@ features:
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-hooks
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-lifecycle internal_hooksd_tests -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-cli --test managed_lifecycle hooks
   - node --test v3/tests/scripts/v3-cli-distribution.spec.mjs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
