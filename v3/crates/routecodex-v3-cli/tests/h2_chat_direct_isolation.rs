@@ -647,8 +647,8 @@ async fn assert_chat_front_sse_transport_break(port: u16) {
         "streaming no-response must frame the break as an incomplete chunked body: {text:?}"
     );
     assert!(
-        text.contains(": routecodex provider transport break"),
-        "streaming no-response must flush the SSE boundary frame before breaking: {text:?}"
+        text.contains(":\n\n") && !text.contains("provider") && !text.contains("transport break"),
+        "streaming no-response must flush neutral SSE framing without control facts: {text:?}"
     );
     assert!(
         !text.ends_with("0\r\n\r\n"),
