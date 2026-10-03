@@ -4,6 +4,7 @@ mod endpoint_handlers;
 mod executors;
 mod frame_builders;
 mod live_snapshot;
+mod live_snapshot_terminal_evidence;
 mod metadata_center;
 mod models_catalog;
 mod request_id;
@@ -30,6 +31,7 @@ use endpoint_handlers::{
 pub use executors::*;
 pub(crate) use frame_builders::*;
 pub(crate) use live_snapshot::*;
+pub(crate) use live_snapshot_terminal_evidence::*;
 pub(crate) use metadata_center::*;
 use request_id::{
     format_v3_tm, v3_request_id_clock_now, V3AllocatedRequestIdentity, V3RequestCounterState,
