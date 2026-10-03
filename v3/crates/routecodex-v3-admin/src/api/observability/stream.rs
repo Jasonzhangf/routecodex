@@ -8,7 +8,8 @@
 // never as a raw `event: error`, which EventSource would treat as a connection
 // failure.
 
-use super::{query_params, read_v3_obs_projection, QueryRow};
+use super::store_cache::read_v3_obs_projection;
+use super::{query_params, QueryRow};
 use crate::AppState;
 use axum::extract::{RawQuery, State};
 use axum::http::StatusCode;
