@@ -849,6 +849,59 @@ pub(crate) fn capture_v3_anthropic_relay_response(
     None
 }
 
+/// Write the provider-private evidence pair for a terminal client error.
+///
+/// Every provider terminal ends the client transport without a client payload,
+/// so a request that really failed would leave no `request.json`/`error.json`
+/// evidence on disk and no artifact reference to resolve. This is the single
+/// owner of that file pair; callers supply only the typed chain they hold.
+/// Returns a debug-failure response when the debug sink itself fails; `None`
+/// means the status is not a terminal client error.
+fn persist_v3_terminal_error_evidence_pair(
+    state: &Arc<V3ListenerState>,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+    raw_request_payload: &Value,
+    error_evidence: Value,
+    status: u16,
+) -> Option<Response<Body>> {
+    if !v3_output_has_terminal_client_error(status) {
+        return None;
+    }
+    if let Err(error) = persist_v3_error_evidence_payload(
+        state,
+        entry_protocol,
+        endpoint,
+        request_id,
+        "request.json",
+        &state
+            .debug
+            .project_payload_verbatim(raw_request_payload.clone()),
+        Some(status),
+    ) {
+        return Some(foundation_output_response(project_v3_debug_failure(
+            "V3DebugErrorEvidenceCaptured",
+            V3DebugError::Sink(error),
+        )));
+    }
+    if let Err(error) = persist_v3_error_evidence_payload(
+        state,
+        entry_protocol,
+        endpoint,
+        request_id,
+        "error.json",
+        &state.debug.project_payload_verbatim(error_evidence),
+        Some(status),
+    ) {
+        return Some(foundation_output_response(project_v3_debug_failure(
+            "V3DebugErrorEvidenceCaptured",
+            V3DebugError::Sink(error),
+        )));
+    }
+    None
+}
+
 /// Persist the error evidence for a Responses relay output that ends in a
 /// terminal client error.
 ///
@@ -866,32 +919,13 @@ pub(crate) fn persist_v3_responses_relay_terminal_error_evidence(
     raw_request_payload: &Value,
     output: &V3ResponsesRelayRuntimeOutput,
 ) -> Option<Response<Body>> {
-    if !v3_output_has_terminal_client_error(output.status) {
-        return None;
-    }
-    if let Err(error) = persist_v3_error_evidence_payload(
+    persist_v3_terminal_error_evidence_pair(
         state,
         entry_protocol,
         endpoint,
         request_id,
-        "request.json",
-        &state
-            .debug
-            .project_payload_verbatim(raw_request_payload.clone()),
-        (output.status >= 400).then_some(output.status),
-    ) {
-        return Some(foundation_output_response(project_v3_debug_failure(
-            "V3DebugErrorEvidenceCaptured",
-            V3DebugError::Sink(error),
-        )));
-    }
-    if let Err(error) = persist_v3_error_evidence_payload(
-        state,
-        entry_protocol,
-        endpoint,
-        request_id,
-        "error.json",
-        &state.debug.project_payload_verbatim(json!({
+        raw_request_payload,
+        json!({
             "object": "routecodex.v3.error_evidence",
             "stage": "error",
             "status": output.status,
@@ -900,15 +934,9 @@ pub(crate) fn persist_v3_responses_relay_terminal_error_evidence(
             "node_trace": output.node_trace.clone(),
             "error_chain": output.error_chain.clone(),
             "observability": output.observability.as_ref().map(project_v3_runtime_observability_debug),
-        })),
-        (output.status >= 400).then_some(output.status),
-    ) {
-        return Some(foundation_output_response(project_v3_debug_failure(
-            "V3DebugErrorEvidenceCaptured",
-            V3DebugError::Sink(error),
-        )));
-    }
-    None
+        }),
+        output.status,
+    )
 }
 
 /// Persist the error evidence for a provider terminal that ends the client
@@ -929,32 +957,13 @@ pub(crate) fn persist_v3_projected_terminal_error_evidence(
     node_trace: &[&'static str],
     projected: &routecodex_v3_error::V3Error06ClientProjected,
 ) -> Option<Response<Body>> {
-    if !v3_output_has_terminal_client_error(projected.status) {
-        return None;
-    }
-    if let Err(error) = persist_v3_error_evidence_payload(
+    persist_v3_terminal_error_evidence_pair(
         state,
         entry_protocol,
         endpoint,
         request_id,
-        "request.json",
-        &state
-            .debug
-            .project_payload_verbatim(raw_request_payload.clone()),
-        (projected.status >= 400).then_some(projected.status),
-    ) {
-        return Some(foundation_output_response(project_v3_debug_failure(
-            "V3DebugErrorEvidenceCaptured",
-            V3DebugError::Sink(error),
-        )));
-    }
-    if let Err(error) = persist_v3_error_evidence_payload(
-        state,
-        entry_protocol,
-        endpoint,
-        request_id,
-        "error.json",
-        &state.debug.project_payload_verbatim(json!({
+        raw_request_payload,
+        json!({
             "object": "routecodex.v3.error_evidence",
             "stage": "error",
             "status": projected.status,
@@ -963,15 +972,9 @@ pub(crate) fn persist_v3_projected_terminal_error_evidence(
             "node_trace": node_trace,
             "error_chain": projected.chain,
             "observability": Value::Null,
-        })),
-        (projected.status >= 400).then_some(projected.status),
-    ) {
-        return Some(foundation_output_response(project_v3_debug_failure(
-            "V3DebugErrorEvidenceCaptured",
-            V3DebugError::Sink(error),
-        )));
-    }
-    None
+        }),
+        projected.status,
+    )
 }
 
 /// Project the typed Error chain of a Responses relay output into the debug
