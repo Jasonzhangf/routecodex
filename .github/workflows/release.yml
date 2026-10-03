@@ -45,6 +45,12 @@ jobs:
       - name: Install V3 local build dependencies
         run: npm ci --prefix v3 --ignore-scripts
 
+      - name: Fetch Rust dependencies for V3 checks
+        run: cargo fetch --locked --manifest-path v3/Cargo.toml
+
+      - name: Install pinned DAGPipe graph CLI
+        run: cargo install --git https://github.com/Jasonzhangf/DAGpipe.git --rev 8cb59fb5262b5e1e440638faf3b04e06a2762cfb --locked pipeline_runtime
+
       - name: Repo sanity (no root junk)
         run: node scripts/ci/repo-sanity.mjs
 
