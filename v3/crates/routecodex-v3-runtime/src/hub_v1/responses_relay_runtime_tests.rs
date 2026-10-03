@@ -711,7 +711,7 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
 }
 
 #[tokio::test]
-async fn responses_relay_unknown_direct_provider_model_projects_404() {
+async fn responses_relay_unknown_direct_provider_model_falls_back_to_default_pool() {
     std::env::set_var("MINIMAX_TEST_KEY", "secret-key");
     let authoring = parse_v3_config_02_authoring(
             r#"
@@ -761,14 +761,15 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
         )
         .await;
 
-    assert_eq!(output.status, 404);
-    assert!(
-        output
-            .node_trace
-            .iter()
-            .any(|node| *node == "V3Error06ClientProjected"),
-        "404 must project through the Error chain: {:?}",
-        output.node_trace
+    // `minimax.unknown-model` names an enabled provider but no model that provider declares,
+    // so it is not a listed direct target: it takes the normal classification path into the
+    // `default` pool instead of failing.
+    assert_eq!(output.status, 200);
+    assert_eq!(output.body["evidence"]["providerNetworkSend"], false);
+    assert_eq!(output.body["providerRequest"]["providerId"], "minimax");
+    assert_eq!(
+        output.body["providerRequest"]["body"]["model"],
+        "MiniMax-M3"
     );
     std::env::remove_var("MINIMAX_TEST_KEY");
 }

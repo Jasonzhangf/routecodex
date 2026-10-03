@@ -24,7 +24,7 @@ use crate::provider_failure_runtime_policy::{
 use crate::runtime_timing::V3RuntimeTimingState;
 use futures_util::StreamExt;
 use routecodex_v3_config::{V3Config05ManifestPublished, V3WebSearchExecutionMode};
-use routecodex_v3_error::{V3ErrorSourceKind, V3ProviderFailureSessionScope};
+use routecodex_v3_error::V3ProviderFailureSessionScope;
 use routecodex_v3_provider_responses::{
     ResponsesTransport, V3ProviderError, V3ProviderRequestHeader, V3ProviderResponseBody,
     V3ProviderSseStream, V3ResponsesProviderTarget, V3Transport13ResponsesHttpRequest,
@@ -374,7 +374,6 @@ use std::fmt;
 pub enum V3RelayCoreError {
     StaticRegistry(String),
     EndpointPath(String),
-    ModelNotFound(String),
     Target(String),
     ProviderPoolExhausted {
         attempted_candidates: Vec<String>,
@@ -389,7 +388,6 @@ impl fmt::Display for V3RelayCoreError {
         match self {
             V3RelayCoreError::StaticRegistry(message) => write!(f, "static registry: {message}"),
             V3RelayCoreError::EndpointPath(message) => write!(f, "endpoint path: {message}"),
-            V3RelayCoreError::ModelNotFound(message) => write!(f, "model not found: {message}"),
             V3RelayCoreError::Target(message) => write!(f, "target: {message}"),
             V3RelayCoreError::ProviderPoolExhausted {
                 attempted_candidates,
@@ -664,11 +662,6 @@ where
             match target_resolution {
                 V3RelayProviderAdmittedTargetResolution::Selected(selected) => {
                     (selected.selected, Some(selected.admission))
-                }
-                V3RelayProviderAdmittedTargetResolution::Failed(source)
-                    if source.source_kind == V3ErrorSourceKind::ModelNotFound =>
-                {
-                    return Err(V3RelayCoreError::ModelNotFound(source.message.clone()));
                 }
                 V3RelayProviderAdmittedTargetResolution::Failed(source) => {
                     return Err(V3RelayCoreError::Target(format!(
