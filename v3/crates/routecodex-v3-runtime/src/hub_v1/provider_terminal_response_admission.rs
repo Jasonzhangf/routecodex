@@ -29,15 +29,25 @@ fn responses_incomplete_reason(payload: &Value) -> Option<&str> {
         .pointer("/response/status")
         .or_else(|| payload.get("status"))
         .and_then(Value::as_str);
-    (event_type == Some("response.incomplete") || status == Some("incomplete")).then(|| {
-        payload
-            .pointer("/response/incomplete_details/reason")
-            .or_else(|| payload.pointer("/incomplete_details/reason"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|reason| !reason.is_empty())
-            .unwrap_or("unknown")
-    })
+    if event_type != Some("response.incomplete") && status != Some("incomplete") {
+        return None;
+    }
+    let reason = payload
+        .pointer("/response/incomplete_details/reason")
+        .or_else(|| payload.pointer("/incomplete_details/reason"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|reason| !reason.is_empty())
+        .unwrap_or("unknown");
+    // A Responses-wire provider reports its own output cap with the standard
+    // `response.incomplete` + `max_output_tokens` terminal. That is the same
+    // output-cap semantic as the Chat aliases and the Anthropic `max_tokens`
+    // stop reason, i.e. valid partial output, so it must not enter the provider
+    // failure/cooldown path on any entry.
+    if reason == "max_output_tokens" {
+        return None;
+    }
+    Some(reason)
 }
 
 /// Chat output-cap terminals, including gateway aliases such as `max_tokens`,
@@ -95,15 +105,6 @@ mod tests {
     #[test]
     fn rejects_registered_incomplete_terminal_shapes() {
         for (protocol, payload, reason) in [
-            (
-                V3HubProviderWireProtocol::Responses,
-                json!({
-                    "status": "incomplete",
-                    "incomplete_details": {"reason": "max_output_tokens"},
-                    "usage": {"input_tokens": 12, "output_tokens": 2, "total_tokens": 14}
-                }),
-                "max_output_tokens",
-            ),
             (
                 V3HubProviderWireProtocol::Responses,
                 json!({
@@ -178,6 +179,29 @@ mod tests {
             (
                 V3HubProviderWireProtocol::Anthropic,
                 json!({"type": "message_delta", "delta": {"stop_reason": "max_tokens"}}),
+            ),
+            // A Responses-wire provider reports its own output cap with the
+            // standard `response.incomplete` + `max_output_tokens` terminal.
+            // That is the same output-cap semantic as the Chat aliases and the
+            // Anthropic `max_tokens` stop reason above, so it is valid partial
+            // output and must be admitted on every entry.
+            (
+                V3HubProviderWireProtocol::Responses,
+                json!({
+                    "status": "incomplete",
+                    "incomplete_details": {"reason": "max_output_tokens"},
+                    "usage": {"input_tokens": 12, "output_tokens": 2, "total_tokens": 14}
+                }),
+            ),
+            (
+                V3HubProviderWireProtocol::Responses,
+                json!({
+                    "type": "response.incomplete",
+                    "response": {
+                        "status": "incomplete",
+                        "incomplete_details": {"reason": "max_output_tokens"}
+                    }
+                }),
             ),
         ] {
             assert_eq!(

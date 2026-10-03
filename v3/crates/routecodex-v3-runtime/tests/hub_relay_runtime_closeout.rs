@@ -1239,7 +1239,45 @@ impl ResponsesTransport for ResponsesIncompleteExhaustionTransport {
                 b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial-must-not-commit\"}\n\n".to_vec(),
             ),
             Ok::<Vec<u8>, V3ProviderError>(
-                b"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_incomplete_exhaustion\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"usage\":{\"input_tokens\":10,\"output_tokens\":2,\"total_tokens\":12}}}\n\n".to_vec(),
+                b"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_incomplete_exhaustion\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"content_filter\"},\"usage\":{\"input_tokens\":10,\"output_tokens\":2,\"total_tokens\":12}}}\n\n".to_vec(),
+            ),
+        ];
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(futures_util::stream::iter(frames)),
+        ))
+    }
+}
+
+struct ResponsesOutputCapTransport {
+    provider_ids: Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl ResponsesTransport for ResponsesOutputCapTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.provider_ids
+            .lock()
+            .unwrap()
+            .push(request.provider_id().to_string());
+        // A Responses-wire provider that stopped at its own output cap while
+        // carrying real partial text. This is valid partial output, so the
+        // attempt must be admitted instead of reselected.
+        let frames = vec![
+            Ok::<Vec<u8>, V3ProviderError>(
+                b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"capped-partial-output\"}\n\n".to_vec(),
+            ),
+            Ok::<Vec<u8>, V3ProviderError>(
+                b"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_incomplete_cap\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"capped-partial-output\"}]}],\"usage\":{\"input_tokens\":10,\"output_tokens\":2,\"total_tokens\":12}}}\n\n".to_vec(),
             ),
         ];
         Ok(V3ProviderResp14Raw::from_sse(
@@ -1635,7 +1673,7 @@ async fn responses_relay_provider_response_decode_error_reselects_next_candidate
 }
 
 #[tokio::test]
-async fn responses_relay_incomplete_exhaustion_keeps_typed_terminal_error() {
+async fn responses_relay_content_filter_incomplete_exhaustion_keeps_typed_terminal_error() {
     let server_id = "responses_incomplete_exhaustion";
     let manifest = responses_reselect_manifest_for_scope(server_id);
     let transport = ResponsesIncompleteExhaustionTransport {
@@ -1697,6 +1735,60 @@ async fn responses_relay_incomplete_exhaustion_keeps_typed_terminal_error() {
     assert_eq!(usage.input_tokens, Some(10));
     assert_eq!(usage.output_tokens, Some(2));
     assert_eq!(usage.total_tokens, Some(12));
+}
+
+#[tokio::test]
+async fn responses_relay_output_cap_incomplete_commits_partial_output_without_reselect() {
+    let server_id = "responses_output_cap";
+    let manifest = responses_reselect_manifest_for_scope(server_id);
+    let transport = ResponsesOutputCapTransport {
+        provider_ids: Mutex::new(Vec::new()),
+    };
+    let output = execute_v3_responses_relay_runtime(
+        &manifest,
+        V3ResponsesRelayRuntimeInput {
+            server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-responses-output-cap".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":"cap the output",
+                "stream":false
+            }),
+        },
+        &transport,
+    )
+    .await
+    .expect("an output-cap response.incomplete is valid partial output");
+
+    // The admission owner is entry-independent: the Responses-wire
+    // `response.incomplete` + `max_output_tokens` terminal is admitted here just
+    // as it is through the Chat entry, so exactly one candidate is attempted.
+    assert_eq!(
+        transport.provider_ids.lock().unwrap().as_slice(),
+        ["limited"],
+        "an admitted output-cap truncation must not reselect"
+    );
+    assert_eq!(output.status, 200, "{output:?}");
+    assert!(output.error_chain.is_none(), "{output:?}");
+    let body = match output.client_body {
+        V3ResponsesRelayClientBody::Json(value) => value,
+        V3ResponsesRelayClientBody::Sse(_) => panic!("expected JSON client body"),
+    };
+    assert_eq!(body["status"], "incomplete", "{body}");
+    assert_eq!(
+        body["incomplete_details"]["reason"], "max_output_tokens",
+        "{body}"
+    );
+    assert!(
+        body.to_string().contains("capped-partial-output"),
+        "truncated partial output must reach the client: {body}"
+    );
 }
 
 #[tokio::test]

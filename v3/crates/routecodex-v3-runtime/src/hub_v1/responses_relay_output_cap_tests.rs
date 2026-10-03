@@ -167,3 +167,32 @@ fn openai_chat_reasoning_only_stop_remains_provider_failure() {
     assert_eq!(projection.status, 502);
     assert_eq!(projection.code, "provider_empty_visible_output");
 }
+
+// 上游 Responses 参考把自身输出上限截断表示为 response.incomplete +
+// incomplete_details.reason=max_output_tokens。这与 Chat 的 length 别名和
+// Anthropic 的 max_tokens 是同一语义，因此该终态必须在所有入口都被接纳为
+// 合法的部分输出，而不是进入 provider 失败/冷却/切换路径。
+#[tokio::test]
+async fn responses_wire_output_cap_incomplete_stream_is_admitted_with_usage_observation() {
+    let observation = V3RuntimeStreamObservation::default();
+    let provider = Box::pin(futures_util::stream::iter(vec![Ok(
+        b"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_incomplete\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15}}}\n\n".to_vec(),
+    )]));
+    let response =
+        build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(provider, &observation)
+            .await
+            .expect("an output-cap response.incomplete is admitted partial output");
+
+    assert_eq!(response["status"], "incomplete", "{response}");
+    assert_eq!(
+        response["incomplete_details"]["reason"], "max_output_tokens",
+        "{response}"
+    );
+    let snapshot = observation.snapshot().unwrap();
+    assert_eq!(snapshot.response_status.as_deref(), Some("incomplete"));
+    assert_eq!(
+        snapshot.finish_reason.as_deref(),
+        Some("length"),
+        "max_output_tokens incomplete terminal must record finish_reason=length"
+    );
+}

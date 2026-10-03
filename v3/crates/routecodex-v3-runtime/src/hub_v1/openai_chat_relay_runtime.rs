@@ -1094,6 +1094,16 @@ fn project_responses_sse_as_openai_chat_stream(
                             crate::hub_v1::normalize_v3_responses_function_call_arguments(
                                 &mut normalized,
                             )?;
+                            // The terminal-admission owner decides which
+                            // Responses terminals are valid partial output for
+                            // the Responses client projection. It does not
+                            // govern `response.incomplete` on this entry: the
+                            // Chat codec owns that terminal and projects BOTH
+                            // legal reasons (`max_output_tokens` -> `length`,
+                            // `content_filter` -> `content_filter`) as Chat
+                            // final frames, per its own documented contract.
+                            // Asking the owner here would turn a legal
+                            // `content_filter` terminal into a stream error.
                             if normalized.get("type").and_then(Value::as_str)
                                 != Some("response.incomplete")
                             {
