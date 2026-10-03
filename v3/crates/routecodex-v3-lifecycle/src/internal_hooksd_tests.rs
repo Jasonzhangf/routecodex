@@ -175,7 +175,7 @@ async fn wait_degraded(project: &Path, instance: &str) {
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-        "expected explicit hooks-unavailable status: {detail}"
+            "expected explicit hooks-unavailable status: {detail}"
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
