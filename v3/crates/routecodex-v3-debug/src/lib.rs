@@ -639,7 +639,9 @@ impl V3DebugRuntime {
         let mut sink = sink
             .lock()
             .map_err(|error| V3DebugError::Poisoned(error.to_string()))?;
-        let live = fs::symlink_metadata(path).ok();
+        // Follow a symlinked `log_file`: the comparison is against the file the
+        // handle actually writes to, and the cap applies to that file's length.
+        let live = fs::metadata(path).ok();
         let live_identity = live
             .as_ref()
             .map(|metadata| (metadata.dev(), metadata.ino()));

@@ -374,6 +374,48 @@ fn oversized_debug_log_rotates_to_a_single_generation() {
     fs::remove_dir_all(path).unwrap();
 }
 
+#[test]
+fn a_symlinked_log_file_is_capped_by_its_target_length() {
+    let path = std::env::temp_dir().join(format!(
+        "routecodex-v3-debug-symlink-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&path);
+    fs::create_dir_all(&path).unwrap();
+    let target = path.join("real.jsonl");
+    let handle = fs::File::create(&target).unwrap();
+    handle.set_len(V3_DEBUG_LOG_MAX_BYTES + 1).unwrap();
+    drop(handle);
+    let link = path.join("debug.jsonl");
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+
+    let runtime = V3DebugRuntime::new(V3DebugRuntimeConfig {
+        log_console: false,
+        log_file: Some(link.display().to_string()),
+        snapshots_enabled: false,
+        snapshot_stages: None,
+        dry_run_enabled: false,
+        raw_request_retention: 0,
+        raw_response_retention: 0,
+        event_retention: 4,
+        redaction: V3RedactionPolicy::default(),
+    })
+    .unwrap();
+    runtime
+        .append_human_console_line("[5556] symlinked log")
+        .unwrap();
+
+    assert!(
+        path.join("debug.jsonl.1").exists(),
+        "the cap must measure the file a symlinked log_file writes to, not the link itself"
+    );
+    assert!(
+        fs::read_to_string(&link).unwrap().contains("symlinked log"),
+        "the live log must keep receiving lines after the rotation"
+    );
+    fs::remove_dir_all(path).unwrap();
+}
+
 /// Another writer sharing `log_file` — a second process, or an external
 /// rotator — must not capture this sink's cached handle: lines belong in the
 /// file the configured path currently names.
