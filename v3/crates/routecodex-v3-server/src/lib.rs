@@ -596,7 +596,7 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
                                 request_connection_broker,
                                 service,
                             ).await {
-                                eprintln!("V3 Front HTTP connection failed: {error}");
+                                eprintln!("V3 Front HTTP connection failed: {error:?}");
                             }
                         });
                     }

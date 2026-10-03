@@ -1,6 +1,6 @@
 use serde_json::{Map, Value};
 use std::fs;
-use std::io::Write;
+use std::io::{BufWriter, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
@@ -180,6 +180,15 @@ impl V3CodexSampleStore {
         self.retention
     }
 
+    fn should_persist(&self, force: bool, status: Option<u16>) -> bool {
+        if !force {
+            return self.enabled && !self.error_samples_only;
+        }
+        !status.is_some_and(|status| {
+            routecodex_v3_config::internal::v3_error_sample_skip_statuses().contains(&status)
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn persist(
         &self,
@@ -192,20 +201,8 @@ impl V3CodexSampleStore {
         force: bool,
         status: Option<u16>,
     ) -> Result<(), String> {
-        if !self.enabled && !force {
+        if !self.should_persist(force, status) {
             return Ok(());
-        }
-        if !force && self.error_samples_only {
-            return Ok(());
-        }
-        // 账号/配额类错误状态不落盘（401/402/403/429/503 等）。
-        if force {
-            if let Some(status) = status {
-                if routecodex_v3_config::internal::v3_error_sample_skip_statuses().contains(&status)
-                {
-                    return Ok(());
-                }
-            }
         }
         let _persistence_guard = self
             .persistence_guard
@@ -218,10 +215,12 @@ impl V3CodexSampleStore {
         let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));
         let path = dir.join(file_name);
         let payload = merge_provider_snapshot_attempts(&path, file_name, payload)?;
-        let mut file = fs::File::create(&path).map_err(|error| error.to_string())?;
+        let file = fs::File::create(&path).map_err(|error| error.to_string())?;
         let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+        let mut file = BufWriter::new(file);
         serde_json::to_writer_pretty(&mut file, &payload).map_err(|error| error.to_string())?;
         file.write_all(b"\n").map_err(|error| error.to_string())?;
+        file.flush().map_err(|error| error.to_string())?;
         enforce_v3_codex_sample_global_retention(&samples_root, Some(&dir), self.retention)?;
         Ok(())
     }
@@ -284,6 +283,9 @@ impl V3CodexSampleStore {
     /// Hot-path enqueue owner. A rejected diagnostic write is reported out of band so it
     /// cannot turn a passable business request into a server error.
     pub fn enqueue_persist(self: &Arc<Self>, job: V3CodexSamplePersistJob) -> Result<(), String> {
+        if !self.should_persist(job.force, job.status) {
+            return Ok(());
+        }
         let failure_request_id = job.request_id.clone();
         let failure_file_name = job.file_name.clone();
         let enqueue = match self.enqueue.read() {

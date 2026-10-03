@@ -98,8 +98,13 @@ requireMatch(
 );
 requireMatch(
   sampleStore,
-  /pub fn persist\([\s\S]*force: bool[\s\S]*if !self\.enabled && !force \{\s*return Ok\(\(\)\);\s*\}/,
-  "V3CodexSampleStore.persist must force-write error evidence even when disabled",
+  /fn should_persist[\s\S]*if !force \{\s*return self\.enabled && !self\.error_samples_only;[\s\S]*pub fn persist\([\s\S]*if !self\.should_persist\(force, status\)/,
+  "V3CodexSampleStore must own one capture policy and force-write error evidence even when disabled",
+);
+requireMatch(
+  sampleStore,
+  /pub fn enqueue_persist[\s\S]*if !self\.should_persist\(job\.force, job\.status\) \{\s*return Ok\(\(\)\);\s*\}[\s\S]*let failure_request_id/,
+  "Skipped samples must not occupy queue slots or byte budget",
 );
 requireMatch(
   sampleStore,
