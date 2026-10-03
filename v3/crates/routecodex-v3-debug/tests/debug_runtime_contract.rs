@@ -383,10 +383,9 @@ fn a_symlinked_log_file_is_capped_by_its_target_length() {
     let _ = fs::remove_dir_all(&path);
     fs::create_dir_all(&path).unwrap();
     let target = path.join("real.jsonl");
-    let handle = fs::File::create(&target).unwrap();
-    handle.set_len(V3_DEBUG_LOG_MAX_BYTES + 1).unwrap();
-    drop(handle);
     let link = path.join("debug.jsonl");
+    // Dangling at construction, so opening the sink cannot rotate anything: the
+    // only probe that can see the oversized target is the per-line one.
     std::os::unix::fs::symlink(&target, &link).unwrap();
 
     let runtime = V3DebugRuntime::new(V3DebugRuntimeConfig {
@@ -401,6 +400,12 @@ fn a_symlinked_log_file_is_capped_by_its_target_length() {
         redaction: V3RedactionPolicy::default(),
     })
     .unwrap();
+    // A sparse file of cap size keeps the test cheap while still tripping the
+    // cap the sink enforces.
+    let handle = fs::OpenOptions::new().write(true).open(&target).unwrap();
+    handle.set_len(V3_DEBUG_LOG_MAX_BYTES + 1).unwrap();
+    drop(handle);
+
     runtime
         .append_human_console_line("[5556] symlinked log")
         .unwrap();
