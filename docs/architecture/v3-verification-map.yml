@@ -2199,7 +2199,7 @@ features:
   - controlled stream=true response.create projects Runtime SSE output as WebSocket events without full materialization
   - malformed client WebSocket event fails before provider send; missing type, unsupported response.cancel, and nested response.create response payload also fail before provider send
   - a second response.create carrying previous_response_id is rejected before provider send instead of re-entering Router as a continuation
-  - provider WebSocket/runtime error projects an explicit WebSocket error event without HTTP fallback
+  - a provider terminal closes the current WebSocket without any client payload so no provider status, code, header, or body reaches the client; a runtime/validation error still projects an explicit WebSocket error event without HTTP fallback
   - client disconnect during incremental Runtime SSE projection drops the provider stream/connection instead of draining to terminal behind the client
   - Server owns only client upgrade and framing while provider WebSocket state remains provider-owned
   - control fields do not enter provider/client normal payloads

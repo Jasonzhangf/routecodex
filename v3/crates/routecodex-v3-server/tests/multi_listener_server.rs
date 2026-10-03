@@ -4494,7 +4494,7 @@ async fn responses_inbound_websocket_transport_failure_closes_without_fabricated
 }
 
 #[tokio::test]
-async fn responses_inbound_websocket_preserves_eligible_provider_429_error_fields() {
+async fn responses_inbound_websocket_provider_429_never_reaches_the_client() {
     let _test_guard = TEST_LOCK.lock().await;
     let upstream_body = json!({
         "error": {"type":"rate_limit_error","message":"slow down","param":"upstream"},
@@ -4529,27 +4529,16 @@ async fn responses_inbound_websocket_preserves_eligible_provider_429_error_field
         ))
         .await
         .unwrap();
-    let event: Value = serde_json::from_str(
-        timeout(Duration::from_secs(30), socket.next())
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap()
-            .to_text()
-            .unwrap(),
-    )
-    .unwrap();
-    assert_eq!(event["type"], "error");
-    assert_eq!(event["status"], 429);
-    assert_eq!(event["error"]["type"], "rate_limit_error");
-    assert_eq!(event["error"]["message"], "slow down");
-    assert_eq!(event["error"]["param"], "upstream");
-    assert_eq!(event["provider_body"], upstream_body);
-    assert!(event["provider_headers"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|header| { header["name"] == "retry-after" && header["value"] == json!([49, 55]) }));
+    let message = timeout(Duration::from_secs(30), socket.next())
+        .await
+        .expect("an exhausted provider terminal must close the WebSocket");
+    assert!(
+        !matches!(
+            message,
+            Some(Ok(Message::Text(_))) | Some(Ok(Message::Binary(_)))
+        ),
+        "a provider HTTP failure must not project its status, headers, or body to the client"
+    );
     assert_eq!(captures.recv().await.unwrap().body["model"], "wire-test");
 
     let _ = socket.close(None).await;
@@ -4603,7 +4592,7 @@ async fn responses_inbound_websocket_upstream_502_closes_without_fabricated_even
 }
 
 #[tokio::test]
-async fn responses_inbound_websocket_preserves_binary_provider_error_body() {
+async fn responses_inbound_websocket_binary_provider_error_body_never_reaches_the_client() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
         StatusCode::TOO_MANY_REQUESTS,
@@ -4634,25 +4623,16 @@ async fn responses_inbound_websocket_preserves_binary_provider_error_body() {
         ))
         .await
         .unwrap();
-    let event: Value = serde_json::from_str(
-        timeout(Duration::from_secs(30), socket.next())
-            .await
-            .expect("eligible binary upstream error must emit an event")
-            .unwrap()
-            .unwrap()
-            .to_text()
-            .unwrap(),
-    )
-    .unwrap();
-    assert_eq!(event["type"], "error");
-    assert_eq!(event["status"], 429);
-    assert_eq!(event["provider_body"], json!([255, 254]));
-    assert_eq!(event["provider_body_encoding"], "bytes");
-    assert!(event["provider_headers"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|header| { header["name"] == "retry-after" && header["value"] == json!([49, 55]) }));
+    let message = timeout(Duration::from_secs(30), socket.next())
+        .await
+        .expect("an exhausted provider terminal must close the WebSocket");
+    assert!(
+        !matches!(
+            message,
+            Some(Ok(Message::Text(_))) | Some(Ok(Message::Binary(_)))
+        ),
+        "a non-UTF-8 provider error body must never reach the client"
+    );
     assert_eq!(captures.recv().await.unwrap().body["model"], "wire-test");
 
     handle.shutdown().await;

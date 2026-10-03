@@ -1336,8 +1336,8 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 if let Some(disposition) = output.terminal_disposition.clone() {
                     // Third and last Responses terminal-disposition site: same
                     // entry, same defect, so the real typed chain and the
-                    // on-disk evidence are recorded before the provider's own
-                    // response is returned verbatim.
+                    // on-disk evidence are recorded before the client transport
+                    // is broken without a payload.
                     if let Some(response) = persist_v3_responses_relay_terminal_error_evidence(
                         &state,
                         &entry_protocol,
