@@ -695,29 +695,24 @@ async fn provider_sse_json_completed_wins_over_opaque_event_label() {
 }
 
 #[tokio::test]
-async fn provider_sse_incomplete_enters_error_chain_with_usage_observation() {
+async fn provider_sse_content_filter_incomplete_enters_error_chain_with_usage_observation() {
     let observation = V3RuntimeStreamObservation::default();
     let provider = Box::pin(stream::iter(vec![Ok(
-            b"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_incomplete\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15}}}\n\n".to_vec(),
+            b"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_incomplete_filtered\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"content_filter\"},\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15}}}\n\n".to_vec(),
         )]));
     let error =
         build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(provider, &observation)
             .await
-            .expect_err("provider response.incomplete must enter the error chain");
+            .expect_err("a content_filter incomplete terminal must enter the error chain");
 
     assert!(
         error
             .to_string()
-            .contains("provider response ended before completion: max_output_tokens"),
+            .contains("provider response ended before completion: content_filter"),
         "unexpected provider error: {error}"
     );
     let snapshot = observation.snapshot().unwrap();
     assert_eq!(snapshot.response_status.as_deref(), Some("incomplete"));
-    assert_eq!(
-        snapshot.finish_reason.as_deref(),
-        Some("length"),
-        "max_output_tokens incomplete terminal must record finish_reason=length"
-    );
 }
 
 #[tokio::test]

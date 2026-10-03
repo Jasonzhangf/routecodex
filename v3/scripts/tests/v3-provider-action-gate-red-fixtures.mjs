@@ -167,10 +167,10 @@ const cases = [
     name: 'Responses Relay incomplete exhaustion loses side-channel usage coverage',
     path: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs',
     mutate: (source) => source.replace(
-      'responses_relay_incomplete_exhaustion_keeps_typed_terminal_error',
+      'responses_relay_content_filter_incomplete_exhaustion_keeps_typed_terminal_error',
       'responses_relay_incomplete_exhaustion_has_no_typed_terminal_contract',
     ),
-    diagnostic: /missing active Rust test responses_relay_incomplete_exhaustion_keeps_typed_terminal_error/u,
+    diagnostic: /missing active Rust test responses_relay_content_filter_incomplete_exhaustion_keeps_typed_terminal_error/u,
   },
   {
     name: 'terminal transition is removed',
