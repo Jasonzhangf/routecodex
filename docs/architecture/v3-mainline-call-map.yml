@@ -2563,6 +2563,34 @@ chains:
       side_channel_reads: [v3.error.chain]
       side_channel_writes: []
     status: anchored
+  - step_id: v3-srv-07
+    from_node: V3ServerHttpFramingPolicy
+    to_node: HyperHttp1ParserPolicy
+    caller_symbol: serve_v3_front_http_connection
+    caller_file: v3/crates/routecodex-v3-server/src/restart_handoff.rs
+    callee_symbol: automatic_error_responses
+    callee_file: v3/vendor/hyper/src/server/conn/http1.rs
+    owner_feature_id: v3.runtime_restart_handoff_skeleton
+    resource_flow:
+      consumes: []
+      produces: [v3.server.http_parse_error_policy]
+      side_channel_reads: []
+      side_channel_writes: [v3.server.http_parse_error_policy]
+    status: anchored
+  - step_id: v3-srv-08
+    from_node: HyperHttp1ParserPolicy
+    to_node: HyperConnectionParserPolicy
+    caller_symbol: serve_connection
+    caller_file: v3/vendor/hyper/src/server/conn/http1.rs
+    callee_symbol: set_automatic_error_responses
+    callee_file: v3/vendor/hyper/src/proto/h1/conn.rs
+    owner_feature_id: v3.runtime_restart_handoff_skeleton
+    resource_flow:
+      consumes: [v3.server.http_parse_error_policy]
+      produces: []
+      side_channel_reads: [v3.server.http_parse_error_policy]
+      side_channel_writes: []
+    status: anchored
 - chain_id: v3.debug_error_foundation.mainline
   owner_feature_id: v3.debug_error_foundation
   summary: 'P3/P4 Runtime foundation: Server enters Runtime, Debug records side-channel evidence, Error traverses six adjacent nodes, Error owns the failure session scope, Provider owns health state.'

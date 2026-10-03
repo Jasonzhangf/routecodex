@@ -31,6 +31,260 @@ use tokio_tungstenite::{
 
 static TEST_LOCK: Mutex<()> = Mutex::const_new(());
 
+async fn read_raw_content_length_response(socket: &mut TcpStream) -> Vec<u8> {
+    let mut wire = Vec::new();
+    while !wire.ends_with(b"\r\n\r\n") {
+        wire.push(socket.read_u8().await.unwrap());
+    }
+    let head = String::from_utf8(wire.clone()).unwrap();
+    let length = head
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse::<usize>().unwrap())
+        })
+        .expect("bounded test response has Content-Length");
+    let head_length = wire.len();
+    wire.resize(head_length + length, 0);
+    socket.read_exact(&mut wire[head_length..]).await.unwrap();
+    wire
+}
+
+// Stable public gate: test:v3-server-debug-error-blackbox (workspace CI).
+#[tokio::test]
+async fn malformed_http_framing_never_sends_client_error_blackbox() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let handle = spawn_v3_server_aggregate(p6_manifest(
+        free_port(),
+        free_port(),
+        "http://127.0.0.1:9/v1",
+    ))
+    .await
+    .unwrap();
+    let addr = handle.listeners[0].addr;
+    let mut results = Vec::new();
+    for endpoint in [
+        "/v1/chat/completions",
+        "/v1/responses",
+        "/v1/responses/compact",
+        "/v1/messages",
+        "/v1beta/models/wire-test/generateContent",
+    ] {
+        for malformed in [
+            "Content-Length: invalid\r\n".to_owned(),
+            "Content-Length: 1\r\nContent-Length: 2\r\n".to_owned(),
+            "bad header: value\r\n".to_owned(),
+            "x: v\r\n".repeat(101),
+        ] {
+            for reused in ["fresh", "reused", "pipelined"] {
+                let mut socket = TcpStream::connect(addr).await.unwrap();
+                if reused == "reused" {
+                    socket
+                        .write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                        .await
+                        .unwrap();
+                    let success = timeout(
+                        Duration::from_secs(5),
+                        read_raw_content_length_response(&mut socket),
+                    )
+                    .await
+                    .expect("keep-alive success must finish");
+                    assert!(success.starts_with(b"HTTP/1.1 200"));
+                }
+                socket
+                    .write_all(
+                        format!(
+                            "{}POST {endpoint} HTTP/1.1\r\nHost: localhost\r\n{malformed}\r\n",
+                            if reused == "pipelined" {
+                                "GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n"
+                            } else {
+                                ""
+                            }
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+                if reused == "pipelined" {
+                    let success = timeout(
+                        Duration::from_secs(5),
+                        read_raw_content_length_response(&mut socket),
+                    )
+                    .await
+                    .expect("the preceding pipelined success must finish");
+                    assert!(success.starts_with(b"HTTP/1.1 200"));
+                }
+                let mut wire = Vec::new();
+                let terminal = timeout(Duration::from_secs(5), socket.read_to_end(&mut wire)).await;
+                let ended = matches!(terminal, Ok(Ok(_)))
+                    || matches!(terminal, Ok(Err(ref error)) if error.kind() == std::io::ErrorKind::ConnectionReset);
+                results.push((endpoint, malformed.clone(), reused, ended, wire));
+            }
+        }
+    }
+    handle.shutdown().await;
+    for (endpoint, malformed, reused, ended, wire) in &results {
+        eprintln!(
+            "framing-public {endpoint} connection={reused} header_bytes={} response_bytes={} terminal={ended}",
+            malformed.len(),
+            wire.len()
+        );
+    }
+    for (endpoint, malformed, reused, ended, wire) in results {
+        assert!(ended, "{endpoint} reused={reused} must close, not hang");
+        assert!(
+            wire.is_empty(),
+            "{endpoint} reused={reused} header_bytes={} leaked framing error: {}",
+            malformed.len(),
+            String::from_utf8_lossy(&wire)
+        );
+    }
+}
+
+// Public dependency consumer: the local patch preserves Hyper's default policy.
+#[tokio::test]
+async fn hyper_default_error_policy_preserves_upstream_behavior_blackbox() {
+    for explicitly_enabled in [false, true] {
+        for (header, status) in [
+            ("Content-Length: invalid\r\n".to_owned(), "400"),
+            ("x: v\r\n".repeat(101), "431"),
+        ] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let task = tokio::spawn(async move {
+                let (socket, _) = listener.accept().await.unwrap();
+                let service =
+                    hyper::service::service_fn(|_: hyper::Request<hyper::body::Incoming>| async {
+                        panic!("a parse failure must not enter the application");
+                        #[allow(unreachable_code)]
+                        Ok::<_, std::convert::Infallible>(Response::new(Body::empty()))
+                    });
+                let mut builder = hyper::server::conn::http1::Builder::new();
+                if explicitly_enabled {
+                    builder.automatic_error_responses(true);
+                }
+                let result = builder
+                    .serve_connection(hyper_util::rt::TokioIo::new(socket), service)
+                    .await;
+                assert!(result.is_err(), "the original parse error stays internal");
+            });
+            let mut socket = TcpStream::connect(addr).await.unwrap();
+            socket
+                .write_all(
+                    format!("POST /upstream HTTP/1.1\r\nHost: localhost\r\n{header}\r\n")
+                        .as_bytes(),
+                )
+                .await
+                .unwrap();
+            let mut wire = Vec::new();
+            timeout(Duration::from_secs(5), socket.read_to_end(&mut wire))
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(wire.starts_with(format!("HTTP/1.1 {status}").as_bytes()));
+            task.await.unwrap();
+        }
+    }
+}
+
+async fn front_transport_test_listener(
+    router: Router,
+) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let task = tokio::spawn(async move {
+        let (socket, peer) = listener.accept().await.unwrap();
+        let broker = routecodex_v3_server::V3FrontTransportBroker::new(1);
+        let identity = broker.allocate_connection_identity();
+        routecodex_v3_server::serve_v3_front_http_connection(
+            socket, peer, identity, broker, router,
+        )
+        .await
+        .unwrap();
+    });
+    (addr, task)
+}
+
+// Public Front consumer: protects transparent payloads, control errors, and interim heads.
+#[tokio::test]
+async fn front_http_framing_preserves_authorized_responses_blackbox() {
+    let router = Router::new()
+        .route(
+            "/control",
+            axum::routing::get(|| async { (StatusCode::IM_A_TEAPOT, "control-error") }),
+        )
+        .route(
+            "/opaque",
+            axum::routing::get(|| async {
+                Body::from_stream(futures_util::stream::unfold(0, |index| async move {
+                    if index == 64 {
+                        return None;
+                    }
+                    sleep(Duration::from_millis(2)).await;
+                    let bytes = format!("HTTP/1.1 500 body-data-{index}:{}", "x".repeat(32768));
+                    Some((Ok::<_, std::io::Error>(bytes), index + 1))
+                }))
+            }),
+        );
+    let (addr, task) = front_transport_test_listener(router).await;
+    let client = reqwest::Client::new();
+    let control = client
+        .get(format!("http://{addr}/control"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(control.status(), StatusCode::IM_A_TEAPOT);
+    assert_eq!(control.text().await.unwrap(), "control-error");
+    let opaque = client
+        .get(format!("http://{addr}/opaque"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(opaque.status(), StatusCode::OK);
+    let body = opaque.text().await.unwrap();
+    let expected = (0..64)
+        .map(|index| format!("HTTP/1.1 500 body-data-{index}:{}", "x".repeat(32768)))
+        .collect::<String>();
+    assert_eq!(body, expected);
+    drop(client);
+    timeout(Duration::from_secs(5), task)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let echo = Router::new().route("/echo", post(|body: axum::body::Bytes| async move { body }));
+    let (addr, task) = front_transport_test_listener(echo).await;
+    let mut socket = TcpStream::connect(addr).await.unwrap();
+    socket
+        .write_all(b"POST /echo HTTP/1.1\r\nHost: localhost\r\nExpect: 100-continue\r\nContent-Length: 4\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let mut interim = Vec::new();
+    timeout(Duration::from_secs(5), async {
+        while !interim.ends_with(b"\r\n\r\n") {
+            interim.push(socket.read_u8().await.unwrap());
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(interim, b"HTTP/1.1 100 Continue\r\n\r\n");
+    socket.write_all(b"echo").await.unwrap();
+    let response = timeout(
+        Duration::from_secs(5),
+        read_raw_content_length_response(&mut socket),
+    )
+    .await
+    .unwrap();
+    assert!(response.starts_with(b"HTTP/1.1 200"));
+    assert!(response.ends_with(b"echo"));
+    drop(socket);
+    timeout(Duration::from_secs(5), task)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
 async fn assert_websocket_closes_without_data(
     socket: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>,
 ) {

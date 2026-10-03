@@ -64,6 +64,80 @@ Reuse the existing registered request, response, and error SESE graphs at `docs/
 
 ## Required blackbox regression and release gate
 
+### HTTP framing failure before admission
+
+The installed 0.90.4830 candidate still sent Hyper's automatic `400 Bad Request`
+for `Content-Length: invalid`. This failure occurs before the application service
+is called; it bypasses the model transport-outcome consumer. The same boundary
+must cover a malformed request after a successful keep-alive request.
+
+Server/Front owns `v3.server.http_parse_error_policy`, a typed per-connection
+HTTP parser policy. The only automatic-error producer is Hyper's
+`Conn::on_parse_error`, which calls `T::on_error` and buffers an HTTP error head
+before any application service is involved. The proposed repair disables that
+producer for Front connections, rather than filtering serialized output.
+
+Hyper 1.10.1 exposes no public switch for this behavior. Vendor the exact already
+locked 1.10.1 crate under `v3/vendor/hyper`, preserving MIT licensing and upstream
+source/provenance, with one narrow native API addition:
+`http1::Builder::automatic_error_responses(bool)`. Its default stays true for
+unchanged dependency consumers. The builder copies that typed flag into Conn;
+`on_parse_error` with false returns the original typed error without calling
+`T::on_error` or buffering any synthetic response. Preserve the existing HTTP/2
+preface error classification. The production Front builder always sets false;
+this is not a user-configurable exception to the no-client-error contract.
+
+Cargo uses one patched Hyper owner via a V3-local `[patch.crates-io]` path;
+exclude the dependency from workspace membership and prove resolution with
+locked Cargo metadata. No global registry edits, second HTTP implementation,
+fallback, body-prefix scan, body/frame wrapper, or flush-permission state machine
+is introduced. The parser's acceptance domain, keep-alive/backpressure, upgrade,
+100 Continue, and application response serialization stay unchanged. Only the
+two native API/implementation files differ from imported upstream Rust source.
+
+The error returns through the existing connection Result and teardown, with
+the original cause retained internally. Teardown releases broker/socket senders;
+the existing writer drains previously queued application bytes before shutdown.
+It must not signal the biased immediate-close branch just to suppress a parser
+error, which could discard a preceding queued successful response.
+
+The existing lifecycle DAG's delivery node includes this framing boundary;
+the registered request/response/error graphs retain their existing business
+ARC boundaries. This is Server's HTTP transport implementation, not a new
+business Operator or a new lifecycle graph. The semantic path is:
+`接收连接 → 按禁止自动错误响应的策略解析请求 → 交付真实响应或无响应关闭 → 释放连接资源`.
+Application-authorized management error responses remain valid control-plane
+responses. Failure before application admission cannot be reliably assigned
+to a management endpoint and closes without a response.
+
+Required raw-TCP regression: invalid request line/header/content length on all
+model paths, both first-request and after keep-alive success; assert EOF/reset
+with zero new response bytes, not a timeout. Preserve ordinary management
+errors, Expect/100-continue, opaque response body prefixes, multi-flush bodies,
+SSE, and WebSocket upgrade/frame success. Reverting the Front policy to true must
+restore the automatic error response in the same public testcase.
+
+#### Design proof obligations (before implementation)
+
+The rejected coarse flush-authority proposal is preserved only in task evidence.
+It is not implemented or retained as an alternative runtime path. The native
+producer switch must prevent automatic400/431/414 at every parse-failure state,
+including partial writes and buffered pipelined requests; it must not need to
+attribute or predict Hyper's encoded header/chunk bytes. Default-true dependency
+behavior must remain intact for controlled upstreams and other consumers.
+
+`Content-Length: invalid` is confirmed automatic400 by the saved installed wire
+and both public red runs. Locked Hyper `error.rs:638` maps it to
+`Parse::Header(Header::ContentLengthInvalid)`; `role.rs:466-481` includes every
+`Parse::Header(_)` in automatic400. It is not the `_ => None` case. Resource/caller
+bindings are anchored to the authored native API; installed behavior requires
+separate candidate and merged-runtime acceptance.
+Import integrity must identify exactly the two changed upstream source files,
+and the V3 installer/isolation checks must consume the local patched dependency.
+Author validation must prove all 60 malformed-entry cases (fresh, reused, and
+pipelined) plus multi-flush opaque bodies, control errors, 100 Continue, SSE,
+and successful WebSocket frames. No design PASS substitutes for those results.
+
 Use real public HTTP/stream/WebSocket consumers with controlled upstreams. Mock private state and source-pattern assertions cannot substitute for behavior. Cover each HTTP entry in JSON/SSE, Responses WebSocket, and supported Direct/Relay combinations. Bind results to the candidate SHA, input/config, upstream observations, and client wire capture.
 
 | Case | Required external result and side effects |

@@ -4954,6 +4954,8 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-server/src/restart_handoff.rs
   - v3/crates/routecodex-v3-server/src/restart_closeout.rs
+  - v3/vendor/hyper/src/server/conn/http1.rs
+  - v3/vendor/hyper/src/proto/h1/conn.rs
   - v3/crates/routecodex-v3-server/src/restart_handoff/tests/restart_handoff_closeout.rs
   - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
   - v3/crates/routecodex-v3-server/src/session_admission.rs
@@ -4967,11 +4969,14 @@ features:
   - v3.front.client_closeout_frame
   - v3.front.deadline_budget
   - v3.front.request_activity_gate
+  - v3.server.http_parse_error_policy
   entry_symbols:
   - V3FrontRequestLease
   - V3RuntimeHandoffCheckpoint
   - V3FrontFrameSequence
   - V3FrontTransportCloseoutState
+  - automatic_error_responses
+  - set_automatic_error_responses
   - V3StableFrontSocket::set_exec_closeout_frame
   - V3FrontDeadlineBudget
   - V3ServerRequestActivityGate
@@ -4979,6 +4984,12 @@ features:
   allowed_paths:
   - v3/crates/routecodex-v3-server/src/restart_handoff.rs
   - v3/crates/routecodex-v3-server/src/restart_closeout.rs
+  - v3/vendor/hyper
+  - v3/Cargo.toml
+  - v3/Cargo.lock
+  - v3/scripts/run-admission-gate.mjs
+  - scripts/verify-fast.mjs
+  - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
   - v3/crates/routecodex-v3-server/src/restart_handoff/tests/restart_handoff_closeout.rs
   - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
   - v3/crates/routecodex-v3-server/src/session_admission.rs

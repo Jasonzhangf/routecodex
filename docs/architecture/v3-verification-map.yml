@@ -1254,6 +1254,7 @@ features:
   - Client-input malformed request projection has neither internal_code nor external_error
   required_integration:
   - All model entry errors stay internal even on pool exhaustion; multi_listener_server model_entries_never_deliver_provider_or_sse_decode_errors_blackbox captures real HTTP bytes for Chat, Responses including compact, Messages, and Gemini JSON/SSE with upstream503 and malformed SSE; responses_inbound_websocket_sse_decode_failure_never_sends_client_error and the provider429/binary/502, malformed input, pool exhaustion, session isolation, and successful tool tests are mandatory in test:v3-server-debug-error-blackbox and the V3 cargo workspace CI run
+  - multi_listener_server malformed_http_framing_never_sends_client_error_blackbox proves fresh, reused and pipelined HTTP parse failures terminate with zero new bytes; front_http_framing_preserves_authorized_responses_blackbox preserves control errors, opaque/multi-flush bodies and Expect/100-continue; hyper_default_error_policy_preserves_upstream_behavior_blackbox proves the dependency default and explicit true preserve native 400/431; existing success gates preserve SSE and WebSocket
   - Server model pending endpoint emits internal Debug/Error evidence and returns only complete success or a typed incomplete transport outcome
   - Debug status/logs/snapshots endpoints expose shared runtime state without secrets
   - Debug dry-run endpoint reports stopped_before_provider_send and no_network_send
