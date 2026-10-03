@@ -292,6 +292,18 @@ fn p6_manifest(
     port_b: u16,
     provider_base_url: &str,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
+    p6_manifest_with_context_window(port_a, port_b, provider_base_url, 128_000)
+}
+
+/// `max_context_tokens` bounds every candidate in the p6 route pools, so a
+/// window too small for the request forces a selection-time pool exhaustion
+/// with no provider attempt at all.
+fn p6_manifest_with_context_window(
+    port_a: u16,
+    port_b: u16,
+    provider_base_url: &str,
+    max_context_tokens: u32,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
     let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
     let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
     let source = format!(
@@ -324,7 +336,7 @@ supports_streaming = true
 supports_thinking = true
 thinking = "optional"
 max_tokens = 4096
-max_context_tokens = 128000
+max_context_tokens = {max_context_tokens}
 [providers.test.models."gpt-5.6-sol"]
 wire_name = "gpt-5.6-sol"
 capabilities = ["text", "reasoning", "tools"]
@@ -5160,6 +5172,64 @@ async fn p6_provider_503_never_reaches_a_streaming_client() {
     std::env::remove_var("V3_P6_TEST_KEY");
     handle.shutdown().await;
     failure_shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn responses_selection_exhaustion_never_reaches_the_client() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (success_base_url, _captures, success_shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-selection-exhaustion");
+    let handle = spawn_v3_server_aggregate(p6_manifest_with_context_window(
+        free_port(),
+        free_port(),
+        &success_base_url,
+        2_000,
+    ))
+    .await
+    .unwrap();
+    let client = reqwest::Client::new();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+
+    // Positive control: a request inside every candidate's window is served
+    // normally, so the transport break below can only come from real exhaustion.
+    let served = client
+        .post(&endpoint)
+        .json(&json!({"model":"client-test","input":"hello"}))
+        .send()
+        .await
+        .expect("a request inside the window must be served");
+    assert_eq!(served.status(), StatusCode::OK);
+
+    // Selection-time pool exhaustion: every candidate is excluded by the
+    // context window before any provider attempt, so no upstream status exists
+    // and the client boundary is a transport break, never a synthesized 502.
+    let long_input = "context window exhaustion probe ".repeat(600);
+    let streaming = client
+        .post(&endpoint)
+        .json(&json!({"model":"client-test","input":long_input,"stream":true}))
+        .send()
+        .await
+        .expect("a streaming client must receive the SSE response head");
+    assert_eq!(streaming.status(), StatusCode::OK);
+    assert_eq!(streaming.headers()["content-type"], "text/event-stream");
+    assert!(
+        streaming.text().await.is_err(),
+        "an exhausted selection must abort the streaming body instead of projecting a 502"
+    );
+
+    let nonstreaming = client
+        .post(&endpoint)
+        .json(&json!({"model":"client-test","input":long_input}))
+        .send()
+        .await;
+    assert!(
+        nonstreaming.is_err(),
+        "an exhausted selection must close the nonstreaming client without a payload"
+    );
+
+    std::env::remove_var("V3_P6_TEST_KEY");
+    handle.shutdown().await;
+    success_shutdown.send(()).unwrap();
 }
 
 #[tokio::test]

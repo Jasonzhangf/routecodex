@@ -178,9 +178,33 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         ) {
             Ok(plan) => plan,
             Err(failure) => {
-                let frame = build_v3_server_16_http_frame_from_v3_error_06(
-                    project_v3_protocol_execution_plan_failure(failure),
-                );
+                let node_trace = failure.node_trace.clone();
+                let projected = project_v3_protocol_execution_plan_failure(failure);
+                if projected.pool_exhausted {
+                    // A selection-time pool exhaustion is a provider terminal:
+                    // no candidate was admitted, so there is no upstream
+                    // response to witness and the client boundary is the
+                    // transport break. The Error06 body stays provider-private
+                    // evidence on disk, never a client payload.
+                    if let Some(response) = persist_v3_projected_terminal_error_evidence(
+                        &state,
+                        &entry_protocol,
+                        &path,
+                        &request_id,
+                        &payload,
+                        &node_trace,
+                        &projected,
+                    ) {
+                        return response;
+                    }
+                    return provider_terminal_response(
+                        &state,
+                        front_connection_identity,
+                        routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+                        requested_stream,
+                    );
+                }
+                let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
                 return responses_direct_output_response(
                     project_v3_responses_error_frame_for_request_if_sse(
                         frame,

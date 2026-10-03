@@ -911,6 +911,69 @@ pub(crate) fn persist_v3_responses_relay_terminal_error_evidence(
     None
 }
 
+/// Persist the error evidence for a provider terminal that ends the client
+/// transport before any runtime output exists.
+///
+/// A selection-time pool exhaustion is decided while the protocol execution
+/// plan is built, so no relay/direct runtime output carries the evidence. The
+/// Error06 projection is still the real typed truth, and it has to stay on disk
+/// as provider-private evidence even though the client boundary is a transport
+/// break. Returns a debug-failure response when the debug sink itself fails;
+/// `None` means the projection is not a terminal client error.
+pub(crate) fn persist_v3_projected_terminal_error_evidence(
+    state: &Arc<V3ListenerState>,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+    raw_request_payload: &Value,
+    node_trace: &[&'static str],
+    projected: &routecodex_v3_error::V3Error06ClientProjected,
+) -> Option<Response<Body>> {
+    if !v3_output_has_terminal_client_error(projected.status) {
+        return None;
+    }
+    if let Err(error) = persist_v3_error_evidence_payload(
+        state,
+        entry_protocol,
+        endpoint,
+        request_id,
+        "request.json",
+        &state
+            .debug
+            .project_payload_verbatim(raw_request_payload.clone()),
+        (projected.status >= 400).then_some(projected.status),
+    ) {
+        return Some(foundation_output_response(project_v3_debug_failure(
+            "V3DebugErrorEvidenceCaptured",
+            V3DebugError::Sink(error),
+        )));
+    }
+    if let Err(error) = persist_v3_error_evidence_payload(
+        state,
+        entry_protocol,
+        endpoint,
+        request_id,
+        "error.json",
+        &state.debug.project_payload_verbatim(json!({
+            "object": "routecodex.v3.error_evidence",
+            "stage": "error",
+            "status": projected.status,
+            "request_id": request_id,
+            "endpoint": endpoint,
+            "node_trace": node_trace,
+            "error_chain": projected.chain,
+            "observability": Value::Null,
+        })),
+        (projected.status >= 400).then_some(projected.status),
+    ) {
+        return Some(foundation_output_response(project_v3_debug_failure(
+            "V3DebugErrorEvidenceCaptured",
+            V3DebugError::Sink(error),
+        )));
+    }
+    None
+}
+
 /// Project the typed Error chain of a Responses relay output into the debug
 /// trace and the observability store.
 ///

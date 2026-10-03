@@ -1178,6 +1178,7 @@ features:
   - A successful ten-minute probe increases the budget, a 429 probe decreases it, and SSE leases release only when the raw stream is dropped or exhausted
   - Responses HTTP transport applies the configured provider SSE first-frame timeout to the response-header wait and the timeout reason projects as the health-neutral transient transport hang in both direct and relay failure policies
   - Responses, OpenAI Chat, Anthropic, and Gemini transport builders propagate the configured provider SSE first-frame timeout through the shared transport request
+  - A Responses selection-time pool exhaustion (every candidate excluded by the context window before any provider attempt) breaks the client transport for both the streaming and the nonstreaming boundary instead of projecting the synthesized 502 `network_error` body, which stays provider-private Error06 evidence
   required_contract:
   - Provider concurrency policy is Config-owned: maxInFlight is a soft adaptive signal and acquireTimeoutMs bounds only scheduled probe admission; neither is reconstructed from payload, MetadataCenter, or Debug
   - Reaching the adaptive concurrency budget never blocks a business request, excludes its selected provider, or advances a route tier
