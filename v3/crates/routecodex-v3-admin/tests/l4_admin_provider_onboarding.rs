@@ -518,6 +518,37 @@ async fn probe_stream_never_leaks_secret_material() {
 }
 
 #[tokio::test]
+async fn probe_l3_reports_status_only_without_semantic_claim() {
+    let (upstream, _captured) = spawn_mock_upstream(200, 1, |_| "not-json".to_string()).await;
+    let (base, _state, home) = bind_test_server().await;
+    let token = admin_token(&home);
+    let response = http_client()
+        .post(format!("{base}/api/providers/probe"))
+        .header("x-routecodex-admin-token", &token)
+        .json(&json!({
+            "config": provider_json("p9", &format!("{upstream}/v1"), "sk-test", "m9"),
+            "stages": ["l3_semantic"],
+        }))
+        .send()
+        .await
+        .expect("probe response");
+    assert_eq!(response.status().as_u16(), 200, "probe streams over SSE");
+    let body = response.text().await.expect("probe stream body");
+    assert!(
+        body.contains("\"status_probe\":\"2xx\""),
+        "L3 must report status-only success: {body}"
+    );
+    assert!(
+        body.contains("\"body_inspected\":false"),
+        "L3 must not claim to inspect the response body: {body}"
+    );
+    assert!(
+        !body.contains("semantic_probe"),
+        "L3 must not emit a semantic success claim: {body}"
+    );
+}
+
+#[tokio::test]
 async fn import_partial_success_reports_retryable_failures() {
     let (base, _state, home) = bind_test_server().await;
     let token = admin_token(&home);

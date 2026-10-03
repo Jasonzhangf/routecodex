@@ -338,7 +338,7 @@ fn recovered_primary_failback_is_not_starved_by_backup_successes() {
             155,
             Some(permit.expected_generation()),
         )
-        .expect("semantic probe recovery");
+        .expect("HTTP 2xx probe recovery");
 
     let selected = resolve_target(&manifest, "failback_liveness", &BTreeSet::new(), &health);
     let V3RelayProviderTargetResolution::Selected(selected) = selected else {

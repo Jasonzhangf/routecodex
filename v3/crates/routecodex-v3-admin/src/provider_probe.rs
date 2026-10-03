@@ -1,5 +1,5 @@
 // feature_id: v3.admin_api
-//! Provider connectivity probe ladder (L1 contract / L2 reachability+auth / L3 semantic).
+//! Provider connectivity probe ladder (L1 contract / L2 reachability+auth / L3 status probe).
 //!
 //! Advisory diagnostics only: probe outcomes never mutate runtime provider health truth.
 //!
@@ -52,12 +52,14 @@ pub struct ProbeRequest {
     #[serde(default)]
     pub auth_alias: Option<String>,
     /// 只跑指定 stage（`l1_contract` / `l2_reachability_auth` / `l3_semantic`）；缺省全部。
+    /// `l3_semantic` 是保留的 API 标识，当前语义为 HTTP 2xx 状态探测。
     #[serde(default)]
     pub stages: Option<Vec<String>>,
 }
 
 pub(crate) const STAGE_L1: &str = "l1_contract";
 pub(crate) const STAGE_L2: &str = "l2_reachability_auth";
+/// Legacy stage id retained for API compatibility; this stage is HTTP status-only.
 pub(crate) const STAGE_L3: &str = "l3_semantic";
 
 async fn probe_candidate(
@@ -283,7 +285,7 @@ fn stage_label(stage: &str) -> &'static str {
     match stage {
         STAGE_L1 => "L1 contract (offline candidate validation)",
         STAGE_L2 => "L2 reachability + auth",
-        STAGE_L3 => "L3 semantic minimal chat",
+        STAGE_L3 => "L3 HTTP status probe (2xx)",
         _ => "unknown stage",
     }
 }
@@ -344,6 +346,7 @@ pub(crate) async fn execute_stages(
 }
 
 /// 跑一个 stage（`l1_contract` / `l2_reachability_auth` / `l3_semantic`）。
+/// `l3_semantic` 只判断 HTTP 2xx，不读取或解释响应 body。
 pub(crate) async fn execute_stage(
     stage: &str,
     id: &str,
@@ -480,10 +483,14 @@ async fn stage_l3(
             "canonical_model_id": target.canonical_model_id,
             "wire_model": target.wire_model,
             "builder": "routecodex_v3_runtime::probe_v3_provider_global_target",
+            "success_condition": "http_2xx_status_only",
         }),
     )];
     match probe_v3_provider_global_target(target).await {
-        Ok(()) => StageRun::passed(evidence, json!({ "semantic_probe": "ok" })),
+        Ok(()) => StageRun::passed(
+            evidence,
+            json!({ "status_probe": "2xx", "body_inspected": false }),
+        ),
         Err(V3ProviderHealthProbeFailure::Provider(message)) => {
             StageRun::failed("provider_rejected", json!({ "message": message }))
                 .with_evidence(evidence)
