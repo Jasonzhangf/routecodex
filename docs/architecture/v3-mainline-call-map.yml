@@ -7554,7 +7554,7 @@ chains:
     to_node: V3AdminObservabilityAggregation
     caller_symbol: records
     caller_file: v3/crates/routecodex-v3-admin/src/api/observability.rs
-    callee_symbol: v3_webui_observability_read_raw_rows
+    callee_symbol: v3_webui_observability_read_raw_rows_from
     callee_file: v3/crates/routecodex-v3-debug/src/observability_store.rs
     status: anchored
     owner_feature_id: v3.server_internal_observability_projection
