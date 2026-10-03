@@ -2745,7 +2745,7 @@ flowchart TD
   end
   subgraph c_65_v3_server_internal_observability_projection_m_v3_debug["v3-debug"]
     c_65_v3_server_internal_observability_projection_1["v3-debug<br/>v3_webui_observability_append_row<br/><small>routecodex-v3-debug/src/observability_store.rs</small>"]
-    c_65_v3_server_internal_observability_projection_3["v3-debug<br/>v3_webui_observability_read_raw_rows<br/><small>routecodex-v3-debug/src/observability_store.rs</small>"]
+    c_65_v3_server_internal_observability_projection_3["v3-debug<br/>v3_webui_observability_read_raw_rows_from<br/><small>routecodex-v3-debug/src/observability_store.rs</small>"]
   end
   subgraph c_65_v3_server_internal_observability_projection_m_v3_server["v3-server"]
     c_65_v3_server_internal_observability_projection_0["v3-server<br/>record_v3_observability_event<br/><small>routecodex-v3-server/src/webui_observability.rs</small>"]
@@ -2757,7 +2757,7 @@ flowchart TD
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
 | `v3-server-observability-record` | `V3ServerConsoleObservation` → `V3WebuiObservability` | anchored | record_v3_observability_event<br/><small>routecodex-v3-server/src/webui_observability.rs</small> | v3_webui_observability_append_row<br/><small>routecodex-v3-debug/src/observability_store.rs</small> | `v3.server_internal_observability_projection` |
-| `v3-admin-observability-read` | `V3WebuiObservabilityStore` → `V3AdminObservabilityAggregation` | anchored | records<br/><small>routecodex-v3-admin/src/api/observability.rs</small> | v3_webui_observability_read_raw_rows<br/><small>routecodex-v3-debug/src/observability_store.rs</small> | `v3.server_internal_observability_projection` |
+| `v3-admin-observability-read` | `V3WebuiObservabilityStore` → `V3AdminObservabilityAggregation` | anchored | records<br/><small>routecodex-v3-admin/src/api/observability.rs</small> | v3_webui_observability_read_raw_rows_from<br/><small>routecodex-v3-debug/src/observability_store.rs</small> | `v3.server_internal_observability_projection` |
 
 ## v3.route_policy.condition_evaluation
 

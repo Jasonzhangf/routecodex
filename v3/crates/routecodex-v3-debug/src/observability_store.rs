@@ -3,11 +3,15 @@
 // row is a typed serde_json::Value so each crate can decode its own typed row
 // without owning a second file format. Reads fold lifecycle rows by
 // request_key so each request is projected once at its latest lifecycle state.
+//
+// Store mutation contract: normal writes append one complete newline-terminated
+// row; retention compaction writes a replacement file and atomically renames it
+// over the store path. The path is never rewritten in place.
 
 use serde_json::Value;
 use std::collections::{BTreeMap, VecDeque};
 use std::fs;
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 pub const V3_WEBUI_OBSERVABILITY_SCHEMA_VERSION: u64 = 1;
@@ -185,8 +189,22 @@ mod retention_tests {
             )
             .unwrap();
         }
+        #[cfg(unix)]
+        let inode_before = {
+            use std::os::unix::fs::MetadataExt;
+            fs::metadata(&path).unwrap().ino()
+        };
         let new_row = json!({"request_key": "new", "event_type": "request.completed"});
         v3_webui_observability_append_row_with_retention(&path, &new_row, limit).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            assert_ne!(
+                inode_before,
+                fs::metadata(&path).unwrap().ino(),
+                "retention compaction must atomically replace the store path"
+            );
+        }
 
         let rows = v3_webui_observability_read_raw_rows(&path).unwrap();
         assert!(rows.len() < 4);
@@ -232,6 +250,65 @@ mod retention_tests {
         .unwrap_err();
         assert!(matches!(error, V3WebuiObservabilityStoreError::Decode(_)));
         assert_eq!(fs::read_to_string(&path).unwrap(), corrupt);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn incremental_raw_read_decodes_only_appended_lines_and_holds_back_partial_tail() {
+        use std::io::Write;
+        let dir = temp_dir("incremental-read");
+        let path = dir.join("records.jsonl");
+        v3_webui_observability_append_row(&path, &json!({"request_key": "a"})).unwrap();
+
+        let first = v3_webui_observability_read_raw_rows_from(&path, 0, 0).unwrap();
+        assert_eq!(first.rows.len(), 1);
+        assert_eq!(first.next_line_number, 1);
+
+        // No new bytes: resuming from the returned offset yields no rows.
+        let idle = v3_webui_observability_read_raw_rows_from(
+            &path,
+            first.next_offset,
+            first.next_line_number,
+        )
+        .unwrap();
+        assert!(idle.rows.is_empty());
+        assert_eq!(idle.next_offset, first.next_offset);
+
+        // A writer's unterminated trailing fragment is left for the next read...
+        {
+            let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
+            write!(
+                file,
+                "{}",
+                r#"{"schema_version":1,"row":{"request_key":"b""#
+            )
+            .unwrap();
+        }
+        let partial = v3_webui_observability_read_raw_rows_from(
+            &path,
+            first.next_offset,
+            first.next_line_number,
+        )
+        .unwrap();
+        assert!(partial.rows.is_empty());
+        assert_eq!(partial.next_offset, first.next_offset);
+
+        // ...and decoded once the writer terminates it.
+        {
+            let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
+            writeln!(file, "{}", "}}").unwrap();
+        }
+        let completed = v3_webui_observability_read_raw_rows_from(
+            &path,
+            partial.next_offset,
+            partial.next_line_number,
+        )
+        .unwrap();
+        assert_eq!(completed.rows.len(), 1);
+        assert_eq!(
+            completed.rows[0].get("request_key").and_then(Value::as_str),
+            Some("b")
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 }
@@ -384,6 +461,73 @@ pub fn v3_webui_observability_read_raw_rows(
         rows.push(decode_observability_row(path, line_number, line)?);
     }
     Ok(rows)
+}
+
+/// Incremental result of a raw read starting at a byte offset.
+///
+/// `next_offset` is the byte position after the last newline-terminated record,
+/// so a caller can resume from it without re-decoding what it already read. A
+/// writer's in-progress trailing fragment (no terminating newline yet) is left
+/// unconsumed and decoded on the next call once it is complete.
+#[derive(Debug, Default, Clone)]
+pub struct V3WebuiObservabilityRawRead {
+    pub rows: Vec<Value>,
+    pub next_offset: u64,
+    pub next_line_number: usize,
+}
+
+/// Incremental sibling of `v3_webui_observability_read_raw_rows`: decodes only
+/// the complete lines appended since `offset`, returning the new rows and the
+/// resume offset. Admin's polling cache uses this to stop re-reading and
+/// re-decoding the whole append-only store on every request.
+pub fn v3_webui_observability_read_raw_rows_from(
+    path: &Path,
+    offset: u64,
+    line_number: usize,
+) -> Result<V3WebuiObservabilityRawRead, V3WebuiObservabilityStoreError> {
+    if !path.exists() {
+        return Ok(V3WebuiObservabilityRawRead {
+            rows: Vec::new(),
+            next_offset: offset,
+            next_line_number: line_number,
+        });
+    }
+    let mut file = fs::File::open(path)?;
+    let length = file.metadata()?.len();
+    let start = offset.min(length);
+    file.seek(SeekFrom::Start(start))?;
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)?;
+
+    let mut rows = Vec::new();
+    let mut cursor = 0usize;
+    let mut consumed = 0usize;
+    let mut next_line_number = line_number;
+    while let Some(position) = buffer[cursor..].iter().position(|byte| *byte == b'\n') {
+        let end = cursor + position;
+        let line = &buffer[cursor..end];
+        cursor = end + 1;
+        consumed = cursor;
+        if line.iter().all(u8::is_ascii_whitespace) {
+            next_line_number += 1;
+            continue;
+        }
+        let text = std::str::from_utf8(line)
+            .map_err(|error| {
+                V3WebuiObservabilityStoreError::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    error,
+                ))
+            })?
+            .to_string();
+        rows.push(decode_observability_row(path, next_line_number, text)?);
+        next_line_number += 1;
+    }
+    Ok(V3WebuiObservabilityRawRead {
+        rows,
+        next_offset: start + consumed as u64,
+        next_line_number,
+    })
 }
 
 fn decode_observability_row(
