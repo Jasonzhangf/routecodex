@@ -982,18 +982,32 @@ pub(crate) fn persist_v3_projected_terminal_error_evidence(
 /// The client boundary must never project the provider's own status, headers, or
 /// body, so the only place that real upstream error stays readable is the
 /// provider-private evidence directory. This is the single owner of that
-/// artifact: the eligibility rule and the witness accessors exist for this
-/// record, and without it the witness would be built and carried across every
-/// attempt and reselection only to be discarded at the boundary. The artifact is
-/// separate from `error.json` because the error-evidence pair has its own owner
-/// and lanes that already write it; two writers to one file would race.
+/// artifact: the witness accessors exist for this record, and without it the
+/// witness would be built and carried across every attempt and reselection only
+/// to be discarded at the boundary. The artifact is separate from `error.json`
+/// because the error-evidence pair has its own owner and lanes that already
+/// write it; two writers to one file would race.
+///
+/// The record states what the provider actually did, not what the client was
+/// allowed to see. `external_http` means a real upstream response head was
+/// received and its status, headers, and body are recorded here losslessly,
+/// whatever that status is; that is decoupled from the client-projection rule
+/// (bug `705d624` keeps HTTP 502 out of any client response), and a failed body
+/// read is recorded as `body_read_failure` rather than erasing the status and
+/// headers that really arrived. `no_response` is reserved for the case where no
+/// upstream response head existed at all.
+///
+/// Returns nothing: the debug sink records every persistence failure in its own
+/// failure ledger and reports it out of band, so a diagnostic write can never
+/// turn a provider terminal into a client error and there is no error to
+/// propagate here.
 pub(crate) fn persist_v3_provider_terminal_evidence(
     state: &Arc<V3ListenerState>,
     entry_protocol: &str,
     endpoint: &str,
     request_id: &str,
     disposition: &routecodex_v3_error::V3ProviderTerminalDisposition,
-) -> Result<(), String> {
+) {
     let payload = match disposition {
         // The provider's real status, headers, and body are the error truth this
         // artifact exists to keep: they are recorded losslessly here and never
@@ -1004,13 +1018,14 @@ pub(crate) fn persist_v3_provider_terminal_evidence(
             "status": witness.status(),
             "headers": witness.headers(),
             "body": witness.body(),
+            "body_read_failure": witness.body_read_failure(),
         }),
         routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => json!({
             "object": "routecodex.v3.provider_terminal_evidence",
             "kind": "no_response",
         }),
     };
-    persist_v3_error_evidence_payload(
+    let _persisted = persist_v3_error_evidence_payload(
         state,
         entry_protocol,
         endpoint,
@@ -1018,7 +1033,7 @@ pub(crate) fn persist_v3_provider_terminal_evidence(
         "provider-terminal.json",
         &state.debug.project_payload_verbatim(payload),
         None,
-    )
+    );
 }
 
 /// Project the typed Error chain of a Responses relay output into the debug

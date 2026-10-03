@@ -4192,15 +4192,14 @@ async fn provider_terminal_external_http_never_projects_provider_response_to_cli
     let state = test_v3_listener_state_with_debug(&log_file, 5555, true, true, None, true);
     let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
     let raw_body = br#"{"error":{"type":"rate_limit_error","message":"later"}}"#.to_vec();
-    let witness = routecodex_v3_error::V3EligibleExternalHttpResponse::new(
+    let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
         429,
         vec![
             ("content-type".to_string(), b"application/json".to_vec()),
             ("retry-after".to_string(), b"17".to_vec()),
         ],
         raw_body.clone(),
-    )
-    .unwrap();
+    );
     let response = provider_terminal_response(
         &state,
         None,
@@ -4252,6 +4251,66 @@ async fn provider_terminal_external_http_never_projects_provider_response_to_cli
     assert!(
         !error.to_string().contains("rate_limit_error"),
         "the provider body must not reach the client transport: {error}"
+    );
+}
+
+#[tokio::test]
+async fn provider_terminal_external_http_records_body_read_failure_without_erasing_the_status() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-provider-terminal-body-read-failure-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let log_file = root.join("server.log");
+    let state = test_v3_listener_state_with_debug(&log_file, 5555, true, true, None, true);
+    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
+    let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
+        503,
+        vec![("content-type".to_string(), b"application/json".to_vec())],
+        Vec::new(),
+    )
+    .with_body_read_failure("upstream closed the response body early");
+    let response = provider_terminal_response(
+        &state,
+        None,
+        routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness),
+        true,
+        V3ProviderTerminalEvidence {
+            entry_protocol: "openai_chat",
+            endpoint: "/v1/chat/completions",
+            request_id: "provider-terminal-body-read-failure-unit",
+        },
+    );
+    sample_worker.wait_until_idle().await.unwrap();
+    // The upstream really did answer 503 with headers before the body read
+    // failed. That is a real response head, so the record keeps the status and
+    // headers and names the read failure instead of claiming no response.
+    let evidence: Value = serde_json::from_str(
+        &fs::read_to_string(root.join(
+            ".rcc/codex-samples/openai-chat-completions/ports/5555/\
+             provider-terminal-body-read-failure-unit/provider-terminal.json",
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(evidence["kind"], "external_http", "{evidence}");
+    assert_eq!(evidence["status"], 503);
+    assert_eq!(
+        evidence["body_read_failure"],
+        "upstream closed the response body early"
+    );
+    assert!(evidence.get("body").is_some(), "{evidence}");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    let error = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect_err("a streaming external provider terminal must break the client transport");
+    assert!(
+        error.to_string().contains("provider pool exhausted"),
+        "{error}"
     );
 }
 

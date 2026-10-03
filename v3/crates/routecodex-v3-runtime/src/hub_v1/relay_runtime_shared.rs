@@ -18,9 +18,9 @@ use crate::provider_failure_runtime_policy::{
 use futures_util::StreamExt;
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3EligibleExternalHttpResponse, V3Error05ExecutionAction,
-    V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected, V3ErrorActionScope,
-    V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3_ERROR_CHAIN_NODE_IDS,
+    build_v3_error_01_source_raised, V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness,
+    V3Error06ClientProjected, V3ErrorActionScope, V3ErrorHandlingCenter,
+    V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3ExternalHttpWitness, V3_ERROR_CHAIN_NODE_IDS,
     V3_TRANSIENT_TRANSPORT_HANG_CODE,
 };
 use routecodex_v3_provider_responses::{
@@ -288,14 +288,16 @@ pub fn provider_http_failure(
     }
 }
 
-/// A status and headers alone are not a complete upstream HTTP response.
-pub fn eligible_external_http_witness(
-    response: &V3ProviderHttpFailure,
-) -> Option<V3EligibleExternalHttpResponse> {
-    if response.body_read_failure.is_some() {
-        return None;
-    }
-    V3EligibleExternalHttpResponse::new(
+/// The canonical provider-terminal witness builder: the upstream HTTP response
+/// is recorded losslessly whenever one was received, whatever its status.
+///
+/// Client-projection eligibility (bug `705d624` keeps HTTP 502 out of any
+/// client response) is deliberately not part of this. Evidence capture is
+/// decoupled from the rule that decides whether a client may see the response,
+/// and a failed body read is recorded as such instead of erasing the status
+/// and headers that were really received.
+pub fn external_http_witness(response: &V3ProviderHttpFailure) -> V3ExternalHttpWitness {
+    let witness = V3ExternalHttpWitness::new(
         response.status,
         response
             .headers
@@ -303,7 +305,22 @@ pub fn eligible_external_http_witness(
             .map(|header| (header.name.clone(), header.value.clone()))
             .collect(),
         response.body.clone(),
-    )
+    );
+    match response.body_read_failure.as_deref() {
+        Some(reason) => witness.with_body_read_failure(reason),
+        None => witness,
+    }
+}
+
+/// Build the witness from a provider transport error. A transport failure
+/// produced no upstream response head at all, so it carries no evidence.
+pub(crate) fn external_http_witness_from_provider_error(
+    error: &V3ProviderError,
+) -> Option<V3ExternalHttpWitness> {
+    match error {
+        V3ProviderError::HttpStatus { response } => Some(external_http_witness(response)),
+        _ => None,
+    }
 }
 
 /// Preserve the received upstream status while recording that its body read
@@ -476,7 +493,7 @@ pub fn provider_failure_message(failure: &V3RelayProviderFailure) -> String {
 /// projected through the typed Error01-06 chain before the relay loop exits.
 pub fn terminalize_provider_failure(
     mut failure: V3RelayProviderFailure,
-    last_eligible_external_http: Option<routecodex_v3_error::V3EligibleExternalHttpResponse>,
+    last_external_http: Option<routecodex_v3_error::V3ExternalHttpWitness>,
 ) -> V3RelayProviderFailure {
     if failure.terminal_projection.is_some() {
         return failure;
@@ -504,7 +521,7 @@ pub fn terminalize_provider_failure(
     .expect("provider residence-budget terminal requires exhausted Error05");
     failure.terminal_disposition = Some(V3ErrorHandlingCenter::provider_terminal_disposition(
         terminal.clone(),
-        last_eligible_external_http,
+        last_external_http,
     ));
     failure.terminal_projection = Some(V3ErrorHandlingCenter::project_terminal_decision(terminal));
     failure
@@ -722,7 +739,14 @@ mod tests {
             body: vec![],
             body_read_failure: Some("connection closed while reading body".into()),
         };
-        assert!(eligible_external_http_witness(&response).is_none());
+        let witness = external_http_witness(&response);
+        // The response head was received, so the status is real evidence even
+        // though the body read failed.
+        assert_eq!(witness.status(), 429);
+        assert_eq!(
+            witness.body_read_failure(),
+            Some("connection closed while reading body")
+        );
         let failure = provider_http_body_read_failure(&response, "provider-a");
         assert_eq!(failure.status, 429);
         // The upstream did return HTTP 429; only its error body read failed.
@@ -732,9 +756,8 @@ mod tests {
     }
 
     #[test]
-    fn incomplete_http_body_keeps_prior_complete_witness() {
-        let prior = V3EligibleExternalHttpResponse::new(429, vec![], b"rate limited".to_vec())
-            .expect("complete upstream error");
+    fn incomplete_http_body_records_the_new_response_head() {
+        let prior = V3ExternalHttpWitness::new(429, vec![], b"rate limited".to_vec());
         let incomplete = V3ProviderHttpFailure {
             request_id: "req-next".into(),
             provider_id: "provider-b".into(),
@@ -743,11 +766,11 @@ mod tests {
             body: vec![],
             body_read_failure: Some("truncated body".into()),
         };
-        let mut last = Some(prior.clone());
-        if let Some(witness) = eligible_external_http_witness(&incomplete) {
-            last = Some(witness);
-        }
-        assert_eq!(last, Some(prior));
+        let last = Some(external_http_witness(&incomplete));
+        let latest = last.expect("the new response head is real evidence");
+        assert_eq!(latest.status(), 400);
+        assert_eq!(latest.body_read_failure(), Some("truncated body"));
+        assert_ne!(latest, prior);
     }
 
     #[test]

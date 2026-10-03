@@ -310,7 +310,7 @@ async fn handle_v3_responses_relay_provider_failure(
             failed_candidates: state.failed_candidates,
             same_candidate_retries: state.same_candidate_retries,
             trace: state.trace,
-            last_eligible_external_http: state.last_eligible_external_http,
+            last_external_http: state.last_external_http,
         },
     )
     .await

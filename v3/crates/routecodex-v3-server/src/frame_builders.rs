@@ -415,18 +415,15 @@ pub(crate) fn provider_terminal_response(
     // The provider's real error is recorded before the transport breaks. This is
     // the only production reader of the witness: without it the provider status,
     // headers, and body would be carried through every attempt and discarded.
-    if let Err(error) = persist_v3_provider_terminal_evidence(
+    // The debug sink cannot fail this boundary: it records persistence failures
+    // in its own ledger and reports them out of band.
+    persist_v3_provider_terminal_evidence(
         state,
         evidence.entry_protocol,
         evidence.endpoint,
         evidence.request_id,
         &disposition,
-    ) {
-        return foundation_output_response(project_v3_debug_failure(
-            "V3DebugErrorEvidenceCaptured",
-            V3DebugError::Sink(error),
-        ));
-    }
+    );
     match disposition {
         // A real compatible upstream HTTP error is still a provider error. Its real
         // status, headers, and body are recorded as provider-terminal evidence and in

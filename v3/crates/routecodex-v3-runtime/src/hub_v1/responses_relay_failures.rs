@@ -362,7 +362,7 @@ pub(crate) fn provider_request_relay_failure(
 
 pub(crate) fn terminalize_v3_responses_relay_provider_failure(
     mut failure: V3ResponsesRelayProviderFailure,
-    last_eligible_external_http: Option<routecodex_v3_error::V3EligibleExternalHttpResponse>,
+    last_external_http: Option<routecodex_v3_error::V3ExternalHttpWitness>,
 ) -> V3ResponsesRelayProviderFailure {
     if failure.terminal_projection.is_none() {
         let source = routecodex_v3_error::build_v3_error_01_source_raised(
@@ -388,7 +388,7 @@ pub(crate) fn terminalize_v3_responses_relay_provider_failure(
         .expect("Responses residence-budget terminal requires exhausted Error05");
         failure.terminal_disposition = Some(V3ErrorHandlingCenter::provider_terminal_disposition(
             terminal.clone(),
-            last_eligible_external_http,
+            last_external_http,
         ));
         failure.terminal_projection =
             Some(V3ErrorHandlingCenter::project_terminal_decision(terminal));

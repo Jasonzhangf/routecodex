@@ -230,22 +230,21 @@ fn exhausted_provider_error_05(code: &str) -> V3Error05TerminalDecision {
 #[test]
 fn provider_terminal_preserves_real_429_status_headers_and_raw_body() {
     let body = br#"{"error":{"type":"rate_limit_error","message":"retry"}}"#.to_vec();
-    let witness = V3EligibleExternalHttpResponse::new(
+    let witness = V3ExternalHttpWitness::new(
         429,
         vec![("retry-after".to_string(), b"7".to_vec())],
         body.clone(),
-    )
-    .expect("eligible HTTP error");
+    );
     assert_eq!(
         V3ErrorHandlingCenter::provider_terminal_disposition(
             exhausted_provider_error_05("provider_transport_failed"),
             Some(witness),
         ),
-        V3ProviderTerminalDisposition::ExternalHttp(V3EligibleExternalHttpResponse {
-            status: 429,
-            headers: vec![("retry-after".to_string(), b"7".to_vec())],
+        V3ProviderTerminalDisposition::ExternalHttp(V3ExternalHttpWitness::new(
+            429,
+            vec![("retry-after".to_string(), b"7".to_vec())],
             body,
-        })
+        ))
     );
 }
 
@@ -276,19 +275,44 @@ fn exhausted_semantic_failure_never_projects_an_error_to_the_client() {
 }
 
 #[test]
-fn upstream_http_502_is_ineligible_for_client_projection() {
-    assert!(V3EligibleExternalHttpResponse::new(502, vec![], b"bad gateway".to_vec()).is_none());
-    assert!(V3EligibleExternalHttpResponse::new(200, vec![], b"ok".to_vec()).is_none());
+fn real_upstream_502_and_2xx_are_recorded_as_evidence_without_client_projection() {
+    // Bug `705d624` keeps an upstream 502 out of any client response, and a 2xx
+    // terminal is still a provider-attempt failure. Neither changes the fact
+    // that a real upstream response was received: the witness records it
+    // losslessly, and the disposition carries it as provider-private evidence.
+    // Client projection is decided at the boundary, not by discarding evidence.
+    let upstream_502 = V3ExternalHttpWitness::new(502, vec![], b"bad gateway".to_vec());
+    assert_eq!(upstream_502.status(), 502);
+    assert_eq!(upstream_502.body(), b"bad gateway");
+    let terminal_2xx = V3ExternalHttpWitness::new(200, vec![], b"ok".to_vec());
+    assert_eq!(terminal_2xx.status(), 200);
+    assert_eq!(terminal_2xx.body(), b"ok");
+    assert_eq!(terminal_2xx.body_read_failure(), None);
+}
+
+#[test]
+fn body_read_failure_keeps_status_headers_and_records_the_failure() {
+    // The response head is real even when the body read fails. Reporting this as
+    // "no response" would assert an absence that did not happen and would drop
+    // the status and headers that were actually received.
+    let witness = V3ExternalHttpWitness::new(
+        400,
+        vec![("x-upstream".to_string(), b"1".to_vec())],
+        Vec::new(),
+    )
+    .with_body_read_failure("truncated body");
+    assert_eq!(witness.status(), 400);
+    assert_eq!(witness.headers()[0].1, b"1");
+    assert_eq!(witness.body_read_failure(), Some("truncated body"));
 }
 
 #[test]
 fn provider_terminal_keeps_raw_header_bytes_without_utf8_projection() {
-    let witness = V3EligibleExternalHttpResponse::new(
+    let witness = V3ExternalHttpWitness::new(
         429,
         vec![("x-upstream".to_string(), vec![0x61, 0xff])],
         vec![],
-    )
-    .expect("eligible HTTP error");
+    );
     assert_eq!(witness.headers()[0].1, vec![0x61, 0xff]);
     assert_eq!(witness.status(), 429);
     assert!(witness.body().is_empty());

@@ -224,7 +224,7 @@ where
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
     let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
-    let mut last_external_http = None::<V3EligibleExternalHttpResponse>;
+    let mut last_external_http = None::<V3ExternalHttpWitness>;
     let mut send_attempts = 0usize;
     let mut pending_provider_action_recovery = None;
     let mut provider_request_snapshot = None;
@@ -518,7 +518,7 @@ where
         let provider_raw = match transport.send(transport_request).await {
             Ok(raw) => raw,
             Err(error) => {
-                if let Some(witness) = eligible_external_http_from_provider_error(&error) {
+                if let Some(witness) = crate::hub_v1::external_http_witness_from_provider_error(&error) {
                     last_external_http = Some(witness);
                 }
                 if let Err(timing_error) = runtime_timing.finish_external() {
@@ -675,13 +675,14 @@ where
                 .collect();
             let response_body = provider_raw.into_body_bytes().await.ok();
             if let Some(body) = response_body.as_ref() {
-                if let Some(witness) = V3EligibleExternalHttpResponse::new(
+                // Retained regardless of client-projection eligibility (bug
+                // `705d624`): an upstream 502 is still a real upstream
+                // response and its status and body must survive as evidence.
+                last_external_http = Some(V3ExternalHttpWitness::new(
                     provider_status,
                     response_headers,
                     body.clone(),
-                ) {
-                    last_external_http = Some(witness);
-                }
+                ));
             }
             let provider_detail = response_body.and_then(|body| {
                 serde_json::from_slice::<serde_json::Value>(&body)
