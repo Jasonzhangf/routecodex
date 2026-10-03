@@ -5545,6 +5545,7 @@ features:
   - spawn_patrol_loop
   - records
   - v3_webui_observability_read_raw_rows
+  - v3_webui_observability_read_raw_rows_from
   - build_timeseries
   allowed_paths:
   - v3/crates/routecodex-v3-admin/src/lib.rs

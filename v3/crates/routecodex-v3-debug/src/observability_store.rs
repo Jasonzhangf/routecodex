@@ -7,7 +7,7 @@
 use serde_json::Value;
 use std::collections::{BTreeMap, VecDeque};
 use std::fs;
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 pub const V3_WEBUI_OBSERVABILITY_SCHEMA_VERSION: u64 = 1;
@@ -256,7 +256,7 @@ pub fn v3_webui_observability_read_rows_bounded(
     let mut latest_by_key = BTreeMap::<String, Value>::new();
     let mut order = VecDeque::<String>::new();
     for (line_number, line) in BufReader::new(file).lines().enumerate() {
-        let row = decode_observability_row(path, line_number, line?)?;
+        let row = decode_observability_row(path, line_number, &line?)?;
         let key = row
             .get("request_key")
             .and_then(Value::as_str)
@@ -335,7 +335,7 @@ pub fn v3_webui_observability_read_rows_bounded_lenient(
                 continue;
             }
         };
-        let row = match decode_observability_row(path, line_number, line) {
+        let row = match decode_observability_row(path, line_number, &line) {
             Ok(row) => row,
             Err(error) => {
                 report.skipped.push(skipped_note(error.to_string()));
@@ -381,15 +381,80 @@ pub fn v3_webui_observability_read_raw_rows(
         if line.trim().is_empty() {
             continue;
         }
-        rows.push(decode_observability_row(path, line_number, line)?);
+        rows.push(decode_observability_row(path, line_number, &line)?);
     }
     Ok(rows)
+}
+
+/// Records decoded by an incremental tail read plus the reader position that
+/// follows them.
+#[derive(Debug, Default)]
+pub struct V3WebuiObservabilityRawTail {
+    pub rows: Vec<Value>,
+    /// Byte offset of the first byte after the last complete record consumed.
+    pub next_offset: u64,
+    /// Number of store lines consumed, including skipped blank lines.
+    pub next_line: usize,
+}
+
+/// Reads complete records starting at `start_offset`.
+///
+/// The store is append-only between retention rewrites, so a reader that
+/// remembers `next_offset`/`next_line` decodes only newly appended records
+/// instead of the whole history. A trailing partial line (a writer caught
+/// mid-append) is left unconsumed: `next_offset` stops at the last newline so
+/// the next call re-reads it once the record is complete.
+pub fn v3_webui_observability_read_raw_rows_from(
+    path: &Path,
+    start_offset: u64,
+    start_line: usize,
+) -> Result<V3WebuiObservabilityRawTail, V3WebuiObservabilityStoreError> {
+    let mut tail = V3WebuiObservabilityRawTail {
+        rows: Vec::new(),
+        next_offset: start_offset,
+        next_line: start_line,
+    };
+    if !path.exists() {
+        return Ok(tail);
+    }
+    let mut file = fs::File::open(path)?;
+    if start_offset > 0 {
+        file.seek(SeekFrom::Start(start_offset))?;
+    }
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)?;
+    let mut consumed = 0usize;
+    for line in buffer.split_inclusive(|byte| *byte == b'\n') {
+        if !line.ends_with(b"\n") {
+            break;
+        }
+        consumed += line.len();
+        let mut text = &line[..line.len() - 1];
+        if text.ends_with(b"\r") {
+            text = &text[..text.len() - 1];
+        }
+        let text = std::str::from_utf8(text).map_err(|error| {
+            V3WebuiObservabilityStoreError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                error,
+            ))
+        })?;
+        let line_number = tail.next_line;
+        tail.next_line += 1;
+        if text.trim().is_empty() {
+            continue;
+        }
+        tail.rows
+            .push(decode_observability_row(path, line_number, text)?);
+    }
+    tail.next_offset = start_offset + consumed as u64;
+    Ok(tail)
 }
 
 fn decode_observability_row(
     path: &Path,
     line_number: usize,
-    line: String,
+    line: &str,
 ) -> Result<Value, V3WebuiObservabilityStoreError> {
     if line.trim().is_empty() {
         return Err(V3WebuiObservabilityStoreError::Decode(format!(
@@ -398,7 +463,7 @@ fn decode_observability_row(
             line_number + 1
         )));
     }
-    let envelope: Value = serde_json::from_str(&line).map_err(|error| {
+    let envelope: Value = serde_json::from_str(line).map_err(|error| {
         V3WebuiObservabilityStoreError::Decode(format!(
             "invalid observability record {}:{}: {error}",
             path.display(),
@@ -472,6 +537,80 @@ mod tests {
         assert!(v3_webui_observability_read_raw_rows(path)
             .unwrap()
             .is_empty());
+    }
+
+    /// The incremental reader must agree with the full reader at every step of
+    /// an append-only history, must leave a torn trailing record for the next
+    /// call, and must be re-readable from a reset offset.
+    #[test]
+    fn incremental_tail_matches_full_read_and_leaves_partial_lines() {
+        let dir = temp_dir("tail");
+        let path = dir.join("records.jsonl");
+        let row = |id: &str| json!({"request_key": format!("4444:{id}"), "event_type": "request.started"});
+
+        v3_webui_observability_append_row(&path, &row("r1")).unwrap();
+        let first = v3_webui_observability_read_raw_rows_from(&path, 0, 0).unwrap();
+        assert_eq!(first.rows.len(), 1);
+        assert_eq!(first.next_line, 1);
+        assert_eq!(
+            first.next_offset,
+            std::fs::metadata(&path).unwrap().len(),
+            "a complete record must advance the offset to the file end"
+        );
+
+        // A writer caught mid-append leaves the torn record unconsumed.
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        file.write_all(br#"{"schema_version":1,"row":{"request_key":"#)
+            .unwrap();
+        file.flush().unwrap();
+        let torn =
+            v3_webui_observability_read_raw_rows_from(&path, first.next_offset, first.next_line)
+                .unwrap();
+        assert!(torn.rows.is_empty());
+        assert_eq!(torn.next_offset, first.next_offset);
+        assert_eq!(torn.next_line, first.next_line);
+
+        // Completing that record makes it readable from the same offset.
+        file.write_all(br#""4444:r2","event_type":"request.completed"}}"#)
+            .unwrap();
+        file.write_all(b"\n").unwrap();
+        file.flush().unwrap();
+        let resumed =
+            v3_webui_observability_read_raw_rows_from(&path, torn.next_offset, torn.next_line)
+                .unwrap();
+        assert_eq!(resumed.rows.len(), 1);
+        assert_eq!(resumed.next_line, 2);
+
+        // Incremental results concatenate to exactly the full read.
+        let mut incremental = first.rows.clone();
+        incremental.extend(resumed.rows.clone());
+        assert_eq!(
+            incremental,
+            v3_webui_observability_read_raw_rows(&path).unwrap()
+        );
+
+        // Blank lines are consumed without becoming rows and still count.
+        v3_webui_observability_append_row(&path, &row("r3")).unwrap();
+        let with_blank = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, format!("{with_blank}\n\n")).unwrap();
+        let past = v3_webui_observability_read_raw_rows_from(
+            &path,
+            resumed.next_offset,
+            resumed.next_line,
+        )
+        .unwrap();
+        assert_eq!(past.rows.len(), 1);
+        assert_eq!(past.next_line, 5);
+        assert_eq!(past.next_offset, std::fs::metadata(&path).unwrap().len());
+
+        // A reset offset re-reads the whole history from the start.
+        let full = v3_webui_observability_read_raw_rows_from(&path, 0, 0).unwrap();
+        assert_eq!(full.rows.len(), 3);
+        assert_eq!(full.next_offset, std::fs::metadata(&path).unwrap().len());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
