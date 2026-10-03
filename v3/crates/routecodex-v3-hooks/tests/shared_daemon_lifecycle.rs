@@ -117,7 +117,11 @@ fn configured_rcc_symlink_uses_one_canonical_daemon_and_reclaims_project() {
     let (mut lease, response) = daemon.register(&project);
     assert_eq!(response["ok"], true, "{response}");
     assert_eq!(response["daemon_pid"], daemon.child.id());
-    assert!(daemon.home.path().join("external-rcc/hooks/daemon.sock").exists());
+    assert!(daemon
+        .home
+        .path()
+        .join("external-rcc/hooks/daemon.sock")
+        .exists());
     daemon.release(&mut lease);
     assert!(!project.join("hooks-sidecar.sock").exists());
     daemon.idle_exit();
