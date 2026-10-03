@@ -208,8 +208,13 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
             )
             .await;
             match outcome {
-                V3ResponsesDirectServerOutcome::ProviderTerminal(disposition) => {
-                    send_responses_websocket_provider_terminal(socket, disposition).await
+                V3ResponsesDirectServerOutcome::ProviderTerminal(_) => {
+                    // A provider terminal never projects onto the client. The
+                    // WebSocket client boundary is a transport break, exactly
+                    // like the HTTP/SSE boundary: close without a payload. The
+                    // provider's own status, headers, and body stay
+                    // provider-private typed Error evidence.
+                    Err(())
                 }
                 V3ResponsesDirectServerOutcome::DirectFrame(frame) => {
                     send_responses_websocket_frame(socket, frame).await
@@ -231,8 +236,13 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
             )
             .await;
             match outcome {
-                V3ResponsesDirectServerOutcome::ProviderTerminal(disposition) => {
-                    send_responses_websocket_provider_terminal(socket, disposition).await
+                V3ResponsesDirectServerOutcome::ProviderTerminal(_) => {
+                    // A provider terminal never projects onto the client. The
+                    // WebSocket client boundary is a transport break, exactly
+                    // like the HTTP/SSE boundary: close without a payload. The
+                    // provider's own status, headers, and body stay
+                    // provider-private typed Error evidence.
+                    Err(())
                 }
                 V3ResponsesDirectServerOutcome::DirectFrame(frame) => {
                     send_responses_websocket_frame(socket, frame).await
@@ -546,8 +556,10 @@ pub(crate) async fn send_responses_relay_websocket_output(
     socket: &mut WebSocket,
     output: V3ResponsesRelayRuntimeOutput,
 ) -> Result<(), ()> {
-    if let Some(disposition) = output.terminal_disposition.clone() {
-        return send_responses_websocket_provider_terminal(socket, disposition).await;
+    if output.terminal_disposition.is_some() {
+        // A provider terminal never projects onto the client: close the socket
+        // without a payload, exactly like the HTTP/SSE transport break.
+        return Err(());
     }
     if !output.error_chain.as_ref().is_none_or(Vec::is_empty) || output.status >= 400 {
         let message = match output.client_body {
@@ -569,42 +581,6 @@ pub(crate) async fn send_responses_relay_websocket_output(
         }
         V3ResponsesRelayClientBody::Sse(stream) => {
             send_responses_relay_websocket_sse_stream(socket, stream).await
-        }
-    }
-}
-
-pub(crate) async fn send_responses_websocket_provider_terminal(
-    socket: &mut WebSocket,
-    disposition: routecodex_v3_error::V3ProviderTerminalDisposition,
-) -> Result<(), ()> {
-    match disposition {
-        routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => Err(()),
-        routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness) => {
-            let (body, body_encoding): (Value, Option<&str>) =
-                match serde_json::from_slice(witness.body()) {
-                    Ok(body) => (body, None),
-                    Err(_) => match std::str::from_utf8(witness.body()) {
-                        Ok(body) => (Value::String(body.to_string()), None),
-                        Err(_) => (json!(witness.body()), Some("bytes")),
-                    },
-                };
-            let error = body.get("error").cloned().unwrap_or_else(|| body.clone());
-            let provider_headers = witness
-                .headers()
-                .iter()
-                .map(|(name, value)| json!({"name": name, "value": value}))
-                .collect::<Vec<_>>();
-            let mut event = json!({
-                "type": "error",
-                "status": witness.status(),
-                "error": error,
-                "provider_body": body,
-                "provider_headers": provider_headers,
-            });
-            if let Some(encoding) = body_encoding {
-                event["provider_body_encoding"] = Value::String(encoding.to_string());
-            }
-            send_responses_websocket_json(socket, &event).await
         }
     }
 }

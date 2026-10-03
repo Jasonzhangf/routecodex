@@ -184,8 +184,8 @@ or payload-carried control replaces this chain.
 | error_err02_host_captured | `error.provider_failure_policy` (existing ErrorErr02) | error-source | error-host-captured | error.chain read/write | error-host-captured produced | no skip path; this node is mandatory | HostCaptured never skipped |
 | error_err03_runtime_classified | `error.pipeline_contract` (existing ErrorErr03) | error-host-captured | error-classified | error.chain, provider_runtime.observation read/write | error-classified produced | classification failure remains in error chain | classification is typed, not payload metadata |
 | error_err04_router_policy_applied | `error.execution_decision_consumer` (existing ErrorErr04) | error-classified | error-policy-applied | error.chain, route.retry_exclusion_set read/write | error-policy-applied produced | policy failure remains in error chain | cooldown/retry policy preserved |
-| error_err05_execution_decision | `error.execution_decision_owner` (existing ErrorErr05) | error-policy-applied | error-for-projection | error.chain, v3.error.execution_decision read/write | error-for-projection produced; typed decision stays in the side resource | decision failure remains in error chain | writes retry/terminal decision only to typed control resource |
-| error_err06_client_projected | `error.client_projection_candidate` / SSE (existing ErrorErr06) | error-for-projection | error-client-projected-candidate | error.chain and error_execution_decision read | projected candidate for terminal_client_error; empty candidate for retry | typed source failure to ErrorErr01 | this node always runs; Runtime discards retry output and only submits terminal projection through Server/SSE |
+| error_err05_execution_decision | `error.execution_decision_owner` (existing ErrorErr05) | error-policy-applied | error-for-projection | error.chain, v3.error.execution_decision read/write | error-for-projection produced; typed decision stays in the side resource | decision failure remains in error chain | writes retry/terminal decision only to typed control resource; a provider-derived terminal is written as `client_transport_break`, never as a projected client error |
+| error_err06_client_projected | `error.client_projection_candidate` / SSE (existing ErrorErr06) | error-for-projection | error-client-projected-candidate | error.chain and error_execution_decision read | projected candidate only for a non-provider terminal; empty candidate for `retry` and for a provider-derived terminal | typed source failure to ErrorErr01 | this node always runs; a provider-derived terminal stages an empty candidate and the client boundary is the `client_transport_break` disposition owned by Error05 and Server/SSE, so no provider status, code, or message ever reaches the client |
 
 ## Runtime runner
 
@@ -219,6 +219,7 @@ dispositions stay on the control side and do not alter graph topology:
 | `retry` | `Error05` | Error06, RuntimeRetryLaunch, RuntimeAttemptCleanup, request graph | Error06 stages no client error; Runtime discards it, releases failed attempt scope, and admits one new attempt without a graph backedge; finalizer is not triggered |
 | `cancel` | Runtime | `RuntimeCancellation`, RuntimeAttemptCleanup, finalizer | no client commit; drains and releases attempt scope, then request scope |
 | `disconnect` | ServerDisconnectReceipt | `RuntimeAttemptCleanup`, finalizer | no new client commit; covers pre-first-frame and post-frame disconnects; releases attempt scope, then request scope |
+| `client_transport_break` | `Error05` | Server/SSE, `RuntimeAttemptCleanup`, finalizer | the error chain keeps the typed provider truth and stages no client candidate; Server/SSE ends the client transport without a provider status, code, or message; the finalizer then releases request scope. This is the only client boundary for a provider-derived terminal, so a client entry is never coupled to a provider |
 
 The request, response, and error graphs stay separate. Retry and servertool re-entry happen only
 after their fixed graph has returned to its single sink; Runtime consumes the typed disposition,
@@ -324,7 +325,7 @@ Each control/projection family has one writer and explicit readers:
 | response tool binding | `govern_chat_response` | `inverse_project_client_response` | after final client inverse projection, servertool attempt cleanup, or finalizer |
 | execution disposition | `govern_chat_response` | inverse/frame staging, RuntimeClientCommit, RuntimeInternalFollowup, RuntimeRequestFinalizer | typed control stays separate; only RuntimeClientCommit submits the staged candidate; finalizer only for client_commit or terminal no-commit outcome |
 | servertool sidecar plan | `govern_chat_response` (Resp03) | `RuntimeInternalFollowup` | emitted only for `servertool_followup`; released by attempt cleanup after sidecar execution before request re-entry |
-| error execution decision | `error_err05_execution_decision` | Error06, RuntimeClientCommit, RuntimeRetryLaunch, RuntimeRequestFinalizer | typed control stays separate; Error06 always runs and emits a candidate only for terminal_client_error; finalizer only after terminal projection |
+| error execution decision | `error_err05_execution_decision` | Error06, RuntimeClientCommit, RuntimeRetryLaunch, RuntimeRequestFinalizer, Server/SSE | typed control stays separate; Error06 always runs and emits a candidate only for a non-provider terminal_client_error, while a provider-derived terminal is written as `client_transport_break` and Server/SSE ends the client transport with no provider status, code, or message; finalizer only after terminal projection or transport break |
 | remote continuation reference | entry protocol projection | provider projection and inverse projection | request-local, no local continuation store |
 | servertool hop | Resp03 typed action | Runtime internal follow-up | attempt scope released before request re-entry; request scope remains until finalizer |
 
@@ -425,8 +426,10 @@ stateDiagram-v2
   客户端提交 --> [*]: 成功终态
   错误链 --> 重试排队: Error05 仅决策重试
   重试排队 --> 正在处理请求: RuntimeRetryLaunch 同 runner 重入
-  错误链 --> 客户端错误投影: Error06
+  错误链 --> 客户端错误投影: Error06（仅非 provider 终态）
   客户端错误投影 --> [*]: 错误终态
+  错误链 --> 客户端传输断开: Error05 判定 provider 派生终态
+  客户端传输断开 --> [*]: 断流终态，不投影任何 provider 状态/错误码/消息
   正在处理请求 --> 取消排空: 观察取消并在波次结束后排空
   取消排空 --> [*]: 释放尝试预算与上下文
   等待请求 --> 断开记录: 已接受帧后客户端断开
@@ -530,6 +533,7 @@ supported; no local continuation is introduced.
 | 17 | `error_err04_router_policy_applied` | Error04 |
 | 18 | `error_err05_execution_decision` | Error05 |
 | 19 | `error_err06_client_projected` | Error06/SSE |
+| 19a | Provider-derived client transport break (no client error projection) | Error05 / Server/SSE |
 
 ### Existing production families (context only, not delivery units)
 

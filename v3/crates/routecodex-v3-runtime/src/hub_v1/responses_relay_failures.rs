@@ -142,7 +142,8 @@ pub(crate) fn provider_runtime_failure(
             _ => 502,
         }
     };
-    // `status` above is the client-facing projection (502 for a network failure).
+    // `status` above is the internal typed marker (502 for a network failure); a
+    // provider terminal never projects it onto the client, so it is evidence only.
     // `provider_status` carries only a real upstream HTTP status: a transport or
     // other response-less failure must stay `None` so it cannot be mistaken for a
     // genuine upstream HTTP 502.
