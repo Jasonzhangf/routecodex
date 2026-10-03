@@ -432,19 +432,18 @@ fn v3_sse_transport_disconnect_response(
     connection: Option<V3FrontConnectionIdentity>,
 ) -> Response<Body> {
     let broker = state.front_transport_broker.clone();
-    let body = stream::once(async {
-        Ok::<Vec<u8>, io::Error>(b":\n\n".to_vec())
-    })
-    .chain(stream::once(async move {
-        if let Some(connection) = connection {
-            broker
-                .settle_current_connection_transport_break(connection, Duration::from_secs(2))
-                .await;
-        }
-        Err(io::Error::other(
-            "provider pool exhausted; SSE transport unavailable",
-        ))
-    }));
+    let body = stream::once(async { Ok::<Vec<u8>, io::Error>(b":\n\n".to_vec()) }).chain(
+        stream::once(async move {
+            if let Some(connection) = connection {
+                broker
+                    .settle_current_connection_transport_break(connection, Duration::from_secs(2))
+                    .await;
+            }
+            Err(io::Error::other(
+                "provider pool exhausted; SSE transport unavailable",
+            ))
+        }),
+    );
     Response::builder()
         .status(StatusCode::OK)
         .header("content-type", "text/event-stream")
