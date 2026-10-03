@@ -1562,7 +1562,7 @@ features:
   - OpenAI Chat Relay has no secondary SSE accept worker and never serializes Error06 JSON as a normal Chat completion data frame
   - rejected metadata_center request produces zero upstream captures
   - chat entry pool exhaustion and provider terminals break the client transport for both the same-protocol Direct lane and the cross-protocol Relay lane instead of projecting an error payload
-  - a real external upstream status (429/503) reaches the client unchanged, and a healthy later candidate is reselected
+  - a real external upstream status (429/503) never reaches the client on either lane; the client observes a transport break and a healthy later candidate is reselected to serve the request
   required_gates:
   - npm run test:v3-openai-chat-relay-runtime-integration
   - npm run test:v3-h2-chat-direct-isolation

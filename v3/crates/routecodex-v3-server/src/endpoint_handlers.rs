@@ -975,8 +975,8 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             }
         };
         if let Some(disposition) = output.terminal_disposition.take() {
-            // A provider terminal disposition returns the provider's own HTTP
-            // response verbatim, so this path never reaches the relay closeout
+            // A provider terminal disposition ends the client transport without
+            // a client payload, so this path never reaches the relay closeout
             // below. The chain and status are still real typed facts: persist
             // the error evidence and project the chain first, otherwise a
             // request that really failed keeps an observability row whose every

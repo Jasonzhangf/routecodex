@@ -853,8 +853,8 @@ pub(crate) fn capture_v3_anthropic_relay_response(
 /// terminal client error.
 ///
 /// Both the ordinary relay closeout and the provider-terminal-disposition
-/// closeout need this. A terminal disposition returns the provider's own HTTP
-/// response verbatim, so without an explicit call a request that really failed
+/// closeout need this. A provider terminal ends the client transport without a
+/// client payload, so without an explicit call a request that really failed
 /// would leave no `request.json`/`error.json` evidence on disk and no artifact
 /// reference to resolve. Returns a debug-failure response when the debug sink
 /// itself fails; `None` means the output is not a terminal client error.
