@@ -5568,7 +5568,10 @@ async fn responses_full_sampling_burst_does_not_drop_sample_writes() {
         failures.is_empty(),
         "full-sampling burst must not drop sample writes: {failures:?}"
     );
-    let written = fs::read_dir(&samples_root).unwrap().filter_map(Result::ok).count();
+    let written = fs::read_dir(&samples_root)
+        .unwrap()
+        .filter_map(Result::ok)
+        .count();
     assert!(
         written >= 80,
         "expected at least one request sample dir per request, found {written}"
