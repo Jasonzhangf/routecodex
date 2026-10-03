@@ -5,7 +5,7 @@ features:
   status: source_active_live_verification_required
   change_risk: high
   owner_kind: rust_v3_internal_hooks_sidecar
-  owner_scope: Optional RouteCodex-owned hooks sidecar process, native Codex App Server transport, mounted hook dispatch, timers, forwarding, and typed delivery evidence.
+  owner_scope: Optional per-user shared hooks daemon, isolated project registrations and lease reclamation, native Codex App Server transport, mounted hook dispatch, timers, forwarding, and typed delivery evidence.
   owner_crates:
   - routecodex-v3-hooks
   - routecodex-v3-lifecycle
@@ -17,6 +17,8 @@ features:
   - v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
   - v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar/hooks_install.rs
   resource_bindings:
+  - v3.hooks.global_daemon
+  - v3.hooks.project_registration
   - v3.hooks.sidecar_install_record
   - v3.hooks.control_socket
   - v3.hooks.native_appserver_transport
@@ -46,7 +48,9 @@ features:
   - v3/Cargo.lock
   - docs/architecture
   - docs/design/rcc-internal-hooks-sidecar-contract.md
+  - docs/design/hooksd-global-lifecycle.md
   - docs/goals/rcc-internal-hooks-sidecar-plan.md
+  - docs/goals/hooksd-7edd843-implementation.md
   forbidden_paths:
   - request.normal_payload
   - response.client_payload
@@ -66,6 +70,9 @@ features:
   - npm run verify:v3-architecture-docs
   - git diff --check
   live_required:
+  - Concurrent project registrations share one daemon PID while handlers, schedules, intents, persisted state, and control sockets remain project-isolated.
+  - Project release and owner crash reclaim project workers and sockets; another live project remains usable, and the final release leads to bounded daemon exit.
+  - Repeated registration and release do not accumulate daemon processes, worker threads, or project sockets.
   - real TUI/TUI and TUI/Desktop App Server same-entry replay with native accepted/delivered/replied/read evidence or an explicit highest-layer capability gap
   - sidecar missing/crash/timeout leaves RouteCodex Running with hooks_unavailable:<reason>
   completion_boundary:
