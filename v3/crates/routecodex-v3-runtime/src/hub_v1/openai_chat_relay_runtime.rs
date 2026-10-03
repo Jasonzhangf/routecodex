@@ -1094,20 +1094,28 @@ fn project_responses_sse_as_openai_chat_stream(
                             crate::hub_v1::normalize_v3_responses_function_call_arguments(
                                 &mut normalized,
                             )?;
-                            // The terminal-admission owner is the single
-                            // authority for which Responses terminals are valid
-                            // partial output. Do not special-case
-                            // `response.incomplete` here: the owner admits the
-                            // output-cap reason and still rejects a genuine
-                            // `content_filter` refusal.
-                            if let Some(failure) = classify_v3_provider_terminal_admission(
-                                V3HubProviderWireProtocol::Responses,
-                                &normalized,
-                            ) {
-                                return Err(format!(
-                                    "provider emitted {}: {}",
-                                    failure.code, failure.message
-                                ));
+                            // The terminal-admission owner decides which
+                            // Responses terminals are valid partial output for
+                            // the Responses client projection. It does not
+                            // govern `response.incomplete` on this entry: the
+                            // Chat codec owns that terminal and projects BOTH
+                            // legal reasons (`max_output_tokens` -> `length`,
+                            // `content_filter` -> `content_filter`) as Chat
+                            // final frames, per its own documented contract.
+                            // Asking the owner here would turn a legal
+                            // `content_filter` terminal into a stream error.
+                            if normalized.get("type").and_then(Value::as_str)
+                                != Some("response.incomplete")
+                            {
+                                if let Some(failure) = classify_v3_provider_terminal_admission(
+                                    V3HubProviderWireProtocol::Responses,
+                                    &normalized,
+                                ) {
+                                    return Err(format!(
+                                        "provider emitted {}: {}",
+                                        failure.code, failure.message
+                                    ));
+                                }
                             }
                             let event = classify_v3_responses_sse_event(&normalized)
                                 .map(|semantic| project_v3_responses_sse_event_json(&semantic))
