@@ -69,6 +69,7 @@ Its physical Chat representation is fixed as follows:
 | `request.store` | `routecodex_chat_extension.responses_request.store` | registered payload extension |
 | `request.text.output_config` | `routecodex_chat_extension.responses_request.text` | registered payload extension |
 | `request.anthropic_system_blocks` | `routecodex_chat_extension.anthropic_request.system` | registered payload extension |
+| `request.messages.tool_result.extra_fields` | `messages[].routecodex_chat_extension.responses_tool_output_extra_fields` | opaque business fields restored by Responses Outbound; other targets explicitly unmapped |
 | `request.reasoning_effort` | `reasoning_effort` | Chat request field |
 | `request.reasoning_budget_tokens` | `reasoning_budget_tokens` | registered Chat request field |
 | `request.reasoning_summary_policy` | `reasoning_summary_policy` | registered Chat request field |

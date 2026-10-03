@@ -84,7 +84,10 @@ impl ResponsesTransport for PassthroughTransport {
     }
 }
 
-struct ClientDisconnectTransport;
+#[derive(Default)]
+struct ClientDisconnectTransport {
+    calls: Mutex<Vec<std::time::Instant>>,
+}
 
 struct DirectMalformedSseAttemptTransport;
 
@@ -208,6 +211,7 @@ impl ResponsesTransport for ClientDisconnectTransport {
         &self,
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.calls.lock().unwrap().push(std::time::Instant::now());
         Err(V3ProviderError::ClientDisconnect {
             request_id: request.request_id().to_string(),
             provider_id: request.provider_id().to_string(),
@@ -398,6 +402,7 @@ async fn terminal_sse_success_seals_replay_without_blocking_a_fresh_request() {
 #[tokio::test]
 async fn direct_client_disconnect_is_health_neutral_and_never_enters_action_wait() {
     let manifest = manifest();
+    let transport = ClientDisconnectTransport::default();
     for index in 0..3 {
         let started = std::time::Instant::now();
         let output = execute_v3_responses_direct_runtime_kernel(
@@ -411,12 +416,17 @@ async fn direct_client_disconnect_is_health_neutral_and_never_enters_action_wait
                 json!({"model":"gpt-5.5","input":"disconnect","stream":false}),
             ),
             register_responses_direct_hooks(),
-            &ClientDisconnectTransport,
+            &transport,
         )
         .await;
         assert_eq!(output.client_payload.status, 499);
+        let calls = transport.calls.lock().unwrap();
+        assert_eq!(calls.len(), index + 1, "each disconnect must send once");
+        // Only the first request includes cold initialization. Later requests
+        // must also detect any action wait before transport is reached.
+        let handling_started = if index == 0 { calls[index] } else { started };
         assert!(
-            started.elapsed() < std::time::Duration::from_millis(500),
+            handling_started.elapsed() < std::time::Duration::from_millis(500),
             "Direct client disconnect entered provider health retry or action wait"
         );
     }

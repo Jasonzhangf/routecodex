@@ -928,10 +928,26 @@ fn collect_unmapped_outbound_field_paths(
         return Vec::new();
     };
     let allowed = allowed_top_level_outbound_fields(target_protocol);
-    map.keys()
+    let mut paths: Vec<String> = map
+        .keys()
         .filter(|key| !allowed.contains(key.as_str()))
         .map(|key| json_path_child("$", key))
-        .collect()
+        .collect();
+    if !matches!(target_protocol, V3OutboundTargetProtocol::OpenAiResponses) {
+        if let Some(messages) = source.get("messages").and_then(Value::as_array) {
+            for (index, message) in messages.iter().enumerate() {
+                if message
+                    .pointer("/routecodex_chat_extension/responses_tool_output_extra_fields")
+                    .is_some_and(|fields| {
+                        fields.as_object().is_none_or(|fields| !fields.is_empty())
+                    })
+                {
+                    paths.push(format!("$.messages[{index}].routecodex_chat_extension.responses_tool_output_extra_fields"));
+                }
+            }
+        }
+    }
+    paths
 }
 
 fn allowed_top_level_outbound_fields(
@@ -961,7 +977,11 @@ pub(crate) fn build_responses_input_from_chat_messages(
             .and_then(Value::as_str)
             .unwrap_or("user")
             .trim();
-        if role.eq_ignore_ascii_case("tool") {
+        if role.eq_ignore_ascii_case("tool")
+            || message
+                .pointer("/routecodex_chat_extension/responses_tool_output_name")
+                .is_some()
+        {
             if let Some(item) = chat_tool_result_to_responses_input_item(row)? {
                 output.push(item);
             }
