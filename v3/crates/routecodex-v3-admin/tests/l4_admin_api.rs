@@ -150,7 +150,30 @@ fn write_observability_rows(home: &std::path::Path, rows: &[serde_json::Value]) 
         })
         .collect::<Vec<_>>()
         .join("\n");
-    std::fs::write(store_path, format!("{content}\n")).expect("observability store");
+    let temp_path = store_path.with_extension("jsonl.tmp-test");
+    std::fs::write(&temp_path, format!("{content}\n")).expect("observability store temp");
+    std::fs::rename(&temp_path, &store_path).expect("atomic observability store replace");
+}
+
+fn append_observability_rows(home: &std::path::Path, rows: &[serde_json::Value]) {
+    use std::io::Write;
+    let store_path = home
+        .join("logs")
+        .join("server-v3-4444.request-records.jsonl");
+    std::fs::create_dir_all(store_path.parent().unwrap()).expect("logs dir");
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&store_path)
+        .expect("open observability store");
+    for row in rows {
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({ "schema_version": 1, "row": row })
+        )
+        .expect("append observability row");
+    }
 }
 
 fn observability_row_with_result(request_key: &str, result: Option<&str>) -> serde_json::Value {
@@ -528,6 +551,170 @@ async fn observability_records_group_terminal_errors_by_raw_status_code() {
         filtered_body["records"][0]["request_key"],
         "4444:req-source"
     );
+}
+
+/// The records handler caches its projection keyed on the store file identity.
+/// Appending rows must extend the cached view instead of serving a stale page,
+/// and a rewrite (retention compaction) must rebuild it from scratch.
+#[tokio::test]
+async fn observability_records_cache_tracks_append_and_rewrite() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows(
+        &home,
+        &[observability_row_with_result("4444:first", Some("success"))],
+    );
+
+    let first: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("first records response")
+        .json()
+        .await
+        .expect("first records json");
+    assert_eq!(first["total"], 1);
+    assert_eq!(first["records"][0]["request_key"], "4444:first");
+
+    append_observability_rows(
+        &home,
+        &[observability_row_with_result("4444:second", Some("error"))],
+    );
+    let appended: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("appended records response")
+        .json()
+        .await
+        .expect("appended records json");
+    assert_eq!(appended["total"], 2);
+    let mut keys: Vec<&str> = appended["records"]
+        .as_array()
+        .expect("records array")
+        .iter()
+        .map(|row| row["request_key"].as_str().expect("request_key"))
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(keys, vec!["4444:first", "4444:second"]);
+
+    write_observability_rows(
+        &home,
+        &[observability_row_with_result(
+            "4444:rewritten",
+            Some("success"),
+        )],
+    );
+    let rewritten: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("rewritten records response")
+        .json()
+        .await
+        .expect("rewritten records json");
+    assert_eq!(rewritten["total"], 1);
+    assert_eq!(rewritten["records"][0]["request_key"], "4444:rewritten");
+
+    // Retention-style atomic replacement to a longer file: the new inode must
+    // force a rebuild instead of resuming into the old offset.
+    let padded = serde_json::json!({
+        "request_key": "4444:padded",
+        "event_type": "request.completed",
+        "started_epoch_ms": 1,
+        "updated_epoch_ms": 3,
+        "finished_epoch_ms": 2,
+        "duration_ms": 10,
+        "meta": { "padding": "x".repeat(4096) },
+        "scope": { "port": 4444 },
+        "result": "success",
+        "attempts": 1,
+        "failed_attempts": 0,
+        "switches": 0
+    });
+    write_observability_rows(&home, &[padded]);
+    let padded_body: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("padded records response")
+        .json()
+        .await
+        .expect("padded records json");
+    assert_eq!(padded_body["total"], 1);
+    assert_eq!(padded_body["records"][0]["request_key"], "4444:padded");
+}
+
+#[tokio::test]
+async fn observability_records_cache_rebuilds_on_same_length_early_rewrite() {
+    let (base, _state, home) = bind_test_server().await;
+    let first = serde_json::json!({
+        "request_key": "4444:stable",
+        "event_type": "request.completed",
+        "started_epoch_ms": 1,
+        "updated_epoch_ms": 3,
+        "finished_epoch_ms": 2,
+        "duration_ms": 10,
+        "meta": { "marker": "alpha" },
+        "scope": { "port": 4444 },
+        "result": "success",
+        "attempts": 1,
+        "failed_attempts": 0,
+        "switches": 0
+    });
+    let mut tail = observability_row_with_result("4444:tail", Some("success"));
+    tail["started_epoch_ms"] = serde_json::json!(2);
+    tail["meta"] = serde_json::json!({ "padding": "x".repeat(5000) });
+    write_observability_rows(&home, &[first.clone(), tail.clone()]);
+
+    let before: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("initial records response")
+        .json()
+        .await
+        .expect("initial records json");
+    let stable_marker = |body: &serde_json::Value| {
+        body["records"]
+            .as_array()
+            .expect("records array")
+            .iter()
+            .find(|row| row["request_key"] == "4444:stable")
+            .expect("stable record")["meta"]["marker"]
+            .clone()
+    };
+    assert_eq!(stable_marker(&before), "alpha");
+
+    let store_path = home
+        .join("logs")
+        .join("server-v3-4444.request-records.jsonl");
+    let original = std::fs::read_to_string(&store_path).expect("read observability store");
+    assert!(original.contains("\"marker\":\"alpha\""));
+    let rewritten = original.replace("\"marker\":\"alpha\"", "\"marker\":\"bravo\"");
+    assert_eq!(rewritten.len(), original.len());
+    std::fs::write(&store_path, rewritten).expect("same-length in-place rewrite");
+
+    let after: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("rewritten records response")
+        .json()
+        .await
+        .expect("rewritten records json");
+    assert_eq!(stable_marker(&after), "bravo");
 }
 
 #[tokio::test]

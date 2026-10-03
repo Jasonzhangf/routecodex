@@ -2325,7 +2325,7 @@ resources:
       observed_control_facts_may_drive_current_control_state: false
       current_control_state_source: v3.provider.key_health_state
     allowed_writers: [v3_webui_observability_append_row, v3_webui_observability_append_row_with_retention]
-    allowed_readers: [v3_webui_observability_read_rows, v3_webui_observability_read_raw_rows]
+    allowed_readers: [v3_webui_observability_read_rows, v3_webui_observability_read_raw_rows, v3_webui_observability_read_raw_rows_from]
     forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, protocol.metadata]
     may_enter_provider_body: false
     may_enter_client_body: false
