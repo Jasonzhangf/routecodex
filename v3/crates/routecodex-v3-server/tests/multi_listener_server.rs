@@ -115,6 +115,30 @@ fn read_single_responses_sample_response(samples_root: &std::path::Path) -> Valu
     serde_json::from_str(&response).unwrap()
 }
 
+/// Wait for the provider-terminal evidence of the failed request to reach disk.
+///
+/// The boundary records the evidence before it breaks the client transport, but
+/// the sample store persists it through its own worker, so the artifact can land
+/// slightly after the client observes the abort. Parseable JSON, not file
+/// existence, is the completion signal: a reader can otherwise observe a
+/// partially written file.
+async fn wait_for_v3_provider_terminal_evidence(samples_root: &std::path::Path) -> Value {
+    for _ in 0..200 {
+        if let Ok(entries) = fs::read_dir(samples_root) {
+            for entry in entries.flatten() {
+                let path = entry.path().join("provider-terminal.json");
+                if let Ok(raw) = fs::read_to_string(&path) {
+                    if let Ok(evidence) = serde_json::from_str::<Value>(&raw) {
+                        return evidence;
+                    }
+                }
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    panic!("provider terminal evidence must appear under {samples_root:?}");
+}
+
 fn read_responses_sample_response_by_request_marker(
     samples_root: &std::path::Path,
     request_marker: &str,
@@ -5147,6 +5171,7 @@ async fn p6_all_transport_failures_close_without_http_response() {
 #[tokio::test]
 async fn p6_provider_503_never_reaches_a_streaming_client() {
     let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("p6-provider-503-terminal-evidence");
     let (failure_base_url, failure_shutdown) =
         start_controlled_failure_upstream_all_protocols().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-direct-sse");
@@ -5154,6 +5179,7 @@ async fn p6_provider_503_never_reaches_a_streaming_client() {
         spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &failure_base_url))
             .await
             .unwrap();
+    let port = handle.listeners[0].addr.port();
     // A streaming client observes the SSE boundary and then an aborted transfer,
     // never a provider status or a synthesized JSON error body.
     let response = reqwest::Client::new()
@@ -5167,6 +5193,18 @@ async fn p6_provider_503_never_reaches_a_streaming_client() {
     assert!(
         response.text().await.is_err(),
         "the streaming body must abort without a provider status, code, or body"
+    );
+
+    // The provider's real 503 and its body stay provider-private evidence: the
+    // boundary records them for the failed request instead of carrying the
+    // witness through every attempt only to discard it.
+    let evidence =
+        wait_for_v3_provider_terminal_evidence(&home_guard.codex_samples_root(port)).await;
+    assert_eq!(evidence["kind"], "external_http");
+    assert_eq!(evidence["status"], 503);
+    assert_eq!(
+        evidence["body"],
+        json!(r#"{"error":"controlled_unavailable"}"#.as_bytes())
     );
 
     std::env::remove_var("V3_P6_TEST_KEY");

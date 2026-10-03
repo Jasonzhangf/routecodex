@@ -977,6 +977,50 @@ pub(crate) fn persist_v3_projected_terminal_error_evidence(
     )
 }
 
+/// Record the typed provider terminal as provider-private evidence.
+///
+/// The client boundary must never project the provider's own status, headers, or
+/// body, so the only place that real upstream error stays readable is the
+/// provider-private evidence directory. This is the single owner of that
+/// artifact: the eligibility rule and the witness accessors exist for this
+/// record, and without it the witness would be built and carried across every
+/// attempt and reselection only to be discarded at the boundary. The artifact is
+/// separate from `error.json` because the error-evidence pair has its own owner
+/// and lanes that already write it; two writers to one file would race.
+pub(crate) fn persist_v3_provider_terminal_evidence(
+    state: &Arc<V3ListenerState>,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+    disposition: &routecodex_v3_error::V3ProviderTerminalDisposition,
+) -> Result<(), String> {
+    let payload = match disposition {
+        // The provider's real status, headers, and body are the error truth this
+        // artifact exists to keep: they are recorded losslessly here and never
+        // reach the client.
+        routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness) => json!({
+            "object": "routecodex.v3.provider_terminal_evidence",
+            "kind": "external_http",
+            "status": witness.status(),
+            "headers": witness.headers(),
+            "body": witness.body(),
+        }),
+        routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => json!({
+            "object": "routecodex.v3.provider_terminal_evidence",
+            "kind": "no_response",
+        }),
+    };
+    persist_v3_error_evidence_payload(
+        state,
+        entry_protocol,
+        endpoint,
+        request_id,
+        "provider-terminal.json",
+        &state.debug.project_payload_verbatim(payload),
+        None,
+    )
+}
+
 /// Project the typed Error chain of a Responses relay output into the debug
 /// trace and the observability store.
 ///

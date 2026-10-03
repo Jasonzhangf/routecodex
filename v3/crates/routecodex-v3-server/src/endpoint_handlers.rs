@@ -202,6 +202,11 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         front_connection_identity,
                         routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
                         requested_stream,
+                        V3ProviderTerminalEvidence {
+                            entry_protocol: &entry_protocol,
+                            endpoint: &path,
+                            request_id: &request_id,
+                        },
                     );
                 }
                 let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
@@ -570,6 +575,11 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 front_connection_identity,
                 disposition,
                 requested_stream,
+                V3ProviderTerminalEvidence {
+                    entry_protocol: &entry_protocol,
+                    endpoint: &path,
+                    request_id: &request_id,
+                },
             );
         }
         if output.error_chain.is_some() {
@@ -678,6 +688,11 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 front_connection_identity,
                 disposition,
                 requested_stream,
+                V3ProviderTerminalEvidence {
+                    entry_protocol: &entry_protocol,
+                    endpoint: &path,
+                    request_id: &request_id,
+                },
             );
         }
         if let Some(response) = emit_relay_error_chain_if_any(
@@ -793,6 +808,11 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 front_connection_identity,
                 disposition,
                 requested_stream,
+                V3ProviderTerminalEvidence {
+                    entry_protocol: &entry_protocol,
+                    endpoint: &path,
+                    request_id: &request_id,
+                },
             );
         }
         if let Some(response) = emit_relay_error_chain_if_any(
@@ -1032,6 +1052,11 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 front_connection_identity,
                 disposition,
                 requested_stream,
+                V3ProviderTerminalEvidence {
+                    entry_protocol: &entry_protocol,
+                    endpoint: &path,
+                    request_id: &request_id,
+                },
             );
         }
         if output.protocol_direct_handoff.is_some() {
@@ -1070,6 +1095,11 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         front_connection_identity,
                         disposition,
                         requested_stream,
+                        V3ProviderTerminalEvidence {
+                            entry_protocol: &entry_protocol,
+                            endpoint: &path,
+                            request_id: &request_id,
+                        },
                     );
                 }
                 V3ResponsesDirectServerOutcome::DirectFrame(mut frame) => {
@@ -1175,6 +1205,11 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                             front_connection_identity,
                             disposition,
                             requested_stream,
+                            V3ProviderTerminalEvidence {
+                                entry_protocol: &entry_protocol,
+                                endpoint: &path,
+                                request_id: &request_id,
+                            },
                         );
                     }
                     prepend_v3_protocol_plan_trace_to_responses_relay_output(
@@ -1256,6 +1291,11 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     front_connection_identity,
                     disposition,
                     requested_stream,
+                    V3ProviderTerminalEvidence {
+                        entry_protocol: &entry_protocol,
+                        endpoint: &path,
+                        request_id: &request_id,
+                    },
                 )
             }
             V3ResponsesDirectServerOutcome::DirectFrame(mut frame) => {
@@ -1389,6 +1429,11 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         front_connection_identity,
                         disposition,
                         requested_stream,
+                        V3ProviderTerminalEvidence {
+                            entry_protocol: &entry_protocol,
+                            endpoint: &path,
+                            request_id: &request_id,
+                        },
                     );
                 }
                 finalize_v3_responses_relay_server_output(

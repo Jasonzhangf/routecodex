@@ -4180,11 +4180,17 @@ async fn responses_relay_json_error_projects_failure_terminal_with_done() {
 
 #[tokio::test]
 async fn provider_terminal_external_http_never_projects_provider_response_to_client() {
-    let log_file = std::env::temp_dir().join(format!(
-        "rcc-provider-terminal-server-{}.log",
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-provider-terminal-external-http-{}",
         std::process::id()
     ));
-    let state = test_v3_listener_state(&log_file, 5555);
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let log_file = root.join("server.log");
+    let state = test_v3_listener_state_with_debug(&log_file, 5555, true, true, None, true);
+    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
     let raw_body = br#"{"error":{"type":"rate_limit_error","message":"later"}}"#.to_vec();
     let witness = routecodex_v3_error::V3EligibleExternalHttpResponse::new(
         429,
@@ -4200,7 +4206,37 @@ async fn provider_terminal_external_http_never_projects_provider_response_to_cli
         None,
         routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness),
         true,
+        V3ProviderTerminalEvidence {
+            entry_protocol: "openai_chat",
+            endpoint: "/v1/chat/completions",
+            request_id: "provider-terminal-external-http-unit",
+        },
     );
+    sample_worker.wait_until_idle().await.unwrap();
+    // The witness is the provider's real error, so it has to stay readable as
+    // provider-private evidence: its status, headers, and body are recorded
+    // losslessly instead of being carried and discarded at the boundary.
+    let evidence: Value = serde_json::from_str(
+        &fs::read_to_string(root.join(
+            ".rcc/codex-samples/openai-chat-completions/ports/5555/\
+             provider-terminal-external-http-unit/provider-terminal.json",
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(evidence["kind"], "external_http");
+    assert_eq!(evidence["status"], 429);
+    assert_eq!(
+        evidence["headers"],
+        json!([
+            [
+                "content-type",
+                [97, 112, 112, 108, 105, 99, 97, 116, 105, 111, 110, 47, 106, 115, 111, 110]
+            ],
+            ["retry-after", [49, 55]],
+        ])
+    );
+    assert_eq!(evidence["body"], json!(raw_body));
     // The provider's real status and headers are provider-private: the client boundary
     // stays a transport break and never carries the upstream response.
     assert_eq!(response.status(), StatusCode::OK);
@@ -4221,17 +4257,41 @@ async fn provider_terminal_external_http_never_projects_provider_response_to_cli
 
 #[tokio::test]
 async fn provider_terminal_no_response_breaks_streaming_client_transport() {
-    let log_file = std::env::temp_dir().join(format!(
-        "rcc-provider-terminal-sse-break-{}.log",
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-provider-terminal-no-response-{}",
         std::process::id()
     ));
-    let state = test_v3_listener_state(&log_file, 5555);
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let log_file = root.join("server.log");
+    let state = test_v3_listener_state_with_debug(&log_file, 5555, true, true, None, true);
+    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
     let response = provider_terminal_response(
         &state,
         None,
         routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
         true,
+        V3ProviderTerminalEvidence {
+            entry_protocol: "openai_chat",
+            endpoint: "/v1/chat/completions",
+            request_id: "provider-terminal-no-response-unit",
+        },
     );
+    sample_worker.wait_until_idle().await.unwrap();
+    // No provider response exists, so the recorded terminal states exactly that
+    // instead of a fabricated status.
+    let evidence: Value = serde_json::from_str(
+        &fs::read_to_string(root.join(
+            ".rcc/codex-samples/openai-chat-completions/ports/5555/\
+             provider-terminal-no-response-unit/provider-terminal.json",
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(evidence["kind"], "no_response");
+    assert!(evidence.get("status").is_none(), "{evidence}");
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["content-type"], "text/event-stream");
     let error = to_bytes(response.into_body(), usize::MAX)

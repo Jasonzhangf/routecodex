@@ -388,25 +388,50 @@ pub(crate) fn responses_direct_output_response_with_console_for_protocol(
     builder.body(Body::from(body)).expect("typed response")
 }
 
+/// Request identity the client boundary needs to record provider-terminal evidence.
+pub(crate) struct V3ProviderTerminalEvidence<'a> {
+    pub entry_protocol: &'a str,
+    pub endpoint: &'a str,
+    pub request_id: &'a str,
+}
+
 /// Project a provider-terminal outcome onto the client boundary.
 ///
 /// The client entry is never coupled to a provider. A provider terminal is either
 /// absorbed by a remaining candidate (the runtime keeps rotating before it reaches
 /// this point) or becomes a client transport break. The provider's own status,
-/// headers, and body are provider-private: they stay in the typed Error chain and in
-/// provider evidence, and they must not be projected as a client response. The
-/// disposition is matched exhaustively so a new terminal shape has to state its client
-/// boundary explicitly instead of inheriting provider passthrough.
+/// headers, and body are provider-private: they are recorded as provider-terminal
+/// evidence, they stay in the typed Error chain, and they must not be projected as
+/// a client response. The disposition is matched exhaustively so a new terminal
+/// shape has to state its client boundary explicitly instead of inheriting
+/// provider passthrough.
 pub(crate) fn provider_terminal_response(
-    state: &V3ListenerState,
+    state: &Arc<V3ListenerState>,
     connection: Option<V3FrontConnectionIdentity>,
     disposition: routecodex_v3_error::V3ProviderTerminalDisposition,
     requested_stream: bool,
+    evidence: V3ProviderTerminalEvidence<'_>,
 ) -> Response<Body> {
+    // The provider's real error is recorded before the transport breaks. This is
+    // the only production reader of the witness: without it the provider status,
+    // headers, and body would be carried through every attempt and discarded.
+    if let Err(error) = persist_v3_provider_terminal_evidence(
+        state,
+        evidence.entry_protocol,
+        evidence.endpoint,
+        evidence.request_id,
+        &disposition,
+    ) {
+        return foundation_output_response(project_v3_debug_failure(
+            "V3DebugErrorEvidenceCaptured",
+            V3DebugError::Sink(error),
+        ));
+    }
     match disposition {
-        // A real compatible upstream HTTP error is still a provider error. It is
-        // recorded in the Error chain with its real status and body, and the client
-        // observes a transport break instead of the provider's response.
+        // A real compatible upstream HTTP error is still a provider error. Its real
+        // status, headers, and body are recorded as provider-terminal evidence and in
+        // the Error chain, and the client observes a transport break instead of the
+        // provider's response.
         routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(_)
         | routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => {}
     }
