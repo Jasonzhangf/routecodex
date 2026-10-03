@@ -37,12 +37,12 @@ pub(crate) use provider_compat_shared::{
 };
 mod relay_runtime_shared;
 pub(crate) use relay_runtime_shared::{
-    build_v3_relay_observability, error_output, extract_error_type_style,
-    extract_message_type_style, handle_provider_failure, provider_pool_exhausted_source,
-    provider_request_failure, provider_runtime_failure, provider_target,
-    push_sse_response_chain_trace, server_routing_group, terminalize_provider_failure,
-    wrap_v3_relay_client_sse_usage_observation, V3RelayCommittedSseStream,
-    V3RelayProjectedSseStream, V3RelayProviderFailure,
+    build_v3_relay_observability, error_output, external_http_witness_from_provider_error,
+    extract_error_type_style, extract_message_type_style, handle_provider_failure,
+    provider_pool_exhausted_source, provider_request_failure, provider_runtime_failure,
+    provider_target, push_sse_response_chain_trace, server_routing_group,
+    terminalize_provider_failure, wrap_v3_relay_client_sse_usage_observation,
+    V3RelayCommittedSseStream, V3RelayProjectedSseStream, V3RelayProviderFailure,
 };
 mod relay_runtime_core;
 pub(crate) use relay_runtime_core::{

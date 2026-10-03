@@ -1179,6 +1179,7 @@ features:
   - Responses HTTP transport applies the configured provider SSE first-frame timeout to the response-header wait and the timeout reason projects as the health-neutral transient transport hang in both direct and relay failure policies
   - Responses, OpenAI Chat, Anthropic, and Gemini transport builders propagate the configured provider SSE first-frame timeout through the shared transport request
   - A Responses selection-time pool exhaustion (every candidate excluded by the context window before any provider attempt) breaks the client transport for both the streaming and the nonstreaming boundary instead of projecting the synthesized 502 `network_error` body, which stays provider-private Error06 evidence
+  - A provider terminal disposition records provider-private evidence before the client transport breaks: the real external upstream status, headers, and body are persisted for the failed request, and a terminal with no provider response records that instead of a fabricated status
   required_contract:
   - Provider concurrency policy is Config-owned: maxInFlight is a soft adaptive signal and acquireTimeoutMs bounds only scheduled probe admission; neither is reconstructed from payload, MetadataCenter, or Debug
   - Reaching the adaptive concurrency budget never blocks a business request, excludes its selected provider, or advances a route tier
@@ -1563,7 +1564,7 @@ features:
   - OpenAI Chat Relay has no secondary SSE accept worker and never serializes Error06 JSON as a normal Chat completion data frame
   - rejected metadata_center request produces zero upstream captures
   - chat entry pool exhaustion and provider terminals break the client transport for both the same-protocol Direct lane and the cross-protocol Relay lane instead of projecting an error payload
-  - a real external upstream status (429/503) never reaches the client on either lane; the client observes a transport break and a healthy later candidate is reselected to serve the request
+  - a real external upstream status (429/503) never reaches the client on either lane; the client observes a transport break and a healthy later candidate is reselected to serve the request, while the failed request's provider-terminal evidence keeps the real upstream status, headers, and body
   required_gates:
   - npm run test:v3-openai-chat-relay-runtime-integration
   - npm run test:v3-h2-chat-direct-isolation

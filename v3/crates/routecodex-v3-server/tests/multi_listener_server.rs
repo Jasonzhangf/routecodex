@@ -115,6 +115,30 @@ fn read_single_responses_sample_response(samples_root: &std::path::Path) -> Valu
     serde_json::from_str(&response).unwrap()
 }
 
+/// Wait for the provider-terminal evidence of the failed request to reach disk.
+///
+/// The boundary records the evidence before it breaks the client transport, but
+/// the sample store persists it through its own worker, so the artifact can land
+/// slightly after the client observes the abort. Parseable JSON, not file
+/// existence, is the completion signal: a reader can otherwise observe a
+/// partially written file.
+async fn wait_for_v3_provider_terminal_evidence(samples_root: &std::path::Path) -> Value {
+    for _ in 0..200 {
+        if let Ok(entries) = fs::read_dir(samples_root) {
+            for entry in entries.flatten() {
+                let path = entry.path().join("provider-terminal.json");
+                if let Ok(raw) = fs::read_to_string(&path) {
+                    if let Ok(evidence) = serde_json::from_str::<Value>(&raw) {
+                        return evidence;
+                    }
+                }
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    panic!("provider terminal evidence must appear under {samples_root:?}");
+}
+
 fn read_responses_sample_response_by_request_marker(
     samples_root: &std::path::Path,
     request_marker: &str,
@@ -1450,6 +1474,218 @@ async fn start_controlled_failure_upstream_all_protocols() -> (String, oneshot::
             .unwrap();
     });
     (format!("http://{address}/v1"), shutdown_tx)
+}
+
+/// Upstream that answers every protocol with a real HTTP response carrying a
+/// caller-chosen status, headers, and body.
+///
+/// Bug `705d624` keeps an upstream 502 out of any client response, so a 502 from
+/// this upstream is exactly the "real response that is not eligible for client
+/// projection" case: the client must never see it, and the provider-private
+/// evidence must still record it.
+async fn start_controlled_status_upstream(
+    status: StatusCode,
+    content_type: &'static str,
+    response_body: &'static [u8],
+) -> (String, oneshot::Sender<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route(
+            "/v1/responses",
+            post(move || async move {
+                Response::builder()
+                    .status(status)
+                    .header("content-type", content_type)
+                    .header("x-control-upstream", "status-upstream")
+                    .body(Body::from(response_body))
+                    .unwrap()
+            }),
+        )
+        .route(
+            "/v1/messages",
+            post(move || async move {
+                Response::builder()
+                    .status(status)
+                    .header("content-type", content_type)
+                    .body(Body::from(response_body))
+                    .unwrap()
+            }),
+        );
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}/v1"), shutdown_tx)
+}
+
+/// A real upstream 502 must be recorded as provider-private evidence, not
+/// reported as "no provider response".
+///
+/// Bug `705d624` keeps the 502 out of every client response; that rule decides
+/// what the client may see and must not decide what the evidence records. The
+/// upstream here really did answer 502 with a body and headers, so the artifact
+/// has to say `external_http` and carry the real status, headers, and body.
+#[tokio::test]
+async fn p6_real_upstream_502_is_recorded_as_provider_private_evidence() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("p6-upstream-502-evidence");
+    let (failure_base_url, failure_shutdown) = start_controlled_status_upstream(
+        StatusCode::BAD_GATEWAY,
+        "application/json",
+        br#"{"error":"controlled_bad_gateway"}"#,
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-upstream-502");
+    let handle =
+        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &failure_base_url))
+            .await
+            .unwrap();
+    let port = handle.listeners[0].addr.port();
+
+    // The client boundary stays a transport break: no upstream status, code, or
+    // body is projected, and no proxy 502 is fabricated for the entry either.
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .json(&json!({"model":"client-test","input":"hello","stream":true}))
+        .send()
+        .await
+        .expect("a streaming client must receive the SSE response head");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    let body = response.text().await;
+    assert!(
+        body.is_err(),
+        "an upstream 502 must abort the streaming body, not project the upstream response: {body:?}"
+    );
+
+    let evidence =
+        wait_for_v3_provider_terminal_evidence(&home_guard.codex_samples_root(port)).await;
+    assert_eq!(
+        evidence["kind"], "external_http",
+        "a real upstream response head was received, so the evidence must not claim no response: {evidence}"
+    );
+    assert_eq!(evidence["status"], 502);
+    assert_eq!(
+        evidence["body"],
+        json!(br#"{"error":"controlled_bad_gateway"}"#.as_slice())
+    );
+    // The headers the upstream really sent are recorded verbatim, byte for byte.
+    // Only the controlled headers are asserted; the hop-by-hop `content-length`
+    // and `date` this upstream also emits are recorded too but are not stable.
+    let headers = evidence["headers"]
+        .as_array()
+        .unwrap_or_else(|| panic!("evidence headers must be an array: {evidence}"));
+    let recorded = |name: &str| -> Value {
+        headers
+            .iter()
+            .find(|entry| entry[0] == json!(name))
+            .unwrap_or_else(|| panic!("upstream header {name} must be recorded: {evidence}"))[1]
+            .clone()
+    };
+    assert_eq!(
+        recorded("content-type"),
+        json!("application/json".as_bytes())
+    );
+    assert_eq!(
+        recorded("x-control-upstream"),
+        json!("status-upstream".as_bytes())
+    );
+
+    std::env::remove_var("V3_P6_TEST_KEY");
+    handle.shutdown().await;
+    failure_shutdown.send(()).unwrap();
+}
+
+/// The WebSocket entry is a client boundary too: a provider terminal there must
+/// record the same provider-private evidence.
+///
+/// The WebSocket lane closes the socket without a payload, so without an
+/// explicit reader on that entry the witness would be dropped and the provider's
+/// real 429 would be silently swallowed.
+#[tokio::test]
+async fn responses_websocket_provider_429_is_recorded_as_provider_private_evidence() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("ws-provider-429-evidence");
+    let upstream_body = json!({
+        "error": {"type":"rate_limit_error","message":"slow down","param":"upstream"}
+    });
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::TOO_MANY_REQUESTS,
+        "application/json",
+        serde_json::to_vec(&upstream_body).unwrap(),
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-ws-429-evidence");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let port = handle.listeners[0].addr.port();
+    let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
+    let mut request = endpoint.into_client_request().unwrap();
+    request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    let (mut socket, handshake) = connect_async(request).await.unwrap();
+    assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+    socket
+        .send(Message::Text(
+            json!({"type":"response.create","model":"client-test","input":"ws 429 evidence"})
+                .to_string(),
+        ))
+        .await
+        .unwrap();
+    let message = timeout(Duration::from_secs(30), socket.next())
+        .await
+        .expect("an exhausted provider terminal must close the WebSocket");
+    assert!(
+        !matches!(
+            message,
+            Some(Ok(Message::Text(_))) | Some(Ok(Message::Binary(_)))
+        ),
+        "a provider HTTP failure must not project its status, headers, or body to the client"
+    );
+    assert_eq!(captures.recv().await.unwrap().body["model"], "wire-test");
+
+    let evidence =
+        wait_for_v3_provider_terminal_evidence(&home_guard.codex_samples_root(port)).await;
+    assert_eq!(evidence["kind"], "external_http");
+    assert_eq!(evidence["status"], 429);
+    assert_eq!(
+        evidence["body"],
+        json!(serde_json::to_vec(&upstream_body).unwrap())
+    );
+    // The real upstream header is recorded verbatim, not projected to the client.
+    let headers = evidence["headers"]
+        .as_array()
+        .unwrap_or_else(|| panic!("evidence headers must be an array: {evidence}"));
+    let recorded = |name: &str| -> Value {
+        headers
+            .iter()
+            .find(|entry| entry[0] == json!(name))
+            .unwrap_or_else(|| panic!("upstream header {name} must be recorded: {evidence}"))[1]
+            .clone()
+    };
+    assert_eq!(
+        recorded("content-type"),
+        json!("application/json".as_bytes())
+    );
+    assert_eq!(recorded("retry-after"), json!("17".as_bytes()));
+
+    let _ = socket.close(None).await;
+    std::env::remove_var("V3_P6_TEST_KEY");
+    handle.shutdown().await;
+    let _ = shutdown.send(());
 }
 
 async fn controlled_capturing_failure_upstream(
@@ -5147,6 +5383,7 @@ async fn p6_all_transport_failures_close_without_http_response() {
 #[tokio::test]
 async fn p6_provider_503_never_reaches_a_streaming_client() {
     let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("p6-provider-503-terminal-evidence");
     let (failure_base_url, failure_shutdown) =
         start_controlled_failure_upstream_all_protocols().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-direct-sse");
@@ -5154,6 +5391,7 @@ async fn p6_provider_503_never_reaches_a_streaming_client() {
         spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &failure_base_url))
             .await
             .unwrap();
+    let port = handle.listeners[0].addr.port();
     // A streaming client observes the SSE boundary and then an aborted transfer,
     // never a provider status or a synthesized JSON error body.
     let response = reqwest::Client::new()
@@ -5167,6 +5405,18 @@ async fn p6_provider_503_never_reaches_a_streaming_client() {
     assert!(
         response.text().await.is_err(),
         "the streaming body must abort without a provider status, code, or body"
+    );
+
+    // The provider's real 503 and its body stay provider-private evidence: the
+    // boundary records them for the failed request instead of carrying the
+    // witness through every attempt only to discard it.
+    let evidence =
+        wait_for_v3_provider_terminal_evidence(&home_guard.codex_samples_root(port)).await;
+    assert_eq!(evidence["kind"], "external_http");
+    assert_eq!(evidence["status"], 503);
+    assert_eq!(
+        evidence["body"],
+        json!(r#"{"error":"controlled_unavailable"}"#.as_bytes())
     );
 
     std::env::remove_var("V3_P6_TEST_KEY");

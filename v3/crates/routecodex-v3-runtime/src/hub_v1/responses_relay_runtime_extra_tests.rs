@@ -205,12 +205,11 @@ fn web_search_sidecar_failure_preserves_typed_code_and_response_lane_without_con
 
 #[test]
 fn provider_failure_output_keeps_real_http_witness_outside_error06_body() {
-    let upstream = routecodex_v3_error::V3EligibleExternalHttpResponse::new(
+    let upstream = routecodex_v3_error::V3ExternalHttpWitness::new(
         429,
         vec![("retry-after".to_string(), b"17".to_vec())],
         br#"{"error":{"type":"rate_limit_error"}}"#.to_vec(),
-    )
-    .expect("real upstream 429 remains eligible");
+    );
     let terminal_projection = V3ErrorHandlingCenter::project_terminal_decision(
         V3ErrorHandlingCenter::decide_provider(
             V3ErrorHandlingCenterInput {

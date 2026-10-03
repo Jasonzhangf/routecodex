@@ -117,7 +117,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> = None;
     let mut initial_selected_target = initial_selected_target;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
-    let mut last_eligible_external_http = None;
+    let mut last_external_http = None;
     let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
     let request_execution_control = match initial_request_execution_control {
         Some(control) => control,
@@ -205,7 +205,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     return Ok(provider_failure_output(
                         terminalize_v3_responses_relay_provider_failure(
                             failure,
-                            last_eligible_external_http.clone(),
+                            last_external_http.clone(),
                         ),
                         trace,
                         0,
@@ -339,7 +339,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             provider_failure_event_sink: provider_failure_event_sink.as_ref(),
                             selected_observability: &selected_observability,
                             trace: &mut trace,
-                            last_eligible_external_http: &mut last_eligible_external_http,
+                            last_external_http: &mut last_external_http,
                         },
                     )
                     .await
@@ -463,11 +463,9 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         let provider_raw = match transport_result {
             Ok(raw) => raw,
             Err(V3ProviderError::HttpStatus { response }) => {
-                if let Some(witness) =
-                    crate::hub_v1::relay_runtime_shared::eligible_external_http_witness(&response)
-                {
-                    last_eligible_external_http = Some(witness);
-                }
+                last_external_http = Some(
+                    crate::hub_v1::relay_runtime_shared::external_http_witness(&response),
+                );
                 handle_error_before_resp03!(runtime_timing
                     .finish_external()
                     .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
@@ -513,7 +511,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             provider_failure_event_sink: provider_failure_event_sink.as_ref(),
                             selected_observability: &selected_observability,
                             trace: &mut trace,
-                            last_eligible_external_http: &mut last_eligible_external_http,
+                            last_external_http: &mut last_external_http,
                         },
                     )
                     .await
@@ -547,7 +545,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             provider_failure_event_sink: provider_failure_event_sink.as_ref(),
                             selected_observability: &selected_observability,
                             trace: &mut trace,
-                            last_eligible_external_http: &mut last_eligible_external_http,
+                            last_external_http: &mut last_external_http,
                         },
                     )
                     .await
@@ -597,7 +595,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                         .as_ref(),
                                     selected_observability: &selected_observability,
                                     trace: &mut trace,
-                                    last_eligible_external_http: &mut last_eligible_external_http,
+                                    last_external_http: &mut last_external_http,
                                 },
                             )
                             .await
@@ -635,7 +633,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                         .as_ref(),
                                     selected_observability: &selected_observability,
                                     trace: &mut trace,
-                                    last_eligible_external_http: &mut last_eligible_external_http,
+                                    last_external_http: &mut last_external_http,
                                 },
                             )
                             .await
@@ -670,7 +668,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                 provider_failure_event_sink: provider_failure_event_sink.as_ref(),
                                 selected_observability: &selected_observability,
                                 trace: &mut trace,
-                                last_eligible_external_http: &mut last_eligible_external_http,
+                                last_external_http: &mut last_external_http,
                             },
                         )
                         .await
@@ -775,7 +773,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                 provider_failure_event_sink: provider_failure_event_sink.as_ref(),
                                 selected_observability: &selected_observability,
                                 trace: &mut trace,
-                                last_eligible_external_http: &mut last_eligible_external_http,
+                                last_external_http: &mut last_external_http,
                             },
                         )
                         .await
@@ -847,8 +845,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                             .as_ref(),
                                         selected_observability: &selected_observability,
                                         trace: &mut trace,
-                                        last_eligible_external_http:
-                                            &mut last_eligible_external_http,
+                                        last_external_http: &mut last_external_http,
                                     },
                                 )
                                 .await
@@ -1026,7 +1023,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                         .as_ref(),
                                     selected_observability: &selected_observability,
                                     trace: &mut trace,
-                                    last_eligible_external_http: &mut last_eligible_external_http,
+                                    last_external_http: &mut last_external_http,
                                 },
                             )
                             .await
@@ -1045,7 +1042,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                 attach_v3_provider_failure_events_to_failure(
                                     terminalize_v3_responses_relay_provider_failure(
                                         failure,
-                                        last_eligible_external_http.clone(),
+                                        last_external_http.clone(),
                                     ),
                                     &provider_failure_events,
                                 ),
@@ -1128,7 +1125,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                 provider_failure_event_sink: provider_failure_event_sink.as_ref(),
                                 selected_observability: &selected_observability,
                                 trace: &mut trace,
-                                last_eligible_external_http: &mut last_eligible_external_http,
+                                last_external_http: &mut last_external_http,
                             },
                         )
                         .await
@@ -1206,8 +1203,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                             .as_ref(),
                                         selected_observability: &selected_observability,
                                         trace: &mut trace,
-                                        last_eligible_external_http:
-                                            &mut last_eligible_external_http,
+                                        last_external_http: &mut last_external_http,
                                     },
                                 )
                                 .await
