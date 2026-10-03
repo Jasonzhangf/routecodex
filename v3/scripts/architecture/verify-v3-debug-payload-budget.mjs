@@ -159,8 +159,8 @@ requireMatch(
 );
 requireMatch(
   sampleStore,
-  /mpsc::channel\(V3_CODEX_SAMPLE_PERSIST_QUEUE_CAPACITY\)[\s\S]*try_send[\s\S]*TrySendError::Full/,
-  "Sample persistence must use a bounded queue and report overload without awaiting capacity",
+  /unbounded_channel\(\)[\s\S]*try_acquire_many_owned[\s\S]*enqueue\.send\(message\)/,
+  "Sample persistence must bound pending samples by the declared byte budget instead of a fixed message count",
 );
 requireMatch(
   sampleStore,
@@ -189,8 +189,8 @@ requireMatch(
 );
 forbidMatch(
   sampleStore,
-  /UnboundedSender|UnboundedReceiver|unbounded_channel/,
-  "Sample persistence must not retain an unbounded payload queue",
+  /V3_CODEX_SAMPLE_PERSIST_QUEUE_CAPACITY|try_send\(message\)/,
+  "Sample persistence must not drop a queued sample when a fixed message-count bound is exceeded",
 );
 forbidMatch(
   sampleStore,
