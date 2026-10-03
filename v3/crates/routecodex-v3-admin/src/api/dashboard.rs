@@ -6,7 +6,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -104,50 +104,60 @@ async fn overview(State(state): State<AppState>) -> Response {
     let counter_path = config_dir.join("state").join("global-request-counter.json");
     let counter = read_request_counter(&counter_path);
 
+    // Store sources keep the authoring map's own order, which is the order this
+    // aggregate has always reported them in.
     let debug_log = authoring.debug.log_file.as_deref();
     let mut store_sources = Vec::new();
-    let mut persisted_stats = PersistedTrafficStats::default();
     for server in authoring.servers.values().filter(|server| server.enabled) {
-        let path = routecodex_v3_config::v3_webui_observability_store_path(
-            &state.config_path,
-            debug_log,
-            server.port,
+        store_sources.push(
+            routecodex_v3_config::v3_webui_observability_store_path(
+                &state.config_path,
+                debug_log,
+                server.port,
+            )
+            .display()
+            .to_string(),
         );
-        let values = match routecodex_v3_debug::v3_webui_observability_read_rows(&path) {
-            Ok(values) => values,
-            Err(error) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({
-                        "error": format!(
-                            "observability store {} unavailable: {error}",
-                            server.port
-                        )
-                    })),
-                )
-                    .into_response();
-            }
-        };
-        store_sources.push(path.display().to_string());
-        for value in values {
-            let row = match serde_json::from_value::<PersistedTrafficRow>(value) {
-                Ok(row) => row,
-                Err(error) => {
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(serde_json::json!({
-                            "error": format!(
-                                "decode observability store {} row failed: {error}",
-                                server.port
-                            )
-                        })),
-                    )
-                        .into_response();
-                }
-            };
-            persisted_stats.merge(row);
-        }
     }
+    let stats_state = state.clone();
+    // Shares the incremental store cache with the records and SSE endpoints, and
+    // runs on the blocking pool because that cache lock spans file reads.
+    let persisted_stats = match tokio::task::spawn_blocking(move || {
+        let mut stats = PersistedTrafficStats::default();
+        crate::api::observability::visit_v3_obs_stores(&stats_state, |_, rows| {
+            // The overview has always counted the latest row per request_key, the
+            // folding of `v3_webui_observability_read_rows`, not every lifecycle
+            // row.
+            let mut latest = BTreeMap::<&str, &crate::api::observability::SourceRow>::new();
+            for row in rows {
+                latest.insert(row.request_key.as_str(), row);
+            }
+            for row in latest.into_values() {
+                stats.merge(row);
+            }
+        })
+        .map(|()| stats)
+    })
+    .await
+    {
+        Ok(Ok(stats)) => stats,
+        Ok(Err(error)) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": error })),
+            )
+                .into_response();
+        }
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": format!("observability overview read task failed: {error}")
+                })),
+            )
+                .into_response();
+        }
+    };
 
     let revisions = match state.store.revision_store().list() {
         Ok(revisions) => revisions,
@@ -196,17 +206,8 @@ struct PersistedTrafficStats {
     route_targets: BTreeMap<String, u64>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-struct PersistedTrafficRow {
-    #[serde(default)]
-    result: Option<String>,
-    #[serde(default)]
-    failed_attempts: u64,
-    meta: serde_json::Value,
-}
-
 impl PersistedTrafficStats {
-    fn merge(&mut self, row: PersistedTrafficRow) {
+    fn merge(&mut self, row: &crate::api::observability::SourceRow) {
         self.received += 1;
         if row.result.as_deref() == Some("error") || row.failed_attempts > 0 {
             self.provider_errors += 1;

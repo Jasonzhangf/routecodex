@@ -27,7 +27,9 @@ use routecodex_v3_runtime::hub_v1::usage_normalization::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// The six typed Error chain nodes, in canonical order. The detail endpoint
 /// always reports all six; nodes the store did not observe are `not_reached`.
@@ -611,11 +613,11 @@ fn attempt_status_code(row: &QueryRow) -> Option<String> {
 /// `provider_attempt_failed` row is additionally kept as a separate
 /// `failed-attempt` query row with its original status/category/detail, so a
 /// retry that eventually succeeds does not hide the non-normal attempt.
-fn project_query_rows(rows: Vec<SourceRow>) -> Vec<QueryRow> {
-    let mut latest: BTreeMap<String, SourceRow> = BTreeMap::new();
-    let mut attempt_rows: Vec<SourceRow> = Vec::new();
+fn project_query_rows<'a>(rows: impl IntoIterator<Item = &'a SourceRow>) -> Vec<QueryRow> {
+    let mut latest: BTreeMap<String, &'a SourceRow> = BTreeMap::new();
+    let mut attempt_rows: Vec<&'a SourceRow> = Vec::new();
     for row in rows {
-        if is_provider_attempt_failure(&row) {
+        if is_provider_attempt_failure(row) {
             attempt_rows.push(row);
         } else {
             latest.insert(row.request_key.clone(), row);
@@ -626,43 +628,62 @@ fn project_query_rows(rows: Vec<SourceRow>) -> Vec<QueryRow> {
     for row in latest.into_values() {
         query_rows.push(to_query_row(row));
     }
-    query_rows.extend(
-        attempt_rows
-            .into_iter()
-            .map(|row| to_attempt_query_row(row))
-            .collect::<Vec<_>>(),
-    );
+    query_rows.extend(attempt_rows.into_iter().map(to_attempt_query_row));
     for row in query_rows.iter_mut() {
         row.error_origin = row_error_origin_opt(row).map(str::to_string);
     }
     query_rows
 }
 
-fn to_query_row(row: SourceRow) -> QueryRow {
-    let value = serde_json::to_value(row).expect("source row serializes");
-    serde_json::from_value(value).expect("query row shape is compatible")
-}
-
-fn to_attempt_query_row(row: SourceRow) -> QueryRow {
+/// Projects a stored row into its query shape.
+///
+/// `QueryRow` is `SourceRow` without `tokens_output` plus `error_origin`, so the
+/// projection is a direct field mapping. It previously round-tripped the row
+/// through `serde_json::to_value` + `from_value`, which serialized and reparsed
+/// every row of the whole history on every projection rebuild.
+fn to_query_row(row: &SourceRow) -> QueryRow {
     QueryRow {
-        request_key: row.request_key,
-        event_type: row.event_type,
+        request_key: row.request_key.clone(),
+        event_type: row.event_type.clone(),
         started_epoch_ms: row.started_epoch_ms,
         updated_epoch_ms: row.updated_epoch_ms,
         finished_epoch_ms: row.finished_epoch_ms,
         duration_ms: row.duration_ms,
-        meta: row.meta,
-        scope: row.scope,
+        meta: row.meta.clone(),
+        scope: row.scope.clone(),
+        result: row.result.clone(),
+        error_origin: None,
+        attempts: row.attempts,
+        failed_attempts: row.failed_attempts,
+        switches: row.switches,
+        usage: row.usage.clone(),
+        timing_internal_ms: row.timing_internal_ms,
+        timing_external_ms: row.timing_external_ms,
+        servertool: row.servertool,
+        raw_artifact_ref: row.raw_artifact_ref.clone(),
+    }
+}
+
+fn to_attempt_query_row(row: &SourceRow) -> QueryRow {
+    QueryRow {
+        request_key: row.request_key.clone(),
+        event_type: row.event_type.clone(),
+        started_epoch_ms: row.started_epoch_ms,
+        updated_epoch_ms: row.updated_epoch_ms,
+        finished_epoch_ms: row.finished_epoch_ms,
+        duration_ms: row.duration_ms,
+        meta: row.meta.clone(),
+        scope: row.scope.clone(),
         result: Some("failed-attempt".to_string()),
         error_origin: None,
         attempts: row.attempts,
         failed_attempts: row.failed_attempts,
         switches: row.switches,
-        usage: row.usage,
+        usage: row.usage.clone(),
         timing_internal_ms: row.timing_internal_ms,
         timing_external_ms: row.timing_external_ms,
         servertool: row.servertool,
-        raw_artifact_ref: row.raw_artifact_ref,
+        raw_artifact_ref: row.raw_artifact_ref.clone(),
     }
 }
 
@@ -801,6 +822,19 @@ fn row_effective_input(row: &QueryRow) -> u64 {
 }
 
 fn configured_ports(state: &AppState) -> Result<Vec<u16>, String> {
+    Ok(observability_store_paths(state)?
+        .into_iter()
+        .map(|(port, _)| port)
+        .collect())
+}
+
+/// Configured listener ports paired with their per-listener JSONL store path.
+///
+/// Server and Admin derive the path from the shared config helper using the
+/// authoring debug log file truth. The authoring truth is read once here: a
+/// per-port `read_authoring()` recompiled the whole provider directory for
+/// every listener on every observability read.
+fn observability_store_paths(state: &AppState) -> Result<Vec<(u16, PathBuf)>, String> {
     let authoring = state
         .store
         .read_authoring()
@@ -816,65 +850,222 @@ fn configured_ports(state: &AppState) -> Result<Vec<u16>, String> {
     if ports.is_empty() {
         return Err("observability has no enabled listener source".to_string());
     }
-    Ok(ports)
-}
-
-/// Per-listener JSONL store path. Server and Admin derive the same path from
-/// the shared config helper using the authoring debug log file truth.
-fn observability_store_path(state: &AppState, port: u16) -> Result<PathBuf, String> {
-    let authoring = state
-        .store
-        .read_authoring()
-        .map_err(|error| format!("observability config read failed: {error}"))?;
     let debug_log = authoring.debug.log_file.as_deref();
-    Ok(routecodex_v3_config::v3_webui_observability_store_path(
-        &state.config_path,
-        debug_log,
-        port,
-    ))
+    Ok(ports
+        .into_iter()
+        .map(|port| {
+            (
+                port,
+                routecodex_v3_config::v3_webui_observability_store_path(
+                    &state.config_path,
+                    debug_log,
+                    port,
+                ),
+            )
+        })
+        .collect())
 }
 
-/// Read every persisted observability row across the configured listeners.
+/// Incremental reader position and decoded rows for one listener store.
 ///
-/// A store file that does not exist is "no traffic recorded yet" and is skipped;
-/// a store file that exists but cannot be read or decoded is an explicit failure
-/// and never becomes an empty result.
-fn read_observability_rows(state: &AppState) -> Result<Vec<SourceRow>, (StatusCode, Value)> {
-    let ports = configured_ports(state)
-        .map_err(|error| (StatusCode::BAD_GATEWAY, json!({ "error": error })))?;
-    let mut rows = Vec::new();
-    for port in ports {
-        let path = observability_store_path(state, port).map_err(|error| {
-            (
-                StatusCode::BAD_GATEWAY,
-                json!({ "error": format!("observability store path {port} unavailable: {error}") }),
-            )
-        })?;
-        let values = match routecodex_v3_debug::v3_webui_observability_read_raw_rows(&path) {
-            Ok(values) => values,
-            Err(error) => {
-                if path.exists() {
-                    return Err((
-                        StatusCode::BAD_GATEWAY,
-                        json!({ "error": format!("observability store {port} unavailable: {error}") }),
-                    ));
-                }
-                continue;
-            }
+/// The store is append-only between retention rewrites, so a reader that keeps
+/// the last consumed byte offset decodes only newly appended records instead of
+/// the whole history on every WebUI poll.
+#[derive(Default)]
+struct V3ObsPortCache {
+    dev: u64,
+    ino: u64,
+    offset: u64,
+    line: usize,
+    present: bool,
+    rows: Vec<SourceRow>,
+    max_seq: u64,
+}
+
+/// Process-wide observability read cache.
+///
+/// `projected` is the folded query projection of `ports` in configured listener
+/// order, keyed by the store identities it was folded from, so a burst of
+/// polling endpoints and SSE clients shares one fold instead of each re-reading
+/// and re-projecting the whole history.
+#[derive(Default)]
+struct V3ObsStoreCache {
+    ports: BTreeMap<PathBuf, V3ObsPortCache>,
+    projected_from: Vec<(PathBuf, u64, u64, u64)>,
+    projected: Option<Arc<Vec<QueryRow>>>,
+}
+
+fn v3_obs_store_cache() -> &'static Mutex<V3ObsStoreCache> {
+    static CACHE: OnceLock<Mutex<V3ObsStoreCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(V3ObsStoreCache::default()))
+}
+
+fn v3_obs_cache_guard() -> std::sync::MutexGuard<'static, V3ObsStoreCache> {
+    v3_obs_store_cache()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+}
+
+/// Refreshes one listener store cache entry from disk.
+///
+/// Returns `false` when the store file does not exist yet ("no traffic recorded
+/// for this listener"). A store that exists but cannot be read or decoded is an
+/// explicit error and never becomes an empty result.
+fn refresh_v3_obs_port_cache(
+    port: u16,
+    path: &PathBuf,
+    entry: &mut V3ObsPortCache,
+) -> Result<bool, String> {
+    let metadata = match std::fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            *entry = V3ObsPortCache::default();
+            return Ok(false);
+        }
+        Err(error) => {
+            return Err(format!("observability store {port} unavailable: {error}"));
+        }
+    };
+    let (dev, ino, len) = (metadata.dev(), metadata.ino(), metadata.len());
+    // A retention rewrite renames a fresh file into place, so the identity
+    // change is the reset signal; a shrunk file covers an in-place truncation.
+    if !entry.present || entry.dev != dev || entry.ino != ino || len < entry.offset {
+        *entry = V3ObsPortCache {
+            dev,
+            ino,
+            present: true,
+            ..V3ObsPortCache::default()
         };
-        for value in values {
+    }
+    if len > entry.offset {
+        let tail = routecodex_v3_debug::v3_webui_observability_read_raw_rows_from(
+            path,
+            entry.offset,
+            entry.line,
+        )
+        .map_err(|error| format!("observability store {port} unavailable: {error}"))?;
+        let mut decoded = Vec::with_capacity(tail.rows.len());
+        for value in tail.rows {
             let row = serde_json::from_value::<SourceRow>(value).map_err(|error| {
-                (
-                    StatusCode::BAD_GATEWAY,
-                    json!({
-                        "error": format!("decode observability store {port} row failed: {error}")
-                    }),
-                )
+                format!("decode observability store {port} row failed: {error}")
             })?;
-            rows.push(row);
+            decoded.push(row);
+        }
+        // The whole tail is committed at once: a rejected row must not leave the
+        // cache holding rows the offset has not consumed, which would re-append
+        // them on every later poll.
+        for row in decoded {
+            entry.max_seq = entry.max_seq.max(row.updated_epoch_ms);
+            entry.rows.push(row);
+        }
+        entry.offset = tail.next_offset;
+        entry.line = tail.next_line;
+    }
+    Ok(true)
+}
+
+/// Visits the decoded raw rows of every configured listener store through the
+/// same incremental cache the records, detail and SSE paths use.
+///
+/// The dashboard aggregates with the `request_key` folding of
+/// `v3_webui_observability_read_rows` rather than the query projection, so it
+/// needs the raw per-store rows; it shares the decoded row cache instead of
+/// re-reading whole stores through a second reader.
+pub(crate) fn visit_v3_obs_stores(
+    state: &AppState,
+    mut visit: impl FnMut(u16, &[SourceRow]),
+) -> Result<(), String> {
+    let ports = observability_store_paths(state)?;
+    let mut cache = v3_obs_cache_guard();
+    for (port, path) in &ports {
+        let entry = cache.ports.entry(path.clone()).or_default();
+        refresh_v3_obs_port_cache(*port, path, entry)?;
+    }
+    cache
+        .ports
+        .retain(|path, _| ports.iter().any(|(_, known)| known == path));
+    for (port, path) in &ports {
+        if let Some(entry) = cache.ports.get(path) {
+            visit(*port, &entry.rows);
         }
     }
-    Ok(rows)
+    Ok(())
+}
+
+/// Folded query projection of every persisted observability row.
+struct V3ObsProjection {
+    rows: Arc<Vec<QueryRow>>,
+    /// Highest `updated_epoch_ms` across every cached row.
+    max_seq: u64,
+}
+
+/// Reads the folded projection of every configured listener store.
+///
+/// Only records appended since the previous read are decoded; the fold itself
+/// is reused until a store identity changes. The cache lock also single-flights
+/// the concurrent polls of every open WebUI tab.
+fn read_v3_obs_projection(state: &AppState) -> Result<V3ObsProjection, (StatusCode, Value)> {
+    let ports = observability_store_paths(state)
+        .map_err(|error| (StatusCode::BAD_GATEWAY, json!({ "error": error })))?;
+    let mut cache = v3_obs_cache_guard();
+    let mut identity = Vec::with_capacity(ports.len());
+    let mut max_seq = 0u64;
+    for (port, path) in &ports {
+        let entry = cache.ports.entry(path.clone()).or_default();
+        match refresh_v3_obs_port_cache(*port, path, entry) {
+            Ok(true) => max_seq = max_seq.max(entry.max_seq),
+            Ok(false) => {}
+            Err(error) => return Err((StatusCode::BAD_GATEWAY, json!({ "error": error }))),
+        }
+        identity.push((path.clone(), entry.dev, entry.ino, entry.offset));
+    }
+    cache
+        .ports
+        .retain(|path, _| ports.iter().any(|(_, known)| known == path));
+    if cache.projected.is_none() || cache.projected_from != identity {
+        let folded = project_query_rows(
+            ports
+                .iter()
+                .filter_map(|(_, path)| cache.ports.get(path))
+                .flat_map(|entry| entry.rows.iter()),
+        );
+        cache.projected = Some(Arc::new(folded));
+        cache.projected_from = identity;
+    }
+    Ok(V3ObsProjection {
+        rows: Arc::clone(
+            cache
+                .projected
+                .as_ref()
+                .expect("projection is cached by the branch above"),
+        ),
+        max_seq,
+    })
+}
+
+/// Every persisted lifecycle row of one request, in configured listener order.
+fn read_v3_obs_rows_for_request_key(
+    state: &AppState,
+    request_key: &str,
+) -> Result<Vec<SourceRow>, (StatusCode, Value)> {
+    let ports = observability_store_paths(state)
+        .map_err(|error| (StatusCode::BAD_GATEWAY, json!({ "error": error })))?;
+    let mut cache = v3_obs_cache_guard();
+    let mut matching = Vec::new();
+    for (port, path) in &ports {
+        let entry = cache.ports.entry(path.clone()).or_default();
+        if let Err(error) = refresh_v3_obs_port_cache(*port, path, entry) {
+            return Err((StatusCode::BAD_GATEWAY, json!({ "error": error })));
+        }
+        matching.extend(
+            entry
+                .rows
+                .iter()
+                .filter(|row| row.request_key == request_key)
+                .cloned(),
+        );
+    }
+    Ok(matching)
 }
 
 fn query_params(raw_query: &RawQuery) -> HashMap<String, String> {
@@ -903,12 +1094,32 @@ async fn records(
             return (StatusCode::BAD_REQUEST, Json(json!({ "error": error }))).into_response()
         }
     };
-    let rows = match read_observability_rows(&state) {
-        Ok(rows) => rows,
-        Err((status, body)) => return (status, Json(body)).into_response(),
+    // The cache lock spans metadata reads, decoding and the fold, so the read
+    // runs on the blocking pool instead of stalling a runtime worker.
+    let projection_state = state.clone();
+    let projection = match tokio::task::spawn_blocking(move || {
+        read_v3_obs_projection(&projection_state)
+    })
+    .await
+    {
+        Ok(Ok(projection)) => projection,
+        Ok(Err((status, body))) => return (status, Json(body)).into_response(),
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": format!("observability records read task failed: {error}")
+                })),
+            )
+                .into_response()
+        }
     };
-    let rows = project_query_rows(rows);
-    let mut filtered: Vec<QueryRow> = rows.into_iter().filter(|row| query.matches(row)).collect();
+    let mut filtered: Vec<QueryRow> = projection
+        .rows
+        .iter()
+        .filter(|row| query.matches(row))
+        .cloned()
+        .collect();
     let timeseries_rows: Vec<super::timeseries::TimeseriesRow<'_>> = filtered
         .iter()
         .map(|row| super::timeseries::TimeseriesRow {
@@ -1267,14 +1478,25 @@ async fn record_detail(
     State(state): State<AppState>,
     AxumPath(request_key): AxumPath<String>,
 ) -> Response {
-    let rows = match read_observability_rows(&state) {
-        Ok(rows) => rows,
-        Err((status, body)) => return (status, Json(body)).into_response(),
+    let detail_state = state.clone();
+    let detail_key = request_key.clone();
+    let mut matching: Vec<SourceRow> = match tokio::task::spawn_blocking(move || {
+        read_v3_obs_rows_for_request_key(&detail_state, &detail_key)
+    })
+    .await
+    {
+        Ok(Ok(rows)) => rows,
+        Ok(Err((status, body))) => return (status, Json(body)).into_response(),
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": format!("observability record detail read task failed: {error}")
+                })),
+            )
+                .into_response()
+        }
     };
-    let mut matching: Vec<SourceRow> = rows
-        .into_iter()
-        .filter(|row| row.request_key == request_key)
-        .collect();
     if matching.is_empty() {
         return (
             StatusCode::NOT_FOUND,
@@ -1293,22 +1515,15 @@ async fn record_detail(
     let attempts: Vec<QueryRow> = matching
         .iter()
         .filter(|row| is_provider_attempt_failure(row))
-        .cloned()
         .map(to_attempt_query_row)
         .collect();
     let mut row = matching
         .iter()
         .rev()
         .find(|row| !is_provider_attempt_failure(row))
-        .cloned()
         .map(to_query_row)
         .unwrap_or_else(|| {
-            to_attempt_query_row(
-                matching
-                    .last()
-                    .cloned()
-                    .expect("matching rows are non-empty"),
-            )
+            to_attempt_query_row(matching.last().expect("matching rows are non-empty"))
         });
     let observed_error = row
         .meta

@@ -139,12 +139,10 @@ impl V3CodexSamplePersistHandle {
                 error.into_inner()
             })
             .take();
-        if let Some(task) = task.as_ref() {
-            while !task.is_finished() {
-                tokio::task::yield_now().await;
-            }
-        }
         if let Some(task) = task {
+            // Awaiting the handle is the wait. Polling `is_finished` with
+            // `yield_now` kept the task runnable and burned a whole core for
+            // the duration of the shutdown drain.
             if let Err(error) = task.await {
                 eprintln!("codex sample persist worker task failed: {error}");
             }
