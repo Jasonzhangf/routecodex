@@ -171,13 +171,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 V3RelayProviderAdmittedTargetResolution::Selected(selected) => {
                     (selected.selected, Some(selected.admission))
                 }
-                V3RelayProviderAdmittedTargetResolution::Failed(source)
-                    if source.source_kind == V3ErrorSourceKind::ModelNotFound =>
-                {
-                    return Err(V3ResponsesRelayRuntimeError::ModelNotFound(
-                        source.message.clone(),
-                    ));
-                }
                 V3RelayProviderAdmittedTargetResolution::Failed(source) => {
                     return Err(V3ResponsesRelayRuntimeError::Target(format!(
                         "{}: {}",

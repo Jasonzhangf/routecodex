@@ -1947,12 +1947,12 @@ async fn gemini_thinking_budget_and_include_thoughts_produce_no_reasoning_effort
 // E3: Gemini thinkingLevel -> reasoning.effort runtime integration.
 
 #[tokio::test]
-async fn gemini_unknown_direct_provider_model_returns_model_not_found() {
+async fn gemini_unknown_direct_provider_model_falls_back_to_default_pool() {
     let transport = JsonTransport {
         captured_url: Mutex::new(None),
         captured_body: Mutex::new(None),
     };
-    let error = execute_v3_gemini_relay_runtime(
+    execute_v3_gemini_relay_runtime(
         &manifest(),
         V3GeminiRelayRuntimeInput {
             server_id: "controlled".into(),
@@ -1972,11 +1972,10 @@ async fn gemini_unknown_direct_provider_model_returns_model_not_found() {
         &transport,
     )
     .await
-    .unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("direct provider model controlled.unknown-model is not configured"),
-        "gemini provider.model absence must surface ModelNotFound: {error}"
+    .unwrap();
+    assert_eq!(
+        transport.captured_url.lock().unwrap().as_deref(),
+        Some("http://controlled.invalid/v1beta/models/gemini-wire:generateContent"),
+        "an enabled provider that declares no such model must fall back to normal pool routing"
     );
 }
