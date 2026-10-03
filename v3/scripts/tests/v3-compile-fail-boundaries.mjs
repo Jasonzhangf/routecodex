@@ -100,7 +100,7 @@ for (const fixture of [
     mkdirSync(sourceDir);
     writeFileSync(
       join(root, 'Cargo.toml'),
-      `[package]\nname = "v3-target-health-mutation-fixture"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nroutecodex-v3-provider-responses = { path = "${resolve(v3Root, 'crates/routecodex-v3-provider-responses')}" }\n\n[workspace]\n`,
+      `[package]\nname = "v3-target-health-mutation-fixture"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nroutecodex-v3-provider-responses = { path = "${resolve(v3Root, 'crates/routecodex-v3-provider-responses')}" }\n\n[patch.crates-io]\nhyper = { path = ${JSON.stringify(resolve(v3Root, 'vendor/hyper'))} }\n\n[workspace]\n`,
     );
     writeFileSync(
       join(sourceDir, 'main.rs'),
@@ -217,7 +217,7 @@ for (const fixture of [
     mkdirSync(sourceDir);
     writeFileSync(
       join(root, 'Cargo.toml'),
-      `[package]\nname = "v3-provider-private-node-fixture"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nroutecodex-v3-provider-responses = { path = "${resolve(v3Root, 'crates/routecodex-v3-provider-responses')}" }\n\n[workspace]\n`,
+      `[package]\nname = "v3-provider-private-node-fixture"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nroutecodex-v3-provider-responses = { path = "${resolve(v3Root, 'crates/routecodex-v3-provider-responses')}" }\n\n[patch.crates-io]\nhyper = { path = ${JSON.stringify(resolve(v3Root, 'vendor/hyper'))} }\n\n[workspace]\n`,
     );
     writeFileSync(join(sourceDir, 'main.rs'), fixture.code);
     const result = spawnSync('cargo', ['check', '--offline', '--manifest-path', join(root, 'Cargo.toml')], {
@@ -269,7 +269,7 @@ for (const fixture of [
     mkdirSync(sourceDir);
     writeFileSync(
       join(root, 'Cargo.toml'),
-      `[package]\nname = "v3-hub-node-compile-fail-fixture"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nroutecodex-v3-config = { path = "${resolve(v3Root, 'crates/routecodex-v3-config')}" }\nroutecodex-v3-runtime = { path = "${resolve(v3Root, 'crates/routecodex-v3-runtime')}" }\nserde_json = "1"\n\n[workspace]\n`,
+      `[package]\nname = "v3-hub-node-compile-fail-fixture"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nroutecodex-v3-config = { path = "${resolve(v3Root, 'crates/routecodex-v3-config')}" }\nroutecodex-v3-runtime = { path = "${resolve(v3Root, 'crates/routecodex-v3-runtime')}" }\nserde_json = "1"\n\n[patch.crates-io]\nhyper = { path = ${JSON.stringify(resolve(v3Root, 'vendor/hyper'))} }\n\n[workspace]\n`,
     );
     writeFileSync(join(sourceDir, 'main.rs'), fixture.code);
     const result = spawnSync('cargo', ['check', '--offline', '--manifest-path', join(root, 'Cargo.toml')], {
