@@ -4179,7 +4179,7 @@ async fn responses_relay_json_error_projects_failure_terminal_with_done() {
 }
 
 #[tokio::test]
-async fn provider_terminal_http_response_preserves_real_status_body_and_end_to_end_headers() {
+async fn provider_terminal_external_http_never_projects_provider_response_to_client() {
     let log_file = std::env::temp_dir().join(format!(
         "rcc-provider-terminal-server-{}.log",
         std::process::id()
@@ -4191,9 +4191,6 @@ async fn provider_terminal_http_response_preserves_real_status_body_and_end_to_e
         vec![
             ("content-type".to_string(), b"application/json".to_vec()),
             ("retry-after".to_string(), b"17".to_vec()),
-            ("connection".to_string(), b"keep-alive, x-hop".to_vec()),
-            ("x-hop".to_string(), b"discard".to_vec()),
-            ("content-length".to_string(), b"999".to_vec()),
         ],
         raw_body.clone(),
     )
@@ -4202,17 +4199,23 @@ async fn provider_terminal_http_response_preserves_real_status_body_and_end_to_e
         &state,
         None,
         routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness),
-        false,
+        true,
     );
-    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
-    assert_eq!(response.headers()["retry-after"], "17");
-    assert_eq!(response.headers()["content-type"], "application/json");
-    assert!(!response.headers().contains_key("connection"));
-    assert!(!response.headers().contains_key("x-hop"));
-    assert!(!response.headers().contains_key("content-length"));
-    assert_eq!(
-        to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-        raw_body
+    // The provider's real status and headers are provider-private: the client boundary
+    // stays a transport break and never carries the upstream response.
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    assert!(!response.headers().contains_key("retry-after"));
+    let error = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect_err("a streaming external provider terminal must break the client transport");
+    assert!(
+        error.to_string().contains("provider pool exhausted"),
+        "{error}"
+    );
+    assert!(
+        !error.to_string().contains("rate_limit_error"),
+        "the provider body must not reach the client transport: {error}"
     );
 }
 

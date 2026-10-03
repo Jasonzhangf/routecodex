@@ -98,7 +98,7 @@ impl Drop for CliProcess {
 }
 
 #[tokio::test]
-async fn bug_705d624_real_http_429_retains_status_and_error_in_json_and_sse() {
+async fn bug_705d624_real_http_429_never_reaches_the_client() {
     let success = start_controlled_upstream(ProviderMode::Success).await;
     let mut rate_a = start_controlled_upstream(ProviderMode::RateLimited).await;
     let mut rate_b = start_controlled_upstream(ProviderMode::RateLimited).await;
@@ -108,24 +108,11 @@ async fn bug_705d624_real_http_429_retains_status_and_error_in_json_and_sse() {
     let mut cli = start_cli_server(&config, ports.all());
     wait_for_health(&client, &mut cli, ports.exhausted, "h2_exhausted").await;
 
-    for stream in [false, true] {
-        let response = client
-            .post(format!("http://127.0.0.1:{}/v1/responses", ports.exhausted))
-            .json(&json!({"model":"client-test","input":"429 parity","stream":stream}))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(response.status(), ReqwestStatusCode::TOO_MANY_REQUESTS);
-        let body = response.text().await.unwrap();
-        assert!(
-            body.contains("rate_limit_error"),
-            "stream={stream} body={body}"
-        );
-        assert!(
-            !body.contains("network_error"),
-            "stream={stream} body={body}"
-        );
-    }
+    // The provider pool is exhausted, so both client lanes observe a transport break.
+    // The real upstream 429 stays in the typed Error chain: the client never receives
+    // the provider status, a provider header, or a provider error body.
+    assert_no_front_http_headers(ports.exhausted, false).await;
+    assert_front_sse_transport_break(ports.exhausted).await;
     next_capture(&mut rate_a.captures, "429 first upstream").await;
     next_capture(&mut rate_b.captures, "429 second upstream").await;
     drop(cli);
@@ -133,7 +120,7 @@ async fn bug_705d624_real_http_429_retains_status_and_error_in_json_and_sse() {
 }
 
 #[tokio::test]
-async fn bug_705d624_last_real_429_survives_later_transport_failure_and_reselection_succeeds() {
+async fn bug_705d624_last_provider_failure_never_reaches_the_client_and_reselection_succeeds() {
     let success = start_controlled_upstream(ProviderMode::Success).await;
     let mut rate = start_controlled_upstream(ProviderMode::RateLimited).await;
     let mut no_response = start_no_response_upstream().await;
@@ -144,19 +131,10 @@ async fn bug_705d624_last_real_429_survives_later_transport_failure_and_reselect
     wait_for_health(&client, &mut cli, ports.exhausted, "h2_exhausted").await;
     wait_for_health(&client, &mut cli, ports.reselect, "h2_reselect").await;
 
-    let failure_response = client
-        .post(format!("http://127.0.0.1:{}/v1/responses", ports.exhausted))
-        .json(&json!({"model":"client-test","input":"429 then no response"}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        failure_response.status(),
-        ReqwestStatusCode::TOO_MANY_REQUESTS
-    );
-    let body = failure_response.text().await.unwrap();
-    assert!(body.contains("rate_limit_error"), "{body}");
-    assert!(!body.contains("network_error"), "{body}");
+    // Every candidate on the exhausted lane fails: the last real 429 and the later
+    // transport failure both stay in the typed Error chain, and the client boundary is a
+    // transport break instead of a provider status or a provider error body.
+    assert_no_front_http_headers(ports.exhausted, false).await;
     next_capture(&mut rate.captures, "429 before transport failure").await;
     next_capture(&mut no_response.captures, "transport after 429").await;
 
@@ -217,6 +195,28 @@ async fn bug_705d624_real_upstream_http_502_is_not_forwarded_to_client() {
         "second actual HTTP 502 upstream",
     )
     .await;
+    drop(cli);
+    wait_ports_closed(&client, &ports.all()).await;
+}
+
+#[tokio::test]
+async fn bug_705d624_aborted_provider_stream_never_projects_network_error_to_client() {
+    let success = start_controlled_upstream(ProviderMode::Success).await;
+    let mut aborted_a = start_aborted_sse_upstream().await;
+    let mut aborted_b = start_aborted_sse_upstream().await;
+    let ports = H2Ports::allocate();
+    let config = write_h2_config(&ports, &success, &aborted_a, &aborted_b, "");
+    let client = reqwest::Client::new();
+    let mut cli = start_cli_server(&config, ports.all());
+    wait_for_health(&client, &mut cli, ports.exhausted, "h2_exhausted").await;
+
+    // An aborted provider stream is a provider transport failure. It must stay in the
+    // typed Error chain: the client must never receive HTTP 502, a `network_error`
+    // code, or a `response.failed` frame.
+    assert_no_front_http_headers(ports.exhausted, false).await;
+    assert_front_sse_transport_break(ports.exhausted).await;
+    next_capture(&mut aborted_a.captures, "first aborted provider stream").await;
+    next_capture(&mut aborted_b.captures, "second aborted provider stream").await;
     drop(cli);
     wait_ports_closed(&client, &ports.all()).await;
 }
@@ -422,36 +422,10 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
     );
     assert_eq!(reselect_success.body["model"], "wire-success");
 
-    let exhausted_response = client
-        .post(format!("http://127.0.0.1:{}/v1/responses", ports.exhausted))
-        .json(&json!({
-            "model": "client-test",
-            "input": "default pool exhaustion",
-            "metadata": {"h2_case": "default_pool_exhaustion"}
-        }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        exhausted_response.status(),
-        ReqwestStatusCode::SERVICE_UNAVAILABLE
-    );
-    let exhausted_body: Value = exhausted_response.json().await.unwrap();
-    assert!(
-        exhausted_body.to_string().contains("controlled_failure-b"),
-        "last real upstream HTTP 503 response must retain its external error meaning: {exhausted_body}"
-    );
-    assert!(!exhausted_body.to_string().contains("network_error"));
-    assert!(
-        exhausted_body["error"].get("target_exhausted").is_none()
-            && exhausted_body["error"]
-                .get("candidates_remaining")
-                .is_none()
-            && exhausted_body["error"].get("decision").is_none()
-            && exhausted_body["error"].get("external_error").is_none(),
-        "Error06 body must not carry control-plane fields: {}",
-        exhausted_body["error"]
-    );
+    // The exhausted lane has no eligible candidate left, so the client boundary is a
+    // transport break. The last real upstream 503 stays in the typed Error chain: the
+    // client never receives a provider status, a provider error code, or a provider body.
+    assert_no_front_http_headers(ports.exhausted, false).await;
     let exhausted_first = next_capture(&mut failure_a.captures, "exhaustion first").await;
     assert_eq!(exhausted_first.body["model"], "wire-failure-a");
     let exhausted_second = next_capture(&mut failure_b.captures, "exhaustion second").await;
@@ -593,7 +567,7 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
             "default_pool_exhaustion": {
                 "first_provider_wire_request": exhausted_first.body,
                 "second_provider_wire_request": exhausted_second.body,
-                "client_response": exhausted_body
+                "client_transport_break": "zero HTTP response bytes; no provider status, code, or body"
             },
             "dry_run": dry_run
         },
@@ -843,6 +817,43 @@ async fn start_no_response_upstream() -> ControlledUpstream {
                         accept: None,
                         body: json!({"transport_connected": true}),
                     }).unwrap();
+                    drop(socket);
+                }
+            }
+        }
+    });
+    ControlledUpstream {
+        base_url: format!("http://{address}/v1"),
+        captures: captures_rx,
+        shutdown: Some(shutdown_tx),
+    }
+}
+
+/// A provider that commits an SSE response head and one frame, then aborts the body.
+/// The runtime reads an incomplete provider stream, which is a provider transport
+/// failure and must stay provider-private.
+async fn start_aborted_sse_upstream() -> ControlledUpstream {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = &mut shutdown_rx => break,
+                accepted = listener.accept() => {
+                    let (mut socket, _) = accepted.unwrap();
+                    captures_tx.send(ProviderCapture {
+                        authorization: None,
+                        accept: None,
+                        body: json!({"transport_connected": true}),
+                    }).unwrap();
+                    let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n";
+                    let frame = "event: response.created\ndata: {\"type\":\"response.created\",\"id\":\"h2_aborted\"}\n\n";
+                    let chunk = format!("{:x}\r\n{}\r\n", frame.len(), frame);
+                    let _ = socket.write_all(head.as_bytes()).await;
+                    let _ = socket.write_all(chunk.as_bytes()).await;
+                    // Abort the body: no terminating chunk and no `[DONE]`.
                     drop(socket);
                 }
             }

@@ -129,7 +129,7 @@ cases:
     provider_model_scope: generic_openai_chat_provider_models
     scenario_groups: [text, tool, image, error]
     owner_feature_id: v3.openai_chat_relay_runtime_integration
-    controlled_evidence: { status: controlled_verified, refs: [docs/architecture/manifests/v3.openai_chat_relay.controlled_runtime.mainline.yml, docs/architecture/wiki/v3-openai-chat-relay-controlled-runtime.md], gates: [npm run test:v3-openai-chat-relay-runtime-integration, npm run verify:v3-openai-chat-relay-runtime-integration] }
+    controlled_evidence: { status: controlled_verified, refs: [docs/architecture/manifests/v3.openai_chat_relay.controlled_runtime.mainline.yml, docs/architecture/wiki/v3-openai-chat-relay-controlled-runtime.md], gates: [npm run test:v3-openai-chat-relay-runtime-integration, npm run test:v3-h2-chat-direct-isolation, npm run verify:v3-openai-chat-relay-runtime-integration] }
     live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/evidence.jsonl, .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json, MEMORY.md], blockers: [] }
     production: { status: ready, blockers: [] }
   - id: openai_chat_sse_http
@@ -139,7 +139,7 @@ cases:
     provider_model_scope: generic_openai_chat_provider_models
     scenario_groups: [text, tool, image, error]
     owner_feature_id: v3.openai_chat_relay_runtime_integration
-    controlled_evidence: { status: controlled_verified, refs: [docs/architecture/manifests/v3.openai_chat_relay.controlled_runtime.mainline.yml, docs/architecture/wiki/v3-openai-chat-relay-controlled-runtime.md], gates: [npm run test:v3-openai-chat-relay-runtime-integration, npm run verify:v3-openai-chat-relay-runtime-integration] }
+    controlled_evidence: { status: controlled_verified, refs: [docs/architecture/manifests/v3.openai_chat_relay.controlled_runtime.mainline.yml, docs/architecture/wiki/v3-openai-chat-relay-controlled-runtime.md], gates: [npm run test:v3-openai-chat-relay-runtime-integration, npm run test:v3-h2-chat-direct-isolation, npm run verify:v3-openai-chat-relay-runtime-integration] }
     live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/evidence.jsonl, .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json, MEMORY.md], blockers: [] }
     production: { status: ready, blockers: [] }
   - id: openai_chat_websocket_v2
