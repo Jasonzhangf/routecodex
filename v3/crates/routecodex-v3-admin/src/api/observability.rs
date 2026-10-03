@@ -834,7 +834,9 @@ fn configured_ports(state: &AppState) -> Result<Vec<u16>, String> {
 /// authoring debug log file truth. The authoring truth is read once here: a
 /// per-port `read_authoring()` recompiled the whole provider directory for
 /// every listener on every observability read.
-fn observability_store_paths(state: &AppState) -> Result<Vec<(u16, PathBuf)>, String> {
+///
+/// Empty when the authoring config enables no listener.
+fn observability_store_sources(state: &AppState) -> Result<Vec<(u16, PathBuf)>, String> {
     let authoring = state
         .store
         .read_authoring()
@@ -847,9 +849,6 @@ fn observability_store_paths(state: &AppState) -> Result<Vec<(u16, PathBuf)>, St
         .collect::<Vec<_>>();
     ports.sort_unstable();
     ports.dedup();
-    if ports.is_empty() {
-        return Err("observability has no enabled listener source".to_string());
-    }
     let debug_log = authoring.debug.log_file.as_deref();
     Ok(ports
         .into_iter()
@@ -864,6 +863,17 @@ fn observability_store_paths(state: &AppState) -> Result<Vec<(u16, PathBuf)>, St
             )
         })
         .collect())
+}
+
+/// `observability_store_sources` for the query surfaces, which have always
+/// reported a config with no enabled listener as an error rather than as an
+/// empty history.
+fn observability_store_paths(state: &AppState) -> Result<Vec<(u16, PathBuf)>, String> {
+    let sources = observability_store_sources(state)?;
+    if sources.is_empty() {
+        return Err("observability has no enabled listener source".to_string());
+    }
+    Ok(sources)
 }
 
 /// Incremental reader position and decoded rows for one listener store.
@@ -975,7 +985,9 @@ pub(crate) fn visit_v3_obs_stores(
     state: &AppState,
     mut visit: impl FnMut(u16, &[SourceRow]),
 ) -> Result<(), String> {
-    let ports = observability_store_paths(state)?;
+    // A config that enables no listener has no store to visit. The overview has
+    // always aggregated that as an empty history instead of failing.
+    let ports = observability_store_sources(state)?;
     let mut cache = v3_obs_cache_guard();
     for (port, path) in &ports {
         let entry = cache.ports.entry(path.clone()).or_default();
