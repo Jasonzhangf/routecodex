@@ -129,3 +129,44 @@ dev 覆盖 `ROUTECODEX_V3_ADMIN_BIND=127.0.0.1:18090` 让 admin 端口避让后�
 
 边界：以上为本次候选产物在隔离实例上的真实入口证据；**用户 live daemon（4444/7777）尚未安装/重启**，
 故「已安装 runtime 的同入口重放」不成立，未宣称闭环。
+
+## 二次 review 与合并（2026-10-03 23:0x）
+
+第二轮独立架构 review 结论 **PASS**：blocking 消融项确认解决，未发现引入回归。其独立核验：
+全仓 `ModelNotFound` 0 命中；`routecodex-v3-admin/src/provider_models.rs:100` 的 `model_not_found`
+是 admin provider-model 变更接口的局部 HTTP 错误码，与已删除的 `V3ErrorSourceKind` 无耦合；
+`routecodex-v3-error/src/lib.rs` 的状态映射是逐变体穷尽匹配（无通配），删 404 分支不改变其它 kind。
+
+review advisory 处理：
+- 已改：catalog feature 的 `owner_scope` / `required_unit` / `completion_rule.runtime` 旧「路由组上限」表述，
+  以及本 feature 绑定的 `docs/design/codex-model-capability-contract.md` 的可见模型规则（改为三面 + 入口名优先级）。
+- 已改：`v3-function-map.yml` catalog `owner_files` / `allowed_paths` 补齐 `models_catalog.rs` 与本笔记。
+- 驳回：reviewer 建议删除 `anthropic_relay_runtime.rs` 的 `V3ErrorSourceKind` import。该 import 被
+  `use super::*` 的子模块使用；删除后 `cargo check` 报 4 个 `E0433`，属活跃引用而非死代码，已保留并记录。
+
+## origin/main 前进与合并后复验（2026-10-03 23:1x）
+
+推分支时发现 `origin/main` 已从 `2fde74987` 前进到 `50ba5e540`（PR #313：client boundary 与
+"converge terminal error evidence on one writer"，含 `routecodex-v3-server/src/{endpoint_handlers,
+frame_builders,live_snapshot,websocket}.rs` 与 `hub_v1/{relay_runtime_shared,responses_relay_failures}.rs`）。
+已把最新 main 合入候选：merge commit `b0ea0fdff`，**无文本冲突**；合并后复核
+`ModelNotFound` 仍 0 命中、`is_routed_exposed` 与入口名虚拟条目段仍在。
+
+合并后重跑（候选 = main@50ba5e540 + 本修复）：
+- `cargo check --workspace --all-targets` **0 error**；`cargo +stable fmt --all -- --check` 干净。
+- error 18/14/2/4；runtime lib 1104；runtime 集成 18/21/43；config+VR 36/57/11/9/26/2 —— 全绿。
+- `multi_listener_server` **78 passed / 0 failed 连续 3 次**；controlled relay/gemini/direct 全绿。
+- 首轮合并后全量跑出现 3 个失败，**判为并发争用**：全部 panic 在
+  `spawn_v3_server_aggregate(...).unwrap()`（测试服务器起不来），三个用例单独跑全绿，
+  且每次失败集合不同（run1 与 run2 三个失败互不相同），随后连续 3 次全量 78/78。
+- gates：build-admission lockstep PASS digest=`406616463cc04e228029cb38943f573b2498dd63752fc2ec00e0de732685612e`；
+  docs / resource / module / rust-only 全 PASS。
+
+合并后 live 复验（重新 build 的 `rccv3`，隔离实例，真实入口）：
+- `GET /health` ok；`GET /v1/models` 仍是三面：`mock.mock-model`（`direct_route:true`, `provider:mock`）
+  + `gpt-5.5` / `auto` / `client-alias`（`direct_route:false`, `routecodex`）。
+- `POST /v1/chat/completions`：`gpt-5.5` / `auto` / `client-alias` / `mock.unknown-model` / `mock.mock-model`
+  **全部 200**，upstream 收到的 wire model 全部 `mock-model`。
+- `POST /v1/responses`：`mock.unknown-model` 与 `auto` 均 **200**，`model=mock-model`。
+
+边界：用户 live daemon（4444/7777）仍未安装/重启；已安装 runtime 的同入口重放不成立，未宣称闭环。
