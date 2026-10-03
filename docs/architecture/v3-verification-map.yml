@@ -3120,7 +3120,7 @@ features:
   - Bounded Chat Anthropic and Responses terminal facts match once and retain exact policy identity/path through retry backoff and final projection.
   - Configured backoff is a minimum combined with provider-action-gate delay by max rather than addition.
   - Only a non-matching successful response records provider success and reaches Resp03 client commit.
-  - Responses, OpenAI Chat, and Anthropic genuinely rejected provider terminals, including an Anthropic `refusal` stop reason, enter Error01-06 and reselect before any client commit; an output-cap terminal on the OpenAI Chat wire (`length`/`max_tokens`/`max_output_tokens`) and an Anthropic `max_tokens` stop reason are valid partial output and never enter that path, while a Responses `response.incomplete` carrying `max_output_tokens` still does.
+  - Responses, OpenAI Chat, and Anthropic genuinely rejected provider terminals, including an Anthropic `refusal` stop reason and a Responses `response.incomplete` carrying `content_filter`, enter Error01-06 and reselect before any client commit; an output-cap terminal on the OpenAI Chat wire (`length`/`max_tokens`/`max_output_tokens`), an Anthropic `max_tokens` stop reason, and a Responses `response.incomplete` carrying `max_output_tokens` are all the same valid-partial-output semantic and never enter that path, on any entry.
   required_negative:
   - Id model and metadata strings cannot trigger content matching.
   - Error policy directive cannot enter normal provider/client payload MetadataCenter or SSE/Server ownership.
