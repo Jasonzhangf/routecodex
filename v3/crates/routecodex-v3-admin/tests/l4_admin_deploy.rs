@@ -608,6 +608,9 @@ async fn unavailable_admin_token_fails_closed_with_503() {
         config_path,
         admin_token: None,
         started_at_epoch_ms: 0,
+        records_cache: std::sync::Arc::new(
+            routecodex_v3_admin::api::observability::RecordsProjectionCache::default(),
+        ),
     };
     let server = bind_test_server_with_state(state, home).await;
 

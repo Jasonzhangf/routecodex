@@ -10,12 +10,14 @@
 
 mod artifacts;
 mod cooldown;
+mod records_cache;
 mod stream;
 
 use self::artifacts::{
     artifact_content, artifacts, list_v3_obs_artifacts, resolve_v3_obs_sample_dir,
 };
 use self::cooldown::{add_cooldown, cooldown_pool, probe_cooldown, remove_cooldown};
+pub use self::records_cache::RecordsProjectionCache;
 use self::stream::stream;
 use crate::AppState;
 use axum::extract::{Path as AxumPath, RawQuery, State};
@@ -28,6 +30,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// The six typed Error chain nodes, in canonical order. The detail endpoint
 /// always reports all six; nodes the store did not observe are `not_reached`.
@@ -834,6 +837,26 @@ fn observability_store_path(state: &AppState, port: u16) -> Result<PathBuf, Stri
     ))
 }
 
+/// The cached records projection for every configured listener port.
+fn records_query_rows(state: &AppState) -> Result<Arc<Vec<QueryRow>>, (StatusCode, Value)> {
+    let ports = configured_ports(state)
+        .map_err(|error| (StatusCode::BAD_GATEWAY, json!({ "error": error })))?;
+    let mut paths = Vec::with_capacity(ports.len());
+    for port in ports {
+        let path = observability_store_path(state, port).map_err(|error| {
+            (
+                StatusCode::BAD_GATEWAY,
+                json!({ "error": format!("observability store path {port} unavailable: {error}") }),
+            )
+        })?;
+        paths.push(path);
+    }
+    state
+        .records_cache
+        .project(&paths)
+        .map_err(|error| (StatusCode::BAD_GATEWAY, json!({ "error": error })))
+}
+
 /// Read every persisted observability row across the configured listeners.
 ///
 /// A store file that does not exist is "no traffic recorded yet" and is skipped;
@@ -903,12 +926,15 @@ async fn records(
             return (StatusCode::BAD_REQUEST, Json(json!({ "error": error }))).into_response()
         }
     };
-    let rows = match read_observability_rows(&state) {
+    let projected = match records_query_rows(&state) {
         Ok(rows) => rows,
         Err((status, body)) => return (status, Json(body)).into_response(),
     };
-    let rows = project_query_rows(rows);
-    let mut filtered: Vec<QueryRow> = rows.into_iter().filter(|row| query.matches(row)).collect();
+    let mut filtered: Vec<QueryRow> = projected
+        .iter()
+        .filter(|row| query.matches(row))
+        .cloned()
+        .collect();
     let timeseries_rows: Vec<super::timeseries::TimeseriesRow<'_>> = filtered
         .iter()
         .map(|row| super::timeseries::TimeseriesRow {
