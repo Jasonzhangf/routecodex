@@ -24,12 +24,13 @@ pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
     mut input: V3HubReqInbound01ClientRaw,
 ) -> Result<V3HubReqInbound02Normalized, String> {
     if input.entry_protocol == V3HubEntryProtocol::Responses
-        && input
-            .payload
-            .0
-            .get("messages")
-            .and_then(serde_json::Value::as_array)
-            .is_none()
+        && (input.payload.0.get("input").is_some()
+            || input
+                .payload
+                .0
+                .get("messages")
+                .and_then(serde_json::Value::as_array)
+                .is_none())
     {
         // canonical 化前先清洗原始 responses payload：此时 fco output 图片还是
         // 数组形态，normalize 能正确替换为 [Image]；canonical 转换会把数组
@@ -40,6 +41,15 @@ pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
         let mut canonical =
             super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat(raw)
                 .map_err(|error| format!("Responses inbound canonicalization failed: {error}"))?;
+        if let Some(source) = raw.get("messages").filter(|value| !value.is_null()) {
+            let source = source.as_array().ok_or_else(|| {
+                "Responses inbound canonicalization failed: messages must be an array".to_string()
+            })?;
+            let decoded = canonical["messages"]
+                .as_array()
+                .expect("codec Chat messages");
+            canonical["messages"] = Value::Array(merge_responses_chat_histories(source, decoded)?);
+        }
         normalize_v3_history_image_placeholders(&mut canonical);
         input.payload.0 = Arc::new(canonical);
         return Ok(V3HubReqInbound02Normalized {
@@ -126,6 +136,131 @@ pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
     })
 }
 
+fn merge_responses_chat_histories(
+    source: &[Value],
+    decoded: &[Value],
+) -> Result<Vec<Value>, String> {
+    if source.len() == decoded.len() {
+        if let Some(merged) = source
+            .iter()
+            .zip(decoded)
+            .map(|(source, decoded)| merge_equivalent_chat_value(source, decoded))
+            .collect::<Option<Vec<_>>>()
+        {
+            return Ok(merged);
+        }
+    }
+    // Legacy public hook callers supply preceding Chat calls and current Responses
+    // results. Decode the results first; Req04 still owns id/kind pairing.
+    if decoded.iter().all(|message| message["role"] == "tool") {
+        let mut merged = source.to_vec();
+        for result in decoded {
+            if let Some(existing) = merged.iter_mut().find(|message| {
+                message["role"] == "tool"
+                    && message.get("tool_call_id") == result.get("tool_call_id")
+            }) {
+                *existing = merge_equivalent_chat_value(existing, result).ok_or_else(|| {
+                    "Responses inbound canonicalization failed: conflicting tool output representations".to_string()
+                })?;
+            } else {
+                merged.push(result.clone());
+            }
+        }
+        return Ok(merged);
+    }
+    Err(
+        "Responses inbound canonicalization failed: conflicting input and messages representations"
+            .to_string(),
+    )
+}
+
+fn merge_equivalent_chat_value(source: &Value, decoded: &Value) -> Option<Value> {
+    match (source, decoded) {
+        (Value::Object(source), Value::Object(decoded)) => {
+            let empty_assistant_content = |object: &serde_json::Map<String, Value>| {
+                object.get("role").is_some_and(|role| role == "assistant")
+                    && object
+                        .get("tool_calls")
+                        .and_then(Value::as_array)
+                        .is_some_and(|calls| !calls.is_empty())
+                    && object
+                        .get("content")
+                        .is_none_or(|content| content.is_null() || content.as_str() == Some(""))
+            };
+            let semantic_keys = |object: &serde_json::Map<String, Value>| {
+                object
+                    .keys()
+                    .filter(|key| {
+                        key.as_str() != "routecodex_chat_extension"
+                            && !(key.as_str() == "content" && empty_assistant_content(object))
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>()
+            };
+            if semantic_keys(source) != semantic_keys(decoded) {
+                return None;
+            }
+            let mut merged = source.clone();
+            for (key, value) in decoded {
+                if key == "routecodex_chat_extension" {
+                    let mut fields = match source.get(key) {
+                        Some(source) => source.as_object()?.clone(),
+                        None => serde_json::Map::new(),
+                    };
+                    for (field, value) in value.as_object()? {
+                        if let Some(existing) = fields.get(field) {
+                            if existing != value {
+                                return None;
+                            }
+                        } else {
+                            fields.insert(field.clone(), value.clone());
+                        }
+                    }
+                    merged.insert(key.clone(), Value::Object(fields));
+                } else if key == "content"
+                    && empty_assistant_content(source)
+                    && empty_assistant_content(decoded)
+                {
+                    // Chat assistant tool calls permit absent/null content; the
+                    // Responses codec spells that same empty content as "".
+                } else if key == "content"
+                    && comparable_chat_content(&source[key]) == comparable_chat_content(value)
+                {
+                    // Preserve the source representation; only singleton plain text
+                    // is equivalent to its scalar Chat spelling.
+                } else {
+                    merged.insert(
+                        key.clone(),
+                        merge_equivalent_chat_value(&source[key], value)?,
+                    );
+                }
+            }
+            Some(Value::Object(merged))
+        }
+        (Value::Array(source), Value::Array(decoded)) if source.len() == decoded.len() => source
+            .iter()
+            .zip(decoded)
+            .map(|(source, decoded)| merge_equivalent_chat_value(source, decoded))
+            .collect::<Option<Vec<_>>>()
+            .map(Value::Array),
+        _ if source == decoded => Some(source.clone()),
+        _ => None,
+    }
+}
+
+fn comparable_chat_content(content: &Value) -> &Value {
+    if let Some(parts) = content.as_array() {
+        if parts.len() == 1
+            && parts[0].as_object().is_some_and(|part| part.len() == 2)
+            && parts[0]["type"] == "text"
+            && parts[0]["text"].is_string()
+        {
+            return &parts[0]["text"];
+        }
+    }
+    content
+}
+
 pub fn build_v3_hub_req_inbound_02_responses_chat_canonical_from_v3_hub_req_inbound_01(
     input: V3HubReqInbound01ClientRaw,
 ) -> Result<V3HubReqInbound02Normalized, String> {
@@ -134,32 +269,7 @@ pub fn build_v3_hub_req_inbound_02_responses_chat_canonical_from_v3_hub_req_inbo
             "Responses inbound canonicalization requires the Responses entry protocol".to_string(),
         );
     }
-    if input
-        .payload
-        .0
-        .get("messages")
-        .and_then(serde_json::Value::as_array)
-        .is_some()
-    {
-        return Ok(V3HubReqInbound02Normalized {
-            previous: input,
-            semantic_protocol: V3HubRequestSemanticProtocol::Chat,
-            canonicalized_from_responses: false,
-            memory_raw_capture_guidance_injected: false,
-        });
-    }
-    let mut input = input;
-    let canonical = super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat(
-        input.payload.0.as_ref(),
-    )
-    .map_err(|error| format!("Responses inbound canonicalization failed: {error}"))?;
-    input.payload.0 = Arc::new(canonical);
-    Ok(V3HubReqInbound02Normalized {
-        previous: input,
-        semantic_protocol: V3HubRequestSemanticProtocol::Chat,
-        canonicalized_from_responses: true,
-        memory_raw_capture_guidance_injected: false,
-    })
+    build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(input)
 }
 
 #[cfg(test)]

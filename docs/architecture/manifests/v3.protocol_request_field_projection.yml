@@ -56,6 +56,7 @@ payload_semantics:
   - request.tools.custom_declaration
   - request.tool_choice.named_custom
   - request.messages.tool_calls.custom
+  - request.messages.tool_result.extra_fields
 semantic_registry:
   - semantic_id: request.metadata
     chat_storage: routecodex_chat_extension.responses_request.metadata
@@ -197,6 +198,14 @@ semantic_registry:
       responses: mapped_exact
       openai_chat: mapped_exact_native_custom
       anthropic: mapped_compatible_registered:v3.custom_tool.anthropic_string_input_wrapper.v1
+      gemini: unsupported
+  - semantic_id: request.messages.tool_result.extra_fields
+    chat_storage: messages[].routecodex_chat_extension.responses_tool_output_extra_fields
+    type: opaque_business_object
+    projections:
+      responses: mapped_exact
+      openai_chat: unsupported
+      anthropic: unsupported
       gemini: unsupported
 compatibility_registry:
   - compatibility_id: v3.custom_tool.anthropic_string_input_wrapper.v1
