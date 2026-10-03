@@ -312,6 +312,8 @@ async fn assert_incomplete_sse_or_no_response(response: Result<reqwest::Response
         let text = String::from_utf8_lossy(&wire);
         assert!(
             !text.contains("error")
+                && !text.contains("provider")
+                && !text.contains("transport break")
                 && !text.contains("response.failed")
                 && !text.contains("[DONE]")
                 && !text.contains("response.completed"),
@@ -5431,6 +5433,8 @@ async fn model_entries_never_deliver_provider_or_sse_decode_errors_blackbox() {
                 let text = String::from_utf8_lossy(&wire);
                 assert!(
                     !text.contains("controlled_unavailable")
+                        && !text.contains("provider transport break")
+                        && !text.contains("provider pool exhausted")
                         && !text.contains("response.failed")
                         && !text.contains("event: error")
                         && !text.contains("\"error\""),

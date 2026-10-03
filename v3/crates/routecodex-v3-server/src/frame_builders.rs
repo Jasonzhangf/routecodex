@@ -426,14 +426,14 @@ pub(crate) fn provider_terminal_response(
 /// A concurrent exec replacement owns the same client boundary. This terminal
 /// suppresses a restart closeout that has not committed, and commits the restart
 /// closeout that the replacement deferred while waiting for the head. The client then
-/// observes either the SSE transport break or the restart `503`, never zero bytes.
+/// observes an incomplete transfer or a transport close, without an error frame.
 fn v3_sse_transport_disconnect_response(
     state: &V3ListenerState,
     connection: Option<V3FrontConnectionIdentity>,
 ) -> Response<Body> {
     let broker = state.front_transport_broker.clone();
     let body = stream::once(async {
-        Ok::<Vec<u8>, io::Error>(b": routecodex provider transport break\n\n".to_vec())
+        Ok::<Vec<u8>, io::Error>(b":\n\n".to_vec())
     })
     .chain(stream::once(async move {
         if let Some(connection) = connection {

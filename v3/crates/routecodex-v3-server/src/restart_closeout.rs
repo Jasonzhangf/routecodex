@@ -131,14 +131,13 @@ impl V3FrontTransportCloseoutState {
     /// Suppress a pending restart closeout frame for a terminal that owns its own
     /// client-visible boundary.
     ///
-    /// The streaming no-response terminal writes the SSE transport break itself, so a
-    /// concurrent restart replacement must not also queue the `503` closeout frame.
+    /// The streaming no-response terminal owns the incomplete SSE transfer, so a
+    /// concurrent restart replacement must not queue another client frame.
     /// Unlike `abort_without_response` this leaves the connection open, because Hyper
     /// still has to write the response head before the body fails.
     ///
     /// Returns `false` when a restart closeout already committed on this connection.
-    /// The committed `503` is the client-visible boundary then, and clearing it would
-    /// leave the client with the same silent zero-byte close this terminal removes.
+    /// The committed transport close is the client-visible boundary then.
     pub(crate) fn suppress_restart_closeout_frame(&self) -> bool {
         let mut request_cycle = self
             .request_cycle

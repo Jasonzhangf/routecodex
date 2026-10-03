@@ -135,7 +135,7 @@ async fn front_socket_deferred_closeout_keeps_the_sse_head_writable() {
             .write_tx
             .send(
                 b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\r\n\
-                  : routecodex provider transport break\n\n"
+                  :\n\n"
                     .to_vec(),
             )
             .await
@@ -162,8 +162,8 @@ async fn front_socket_deferred_closeout_keeps_the_sse_head_writable() {
         "the deferred closeout must let the SSE response head reach the client: {text:?}"
     );
     assert!(
-        text.contains(": routecodex provider transport break"),
-        "the deferred closeout must let the transport break reach the client: {text:?}"
+        text.ends_with(":\n\n") && !text.contains("provider"),
+        "the deferred closeout must preserve neutral SSE framing: {text:?}"
     );
     assert!(
         !text.contains("503"),
