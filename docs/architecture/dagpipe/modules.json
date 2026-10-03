@@ -6,7 +6,6 @@
     { "id": "error", "status": "graph", "graph": "docs/architecture/dagpipe/v3.operation_runner.error.graph.json" }
   ],
   "extensions": [
-    { "id": "dsh-responses-function-call-terminal", "status": "graph", "graph": "docs/architecture/dagpipe/dsh-responses-function-call-terminal.graph.json" },
-    { "id": "codex-sample-persistence", "status": "graph", "graph": "docs/architecture/dagpipe/v3.codex_sample_persistence.graph.json" }
+    { "id": "dsh-responses-function-call-terminal", "status": "graph", "graph": "docs/architecture/dagpipe/dsh-responses-function-call-terminal.graph.json" }
   ]
 }
