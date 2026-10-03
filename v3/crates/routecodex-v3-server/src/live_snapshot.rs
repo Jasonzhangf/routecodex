@@ -6,6 +6,81 @@ use routecodex_v3_runtime::V3ResponsesDirectRuntimeOutput;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 
+pub(crate) fn start_v3_live_snapshot_session(
+    state: &V3ListenerState,
+    trace_scope: &routecodex_v3_debug::V3DebugTraceScope,
+) -> Result<Option<String>, Box<Response<Body>>> {
+    match state.debug.start_snapshot_session(trace_scope, "live") {
+        Ok(session_id) => Ok(Some(session_id)),
+        Err(V3DebugError::Disabled("snapshots")) => Ok(None),
+        Err(error) => Err(Box::new(foundation_output_response(
+            project_v3_debug_failure("V3SnapshotSessionStarted", error),
+        ))),
+    }
+}
+
+pub(crate) fn record_v3_live_snapshot_projection(
+    state: &V3ListenerState,
+    trace_scope: &routecodex_v3_debug::V3DebugTraceScope,
+    snapshot_session_id: Option<&str>,
+    status: u16,
+    node_trace: &[&'static str],
+    phase: &'static str,
+) -> Option<Response<Body>> {
+    let session_id = snapshot_session_id?;
+    for node_id in node_trace {
+        if let Err(error) = state.debug.record_snapshot(
+            trace_scope,
+            session_id,
+            *node_id,
+            json!({
+                "node_id": node_id,
+                "phase": phase,
+                "status": status,
+                "live": true
+            }),
+        ) {
+            return Some(foundation_output_response(project_v3_debug_failure(
+                "V3SnapshotNodeCaptured",
+                error,
+            )));
+        }
+    }
+    if let Err(error) = state
+        .debug
+        .close_snapshot_session_keep_snapshots(trace_scope, session_id)
+    {
+        return Some(foundation_output_response(project_v3_debug_failure(
+            "V3SnapshotSessionClosed",
+            error,
+        )));
+    }
+    None
+}
+
+pub(crate) fn relay_error_body_for_console(body: &V3ResponsesRelayClientBody) -> Option<&Value> {
+    match body {
+        V3ResponsesRelayClientBody::Json(value) => Some(value),
+        V3ResponsesRelayClientBody::Sse(_) => None,
+    }
+}
+
+pub(crate) fn openai_chat_error_body_for_console(
+    body: &V3OpenAiChatRelayClientBody,
+) -> Option<&Value> {
+    match body {
+        V3OpenAiChatRelayClientBody::Json(value) => Some(value),
+        V3OpenAiChatRelayClientBody::Sse(_) => None,
+    }
+}
+
+pub(crate) fn gemini_error_body_for_console(body: &V3GeminiRelayClientBody) -> Option<&Value> {
+    match body {
+        V3GeminiRelayClientBody::Json(value) => Some(value),
+        V3GeminiRelayClientBody::Sse(_) => None,
+    }
+}
+
 /// `true` when a relay/direct runtime output carries a terminal client error.
 ///
 /// The client status is the whole predicate: the output's Error chain is not
@@ -1314,124 +1389,6 @@ pub(crate) fn capture_v3_responses_direct_provider_snapshots(
         }
     }
     None
-}
-
-pub(crate) fn capture_v3_foundation_runtime_response(
-    state: &V3ListenerState,
-    trace_scope: &routecodex_v3_debug::V3DebugTraceScope,
-    entry_protocol: &str,
-    execution_mode: V3EntryProtocolExecutionMode,
-    endpoint: &str,
-    request_id: &str,
-    output: &V3FoundationRuntimeOutput,
-) -> Option<Response<Body>> {
-    if !state.debug.should_capture_snapshot_stage("client-response") {
-        return None;
-    }
-    if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Direct {
-        if !v3_codex_sample_scope_allows(state, execution_mode) {
-            return None;
-        }
-        let payload = state.debug.project_payload_verbatim(output.body.clone());
-        if let Err(error) = persist_v3_codex_sample_payload(
-            state,
-            entry_protocol,
-            endpoint,
-            request_id,
-            "response.json",
-            &payload,
-        ) {
-            return Some(foundation_output_response(project_v3_debug_failure(
-                "V3Debug03RawResponseCaptured",
-                V3DebugError::Sink(error),
-            )));
-        }
-        return None;
-    }
-    let projection = match state
-        .debug
-        .capture_raw_response(trace_scope, output.body.clone())
-    {
-        Ok(projection) => projection,
-        Err(error) => {
-            return Some(foundation_output_response(project_v3_debug_failure(
-                "V3Debug03RawResponseCaptured",
-                error,
-            )));
-        }
-    };
-    if let Some(projection) = projection {
-        if let Err(error) = persist_v3_codex_sample_payload(
-            state,
-            entry_protocol,
-            endpoint,
-            request_id,
-            "response.json",
-            &projection.payload,
-        ) {
-            return Some(foundation_output_response(project_v3_debug_failure(
-                "V3Debug03RawResponseCaptured",
-                V3DebugError::Sink(error),
-            )));
-        }
-    }
-    None
-}
-
-pub(crate) fn project_v3_runtime_observability_debug(
-    observability: &V3RuntimeObservability,
-) -> Value {
-    json!({
-        "routing_group_id": observability.routing_group_id,
-        "pool_id": observability.pool_id,
-        "provider_id": observability.provider_id,
-        "provider_key": observability.provider_key,
-        "model_id": observability.model_id,
-        "wire_model": observability.wire_model,
-        "provider_type": observability.provider_type,
-        "attempts": observability.attempts,
-        "transport": observability.transport,
-        "provider_status": observability.provider_status,
-        "response_status": observability.response_status,
-        "finish_reason": observability.finish_reason,
-        "target_path": observability.target_path,
-        "unavailable_candidates": observability.unavailable_candidates,
-        "provider_failure_events": observability.provider_failure_events.iter().map(project_v3_runtime_provider_failure_event_debug).collect::<Vec<Value>>(),
-        "usage": observability.usage.as_ref().map(project_v3_runtime_usage_debug),
-    })
-}
-
-pub(crate) fn project_v3_runtime_provider_failure_event_debug(
-    event: &V3RuntimeProviderFailureObservation,
-) -> Value {
-    json!({
-        "provider_key": &event.provider_key,
-        "provider_id": &event.provider_id,
-        "auth_alias": event.auth_alias.as_ref(),
-        "model_id": &event.model_id,
-        "status": event.status,
-        "error_type": event.error_type.as_ref(),
-        "external_error_kind": event.external_error_kind.as_ref(),
-        "external_error_code": event.external_error_code.as_ref(),
-        "external_error_status": event.external_error_status,
-        "internal_code": event.internal_code.as_ref(),
-        "message": &event.message,
-        "failure_count": event.failure_count,
-        "health_state": &event.health_state,
-        "cooldown_until_ms": event.cooldown_until_ms,
-        "action": &event.action,
-        "next_provider_key": event.next_provider_key.as_ref(),
-        "wait_ms": event.wait_ms,
-    })
-}
-
-pub(crate) fn project_v3_runtime_usage_debug(usage: &V3RuntimeUsageSummary) -> Value {
-    json!({
-        "input_tokens": usage.input_tokens,
-        "output_tokens": usage.output_tokens,
-        "total_tokens": usage.total_tokens,
-        "cached_tokens": usage.cached_tokens,
-    })
 }
 
 pub(crate) fn persist_v3_codex_sample_payload(

@@ -1,10 +1,10 @@
 # V3 Module Decomposition SOP（巨型文件拆解标准作业程序）
 
 Status: partial execution; scoped changes recorded below.
-Scoped split (2026-10-03): `live_snapshot_projection.rs` holds existing snapshot
-session projection and protocol-native diagnostic body selectors. The function
-bodies and crate-visible caller paths are preserved. This removes the latest
-main sample-queue change's file-size violation without relaxing the 1500-line gate.
+Scoped split (2026-10-03): `live_snapshot_projections.rs` holds foundation response
+snapshot capture and runtime observability projections from main PR #325. Snapshot
+session helpers and diagnostic body selectors remain in `live_snapshot.rs`, which
+fits the 1500-line gate. Function bodies and crate-visible caller paths are preserved.
 Scoped split (2026-09-05): `anthropic_relay_runtime/response_closeout.rs` owns
 JSON/SSE normalization and shared Resp03-Resp06 closeout. Kernel submodules
 `direct_execution_control.rs` and `direct_runtime_timing.rs` own control resolution

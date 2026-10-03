@@ -3609,9 +3609,9 @@ features:
   - path: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_timing.rs
     owner: kernel
     responsibility: Finalize typed timing for committed SSE, live SSE and JSON.
-  - path: v3/crates/routecodex-v3-server/src/live_snapshot_projection.rs
+  - path: v3/crates/routecodex-v3-server/src/live_snapshot_projections.rs
     owner: live_snapshot
-    responsibility: Start and close diagnostic snapshot sessions and select protocol-native diagnostic error bodies; function bodies and caller behavior are preserved.
+    responsibility: Capture foundation response snapshots and project runtime observability; function bodies and caller behavior are preserved.
   decomposition_edges:
   - caller: execute_v3_anthropic_relay_runtime_inner
     callees: [closeout_anthropic_relay_response, closeout_anthropic_relay_sse_response]
@@ -3626,7 +3626,8 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
-  - v3/crates/routecodex-v3-server/src/live_snapshot_projection.rs
+  - v3/crates/routecodex-v3-server/src/live_snapshot.rs
+  - v3/crates/routecodex-v3-server/src/live_snapshot_projections.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/provider-compat-core/src/lib.rs
