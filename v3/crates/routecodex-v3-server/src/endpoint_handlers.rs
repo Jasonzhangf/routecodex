@@ -178,9 +178,33 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         ) {
             Ok(plan) => plan,
             Err(failure) => {
-                let frame = build_v3_server_16_http_frame_from_v3_error_06(
-                    project_v3_protocol_execution_plan_failure(failure),
-                );
+                let node_trace = failure.node_trace.clone();
+                let projected = project_v3_protocol_execution_plan_failure(failure);
+                if projected.pool_exhausted {
+                    // A selection-time pool exhaustion is a provider terminal:
+                    // no candidate was admitted, so there is no upstream
+                    // response to witness and the client boundary is the
+                    // transport break. The Error06 body stays provider-private
+                    // evidence on disk, never a client payload.
+                    if let Some(response) = persist_v3_projected_terminal_error_evidence(
+                        &state,
+                        &entry_protocol,
+                        &path,
+                        &request_id,
+                        &payload,
+                        &node_trace,
+                        &projected,
+                    ) {
+                        return response;
+                    }
+                    return provider_terminal_response(
+                        &state,
+                        front_connection_identity,
+                        routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+                        requested_stream,
+                    );
+                }
+                let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
                 return responses_direct_output_response(
                     project_v3_responses_error_frame_for_request_if_sse(
                         frame,
@@ -975,8 +999,8 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             }
         };
         if let Some(disposition) = output.terminal_disposition.take() {
-            // A provider terminal disposition returns the provider's own HTTP
-            // response verbatim, so this path never reaches the relay closeout
+            // A provider terminal disposition ends the client transport without
+            // a client payload, so this path never reaches the relay closeout
             // below. The chain and status are still real typed facts: persist
             // the error evidence and project the chain first, otherwise a
             // request that really failed keeps an observability row whose every
@@ -1336,8 +1360,8 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 if let Some(disposition) = output.terminal_disposition.clone() {
                     // Third and last Responses terminal-disposition site: same
                     // entry, same defect, so the real typed chain and the
-                    // on-disk evidence are recorded before the provider's own
-                    // response is returned verbatim.
+                    // on-disk evidence are recorded before the client transport
+                    // is broken without a payload.
                     if let Some(response) = persist_v3_responses_relay_terminal_error_evidence(
                         &state,
                         &entry_protocol,

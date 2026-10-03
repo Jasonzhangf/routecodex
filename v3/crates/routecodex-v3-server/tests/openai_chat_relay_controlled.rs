@@ -214,7 +214,7 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
     assert_eq!(body.matches("data: [DONE]").count(), 1, "{body}");
     let _sse_capture = captures_rx.recv().await.unwrap();
 
-    let error_response = client
+    let error_result = client
         .post(&endpoint)
         .json(&json!({
             "model":"chat-client-alias",
@@ -222,14 +222,17 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
             "stream":false
         }))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(error_response.status(), StatusCode::TOO_MANY_REQUESTS);
-    let error_body = error_response.text().await.unwrap();
-    assert_eq!(
-        error_body, r#"{"error":{"type":"rate_limit_error","message":"controlled rate limit"}}"#,
-        "complete upstream HTTP error must retain its status and body"
-    );
+        .await;
+    match error_result {
+        Ok(response) => panic!(
+            "a provider-terminal 429 must not reach the chat client, got {}",
+            response.status()
+        ),
+        Err(error) => assert!(
+            error.is_request(),
+            "expected an aborted chat client transport: {error}"
+        ),
+    }
     let error_capture = tokio::time::timeout(Duration::from_secs(2), captures_rx.recv())
         .await
         .expect("provider failure must produce a capture")
@@ -240,7 +243,7 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
     );
     assert!(error_capture.body.get("metadata_center").is_none());
 
-    let sse_error_response = client
+    let sse_error_result = client
         .post(&endpoint)
         .json(&json!({
             "model":"chat-client-alias",
@@ -248,19 +251,28 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
             "stream":true
         }))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(sse_error_response.status(), StatusCode::TOO_MANY_REQUESTS);
-    assert_eq!(
-        sse_error_response.headers().get("content-type").unwrap(),
-        "application/json"
-    );
-    let sse_error_body = sse_error_response.text().await.unwrap();
-    assert_eq!(
-        sse_error_body,
-        r#"{"error":{"type":"rate_limit_error","message":"controlled rate limit"}}"#,
-        "streaming request must retain the complete upstream HTTP error"
-    );
+        .await;
+    match sse_error_result {
+        Ok(response) => {
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(
+                response.headers().get("content-type").unwrap(),
+                "text/event-stream"
+            );
+            let break_error = tokio::time::timeout(Duration::from_secs(2), response.text())
+                .await
+                .expect("streaming provider terminal must settle within the transport break")
+                .expect_err("a streaming provider terminal must break the client transport");
+            assert!(
+                !break_error.to_string().contains("rate_limit_error"),
+                "the provider body must not reach the client: {break_error}"
+            );
+        }
+        Err(error) => assert!(
+            error.is_request(),
+            "expected an aborted chat client transport: {error}"
+        ),
+    }
     let sse_failure_capture = loop {
         let capture = tokio::time::timeout(Duration::from_secs(2), captures_rx.recv())
             .await
