@@ -24,12 +24,13 @@ pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
     mut input: V3HubReqInbound01ClientRaw,
 ) -> Result<V3HubReqInbound02Normalized, String> {
     if input.entry_protocol == V3HubEntryProtocol::Responses
-        && input
-            .payload
-            .0
-            .get("messages")
-            .and_then(serde_json::Value::as_array)
-            .is_none()
+        && (input.payload.0.get("input").is_some()
+            || input
+                .payload
+                .0
+                .get("messages")
+                .and_then(serde_json::Value::as_array)
+                .is_none())
     {
         // canonical 化前先清洗原始 responses payload：此时 fco output 图片还是
         // 数组形态，normalize 能正确替换为 [Image]；canonical 转换会把数组
@@ -40,6 +41,19 @@ pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
         let mut canonical =
             super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat(raw)
                 .map_err(|error| format!("Responses inbound canonicalization failed: {error}"))?;
+        if let Some(source_messages) = raw.get("messages").filter(|value| !value.is_null()) {
+            if source_messages
+                .as_array()
+                .map(|messages| comparable_chat_messages(messages))
+                != canonical
+                    .get("messages")
+                    .and_then(Value::as_array)
+                    .map(|messages| comparable_chat_messages(messages))
+            {
+                return Err("Responses inbound canonicalization failed: conflicting input and messages representations".to_string());
+            }
+            canonical["messages"] = source_messages.clone();
+        }
         normalize_v3_history_image_placeholders(&mut canonical);
         input.payload.0 = Arc::new(canonical);
         return Ok(V3HubReqInbound02Normalized {
@@ -126,6 +140,26 @@ pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
     })
 }
 
+fn comparable_chat_messages(messages: &[Value]) -> Vec<Value> {
+    let mut messages = messages.to_vec();
+    for message in &mut messages {
+        let Some(content) = message.get_mut("content") else {
+            continue;
+        };
+        let Some(parts) = content.as_array() else {
+            continue;
+        };
+        if parts.len() == 1
+            && parts[0].as_object().is_some_and(|part| part.len() == 2)
+            && parts[0]["type"] == "text"
+            && parts[0]["text"].is_string()
+        {
+            *content = parts[0]["text"].clone();
+        }
+    }
+    messages
+}
+
 pub fn build_v3_hub_req_inbound_02_responses_chat_canonical_from_v3_hub_req_inbound_01(
     input: V3HubReqInbound01ClientRaw,
 ) -> Result<V3HubReqInbound02Normalized, String> {
@@ -134,38 +168,114 @@ pub fn build_v3_hub_req_inbound_02_responses_chat_canonical_from_v3_hub_req_inbo
             "Responses inbound canonicalization requires the Responses entry protocol".to_string(),
         );
     }
-    if input
-        .payload
-        .0
-        .get("messages")
-        .and_then(serde_json::Value::as_array)
-        .is_some()
-    {
-        return Ok(V3HubReqInbound02Normalized {
-            previous: input,
-            semantic_protocol: V3HubRequestSemanticProtocol::Chat,
-            canonicalized_from_responses: false,
-            memory_raw_capture_guidance_injected: false,
-        });
-    }
-    let mut input = input;
-    let canonical = super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat(
-        input.payload.0.as_ref(),
-    )
-    .map_err(|error| format!("Responses inbound canonicalization failed: {error}"))?;
-    input.payload.0 = Arc::new(canonical);
-    Ok(V3HubReqInbound02Normalized {
-        previous: input,
-        semantic_protocol: V3HubRequestSemanticProtocol::Chat,
-        canonicalized_from_responses: true,
-        memory_raw_capture_guidance_injected: false,
-    })
+    build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(input)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn responses_input_with_matching_messages_normalizes_once_and_preserves_raw_tools() {
+        let payload = json!({
+            "input":"hi", "messages":[{"role":"user","content":"hi"}],
+            "model":"gpt-5.5", "stream":false, "tools":"not-an-array"
+        });
+        for normalize in [
+            build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01,
+            build_v3_hub_req_inbound_02_responses_chat_canonical_from_v3_hub_req_inbound_01,
+        ] {
+            let raw = super::super::build_v3_hub_req_inbound_01_client_raw(
+                payload.clone(),
+                V3HubEntryProtocol::Responses,
+                super::super::V3HubInvocationSource::Client,
+                super::super::V3HubTransportIntent::Json,
+            );
+            let normalized = normalize(raw).expect("equivalent representations must normalize");
+            assert!(normalized.canonicalized_from_responses);
+            assert!(normalized.previous.payload.0.get("input").is_none());
+            assert_eq!(
+                normalized.previous.payload.0["messages"],
+                payload["messages"]
+            );
+            assert_eq!(normalized.previous.payload.0["tools"], payload["tools"]);
+        }
+    }
+
+    #[test]
+    fn responses_null_messages_normalizes_as_absent_history() {
+        let raw = super::super::build_v3_hub_req_inbound_01_client_raw(
+            json!({"input":"hi","messages":null}),
+            V3HubEntryProtocol::Responses,
+            super::super::V3HubInvocationSource::Client,
+            super::super::V3HubTransportIntent::Json,
+        );
+        let normalized = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(raw)
+            .expect("null optional messages must not conflict with input");
+        assert!(normalized.canonicalized_from_responses);
+        assert!(normalized.previous.payload.0.get("input").is_none());
+        assert_eq!(
+            comparable_chat_messages(
+                normalized.previous.payload.0["messages"]
+                    .as_array()
+                    .unwrap()
+            ),
+            json!([{"role":"user","content":"hi"}])
+                .as_array()
+                .unwrap()
+                .clone()
+        );
+    }
+
+    #[test]
+    fn responses_conflicting_input_and_messages_fail_before_chat_process() {
+        for normalize in [
+            build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01,
+            build_v3_hub_req_inbound_02_responses_chat_canonical_from_v3_hub_req_inbound_01,
+        ] {
+            let raw = super::super::build_v3_hub_req_inbound_01_client_raw(
+                json!({"input":"hi","messages":[{"role":"user","content":"different history"}]}),
+                V3HubEntryProtocol::Responses,
+                super::super::V3HubInvocationSource::Client,
+                super::super::V3HubTransportIntent::Json,
+            );
+            let error = normalize(raw).expect_err("neither history may be silently discarded");
+            assert!(error.contains("conflicting input and messages"), "{error}");
+        }
+    }
+
+    #[test]
+    fn responses_messages_only_stays_canonical_but_present_invalid_input_is_not_hidden() {
+        for normalize in [
+            build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01,
+            build_v3_hub_req_inbound_02_responses_chat_canonical_from_v3_hub_req_inbound_01,
+        ] {
+            let payload =
+                json!({"messages":[{"role":"user","content":"hi"}],"tools":"not-an-array"});
+            let raw = super::super::build_v3_hub_req_inbound_01_client_raw(
+                payload.clone(),
+                V3HubEntryProtocol::Responses,
+                super::super::V3HubInvocationSource::Client,
+                super::super::V3HubTransportIntent::Json,
+            );
+            let normalized = normalize(raw).expect("messages-only remains accepted");
+            assert!(!normalized.canonicalized_from_responses);
+            assert_eq!(*normalized.previous.payload.0, payload);
+            for invalid_input in [Value::Null, json!(42), json!({"text":"hi"})] {
+                let mut malformed = payload.clone();
+                malformed["input"] = invalid_input;
+                let raw = super::super::build_v3_hub_req_inbound_01_client_raw(
+                    malformed,
+                    V3HubEntryProtocol::Responses,
+                    super::super::V3HubInvocationSource::Client,
+                    super::super::V3HubTransportIntent::Json,
+                );
+                let error = normalize(raw).expect_err("malformed input cannot bypass its owner");
+                assert!(error.contains("must contain input array"), "{error}");
+            }
+        }
+    }
 
     #[test]
     fn malformed_responses_inbound_canonicalization_failure_does_not_enter_chat_process() {

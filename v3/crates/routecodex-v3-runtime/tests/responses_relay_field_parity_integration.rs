@@ -149,6 +149,128 @@ fn responses_openai_chat_field_parity_response_matrix() {
 }
 
 #[tokio::test]
+async fn responses_dual_history_reaches_provider_wire_once() {
+    let transport = ProviderProjectionJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        response: serde_json::json!({
+            "id":"chatcmpl-dual-history","object":"chat.completion","model":"chat-wire-model",
+            "choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]
+        }),
+    };
+    let result = execute_v3_responses_relay_runtime(
+        &manifest_openai_chat_wire(),
+        responses_relay_input(
+            "req-dual-history",
+            serde_json::json!({
+                "input":"hi","messages":[{"role":"user","content":"hi"}],
+                "model":"gpt-5.5","stream":false,"tools":[]
+            }),
+        ),
+        &transport,
+    )
+    .await
+    .expect("matching dual representation must execute the public runtime");
+    assert_eq!(result.status, 200, "{result:?}");
+    assert!(result.error_chain.is_none(), "{result:?}");
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    assert_eq!(captures[0].0, "http://chatwire.invalid/v1/chat/completions");
+    let body = provider_projection_body(&captures[0]);
+    assert!(body.get("input").is_none());
+    assert_eq!(
+        body["messages"],
+        serde_json::json!([{"role":"user","content":"hi"}])
+    );
+    assert!(result.error_chain.is_none());
+}
+
+#[tokio::test]
+async fn responses_null_messages_reaches_provider_wire() {
+    let transport = ProviderProjectionJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        response: serde_json::json!({
+            "id":"chatcmpl-null-history","object":"chat.completion","model":"chat-wire-model",
+            "choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]
+        }),
+    };
+    let result = execute_v3_responses_relay_runtime(
+        &manifest_openai_chat_wire(),
+        responses_relay_input(
+            "req-null-history",
+            serde_json::json!({"input":"hi","messages":null,"model":"gpt-5.5","stream":false,"tools":[]}),
+        ),
+        &transport,
+    )
+    .await
+    .expect("null optional history must execute the public runtime");
+    assert_eq!(result.status, 200, "{result:?}");
+    assert!(result.error_chain.is_none(), "{result:?}");
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    let body = provider_projection_body(&captures[0]);
+    assert!(body.get("input").is_none());
+    assert_eq!(
+        body["messages"],
+        serde_json::json!([{"role":"user","content":"hi"}])
+    );
+}
+
+#[tokio::test]
+async fn responses_dual_history_preserves_existing_invalid_tools_error() {
+    let transport = ProviderProjectionJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        response: serde_json::json!({}),
+    };
+    let result = execute_v3_responses_relay_runtime(
+        &manifest_openai_chat_wire(),
+        responses_relay_input(
+            "req-invalid-tools-dual-history",
+            serde_json::json!({
+                "input":"hi","messages":[{"role":"user","content":"hi"}],
+                "model":"gpt-5.5","stream":false,"tools":"not-an-array"
+            }),
+        ),
+        &transport,
+    )
+    .await
+    .expect("declared outbound representation errors use the typed error chain");
+    let routecodex_v3_runtime::V3ResponsesRelayClientBody::Json(body) = result.client_body else {
+        panic!("JSON request must have a JSON error projection");
+    };
+    let message = body["error"]["message"].as_str().expect("error message");
+    assert!(
+        message.contains("MalformedOutboundField") && message.contains("$.tools"),
+        "{message}"
+    );
+    assert!(!message.contains("$.input"), "{message}");
+    assert!(transport.captures.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn responses_conflicting_dual_history_never_sends_provider_request() {
+    let transport = ProviderProjectionJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        response: serde_json::json!({}),
+    };
+    let result = execute_v3_responses_relay_runtime(
+        &manifest_openai_chat_wire(),
+        responses_relay_input(
+            "req-conflicting-dual-history",
+            serde_json::json!({
+                "input":"hi","messages":[{"role":"user","content":"different"}],"model":"gpt-5.5"
+            }),
+        ),
+        &transport,
+    )
+    .await;
+    assert!(
+        result.is_err(),
+        "conflicting histories cannot reach transport"
+    );
+    assert!(transport.captures.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn responses_openai_chat_field_parity_request_matrix_runtime() {
     let transport = ProviderProjectionJsonTransport {
         captures: Mutex::new(Vec::new()),
