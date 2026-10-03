@@ -7,6 +7,40 @@ use super::*;
 use serde_json::{json, Value};
 
 #[test]
+fn responses_dual_history_accepts_plain_text_equivalence_without_losing_fields() {
+    let normalize = |payload| {
+        let raw = super::super::build_v3_hub_req_inbound_01_client_raw(
+            payload,
+            super::super::V3HubEntryProtocol::Responses,
+            super::super::V3HubInvocationSource::Client,
+            super::super::V3HubTransportIntent::Json,
+        );
+        super::super::build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(raw)
+            .map(|normalized| normalized.previous.payload.0)
+    };
+    let messages = json!([{"role":"user","content":[{"type":"text","text":" hi "}]}]);
+    let request = normalize(json!({
+        "input":" hi ", "messages":messages
+    }))
+    .expect("plain text representations have equal meaning");
+    assert_eq!(request["messages"], messages);
+    for different_messages in [
+        json!([{"role":"user","content":[{"type":"text","text":" hi ","extra":"keep"}]}]),
+        json!([{"role":"user","content":"hi"}]),
+        json!([{"role":"assistant","content":" hi "}]),
+        json!([{"role":"user","content":" hi ","name":"named"}]),
+        json!([{"role":"user","content":" hi ","tool_calls":[{"id":"call1","type":"function","function":{"name":"run","arguments":"{}"}}]}]),
+        json!([{"role":"user","content":" hi "},{"role":"user","content":"again"}]),
+    ] {
+        let error = normalize(json!({
+            "input":" hi ","messages":different_messages
+        }))
+        .expect_err("meaningful source differences must stay explicit");
+        assert!(error.contains("conflicting input and messages"), "{error}");
+    }
+}
+
+#[test]
 fn responses_reasoning_effort_normalizes_whitespace_and_case_like_chat_side() {
     let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
         "model": "deepseek-v4-flash",
