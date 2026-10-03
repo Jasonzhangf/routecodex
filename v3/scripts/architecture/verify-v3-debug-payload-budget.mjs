@@ -159,8 +159,8 @@ requireMatch(
 );
 requireMatch(
   sampleStore,
-  /unbounded_channel\(\)[\s\S]*try_acquire_many_owned[\s\S]*enqueue\.send\(message\)/,
-  "Sample persistence must bound pending samples by the declared byte budget instead of a fixed message count",
+  /unbounded_channel\(\)[\s\S]*V3_CODEX_SAMPLE_PERSIST_JOB_OVERHEAD_BYTES[\s\S]*try_acquire_many_owned[\s\S]*enqueue\.send\(message\)/,
+  "Sample persistence must bound pending samples by payload bytes plus a fixed per-job overhead instead of a fixed message count",
 );
 requireMatch(
   sampleStore,

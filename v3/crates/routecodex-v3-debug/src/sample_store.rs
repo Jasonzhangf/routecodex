@@ -10,6 +10,10 @@ use std::sync::{Arc, Mutex, RwLock};
 /// files are one evidence record and must consume one retention slot.
 pub const V3_CODEX_SAMPLE_REQUEST_RETENTION: usize = 100;
 const V3_CODEX_SAMPLE_PERSIST_QUEUE_BYTE_BUDGET: u32 = 64 * 1024 * 1024;
+/// Fixed allocation cost of one queued persistence job (channel slot, job
+/// metadata, and Arc/Value overhead). Charging it to the byte budget keeps the
+/// total queued memory bounded even when every payload serializes to a few bytes.
+const V3_CODEX_SAMPLE_PERSIST_JOB_OVERHEAD_BYTES: u32 = 4096;
 const V3_CODEX_SAMPLE_PERSIST_FAILURE_LIMIT: usize = 256;
 
 enum V3CodexSamplePersistQueueMessage {
@@ -326,7 +330,9 @@ impl V3CodexSampleStore {
                 return Ok(());
             }
         };
-        let payload_permits = match u32::try_from(payload_size) {
+        let payload_size_with_overhead =
+            payload_size.saturating_add(u64::from(V3_CODEX_SAMPLE_PERSIST_JOB_OVERHEAD_BYTES));
+        let payload_permits = match u32::try_from(payload_size_with_overhead) {
             Ok(payload_permits) => payload_permits,
             Err(_) => {
                 record_v3_codex_sample_persist_failure(
@@ -1286,7 +1292,7 @@ mod tests {
                 let failures = handle.shutdown().await;
                 assert!(
                     failures.is_empty(),
-                    "a sample burst within the byte budget must not drop any diagnostic write: {failures:?}"
+                    "a full-sampling burst within the byte-and-overhead budget must not drop any diagnostic write: {failures:?}"
                 );
                 assert!(handle.persist_failures().is_empty());
                 for index in 0..BURST {
@@ -1300,6 +1306,42 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn persist_async_worker_bounds_tiny_payload_job_count_by_fixed_overhead() {
+        let max_by_overhead = V3_CODEX_SAMPLE_PERSIST_QUEUE_BYTE_BUDGET as usize
+            / V3_CODEX_SAMPLE_PERSIST_JOB_OVERHEAD_BYTES as usize;
+        let store = Arc::new(V3CodexSampleStore::new(true, max_by_overhead, false));
+        let persist_guard = store.persistence_guard.lock().unwrap();
+        let handle = store
+            .start_persist_worker()
+            .expect("persist worker should start");
+        for index in 0..=max_by_overhead {
+            store
+                .enqueue_persist(V3CodexSamplePersistJob {
+                    port: 10000,
+                    entry_protocol: "responses".to_string(),
+                    endpoint: "/v1/responses".to_string(),
+                    request_id: format!("req-tiny-{index}"),
+                    file_name: "request.json".to_string(),
+                    payload: Arc::new(json!({"tiny": index})),
+                    force: false,
+                    status: None,
+                })
+                .expect("fixed-overhead budget exhaustion must not reject the business request");
+        }
+        let failures = store.persist_failure_snapshot();
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.reason.contains("64 MiB persistence budget")),
+            "tiny-payload bursts must be bounded by the fixed per-job overhead: {failures:?}"
+        );
+        drop(persist_guard);
+        // Keep the worker and guard held until task cancellation: this assertion
+        // covers admission bounded by fixed overhead, not filesystem drain.
+        drop(handle);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn persist_async_worker_rejects_payload_over_byte_budget() {
         let store = Arc::new(V3CodexSampleStore::new(
             true,
@@ -1310,7 +1352,11 @@ mod tests {
             .start_persist_worker()
             .expect("persist worker should start");
         let payload = Arc::new(json!({
-            "payload": "x".repeat(V3_CODEX_SAMPLE_PERSIST_QUEUE_BYTE_BUDGET as usize + 1)
+            "payload": "x".repeat(
+                V3_CODEX_SAMPLE_PERSIST_QUEUE_BYTE_BUDGET as usize
+                    - V3_CODEX_SAMPLE_PERSIST_JOB_OVERHEAD_BYTES as usize
+                    + 1
+            )
         }));
 
         store
