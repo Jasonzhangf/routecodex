@@ -12,6 +12,32 @@ canonical_docs:
   - docs/goals/v3-hub-pipeline-static-skeleton-implementation-plan.md
   - docs/design/v3-existing-hub-provider-path-audit.md
 resources:
+  - resource_id: v3.hooks.global_daemon
+    resource_kind: typed_global_service_registration
+    lifecycle: v3.rcc_internal_hooks_sidecar
+    owner_feature_id: v3.rcc_internal_hooks_sidecar
+    owner_crate: routecodex-v3-hooks
+    owner_node: SharedHooksDaemon
+    identity: [userId, canonicalServiceDirectory, lockInode, socketIdentity]
+    allowed_writers: [acquire_shared_service]
+    allowed_readers: [register_project]
+    forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design_declared_implementation_pending
+  - resource_id: v3.hooks.project_registration
+    resource_kind: typed_project_lease
+    lifecycle: v3.rcc_internal_hooks_sidecar
+    owner_feature_id: v3.rcc_internal_hooks_sidecar
+    owner_crate: routecodex-v3-hooks
+    owner_node: SharedHooksProjectRegistration
+    identity: [canonicalInstanceDirectory, registrationGeneration, leaseConnection]
+    allowed_writers: [register_project, reclaim_project]
+    allowed_readers: [serve_project_lease]
+    forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: design_declared_implementation_pending
   - resource_id: v3.hooks.sidecar_install_record
     resource_kind: external_process_declaration
     lifecycle: v3.rcc_internal_hooks_sidecar
