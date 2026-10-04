@@ -5,6 +5,7 @@ mod memory_raw_capture;
 mod provider_config;
 mod provider_directory;
 mod provider_priority_schedule;
+mod runtime_config;
 mod store;
 mod types;
 mod user_config;
@@ -18,6 +19,7 @@ pub use provider_priority_schedule::{
     default_provider_priority_timezone, V3DailyTimeWindowAuthoringConfig,
     V3ProviderPriorityScheduleAuthoringConfig, V3ProviderPriorityScheduleEntryAuthoringConfig,
 };
+pub use runtime_config::{V3RuntimeAuthoringConfig, V3RuntimeManifest};
 mod validate;
 #[cfg(test)]
 mod validate_auth_tests;

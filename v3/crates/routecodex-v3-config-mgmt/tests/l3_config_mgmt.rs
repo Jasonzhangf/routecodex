@@ -409,3 +409,58 @@ tiers = [[{ use = "p1/m1" }]]
     assert!(!saved.contains("priority"));
     assert_eq!(store.read_user_routing().unwrap(), selection);
 }
+
+#[test]
+fn user_routing_commit_preserves_runtime_fd_limit() {
+    let home = temp_home();
+    let provider_dir = home.join("provider").join("p1");
+    fs::create_dir_all(&provider_dir).expect("provider dir");
+    fs::write(
+        provider_dir.join("config.v2.toml"),
+        r#"version = "2.0.0"
+providerId = "p1"
+[provider]
+id = "p1"
+enabled = true
+type = "openai_chat"
+baseURL = "http://127.0.0.1:9999/v1"
+defaultModel = "m1"
+[provider.auth]
+type = "apikey"
+apiKey = "test"
+[provider.models."m1"]
+supportsStreaming = true
+"#,
+    )
+    .expect("provider file");
+    let path = home.join("config.toml");
+    fs::write(
+        &path,
+        r#"version = 3
+
+[runtime]
+fd_limit = 8192
+
+[servers.routecodex_v3_4444]
+bind = "127.0.0.1"
+port = 4444
+[servers.routecodex_v3_4444.routes.default]
+tiers = [[{ use = "p1/m1" }]]
+"#,
+    )
+    .expect("user config");
+
+    let store = ConfigMgmtStore::new(&path);
+    let selection = store.read_user_routing().expect("read user routing");
+    assert_eq!(selection.runtime.fd_limit, Some(8192));
+    store
+        .commit_user_routing_with_backup(&selection, "runtime.recommit", "test")
+        .expect("commit user routing");
+
+    let saved = fs::read_to_string(&path).expect("saved user config");
+    assert!(saved.contains("fd_limit = 8192"));
+    assert_eq!(
+        store.read_user_routing().unwrap().runtime.fd_limit,
+        Some(8192)
+    );
+}
