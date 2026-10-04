@@ -1,5 +1,37 @@
 use super::*;
 
+#[test]
+fn goaichat_profile_preserves_existing_hosted_extensions_and_other_protocols() {
+    let payload = json!({"tools":[
+        {"type":"web_search_20250305","name":"web_search","max_uses":7,
+            "function":{"name":"web_search","parameters":{"query":"provider-extension"}},
+            "opaque":{"preserve":true}},
+        {"type":"web_search_20990101","name":"web_search"},
+        {"name":"exec_command","input_schema":{"type":"object"}}
+    ],"messages":[{"role":"user","content":"opaque history"}]});
+    for protocol in ["anthropic-messages", "openai-chat", "openai-responses"] {
+        let input = ReqOutboundCompatInput {
+            payload: payload.clone(),
+            adapter_context: AdapterContext {
+                compatibility_profile: Some("anthropic:goaichat".into()),
+                provider_protocol: Some(protocol.into()),
+                ..Default::default()
+            },
+            explicit_profile: None,
+        };
+        assert_eq!(
+            run_req_outbound_stage3_compat(input.clone())
+                .unwrap()
+                .payload,
+            payload
+        );
+        assert_eq!(
+            run_resp_inbound_stage3_compat(input).unwrap().payload,
+            payload
+        );
+    }
+}
+
 fn deepseek_max_input(payload: Value, provider_protocol: &str) -> ReqOutboundCompatInput {
     ReqOutboundCompatInput {
         payload,

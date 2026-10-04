@@ -53,6 +53,8 @@ await run(
     '--test',
     'h2_chat_direct_isolation',
     '--test',
+    'goaichat_hosted_tool_history_blackbox',
+    '--test',
     'user_config_cli',
     '--test',
     'user_config_provider_request_dry_run',

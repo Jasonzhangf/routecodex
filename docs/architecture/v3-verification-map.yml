@@ -462,13 +462,25 @@ features:
   required_positive:
   - Ordinary protocol and business fields remain unchanged through request and response compatibility.
   - Provider compatibility remains limited to registered provider-family wire projections.
-  - Request-shape compatibility failures project HTTP 400 and do not invoke provider transport.
+  - Request-shape compatibility failures remain typed internal errors and never authorize a client error response.
+  - The explicitly selected anthropic:goaichat request profile preserves hosted web_search type/name/options and ordinary tool/history identity while supplying the gateway function envelope after standard Anthropic projection.
+  - Public HTTP Responses (JSON/SSE), Chat and Messages consumers complete a tool execution and matching follow-up with exactly one accepted upstream attempt per turn; provider switching cannot mask a shape regression.
   required_negative:
   - Top-level semantics, processed, and processingMetadata fail at both request and response compat entrypoints.
   - Compat does not strip, reconstruct, or route control state and does not own Chat Process or SSE semantics.
-  - Request-shape compatibility failures do not retry, switch provider, or mutate provider health.
+  - Compat does not own retry, provider switching or health; typed Error owns request-local compatibility handling.
+  - Generic chat:glm Anthropic passthrough and other provider protocols never receive Goaichat private hosted-tool fields.
+  black_box_regression:
+    command: npm run test:v3-goaichat-hosted-tool-history-blackbox
+    test_ids:
+    - goaichat_responses_hosted_history_round_trip_blackbox
+    - goaichat_responses_sse_hosted_history_round_trip_blackbox
+    - goaichat_chat_hosted_history_round_trip_blackbox
+    - goaichat_messages_hosted_history_round_trip_blackbox
+    - generic_glm_anthropic_hosted_history_preserved_blackbox
   required_gates:
   - npm run test:v3-provider-compat-profile-loading
+  - npm run test:v3-goaichat-hosted-tool-history-blackbox
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries

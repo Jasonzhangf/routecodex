@@ -1210,6 +1210,10 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
   - v3/crates/routecodex-v3-runtime/tests
+  - v3/crates/routecodex-v3-cli/tests/goaichat_hosted_tool_history_blackbox.rs
+  - v3/scripts/test.mjs
+  - v3/package.json
+  - package.json
   - docs/architecture
   forbidden_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
