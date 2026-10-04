@@ -185,6 +185,7 @@ fn minimal_user_config(
     }
     Ok(V3UserConfig02RoutingSelectionParsed {
         version: 3,
+        runtime: Default::default(),
         servers: BTreeMap::from([(
             "default".to_string(),
             V3UserServerAuthoringConfig {

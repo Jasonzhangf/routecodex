@@ -1,4 +1,5 @@
 use crate::memory_raw_capture::compile_memory_raw_capture;
+use crate::runtime_config::compile_runtime;
 use crate::types::*;
 use crate::{
     compile_v3_http_sse_keepalive_ms_from_environment, looks_like_secret_literal, validation,
@@ -71,6 +72,7 @@ pub(crate) fn build_resource_registry(
         error: compile_error(authoring.error, provider_error_action_policies)?,
         admin_webui,
         memory_raw_capture: compile_memory_raw_capture(authoring.memory_raw_capture)?,
+        runtime: compile_runtime(authoring.runtime)?,
     })
 }
 pub(crate) fn publish_manifest(
