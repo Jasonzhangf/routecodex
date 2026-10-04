@@ -717,6 +717,274 @@ async fn observability_records_cache_rebuilds_on_same_length_early_rewrite() {
     assert_eq!(stable_marker(&after), "bravo");
 }
 
+/// `/api/overview`, `/records`, `/records/:key` and the SSE tail share one
+/// process-wide store cache, so a poll of any of them must not consume the
+/// change signal the others rely on. The dashboard refreshes `/api/overview`
+/// every 10s, which would otherwise leave the requests list and the live tail
+/// lagging a full cycle behind.
+#[tokio::test]
+async fn observability_records_stay_fresh_when_overview_polls_between_them() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows(
+        &home,
+        &[observability_row_with_result("4444:first", Some("success"))],
+    );
+
+    let first: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("first records response")
+        .json()
+        .await
+        .expect("first records json");
+    assert_eq!(first["total"], 1);
+
+    append_observability_rows(
+        &home,
+        &[observability_row_with_result(
+            "4444:second",
+            Some("success"),
+        )],
+    );
+    // A dashboard poll of the overview lands between two records polls.
+    let overview = http_client()
+        .get(format!("{base}/api/overview"))
+        .send()
+        .await
+        .expect("overview response");
+    assert!(overview.status().is_success(), "overview must succeed");
+
+    let appended: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("appended records response")
+        .json()
+        .await
+        .expect("appended records json");
+    let mut keys: Vec<&str> = appended["records"]
+        .as_array()
+        .expect("records array")
+        .iter()
+        .map(|row| row["request_key"].as_str().expect("request_key"))
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        vec!["4444:first", "4444:second"],
+        "an overview poll between two records polls must not stale the records view"
+    );
+}
+
+/// The same shared signal on the deleted-store path: the overview must not be
+/// able to pin rows that no longer exist on disk.
+#[tokio::test]
+async fn observability_records_drop_rows_when_the_store_is_deleted_between_polls() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows(
+        &home,
+        &[observability_row_with_result("4444:gone", Some("success"))],
+    );
+    let before: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("before records response")
+        .json()
+        .await
+        .expect("before records json");
+    assert_eq!(before["total"], 1);
+
+    std::fs::remove_file(
+        home.join("logs")
+            .join("server-v3-4444.request-records.jsonl"),
+    )
+    .expect("remove observability store");
+    let overview = http_client()
+        .get(format!("{base}/api/overview"))
+        .send()
+        .await
+        .expect("overview response");
+    assert!(overview.status().is_success(), "overview must succeed");
+
+    let after: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("after records response")
+        .json()
+        .await
+        .expect("after records json");
+    assert_eq!(
+        after["total"], 0,
+        "a deleted store must not stay visible through the shared projection"
+    );
+}
+
+/// A row that cannot be decoded is a loud, repeatable error. The reader position
+/// must not advance past bytes that were never decoded, or one 502 would be
+/// followed by a silently truncated history.
+#[tokio::test]
+async fn observability_records_keep_reporting_a_decode_error_until_it_is_fixed() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows(
+        &home,
+        &[observability_row_with_result("4444:first", Some("success"))],
+    );
+    let store = home
+        .join("logs")
+        .join("server-v3-4444.request-records.jsonl");
+
+    // A well-formed envelope whose row is not a source row: the store read
+    // succeeds and the decode is what fails.
+    let mut corrupt = std::fs::read_to_string(&store).expect("read observability store");
+    corrupt.push_str("{\"schema_version\":1,\"row\":{\"not\":\"a source row\"}}\n");
+    std::fs::write(&store, &corrupt).expect("write undecodable store");
+
+    for poll in 1..=3 {
+        let response = http_client()
+            .get(format!(
+                "{base}/api/observability/records?page=1&page_size=10&range=all"
+            ))
+            .send()
+            .await
+            .expect("corrupt records response");
+        assert_eq!(
+            response.status().as_u16(),
+            502,
+            "poll {poll} must keep reporting the decode error instead of serving stale rows"
+        );
+    }
+
+    // Repairing the store must restore every valid row, including the one that
+    // was already there before the undecodable line.
+    write_observability_rows(
+        &home,
+        &[
+            observability_row_with_result("4444:first", Some("success")),
+            observability_row_with_result("4444:second", Some("success")),
+        ],
+    );
+    let healed: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("healed records response")
+        .json()
+        .await
+        .expect("healed records json");
+    let mut keys: Vec<&str> = healed["records"]
+        .as_array()
+        .expect("records array")
+        .iter()
+        .map(|row| row["request_key"].as_str().expect("request_key"))
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(keys, vec!["4444:first", "4444:second"]);
+}
+
+/// A failed refresh must not leave a reader position behind. Resuming from a
+/// stale offset would silently skip the prefix of whatever the path holds next
+/// and resurrect rows that are no longer on disk, while still answering 200.
+#[tokio::test]
+async fn observability_records_rebuild_from_scratch_after_a_failed_refresh() {
+    let (base, _state, home) = bind_test_server().await;
+    let store = home
+        .join("logs")
+        .join("server-v3-4444.request-records.jsonl");
+    // Both keys are the same length, so the repaired store is the same length as
+    // the original up to the line appended after it.
+    let envelope = |key: &str| {
+        serde_json::json!({
+            "schema_version": 1,
+            "row": observability_row_with_result(key, Some("success")),
+        })
+        .to_string()
+    };
+    let keys_of = |body: &serde_json::Value| -> Vec<String> {
+        let mut keys: Vec<String> = body["records"]
+            .as_array()
+            .expect("records array")
+            .iter()
+            .map(|row| {
+                row["request_key"]
+                    .as_str()
+                    .expect("request_key")
+                    .to_string()
+            })
+            .collect();
+        keys.sort();
+        keys
+    };
+
+    // Same inode throughout: these are in-place rewrites, not the atomic
+    // replacement the writer normally uses.
+    std::fs::create_dir_all(store.parent().expect("store parent")).expect("logs dir");
+    std::fs::write(&store, format!("{}\n", envelope("c1:old"))).expect("seed store");
+    let first: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=50&range=all"
+        ))
+        .send()
+        .await
+        .expect("first records response")
+        .json()
+        .await
+        .expect("first records json");
+    assert_eq!(keys_of(&first), vec!["c1:old"]);
+
+    std::fs::write(
+        &store,
+        "{\"schema_version\":1,\"row\":{\"not\":\"a source row\"}}\n",
+    )
+    .expect("undecodable in-place rewrite");
+    let failed = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=50&range=all"
+        ))
+        .send()
+        .await
+        .expect("failed records response");
+    assert_eq!(
+        failed.status().as_u16(),
+        502,
+        "an undecodable store must fail loudly"
+    );
+
+    // Longer than the length the reader last consumed successfully.
+    std::fs::write(
+        &store,
+        format!("{}\n{}\n", envelope("c1:new"), envelope("c1:extra")),
+    )
+    .expect("repaired in-place rewrite");
+    let healed: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=50&range=all"
+        ))
+        .send()
+        .await
+        .expect("healed records response")
+        .json()
+        .await
+        .expect("healed records json");
+    assert_eq!(
+        keys_of(&healed),
+        vec!["c1:extra", "c1:new"],
+        "a refresh after a failure must rebuild from the start, not resume from a stale offset"
+    );
+}
+
 #[tokio::test]
 async fn observability_stats_exclude_non_success_usage_but_keep_request_counts() {
     let (base, _state, home) = bind_test_server().await;
