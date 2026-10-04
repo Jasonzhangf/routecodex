@@ -70,10 +70,17 @@ async fn provider(
         .flat_map(|message| message["content"].as_array().unwrap())
         .collect();
     let historical_call = blocks.iter().any(|block| block["type"] == "tool_use");
+    let incomplete_native = body["tools"].as_array().unwrap().iter().any(|tool| {
+        tool.get("input_schema").is_some()
+            && (tool["type"] != "function"
+                || tool["function"]["name"] != tool["name"]
+                || tool["function"]["parameters"] != tool["input_schema"])
+    });
     if state.strict
         && historical_call
         && (hosted["function"]["name"] != hosted["name"]
-            || !hosted["function"]["parameters"].is_object())
+            || !hosted["function"]["parameters"].is_object()
+            || incomplete_native)
     {
         return (
             StatusCode::BAD_REQUEST,
@@ -163,7 +170,7 @@ retention = {{ raw_requests = 8, raw_responses = 8, events = 64 }}
 fn request(endpoint: &str, stream: bool) -> Value {
     let schema =
         json!({"type":"object","properties":{"value":{"type":"integer"}},"required":["value"]});
-    match endpoint {
+    let mut request = match endpoint {
         "/v1/responses" => json!({"model":"gateway.glm-5.3","stream":stream,
             "tools":[{"type":"web_search"},{"type":"function","name":"exec_command","parameters":schema}],
             "input":[{"role":"user","content":"continue the calculation"},
@@ -182,7 +189,40 @@ fn request(endpoint: &str, stream: bool) -> Value {
                 {"role":"assistant","content":[{"type":"tool_use","id":"call_old","name":"exec_command","input":{"value":1}}]},
                 {"role":"user","content":[{"type":"tool_result","tool_use_id":"call_old","content":"EXECUTED:2"}]}]}),
         _ => unreachable!(),
+    };
+    let stdin_schema = json!({"type":"object","properties":{
+        "session_id":{"type":"integer"},"yield_time_ms":{"type":"integer"}
+    },"required":["session_id"]});
+    request["tools"].as_array_mut().unwrap().push(match endpoint {
+        "/v1/responses" => json!({"type":"function","name":"write_stdin","parameters":stdin_schema}),
+        "/v1/chat/completions" => json!({"type":"function","function":{"name":"write_stdin","parameters":stdin_schema}}),
+        "/v1/messages" => json!({"name":"write_stdin","input_schema":stdin_schema}),
+        _ => unreachable!(),
+    });
+    // A real session can retain calls after its current tool inventory changes.
+    // This history must survive without introducing a callable update_plan tool.
+    match endpoint {
+        "/v1/responses" => request["input"].as_array_mut().unwrap().extend([
+            json!({"type":"function_call","call_id":"call_stdin","name":"write_stdin","arguments":"{\"session_id\":71177,\"yield_time_ms\":3000}"}),
+            json!({"type":"function_call_output","call_id":"call_stdin","output":"STDIN_COMPLETED"}),
+            json!({"type":"function_call","call_id":"call_retired","name":"update_plan","arguments":"{\"plan\":[]}"}),
+            json!({"type":"function_call_output","call_id":"call_retired","output":"PLAN_SAVED"}),
+        ]),
+        "/v1/chat/completions" => request["messages"].as_array_mut().unwrap().extend([
+            json!({"role":"assistant","content":null,"tool_calls":[{"id":"call_stdin","type":"function","function":{"name":"write_stdin","arguments":"{\"session_id\":71177,\"yield_time_ms\":3000}"}}]}),
+            json!({"role":"tool","tool_call_id":"call_stdin","content":"STDIN_COMPLETED"}),
+            json!({"role":"assistant","content":null,"tool_calls":[{"id":"call_retired","type":"function","function":{"name":"update_plan","arguments":"{\"plan\":[]}"}}]}),
+            json!({"role":"tool","tool_call_id":"call_retired","content":"PLAN_SAVED"}),
+        ]),
+        "/v1/messages" => request["messages"].as_array_mut().unwrap().extend([
+            json!({"role":"assistant","content":[{"type":"tool_use","id":"call_stdin","name":"write_stdin","input":{"session_id":71177,"yield_time_ms":3000}}]}),
+            json!({"role":"user","content":[{"type":"tool_result","tool_use_id":"call_stdin","content":"STDIN_COMPLETED"}]}),
+            json!({"role":"assistant","content":[{"type":"tool_use","id":"call_retired","name":"update_plan","input":{"plan":[]}}]}),
+            json!({"role":"user","content":[{"type":"tool_result","tool_use_id":"call_retired","content":"PLAN_SAVED"}]}),
+        ]),
+        _ => unreachable!(),
     }
+    request
 }
 
 async fn run_round_trip(endpoint: &str, stream: bool, profile: &str, strict: bool) {
@@ -316,6 +356,35 @@ async fn run_round_trip(endpoint: &str, stream: bool, profile: &str, strict: boo
             .find(|tool| tool["type"] == "web_search_20250305")
             .unwrap();
         assert_eq!(hosted["name"], "web_search");
+        assert_eq!(capture["tools"].as_array().unwrap().len(), 3);
+        let native = capture["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "exec_command")
+            .unwrap();
+        if strict {
+            assert_eq!(native["type"], "function");
+            assert_eq!(native["function"]["name"], native["name"]);
+            assert_eq!(native["function"]["parameters"], native["input_schema"]);
+        } else {
+            assert!(native.get("function").is_none());
+            assert!(native.get("type").is_none());
+        }
+        let stdin = capture["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "write_stdin")
+            .unwrap();
+        if strict {
+            assert_eq!(stdin["type"], "function");
+            assert_eq!(stdin["function"]["name"], stdin["name"]);
+            assert_eq!(stdin["function"]["parameters"], stdin["input_schema"]);
+        } else {
+            assert!(stdin.get("function").is_none());
+            assert!(stdin.get("type").is_none());
+        }
         if strict {
             assert_eq!(
                 hosted["function"],
@@ -339,6 +408,20 @@ async fn run_round_trip(endpoint: &str, stream: bool, profile: &str, strict: boo
         assert!(blocks.iter().any(|block| block["type"] == "tool_result"
             && block["tool_use_id"] == "call_old"
             && block["content"].to_string().contains("EXECUTED:2")));
+        assert!(blocks.iter().any(|block| block["type"] == "tool_use"
+            && block["id"] == "call_retired"
+            && block["name"] == "update_plan"
+            && block["input"] == json!({"plan":[]})));
+        assert!(blocks.iter().any(|block| block["type"] == "tool_result"
+            && block["tool_use_id"] == "call_retired"
+            && block["content"].to_string().contains("PLAN_SAVED")));
+        assert!(blocks.iter().any(|block| block["type"] == "tool_use"
+            && block["id"] == "call_stdin"
+            && block["name"] == "write_stdin"
+            && block["input"] == json!({"session_id":71177,"yield_time_ms":3000})));
+        assert!(blocks.iter().any(|block| block["type"] == "tool_result"
+            && block["tool_use_id"] == "call_stdin"
+            && block["content"].to_string().contains("STDIN_COMPLETED")));
     }
     eprintln!("{endpoint} stream={stream} profile={profile}: attempts=2 execution={receipt} followup=accepted");
 }
