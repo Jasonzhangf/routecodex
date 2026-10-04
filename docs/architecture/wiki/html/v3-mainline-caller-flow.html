@@ -282,8 +282,8 @@
       <div class="hero-meta">
         <span>Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-caller-flow.md</code></span>
         <span>Edge source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
-        <span>84 functional paths</span>
-        <span>492 caller edges</span>
+        <span>85 functional paths</span>
+        <span>493 caller edges</span>
       </div>
     </header>
 
@@ -472,7 +472,7 @@ flowchart TD
 <tr><td>Missing caller/callee fields</td><td><strong>none</strong></td></tr>
 <tr><td>Binding-pending edges</td><td><strong>22</strong></td></tr>
 <tr><td>typed-test-only edges</td><td><strong>15</strong></td></tr>
-<tr><td>live-bound source edges</td><td><strong>380</strong></td></tr>
+<tr><td>live-bound source edges</td><td><strong>381</strong></td></tr>
 <tr><td>aggregate-only wrapper edges</td><td><strong>2</strong></td></tr>
 </tbody>
 </table>
@@ -600,6 +600,7 @@ flowchart TD
 <tr><td><a href="#chain-v3_provider_compat_profile_response"><code>v3.provider_compat_profile.response</code></a><br/>v 3.provider_compat_profile.response</td><td><span class="status pending_review">pending review</span></td><td>1</td><td>4</td><td><code>v3.provider_compat_profile_loading</code></td><td><code>sha256:cb52e8e22579…</code></td></tr>
 <tr><td><a href="#chain-v3_target_session_global_selection"><code>v3.target.session_global_selection</code></a><br/>v 3.target.session_global_selection</td><td><span class="status audited_locked">locked by Jason</span></td><td>4</td><td>4</td><td><code>v3.virtual_router_target_interpreter</code></td><td><code>sha256:ff56cb023f01…</code></td></tr>
 <tr><td><a href="#chain-v3_codex_sample_retention_snap_scope"><code>v3.codex_sample_retention_snap_scope</code></a><br/>v 3.codex_sample_retention_snap_scope</td><td><span class="status audited_locked">locked by Jason</span></td><td>9</td><td>5</td><td><code>v3.codex_sample_retention_snap_scope</code></td><td><code>sha256:73893d0d8082…</code></td></tr>
+<tr><td><a href="#chain-v3_runtime_fd_limit"><code>v3.runtime_fd_limit</code></a><br/>v 3.runtime_fd_limit</td><td><span class="status pending_review">pending review</span></td><td>1</td><td>3</td><td><code>v3.managed_server_lifecycle</code></td><td><code>sha256:230ea3281ec6…</code></td></tr>
 <tr><td><a href="#chain-v3_server_managed_lifecycle"><code>v3.server.managed_lifecycle</code></a><br/>v 3.server.managed_lifecycle</td><td><span class="status audited_locked">locked by Jason</span></td><td>8</td><td>13</td><td><code>v3.managed_server_lifecycle</code></td><td><code>sha256:263429b7022d…</code></td></tr>
 <tr><td><a href="#chain-v3_user_config_compile"><code>v3.user_config.compile</code></a><br/>v 3.user_config.compile</td><td><span class="status pending_review">pending review</span></td><td>3</td><td>5</td><td><code>v3.simplified_user_config</code></td><td><code>sha256:5dbe426ca1f6…</code></td></tr>
 <tr><td><a href="#chain-v3_config_compile"><code>v3.config.compile</code></a><br/>01 配置编译</td><td><span class="status audited_locked">locked by Jason</span></td><td>4</td><td>11</td><td><code>v3.config_interpreter_contract</code></td><td><code>sha256:59948789e48f…</code></td></tr>
@@ -745,6 +746,13 @@ flowchart TD
             <span><code>v3.codex_sample_retention_snap_scope</code></span>
             <span>9 edges · 5 resources · v3-debug, v3-server</span>
             <span class="status audited_locked">locked by Jason</span>
+          </a>
+<a class="branch-card" href="#chain-v3_runtime_fd_limit">
+            <span class="chain-id">v 3.runtime_fd_limit</span>
+            <span>V3Lifecycle01ValidatedConfig → V3Lifecycle04ChildSpawned</span>
+            <span><code>v3.runtime_fd_limit</code></span>
+            <span>1 edges · 3 resources · v3-lifecycle</span>
+            <span class="status pending_review">pending review</span>
           </a>
 <a class="branch-card" href="#chain-v3_responses_provider_event_terminal_merge">
             <span class="chain-id">v 3.responses_provider_event.terminal_merge</span>
@@ -1744,6 +1752,42 @@ flowchart TD
 <tr><td><code>v3-codex-sample-07</code></td><td><code>V3CodexSamplePersistFailureReported</code><br/>→ <code>V3CodexSamplePersistFailureDrained</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.debug.codex_sample_persist_failure</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.debug.codex_sample_persist_failure</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.debug.codex_sample_persist_failure</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.debug.codex_sample_persist_failure</code></div></td><td><code>V3CodexSamplePersistHandle::shutdown</code><br/><small>routecodex-v3-debug/src/sample_store.rs</small></td><td><code>V3CodexSampleStore::persist_failures</code><br/><small>routecodex-v3-debug/src/sample_store.rs</small></td></tr>
 <tr><td><code>v3-codex-sample-08</code></td><td><code>V3CodexSamplePersistFailureDrained</code><br/>→ <code>V3CodexSamplePersistFailureReturned</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.debug.codex_sample_persist_failure</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.debug.codex_sample_persist_failure</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.debug.codex_sample_persist_failure</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.debug.codex_sample_persist_failure</code></div></td><td><code>V3ServerAggregateHandle::shutdown</code><br/><small>routecodex-v3-server/src/lib.rs</small></td><td><code>V3CodexSamplePersistHandle::shutdown</code><br/><small>routecodex-v3-debug/src/sample_store.rs</small></td></tr>
 <tr><td><code>v3-codex-sample-09</code></td><td><code>V3CodexSamplePersistFailureDrained</code><br/>→ <code>V3CodexSamplePersistFailureReturned</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.debug.codex_sample_persist_failure</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.debug.codex_sample_persist_failure</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.debug.codex_sample_persist_failure</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.debug.codex_sample_persist_failure</code></div></td><td><code>V3ServerAggregateHandle::prepare_for_exec</code><br/><small>routecodex-v3-server/src/lib.rs</small></td><td><code>V3CodexSamplePersistHandle::shutdown</code><br/><small>routecodex-v3-debug/src/sample_store.rs</small></td></tr>
+</tbody>
+</table>
+      </div>
+    </details>
+
+
+    <details class="branch-detail" id="chain-v3_runtime_fd_limit" >
+      <summary>
+        <span class="summary-main">v 3.runtime_fd_limit</span>
+        <span class="summary-sub">V3Lifecycle01ValidatedConfig → V3Lifecycle04ChildSpawned</span>
+        <span class="summary-sub">1 edges · <code>v3.runtime_fd_limit</code> · V3Lifecycle01ValidatedConfig → V3Lifecycle04ChildSpawned</span>
+      </summary>
+      <div class="branch-body">
+        <p class="chain-summary">Managed child carries the typed OS descriptor limit and declaration from the same Config snapshot before listener or hooks startup.</p>
+        <div class="branch-meta">
+          <span>owner: <code>v3.managed_server_lifecycle</code></span>
+          <span>audit: <span class="status pending_review">pending review</span></span>
+          <span>modules: <code>v3-lifecycle</code></span>
+          <span>resources: <code>3</code></span>
+
+
+        </div>
+        <div class="diagram-shell">
+          <pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 82, &quot;nodeSpacing&quot;: 46}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;18px&quot;}} }%%
+flowchart TD
+  n_v3_runtime_fd_limit_0[&quot;&lt;b&gt;Lifecycle 01 Validated Config&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3Lifecycle01ValidatedConfig&lt;/small&gt;&quot;]
+  n_v3_runtime_fd_limit_1[&quot;&lt;b&gt;Lifecycle 04 Child Spawned&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3Lifecycle04ChildSpawned&lt;/small&gt;&quot;]
+  n_v3_runtime_fd_limit_0 --&gt;|v3-life-runtime-limit&lt;br/&gt;v3-lifecycle → v3-lifecycle| n_v3_runtime_fd_limit_1
+  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+  classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
+  class n_v3_runtime_fd_limit_0,n_v3_runtime_fd_limit_1 node;</pre>
+        </div>
+        <table>
+<thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
+<tbody>
+<tr><td><code>v3-life-runtime-limit</code></td><td><code>V3Lifecycle01ValidatedConfig</code><br/>→ <code>V3Lifecycle04ChildSpawned</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.config.source_identity</code> <code>v3.config.runtime_limit</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.lifecycle.instance_declaration</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.config.runtime_limit</code></div></td><td><code>V3ManagedLifecycle::run_managed_child</code><br/><small>routecodex-v3-lifecycle/src/lib.rs</small></td><td><code>V3ManagedLifecycle::declaration_with_runtime</code><br/><small>routecodex-v3-lifecycle/src/lib.rs</small></td></tr>
 </tbody>
 </table>
       </div>
