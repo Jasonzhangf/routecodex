@@ -388,6 +388,32 @@ fn run_top_level(binary: &str, state_root: &Path, config: &Path, command: &str) 
         .unwrap()
 }
 
+fn run_with_soft_nofile(
+    binary: &str,
+    state_root: &Path,
+    config: &Path,
+    command: &str,
+    hooks_record: &Path,
+    soft: u64,
+) -> Output {
+    let script =
+        format!("ulimit -S -n {soft} || exit 125\nexec \"$0\" server {command} --config \"$1\"");
+    managed_test_command("/bin/sh", state_root)
+        .arg("-c")
+        .arg(script)
+        .arg(binary)
+        .arg(config)
+        .env("ROUTECODEX_V3_STATE_DIR", state_root)
+        .env(
+            "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
+            request_counter_file(state_root),
+        )
+        .env("V3_MANAGED_TEST_KEY", SECRET)
+        .env("ROUTECODEX_HOOKS_INSTALL_RECORD", hooks_record)
+        .output()
+        .unwrap()
+}
+
 fn kill_explicit_pid(pid: u64) {
     let result = unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
     assert_eq!(
@@ -848,6 +874,124 @@ fn managed_cli_start_status_restart_stop_is_one_aggregate_identity() {
     assert!(String::from_utf8_lossy(&already_stopped.stderr).contains("NotRunning"));
 
     scan_instance_files_for_secret(&instance_dir);
+}
+
+#[test]
+fn managed_child_applies_configured_fd_limit_before_hooks_sidecar() {
+    assert_managed_child_observes_configured_fd_limit(512, 4096);
+}
+
+#[test]
+fn managed_child_lowers_inherited_fd_limit_to_configured_value() {
+    // The parent soft limit is above the configured cap (4096), so the managed
+    // child must lower the inherited soft limit, not just raise it.
+    let inherited_soft = inherited_nofile_soft_above(4096);
+    assert_managed_child_observes_configured_fd_limit(inherited_soft, 4096);
+}
+
+fn inherited_nofile_soft_above(floor: u64) -> u64 {
+    let mut current = std::mem::MaybeUninit::<libc::rlimit>::uninit();
+    assert_eq!(
+        unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, current.as_mut_ptr()) },
+        0
+    );
+    let current = unsafe { current.assume_init() };
+    let hard = if current.rlim_max == libc::RLIM_INFINITY {
+        u64::MAX
+    } else {
+        current.rlim_max as u64
+    };
+    assert!(
+        hard > floor,
+        "test environment hard fd limit {hard} must exceed {floor}"
+    );
+    hard.min(1048575)
+}
+
+fn assert_managed_child_observes_configured_fd_limit(inherited_soft: u64, configured: u64) {
+    let _guard = lifecycle_test_guard();
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let config = write_config(&root, ports);
+    let mut config_text = fs::read_to_string(&config).unwrap();
+    config_text.push_str(&format!("\n[runtime]\nfd_limit = {configured}\n"));
+    fs::write(&config, config_text).unwrap();
+
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+    let hooks_root = root.path().join("hooks");
+    let bin_directory = hooks_root.join("bin");
+    let record_path = hooks_root.join("install.json");
+    let observed_limit = hooks_root.join("fd-limit.txt");
+    let hooksd = bin_directory.join("rccv3-hooksd");
+    fs::create_dir_all(&bin_directory).unwrap();
+    fs::write(
+        &hooksd,
+        format!(
+            "#!/bin/sh\nulimit -n > '{}'\nprintf '%s\\n' '{{\"protocol\":\"rcc-hooks-sidecar/v1\",\"ready\":true}}'\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n",
+            observed_limit.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&hooksd, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(
+        &record_path,
+        serde_json::json!({
+            "supervisor_enabled": true,
+            "hooks_runtime": "internal_hooksd",
+            "bin_directory": bin_directory,
+            "install_root": hooks_root,
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let start = run_with_soft_nofile(
+        binary,
+        &state_root,
+        &config,
+        "start",
+        &record_path,
+        inherited_soft,
+    );
+    assert!(
+        start.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&start.stdout),
+        String::from_utf8_lossy(&start.stderr)
+    );
+    assert_eq!(
+        top_level_status_json(binary, &state_root, &config)["state"],
+        "running"
+    );
+    let deadline = Instant::now() + HOOKS_MARKER_TIMEOUT;
+    while !observed_limit.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "hooks sidecar did not record the inherited fd limit"
+        );
+        sleep(Duration::from_millis(10));
+    }
+    let observed: u64 = fs::read_to_string(&observed_limit)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert_eq!(
+        observed, configured,
+        "managed child must apply [runtime] fd_limit before launching the hooks sidecar"
+    );
+
+    let stop = run_with_hooks_record(binary, &state_root, &config, "stop", &record_path);
+    assert!(
+        stop.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&stop.stdout),
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    for port in ports {
+        wait_port(port, false);
+    }
 }
 
 #[test]
