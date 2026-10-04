@@ -44,6 +44,7 @@
 - Relay payload rewriting is owned only by request/response Chat Process. Direct payload rewriting is owned only by registered Direct hooks. No other stage rewrites payloads.
 - Outbound projects canonical Chat plus extensions into the target standard protocol. It forwards business fields without a known compatible mapping as opaque original values, preserving their inverse association; allowlists and denylists may choose a known mapping, but may not discard or locally reject business fields.
 - Provider Compat performs only provider-private adjustments after standard outbound projection and before or after provider transport as declared. It is not a second Chat Process or a general Outbound implementation.
+- Request-shape regressions require a real public-entry black-box test that asserts the selected provider accepts the first attempt, preserves tools and paired history, and completes actual client tool execution plus follow-up. A final client 200 after provider switching does not prove shape compatibility. Cover the failing combination of hosted declarations and tool history; a fixture that unconditionally returns 200 cannot lock this regression. Explicit gateway profiles and their required tests are bound in `docs/architecture/v3-verification-map.yml`.
 - No guessed repair, fallback, downgrade, silent drop, hidden history rewrite, or success-wrapped error.
 - Control state uses typed control resources or Error chain only. Business payload cannot carry or reconstruct it.
 - Request, response, and error graphs remain separate.
