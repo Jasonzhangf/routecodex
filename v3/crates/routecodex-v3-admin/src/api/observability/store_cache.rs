@@ -82,6 +82,11 @@ struct V3ObsPortCache {
     ino: u64,
     len: u64,
     modified: Option<SystemTime>,
+    /// Inode change time. `modified` can be set back to its previous value from
+    /// userspace, so a same-length in-place rewrite with a restored mtime would
+    /// otherwise look unchanged; ctime cannot be set that way.
+    ctime: i64,
+    ctime_nsec: i64,
     offset: u64,
     line: usize,
     present: bool,
@@ -119,6 +124,12 @@ fn v3_obs_cache_guard() -> std::sync::MutexGuard<'static, V3ObsStoreCache> {
 /// shared projection exactly when it must. An absent store file is an empty
 /// history for that listener, not an error; a store that exists but cannot be
 /// read or decoded is an explicit error and never becomes an empty result.
+///
+/// The entry is committed only after every newly read row decoded, so a
+/// rejected row can never advance the reader past bytes it never decoded: the
+/// same error is reported again on the next poll, and the reader position is
+/// reset so the next attempt rebuilds from the start instead of resuming into a
+/// prefix this reader can no longer vouch for.
 fn refresh_v3_obs_port_cache(
     port: u16,
     path: &PathBuf,
@@ -129,7 +140,7 @@ fn refresh_v3_obs_port_cache(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             // Only a port that still held rows is a change; a store that was
             // already absent stays absent without invalidating the projection.
-            let changed = entry.present || !entry.rows.is_empty();
+            let changed = entry.present;
             *entry = V3ObsPortCache::default();
             return Ok(changed);
         }
@@ -139,12 +150,15 @@ fn refresh_v3_obs_port_cache(
     };
     let (dev, ino, len) = (metadata.dev(), metadata.ino(), metadata.len());
     let modified = metadata.modified().ok();
+    let (ctime, ctime_nsec) = (metadata.ctime(), metadata.ctime_nsec());
     // Nothing changed since the last refresh: no decode, no re-fold.
     if entry.present
         && entry.dev == dev
         && entry.ino == ino
         && entry.len == len
         && entry.modified == modified
+        && entry.ctime == ctime
+        && entry.ctime_nsec == ctime_nsec
     {
         return Ok(false);
     }
@@ -158,43 +172,92 @@ fn refresh_v3_obs_port_cache(
         && len > entry.len
         && len > entry.offset
         && entry.offset > 0;
-    if !append_only {
-        *entry = V3ObsPortCache {
-            dev,
-            ino,
-            len,
-            modified,
-            present: true,
-            ..V3ObsPortCache::default()
-        };
-    }
-    entry.len = len;
-    entry.modified = modified;
-    if len > entry.offset {
-        let tail = routecodex_v3_debug::v3_webui_observability_read_raw_rows_from(
+    let start_offset = if append_only { entry.offset } else { 0 };
+    let start_line = if append_only { entry.line } else { 0 };
+    let mut decoded = Vec::new();
+    let mut next_offset = start_offset;
+    let mut next_line = start_line;
+    if len > start_offset {
+        let read = match routecodex_v3_debug::v3_webui_observability_read_raw_rows_from(
             path,
-            entry.offset,
-            entry.line,
-        )
-        .map_err(|error| format!("observability store {port} unavailable: {error}"))?;
-        let mut decoded = Vec::with_capacity(tail.rows.len());
-        for value in tail.rows {
-            let row = serde_json::from_value::<SourceRow>(value).map_err(|error| {
-                format!("decode observability store {port} row failed: {error}")
-            })?;
+            start_offset,
+            start_line,
+        ) {
+            Ok(read) => read,
+            Err(error) => {
+                reset_v3_obs_reader_position(entry);
+                return Err(format!("observability store {port} unavailable: {error}"));
+            }
+        };
+        next_offset = read.next_offset;
+        next_line = read.next_line_number;
+        for value in read.rows {
+            let row = match serde_json::from_value::<SourceRow>(value) {
+                Ok(row) => row,
+                Err(error) => {
+                    reset_v3_obs_reader_position(entry);
+                    return Err(format!(
+                        "decode observability store {port} row failed: {error}"
+                    ));
+                }
+            };
             decoded.push(row);
         }
-        // The whole tail is committed at once: a rejected row must not leave the
-        // cache holding rows the offset has not consumed, which would re-append
-        // them on every later poll.
-        for row in decoded {
-            entry.max_seq = entry.max_seq.max(row.updated_epoch_ms);
-            entry.rows.push(row);
-        }
-        entry.offset = tail.next_offset;
-        entry.line = tail.next_line_number;
     }
+    // Commit only now. The whole tail lands at once, so a rejected row can never
+    // leave the cache holding rows its offset has not consumed, and a failed
+    // read can never advance the identity past bytes that were never decoded.
+    if !append_only {
+        entry.rows.clear();
+        entry.max_seq = 0;
+    }
+    for row in decoded {
+        entry.max_seq = entry.max_seq.max(row.updated_epoch_ms);
+        entry.rows.push(row);
+    }
+    entry.offset = next_offset;
+    entry.line = next_line;
+    entry.dev = dev;
+    entry.ino = ino;
+    entry.len = len;
+    entry.modified = modified;
+    entry.ctime = ctime;
+    entry.ctime_nsec = ctime_nsec;
+    entry.present = true;
     Ok(true)
+}
+
+/// Forgets the reader position after a refresh failed.
+///
+/// The entry keeps the identity of the last successful refresh, so the failure
+/// is reported again on the next poll instead of being papered over. The offset
+/// and line must not survive it, though: they describe a file this reader can no
+/// longer vouch for, and resuming from a stale offset would silently skip the
+/// prefix of whatever the path holds next — including rows the reader never saw.
+fn reset_v3_obs_reader_position(entry: &mut V3ObsPortCache) {
+    entry.offset = 0;
+    entry.line = 0;
+}
+
+/// Refreshes one port and drops the shared fold when that port's rows changed.
+///
+/// The projection is shared by every consumer, so whichever one happens to
+/// observe an append has to invalidate it. Refreshing the port without doing so
+/// would let a later `read_v3_obs_projection` find the port already up to date,
+/// conclude nothing changed, and serve the fold built before the append.
+fn refresh_v3_obs_store(
+    cache: &mut V3ObsStoreCache,
+    port: u16,
+    path: &PathBuf,
+) -> Result<(), String> {
+    let changed = {
+        let entry = cache.ports.entry(path.clone()).or_default();
+        refresh_v3_obs_port_cache(port, path, entry)?
+    };
+    if changed {
+        cache.projected = None;
+    }
+    Ok(())
 }
 
 /// Visits the decoded raw rows of every configured listener store through the
@@ -213,8 +276,7 @@ pub(crate) fn visit_v3_obs_stores(
     let ports = observability_store_sources(state)?;
     let mut cache = v3_obs_cache_guard();
     for (port, path) in &ports {
-        let entry = cache.ports.entry(path.clone()).or_default();
-        refresh_v3_obs_port_cache(*port, path, entry)?;
+        refresh_v3_obs_store(&mut cache, *port, path)?;
     }
     cache
         .ports
@@ -248,24 +310,21 @@ pub(super) fn read_v3_obs_projection(
     let mut cache = v3_obs_cache_guard();
     let mut projected_paths = Vec::with_capacity(ports.len());
     let mut max_seq = 0u64;
-    let mut changed = false;
     for (port, path) in &ports {
-        let entry = cache.ports.entry(path.clone()).or_default();
-        match refresh_v3_obs_port_cache(*port, path, entry) {
-            Ok(port_changed) => {
-                changed |= port_changed;
-                if entry.present {
-                    max_seq = max_seq.max(entry.max_seq);
-                }
+        if let Err(error) = refresh_v3_obs_store(&mut cache, *port, path) {
+            return Err((StatusCode::BAD_GATEWAY, json!({ "error": error })));
+        }
+        if let Some(entry) = cache.ports.get(path) {
+            if entry.present {
+                max_seq = max_seq.max(entry.max_seq);
             }
-            Err(error) => return Err((StatusCode::BAD_GATEWAY, json!({ "error": error }))),
         }
         projected_paths.push(path.clone());
     }
     cache
         .ports
         .retain(|path, _| ports.iter().any(|(_, known)| known == path));
-    if cache.projected.is_none() || changed || cache.projected_paths != projected_paths {
+    if cache.projected.is_none() || cache.projected_paths != projected_paths {
         let folded = project_query_rows(
             ports
                 .iter()
@@ -294,19 +353,27 @@ pub(super) fn read_v3_obs_rows_for_request_key(
     let ports = observability_store_paths(state)
         .map_err(|error| (StatusCode::BAD_GATEWAY, json!({ "error": error })))?;
     let mut cache = v3_obs_cache_guard();
-    let mut matching = Vec::new();
     for (port, path) in &ports {
-        let entry = cache.ports.entry(path.clone()).or_default();
-        if let Err(error) = refresh_v3_obs_port_cache(*port, path, entry) {
+        if let Err(error) = refresh_v3_obs_store(&mut cache, *port, path) {
             return Err((StatusCode::BAD_GATEWAY, json!({ "error": error })));
         }
-        matching.extend(
-            entry
-                .rows
-                .iter()
-                .filter(|row| row.request_key == request_key)
-                .cloned(),
-        );
+    }
+    // Drop entries for ports the config no longer lists, so a removed listener
+    // does not keep a decoded store resident.
+    cache
+        .ports
+        .retain(|path, _| ports.iter().any(|(_, known)| known == path));
+    let mut matching = Vec::new();
+    for (_, path) in &ports {
+        if let Some(entry) = cache.ports.get(path) {
+            matching.extend(
+                entry
+                    .rows
+                    .iter()
+                    .filter(|row| row.request_key == request_key)
+                    .cloned(),
+            );
+        }
     }
     Ok(matching)
 }
