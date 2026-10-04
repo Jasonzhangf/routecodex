@@ -4,6 +4,7 @@ mod endpoint_handlers;
 mod executors;
 mod frame_builders;
 mod live_snapshot;
+mod live_snapshot_projections;
 mod metadata_center;
 mod models_catalog;
 mod request_id;
@@ -30,6 +31,7 @@ use endpoint_handlers::{
 pub use executors::*;
 pub(crate) use frame_builders::*;
 pub(crate) use live_snapshot::*;
+pub(crate) use live_snapshot_projections::*;
 pub(crate) use metadata_center::*;
 use request_id::{
     format_v3_tm, v3_request_id_clock_now, V3AllocatedRequestIdentity, V3RequestCounterState,
@@ -596,7 +598,7 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
                                 request_connection_broker,
                                 service,
                             ).await {
-                                eprintln!("V3 Front HTTP connection failed: {error}");
+                                eprintln!("V3 Front HTTP connection failed: {error:?}");
                             }
                         });
                     }
@@ -948,6 +950,15 @@ async fn pending_endpoint(
     State(state): State<Arc<V3ListenerState>>,
     request: Request,
 ) -> Response<Body> {
+    let connection = request
+        .extensions()
+        .get::<V3FrontConnectionIdentity>()
+        .copied();
+    let response = pending_model_request(state.clone(), request).await;
+    commit_model_transport_outcome(&state, connection, response)
+}
+
+async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) -> Response<Body> {
     let front_connection_identity = request
         .extensions()
         .get::<V3FrontConnectionIdentity>()

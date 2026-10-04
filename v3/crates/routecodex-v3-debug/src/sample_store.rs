@@ -1,6 +1,6 @@
 use serde_json::{Map, Value};
 use std::fs;
-use std::io::Write;
+use std::io::{BufWriter, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
@@ -9,8 +9,11 @@ use std::sync::{Arc, Mutex, RwLock};
 /// client request/response plus provider request/response files, but those four
 /// files are one evidence record and must consume one retention slot.
 pub const V3_CODEX_SAMPLE_REQUEST_RETENTION: usize = 100;
-const V3_CODEX_SAMPLE_PERSIST_QUEUE_CAPACITY: usize = 64;
 const V3_CODEX_SAMPLE_PERSIST_QUEUE_BYTE_BUDGET: u32 = 64 * 1024 * 1024;
+/// Fixed allocation cost of one queued persistence job (channel slot, job
+/// metadata, and Arc/Value overhead). Charging it to the byte budget keeps the
+/// total queued memory bounded even when every payload serializes to a few bytes.
+const V3_CODEX_SAMPLE_PERSIST_JOB_OVERHEAD_BYTES: u32 = 4096;
 const V3_CODEX_SAMPLE_PERSIST_FAILURE_LIMIT: usize = 256;
 
 enum V3CodexSamplePersistQueueMessage {
@@ -36,13 +39,13 @@ pub struct V3CodexSampleStore {
     /// 与 `--snap` 运行时授权（full_codex_sampling）组合传入。
     error_samples_only: bool,
     persistence_guard: Mutex<()>,
-    enqueue: RwLock<Option<tokio::sync::mpsc::Sender<V3CodexSamplePersistQueueMessage>>>,
+    enqueue: RwLock<Option<tokio::sync::mpsc::UnboundedSender<V3CodexSamplePersistQueueMessage>>>,
     queued_payload_bytes: Arc<tokio::sync::Semaphore>,
     persist_failures: Mutex<V3CodexSamplePersistFailureLedger>,
 }
 
 pub struct V3CodexSamplePersistHandle {
-    stop: Option<tokio::sync::mpsc::Sender<V3CodexSamplePersistQueueMessage>>,
+    stop: Option<tokio::sync::mpsc::UnboundedSender<V3CodexSamplePersistQueueMessage>>,
     task: Mutex<Option<tokio::task::JoinHandle<()>>>,
     store: Arc<V3CodexSampleStore>,
 }
@@ -113,7 +116,6 @@ impl V3CodexSamplePersistHandle {
         let (reply, result) = tokio::sync::oneshot::channel();
         sender
             .send(V3CodexSamplePersistQueueMessage::Barrier { reply })
-            .await
             .map_err(|_| "codex sample persist queue unavailable".to_string())?;
         result
             .await
@@ -139,12 +141,10 @@ impl V3CodexSamplePersistHandle {
                 error.into_inner()
             })
             .take();
-        if let Some(task) = task.as_ref() {
-            while !task.is_finished() {
-                tokio::task::yield_now().await;
-            }
-        }
         if let Some(task) = task {
+            // Awaiting the handle is the wait. Polling `is_finished` with
+            // `yield_now` kept the task runnable and burned a whole core for
+            // the duration of the shutdown drain.
             if let Err(error) = task.await {
                 eprintln!("codex sample persist worker task failed: {error}");
             }
@@ -180,6 +180,15 @@ impl V3CodexSampleStore {
         self.retention
     }
 
+    fn should_persist(&self, force: bool, status: Option<u16>) -> bool {
+        if !force {
+            return self.enabled && !self.error_samples_only;
+        }
+        !status.is_some_and(|status| {
+            routecodex_v3_config::internal::v3_error_sample_skip_statuses().contains(&status)
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn persist(
         &self,
@@ -192,20 +201,8 @@ impl V3CodexSampleStore {
         force: bool,
         status: Option<u16>,
     ) -> Result<(), String> {
-        if !self.enabled && !force {
+        if !self.should_persist(force, status) {
             return Ok(());
-        }
-        if !force && self.error_samples_only {
-            return Ok(());
-        }
-        // 账号/配额类错误状态不落盘（401/402/403/429/503 等）。
-        if force {
-            if let Some(status) = status {
-                if routecodex_v3_config::internal::v3_error_sample_skip_statuses().contains(&status)
-                {
-                    return Ok(());
-                }
-            }
         }
         let _persistence_guard = self
             .persistence_guard
@@ -213,16 +210,25 @@ impl V3CodexSampleStore {
             .map_err(|error| format!("codex sample persistence lock poisoned: {error}"))?;
         let samples_root = resolve_v3_codex_samples_root()?;
         let dir = v3_codex_sample_request_dir(port, entry_protocol, endpoint, request_id)?;
+        let is_new_request_dir = !dir.is_dir();
         fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
         // 样本含敏感请求/错误载荷：目录 0700、文件 0600（不依赖 umask）。
         let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));
         let path = dir.join(file_name);
         let payload = merge_provider_snapshot_attempts(&path, file_name, payload)?;
-        let mut file = fs::File::create(&path).map_err(|error| error.to_string())?;
+        let file = fs::File::create(&path).map_err(|error| error.to_string())?;
         let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+        let mut file = BufWriter::new(file);
         serde_json::to_writer_pretty(&mut file, &payload).map_err(|error| error.to_string())?;
         file.write_all(b"\n").map_err(|error| error.to_string())?;
-        enforce_v3_codex_sample_global_retention(&samples_root, Some(&dir), self.retention)?;
+        file.flush().map_err(|error| error.to_string())?;
+        // Retention counts request directories, so the full-tree sweep only needs
+        // to run when this write created one. Re-scanning the whole samples root
+        // for every file of a request multiplied the Debug worker cost by the
+        // per-request file count.
+        if is_new_request_dir {
+            enforce_v3_codex_sample_global_retention(&samples_root, Some(&dir), self.retention)?;
+        }
         Ok(())
     }
 
@@ -267,7 +273,7 @@ impl V3CodexSampleStore {
                 "codex sample persist worker already started",
             ));
         }
-        let (tx, rx) = tokio::sync::mpsc::channel(V3_CODEX_SAMPLE_PERSIST_QUEUE_CAPACITY);
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let stop_tx = tx.clone();
         let worker_store = Arc::clone(self);
         *enqueue = Some(tx.clone());
@@ -284,6 +290,9 @@ impl V3CodexSampleStore {
     /// Hot-path enqueue owner. A rejected diagnostic write is reported out of band so it
     /// cannot turn a passable business request into a server error.
     pub fn enqueue_persist(self: &Arc<Self>, job: V3CodexSamplePersistJob) -> Result<(), String> {
+        if !self.should_persist(job.force, job.status) {
+            return Ok(());
+        }
         let failure_request_id = job.request_id.clone();
         let failure_file_name = job.file_name.clone();
         let enqueue = match self.enqueue.read() {
@@ -319,7 +328,9 @@ impl V3CodexSampleStore {
                 return Ok(());
             }
         };
-        let payload_permits = match u32::try_from(payload_size) {
+        let payload_size_with_overhead =
+            payload_size.saturating_add(u64::from(V3_CODEX_SAMPLE_PERSIST_JOB_OVERHEAD_BYTES));
+        let payload_permits = match u32::try_from(payload_size_with_overhead) {
             Ok(payload_permits) => payload_permits,
             Err(_) => {
                 record_v3_codex_sample_persist_failure(
@@ -348,20 +359,9 @@ impl V3CodexSampleStore {
             job,
             _payload_permit: payload_permit,
         };
-        match enqueue.try_send(message) {
+        match enqueue.send(message) {
             Ok(()) => Ok(()),
-            Err(tokio::sync::mpsc::error::TrySendError::Full(
-                V3CodexSamplePersistQueueMessage::Persist { job, .. },
-            )) => {
-                record_v3_codex_sample_persist_failure(
-                    self,
-                    job.request_id,
-                    job.file_name,
-                    "codex sample persist queue full".to_string(),
-                );
-                Ok(())
-            }
-            Err(tokio::sync::mpsc::error::TrySendError::Closed(
+            Err(tokio::sync::mpsc::error::SendError(
                 V3CodexSamplePersistQueueMessage::Persist { job, .. },
             )) => {
                 record_v3_codex_sample_persist_failure(
@@ -372,7 +372,7 @@ impl V3CodexSampleStore {
                 );
                 Ok(())
             }
-            Err(_) => unreachable!("sample persistence barriers use the awaited send path"),
+            Err(_) => unreachable!("sample persistence barriers use the queued send path"),
         }
     }
 }
@@ -398,7 +398,7 @@ fn serialized_v3_codex_sample_payload_size(payload: &Value) -> serde_json::Resul
 
 async fn run_v3_codex_sample_persist_worker(
     store: Arc<V3CodexSampleStore>,
-    mut rx: tokio::sync::mpsc::Receiver<V3CodexSamplePersistQueueMessage>,
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<V3CodexSamplePersistQueueMessage>,
 ) {
     while let Some(message) = rx.recv().await {
         match message {
@@ -1259,62 +1259,84 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn persist_async_worker_bounds_queue_and_reports_overload() {
+    async fn persist_async_worker_keeps_every_sample_under_burst() {
         with_test_home_async(|home_base| {
             let home_base = home_base.to_path_buf();
             Box::pin(async move {
-                let store = Arc::new(V3CodexSampleStore::new(
-                    true,
-                    V3_CODEX_SAMPLE_REQUEST_RETENTION,
-                    false,
-                ));
+                const BURST: usize = 512;
+                let store = Arc::new(V3CodexSampleStore::new(true, BURST, false));
+                // Hold the persistence guard so the worker cannot drain while the
+                // burst is enqueued: this reproduces the observed overload window.
                 let persist_guard = store.persistence_guard.lock().unwrap();
                 let mut handle = store
                     .start_persist_worker()
                     .expect("persist worker should start");
-                store
-                    .enqueue_persist(V3CodexSamplePersistJob {
-                        port: 10000,
-                        entry_protocol: "responses".to_string(),
-                        endpoint: "/v1/responses".to_string(),
-                        request_id: "req-saturated".to_string(),
-                        file_name: "request.json".to_string(),
-                        payload: Arc::new(json!({"hello": "in-flight"})),
-                        force: false,
-                        status: None,
-                    })
-                    .expect("sampling overload must not reject the business request");
-                for _ in 0..=V3_CODEX_SAMPLE_PERSIST_QUEUE_CAPACITY {
+                for index in 0..BURST {
                     store
                         .enqueue_persist(V3CodexSamplePersistJob {
                             port: 10000,
                             entry_protocol: "responses".to_string(),
                             endpoint: "/v1/responses".to_string(),
-                            request_id: "req-saturated".to_string(),
+                            request_id: format!("req-burst-{index}"),
                             file_name: "request.json".to_string(),
-                            payload: Arc::new(json!({"hello": "queued"})),
+                            payload: Arc::new(json!({"hello": index})),
                             force: false,
                             status: None,
                         })
-                        .expect("sampling overload must be reported out of band");
+                        .expect("a diagnostic burst must never reject the business request");
                 }
                 drop(persist_guard);
 
                 let failures = handle.shutdown().await;
                 assert!(
-                    failures
-                        .iter()
-                        .any(|failure| failure.reason.contains("queue full")),
-                    "overload must be retained as an explicit persistence failure: {failures:?}"
+                    failures.is_empty(),
+                    "a full-sampling burst within the byte-and-overhead budget must not drop any diagnostic write: {failures:?}"
                 );
-                assert!(failures.len() <= V3_CODEX_SAMPLE_PERSIST_FAILURE_LIMIT + 1);
                 assert!(handle.persist_failures().is_empty());
-                assert!(sample_dir(&home_base)
-                    .join("req-saturated")
-                    .join("request.json")
-                    .exists());
+                for index in 0..BURST {
+                    let path = sample_dir(&home_base)
+                        .join(format!("req-burst-{index}"))
+                        .join("request.json");
+                    assert!(path.exists(), "burst sample {index} must be persisted");
+                }
             })
         })
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn persist_async_worker_bounds_tiny_payload_job_count_by_fixed_overhead() {
+        let max_by_overhead = V3_CODEX_SAMPLE_PERSIST_QUEUE_BYTE_BUDGET as usize
+            / V3_CODEX_SAMPLE_PERSIST_JOB_OVERHEAD_BYTES as usize;
+        let store = Arc::new(V3CodexSampleStore::new(true, max_by_overhead, false));
+        let persist_guard = store.persistence_guard.lock().unwrap();
+        let handle = store
+            .start_persist_worker()
+            .expect("persist worker should start");
+        for index in 0..=max_by_overhead {
+            store
+                .enqueue_persist(V3CodexSamplePersistJob {
+                    port: 10000,
+                    entry_protocol: "responses".to_string(),
+                    endpoint: "/v1/responses".to_string(),
+                    request_id: format!("req-tiny-{index}"),
+                    file_name: "request.json".to_string(),
+                    payload: Arc::new(json!({"tiny": index})),
+                    force: false,
+                    status: None,
+                })
+                .expect("fixed-overhead budget exhaustion must not reject the business request");
+        }
+        let failures = store.persist_failure_snapshot();
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.reason.contains("64 MiB persistence budget")),
+            "tiny-payload bursts must be bounded by the fixed per-job overhead: {failures:?}"
+        );
+        drop(persist_guard);
+        // Keep the worker and guard held until task cancellation: this assertion
+        // covers admission bounded by fixed overhead, not filesystem drain.
+        drop(handle);
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -1328,7 +1350,11 @@ mod tests {
             .start_persist_worker()
             .expect("persist worker should start");
         let payload = Arc::new(json!({
-            "payload": "x".repeat(V3_CODEX_SAMPLE_PERSIST_QUEUE_BYTE_BUDGET as usize + 1)
+            "payload": "x".repeat(
+                V3_CODEX_SAMPLE_PERSIST_QUEUE_BYTE_BUDGET as usize
+                    - V3_CODEX_SAMPLE_PERSIST_JOB_OVERHEAD_BYTES as usize
+                    + 1
+            )
         }));
 
         store
@@ -1359,12 +1385,11 @@ mod tests {
             "request.json".to_string(),
             "disk full".to_string(),
         );
-        let (sender, receiver) = tokio::sync::mpsc::channel(1);
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
         let (reply, reply_receiver) = tokio::sync::oneshot::channel();
         drop(reply_receiver);
         sender
             .send(V3CodexSamplePersistQueueMessage::Barrier { reply })
-            .await
             .expect("barrier should be queued");
         drop(sender);
 

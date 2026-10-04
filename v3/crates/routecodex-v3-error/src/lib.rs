@@ -265,7 +265,6 @@ pub enum V3ErrorSourceKind {
     PayloadTooLarge,
     MethodNotAllowed,
     PathNotFound,
-    ModelNotFound,
     PendingEndpoint,
     ProviderFailure,
     ProviderCompatPayloadBoundaryViolation,
@@ -601,11 +600,9 @@ impl V3EligibleExternalHttpResponse {
     }
 }
 
-/// The provider failure terminal is either a real compatible upstream HTTP
-/// error or no HTTP response at all. Neither branch fabricates a proxy 502.
+/// Provider failures never authorize a client error payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum V3ProviderTerminalDisposition {
-    ExternalHttp(V3EligibleExternalHttpResponse),
     NoResponse,
 }
 
@@ -716,7 +713,6 @@ fn validate_internal_error_source_kind(source_kind: &V3ErrorSourceKind) {
         | V3ErrorSourceKind::PayloadTooLarge
         | V3ErrorSourceKind::MethodNotAllowed
         | V3ErrorSourceKind::PathNotFound
-        | V3ErrorSourceKind::ModelNotFound
         | V3ErrorSourceKind::PendingEndpoint
         | V3ErrorSourceKind::ProviderCompatPayloadBoundaryViolation
         | V3ErrorSourceKind::TargetPoolExhausted
@@ -750,8 +746,7 @@ pub fn build_v3_error_02_classified_from_v3_error_01(
         | V3ErrorSourceKind::UnsupportedMediaType
         | V3ErrorSourceKind::PayloadTooLarge
         | V3ErrorSourceKind::MethodNotAllowed
-        | V3ErrorSourceKind::PathNotFound
-        | V3ErrorSourceKind::ModelNotFound => ("client_input", "already_terminal"),
+        | V3ErrorSourceKind::PathNotFound => ("client_input", "already_terminal"),
         V3ErrorSourceKind::PendingEndpoint => ("pending_endpoint", "already_terminal"),
         V3ErrorSourceKind::ProviderFailure => {
             ("provider_failure", "non_terminal_if_candidates_remain")
@@ -844,10 +839,6 @@ pub fn build_v3_error_03_target_local_action_from_v3_error_02(
         classified.source.source_kind,
         V3ErrorSourceKind::ClientDisconnect
     );
-    let model_not_found = matches!(
-        classified.source.source_kind,
-        V3ErrorSourceKind::ModelNotFound
-    );
     let retry_eligible = provider_failure && candidates_remaining > 0;
     // Provider failures, including SSE/transport failures, affect provider health.
     let health_affecting = provider_failure && !matches!(scope, V3ErrorActionScope::None);
@@ -855,8 +846,6 @@ pub fn build_v3_error_03_target_local_action_from_v3_error_02(
         "target_local_reselect"
     } else if client_disconnect {
         "health_neutral_client_disconnect"
-    } else if model_not_found {
-        "project_client_error"
     } else if candidates_remaining == 0 {
         "target_pool_exhausted"
     } else {
@@ -899,7 +888,6 @@ pub fn build_v3_error_04_target_exhaustion_decision_with_provider_availability(
                     | V3ErrorSourceKind::PayloadTooLarge
                     | V3ErrorSourceKind::MethodNotAllowed
                     | V3ErrorSourceKind::PathNotFound
-                    | V3ErrorSourceKind::ModelNotFound
                     | V3ErrorSourceKind::TargetPoolExhausted
                     | V3ErrorSourceKind::RuntimeFailure
                     | V3ErrorSourceKind::ClientDisconnect
@@ -967,7 +955,6 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
             V3ErrorSourceKind::PayloadTooLarge => 413,
             V3ErrorSourceKind::MethodNotAllowed => 405,
             V3ErrorSourceKind::PathNotFound => 404,
-            V3ErrorSourceKind::ModelNotFound => 404,
             V3ErrorSourceKind::PendingEndpoint => 501,
             V3ErrorSourceKind::ProviderFailure => 502,
             V3ErrorSourceKind::ProviderCompatPayloadBoundaryViolation => 400,
@@ -1034,7 +1021,7 @@ pub struct V3ErrorHandlingCenter;
 impl V3ErrorHandlingCenter {
     pub fn provider_terminal_disposition(
         terminal: V3Error05TerminalDecision,
-        witness: Option<V3EligibleExternalHttpResponse>,
+        _witness: Option<V3EligibleExternalHttpResponse>,
     ) -> V3ProviderTerminalDisposition {
         debug_assert_eq!(
             terminal
@@ -1046,10 +1033,9 @@ impl V3ErrorHandlingCenter {
                 .source_kind,
             V3ErrorSourceKind::ProviderFailure,
         );
-        match witness {
-            Some(response) => V3ProviderTerminalDisposition::ExternalHttp(response),
-            None => V3ProviderTerminalDisposition::NoResponse,
-        }
+        // Upstream HTTP evidence is internal. Exhaustion never authorizes a
+        // client error response, including a real upstream HTTP error.
+        V3ProviderTerminalDisposition::NoResponse
     }
 
     pub fn project_terminal_decision(

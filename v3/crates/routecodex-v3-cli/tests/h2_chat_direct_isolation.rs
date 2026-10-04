@@ -9,7 +9,6 @@ use reqwest::StatusCode as ReqwestStatusCode;
 use serde_json::{json, Value};
 use std::{
     fs,
-    net::TcpListener,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::Arc,
@@ -647,8 +646,8 @@ async fn assert_chat_front_sse_transport_break(port: u16) {
         "streaming no-response must frame the break as an incomplete chunked body: {text:?}"
     );
     assert!(
-        text.contains(": routecodex provider transport break"),
-        "streaming no-response must flush the SSE boundary frame before breaking: {text:?}"
+        text.contains(":\n\n") && !text.contains("provider") && !text.contains("transport break"),
+        "streaming no-response must flush neutral SSE framing without control facts: {text:?}"
     );
     assert!(
         !text.ends_with("0\r\n\r\n"),
@@ -1151,10 +1150,6 @@ async fn wait_ports_closed(client: &reqwest::Client, ports: &[u16]) {
     }
 }
 
-fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
+#[path = "../../../crates/routecodex-v3-runtime/tests/support/test_ports.rs"]
+mod test_ports;
+use test_ports::free_port;

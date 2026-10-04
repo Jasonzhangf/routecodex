@@ -122,8 +122,6 @@ pub enum V3GeminiRelayRuntimeError {
     Target(String),
     #[error("V3 Gemini provider pool exhausted after {attempted_candidates:?}")]
     ProviderPoolExhausted { attempted_candidates: Vec<String> },
-    #[error("V3 Gemini requested direct provider model not found: {0}")]
-    ModelNotFound(String),
     #[error("V3 Gemini provider contract failed: {0}")]
     Provider(#[from] V3ProviderError),
     #[error("V3 Gemini provider compat failed: {0}")]
@@ -216,9 +214,6 @@ async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(
     )
     .await
     .map_err(|error| match error {
-        V3RelayCoreError::ModelNotFound(message) => {
-            V3GeminiRelayRuntimeError::ModelNotFound(message)
-        }
         V3RelayCoreError::EndpointPath(message) => V3GeminiRelayRuntimeError::EndpointPath(message),
         V3RelayCoreError::ProviderPoolExhausted {
             attempted_candidates,
@@ -477,12 +472,6 @@ pub fn project_v3_gemini_relay_runtime_failure(
         V3GeminiRelayRuntimeError::ProviderPoolExhausted { .. }
     );
     let source = match error {
-        V3GeminiRelayRuntimeError::ModelNotFound(message) => build_v3_error_01_source_raised(
-            V3ErrorSourceKind::ModelNotFound,
-            "V3Target10ConcreteProviderSelected",
-            "direct_model_not_found",
-            message,
-        ),
         V3GeminiRelayRuntimeError::ProviderPoolExhausted {
             attempted_candidates,
         } => provider_pool_exhausted_source(

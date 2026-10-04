@@ -10,7 +10,7 @@ use futures_util::StreamExt;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
-use std::{net::TcpListener, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use tokio::sync::{mpsc, oneshot, Mutex};
 
 #[path = "../../../crates/routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
@@ -304,9 +304,11 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
             "metadata_center":{"route":"must-not-leak"}
         }))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(isolation_response.status().as_u16(), 598);
+        .await;
+    assert!(
+        isolation_response.is_err(),
+        "a rejected control-plane leak must close transport without a client error response"
+    );
     if let Ok(Some(capture)) =
         tokio::time::timeout(Duration::from_millis(100), captures_rx.recv()).await
     {
@@ -320,18 +322,53 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         );
     }
 
+    let unlisted_model_response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model":"controlled.unknown-model",
+            "messages":[{"role":"user","content":"unlisted"}],
+            "stream":false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        unlisted_model_response.status(),
+        StatusCode::OK,
+        "a client model that is not a declared provider.model must fall back to normal routing"
+    );
+    let unlisted_model_body: Value = unlisted_model_response.json().await.unwrap();
+    assert_eq!(
+        unlisted_model_body["choices"][0]["message"]["content"],
+        "controlled json"
+    );
+    let unlisted_model_capture = loop {
+        let capture = tokio::time::timeout(Duration::from_secs(2), captures_rx.recv())
+            .await
+            .expect("a client model that is not a declared provider.model must reach the provider")
+            .unwrap();
+        if capture
+            .body
+            .pointer("/messages/0/content")
+            .and_then(Value::as_str)
+            == Some("unlisted")
+        {
+            break capture;
+        }
+    };
+    assert_eq!(
+        unlisted_model_capture.body["model"], "chat-wire-model",
+        "the fallback must serve the default pool target, not the requested name"
+    );
+
     handle.shutdown().await;
     upstream_shutdown_tx.send(()).unwrap();
     std::env::remove_var("V3_OPENAI_CHAT_CONTROLLED_KEY");
 }
 
-fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
+#[path = "../../../crates/routecodex-v3-runtime/tests/support/test_ports.rs"]
+mod test_ports;
+use test_ports::free_port;
 
 fn manifest(
     server_port: u16,

@@ -126,11 +126,11 @@ const cases = [
     diagnostic: /non-Responses client SSE terminator/,
   },
   {
-    name: 'Responses client SSE error path regains the Chat [DONE] terminator',
+    name: 'Responses client SSE error event construction reintroduced',
     file: 'v3/crates/routecodex-v3-server/src/frame_builders.rs',
-    marker: 'format!("event: response.failed\\ndata: {event}\\n\\n").into_bytes()',
-    mutation: 'format!("event: response.failed\\ndata: {event}\\n\\ndata: [DONE]\\n\\n").into_bytes()',
-    diagnostic: /Chat-completions \[DONE\] terminator on the Responses client SSE error path/,
+    marker: 'frame.body = V3Server16Body::Bytes(Vec::new());',
+    mutation: 'frame.body = V3Server16Body::Bytes(b"event: response.failed\\ndata: {}\\n\\n".to_vec());',
+    diagnostic: /client error event construction is forbidden/,
   },
   {
     name: 'Responses client SSE incomplete remerged into failed terminal',

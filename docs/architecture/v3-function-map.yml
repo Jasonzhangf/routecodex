@@ -169,6 +169,7 @@ features:
   owner_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
   resource_bindings:
   - v3.config.source_identity
+  - v3.config.runtime_limit
   - v3.config.published_manifest
   - v3.server.listener_set
   - v3.lifecycle.instance_declaration
@@ -449,6 +450,7 @@ features:
   - v3.config.published_manifest
   - v3.server.listener_set
   - v3.server.validated_http_input
+  - v3.server.model_transport_outcome
   - v3.request.protocol_fields
   - v3.debug.artifact
   - v3.error.chain
@@ -459,9 +461,14 @@ features:
   - v3-srv-03
   - v3-srv-04
   - v3-srv-05
+  - v3-srv-06
   entry_symbols:
   - spawn_v3_server_aggregate
   - pending_endpoint
+  - pending_model_request
+  - model_no_response_output
+  - commit_model_transport_outcome
+  - V3ModelClientNoResponse
   - build_v3_server_startup_01_listener_set_from_config_05
   - build_v3_server_03_http_request_raw
   - register_v3_debug_01_pending_endpoint_event
@@ -1023,6 +1030,7 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-config/src/lib.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/models_catalog.rs
   - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
   resource_bindings:
   - v3.config.published_manifest
@@ -1042,6 +1050,7 @@ features:
   allowed_paths:
   - v3/crates/routecodex-v3-config/src/lib.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/models_catalog.rs
   - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-function-map.yml
@@ -1050,6 +1059,7 @@ features:
   - docs/architecture/wiki/v3-live-provider-compat-parity.md
   - docs/design/codex-model-capability-contract.md
   - docs/goals/v3-models-capability-catalog-test-design.md
+  - docs/goals/models-catalog-direct-surface-run-notes-20261003.md
   - .agents/skills/rcc-dev-skills/references/93-lessons-2026-07.md
   - scripts/architecture/verify-v3-architecture-docs.mjs
   - note.md
@@ -1075,8 +1085,14 @@ features:
   - npm run test:v3-workspace
   - git diff --check
   required_contract:
-  - /v1/models is scoped by the current listener routing group; enabled provider models
-    outside that route group must not be exposed to Codex.
+  - '/v1/models projects three surfaces. (1) Route-group reachable visible ids, scoped
+    by the current listener routing group and narrowed by `expose_models` when it is
+    non-empty. (2) The direct-routing surface: every enabled provider model is
+    addressable as `provider.model` and must always be listed, because `expose_models`
+    names are client entry names rather than provider model ids. (3) Client entry names:
+    an `expose_models` name that matches no provider model is published as a virtual
+    entry with `direct_route: false`, and takes the same normal Virtual Router path as
+    `auto` instead of pinning a provider.'
   - Route group and forwarder expansion belongs to the config Manifest helper; Server
     only calls the helper and projects JSON, and must not interpret route targets
     directly.
@@ -2033,6 +2049,12 @@ features:
     explicit model routes map inbound model to declared targets, while default/no-explicit-model
     paths are filtered by configured target model ids before provider send. Provider
     aliases are not runtime routing truth.
+  - '`provider.model` direct routing pins a provider only when the segment before the
+    first `.` is an enabled provider id that declares that model or one of its aliases.
+    Every other client model string — no dot, an unknown provider segment, or an enabled
+    provider that declares no such model — falls back to normal classification, the same
+    path `auto` and virtual catalog entry names take. Only a resolved direct model that
+    cannot serve the request media requirement fails explicitly without rerouting.'
   - The stable gpt-5.5 Codex client surface remains a capability/priority-routed built-in
     selector and is not narrowed to one provider model.
   - 'Weighted selection is priority-first: only equal-minimum-priority targets participate
@@ -3622,6 +3644,9 @@ features:
   - path: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_timing.rs
     owner: kernel
     responsibility: Finalize typed timing for committed SSE, live SSE and JSON.
+  - path: v3/crates/routecodex-v3-server/src/live_snapshot_projections.rs
+    owner: live_snapshot
+    responsibility: Capture foundation response snapshots and project runtime observability; function bodies and caller behavior are preserved.
   decomposition_edges:
   - caller: execute_v3_anthropic_relay_runtime_inner
     callees: [closeout_anthropic_relay_response, closeout_anthropic_relay_sse_response]
@@ -3636,6 +3661,8 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
+  - v3/crates/routecodex-v3-server/src/live_snapshot.rs
+  - v3/crates/routecodex-v3-server/src/live_snapshot_projections.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/provider-compat-core/src/lib.rs
@@ -4254,6 +4281,7 @@ features:
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/live_snapshot.rs
   - v3/crates/routecodex-v3-server/tests
+  - v3/scripts/architecture/verify-v3-debug-payload-budget.mjs
   - v3/Cargo.lock
   - docs/goals/v3-codex-sample-retention-snap-scope-test-design.md
   - docs/architecture
@@ -4267,7 +4295,12 @@ features:
   - npm run test:v3-debug-payload-budget-red-fixtures
   - npm run verify:v3-resource-map
   - cargo test -p routecodex-v3-debug persist_async_worker_records_explicit_failure_terminal
+  - cargo test -p routecodex-v3-debug persist_async_worker_keeps_every_sample_under_burst
+  - cargo test -p routecodex-v3-debug persist_async_worker_bounds_tiny_payload_job_count_by_fixed_overhead
+  - cargo test -p routecodex-v3-debug persist_failure_barrier_keeps_ledger_when_reply_receiver_is_dropped
+  - cargo test -p routecodex-v3-debug persist_failure_ledger_bounds_records_and_summarizes_overflow
   - cargo test -p routecodex-v3-server --test multi_listener_server responses_direct_sample_persist_failure_is_reported -- --nocapture
+  - cargo test -p routecodex-v3-server --test multi_listener_server responses_full_sampling_burst_does_not_drop_sample_writes -- --nocapture
   mainline_bindings:
   - v3-codex-sample-01
   - v3-codex-sample-02
@@ -4962,6 +4995,8 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-server/src/restart_handoff.rs
   - v3/crates/routecodex-v3-server/src/restart_closeout.rs
+  - v3/vendor/hyper/src/server/conn/http1.rs
+  - v3/vendor/hyper/src/proto/h1/conn.rs
   - v3/crates/routecodex-v3-server/src/restart_handoff/tests/restart_handoff_closeout.rs
   - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
   - v3/crates/routecodex-v3-server/src/session_admission.rs
@@ -4975,11 +5010,14 @@ features:
   - v3.front.client_closeout_frame
   - v3.front.deadline_budget
   - v3.front.request_activity_gate
+  - v3.server.http_parse_error_policy
   entry_symbols:
   - V3FrontRequestLease
   - V3RuntimeHandoffCheckpoint
   - V3FrontFrameSequence
   - V3FrontTransportCloseoutState
+  - automatic_error_responses
+  - set_automatic_error_responses
   - V3StableFrontSocket::set_exec_closeout_frame
   - V3FrontDeadlineBudget
   - V3ServerRequestActivityGate
@@ -4987,6 +5025,14 @@ features:
   allowed_paths:
   - v3/crates/routecodex-v3-server/src/restart_handoff.rs
   - v3/crates/routecodex-v3-server/src/restart_closeout.rs
+  - v3/vendor/hyper
+  - v3/Cargo.toml
+  - v3/Cargo.lock
+  - v3/scripts/run-admission-gate.mjs
+  - scripts/verify-fast.mjs
+  - scripts/tests/verify-fast-scope.mjs
+  - v3/scripts/tests/v3-compile-fail-boundaries.mjs
+  - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
   - v3/crates/routecodex-v3-server/src/restart_handoff/tests/restart_handoff_closeout.rs
   - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
   - v3/crates/routecodex-v3-server/src/session_admission.rs
@@ -5324,6 +5370,7 @@ features:
   - record_v3_webui_error_projection
   - v3_webui_observability_append_row
   - v3_webui_observability_read_rows
+  - v3_webui_observability_read_raw_rows_from
   - v3_webui_observability_store_path
   - cooldown_pool
   - emit_v3_request_console_observation
@@ -5563,6 +5610,7 @@ features:
   - spawn_patrol_loop
   - records
   - v3_webui_observability_read_raw_rows
+  - v3_webui_observability_read_raw_rows_from
   - build_timeseries
   allowed_paths:
   - v3/crates/routecodex-v3-admin/src/lib.rs

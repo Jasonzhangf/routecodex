@@ -10,7 +10,7 @@ use futures_util::StreamExt;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
-use std::{net::TcpListener, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use tokio::sync::{mpsc, oneshot, Mutex};
 
 #[path = "../../../crates/routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
@@ -246,9 +246,11 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
             "metadata_center":{"route":"must-not-leak"}
         }))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(isolation_response.status().as_u16(), 598);
+        .await;
+    assert!(
+        isolation_response.is_err(),
+        "a rejected control-plane leak must close transport without a client error response"
+    );
     assert!(
         tokio::time::timeout(Duration::from_millis(100), captures_rx.recv())
             .await
@@ -260,13 +262,9 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
     std::env::remove_var("V3_GEMINI_CONTROLLED_KEY");
 }
 
-fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
+#[path = "../../../crates/routecodex-v3-runtime/tests/support/test_ports.rs"]
+mod test_ports;
+use test_ports::free_port;
 
 fn manifest(
     server_port: u16,

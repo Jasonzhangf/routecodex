@@ -141,12 +141,6 @@ pub(crate) fn project_v3_anthropic_relay_runtime_failure_with_trace(
         _ => None,
     };
     let source = match error {
-        V3AnthropicRelayRuntimeError::ModelNotFound(message) => build_v3_error_01_source_raised(
-            V3ErrorSourceKind::ModelNotFound,
-            "V3Target10ConcreteProviderSelected",
-            "direct_model_not_found",
-            message,
-        ),
         V3AnthropicRelayRuntimeError::ProviderPoolExhausted {
             attempted_candidates,
         } => provider_pool_exhausted_source(

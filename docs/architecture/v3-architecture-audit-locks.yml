@@ -61,8 +61,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:edd1d4d6c653ef4db400253cb52760ff70f9492b1c3beefdaff526d6f07f33f6
-    last_manual_authorization_id: auth-20260824-v3-protocol-fields-server-startup
+    fingerprint: sha256:e09b3524db5510c71781bc145a257d1283eebeac736120b4f8f5a69f06c04adf
+    last_manual_authorization_id: auth-20261003-all-entry-http-framing-no-client-error
   - item_id: chain:v3.responses_direct.required_mainline
     chain_id: v3.responses_direct.required_mainline
     status: audited_locked
@@ -1251,3 +1251,17 @@ manual_authorizations:
     reason: "Jason authorized completing the V3 Responses tool-call behavior alignment (DSH responses divergence/hang fix). complete_or_repair_v3_resp03_tool_frames was physically deleted because it fabricated a Responses tool-continuation status and finish_reason; edge v3-resp03-tool-governance-01 callee now binds strip_v3_resp03_encrypted_reasoning_content, edge v3-resp03-tool-governance-05 caller was renamed to the renamed characterization test, and the chain summary/owner-scope text now states that a completed tool-call response stays completed/tool_calls and never a fabricated requires_action. Node topology, owners, resources, and control-plane/data-plane boundaries are unchanged."
     fingerprint_before: sha256:02b1273a9573f68bc4f9d2b911b67055869a7303fda280df1f2a1a34f5da52f5
     fingerprint_after: sha256:941b25453c6b5fd0fa5b4458831cccdc4cd6a713b35cffaa53f3639a76651c00
+  - authorization_id: auth-20261003-all-entry-no-client-error
+    item_id: chain:v3.server.startup
+    approved_by: Jason
+    approved_at: '2026-10-03T17:02:41Z'
+    reason: "Jason explicitly required that all model entries never deliver any error response, including pool exhaustion and SSE decoding failures, and that any DAG error edge into a client business response is wrong. This scoped repair changes srv05 from error payload delivery to a Server-owned typed no-response resource and binds srv06 to the actual transport closeout consumer. The other startup edges are preserved; this records the already authorized error-boundary correction, not authorization for unrelated lifecycle changes."
+    fingerprint_before: sha256:edd1d4d6c653ef4db400253cb52760ff70f9492b1c3beefdaff526d6f07f33f6
+    fingerprint_after: sha256:66e47a57a103d5eaebe5c275e3bf6a438cd4cec8d153083d6c6c1e43d88090d4
+  - authorization_id: auth-20261003-all-entry-http-framing-no-client-error
+    item_id: chain:v3.server.startup
+    approved_by: Jason
+    approved_at: '2026-10-03T19:36:00Z'
+    reason: "Jason's explicit all-model-entry prohibition covers every cause, including failures before application admission. Real raw TCP reproduces Hyper-generated HTTP400/431 bypassing the application no-response consumer. This scoped repair binds the Server/Front typed HTTP parse-error policy to a narrow native Hyper builder/Conn API as srv07/srv08. The native producer is disabled without changing protocol acceptance, business payloads, lifecycle topology, or unrelated routing. These edges remain design-only until authored and verified. This records the existing authorized error-boundary repair, not a new authorization or a claimed manual implementation review."
+    fingerprint_before: sha256:66e47a57a103d5eaebe5c275e3bf6a438cd4cec8d153083d6c6c1e43d88090d4
+    fingerprint_after: sha256:e09b3524db5510c71781bc145a257d1283eebeac736120b4f8f5a69f06c04adf

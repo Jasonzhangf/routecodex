@@ -921,7 +921,7 @@ pub(crate) fn error_output_with_observability(
 
 pub(crate) fn target_exhausted_output_with_observability(
     source: V3Error01SourceRaised,
-    witness: Option<V3EligibleExternalHttpResponse>,
+    _witness: Option<V3EligibleExternalHttpResponse>,
     node_trace: Vec<&'static str>,
     hook_registry: &V3HookRegistry,
     observability: Option<V3RuntimeObservability>,
@@ -929,10 +929,7 @@ pub(crate) fn target_exhausted_output_with_observability(
     assert_eq!(source.source_kind, V3ErrorSourceKind::TargetPoolExhausted);
     let mut output =
         error_output_with_observability(source, node_trace, hook_registry, observability);
-    output.terminal_disposition = Some(match witness {
-        Some(response) => V3ProviderTerminalDisposition::ExternalHttp(response),
-        None => V3ProviderTerminalDisposition::NoResponse,
-    });
+    output.terminal_disposition = Some(V3ProviderTerminalDisposition::NoResponse);
     output
 }
 
@@ -1027,7 +1024,7 @@ mod target_exhaustion_disposition_tests {
     }
 
     #[test]
-    fn direct_target_exhaustion_keeps_prior_real_upstream_http_response() {
+    fn direct_target_exhaustion_never_delivers_prior_upstream_error() {
         let witness = V3EligibleExternalHttpResponse::new(
             429,
             vec![("content-type".into(), b"application/json".to_vec())],
@@ -1049,12 +1046,12 @@ mod target_exhaustion_disposition_tests {
         );
         assert_eq!(
             output.terminal_disposition,
-            Some(V3ProviderTerminalDisposition::ExternalHttp(witness))
+            Some(V3ProviderTerminalDisposition::NoResponse)
         );
     }
 
     #[test]
-    fn direct_provider_terminal_uses_witness_or_no_response() {
+    fn direct_provider_terminal_never_delivers_upstream_witness() {
         let decision = V3ErrorHandlingCenter::decide_provider(
             V3ErrorHandlingCenterInput {
                 source: routecodex_v3_error::build_v3_error_01_source_raised(
@@ -1094,7 +1091,7 @@ mod target_exhaustion_disposition_tests {
         );
         assert_eq!(
             external.terminal_disposition,
-            Some(V3ProviderTerminalDisposition::ExternalHttp(witness))
+            Some(V3ProviderTerminalDisposition::NoResponse)
         );
     }
 }

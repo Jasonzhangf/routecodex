@@ -7,7 +7,7 @@ use super::{
     attempt_status_code, error_category_status_code, row_cache_creation_value,
     row_cache_hit_numerator, row_cache_read_value, row_cached_value, row_effective_input,
     row_error_origin, row_error_origin_opt, row_input_value, row_output_value, row_status_code,
-    row_total_value, QueryRow, SourceScope,
+    row_total_value, to_query_row, QueryRow, SourceRow, SourceScope,
 };
 use serde_json::{json, Value};
 
@@ -190,6 +190,47 @@ fn build_attempt_row(meta: Value) -> QueryRow {
     row.result = Some("failed-attempt".to_string());
     row.meta = meta;
     row
+}
+
+/// The direct projection must stay equivalent to the serde round-trip it
+/// replaced: `QueryRow` is `SourceRow` without `tokens_output` plus a defaulted
+/// `error_origin`.
+#[test]
+fn query_projection_matches_the_serde_round_trip_it_replaced() {
+    let row = SourceRow {
+        request_key: "4444:r1".to_string(),
+        event_type: "request.completed".to_string(),
+        started_epoch_ms: 1,
+        updated_epoch_ms: 2,
+        finished_epoch_ms: Some(3),
+        duration_ms: Some(4),
+        meta: json!({"endpoint": "/v1/responses", "error_category": "provider_http_502"}),
+        scope: SourceScope {
+            port: 4444,
+            workdir: Some("/tmp".to_string()),
+            session: Some("session".to_string()),
+        },
+        result: Some("success".to_string()),
+        attempts: 2,
+        failed_attempts: 1,
+        switches: 3,
+        usage: Some(json!({"input_tokens": 10})),
+        timing_internal_ms: Some(5),
+        timing_external_ms: Some(6),
+        servertool: true,
+        tokens_output: Some(7),
+        raw_artifact_ref: Some("artifact".to_string()),
+    };
+    let round_tripped: QueryRow =
+        serde_json::from_value(serde_json::to_value(&row).expect("source row serializes"))
+            .expect("query row shape is compatible");
+    let projected = to_query_row(&row);
+    assert_eq!(projected, round_tripped);
+    assert_eq!(
+        serde_json::to_value(&projected).expect("projected row serializes"),
+        serde_json::to_value(&round_tripped).expect("round-tripped row serializes"),
+        "the projected row must serialize exactly as the round-trip did"
+    );
 }
 
 #[test]

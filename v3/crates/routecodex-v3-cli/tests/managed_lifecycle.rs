@@ -1,13 +1,12 @@
 use serde_json::Value;
-use std::collections::HashSet;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpStream;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::{Mutex, MutexGuard};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
@@ -116,23 +115,9 @@ allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
 "#;
 
-fn free_port() -> u16 {
-    static ALLOCATED_PORTS: OnceLock<Mutex<HashSet<u16>>> = OnceLock::new();
-    let mut allocated = ALLOCATED_PORTS
-        .get_or_init(|| Mutex::new(HashSet::new()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    loop {
-        let port = TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
-        if allocated.insert(port) {
-            return port;
-        }
-    }
-}
+#[path = "../../../crates/routecodex-v3-runtime/tests/support/test_ports.rs"]
+mod test_ports;
+use test_ports::free_port;
 
 fn state_root_diagnostics(state_root: &Path) -> String {
     let instances_root = state_root.join("instances");
@@ -390,6 +375,32 @@ fn run_top_level(binary: &str, state_root: &Path, config: &Path, command: &str) 
         .unwrap()
 }
 
+fn run_with_soft_nofile(
+    binary: &str,
+    state_root: &Path,
+    config: &Path,
+    command: &str,
+    hooks_record: &Path,
+    soft: u64,
+) -> Output {
+    let script =
+        format!("ulimit -S -n {soft} || exit 125\nexec \"$0\" server {command} --config \"$1\"");
+    managed_test_command("/bin/sh", state_root)
+        .arg("-c")
+        .arg(script)
+        .arg(binary)
+        .arg(config)
+        .env("ROUTECODEX_V3_STATE_DIR", state_root)
+        .env(
+            "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
+            request_counter_file(state_root),
+        )
+        .env("V3_MANAGED_TEST_KEY", SECRET)
+        .env("ROUTECODEX_HOOKS_INSTALL_RECORD", hooks_record)
+        .output()
+        .unwrap()
+}
+
 fn kill_explicit_pid(pid: u64) {
     let result = unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
     assert_eq!(
@@ -547,10 +558,17 @@ fn send_invalid_json_request(port: u16) {
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
     let mut response = String::new();
-    let _ = stream.read_to_string(&mut response);
+    let received = stream.read_to_string(&mut response);
     assert!(
-        response.starts_with("HTTP/1.1 400"),
-        "invalid JSON response must fail visibly, got:\n{response}"
+        received.is_ok()
+            || received
+                .as_ref()
+                .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionReset),
+        "invalid JSON must reach a terminal transport outcome: {received:?}"
+    );
+    assert!(
+        response.is_empty(),
+        "invalid JSON must not receive an error response, got:\n{response}"
     );
 }
 
@@ -564,10 +582,17 @@ fn send_path_not_found_request(port: u16) {
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
     let mut response = String::new();
-    let _ = stream.read_to_string(&mut response);
+    let received = stream.read_to_string(&mut response);
     assert!(
-        response.starts_with("HTTP/1.1 404"),
-        "unknown path response must fail visibly, got:\n{response}"
+        received.is_ok()
+            || received
+                .as_ref()
+                .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionReset),
+        "unknown path must reach a terminal transport outcome: {received:?}"
+    );
+    assert!(
+        response.is_empty(),
+        "unknown path must not receive an error response, got:\n{response}"
     );
 }
 
@@ -836,6 +861,102 @@ fn managed_cli_start_status_restart_stop_is_one_aggregate_identity() {
     assert!(String::from_utf8_lossy(&already_stopped.stderr).contains("NotRunning"));
 
     scan_instance_files_for_secret(&instance_dir);
+}
+
+#[test]
+fn managed_child_applies_configured_fd_limit_before_hooks_sidecar() {
+    assert_managed_child_observes_configured_fd_limit(512, 4096);
+}
+
+#[test]
+fn managed_child_lowers_inherited_fd_limit_to_configured_value() {
+    assert_managed_child_observes_configured_fd_limit(8192, 4096);
+}
+
+fn assert_managed_child_observes_configured_fd_limit(inherited_soft: u64, configured: u64) {
+    let _guard = lifecycle_test_guard();
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let config = write_config(&root, ports);
+    let mut config_text = fs::read_to_string(&config).unwrap();
+    config_text.push_str(&format!("\n[runtime]\nfd_limit = {configured}\n"));
+    fs::write(&config, config_text).unwrap();
+
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+    let hooks_root = root.path().join("hooks");
+    let bin_directory = hooks_root.join("bin");
+    let record_path = hooks_root.join("install.json");
+    let observed_limit = hooks_root.join("fd-limit.txt");
+    let hooksd = bin_directory.join("rccv3-hooksd");
+    fs::create_dir_all(&bin_directory).unwrap();
+    fs::write(
+        &hooksd,
+        format!(
+            "#!/bin/sh\nulimit -n > '{}'\nprintf '%s\\n' '{{\"protocol\":\"rcc-hooks-sidecar/v1\",\"ready\":true}}'\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n",
+            observed_limit.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&hooksd, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(
+        &record_path,
+        serde_json::json!({
+            "supervisor_enabled": true,
+            "hooks_runtime": "internal_hooksd",
+            "bin_directory": bin_directory,
+            "install_root": hooks_root,
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let start = run_with_soft_nofile(
+        binary,
+        &state_root,
+        &config,
+        "start",
+        &record_path,
+        inherited_soft,
+    );
+    assert!(
+        start.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&start.stdout),
+        String::from_utf8_lossy(&start.stderr)
+    );
+    assert_eq!(
+        top_level_status_json(binary, &state_root, &config)["state"],
+        "running"
+    );
+    let deadline = Instant::now() + HOOKS_MARKER_TIMEOUT;
+    while !observed_limit.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "hooks sidecar did not record the inherited fd limit"
+        );
+        sleep(Duration::from_millis(10));
+    }
+    let observed: u64 = fs::read_to_string(&observed_limit)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert_eq!(
+        observed, configured,
+        "managed child must apply [runtime] fd_limit before launching the hooks sidecar"
+    );
+
+    let stop = run_with_hooks_record(binary, &state_root, &config, "stop", &record_path);
+    assert!(
+        stop.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&stop.stdout),
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    for port in ports {
+        wait_port(port, false);
+    }
 }
 
 #[test]

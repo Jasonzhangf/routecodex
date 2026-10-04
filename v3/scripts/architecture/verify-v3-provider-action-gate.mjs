@@ -677,7 +677,7 @@ requireText(
 );
 for (const token of [
   'direct_sse_console_closeout_uses_runtime_stream_observation_for_usage_and_finish',
-  'io_sse_body_internal_error_is_explicit_599_not_silent_eof',
+  'io_sse_body_internal_error_aborts_instead_of_emitting_599',
 ]) {
   requireText(text.serverTests, files.serverTests, token);
 }

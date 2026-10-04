@@ -42,6 +42,30 @@ fn project(routes: &str) -> routecodex_v3_config::V3Config02AuthoringParsed {
 }
 
 #[test]
+fn runtime_fd_limit_projects_from_user_config_to_authoring() {
+    let raw = format!(
+        "{}\n[runtime]\nfd_limit = 65535\n",
+        user_config("[servers.any-name.routes.default]\ntiers = [[{ use = \"cc/model\" }]]")
+    );
+    let parsed = parse_v3_user_config_02_routing(&raw).unwrap();
+    assert_eq!(parsed.runtime.fd_limit, Some(65535));
+    let projected = project_v3_user_config_03_authoring(
+        parsed,
+        parse_v3_config_02_authoring(INTERNAL_BASE).unwrap(),
+        &catalogue(),
+    )
+    .unwrap();
+    assert_eq!(projected.runtime.fd_limit, Some(65535));
+}
+
+#[test]
+fn omitted_runtime_fd_limit_stays_absent() {
+    let projected =
+        project("[servers.any-name.routes.default]\ntiers = [[{ use = \"cc/model\" }]]");
+    assert_eq!(projected.runtime.fd_limit, None);
+}
+
+#[test]
 fn server_local_standard_routes_parse_without_group_or_port_contract() {
     let parsed = parse_v3_user_config_02_routing(&user_config(
         "[servers.any-name.routes.default]\ntiers = [[{ use = \"cc/model\" }]]",

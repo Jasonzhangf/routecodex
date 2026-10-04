@@ -98,8 +98,13 @@ requireMatch(
 );
 requireMatch(
   sampleStore,
-  /pub fn persist\([\s\S]*force: bool[\s\S]*if !self\.enabled && !force \{\s*return Ok\(\(\)\);\s*\}/,
-  "V3CodexSampleStore.persist must force-write error evidence even when disabled",
+  /fn should_persist[\s\S]*if !force \{\s*return self\.enabled && !self\.error_samples_only;[\s\S]*pub fn persist\([\s\S]*if !self\.should_persist\(force, status\)/,
+  "V3CodexSampleStore must own one capture policy and force-write error evidence even when disabled",
+);
+requireMatch(
+  sampleStore,
+  /pub fn enqueue_persist[\s\S]*if !self\.should_persist\(job\.force, job\.status\) \{\s*return Ok\(\(\)\);\s*\}[\s\S]*let failure_request_id/,
+  "Skipped samples must not occupy queue slots or byte budget",
 );
 requireMatch(
   sampleStore,
@@ -154,8 +159,8 @@ requireMatch(
 );
 requireMatch(
   sampleStore,
-  /mpsc::channel\(V3_CODEX_SAMPLE_PERSIST_QUEUE_CAPACITY\)[\s\S]*try_send[\s\S]*TrySendError::Full/,
-  "Sample persistence must use a bounded queue and report overload without awaiting capacity",
+  /unbounded_channel\(\)[\s\S]*V3_CODEX_SAMPLE_PERSIST_JOB_OVERHEAD_BYTES[\s\S]*try_acquire_many_owned[\s\S]*enqueue\.send\(message\)/,
+  "Sample persistence must bound pending samples by payload bytes plus a fixed per-job overhead instead of a fixed message count",
 );
 requireMatch(
   sampleStore,
@@ -184,8 +189,8 @@ requireMatch(
 );
 forbidMatch(
   sampleStore,
-  /UnboundedSender|UnboundedReceiver|unbounded_channel/,
-  "Sample persistence must not retain an unbounded payload queue",
+  /V3_CODEX_SAMPLE_PERSIST_QUEUE_CAPACITY|try_send\(message\)/,
+  "Sample persistence must not drop a queued sample when a fixed message-count bound is exceeded",
 );
 forbidMatch(
   sampleStore,
