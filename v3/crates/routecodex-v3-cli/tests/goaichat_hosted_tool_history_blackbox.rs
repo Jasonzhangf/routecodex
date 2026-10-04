@@ -2,11 +2,46 @@ use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
-use std::{net::TcpListener, sync::Arc, time::Duration};
+use std::{ffi::OsString, net::TcpListener, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 
 #[path = "../../../crates/routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
 mod hub_v1_fixture;
+
+// Aggregate servers resolve process-level runtime paths. Isolate the declared
+// counter source and serialize this test process's environment changes, just as
+// the existing Server black-box suite serializes its aggregate fixtures.
+static TEST_LOCK: Mutex<()> = Mutex::const_new(());
+
+struct CounterEnvironment {
+    previous: Option<OsString>,
+    _runtime: tempfile::TempDir,
+}
+
+impl CounterEnvironment {
+    fn new() -> Self {
+        let runtime = tempfile::tempdir().unwrap();
+        let previous = std::env::var_os("ROUTECODEX_REQUEST_ID_COUNTER_FILE");
+        std::env::set_var(
+            "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
+            runtime.path().join("request-id-counter.json"),
+        );
+        Self {
+            previous,
+            _runtime: runtime,
+        }
+    }
+}
+
+impl Drop for CounterEnvironment {
+    fn drop(&mut self) {
+        if let Some(previous) = &self.previous {
+            std::env::set_var("ROUTECODEX_REQUEST_ID_COUNTER_FILE", previous);
+        } else {
+            std::env::remove_var("ROUTECODEX_REQUEST_ID_COUNTER_FILE");
+        }
+    }
+}
 
 #[derive(Clone)]
 struct Gateway {
@@ -151,6 +186,8 @@ fn request(endpoint: &str, stream: bool) -> Value {
 }
 
 async fn run_round_trip(endpoint: &str, stream: bool, profile: &str, strict: bool) {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _counter_environment = CounterEnvironment::new();
     std::env::set_var("V3_GOAICHAT_BLACKBOX_KEY", "controlled-external-peer");
     let captures = Arc::new(Mutex::new(Vec::new()));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
