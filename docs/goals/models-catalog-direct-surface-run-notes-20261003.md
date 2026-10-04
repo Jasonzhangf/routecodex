@@ -170,3 +170,35 @@ frame_builders,live_snapshot,websocket}.rs` 与 `hub_v1/{relay_runtime_shared,re
 - `POST /v1/responses`：`mock.unknown-model` 与 `auto` 均 **200**，`model=mock-model`。
 
 边界：用户 live daemon（4444/7777）仍未安装/重启；已安装 runtime 的同入口重放不成立，未宣称闭环。
+
+## 合并收口（2026-10-04 19:0x）
+
+- 合并解析 review（独立，只读）结论 **PASS**，`b0ea0fdff` 的合并完整性可证明：
+  `git merge-tree --write-tree 918b120da 50ba5e540` = `702f1872f403795935147fdea36a6e6692ed3f98`
+  = `b0ea0fdff^{tree}`，即合并结果是干净的三方并集，无丢失无重复。它另证实：
+  `multi_listener_server.rs`（+135/−0）与 `openai_chat_relay_controlled.rs`（+39/−0）
+  均为**纯增量**；与本仓库另一侧改动同一测试函数
+  `openai_chat_relay_controlled::server_executes_controlled_json_sse_error_and_isolation_without_second_owner`
+  的两侧断言共存并通过；`V3DirectModelResolution::UnknownModel` 删除后所有 match 点穷尽。
+- PR #314 首次 CI：`test` **fail**，唯一失败子门禁是 `verify:v3-file-size`（`live_snapshot.rs` 1564 > 1500）。
+  证据显示该超限与本改动无关：本改动从未触及该文件（base 1498 行，是 PR #313 的
+  `a44c2daae`/`6067ed748` 涨到 1564）；纯 `origin/main` 同样超限；`test` job 自 2026-08 起持续红。
+  40 个子门禁通过 38 个。经确认该超限已由 PR #325 `9895f59af`（拆分 `live_snapshot`）修复。
+- `origin/main` 前进到 `de953d36e` 后再次合入（`493a2a263`），最终候选 = 最新 main + 本修复。
+  复核：我的测试与两份 map 的新增断言全部保留，`ModelNotFound` 仍 0 命中，`never_reaches_the_client`
+  6 个用例仍在。
+- 最终候选验证：`cargo check --workspace --all-targets` **0 error**；`fmt --check` 干净；
+  config/VR/error/debug 13 个 suite 全 ok；runtime lib **1104**；relay 集成 **18/21/43**；
+  server controlled relay/gemini/direct 全绿；
+  gates build-admission `c891f217cffb86b7dd431b8f6bc166964be89bdd2d44d20bafe2e49ba48ae787`、
+  docs/resource/module/rust-only/**file-size**（`limit=1500, files=311, ratchet entries=13`）全 PASS。
+- `multi_listener_server` 全量在本机高负载（load avg 30~48 / 32 核，多 agent 并发）下间歇失败
+  2~3 个用例，**判为并发争用**：每次失败集合都不同，全部 panic 在
+  `spawn_v3_server_aggregate(...).unwrap()`（起测试服务器失败），每个失败用例单独跑均绿，
+  且同一候选有过连续 78/78 全绿的结果。
+- 最终 live 黑盒（build `0.90.4831`，隔离实例，真实入口）：`/health` ok；
+  `/v1/models` 三面 = `mock.mock-model`（`direct_route:true`, `provider:mock`）+
+  `gpt-5.5` / `auto` / `client-alias`（`direct_route:false`, `routecodex`）；
+  `/v1/chat/completions` 对 `gpt-5.5`/`auto`/`client-alias`/`mock.unknown-model`/`mock.mock-model`
+  **全部 200**，upstream wire model 全部 `mock-model`；`/v1/responses` 对
+  `mock.unknown-model` 与 `auto` 均 **200**，`model=mock-model`。
