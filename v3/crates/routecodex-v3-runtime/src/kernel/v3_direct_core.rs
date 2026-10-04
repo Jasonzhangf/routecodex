@@ -105,6 +105,9 @@ where
     let accumulator = V3RuntimeObservabilityAccumulator::start();
     let runtime_timing = accumulator.timing();
     let mut trace = vec!["V3Config05ManifestPublished", "V3Server03HttpRequestRaw"];
+    // stage-3 丢弃记录要写「客户端原始值」，必须在 codec 标准化之前取句柄：
+    // `standardized` 之后还会被 before-send prepare 改写。
+    let client_original_body = std::sync::Arc::new(raw.body.clone());
     let mut standardized = match C::build_standardized(raw) {
         Ok(standardized) => standardized,
         Err(error) => {
@@ -392,7 +395,7 @@ where
                 .map(|server| server.port.to_string())
                 .unwrap_or_default(),
             manifest.debug.projection_drop_log_file.clone(),
-            std::sync::Arc::new(C::body(&standardized).clone()),
+            client_original_body.clone(),
         );
         let wire = match C::run_request_projection(
             &policy,

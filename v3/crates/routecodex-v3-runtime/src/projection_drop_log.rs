@@ -402,6 +402,34 @@ mod tests {
     }
 
     #[test]
+    fn restamp_and_emit_fills_identity_and_client_original() {
+        // `emit` alone stamps only `ts`. Production must use `restamp_and_emit`
+        // or the persisted line carries an empty request id, an empty entry
+        // port and a null client original.
+        let context = V3ProjectionDropContext::new(
+            "req-1",
+            "8399",
+            None,
+            Arc::new(json!({"x-vendor-flag": true})),
+        );
+        let mut records = vec![V3ProjectionDropRecord::new(
+            "responses",
+            "$[\"x-vendor-flag\"]",
+            "unmapped_target_protocol_field_unrepresentable",
+            json!(true),
+            "test",
+        )];
+        context.restamp_and_emit(&mut records);
+        assert_eq!(records[0].request_id, "req-1");
+        assert_eq!(records[0].entry_port, "8399");
+        assert_eq!(records[0].source_value, json!(true));
+        assert!(
+            records[0].ts > 1_700_000_000_000,
+            "restamp must also stamp ts"
+        );
+    }
+
+    #[test]
     fn append_writes_one_jsonl_line_per_record() {
         let dir = std::env::temp_dir().join(format!(
             "rcc-projection-drop-unit-{}-{:?}",

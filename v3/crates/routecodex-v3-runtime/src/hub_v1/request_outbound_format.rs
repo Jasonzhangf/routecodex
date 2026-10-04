@@ -992,9 +992,13 @@ fn collect_outbound_control_field_paths_inner(value: &Value, path: &str, paths: 
 }
 
 fn json_path_child(parent: &str, key: &str) -> String {
-    if key
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    // An empty key must take the quoted branch: the bare form would render as
+    // `$.`, which the path reader rejects, so the drop would be recorded
+    // without ever being removed from the wire.
+    if !key.is_empty()
+        && key
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
     {
         format!("{parent}.{key}")
     } else {

@@ -452,7 +452,7 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
                         V3InternalErrorCode::V3Provider12ResponsesWirePayload,
                     )
                 })?;
-            drop_context.emit(&mut projection_drops);
+            drop_context.restamp_and_emit(&mut projection_drops);
             wire_body
         }
         crate::hub_v1::V3HubProviderWireProtocol::Anthropic => {
@@ -484,7 +484,7 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
                         V3InternalErrorCode::V3Provider12ResponsesWirePayload,
                     )
                 })?;
-            drop_context.emit(&mut projection_drops);
+            drop_context.restamp_and_emit(&mut projection_drops);
             wire_body
         }
         _ => request_body,
@@ -815,7 +815,7 @@ pub(crate) fn chat_direct_request_projection_hook_with_key_catalog_and_drop_cont
             V3InternalErrorCode::V3Provider12ResponsesWirePayload,
         )
     })?;
-    drop_context.emit(&mut projection_drops);
+    drop_context.restamp_and_emit(&mut projection_drops);
     wire_body = apply_v3_direct_request_key_hook_with_catalog(
         wire_body,
         V3DirectRequestProtocol::OpenAiChat,

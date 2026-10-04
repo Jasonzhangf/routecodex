@@ -96,3 +96,31 @@ fn anthropic_target_carries_drop_records_for_unrepresentable_keys() {
         "expected a drop record for the vendor key, got {drops:?}"
     );
 }
+
+#[test]
+fn unmapped_empty_string_key_is_actually_removed_from_chat_wire() {
+    // An empty key must not render as the bare path `$.`, which the reader
+    // rejects; otherwise the drop is recorded while the field stays on the wire.
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "": {"nested": true}
+    });
+
+    let wire = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("empty vendor key must drop, not fail the request");
+
+    assert!(wire.get("").is_none(), "{wire}");
+    assert_eq!(wire["model"], json!("gpt-test"), "{wire}");
+}
+
+#[test]
+fn empty_string_key_path_is_readable_and_removable() {
+    assert_eq!(
+        split_v3_json_path("$[\"\"]"),
+        Some(vec![V3JsonPathSegment::Key(String::new())])
+    );
+    let mut value = json!({"": 1, "keep": 2});
+    remove_unmapped_outbound_field(&mut value, "$[\"\"]");
+    assert_eq!(value, json!({"keep": 2}));
+}

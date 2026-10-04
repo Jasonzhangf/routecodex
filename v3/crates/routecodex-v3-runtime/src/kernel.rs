@@ -125,6 +125,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         request_execution_control,
     } = state;
 
+    // stage-3 丢弃记录要写「客户端原始值」，必须在 Req04 归一化之前取句柄：
+    // `standardized.body` 之后会被 control prepare 与 before-send 改写。
+    let client_original_body = std::sync::Arc::new(raw.body.clone());
     let mut standardized = match build_v3_req_04_standardized_responses_from_v3_server_03(raw) {
         Ok(standardized) => standardized,
         Err(error) => {
@@ -697,7 +700,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 .map(|port| port.to_string())
                 .unwrap_or_default(),
             manifest.debug.projection_drop_log_file.clone(),
-            std::sync::Arc::new(standardized.body.clone()),
+            client_original_body.clone(),
         );
         let wire = match hook_registry
             .run_request_projection_with_drop_context(&policy, &projection_drop_context)
