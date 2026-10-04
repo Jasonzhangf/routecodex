@@ -685,19 +685,20 @@ function renderV3MainlineSkeletonSopHtml(root) {
       <div class="note-grid">
         <article class="note-card"><h3>Inbound model mapping</h3><p>Explicit <code>match.models</code> route pools declare inbound client model to allowed targets. Default/no-explicit-model paths must reject silent wrong-model success unless a configured target model id matches.</p></article>
         <article class="note-card"><h3>Provider wire hook</h3><p>The provider-wire owner rewrites outbound <code>body.model</code> to the selected target <code>wire_model</code>. Provider aliases are catalog/display metadata and never authorize runtime matching.</p></article>
-        <article class="note-card"><h3>Provider error switching</h3><p>429/401/403/413/5xx/transport/codec failures enter Error01-06 and reselect while selected/default candidates remain. Client projection is allowed only after exhaustion.</p></article>
-        <article class="note-card"><h3>Evidence requirement</h3><p>Marker-only 200 is insufficient. Closeout needs provider-request dry-run selected provider/model plus live replay showing provider-switch chain or explicit exhausted error.</p></article>
+        <article class="note-card"><h3>No client error responses</h3><p>All Chat, Responses HTTP/WS/compact, Messages and enabled Gemini entries keep provider, transport, codec and internal failures in typed Error resources. Recovery reselects while eligible candidates remain. Even complete pool exhaustion must never produce a client error status, payload, event, diagnostic SSE comment or fabricated successful terminal; end an uncompletable transport without error semantics.</p></article>
+        <article class="note-card"><h3>Evidence requirement</h3><p>Marker-only 200 is insufficient. Require provider-request dry-run selected provider/model and real public-entry success/failure regressions: complete real success or incomplete transport with zero client error responses, including pool exhaustion, malformed SSE and automatic HTTP parser failures.</p></article>
       </div>
     </section>
 
     <section class="panel">
       <h2>rccv3 live closeout SOP</h2>
+      <div class="callout"><strong>Main/runtime before review.</strong> Author tests, public-entry E2E and applicable CI PASS → merge/push validated content to main → rebuild/install from main → managed restart → health, real-entry replay and sample audit → complete independent Codex and AGY reviews → defect/resource closeout. Review pending does not delay main rebuild/restart, but keeps the defect open. Bind reviews to exact candidate/main content; repair blocking findings and use traceable revert/rebuild/restart/replay for confirmed delivered regressions. Repository checks and Git protection remain enforced.</div>
       <table>
         <thead><tr><th>Step</th><th>Required evidence</th></tr></thead>
         <tbody>
-          <tr><td>Build/install</td><td><code>npm run install:v3</code> and matching hashes for repo, <code>~/.rcc</code>, and <code>/Volumes/extension/.rcc</code> rccv3 binaries.</td></tr>
-          <tr><td>Config/restart</td><td><code>rccv3 config check -c /Volumes/extension/.rcc/config.v3.toml</code>, then <code>rccv3 restart -c /Volumes/extension/.rcc/config.v3.toml</code>. Legacy <code>routecodex restart --port</code> is not authoritative for this V3 instance.</td></tr>
-          <tr><td>Runtime identity</td><td><code>rccv3 --version</code> and health for all member ports, including 4444 and 5555.</td></tr>
+          <tr><td>Build/install</td><td><code>npm run install:v3</code> from delivered main and matching candidate, installed and loaded binary hashes.</td></tr>
+          <tr><td>Config/restart</td><td>Read the selected active config, otherwise <code>~/.rcc/config.toml</code>; run <code>rccv3 config check -c &lt;active-config&gt;</code>, then <code>rccv3 restart -c &lt;active-config&gt;</code>. Require exit zero and running state.</td></tr>
+          <tr><td>Runtime identity</td><td><code>rccv3 --version</code>, loaded binary identity and health for every listener declared by the active config.</td></tr>
           <tr><td>Behavior</td><td>Provider-request dry-run, live JSON/SSE probe, and exact old-sample replay when a saved failing sample exists.</td></tr>
         </tbody>
       </table>
