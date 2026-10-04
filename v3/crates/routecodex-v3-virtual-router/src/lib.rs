@@ -130,8 +130,6 @@ pub enum V3VirtualRouterError {
     PoolMatchMissing { group_id: String, pool_id: String },
     #[error("routing facts entry protocol is empty or does not match endpoint {0}")]
     InvalidRoutingFacts(String),
-    #[error("unknown model {model} for provider {provider}")]
-    DirectModelUnknown { provider: String, model: String },
     #[error("direct route {provider}.{model} cannot serve this request: model lacks {capability}")]
     DirectModelMediaUnsatisfied {
         provider: String,
@@ -649,11 +647,14 @@ fn append_route_pool_tier(
 }
 
 /// `provider.model` direct routing, matching the V2 engine semantics: when the
-/// client model splits on its first `.` into an existing provider id, the
-/// request pins that provider and skips pool matching entirely. An unknown
-/// provider segment falls back to normal classification (returns None); an
-/// unknown model or an unsatisfiable media requirement fails explicitly
-/// without rerouting. Provider/model interpretation stays in the config layer
+/// client model splits on its first `.` into an existing provider id that
+/// declares that model, the request pins that provider and skips pool matching
+/// entirely. Every other model string — no dot, an unknown provider segment, or
+/// an enabled provider that declares no such model — falls back to normal
+/// classification (returns None), which is the same path the `auto` and virtual
+/// entry names take. Only a resolved direct model that cannot serve the
+/// request's media requirement fails explicitly without rerouting.
+/// Provider/model interpretation stays in the config layer
 /// (`resolve_direct_provider_model`); the router only consumes the resolution.
 fn resolve_v3_direct_model_plan(
     manifest: &V3Config05ManifestPublished,
@@ -663,15 +664,6 @@ fn resolve_v3_direct_model_plan(
     let (direct_provider_id, direct_model_id, model_capabilities) =
         match manifest.resolve_direct_provider_model(requested) {
             V3DirectModelResolution::NotDirect => return None,
-            V3DirectModelResolution::UnknownModel {
-                provider_id,
-                model_id,
-            } => {
-                return Some(Err(V3VirtualRouterError::DirectModelUnknown {
-                    provider: provider_id,
-                    model: model_id,
-                }))
-            }
             V3DirectModelResolution::Resolved {
                 provider_id,
                 model_id,

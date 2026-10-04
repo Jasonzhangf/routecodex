@@ -1266,12 +1266,12 @@ targets = [
 }
 
 #[tokio::test]
-async fn anthropic_unknown_direct_provider_model_returns_model_not_found() {
+async fn anthropic_unknown_direct_provider_model_falls_back_to_default_pool() {
     let scope = "anthropic_404";
     let transport = JsonTransport {
         captured: Mutex::new(None),
     };
-    let error = execute_v3_anthropic_relay_runtime(
+    execute_v3_anthropic_relay_runtime(
         &manifest(scope),
         V3AnthropicRelayRuntimeInput {
             server_id: scope.into(),
@@ -1292,12 +1292,11 @@ async fn anthropic_unknown_direct_provider_model_returns_model_not_found() {
         &transport,
     )
     .await
-    .unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("direct provider model controlled.unknown-model is not configured"),
-        "anthropic provider.model absence must surface ModelNotFound: {error}"
+    .unwrap();
+    let body = transport.captured.lock().unwrap().clone().unwrap();
+    assert_eq!(
+        body["model"], "responses-wire-model",
+        "an enabled provider that declares no such model must fall back to normal pool routing"
     );
 }
 
