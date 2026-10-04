@@ -264,6 +264,8 @@ features:
   - routecodex dev shim may enable snap/debug by default while rcc/rccv3 stable shims require explicit --snap/--debug and restart.plan.json remains previous-release compatible
   required_integration:
   - actual CLI start/status/duplicate-start/restart/stop on temporary aggregate listeners
+  - managed_child_applies_configured_fd_limit_before_hooks_sidecar proves the real `rccv3 start` entry
+    applies `[runtime] fd_limit` to the managed child before an inherited child (hooks sidecar) is launched
   - foreground startup emits the standard minimal human status line instead of raw debug JSON, while Relay/Direct requests emit colorized old-production request monitor output; human server logs persist
     the same ANSI-colored monitor lines; scoped prefix is `[port:entry:sessionID:<data>][project][provider.model][route]`; started/route/terminal/error lines after target selection use Runtime observability
     provider.model/route, not request payload model, pre-route pending scope, or SSE transport bytes; terminal failed lines are ANSI red; route hit uses `[virtual-router-hit] req=... route=... target=provider[key].wire_model
