@@ -1122,6 +1122,8 @@ impl ProviderResponsesTransport {
                 provider_id,
                 expected: "JSON",
                 content_type: response_content_type,
+                status,
+                headers,
             }),
             V3ResponsesStreamIntent::Sse
                 if response_content_type
@@ -1145,6 +1147,8 @@ impl ProviderResponsesTransport {
                 provider_id,
                 expected: "SSE",
                 content_type: response_content_type,
+                status,
+                headers,
             }),
         }
     }
@@ -1375,12 +1379,9 @@ async fn read_response_body_bytes(
     cancellation: Option<V3ProviderCancellation>,
 ) -> Result<Vec<u8>, V3ProviderError> {
     let status = response.status().as_u16();
-    // Only an error status needs to survive a failed body read.
-    let headers = if status >= 400 {
-        collect_response_headers(response.headers())
-    } else {
-        Vec::new()
-    };
+    // The head survives a failed body read for every status, not only for error
+    // statuses: the upstream really answered, and the head is that evidence.
+    let headers = collect_response_headers(response.headers());
     let read = response.bytes();
     let bytes = match cancellation {
         Some(cancellation) => {
@@ -1398,8 +1399,9 @@ async fn read_response_body_bytes(
     }
     // A failed body read is never a response-stage decode failure, so it must
     // not project as 599. When the upstream already returned an error status,
-    // that real status survives; otherwise no usable response body arrived and
-    // this is a network transport failure.
+    // that real status survives; for any other status the upstream still
+    // answered, so its head survives as well and this remains a transport
+    // failure that simply carries the head it really received.
     .map_err(|error| {
         let reason = crate::shared::format_v3_provider_transport_error(&error);
         if status >= 400 {
@@ -1414,9 +1416,11 @@ async fn read_response_body_bytes(
                 }),
             }
         } else {
-            V3ProviderError::Transport {
+            V3ProviderError::ResponseBodyUnreadable {
                 request_id: request_id.to_string(),
                 provider_id: provider_id.to_string(),
+                status,
+                headers,
                 reason,
             }
         }

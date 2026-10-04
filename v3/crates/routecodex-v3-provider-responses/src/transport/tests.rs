@@ -775,16 +775,29 @@ async fn transport_success_body_read_failure_is_a_network_failure() {
         .send(request)
         .await
         .expect_err("truncated success body must fail");
-    // No usable upstream response body arrived, so this is a network transport
-    // failure and must not project as a response-stage 599.
+    // No usable upstream response body arrived, so this stays a network
+    // transport failure and must not project as a response-stage 599. The head
+    // did arrive, so it survives on the error instead of being erased.
     match error {
-        V3ProviderError::Transport { reason, .. } => {
+        V3ProviderError::ResponseBodyUnreadable {
+            status,
+            headers,
+            reason,
+            ..
+        } => {
+            assert_eq!(status, 200);
+            assert!(
+                headers.iter().any(|header| {
+                    header.name == "content-type" && header.value == &b"application/json"[..]
+                }),
+                "the received head must survive a failed body read: {headers:?}"
+            );
             assert!(
                 reason.contains("error decoding response body"),
                 "unexpected reason: {reason}"
             );
         }
-        other => panic!("expected transport error, got {other:?}"),
+        other => panic!("expected an unreadable-body error, got {other:?}"),
     }
 }
 

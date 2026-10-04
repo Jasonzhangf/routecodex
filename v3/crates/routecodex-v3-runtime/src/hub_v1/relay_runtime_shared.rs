@@ -25,7 +25,7 @@ use routecodex_v3_error::{
 };
 use routecodex_v3_provider_responses::{
     V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError, V3ProviderHttpFailure,
-    V3ProviderResp14Raw, V3ResponsesProviderTarget,
+    V3ProviderResp14Raw, V3ProviderResponseHeader, V3ResponsesProviderTarget,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, SseIncrementalDecoder, SseTransportLimits,
@@ -312,6 +312,25 @@ pub fn external_http_witness(response: &V3ProviderHttpFailure) -> V3ExternalHttp
     }
 }
 
+/// The witness for a head that really arrived, whatever the status.
+///
+/// An SSE body is not materialized here, so the empty body is the truthful
+/// statement that no readable bytes were captured at this instant.
+fn external_http_witness_from_head(
+    status: u16,
+    headers: &[V3ProviderResponseHeader],
+    body: Vec<u8>,
+) -> V3ExternalHttpWitness {
+    V3ExternalHttpWitness::new(
+        status,
+        headers
+            .iter()
+            .map(|header| (header.name.clone(), header.value.clone()))
+            .collect(),
+        body,
+    )
+}
+
 /// The witness for a raw provider response the moment its head arrives,
 /// whatever its status or body kind.
 ///
@@ -329,24 +348,34 @@ pub fn external_http_witness(response: &V3ProviderHttpFailure) -> V3ExternalHttp
 /// Evidence capture only. It does not change client projection, provider
 /// rotation, or health.
 pub fn external_http_witness_head(response: &V3ProviderResp14Raw) -> V3ExternalHttpWitness {
-    V3ExternalHttpWitness::new(
+    external_http_witness_from_head(
         response.status(),
-        response
-            .headers()
-            .iter()
-            .map(|header| (header.name.clone(), header.value.clone()))
-            .collect(),
+        response.headers(),
         response.json_body().map(<[u8]>::to_vec).unwrap_or_default(),
     )
 }
 
-/// Build the witness from a provider transport error. A transport failure
-/// produced no upstream response head at all, so it carries no evidence.
+/// Build the witness from a provider error that carries a real response head.
+///
+/// Only errors raised *after* the head was read qualify: `HttpStatus`, and the
+/// two failures the transport raises once it has already parsed the head
+/// (`UnexpectedContentType`, `ResponseBodyUnreadable`). A genuine pre-head
+/// transport failure carries no evidence and stays `None`.
 pub(crate) fn external_http_witness_from_provider_error(
     error: &V3ProviderError,
 ) -> Option<V3ExternalHttpWitness> {
     match error {
         V3ProviderError::HttpStatus { response } => Some(external_http_witness(response)),
+        V3ProviderError::UnexpectedContentType {
+            status, headers, ..
+        }
+        | V3ProviderError::ResponseBodyUnreadable {
+            status, headers, ..
+        } => Some(external_http_witness_from_head(
+            *status,
+            headers,
+            Vec::new(),
+        )),
         _ => None,
     }
 }

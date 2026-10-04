@@ -834,6 +834,11 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 continue;
             }
             Err(error) => {
+                if let Some(witness) =
+                    crate::hub_v1::external_http_witness_from_provider_error(&error)
+                {
+                    last_external_http = Some(witness);
+                }
                 let failure = provider_runtime_failure(error, &selected_target_provider_id);
                 let _ = runtime_timing.finish_external();
                 drop(_provider_action_permit.take());

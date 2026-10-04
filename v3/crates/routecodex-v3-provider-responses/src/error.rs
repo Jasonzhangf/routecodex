@@ -116,6 +116,18 @@ pub enum V3ProviderError {
         provider_id: String,
         expected: &'static str,
         content_type: Option<String>,
+        /// The head that really arrived. A content-type mismatch is decided
+        /// after the response head is read, so the head is real evidence.
+        status: u16,
+        headers: Vec<V3ProviderResponseHeader>,
+    },
+    #[error("provider {provider_id} returned HTTP {status} for request {request_id} but its response body could not be read: {reason}")]
+    ResponseBodyUnreadable {
+        request_id: String,
+        provider_id: String,
+        status: u16,
+        headers: Vec<V3ProviderResponseHeader>,
+        reason: String,
     },
     #[error("provider {provider_id} response body failed for request {request_id}: {reason}")]
     ResponseBody {

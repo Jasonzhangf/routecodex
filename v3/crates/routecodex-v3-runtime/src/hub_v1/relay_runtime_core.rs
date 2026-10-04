@@ -946,6 +946,11 @@ where
                     continue;
                 }
                 Err(error) => {
+                    if let Some(witness) =
+                        crate::hub_v1::external_http_witness_from_provider_error(&error)
+                    {
+                        last_external_http = Some(witness);
+                    }
                     let failure = provider_runtime_failure(error, &selected_target_provider_id);
                     let _ = runtime_timing.finish_external();
                     drop(provider_action_permit.take());

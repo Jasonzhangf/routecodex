@@ -14,7 +14,7 @@ use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
 use std::{ffi::OsString, fs, net::TcpListener, path::PathBuf, sync::Arc};
 use tokio::{
-    io::AsyncWriteExt,
+    io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
     sync::{mpsc, oneshot, Mutex, Semaphore},
     time::{sleep, timeout, Duration},
@@ -1748,6 +1748,169 @@ async fn provider_stream_head_is_recorded_as_evidence_when_the_payload_never_dec
         json!(Vec::<u8>::new()),
         "an unreadable stream body must not be materialized into the evidence: {evidence}"
     );
+
+    std::env::remove_var("V3_P6_TEST_KEY");
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+}
+
+/// A raw TCP upstream that answers with a real response head and then closes
+/// before sending the `content-length` it promised.
+///
+/// Axum always sends a body consistent with its own framing, so this is the
+/// only way to reach the transport path that fails *after* the head was already
+/// parsed. That head is real evidence and must not be lost.
+async fn start_truncated_body_upstream(
+    declared_length: usize,
+    sent_body: Vec<u8>,
+) -> (String, oneshot::Sender<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        loop {
+            let accepted = tokio::select! {
+                _ = &mut shutdown_rx => break,
+                accepted = listener.accept() => accepted,
+            };
+            let Ok((mut socket, _)) = accepted else {
+                break;
+            };
+            let body = sent_body.clone();
+            tokio::spawn(async move {
+                let mut request = [0u8; 8192];
+                let _ = socket.read(&mut request).await;
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
+                     content-length: {declared_length}\r\nconnection: close\r\n\r\n"
+                );
+                let _ = socket.write_all(head.as_bytes()).await;
+                let _ = socket.write_all(&body).await;
+                let _ = socket.flush().await;
+                let _ = socket.shutdown().await;
+            });
+        }
+    });
+    (format!("http://{address}/v1"), shutdown_tx)
+}
+
+/// A content-type mismatch is decided only *after* the provider response head
+/// has been read, so that head is real evidence: it must be recorded instead of
+/// being reported as `no_response`.
+#[tokio::test]
+async fn provider_content_type_mismatch_records_the_received_head_as_evidence() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("provider-content-type-mismatch-evidence");
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "text/event-stream",
+        b"event: response.created\ndata: {}\n\n".to_vec(),
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-content-type-mismatch");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let port = handle.listeners[0].addr.port();
+
+    // A non-streaming client asks for JSON while the provider answers with an
+    // SSE content type. The mismatch is only knowable once the head is read.
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .json(&json!({"model":"client-test","input":"hello"}))
+        .send()
+        .await;
+    assert!(
+        captures.recv().await.is_some(),
+        "the provider must be reached"
+    );
+    // Client contract: no provider status, headers, or body is projected, and no
+    // proxy 502 is fabricated. The client sees a header-less close.
+    let error = response.expect_err(
+        "a non-streaming client must see a header-less close, never a projected \
+         provider status or a fabricated 502",
+    );
+    assert!(
+        !error.is_status(),
+        "the client must never receive a projected HTTP status: {error}"
+    );
+
+    let evidence =
+        wait_for_v3_provider_terminal_evidence(&home_guard.codex_samples_root(port)).await;
+    assert_eq!(
+        evidence["kind"], "external_http",
+        "the upstream head really arrived before the content-type mismatch, so the \
+         evidence must not claim no response: {evidence}"
+    );
+    assert_eq!(evidence["status"], 200);
+    let headers = evidence["headers"]
+        .as_array()
+        .unwrap_or_else(|| panic!("evidence headers must be an array: {evidence}"));
+    let recorded = headers
+        .iter()
+        .find(|entry| entry[0] == json!("content-type"))
+        .unwrap_or_else(|| panic!("the received head must be recorded: {evidence}"));
+    assert_eq!(recorded[1], json!("text/event-stream".as_bytes()));
+
+    std::env::remove_var("V3_P6_TEST_KEY");
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+}
+
+/// A 2xx head whose body read fails is still a received head. It must be
+/// recorded as evidence rather than being collapsed into `no_response`.
+#[tokio::test]
+async fn provider_truncated_body_records_the_received_head_as_evidence() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("provider-truncated-body-evidence");
+    // A real `200 OK` head, then far fewer bytes than `content-length` promises.
+    let (provider_base_url, shutdown) =
+        start_truncated_body_upstream(500, b"{\"incomplete\"".to_vec()).await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-truncated-body");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let port = handle.listeners[0].addr.port();
+
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .json(&json!({"model":"client-test","input":"hello"}))
+        .send()
+        .await;
+    // Client contract: a header-less close, never a fabricated 502.
+    let error = response.expect_err(
+        "a non-streaming client must see a header-less close, never a projected \
+         provider status or a fabricated 502",
+    );
+    assert!(
+        !error.is_status(),
+        "the client must never receive a projected HTTP status: {error}"
+    );
+
+    let evidence =
+        wait_for_v3_provider_terminal_evidence(&home_guard.codex_samples_root(port)).await;
+    assert_eq!(
+        evidence["kind"], "external_http",
+        "the upstream answered with a real 200 head before its body read failed, so \
+         the evidence must not claim no response: {evidence}"
+    );
+    assert_eq!(evidence["status"], 200);
+    let headers = evidence["headers"]
+        .as_array()
+        .unwrap_or_else(|| panic!("evidence headers must be an array: {evidence}"));
+    let recorded = headers
+        .iter()
+        .find(|entry| entry[0] == json!("content-type"))
+        .unwrap_or_else(|| panic!("the received head must be recorded: {evidence}"));
+    assert_eq!(recorded[1], json!("application/json".as_bytes()));
 
     std::env::remove_var("V3_P6_TEST_KEY");
     handle.shutdown().await;

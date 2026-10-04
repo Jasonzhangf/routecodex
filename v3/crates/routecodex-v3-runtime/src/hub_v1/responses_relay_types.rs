@@ -754,6 +754,11 @@ impl V3LiveSnapProviderSnapshotRecorder {
                 provider_id,
                 ..
             }
+            | V3ProviderError::ResponseBodyUnreadable {
+                request_id,
+                provider_id,
+                ..
+            }
             | V3ProviderError::InternalTransport {
                 request_id,
                 provider_id,
