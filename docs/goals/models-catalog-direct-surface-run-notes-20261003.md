@@ -202,3 +202,51 @@ frame_builders,live_snapshot,websocket}.rs` 与 `hub_v1/{relay_runtime_shared,re
   `/v1/chat/completions` 对 `gpt-5.5`/`auto`/`client-alias`/`mock.unknown-model`/`mock.mock-model`
   **全部 200**，upstream wire model 全部 `mock-model`；`/v1/responses` 对
   `mock.unknown-model` 与 `auto` 均 **200**，`model=mock-model`。
+
+## 合并后 CI 与 flake 归因（2026-10-04 11:0x）
+
+PR #314 已在 `origin/main` 前进到 `de953d36e` 后合并为 `d1639c4fa`：
+- 合并父提交核对：`d1639c4fa^1 = de953d36e`（main 尖端）、`d1639c4fa^2 = 30cb95cb9`（本候选），
+  即第三方 review 的「合并基线过期」结论只对已被取代的旧 head `36bd12536` 成立，对实际合并不成立。
+- 内容等价：`git diff --quiet origin/main 30cb95cb9` → **IDENTICAL**；本地 main 与远端 main 均为 `d1639c4fa`。
+- 相对最新 main，我的候选只**新增 135 行 / 删除 0 行**于 `multi_listener_server.rs`，
+  测试函数数 123 → 125，不存在 review 担心的「测试面被永久丢弃」。
+- #323 的 5 个新测试（`persist_async_worker_keeps_every_sample_under_burst`、
+  `persist_async_worker_bounds_tiny_payload_job_count_by_fixed_overhead`、
+  `skipped_samples_do_not_displace_error_evidence`、
+  `disabled_samples_need_no_worker_but_forced_errors_still_report_missing_worker`、
+  `measure_sample_persistence_throughput`）在合并后 main 中全部存在；被取代的
+  `persist_async_worker_bounds_queue_and_reports_overload` 与「64-job」表述均已消失。
+
+合并后 main CI（run `37170572616`）**fail**，唯一失败用例
+`responses_inbound_websocket_projects_json_completed_event_and_enters_runtime`。已做归因实验：
+
+| 结论 | 证据 |
+| --- | --- |
+| 与本次改动无关 | 该用例出自历史提交（`82efe5670`/`e332265d4`），我的 diff 不含任何 websocket 文件 |
+| 不是由最后一次 push 引起 | CI 绿提交 `493a2a263` 与 CI 红提交 `30cb95cb9` 的差异**仅一个 markdown 文件**（32 行新增），无任何 rs/js/toml |
+| **纯 main 也复现**（决定性对照） | 新建 `de953d36e` 对照 worktree（**不含我的改动**）：串行 3 次 = 1 绿 2 红（3 个/5 个失败）；并行 2 次 = 1 红 1 绿 |
+| **flake 早于 #323** | 在 `50ba5e540`（#323 之前、sample_store 改造之前）对照 worktree：串行 3 次 = 1 红 2 绿 |
+
+失败签名一致，全部是共享 `$HOME/.rcc/codex-samples` 的 TOCTOU：
+`spawn_v3_server_aggregate(...).unwrap()` 报 `No such file or directory (os error 2)`，
+以及 `codex sample persist failed ... reason=Not a directory (os error 20)`。
+本机 load average 在 20~48 / 32 核之间（多 agent 并发），单独跑每个失败用例均绿。
+→ 判定：**预先存在的并行/文件系统 flake，非本次改动引入**。对照 worktree 已删除
+（`git worktree list` 不含 `ci-flake-control-20261004`，`test ! -e` 成立）。
+
+## 安装/重启节点：未做（UNVERIFIED）
+
+已安装 runtime 仍是旧产物：`/Users/fanzhang/.local/bin/rccv3`（Oct 3 19:21），
+live daemon PID 49150（`--config /Volumes/extension/.rcc/config.toml`，4444/7777）
+`GET /v1/models` 仍返回 `{"data":[],"models":[]}`，即**未包含本修复**。
+
+`npm run install:release` 在当前环境有三个阻断点，且重启会影响本会话：
+1. **会终止本会话**：运行本会话的 DSH harness（`DeepSeek Harness` PID 61334）与 4444 有已建立连接；
+   4444 上还有 18 个 codex + 22 个 rccv3 连接，属共享 live runtime。
+2. **验证配置缺失**：脚本要求 `$VERIFY_CONFIG`（默认 `/Volumes/extension/.rcc/config.v3.toml`）不存在。
+3. **构建源不是已验候选**：脚本从 `SOURCE_ROOT`（主树 `/Users/fanzhang/Documents/github/routecodex`，
+   HEAD `30f0bb619`、40 个 dirty 文件）构建，该树**不含**本次合并 `d1639c4fa`；
+   且 `0.90.4831` 版本号未变，`/health` 版本匹配也无法证明新代码已加载。
+
+→ 故「已安装 runtime 的同入口重放」不成立，交付在此节点标为 UNVERIFIED，未宣称闭环。
