@@ -1,0 +1,87 @@
+{
+  "id": "v3.provider_output_cap_injection",
+  "version": "2",
+  "inputs": [
+    {
+      "id": "已选目标与语义请求",
+      "schema": "Object",
+      "schema_ref": "v3.request.provider_semantic"
+    }
+  ],
+  "output_contracts": [
+    {
+      "id": "已补齐输出上限的 provider wire 请求",
+      "schema": "Object",
+      "schema_ref": "v3.hub.provider_wire_payload"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "解析已选目标的输出上限",
+      "operator": "routecodex.v3.target.V3TargetInterpreter::expand_candidates",
+      "operator_version": "1",
+      "inputs": ["已选目标与语义请求"],
+      "output": {
+        "id": "目标声明的输出上限",
+        "schema": "Object",
+        "schema_ref": "v3.target.concrete_provider"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.config.published_manifest"],
+        "writes": []
+      }
+    },
+    {
+      "id": "投影为 provider wire 请求",
+      "operator": "routecodex.v3.runtime.build_v3_provider_standard_protocol_payload_from_req07",
+      "operator_version": "1",
+      "inputs": ["目标声明的输出上限"],
+      "output": {
+        "id": "provider wire 请求",
+        "schema": "Object",
+        "schema_ref": "v3.hub.provider_wire_payload"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.request.provider_semantic"],
+        "writes": ["v3.hub.provider_wire_payload"]
+      }
+    },
+    {
+      "id": "补齐缺失的输出上限",
+      "operator": "routecodex.v3.runtime.apply_v3_provider_req_compat_to_provider_payload",
+      "operator_version": "1",
+      "inputs": ["provider wire 请求"],
+      "output": {
+        "id": "已补齐输出上限的 provider wire 请求",
+        "schema": "Object",
+        "schema_ref": "v3.hub.provider_wire_payload"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.target.concrete_provider", "v3.hub.provider_wire_payload"],
+        "writes": ["v3.hub.provider_wire_payload"]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "解析已选目标的输出上限",
+      "to": "投影为 provider wire 请求",
+      "arc_id": "目标声明的输出上限"
+    },
+    {
+      "from": "投影为 provider wire 请求",
+      "to": "补齐缺失的输出上限",
+      "arc_id": "provider wire 请求"
+    }
+  ],
+  "outputs": ["已补齐输出上限的 provider wire 请求"]
+}
