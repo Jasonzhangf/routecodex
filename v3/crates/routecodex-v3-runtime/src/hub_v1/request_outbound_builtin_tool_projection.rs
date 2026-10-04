@@ -10,9 +10,7 @@ use routecodex_v3_config::V3WebSearchExecutionMode;
 
 use super::is_v3_gpt_canonical_model;
 use super::request_outbound_mcp_names::provider_function_name;
-use crate::projection_drop_log::{
-    V3ProjectionDropContext, V3ProjectionDropRecord, V3_PROJECTION_DROP_STAGE3,
-};
+use crate::projection_drop_log::{V3ProjectionDropContext, V3ProjectionDropRecord};
 
 pub(crate) fn project_openai_responses_hosted_web_search_for_selected_target(
     payload: &mut Value,
@@ -219,17 +217,13 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode_recording(
     // 对 tools 无损，因此这里证明是客户端原始形态。没有兼容表示 → 丢弃并继续，
     // 不再让客户端收到 598 provider_request_payload_invalid。
     let Some(tools) = tools.as_array() else {
-        drops.push(V3ProjectionDropRecord {
-            request_id: drop_context.request_id.clone(),
-            entry_port: drop_context.entry_port.clone(),
-            target_protocol: "openai_chat".to_string(),
-            stage: V3_PROJECTION_DROP_STAGE3.to_string(),
-            json_path: "$.tools".to_string(),
-            reason: "non_array_tools_unrepresentable".to_string(),
-            source_value: drop_context.source_value_at("$.tools"),
-            canonical_value: tools.clone(),
-            drop_site: "project_openai_chat_provider_tools_for_web_search_mode".to_string(),
-        });
+        drops.push(V3ProjectionDropRecord::new(
+            "openai_chat",
+            "$.tools",
+            "non_array_tools_unrepresentable",
+            tools.clone(),
+            "project_openai_chat_provider_tools_for_web_search_mode",
+        ));
         return Ok(());
     };
     // gpt 家族模型保留标准 hosted web_search 语义（openai 官方支持）；其余

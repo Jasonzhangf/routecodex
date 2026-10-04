@@ -22,6 +22,10 @@ pub const V3_PROJECTION_DROP_STAGE3: &str = "outbound_target_protocol_projection
 /// 一条 stage-3 出站投影丢弃记录。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct V3ProjectionDropRecord {
+    /// 丢弃落盘时刻（Unix epoch 毫秒）。由 `emit`（唯一的 PRINT + append owner）
+    /// 盖章，因此任何入口都不会产出无时间戳的记录。
+    #[serde(default)]
+    pub ts: u64,
     pub request_id: String,
     /// 入口监听端口（入口身份；不可得时为空串）。
     pub entry_port: String,
@@ -38,29 +42,37 @@ pub struct V3ProjectionDropRecord {
 }
 
 impl V3ProjectionDropRecord {
+    /// stage-3 投影站点使用的唯一构造函数：只填现场可得的字段。
+    ///
+    /// 请求身份（`request_id` / `entry_port` / 客户端原样 `source_value`）由请求
+    /// 作用域在 `restamp_and_emit` 补齐，`ts` 由 `emit` 盖章；因此投影链不必穿参
+    /// 请求上下文，同时任何入口都不会出现「算出丢弃但不落盘」的静默缺口。
+    pub fn new(
+        target_protocol: impl Into<String>,
+        json_path: impl Into<String>,
+        reason: impl Into<String>,
+        canonical_value: Value,
+        drop_site: impl Into<String>,
+    ) -> Self {
+        Self {
+            ts: 0,
+            request_id: String::new(),
+            entry_port: String::new(),
+            target_protocol: target_protocol.into(),
+            stage: V3_PROJECTION_DROP_STAGE3.to_string(),
+            json_path: json_path.into(),
+            reason: reason.into(),
+            source_value: Value::Null,
+            canonical_value,
+            drop_site: drop_site.into(),
+        }
+    }
+
     pub fn to_json_line(&self) -> String {
         serde_json::to_string(self).unwrap_or_else(|error| {
             format!("{{\"error\":\"projection drop record serialization failed: {error}\"}}")
         })
     }
-}
-
-/// 投影侧自足的轻量丢弃描述符：只含 stage 3 现场即可得到的字段。
-///
-/// 请求身份（`request_id` / `entry_port` / 客户端原样 `source_value`）只有请求
-/// 作用域才拥有，因此由 relay 在 `V3ProjectionDropContext::record` 时补齐。
-/// 这样投影函数不必携带上下文参数，架构契约要求的一字参调用形状得以保持，
-/// 同时任何入口都不会出现「算出丢弃但不落盘」的静默缺口。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct V3ProjectionDrop {
-    pub target_protocol: String,
-    pub stage: String,
-    pub json_path: String,
-    pub reason: String,
-    /// 经过 stage 1/2 之后的 canonical 值（stage 3 所见）。
-    pub canonical_value: Value,
-    /// 执行丢弃的 owner 函数名。
-    pub drop_site: String,
 }
 
 /// stage-3 投影上下文：请求身份 + 客户端原始 payload 句柄 + 丢弃日志路径。
@@ -147,37 +159,17 @@ impl V3ProjectionDropContext {
         self.emit(records);
     }
 
-    /// 用请求身份补齐投影描述符并落盘：唯一需要请求作用域的步骤。
-    ///
-    /// 描述符由 stage 3 投影产生（不含请求身份），此处补 `request_id` /
-    /// `entry_port` / 客户端原样 `source_value` 后交给 `emit`。
-    pub fn record(&self, drops: &[V3ProjectionDrop]) {
-        if drops.is_empty() {
-            return;
-        }
-        let records: Vec<V3ProjectionDropRecord> = drops
-            .iter()
-            .map(|drop| V3ProjectionDropRecord {
-                request_id: self.request_id.clone(),
-                entry_port: self.entry_port.clone(),
-                target_protocol: drop.target_protocol.clone(),
-                stage: drop.stage.clone(),
-                json_path: drop.json_path.clone(),
-                reason: drop.reason.clone(),
-                source_value: self.source_value_at(&drop.json_path),
-                canonical_value: drop.canonical_value.clone(),
-                drop_site: drop.drop_site.clone(),
-            })
-            .collect();
-        self.emit(&records);
-    }
-
     /// PRINT 每条丢弃记录，并在配置了日志路径时 append 到独立 JSONL 文件。
-    pub fn emit(&self, records: &[V3ProjectionDropRecord]) {
+    ///
+    /// `ts` 在这里盖章：`emit` 是唯一的 PRINT + append owner，因此无论哪个入口
+    /// 产出记录，都不会出现缺时间戳的行。
+    pub fn emit(&self, records: &mut [V3ProjectionDropRecord]) {
         if records.is_empty() {
             return;
         }
-        for record in records {
+        let now_ms = v3_projection_drop_now_epoch_ms();
+        for record in records.iter_mut() {
+            record.ts = now_ms;
             eprintln!("[v3-projection-drop] {}", record.to_json_line());
         }
         if let Err(error) = append_v3_projection_drop_records(self.log_file.as_deref(), records) {
@@ -229,6 +221,14 @@ pub fn append_v3_projection_drop_records(
         writeln!(file, "{}", record.to_json_line())?;
     }
     file.flush()
+}
+
+/// 丢弃记录的 `ts` 真源：Unix epoch 毫秒（与项目其它 epoch_ms 字段一致）。
+fn v3_projection_drop_now_epoch_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// 最小 JSON path 解析，支持 `$.key`、`.key`、`[index]` 组合（丢弃站点使用）。
@@ -308,17 +308,17 @@ mod tests {
                 .unwrap_or_default()
         ));
         let path = dir.join("projection-drops.jsonl");
-        let record = V3ProjectionDropRecord {
-            request_id: "req-unit".into(),
-            entry_port: "8399".into(),
-            target_protocol: "openai_chat".into(),
-            stage: "outbound_target_protocol_projection".into(),
-            json_path: "$.tools".into(),
-            reason: "non_array_tools_unrepresentable".into(),
-            source_value: json!("not-an-array"),
-            canonical_value: json!("not-an-array"),
-            drop_site: "project_openai_chat_provider_tools_for_web_search_mode".into(),
-        };
+        let mut record = V3ProjectionDropRecord::new(
+            "openai_chat",
+            "$.tools",
+            "non_array_tools_unrepresentable",
+            json!("not-an-array"),
+            "project_openai_chat_provider_tools_for_web_search_mode",
+        );
+        record.ts = 1_700_000_000_000;
+        record.request_id = "req-unit".into();
+        record.entry_port = "8399".into();
+        record.source_value = json!("not-an-array");
         append_v3_projection_drop_records(Some(&path.display().to_string()), &[record.clone()])
             .expect("drop log append must succeed");
         append_v3_projection_drop_records(Some(&path.display().to_string()), &[record])

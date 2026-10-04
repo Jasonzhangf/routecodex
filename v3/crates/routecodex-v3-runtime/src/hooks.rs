@@ -433,7 +433,7 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
     })?;
     let mut request_body = match provider_protocol {
         crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat => {
-            let (wire_body, projection_drops) =
+            let (wire_body, mut projection_drops) =
                 crate::hub_v1::build_v3_chat_canonical_request_from_responses_payload_for_req_inbound(
                     &request_body,
                 )
@@ -452,7 +452,7 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
                         V3InternalErrorCode::V3Provider12ResponsesWirePayload,
                     )
                 })?;
-            drop_context.emit(&projection_drops);
+            drop_context.emit(&mut projection_drops);
             wire_body
         }
         crate::hub_v1::V3HubProviderWireProtocol::Anthropic => {
@@ -803,7 +803,7 @@ pub(crate) fn chat_direct_request_projection_hook_with_key_catalog_and_drop_cont
             drop_context,
         )
     };
-    let (mut wire_body, projection_drops) = projected.map_err(|error| {
+    let (mut wire_body, mut projection_drops) = projected.map_err(|error| {
         build_v3_error_01_source_raised_internal(
             V3ErrorSourceKind::RuntimeFailure,
             "V3ChatDirect11Policy",
@@ -812,7 +812,7 @@ pub(crate) fn chat_direct_request_projection_hook_with_key_catalog_and_drop_cont
             V3InternalErrorCode::V3Provider12ResponsesWirePayload,
         )
     })?;
-    drop_context.emit(&projection_drops);
+    drop_context.emit(&mut projection_drops);
     wire_body = apply_v3_direct_request_key_hook_with_catalog(
         wire_body,
         V3DirectRequestProtocol::OpenAiChat,

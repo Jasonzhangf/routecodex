@@ -1,7 +1,9 @@
 use super::V3HubEntryProtocol;
 use serde_json::{json, Map, Value};
 
-use crate::projection_drop_log::{V3ProjectionDropContext, V3ProjectionDropRecord};
+use crate::projection_drop_log::{
+    resolve_v3_json_path, V3ProjectionDropContext, V3ProjectionDropRecord,
+};
 
 use super::anthropic_request_field_projection::project_chat_store_to_anthropic_wire;
 use super::request_outbound_builtin_tool_projection::project_openai_chat_provider_tools_for_web_search_mode_recording;
@@ -396,12 +398,11 @@ pub(crate) fn project_outbound_payload_for_target_protocol(
     source: &Value,
     target_protocol: V3OutboundTargetProtocol,
 ) -> Result<Value, String> {
-    project_outbound_payload_for_target_protocol_with_drops(
-        source,
-        target_protocol,
-        &V3ProjectionDropContext::disabled(),
-    )
-    .map(|(value, _drops)| value)
+    let drop_context = V3ProjectionDropContext::disabled();
+    let (value, mut drops) =
+        project_outbound_payload_for_target_protocol_with_drops(source, target_protocol)?;
+    drop_context.restamp_and_emit(&mut drops);
+    Ok(value)
 }
 
 /// stage-3 target output-protocol whitelist projection 的 non-error carrier：
@@ -409,14 +410,8 @@ pub(crate) fn project_outbound_payload_for_target_protocol(
 pub(crate) fn project_outbound_payload_for_target_protocol_with_drops(
     source: &Value,
     target_protocol: V3OutboundTargetProtocol,
-    drop_context: &V3ProjectionDropContext,
 ) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
-    project_outbound_payload_for_target_protocol_inner_with_drops(
-        source,
-        target_protocol,
-        None,
-        drop_context,
-    )
+    project_outbound_payload_for_target_protocol_inner_with_drops(source, target_protocol, None)
 }
 
 pub(crate) fn project_outbound_payload_for_selected_target_protocol(
@@ -424,20 +419,20 @@ pub(crate) fn project_outbound_payload_for_selected_target_protocol(
     target_protocol: V3OutboundTargetProtocol,
     model_capabilities: &[String],
 ) -> Result<Value, String> {
-    project_outbound_payload_for_target_protocol_inner_with_drops(
+    let drop_context = V3ProjectionDropContext::disabled();
+    let (value, mut drops) = project_outbound_payload_for_target_protocol_inner_with_drops(
         source,
         target_protocol,
         Some(model_capabilities),
-        &V3ProjectionDropContext::disabled(),
-    )
-    .map(|(value, _drops)| value)
+    )?;
+    drop_context.restamp_and_emit(&mut drops);
+    Ok(value)
 }
 
 fn project_outbound_payload_for_target_protocol_inner_with_drops(
     source: &Value,
     target_protocol: V3OutboundTargetProtocol,
     gemini_model_capabilities: Option<&[String]>,
-    _drop_context: &V3ProjectionDropContext,
 ) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
     let mut source = source.clone();
     if matches!(target_protocol, V3OutboundTargetProtocol::Gemini) {
@@ -459,20 +454,85 @@ fn project_outbound_payload_for_target_protocol_inner_with_drops(
             control_paths.join(",")
         ));
     }
+    // stage 3 白名单投影是「最大兼容优先，其次丢弃」：目标协议白名单之外的字段
+    // 不携带目标协议可表示的语义，按规则 DROP + RECORD + PRINT 后继续请求，
+    // 绝不变成客户端错误。`ControlFieldLeak`（上方）仍是 hard error 不变量。
     let unmapped = collect_unmapped_outbound_field_paths(source, target_protocol);
-    if !unmapped.is_empty() {
-        return Err(format!(
-            "UnmappedOutboundFields target_protocol={} paths={}",
+    let mut drops = Vec::new();
+    for json_path in &unmapped {
+        drops.push(V3ProjectionDropRecord::new(
             target_protocol.as_str(),
-            unmapped.join(",")
+            json_path.clone(),
+            "unmapped_target_protocol_field_unrepresentable",
+            resolve_v3_json_path(source, json_path).unwrap_or(Value::Null),
+            "project_outbound_payload_for_target_protocol_inner_with_drops",
         ));
     }
     let mut projected = source.clone();
+    for json_path in &unmapped {
+        remove_unmapped_outbound_field(&mut projected, json_path);
+    }
     apply_outbound_projection_transforms(&mut projected, target_protocol)?;
-    // UnmappedOutboundFields 的 drop 转换是后续独立候选（plan 节点
-    // IMPL-PLAN-stage3-drop-and-log 明确 LATER）；本 carrier 已就位，
-    // 当前只承载各 drop 站点的记录（例如非数组 tools）。
-    Ok((projected, Vec::new()))
+    Ok((projected, drops))
+}
+
+/// 从投影结果中移除一个白名单外的出站字段。
+///
+/// 丢弃站点使用 `$.key` / `$.key.sub` / `$.arr[i]` 形态；末段是对象成员时删除该
+/// 成员，末段落在数组元素上时删除该元素。父级缺失即视为已无可丢弃内容。
+fn remove_unmapped_outbound_field(projected: &mut Value, json_path: &str) {
+    let Some((parent_path, leaf)) = json_path.rsplit_once('.') else {
+        return;
+    };
+    let leaf = leaf.trim();
+    if leaf.is_empty() {
+        return;
+    }
+    let Some(parent) = pointer_mut_for_json_path(projected, parent_path) else {
+        return;
+    };
+    if let Ok(index) = leaf.parse::<usize>() {
+        if let Some(items) = parent.as_array_mut() {
+            if index < items.len() {
+                items.remove(index);
+            }
+        }
+        return;
+    }
+    if let Some(map) = parent.as_object_mut() {
+        map.remove(leaf);
+    }
+}
+
+/// 把 `$.key` / `$.key.sub` / `$.arr[i]` 形态解析成可变引用。
+fn pointer_mut_for_json_path<'a>(value: &'a mut Value, json_path: &str) -> Option<&'a mut Value> {
+    let mut current = value;
+    let mut rest = json_path.strip_prefix('$').unwrap_or(json_path);
+    loop {
+        if rest.is_empty() {
+            return Some(current);
+        }
+        if let Some(stripped) = rest.strip_prefix('.') {
+            let end = stripped
+                .find(|ch: char| ch == '.' || ch == '[')
+                .unwrap_or(stripped.len());
+            let key = &stripped[..end];
+            if key.is_empty() {
+                return None;
+            }
+            current = current.as_object_mut()?.get_mut(key)?;
+            rest = &stripped[end..];
+            continue;
+        }
+        if let Some(stripped) = rest.strip_prefix('[') {
+            let end = stripped.find(']')?;
+            let index: usize = stripped[..end].trim().parse().ok()?;
+            current = current.as_array_mut()?.get_mut(index)?;
+            rest = &stripped[end + 1..];
+            continue;
+        }
+        return None;
+    }
 }
 
 include!("request_outbound_gemini.rs");
@@ -1106,7 +1166,6 @@ fn normalize_openai_chat_messages_payload(
         project_outbound_payload_for_target_protocol_with_drops(
             payload,
             V3OutboundTargetProtocol::OpenAiChat,
-            drop_context,
         )?;
     drops.append(&mut carrier_drops);
     if let Some(row) = normalized.as_object_mut() {

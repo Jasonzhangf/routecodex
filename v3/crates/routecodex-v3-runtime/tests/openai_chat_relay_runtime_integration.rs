@@ -2749,6 +2749,16 @@ async fn non_array_tools_is_dropped_recorded_and_request_continues() {
     let record: Value = serde_json::from_str(lines[0]).expect("drop record must be JSON");
     assert_eq!(record["request_id"], "req-non-array-tools", "{record}");
     assert_eq!(record["entry_port"], "1", "{record}");
+    assert!(
+        record["ts"]
+            .as_u64()
+            .is_some_and(|ts| ts > 1_700_000_000_000),
+        "drop record must carry a real epoch-ms timestamp: {record}"
+    );
+    assert_eq!(
+        record["stage"], "outbound_target_protocol_projection",
+        "{record}"
+    );
     assert_eq!(record["target_protocol"], "openai_chat", "{record}");
     assert_eq!(record["json_path"], "$.tools", "{record}");
     assert_eq!(record["source_value"], json!("not-an-array"), "{record}");

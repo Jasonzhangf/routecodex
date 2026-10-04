@@ -254,19 +254,17 @@ fn openai_chat_wire_passes_through_same_protocol_thinking_field() {
 }
 
 #[test]
-fn responses_openai_chat_field_parity_include_is_rejected_from_chat_wire() {
+fn responses_openai_chat_field_parity_include_is_dropped_from_chat_wire() {
     let payload = json!({
         "model": "gpt-test",
         "messages": [{"role": "user", "content": "hello"}],
         "include": ["reasoning.encrypted_content"]
     });
 
-    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect_err("OpenAI Chat wire projection must reject unmapped Responses include");
+    let wire = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("OpenAI Chat wire cannot represent Responses include: drop it, do not fail");
 
-    assert!(error.contains("UnmappedOutboundFields"), "{error}");
-    assert!(error.contains("target_protocol=openai_chat"), "{error}");
-    assert!(error.contains("$.include"), "{error}");
+    assert!(wire.get("include").is_none(), "{wire}");
 }
 
 #[test]
@@ -1122,7 +1120,7 @@ fn openai_responses_wire_rebuilds_registered_reasoning_fields_only() {
 }
 
 #[test]
-fn openai_responses_wire_rejects_non_responses_reasoning_extensions() {
+fn openai_responses_wire_drops_non_responses_reasoning_extensions() {
     for field in [
         "reasoning_budget_tokens",
         "reasoning_include_thoughts",
@@ -1137,24 +1135,26 @@ fn openai_responses_wire_rejects_non_responses_reasoning_extensions() {
             .as_object_mut()
             .unwrap()
             .insert(field.to_string(), json!(2048));
-        let error = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
-            .expect_err("non-Responses reasoning semantic must be unmapped");
-        assert!(error.contains(field), "{error}");
+        let wire = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+            .unwrap_or_else(|error| {
+                panic!("non-Responses reasoning semantic {field} must drop, not fail: {error}")
+            });
+        assert!(wire.get(field).is_none(), "{field} must be dropped: {wire}");
     }
 }
 
 #[test]
-fn anthropic_thinking_chat_fields_are_unmapped_for_responses_wire() {
+fn anthropic_thinking_chat_fields_are_dropped_for_responses_wire() {
     let payload = json!({
         "model": "gpt-test",
         "messages": [{"role": "user", "content": "reasoning"}],
         "reasoning_thinking_mode": "enabled",
         "reasoning_budget_tokens": 1024
     });
-    let error = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
-        .expect_err("Anthropic thinking mode and numeric budget have no Responses field");
-    assert!(error.contains("reasoning_thinking_mode"), "{error}");
-    assert!(error.contains("reasoning_budget_tokens"), "{error}");
+    let wire = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+        .expect("Anthropic thinking mode and numeric budget have no Responses field: drop them");
+    assert!(wire.get("reasoning_thinking_mode").is_none(), "{wire}");
+    assert!(wire.get("reasoning_budget_tokens").is_none(), "{wire}");
 }
 
 #[test]
