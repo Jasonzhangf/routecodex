@@ -11,7 +11,7 @@ permissions:
 jobs:
   linux-file-trace:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -30,9 +30,13 @@ jobs:
         run: |
           mkdir -p v3/build-control/h2-startup-trace
           node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test h2_p6_controlled_replay --no-run > v3/build-control/h2-startup-trace/compile.log 2>&1
+      - name: Reproduce the complete installed workspace context
+        id: workspace
+        run: node v3/scripts/run-v3-cargo-test.mjs --workspace -- --nocapture > v3/build-control/h2-startup-trace/workspace.log 2>&1
       - name: Trace default parallel startup without suppressing failures
+        if: ${{ !cancelled() && (steps.workspace.outcome == 'success' || steps.workspace.outcome == 'failure') }}
         run: |
-          strace -f -tt -e trace=%file -o v3/build-control/h2-startup-trace/files.log node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test h2_p6_controlled_replay -- --nocapture > v3/build-control/h2-startup-trace/replay.log 2>&1
+          strace -f -tt -e trace=%file,bind,connect -o v3/build-control/h2-startup-trace/files.log node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test h2_p6_controlled_replay -- --nocapture > v3/build-control/h2-startup-trace/replay.log 2>&1
       - name: Preserve file trace and original test result
         if: always()
         uses: actions/upload-artifact@v4
