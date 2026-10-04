@@ -184,7 +184,10 @@ pub(crate) fn commit_model_transport_outcome(
     response: Response<Body>,
 ) -> Response<Body> {
     if let Some(outcome) = response.extensions().get::<V3ModelClientNoResponse>() {
-        return provider_terminal_response(
+        // A model-entry outcome with no client payload breaks the client transport
+        // without a fabricated error. It carries no provider response head, so it has
+        // no provider-terminal witness to record.
+        return model_transport_break_response(
             state,
             connection,
             routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
@@ -402,6 +405,23 @@ pub(crate) fn provider_terminal_response(
         evidence.request_id,
         &disposition,
     );
+    model_transport_break_response(state, connection, disposition, requested_stream)
+}
+
+/// Break the model client's transport for a terminal outcome that has no client payload.
+///
+/// This is the single implementation of the model-client break. The provider terminal
+/// entry `provider_terminal_response` records the provider witness first and then
+/// delegates here; a model-entry outcome that carries no provider response enters
+/// directly through `commit_model_transport_outcome`. Neither entry projects a provider
+/// status, header, or body to the client, and only the provider terminal entry has a
+/// witness to record.
+fn model_transport_break_response(
+    state: &V3ListenerState,
+    connection: Option<V3FrontConnectionIdentity>,
+    disposition: routecodex_v3_error::V3ProviderTerminalDisposition,
+    requested_stream: bool,
+) -> Response<Body> {
     match disposition {
         // A real compatible upstream HTTP error is still a provider error. Its real
         // status, headers, and body are recorded as provider-terminal evidence and in

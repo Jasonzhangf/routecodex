@@ -270,8 +270,11 @@ targets = [
         "request-local compat must not consume a same-candidate retry budget"
     );
     assert!(!trace.contains(&"V3TargetPolicyRetriedSame"));
+    // The request-local compat failure is the terminal, but the real upstream 429
+    // head that arrived on an earlier attempt is still the provider terminal's
+    // evidence: it is recorded, never projected to the client.
     assert_eq!(
         result.terminal_disposition,
-        Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
+        Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(upstream))
     );
 }
