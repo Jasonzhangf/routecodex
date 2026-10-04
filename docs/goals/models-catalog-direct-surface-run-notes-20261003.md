@@ -250,3 +250,43 @@ live daemon PID 49150（`--config /Volumes/extension/.rcc/config.toml`，4444/77
    且 `0.90.4831` 版本号未变，`/health` 版本匹配也无法证明新代码已加载。
 
 → 故「已安装 runtime 的同入口重放」不成立，交付在此节点标为 UNVERIFIED，未宣称闭环。
+
+## 安装已完成、重启被阻塞（2026-10-04 20:2x）
+
+（本节取代上一节：上一节的 3 个阻断点中，「构建源不是已验候选」与「验证配置缺失」已解决，安装已完成。）
+
+**已完成：构建 + 安装（从本候选 worktree 构建，非主树）**
+- 命令：`CARGO_TARGET_DIR="$PWD/v3/target" CARGO_NET_OFFLINE=true npm --prefix v3 run install`，exit 0。
+  `Finished release profile [optimized] target(s) in 38.29s`；`[install-cli] ok`。
+- 已安装 `/Users/fanzhang/.local/bin/rccv3` sha256 `65fbf9fe0194e1886b6151c57f2489dbddbf4482959f9ce99e9ae3e5668a17de`；
+  `rccv3-admin` `6f3154b69908f52c7f2e022050e5a2cce7925fc01e30ceacb82eda3722e97b1b`；
+  `rccv3-hooksd` `35628eacaa1d361e551cb1ee482a8a24979f11c52df3ed31c852a6b1802d63ae`。
+- 非破坏性：live daemon PID 49150 仍持有旧 inode，不受替换影响。
+
+**重启阻塞：live config 需要未合并的 `[runtime] fd_limit`**
+- live config `/Volumes/extension/.rcc/config.toml`（mtime 2026-10-03 20:40:18，即 daemon 09:04 启动**之后**被改）
+  第 3–4 行为 `[runtime]` / `fd_limit = 65535`。
+- 新装 binary 对该文件 `config check -c` 与 `start -c` 均在 **line 3 `[runtime]`** 报
+  `unknown field 'runtime', expected 'version' or 'servers'` → **解析失败，重启必然起不来**。
+- 隔离验证（`/tmp/rcc-probe/home4`，basename 保持 `config.toml`）：
+  - **带** `[runtime]` → parse error（line 3）；
+  - **去掉** `[runtime]`（`/tmp/rcc-probe/home5`）→ **解析通过**，仅在 validation 阶段因隔离 HOME 缺 provider 文件而报错。
+  → `routes` 用户方言本身没问题；**唯一阻断项就是 `[runtime]`**。
+- **更正早前结论**：此前「新 binary 连 `routes` 也拒绝」是**探针文件命名假象**。本 loader 按 **basename** 选方言：
+  仅 basename 为 `config.toml` 时走 user/authoring 方言（支持 `routes`）；其他名字走 server/manifest 方言
+  （要求 `routing_group`/`route_groups`）。同一内容改名为 `othername.toml` 即在 line 43 `[servers.responses_v3_7777.routes.coding]` 报错。
+- `[runtime]`/`fd_limit` 只存在于**未合并**分支 `97cecc329`（`fd-limit-config-20261003`，其父正是本次合并 `d1639c4fa`）；
+  `git grep V3RuntimeManifest origin/main -- v3/crates/` 为空 → main 无该字段。
+- 该分支 worktree 仍是**他人活跃工作**（dirty 5 文件，`runtime_config.rs` mtime Oct 3 19:51），
+  且 live config 的 `[runtime]` 是在其 19:49 提交之后（20:40）加入的 → 属他人在共享 live config 上的在建依赖。
+- 二进制接受矩阵（对真实 live config）：`fd-limit-config-20261003` 的 dist/release **ACCEPT**；
+  新装 binary、`client-provider-decoupling-main-20261003`、`provider-terminal-witness-evidence-20261003` 均 **REJECT**。
+
+**回归性判断**：live daemon PID 49150 启动于 Oct 3 09:04，早于 `fd_limit` 提交（19:49），
+其运行中的 binary 不可能含 `[runtime]` 支持；live config 于 20:40 加入 `[runtime]` 后，
+**任何 main 基线的 binary（含本次安装）都无法重启该 daemon**。该「不可重启」状态由 20:40 的 config 改动造成，
+不是本次安装引入。
+
+→ 「已安装 runtime 的同入口重放」仍**不成立**，本节点标为 **BLOCKED**（非仅 UNVERIFIED）。
+未擅自重启：重启会解析失败导致 4444/7777 下线并中断本会话。已向用户升级该决策（选项：等 fd-limit 合并 /
+授权临时移除这 2 行后重启再恢复 / 其他）。
