@@ -333,31 +333,11 @@ fn build_v3_provider_standard_protocol_payload_from_req07(
     Ok((payload, drops))
 }
 
-fn normalize_deepseek_tool_choice(
-    payload: &mut Value,
-    selected: &routecodex_v3_target::V3TargetCandidate,
-    provider_protocol: V3HubProviderWireProtocol,
-) {
-    let is_deepseek_target = matches!(
-        selected.compatibility_profile.as_deref(),
-        Some("chat:deepseek-max" | "responses:deepseek-console-go")
-    ) || is_v3_deepseek_v4_compat_model(&selected.model_id)
-        || is_v3_deepseek_v4_compat_model(&selected.wire_model);
-    if matches!(
-        provider_protocol,
-        V3HubProviderWireProtocol::OpenAiChat | V3HubProviderWireProtocol::Responses
-    ) && is_deepseek_target
-    {
-        provider_compat_core::apply_deepseek_v4_request_compat(payload);
-    }
-}
-
-fn is_v3_deepseek_v4_compat_model(model_id: &str) -> bool {
-    matches!(
-        model_id.trim().to_ascii_lowercase().as_str(),
-        "deepseek-v4-flash" | "deepseek-v4.1-flash"
-    )
-}
+#[path = "provider_req_compat_06_deepseek.rs"]
+mod provider_req_compat_06_deepseek;
+use provider_req_compat_06_deepseek::{
+    is_v3_deepseek_v4_compat_model, normalize_deepseek_tool_choice,
+};
 
 #[cfg(test)]
 mod tests {

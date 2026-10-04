@@ -74,6 +74,7 @@ pub(crate) use request_outbound_format::{
     build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording,
     build_v3_openai_chat_standard_request_from_chat_canonical,
     build_v3_openai_chat_standard_request_from_chat_canonical_recording,
+    build_v3_openai_responses_standard_request_for_selected_target,
     build_v3_openai_responses_standard_request_for_selected_target_with_drops,
     build_v3_openai_responses_standard_request_from_chat_canonical,
     normalize_v3_openai_responses_provider_request_payload,

@@ -163,7 +163,10 @@ impl V3ProjectionDropContext {
     ///
     /// `ts` 在这里盖章：`emit` 是唯一的 PRINT + append owner，因此无论哪个入口
     /// 产出记录，都不会出现缺时间戳的行。
-    pub fn emit(&self, records: &mut [V3ProjectionDropRecord]) {
+    ///
+    /// 只盖 `ts`，不填请求身份。生产入口一律走 [`Self::restamp_and_emit`]；
+    /// 本函数保持私有，避免调用点回退成「无身份落盘」。
+    fn emit(&self, records: &mut [V3ProjectionDropRecord]) {
         if records.is_empty() {
             return;
         }
