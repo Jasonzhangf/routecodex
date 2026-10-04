@@ -263,9 +263,8 @@ pub fn split_v3_json_path(json_path: &str) -> Option<Vec<V3JsonPathSegment>> {
             continue;
         }
         if let Some(stripped) = rest.strip_prefix('[') {
-            let end = stripped.find(']')?;
-            let token = stripped[..end].trim();
-            rest = &stripped[end + 1..];
+            let (token, tail) = split_v3_json_path_bracket(stripped)?;
+            rest = tail;
             if token.starts_with('"') {
                 segments.push(V3JsonPathSegment::Key(serde_json::from_str(token).ok()?));
             } else {
@@ -275,6 +274,36 @@ pub fn split_v3_json_path(json_path: &str) -> Option<Vec<V3JsonPathSegment>> {
         }
         return None;
     }
+}
+
+/// 从 `[` 之后的内容里切出括号内 token 及其后的剩余路径。
+///
+/// 引号形式按 JSON 字符串语义扫描：`\` 转义后的字符（含 `]` 和 `"`）属于 token
+/// 内容，不是结束符。`json_path_child` 用 `serde_json::to_string` 渲染非标识符
+/// 键，而 JSON 转义不会转义 `]`，所以 `weird]key` 会产出 `$["weird]key"]`；只有
+/// 按字符串语义扫描才能把它原样解析回来，从而保证「记录到的丢弃一定真的丢弃」。
+fn split_v3_json_path_bracket(stripped: &str) -> Option<(&str, &str)> {
+    if !stripped.starts_with('"') {
+        let end = stripped.find(']')?;
+        return Some((&stripped[..end], &stripped[end + 1..]));
+    }
+    let mut escaped = false;
+    for (offset, ch) in stripped.char_indices().skip(1) {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' => escaped = true,
+            '"' => {
+                let token_end = offset + ch.len_utf8();
+                let tail = stripped[token_end..].strip_prefix(']')?;
+                return Some((&stripped[..token_end], tail));
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// 最小 JSON path 读取，支持 `$.key`、`.key`、`["key"]`、`[index]` 组合。
@@ -329,6 +358,32 @@ mod tests {
         );
         assert_eq!(split_v3_json_path("$"), Some(Vec::new()));
         assert_eq!(split_v3_json_path("$[\"unterminated]"), None);
+    }
+
+    #[test]
+    fn resolve_json_path_round_trips_keys_with_brackets_and_quotes() {
+        // JSON string escaping does not escape `]`, so `json_path_child` emits
+        // `$["weird]key"]` for such a key. The bracket scan must honour string
+        // semantics, otherwise the drop is recorded but never removed.
+        let value = json!({"weird]key": 1, "quo\"te": 2, "back\\slash": 3});
+        assert_eq!(
+            resolve_v3_json_path(&value, "$[\"weird]key\"]"),
+            Some(json!(1))
+        );
+        assert_eq!(
+            resolve_v3_json_path(&value, "$[\"quo\\\"te\"]"),
+            Some(json!(2))
+        );
+        assert_eq!(
+            resolve_v3_json_path(&value, "$[\"back\\\\slash\"]"),
+            Some(json!(3))
+        );
+        // An index after a bracket-quoted key still parses.
+        let nested = json!({"weird]key": {"arr": ["z"]}});
+        assert_eq!(
+            resolve_v3_json_path(&nested, "$[\"weird]key\"].arr[0]"),
+            Some(json!("z"))
+        );
     }
 
     #[test]
