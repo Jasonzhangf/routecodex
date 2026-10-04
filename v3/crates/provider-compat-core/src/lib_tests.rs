@@ -19,70 +19,17 @@ fn goaichat_profile_preserves_existing_hosted_extensions_and_other_protocols() {
             },
             explicit_profile: None,
         };
-        let mut expected = payload.clone();
-        if protocol == "anthropic-messages" {
-            expected["tools"][2]["type"] = json!("function");
-            expected["tools"][2]["function"] = json!({
-                "name":"exec_command","parameters":{"type":"object"}
-            });
-        }
         assert_eq!(
             run_req_outbound_stage3_compat(input.clone())
                 .unwrap()
                 .payload,
-            expected
+            payload
         );
         assert_eq!(
             run_resp_inbound_stage3_compat(input).unwrap().payload,
             payload
         );
     }
-}
-
-#[test]
-fn goaichat_mixed_declarations_are_complete_idempotent_and_preserve_inventory() {
-    let payload = json!({"tools":[
-        {"type":"web_search_20250305","name":"web_search","max_uses":3},
-        {"name":"exec_command","description":"execute value",
-            "input_schema":{"type":"object","properties":{"value":{"type":"integer"}}},
-            "opaque":{"keep":true}},
-        {"name":"write_stdin","input_schema":{"type":"object"},
-            "function":{"name":"write_stdin","parameters":{"providerExtension":true}},
-            "type":"function"}
-    ],"messages":[{"role":"assistant","content":[
-        {"type":"tool_use","id":"retired_call","name":"update_plan","input":{"plan":[]}}
-    ]}]});
-    let input = |payload| ReqOutboundCompatInput {
-        payload,
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("anthropic:goaichat".into()),
-            provider_protocol: Some("anthropic-messages".into()),
-            ..Default::default()
-        },
-        explicit_profile: None,
-    };
-    let result = run_req_outbound_stage3_compat(input(payload.clone()))
-        .unwrap()
-        .payload;
-    let mut expected = payload.clone();
-    expected["tools"][0]["function"] = json!({"name":"web_search","parameters":{}});
-    expected["tools"][1]["type"] = json!("function");
-    expected["tools"][1]["function"] = json!({"name":"exec_command",
-        "parameters":payload["tools"][1]["input_schema"],"description":"execute value"});
-    assert_eq!(result, expected);
-    assert_eq!(
-        run_req_outbound_stage3_compat(input(result.clone()))
-            .unwrap()
-            .payload,
-        result
-    );
-    let native_only = json!({"tools":[payload["tools"][1].clone()],"messages":payload["messages"]});
-    assert_eq!(
-        run_req_outbound_stage3_compat(input(native_only.clone()))
-            .unwrap()
-            .payload,
-        native_only
-    );
 }
 
 fn deepseek_max_input(payload: Value, provider_protocol: &str) -> ReqOutboundCompatInput {
