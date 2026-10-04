@@ -2,9 +2,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, VecDeque};
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::io::{BufWriter, Write};
+use std::os::unix::fs::MetadataExt;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 pub mod observability_store;
 pub mod sample_store;
@@ -227,11 +228,21 @@ impl std::error::Error for V3DebugError {}
 
 type V3DebugResult<T> = Result<T, V3DebugError>;
 
+/// Size cap for the debug log file. The sink rotates the live file to a single
+/// `.1` generation once it grows past this, so an always-on debug log cannot
+/// grow without bound.
+pub const V3_DEBUG_LOG_MAX_BYTES: u64 = 64 * 1024 * 1024;
+
 #[derive(Debug, Clone)]
 pub struct V3DebugRuntime {
     config: Arc<V3DebugRuntimeConfig>,
     state: Arc<RwLock<V3DebugState>>,
     sequence: Arc<AtomicU64>,
+    /// Long-lived append handle for `config.log_file`. Opening the file per
+    /// record cost a `create_dir_all` + `open` + `write` + `close` per debug
+    /// line; the handle is re-validated per line so the sink still self-heals
+    /// when a log directory is removed underneath a running runtime.
+    log_sink: Option<Arc<Mutex<BufWriter<File>>>>,
 }
 
 #[derive(Debug, Default)]
@@ -251,14 +262,15 @@ struct V3SnapshotSession {
 
 impl V3DebugRuntime {
     pub fn new(config: V3DebugRuntimeConfig) -> V3DebugResult<Self> {
-        if let Some(path) = config.log_file.as_deref() {
-            ensure_log_file_parent_dir(path)?;
-            open_log_file_for_append(path)?;
-        }
+        let log_sink = match config.log_file.as_deref() {
+            Some(path) => Some(Arc::new(Mutex::new(open_v3_debug_log_sink(path)?))),
+            None => None,
+        };
         Ok(Self {
             config: Arc::new(config),
             state: Arc::new(RwLock::new(V3DebugState::default())),
             sequence: Arc::new(AtomicU64::new(1)),
+            log_sink,
         })
     }
 
@@ -318,12 +330,7 @@ impl V3DebugRuntime {
     }
 
     pub fn append_human_console_line(&self, line: &str) -> V3DebugResult<()> {
-        let Some(path) = self.config.log_file.as_deref() else {
-            return Ok(());
-        };
-        let mut file = open_log_file_for_append(path)?;
-        writeln!(file, "{line}").map_err(|error| V3DebugError::Sink(error.to_string()))?;
-        Ok(())
+        self.write_log_line(line)
     }
 
     pub fn project_payload_verbatim(&self, payload: Value) -> Value {
@@ -601,16 +608,88 @@ impl V3DebugRuntime {
     }
 
     fn write_sink(&self, event: &V3DebugEventProjection) -> V3DebugResult<()> {
+        if self.log_sink.is_none() {
+            return Ok(());
+        }
         let line =
             serde_json::to_string(event).map_err(|error| V3DebugError::Sink(error.to_string()))?;
         // Node events are internal debug evidence. Human-readable console
         // output is emitted explicitly through append_human_console_line.
-        if let Some(path) = self.config.log_file.as_deref() {
-            let mut file = open_log_file_for_append(path)?;
-            writeln!(file, "{line}").map_err(|error| V3DebugError::Sink(error.to_string()))?;
-        }
-        Ok(())
+        self.write_log_line(&line)
     }
+
+    /// Appends one line to the configured debug log file.
+    ///
+    /// The sink self-heals: a log directory removed underneath a running
+    /// runtime is recreated on the next write, so the live file is re-validated
+    /// instead of trusting the cached handle. A file that the path no longer
+    /// names — removed, or rotated by another writer sharing the same
+    /// `log_file` — is reopened so lines keep landing in the current
+    /// generation. The same check enforces the size cap by rotating to a single
+    /// `.1` generation.
+    fn write_log_line(&self, line: &str) -> V3DebugResult<()> {
+        let Some(sink) = self.log_sink.as_deref() else {
+            return Ok(());
+        };
+        let path = self
+            .config
+            .log_file
+            .as_deref()
+            .expect("a log sink implies a configured log file");
+        let mut sink = sink
+            .lock()
+            .map_err(|error| V3DebugError::Poisoned(error.to_string()))?;
+        // Follow a symlinked `log_file`: the comparison is against the file the
+        // handle actually writes to, and the cap applies to that file's length.
+        let live = fs::metadata(path).ok();
+        let live_identity = live
+            .as_ref()
+            .map(|metadata| (metadata.dev(), metadata.ino()));
+        let sink_identity = sink
+            .get_ref()
+            .metadata()
+            .ok()
+            .map(|metadata| (metadata.dev(), metadata.ino()));
+        if live_identity.is_some() && live_identity != sink_identity {
+            // The cached handle no longer writes to the file the path names.
+            *sink = BufWriter::new(open_log_file_for_append(path)?);
+        } else if live
+            .as_ref()
+            .is_none_or(|metadata| metadata.len() > V3_DEBUG_LOG_MAX_BYTES)
+        {
+            if live.is_some() {
+                rotate_v3_debug_log_file(path)?;
+            }
+            *sink = BufWriter::new(open_log_file_for_append(path)?);
+        }
+        writeln!(sink, "{line}").map_err(|error| V3DebugError::Sink(error.to_string()))?;
+        sink.flush()
+            .map_err(|error| V3DebugError::Sink(error.to_string()))
+    }
+}
+
+/// Opens the debug log sink, rotating an oversized live file first so the
+/// cap holds across restarts as well as during a run.
+fn open_v3_debug_log_sink(path: &str) -> V3DebugResult<BufWriter<File>> {
+    ensure_log_file_parent_dir(path)?;
+    if fs::metadata(path)
+        .map(|metadata| metadata.len() > V3_DEBUG_LOG_MAX_BYTES)
+        .unwrap_or(false)
+    {
+        rotate_v3_debug_log_file(path)?;
+    }
+    open_log_file_for_append(path).map(BufWriter::new)
+}
+
+/// Renames the live log file to its single `.1` generation, replacing any
+/// previous one. Rotation uses rename rather than truncation so an external
+/// tail keeps reading a complete file.
+fn rotate_v3_debug_log_file(path: &str) -> V3DebugResult<()> {
+    let rotated = format!("{path}.1");
+    if let Err(error) = fs::rename(path, &rotated) {
+        return Err(V3DebugError::Sink(error.to_string()));
+    }
+    Ok(())
 }
 
 fn open_log_file_for_append(path: &str) -> V3DebugResult<File> {
