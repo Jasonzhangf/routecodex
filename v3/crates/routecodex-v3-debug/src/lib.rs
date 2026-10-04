@@ -673,8 +673,8 @@ impl V3DebugRuntime {
 /// cap holds across restarts as well as during a run.
 ///
 /// Rotation here is best effort: a log that cannot be rotated must not stop the
-/// runtime from starting. The sink still opens and keeps appending, and the cap
-/// is retried on the next write.
+/// runtime from starting. The sink still opens and keeps appending, and a
+/// rotation that fails outright is retried on the next write.
 fn open_v3_debug_log_sink(path: &str) -> V3DebugResult<BufWriter<File>> {
     ensure_log_file_parent_dir(path)?;
     if fs::metadata(path)
@@ -696,7 +696,9 @@ fn open_v3_debug_log_sink(path: &str) -> V3DebugResult<BufWriter<File>> {
 /// Rename is preferred because a tail keeps reading a complete file, but it
 /// needs write access to the *directory* and a free `.1` name. Truncating the
 /// live file needs write access only to the file, which the sink already holds,
-/// so it backs the rename up rather than failing the cap outright.
+/// so it backs the rename up rather than failing the cap outright. Truncating
+/// discards the previous generation, so it is announced rather than done
+/// silently.
 fn rotate_v3_debug_log_file(path: &str) -> V3DebugResult<()> {
     let target = fs::canonicalize(path).unwrap_or_else(|_| PathBuf::from(path));
     let mut rotated = target.clone().into_os_string();
@@ -709,7 +711,12 @@ fn rotate_v3_debug_log_file(path: &str) -> V3DebugResult<()> {
         .open(&target)
         .map_err(|error| V3DebugError::Sink(error.to_string()))?;
     file.set_len(0)
-        .map_err(|error| V3DebugError::Sink(error.to_string()))
+        .map_err(|error| V3DebugError::Sink(error.to_string()))?;
+    eprintln!(
+        "[RouteCodexV3] debug log {} could not be rotated to its .1 generation; truncated in place to keep the size cap",
+        target.display()
+    );
+    Ok(())
 }
 
 fn open_log_file_for_append(path: &str) -> V3DebugResult<File> {

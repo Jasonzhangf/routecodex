@@ -891,6 +891,92 @@ async fn observability_records_keep_reporting_a_decode_error_until_it_is_fixed()
     assert_eq!(keys, vec!["4444:first", "4444:second"]);
 }
 
+/// A failed refresh must not leave a reader position behind. Resuming from a
+/// stale offset would silently skip the prefix of whatever the path holds next
+/// and resurrect rows that are no longer on disk, while still answering 200.
+#[tokio::test]
+async fn observability_records_rebuild_from_scratch_after_a_failed_refresh() {
+    let (base, _state, home) = bind_test_server().await;
+    let store = home
+        .join("logs")
+        .join("server-v3-4444.request-records.jsonl");
+    // Both keys are the same length, so the repaired store is the same length as
+    // the original up to the line appended after it.
+    let envelope = |key: &str| {
+        serde_json::json!({
+            "schema_version": 1,
+            "row": observability_row_with_result(key, Some("success")),
+        })
+        .to_string()
+    };
+    let keys_of = |body: &serde_json::Value| -> Vec<String> {
+        let mut keys: Vec<String> = body["records"]
+            .as_array()
+            .expect("records array")
+            .iter()
+            .map(|row| row["request_key"].as_str().expect("request_key").to_string())
+            .collect();
+        keys.sort();
+        keys
+    };
+
+    // Same inode throughout: these are in-place rewrites, not the atomic
+    // replacement the writer normally uses.
+    std::fs::create_dir_all(store.parent().expect("store parent")).expect("logs dir");
+    std::fs::write(&store, format!("{}\n", envelope("c1:old"))).expect("seed store");
+    let first: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=50&range=all"
+        ))
+        .send()
+        .await
+        .expect("first records response")
+        .json()
+        .await
+        .expect("first records json");
+    assert_eq!(keys_of(&first), vec!["c1:old"]);
+
+    std::fs::write(
+        &store,
+        "{\"schema_version\":1,\"row\":{\"not\":\"a source row\"}}\n",
+    )
+    .expect("undecodable in-place rewrite");
+    let failed = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=50&range=all"
+        ))
+        .send()
+        .await
+        .expect("failed records response");
+    assert_eq!(
+        failed.status().as_u16(),
+        502,
+        "an undecodable store must fail loudly"
+    );
+
+    // Longer than the length the reader last consumed successfully.
+    std::fs::write(
+        &store,
+        format!("{}\n{}\n", envelope("c1:new"), envelope("c1:extra")),
+    )
+    .expect("repaired in-place rewrite");
+    let healed: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=50&range=all"
+        ))
+        .send()
+        .await
+        .expect("healed records response")
+        .json()
+        .await
+        .expect("healed records json");
+    assert_eq!(
+        keys_of(&healed),
+        vec!["c1:extra", "c1:new"],
+        "a refresh after a failure must rebuild from the start, not resume from a stale offset"
+    );
+}
+
 #[tokio::test]
 async fn observability_stats_exclude_non_success_usage_but_keep_request_counts() {
     let (base, _state, home) = bind_test_server().await;

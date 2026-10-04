@@ -126,9 +126,10 @@ fn v3_obs_cache_guard() -> std::sync::MutexGuard<'static, V3ObsStoreCache> {
 /// read or decoded is an explicit error and never becomes an empty result.
 ///
 /// The entry is committed only after every newly read row decoded, so a
-/// rejected row leaves the reader position untouched: the same error is
-/// reported again on the next poll instead of the cache advancing past the bad
-/// line and silently serving a truncated history.
+/// rejected row can never advance the reader past bytes it never decoded: the
+/// same error is reported again on the next poll, and the reader position is
+/// reset so the next attempt rebuilds from the start instead of resuming into a
+/// prefix this reader can no longer vouch for.
 fn refresh_v3_obs_port_cache(
     port: u16,
     path: &PathBuf,
@@ -173,27 +174,35 @@ fn refresh_v3_obs_port_cache(
         && entry.offset > 0;
     let start_offset = if append_only { entry.offset } else { 0 };
     let start_line = if append_only { entry.line } else { 0 };
-    let read = if len > start_offset {
-        Some(
-            routecodex_v3_debug::v3_webui_observability_read_raw_rows_from(
-                path,
-                start_offset,
-                start_line,
-            )
-            .map_err(|error| format!("observability store {port} unavailable: {error}"))?,
-        )
-    } else {
-        None
-    };
-    let (next_offset, next_line, values) = match read {
-        Some(read) => (read.next_offset, read.next_line_number, read.rows),
-        None => (start_offset, start_line, Vec::new()),
-    };
-    let mut decoded = Vec::with_capacity(values.len());
-    for value in values {
-        let row = serde_json::from_value::<SourceRow>(value)
-            .map_err(|error| format!("decode observability store {port} row failed: {error}"))?;
-        decoded.push(row);
+    let mut decoded = Vec::new();
+    let mut next_offset = start_offset;
+    let mut next_line = start_line;
+    if len > start_offset {
+        let read = match routecodex_v3_debug::v3_webui_observability_read_raw_rows_from(
+            path,
+            start_offset,
+            start_line,
+        ) {
+            Ok(read) => read,
+            Err(error) => {
+                reset_v3_obs_reader_position(entry);
+                return Err(format!("observability store {port} unavailable: {error}"));
+            }
+        };
+        next_offset = read.next_offset;
+        next_line = read.next_line_number;
+        for value in read.rows {
+            let row = match serde_json::from_value::<SourceRow>(value) {
+                Ok(row) => row,
+                Err(error) => {
+                    reset_v3_obs_reader_position(entry);
+                    return Err(format!(
+                        "decode observability store {port} row failed: {error}"
+                    ));
+                }
+            };
+            decoded.push(row);
+        }
     }
     // Commit only now. The whole tail lands at once, so a rejected row can never
     // leave the cache holding rows its offset has not consumed, and a failed
@@ -216,6 +225,18 @@ fn refresh_v3_obs_port_cache(
     entry.ctime_nsec = ctime_nsec;
     entry.present = true;
     Ok(true)
+}
+
+/// Forgets the reader position after a refresh failed.
+///
+/// The entry keeps the identity of the last successful refresh, so the failure
+/// is reported again on the next poll instead of being papered over. The offset
+/// and line must not survive it, though: they describe a file this reader can no
+/// longer vouch for, and resuming from a stale offset would silently skip the
+/// prefix of whatever the path holds next — including rows the reader never saw.
+fn reset_v3_obs_reader_position(entry: &mut V3ObsPortCache) {
+    entry.offset = 0;
+    entry.line = 0;
 }
 
 /// Refreshes one port and drops the shared fold when that port's rows changed.
@@ -332,18 +353,11 @@ pub(super) fn read_v3_obs_rows_for_request_key(
     let ports = observability_store_paths(state)
         .map_err(|error| (StatusCode::BAD_GATEWAY, json!({ "error": error })))?;
     let mut cache = v3_obs_cache_guard();
+    let mut matching = Vec::new();
     for (port, path) in &ports {
         if let Err(error) = refresh_v3_obs_store(&mut cache, *port, path) {
             return Err((StatusCode::BAD_GATEWAY, json!({ "error": error })));
         }
-    }
-    // Drop entries for ports the config no longer lists, so a removed listener
-    // does not keep a decoded store resident.
-    cache
-        .ports
-        .retain(|path, _| ports.iter().any(|(_, known)| known == path));
-    let mut matching = Vec::new();
-    for (_, path) in &ports {
         if let Some(entry) = cache.ports.get(path) {
             matching.extend(
                 entry
