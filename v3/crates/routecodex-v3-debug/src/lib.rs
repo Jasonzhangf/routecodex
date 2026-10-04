@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::os::unix::fs::MetadataExt;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -670,26 +671,45 @@ impl V3DebugRuntime {
 
 /// Opens the debug log sink, rotating an oversized live file first so the
 /// cap holds across restarts as well as during a run.
+///
+/// Rotation here is best effort: a log that cannot be rotated must not stop the
+/// runtime from starting. The sink still opens and keeps appending, and the cap
+/// is retried on the next write.
 fn open_v3_debug_log_sink(path: &str) -> V3DebugResult<BufWriter<File>> {
     ensure_log_file_parent_dir(path)?;
     if fs::metadata(path)
         .map(|metadata| metadata.len() > V3_DEBUG_LOG_MAX_BYTES)
         .unwrap_or(false)
     {
-        rotate_v3_debug_log_file(path)?;
+        let _ = rotate_v3_debug_log_file(path);
     }
     open_log_file_for_append(path).map(BufWriter::new)
 }
 
-/// Renames the live log file to its single `.1` generation, replacing any
-/// previous one. Rotation uses rename rather than truncation so an external
-/// tail keeps reading a complete file.
+/// Rotates the live log to its single `.1` generation, replacing any previous
+/// one.
+///
+/// A symlinked `log_file` is rotated by its target: renaming the link itself
+/// would turn `log_file` into a regular file and leave the real target — the
+/// file an external tail is reading — orphaned above the cap forever.
+///
+/// Rename is preferred because a tail keeps reading a complete file, but it
+/// needs write access to the *directory* and a free `.1` name. Truncating the
+/// live file needs write access only to the file, which the sink already holds,
+/// so it backs the rename up rather than failing the cap outright.
 fn rotate_v3_debug_log_file(path: &str) -> V3DebugResult<()> {
-    let rotated = format!("{path}.1");
-    if let Err(error) = fs::rename(path, &rotated) {
-        return Err(V3DebugError::Sink(error.to_string()));
+    let target = fs::canonicalize(path).unwrap_or_else(|_| PathBuf::from(path));
+    let mut rotated = target.clone().into_os_string();
+    rotated.push(".1");
+    if fs::rename(&target, PathBuf::from(rotated)).is_ok() {
+        return Ok(());
     }
-    Ok(())
+    let file = OpenOptions::new()
+        .write(true)
+        .open(&target)
+        .map_err(|error| V3DebugError::Sink(error.to_string()))?;
+    file.set_len(0)
+        .map_err(|error| V3DebugError::Sink(error.to_string()))
 }
 
 fn open_log_file_for_append(path: &str) -> V3DebugResult<File> {

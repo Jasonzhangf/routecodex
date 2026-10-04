@@ -411,14 +411,89 @@ fn a_symlinked_log_file_is_capped_by_its_target_length() {
         .unwrap();
 
     assert!(
-        path.join("debug.jsonl.1").exists(),
-        "the cap must measure the file a symlinked log_file writes to, not the link itself"
+        fs::symlink_metadata(&link).unwrap().file_type().is_symlink(),
+        "rotating a symlinked log_file must not replace the link itself"
+    );
+    assert!(
+        path.join("real.jsonl.1").exists(),
+        "the cap must rotate the file a symlinked log_file writes to, not the link"
+    );
+    assert_eq!(
+        fs::metadata(path.join("real.jsonl.1")).unwrap().len(),
+        V3_DEBUG_LOG_MAX_BYTES + 1,
+        "rotation must preserve the rotated bytes instead of truncating them"
     );
     assert!(
         fs::read_to_string(&link).unwrap().contains("symlinked log"),
         "the live log must keep receiving lines after the rotation"
     );
+    assert!(
+        fs::metadata(&target).unwrap().len() < V3_DEBUG_LOG_MAX_BYTES,
+        "the real target must restart below the cap instead of staying oversized"
+    );
     fs::remove_dir_all(path).unwrap();
+}
+
+/// The cap is best effort: a log that cannot be rotated must never stop the
+/// runtime from starting, and the sink must still bound the file by truncating
+/// it in place when the rename cannot be done.
+#[test]
+fn an_unrotatable_debug_log_does_not_block_runtime_startup() {
+    for (label, poison_dot_one) in [("dot_one_is_a_directory", true), ("readonly_dir", false)] {
+        let path = std::env::temp_dir().join(format!(
+            "routecodex-v3-debug-unrotatable-{label}-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).unwrap();
+        let file = path.join("debug.jsonl");
+        // A sparse file of cap size keeps the test cheap while still tripping
+        // the cap the sink enforces.
+        let handle = fs::File::create(&file).unwrap();
+        handle.set_len(V3_DEBUG_LOG_MAX_BYTES + 1).unwrap();
+        drop(handle);
+        if poison_dot_one {
+            // Squatting on the rotation name makes the rename fail with EISDIR.
+            fs::create_dir_all(path.join("debug.jsonl.1")).unwrap();
+        } else {
+            // A read-only log directory makes the rename fail with EACCES while
+            // the file itself stays writable.
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o555)).unwrap();
+        }
+
+        let runtime = V3DebugRuntime::new(V3DebugRuntimeConfig {
+            log_console: false,
+            log_file: Some(file.display().to_string()),
+            snapshots_enabled: false,
+            snapshot_stages: None,
+            dry_run_enabled: false,
+            raw_request_retention: 0,
+            raw_response_retention: 0,
+            event_retention: 4,
+            redaction: V3RedactionPolicy::default(),
+        })
+        .unwrap_or_else(|error| {
+            panic!("{label}: an unrotatable log must not block runtime startup: {error}")
+        });
+        runtime
+            .append_human_console_line(&format!("[{label}] after rotation"))
+            .unwrap();
+
+        if !poison_dot_one {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        assert!(
+            fs::metadata(&file).unwrap().len() < V3_DEBUG_LOG_MAX_BYTES,
+            "{label}: the cap must still be enforced by truncating the live file"
+        );
+        assert!(
+            fs::read_to_string(&file).unwrap().contains("after rotation"),
+            "{label}: the sink must keep writing to the live file"
+        );
+        fs::remove_dir_all(path).unwrap();
+    }
 }
 
 /// Another writer sharing `log_file` — a second process, or an external
