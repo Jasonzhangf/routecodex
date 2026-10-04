@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::SystemTime;
 
 pub(super) fn configured_ports(state: &AppState) -> Result<Vec<u16>, String> {
     Ok(observability_store_paths(state)?
@@ -79,6 +80,8 @@ fn observability_store_paths(state: &AppState) -> Result<Vec<(u16, PathBuf)>, St
 struct V3ObsPortCache {
     dev: u64,
     ino: u64,
+    len: u64,
+    modified: Option<SystemTime>,
     offset: u64,
     line: usize,
     present: bool,
@@ -131,16 +134,38 @@ fn refresh_v3_obs_port_cache(
         }
     };
     let (dev, ino, len) = (metadata.dev(), metadata.ino(), metadata.len());
-    // A retention rewrite renames a fresh file into place, so the identity
-    // change is the reset signal; a shrunk file covers an in-place truncation.
-    if !entry.present || entry.dev != dev || entry.ino != ino || len < entry.offset {
+    let modified = metadata.modified().ok();
+    // Nothing changed since the last refresh: no decode, no re-fold.
+    if entry.present
+        && entry.dev == dev
+        && entry.ino == ino
+        && entry.len == len
+        && entry.modified == modified
+    {
+        return Ok(true);
+    }
+    // The store contract permits only append-in-place or atomic replacement, so
+    // the cache resumes only for the same device/inode with a strictly larger
+    // file that already has a consumed prefix. A replaced inode, a shrunk file,
+    // or a same-length file rewritten in place rebuilds this port from scratch.
+    let append_only = entry.present
+        && entry.dev == dev
+        && entry.ino == ino
+        && len > entry.len
+        && len > entry.offset
+        && entry.offset > 0;
+    if !append_only {
         *entry = V3ObsPortCache {
             dev,
             ino,
+            len,
+            modified,
             present: true,
             ..V3ObsPortCache::default()
         };
     }
+    entry.len = len;
+    entry.modified = modified;
     if len > entry.offset {
         let tail = routecodex_v3_debug::v3_webui_observability_read_raw_rows_from(
             path,
