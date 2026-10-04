@@ -462,7 +462,7 @@ const cases = [
     name: 'Responses Relay target projection error bypasses request-local fail-fast',
     path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
     mutate: (source) => source.replace(
-      'let req_compat = match build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07) {\n            Ok(req_compat) => req_compat,\n            Err(error) => {\n                handle_provider_request_failure!(V3ResponsesRelayRuntimeError::ProviderCompat(\n                    error\n                ));\n            }\n        };',
+      'let req_compat = match build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07) {\n            Ok(projected) => record_projected_drops(&projection_drop_context, projected),\n            Err(error) => {\n                handle_provider_request_failure!(V3ResponsesRelayRuntimeError::ProviderCompat(\n                    error\n                ));\n            }\n        };',
       'let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();',
     ),
     diagnostic: /ProviderReqCompat06ProviderCompat request-local fail-fast branch is missing/u,
