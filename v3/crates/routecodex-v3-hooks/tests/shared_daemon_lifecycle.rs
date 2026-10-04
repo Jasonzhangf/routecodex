@@ -219,7 +219,15 @@ fn thirty_release_cycles_do_not_accumulate_project_sockets_or_workers() {
         let (mut lease, response) = daemon.register(&project);
         assert_eq!(response["ok"], true, "{response}");
         assert_eq!(response["daemon_pid"], daemon.child.id());
+        // A bare connect can still sit in the listener backlog, which the kernel
+        // resets when release drops the listener; that is backpressure, not a
+        // leaked worker. One round trip makes this an accepted, blocked business
+        // stream that release must close and reclaim.
         let mut idle_reader = UnixStream::connect(project.join("hooks-sidecar.sock")).unwrap();
+        assert_eq!(
+            exchange(&mut idle_reader, json!({"method":"health"}))["ok"],
+            true
+        );
         idle_reader
             .set_read_timeout(Some(Duration::from_secs(2)))
             .unwrap();
