@@ -2837,6 +2837,8 @@ features:
   - A barrier reports a failure snapshot without draining it; a cancelled barrier reply cannot erase failures needed by shutdown.
   - Worker shutdown drains and returns the bounded failure ledger, including an omitted-count summary; aggregate shutdown and exec preparation return that terminal report.
   - The persistence worker starts only after fallible startup preparation and before listener tasks begin accepting requests.
+  - Startup retention and sample writes use one Debug-owned process-shared filesystem lock; concurrent CLI instances with a shared HOME and 500 old samples all become healthy, return real provider responses, preserve their request samples, and enforce the global 100-request retention limit.
+  - An invalid sample lock produces an explicit file-qualified startup error rather than silently accepting uncoordinated retention.
   required_negative:
   - Debug payload copies never enter MetadataCenter, provider payload, client payload, or routing truth.
   - Missing Direct typed carriers do not cause the server to fabricate provider artifacts.
@@ -2848,6 +2850,7 @@ features:
   - npm run test:v3-debug-payload-budget-red-fixtures
   - npm run verify:v3-resource-map
   - cargo test -p routecodex-v3-debug persist_async_worker_records_explicit_failure_terminal
+  - npm run test:v3-shared-sample-retention-blackbox
   - cargo test -p routecodex-v3-debug persist_async_worker_keeps_every_sample_under_burst
   - cargo test -p routecodex-v3-debug persist_async_worker_bounds_tiny_payload_job_count_by_fixed_overhead
   - cargo test -p routecodex-v3-debug persist_failure_barrier_keeps_ledger_when_reply_receiver_is_dropped
