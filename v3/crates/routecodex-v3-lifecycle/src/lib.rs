@@ -222,7 +222,7 @@ fn apply_v3_runtime_fd_limit(configured: Option<u64>) -> Result<(), V3LifecycleE
     } else {
         limit.min(hard as u64) as libc::rlim_t
     };
-    if current.rlim_cur >= target {
+    if current.rlim_cur == target {
         return Ok(());
     }
     let next = libc::rlimit {
@@ -345,7 +345,24 @@ impl V3ManagedLifecycle {
         &self,
         executable_path: impl AsRef<Path>,
     ) -> Result<(V3ManagedInstanceDeclaration, V3Config05ManifestPublished), V3LifecycleError> {
+        let (declaration, manifest, _runtime_fd_limit) =
+            self.declaration_with_runtime(executable_path)?;
+        Ok((declaration, manifest))
+    }
+
+    fn declaration_with_runtime(
+        &self,
+        executable_path: impl AsRef<Path>,
+    ) -> Result<
+        (
+            V3ManagedInstanceDeclaration,
+            V3Config05ManifestPublished,
+            Option<u64>,
+        ),
+        V3LifecycleError,
+    > {
         let snapshot = load_v3_config_snapshot_from_path(&self.config_path)?;
+        let runtime_fd_limit = snapshot.runtime.fd_limit;
         let config_path = snapshot.canonical_path;
         let admin_webui = snapshot.admin_webui;
         let executable_path = fs::canonicalize(executable_path)?;
@@ -409,6 +426,7 @@ impl V3ManagedLifecycle {
                 listeners,
             },
             manifest,
+            runtime_fd_limit,
         ))
     }
 
@@ -890,10 +908,8 @@ impl V3ManagedLifecycle {
         &self,
         executable_path: impl AsRef<Path>,
     ) -> Result<(), V3LifecycleError> {
-        let (declaration, manifest) = self.declaration(&executable_path)?;
-        let runtime_fd_limit = load_v3_config_snapshot_from_path(&self.config_path)?
-            .runtime
-            .fd_limit;
+        let (declaration, manifest, runtime_fd_limit) =
+            self.declaration_with_runtime(&executable_path)?;
         validate_auth_handles(&manifest)?;
         self.run_managed_child_with_declaration(
             executable_path,

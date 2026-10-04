@@ -85,6 +85,7 @@ requireText(configLib, 'V3ConfigLoadedSnapshot', 'config lib export');
 requireText(configTests, 'config_source_identity_is_stable_sensitive_and_secret_free', 'config source identity test');
 requireText(cliManagedTests, 'managed_child_survives_start_cli_exit_and_is_controlled_by_new_cli_processes', 'managed CLI persistence test');
 requireText(cliManagedTests, 'fn managed_child_applies_configured_fd_limit_before_hooks_sidecar()', 'managed CLI fd limit blackbox test');
+requireText(cliManagedTests, 'fn managed_child_lowers_inherited_fd_limit_to_configured_value()', 'managed CLI fd limit clamp blackbox test');
 requireText(cliManagedTests, 'ulimit -n', 'managed CLI fd limit observation');
 requireText(cliManagedTests, 'top_level_start_status_restart_stop_match_legacy_cli_shape', 'managed CLI top-level lifecycle compatibility test');
 requireText(cliManagedTests, 'top_level_lifecycle_without_config_uses_home_config_toml', 'managed CLI default config test');
@@ -172,6 +173,7 @@ for (const source of [functionMap, verification])
 requireText(functionMap, 'v3/crates/routecodex-v3-config/src/store.rs', 'function map');
 requireText(verification, 'Config-owned source identity', 'verification map');
 requireText(verification, 'managed_child_applies_configured_fd_limit_before_hooks_sidecar', 'verification map');
+requireText(verification, 'managed_child_lowers_inherited_fd_limit_to_configured_value', 'verification map fd limit clamp');
 requireText(mainline, 'v3.server.managed_lifecycle', 'mainline map');
 requireText(mainline, 'v3.config.source_identity', 'mainline map');
 requireText(mainline, 'v3.lifecycle.restart_plan', 'mainline map');
@@ -179,6 +181,7 @@ for (let index = 1; index <= 7; index += 1)
   requireText(manifest, `V3Lifecycle0${index}`, 'lifecycle manifest');
 requireText(testDesign, 'External CLI black-box', 'test design');
 requireText(testDesign, 'managed_child_applies_configured_fd_limit_before_hooks_sidecar', 'test design fd limit blackbox');
+requireText(testDesign, 'managed_child_lowers_inherited_fd_limit_to_configured_value', 'test design fd limit clamp blackbox');
 requireText(testDesign, 'Live matrix', 'test design');
 requireText(testDesign, 'release snapshot executable', 'test design');
 requireText(testDesign, '`restart.plan.json` is an owner-only transient control-side file', 'test design restart plan contract');
