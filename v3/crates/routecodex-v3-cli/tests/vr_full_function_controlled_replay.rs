@@ -9,7 +9,6 @@ use reqwest::StatusCode as ReqwestStatusCode;
 use serde_json::{json, Value};
 use std::{
     fs,
-    net::TcpListener,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::Arc,
@@ -192,13 +191,9 @@ async fn start_controlled_upstream(mode: ProviderMode) -> ControlledUpstream {
     }
 }
 
-fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
+#[path = "../../../crates/routecodex-v3-runtime/tests/support/test_ports.rs"]
+mod test_ports;
+use test_ports::free_port;
 
 fn write_config(
     success_port: u16,

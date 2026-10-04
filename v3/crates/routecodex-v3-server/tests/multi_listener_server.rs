@@ -1871,13 +1871,9 @@ async fn start_controlled_capturing_failure_upstream() -> (
     (format!("http://{address}/v1"), captures_rx, shutdown_tx)
 }
 
-fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
+#[path = "../../../crates/routecodex-v3-runtime/tests/support/test_ports.rs"]
+mod test_ports;
+use test_ports::free_port;
 
 #[tokio::test]
 async fn starts_all_listeners_and_routes_gemini_runtime_input_errors_through_error_chain() {
