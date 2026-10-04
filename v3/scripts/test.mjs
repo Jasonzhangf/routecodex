@@ -51,6 +51,8 @@ await run(
     '--test',
     'h2_p6_controlled_replay',
     '--test',
+    'shared_sample_retention_blackbox',
+    '--test',
     'h2_chat_direct_isolation',
     '--test',
     'goaichat_hosted_tool_history_blackbox',

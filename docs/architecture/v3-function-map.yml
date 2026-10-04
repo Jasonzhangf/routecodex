@@ -4240,6 +4240,7 @@ features:
   - V3CodexSampleStore::start_persist_worker
   - V3CodexSamplePersistFailureLedger
   - serialized_v3_codex_sample_payload_size
+  - lock_v3_codex_sample_filesystem
   - run_v3_codex_sample_persist_worker
   - persist_v3_codex_sample_persist_job
   - record_v3_codex_sample_persist_failure
@@ -4280,6 +4281,7 @@ features:
   - npm run test:v3-debug-payload-budget-red-fixtures
   - npm run verify:v3-resource-map
   - cargo test -p routecodex-v3-debug persist_async_worker_records_explicit_failure_terminal
+  - npm run test:v3-shared-sample-retention-blackbox
   - cargo test -p routecodex-v3-debug persist_async_worker_keeps_every_sample_under_burst
   - cargo test -p routecodex-v3-debug persist_async_worker_bounds_tiny_payload_job_count_by_fixed_overhead
   - cargo test -p routecodex-v3-debug persist_failure_barrier_keeps_ledger_when_reply_receiver_is_dropped
