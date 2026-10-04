@@ -2,16 +2,21 @@
   "evidence_id": "v3-responses-mcp-shell-roundtrip-20260927",
   "issue_id": "59ffb0d",
   "feature_id": "v3.protocol_conversion_field_parity",
-  "captured_at": "2026-09-27T20:28:00Z",
+  "captured_at": "2026-09-27T21:20:09Z",
   "source": {
     "base_commit": "05cbf862202e6e9b965eab986e07b17aff81bb6f",
-    "validated_worktree_diff_sha256_excluding_this_receipt": "3f2dc1141e5d02b94951abcc5e6f21172cbc60f986f7e8589a2dac5cf5dee7dd"
+    "validated_worktree_diff_sha256_excluding_this_receipt": "0fbed9d2bde6173374a05f0c3317af2a92ad995258bf17db18efbbec13bd5ef2"
   },
   "development_tests": [
     {
       "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime mcp_ --lib",
       "result": "pass",
       "tests": "20 passed; 0 failed"
+    },
+    {
+      "command": "cargo fmt --all -- --check",
+      "result": "pass",
+      "tests": "Rust 1.96.1 formatting clean after applying CI rustfmt layout"
     },
     {
       "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime openai_chat_ --lib",
@@ -46,7 +51,7 @@
     {
       "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime responses_relay_runtime --lib",
       "result": "pass",
-      "tests": "146 passed; 0 failed"
+      "tests": "147 passed; 0 failed"
     },
     {
       "command": "CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime additional_tools -- --nocapture",
@@ -74,15 +79,15 @@
     "result": "pass",
     "binary": "/Users/fanzhang/.local/bin/rccv3",
     "version": "rccv3 0.90.4819 (crate 0.1.0)",
-    "sha256": "a1bb2ef92aa030f1c79505293933cd1b76c067d6dd6d966534c3524d4511f3cc"
+    "sha256": "dabbb52e2e1aad13c0975581620ef5989c58affa768fe09ef589ff03fbf0cb61"
   },
   "restart": {
     "command": "rccv3 restart -c /Volumes/extension/.rcc/config.toml",
     "result": "pass",
     "instance_id": "v3-8d7d60058ba4158f0ab0",
     "state": "running",
-    "loaded_binary_sha256": "a1bb2ef92aa030f1c79505293933cd1b76c067d6dd6d966534c3524d4511f3cc",
-    "restart_receipt": "managed restart completed running at 2026-09-27T20:24:00Z; installed binary SHA256 matches artifact; listeners 4444 and 7777 healthy on 0.90.4819",
+    "loaded_binary_sha256": "dabbb52e2e1aad13c0975581620ef5989c58affa768fe09ef589ff03fbf0cb61",
+    "restart_receipt": "managed restart completed running at 2026-09-27T21:17:16Z; installed binary SHA256 matches artifact; listeners 4444 and 7777 healthy on 0.90.4819",
     "status_detail": "RCC instance running; both listener health endpoints returned HTTP 200; hooks sidecar unavailable/crashed"
   },
   "health": [
@@ -159,17 +164,17 @@
   },
   "same_entry_json_underscored_leaf_roundtrip_after_restart": {
     "entry": "HTTP JSON client -> RCC 4444 /v1/responses",
-    "candidate_diff_sha256_excluding_this_receipt": "3f2dc1141e5d02b94951abcc5e6f21172cbc60f986f7e8589a2dac5cf5dee7dd",
-    "loaded_binary_sha256": "a1bb2ef92aa030f1c79505293933cd1b76c067d6dd6d966534c3524d4511f3cc",
+    "candidate_diff_sha256_excluding_this_receipt": "0fbed9d2bde6173374a05f0c3317af2a92ad995258bf17db18efbbec13bd5ef2",
+    "loaded_binary_sha256": "dabbb52e2e1aad13c0975581620ef5989c58affa768fe09ef589ff03fbf0cb61",
     "tool_declaration": "namespace=mcp__mcpx; name=foo__bar",
     "tool_call_request": {
-      "request_id": "openai-responses-router-gpt-5.5-20260927T132516626-513507-10806",
-      "route": "thinking",
-      "provider_model": "xmcc2/deepseek-v4.1-flash",
+      "request_id": "openai-responses-router-gpt-5.5-20260927T141943827-513931-11230",
+      "route": "coding",
+      "provider_model": "xmcc2:key1:kimi-k3",
       "http_status": 200,
       "response_status": "requires_action",
       "provider_status": 200,
-      "call_id": "call_39c09dfa05c747d8b803130c",
+      "call_id": "call_68303c4d34984511a58c9da8",
       "namespace": "mcp__mcpx",
       "name": "foo__bar",
       "arguments": "{\"value\": \"roundtrip-ok\"}"
@@ -180,16 +185,94 @@
       "exit_status": 0
     },
     "followup_request": {
-      "request_id": "openai-responses-router-gpt-5.5-20260927T132738709-513523-10822",
-      "submitted_call_id": "call_39c09dfa05c747d8b803130c",
+      "request_id": "openai-responses-router-gpt-5.5-20260927T141955885-513933-11232",
+      "submitted_call_id": "call_68303c4d34984511a58c9da8",
       "submitted_output": "roundtrip-ok",
-      "route": "thinking",
-      "provider_model": "xmcc2/kimi-k3",
+      "route": "coding",
+      "provider_model": "xmcc2:key1:kimi-k3",
       "http_status": 200,
       "response_status": "completed",
       "provider_status": 200,
       "client_text": "roundtrip-ok"
     },
     "request_records": "/Users/fanzhang/.rcc/logs/server-v3-4444.request-records.jsonl"
+  },
+  "latest_candidate_runtime_reverification": {
+    "source_commit": "9a762ad53c747a1546dd795f3fe92f04ea03fb1e",
+    "candidate_diff_sha256_excluding_this_receipt": "0fbed9d2bde6173374a05f0c3317af2a92ad995258bf17db18efbbec13bd5ef2",
+    "artifact": {
+      "command": "npm run install:v3",
+      "result": "pass",
+      "version": "rccv3 0.90.4819 (crate 0.1.0)",
+      "binary": "/Users/fanzhang/.local/bin/rccv3",
+      "sha256": "d9af30db3861041e0508b2947b1f48c1c2ed9dbe8e59679d71617937268d1ba4"
+    },
+    "restart": {
+      "command": "rccv3 restart -c /Volumes/extension/.rcc/config.toml",
+      "result": "pass",
+      "instance_id": "v3-8d7d60058ba4158f0ab0",
+      "state": "running",
+      "loaded_binary_sha256": "d9af30db3861041e0508b2947b1f48c1c2ed9dbe8e59679d71617937268d1ba4",
+      "listeners": "4444 and 7777 returned HTTP 200 with build_version 0.90.4819",
+      "status_detail": "hooks sidecar unavailable/crashed; request and tool paths verified through 4444"
+    },
+    "duplicate_namespace_tool_roundtrip": {
+      "entry": "HTTP JSON client -> RCC 4444 /v1/responses",
+      "tool_declaration": "mcp__mcpx.foo__bar declared in both tools and additional_tools with different schemas",
+      "tool_call_request": {
+        "request_id": "openai-responses-router-gpt-5.5-20260927T155600885-514810-12109",
+        "route": "thinking",
+        "provider_model": "xmcc2:key1:deepseek-v4.1-flash",
+        "http_status": 200,
+        "response_status": "requires_action",
+        "provider_status": 200,
+        "namespace": "mcp__mcpx",
+        "name": "foo__bar",
+        "call_id": "call_d383c5520a9c48f482ca568d",
+        "arguments": "{\"value\": \"post-restart-ok\"}"
+      },
+      "client_execution": {
+        "command": "printf '%s' 'roundtrip-ok'",
+        "stdout": "post-restart-ok",
+        "exit_status": 0
+      },
+      "followup_request": {
+        "request_id": "openai-responses-router-gpt-5.5-20260927T155614355-514813-12112",
+        "submitted_call_id": "call_d383c5520a9c48f482ca568d",
+        "submitted_output": "post-restart-ok",
+        "http_status": 200,
+        "response_status": "completed",
+        "provider_status": 200,
+        "client_text": "post-restart-ok"
+      }
+    },
+    "codex_cli_shell_roundtrip": {
+      "entry": "Codex CLI --profile gcm -> RCC 4444 /v1/responses",
+      "client_thread": "01a0e515-78cb-7cd0-9f14-ab10e4b99b8b",
+      "client_tool_receipt": "Codex executed printf '%s' 'post-restart-ok' and returned stdout post-restart-ok",
+      "requests": [
+        {
+          "request_id": "openai-responses-router-gpt-5.5-20260927T155630067-514816-12115",
+          "route": "tools",
+          "provider_model": "xmcc2:key1:deepseek-v4.1-flash",
+          "provider_status": 200,
+          "response_status": "requires_action",
+          "finish_reason": "tool_calls"
+        },
+        {
+          "request_id": "openai-responses-router-gpt-5.5-20260927T155634811-514817-12116",
+          "route": "tools",
+          "provider_model": "xmcc2:key1:deepseek-v4.1-flash",
+          "provider_status": 200,
+          "response_status": "completed",
+          "finish_reason": "stop"
+        }
+      ],
+      "request_records": "/Users/fanzhang/.rcc/logs/server-v3-4444.request-records.jsonl"
+    },
+    "ambiguous_flattened_alias_negative_control": {
+      "result": "HTTP 400 before provider send",
+      "detail": "flattened delimiter would reinterpret foo__bar as foo.bar and produce conflicting identities"
+    }
   }
 }
