@@ -131,18 +131,21 @@ bug intake/dedup -> issue-owned clean worktree at latest origin/main
 -> minimal owner-scoped fix -> fetch/combine latest origin/main -> candidate commit + exact SHA
 -> mapped tests/build + author debug + real-entry E2E or scoped consumer verification
 -> when runtime-impacting: install/restart candidate, check health/replay, audit Codex samples
--> independent Codex and AGY architecture reviews on that exact validated candidate
--> recheck origin/main -> merge reviewed candidate into clean main -> push
+-> applicable PR CI PASS -> recheck origin/main -> merge validated candidate into clean main -> push
 -> candidate/main equivalence + remote receipt
 -> post-merge verification: runtime path rebuild/install/restart -> health -> real-entry replay -> sample audit; otherwise scoped consumer check
+-> independent Codex and AGY architecture reviews bound to the delivered main content and verified candidate
 -> issue-owner cleanup of its worktree/playground and temporary resources
 -> one bug disposition receipt: solved or open
 ```
 
-Before merge, a newer `origin/main` or any candidate change invalidates the
-bound validation/review evidence. Record that attempt as `open`; continue from a
-new candidate attempt for the same bug ID and rerun affected gates, E2E, and
-reviews. Do not create a cross-attempt back-edge or reuse stale evidence.
+**项目交付顺序：作者验证和适用 CI 通过后，先合并到 main、从 main 重建安装并重启、完成真实入口验收，再等待并完成独立架构 review。** Review pending does not block this main/runtime sequence; it does block defect closure and any claim of complete delivery. Required repository checks and Git protection remain enforced. A blocking review finding requires an owner-scoped repair and affected verification; a confirmed regression caused by the delivered change follows the traceable revert/rebuild/restart/replay recovery contract.
+
+Before merge, a newer `origin/main` or any candidate change invalidates only
+evidence whose bound inputs changed. Record the new candidate under the same
+bug ID and rerun affected gates and E2E. Bind post-delivery reviews to that
+exact candidate and prove its content equivalent to delivered main; do not
+reuse a stale review as PASS for changed scope.
 
 `solved` requires every applicable test/build/E2E and runtime gate, both
 required architecture reviews, merge and remote receipts, candidate/main

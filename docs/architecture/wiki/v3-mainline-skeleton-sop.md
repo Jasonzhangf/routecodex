@@ -70,6 +70,17 @@ Use this SOP when `/v1/responses` returns success on the wrong provider/model, a
 
 ## rccv3 Live Closeout SOP
 
+Delivery order is author development tests and public-entry black-box E2E plus
+applicable CI PASS -> merge/push validated content to main -> rebuild/install
+from main -> managed restart -> health, real-entry replay and sample audit ->
+complete independent Codex and AGY architecture reviews -> defect/resource
+closeout. Review pending does not delay main rebuild/restart, and the defect
+stays open until both reviews and all applicable closure evidence pass. Bind
+reviews to the exact verified candidate and prove delivered main content
+equivalence. Required repository checks and Git protection remain enforced.
+Repair blocking findings; confirmed regressions caused by the delivered change
+follow traceable revert, rebuild, restart and replay recovery.
+
 Use this SOP for V3 native live surfaces served by the active config. The default local authoring file is `~/.rcc/config.toml`; read the listener set from that file at execution time.
 
 1. Build and install the native V3 binary:

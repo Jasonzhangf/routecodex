@@ -10,7 +10,7 @@
   - `--snapall`: Debug snapshots plus Direct and Relay sample persistence enabled.
 - No-flag startup does not disable unrelated Debug runtime features such as provider-request dry-run.
 - Server is the only filesystem owner for `~/.rcc/codex-samples/<endpoint>/ports/<port>/<requestId>/`.
-- Authorized sample payloads are enqueued to one Debug-owned worker behind a 64-job and 64-MiB serialized-payload budget; a completion barrier waits for all previously accepted writes.
+- Authorized sample payloads are enqueued to one Debug-owned worker bounded by a 64-MiB byte budget across queued and in-flight writes; each job charges its serialized payload plus a fixed overhead, so a full-sampling burst is not dropped by a message-count limit while total queued memory stays bounded. A completion barrier waits for all previously accepted writes.
 - Queue overload and oversized payloads are logged and retained as request/file-qualified failures without rejecting a passable business request.
 - A completion barrier reports a snapshot without draining the failure ledger; worker shutdown drains the bounded ledger and returns an omitted-count summary when needed.
 - Server startup starts the persistence worker only after fallible listener preparation and before listener tasks begin accepting requests.
@@ -53,7 +53,7 @@
 - Positive: Relay diagnostics remain available; `--snapall` preserves explicit full capture.
 - Negative: no snapshot flag cannot write any new sample; default `--snap` cannot write Direct; restart cannot leave more than 100 pre-existing request directories; provider media/auth cannot reach disk unredacted.
 - Failure: filesystem, queue-budget, and redaction/persistence failures remain explicit debug errors; queue pressure cannot become a client error or payload fallback.
-- Boundaries: tests saturate the queue, drop a barrier reply, and exceed the failure-ledger cap to prove each resource and failure report stays bounded.
+- Boundaries: tests burst beyond the old message-count limit, drop a barrier reply, exceed the byte-and-overhead budget, and exceed the failure-ledger cap to prove each resource and failure report stays bounded.
 
 ## Verification Order
 

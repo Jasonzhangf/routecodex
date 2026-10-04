@@ -56,14 +56,17 @@ that confirmation exists and all other applicable delivery conditions pass.
 
 ## Review Gate
 
-After author verification and before commit/merge, run the ordinary reviewers
-required by global `AGENTS.md` L3: Codex Review and AGY Review. Bind both to the
-same validated candidate SHA and apply their shared review standards, project
-Semantic Invariants, and mapped owner/edge/gate bindings. Do not duplicate the
-shared checklist or historical-finding policy here.
-Merge still requires applicable review and PR CI PASS. After merge, rebuild,
-install, managed restart, and replay from `main`; candidate acceptance does not
-prove the merged runtime.
+Follow the project delivery order in `AGENTS.md`: author verification and
+applicable PR CI PASS -> merge/push to main -> rebuild/install, managed restart,
+health, real-entry replay and sample audit from main -> complete independent
+Codex Review and AGY Review. Review pending does not block main/runtime delivery;
+both reviews remain required for defect closure. Repository checks and Git
+protection remain enforced. Bind both reviews to the same validated candidate
+SHA, prove content equivalence to delivered main, and apply shared review
+standards, Semantic Invariants and mapped owner/edge/gate bindings. Candidate
+acceptance does not prove the merged runtime. Repair blocking findings and
+revalidate affected behavior; a confirmed delivered regression follows the
+traceable revert/rebuild/restart/replay recovery contract.
 
 ## Routes
 
