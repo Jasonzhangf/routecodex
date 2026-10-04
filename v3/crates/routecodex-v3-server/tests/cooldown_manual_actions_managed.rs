@@ -15,7 +15,7 @@
 use routecodex_v3_config::V3ConfigStore;
 use routecodex_v3_server::spawn_v3_server_aggregate_with_admin;
 use serde_json::{json, Value};
-use std::{env, fs, net::TcpListener, path::PathBuf};
+use std::{env, fs, path::PathBuf};
 use tokio::time::{sleep, Duration};
 
 static TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -34,13 +34,9 @@ fn temp_home(label: &str) -> PathBuf {
     dir
 }
 
-fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
+#[path = "../../../crates/routecodex-v3-runtime/tests/support/test_ports.rs"]
+mod test_ports;
+use test_ports::free_port;
 
 fn config_source(server_port: u16) -> String {
     format!(
