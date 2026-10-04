@@ -214,39 +214,17 @@ pub fn run_req_outbound_stage3_compat(
             "anthropic-messages",
         )
     {
-        if let Some(tools) = payload
-            .get_mut("tools")
-            .and_then(Value::as_array_mut)
-            .filter(|tools| {
-                tools.iter().any(|tool| {
-                    tool["type"] == "web_search_20250305" && tool["name"] == "web_search"
-                })
-            })
-        {
+        if let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) {
             for tool in tools {
-                let Some(tool) = tool.as_object_mut() else {
-                    continue;
-                };
-                // The gateway parses mixed hosted/native declarations through its
-                // function envelope. Retain the Anthropic fields and expose the
-                // same native schema; history and dispatch identities stay intact.
-                let function = if tool.get("type").and_then(Value::as_str)
-                    == Some("web_search_20250305")
-                    && tool.get("name").and_then(Value::as_str) == Some("web_search")
-                {
-                    json!({"name":"web_search","parameters":{}})
-                } else if let (Some(name), Some(schema)) =
-                    (tool.get("name"), tool.get("input_schema"))
-                {
-                    let mut function = json!({"name":name,"parameters":schema});
-                    if let Some(description) = tool.get("description") {
-                        function["description"] = description.clone();
+                if tool["type"] == "web_search_20250305" && tool["name"] == "web_search" {
+                    if let Some(tool) = tool.as_object_mut() {
+                        // The gateway rejects hosted declarations combined with tool
+                        // history unless its function parser also sees parameters.
+                        // Keep the hosted type/options; this is not a client function.
+                        tool.entry("function")
+                            .or_insert_with(|| json!({"name":"web_search","parameters":{}}));
                     }
-                    function
-                } else {
-                    continue;
-                };
-                tool.entry("function").or_insert(function);
+                }
             }
         }
         return Ok(CompatResult {

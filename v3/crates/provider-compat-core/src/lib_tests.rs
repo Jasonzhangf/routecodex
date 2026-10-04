@@ -7,8 +7,7 @@ fn goaichat_profile_preserves_existing_hosted_extensions_and_other_protocols() {
             "function":{"name":"web_search","parameters":{"query":"provider-extension"}},
             "opaque":{"preserve":true}},
         {"type":"web_search_20990101","name":"web_search"},
-        {"name":"exec_command","description":"Execute","input_schema":{"type":"object"},
-            "opaque":{"preserve":true}}
+        {"name":"exec_command","input_schema":{"type":"object"}}
     ],"messages":[{"role":"user","content":"opaque history"}]});
     for protocol in ["anthropic-messages", "openai-chat", "openai-responses"] {
         let input = ReqOutboundCompatInput {
@@ -20,26 +19,11 @@ fn goaichat_profile_preserves_existing_hosted_extensions_and_other_protocols() {
             },
             explicit_profile: None,
         };
-        let mut expected = payload.clone();
-        if protocol == "anthropic-messages" {
-            expected["tools"][2]["function"] = json!({"name":"exec_command",
-                "description":"Execute","parameters":{"type":"object"}});
-        }
         assert_eq!(
             run_req_outbound_stage3_compat(input.clone())
                 .unwrap()
                 .payload,
-            expected
-        );
-        let native_payload = json!({"tools":[payload["tools"][2].clone()]});
-        let mut native_input = input.clone();
-        native_input.payload = native_payload.clone();
-        assert_eq!(
-            run_req_outbound_stage3_compat(native_input)
-                .unwrap()
-                .payload,
-            native_payload,
-            "native-only requests keep standard Anthropic declarations"
+            payload
         );
         assert_eq!(
             run_resp_inbound_stage3_compat(input).unwrap().payload,
