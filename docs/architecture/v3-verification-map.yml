@@ -463,7 +463,7 @@ features:
   - Ordinary protocol and business fields remain unchanged through request and response compatibility.
   - Provider compatibility remains limited to registered provider-family wire projections.
   - Request-shape compatibility failures remain typed internal errors and never authorize a client error response.
-  - The explicitly selected anthropic:goaichat request profile preserves hosted web_search type/name/options and ordinary tool/history identity while supplying the gateway function envelope after standard Anthropic projection.
+  - The explicitly selected anthropic:goaichat request profile preserves hosted web_search type/name/options and ordinary tool/history identity while supplying complete type/function declarations for current native tools mixed with hosted search after standard Anthropic projection.
   - Public HTTP Responses (JSON/SSE), Chat and Messages consumers complete a tool execution and matching follow-up with exactly one accepted upstream attempt per turn; provider switching cannot mask a shape regression.
   - When the client supplied no output limit, the provider-declared model output cap is projected into the provider wire payload; a client-supplied output limit is never overwritten on any registered provider protocol.
   required_negative:
@@ -471,6 +471,7 @@ features:
   - Compat does not strip, reconstruct, or route control state and does not own Chat Process or SSE semantics.
   - Compat does not own retry, provider switching or health; typed Error owns request-local compatibility handling.
   - Generic chat:glm Anthropic passthrough and other provider protocols never receive Goaichat private hosted-tool fields.
+  - Historical tools missing from the current inventory remain history only; Goaichat compatibility never adds callable tools or a functions roster, and native-only declarations remain unchanged.
   black_box_regression:
     command: npm run test:v3-goaichat-hosted-tool-history-blackbox
     test_ids:

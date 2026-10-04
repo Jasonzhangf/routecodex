@@ -215,6 +215,9 @@ pub fn run_req_outbound_stage3_compat(
         )
     {
         if let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) {
+            let mixed_hosted = tools
+                .iter()
+                .any(|tool| tool["type"] == "web_search_20250305" && tool["name"] == "web_search");
             for tool in tools {
                 if tool["type"] == "web_search_20250305" && tool["name"] == "web_search" {
                     if let Some(tool) = tool.as_object_mut() {
@@ -223,6 +226,23 @@ pub fn run_req_outbound_stage3_compat(
                         // Keep the hosted type/options; this is not a client function.
                         tool.entry("function")
                             .or_insert_with(|| json!({"name":"web_search","parameters":{}}));
+                    }
+                } else if mixed_hosted {
+                    if let Some(tool) = tool.as_object_mut() {
+                        if let (Some(name), Some(schema)) = (
+                            tool.get("name").and_then(Value::as_str),
+                            tool.get("input_schema"),
+                        ) {
+                            // This gateway's mixed-tool parser needs a complete
+                            // function declaration, not only its nested envelope.
+                            // Copy the current declaration; never add history tools.
+                            let mut function = json!({"name":name,"parameters":schema});
+                            if let Some(description) = tool.get("description") {
+                                function["description"] = description.clone();
+                            }
+                            tool.entry("type").or_insert_with(|| json!("function"));
+                            tool.entry("function").or_insert(function);
+                        }
                     }
                 }
             }
