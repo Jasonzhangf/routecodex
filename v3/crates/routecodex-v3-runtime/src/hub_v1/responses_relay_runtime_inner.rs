@@ -65,6 +65,18 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         client_response_transport_intent,
     );
     trace.push("V3HubReqInbound01ClientRaw");
+    // stage-3 丢弃上下文：保留客户端原始 payload 的 Arc 句柄（ReqInbound02 会用
+    // canonical 覆盖 `payload`，该 Arc 仍指向客户端原始值）。
+    let projection_drop_context = crate::projection_drop_log::V3ProjectionDropContext::new(
+        input.request_id.clone(),
+        manifest
+            .servers
+            .get(&input.server_id)
+            .map(|server| server.port.to_string())
+            .unwrap_or_default(),
+        manifest.debug.projection_drop_log_file.clone(),
+        std::sync::Arc::clone(&req01.payload.0),
+    );
     let req02 = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(req01)
         .map_err(V3ResponsesRelayRuntimeError::ClientInboundCanonical)?;
     trace.push("V3HubReqInbound02Normalized");
@@ -344,7 +356,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
             }};
         }
         let req_compat = match build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07) {
-            Ok(req_compat) => req_compat,
+            Ok(projected) => record_projected_drops(&projection_drop_context, projected),
             Err(error) => {
                 handle_provider_request_failure!(V3ResponsesRelayRuntimeError::ProviderCompat(
                     error

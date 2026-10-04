@@ -1652,12 +1652,13 @@ fn validate_auth_alias_ref(
 pub(crate) fn compile_debug(
     authoring: V3DebugAuthoringConfig,
 ) -> Result<V3DebugManifest, V3ConfigError> {
-    if authoring
-        .log_file
-        .as_deref()
-        .is_some_and(|path| path.trim().is_empty())
-    {
+    let debug_log_file = authoring.log_file.as_deref();
+    if debug_log_file.is_some_and(|p| p.trim().is_empty()) {
         return Err(validation("debug log_file cannot be empty"));
+    }
+    let debug_drop_log_file = authoring.projection_drop_log_file.as_deref();
+    if debug_drop_log_file.is_some_and(|p| p.trim().is_empty()) {
+        return Err(validation("debug projection_drop_log_file cannot be empty"));
     }
     let snapshot_stages = authoring
         .snapshot_stages
@@ -1666,6 +1667,7 @@ pub(crate) fn compile_debug(
     Ok(V3DebugManifest {
         log_console: authoring.log_console,
         log_file: authoring.log_file,
+        projection_drop_log_file: authoring.projection_drop_log_file,
         snapshots: authoring.snapshots,
         // Preserve the explicit authoring authorization; the runtime still
         // decides which lifecycle stages may write samples.

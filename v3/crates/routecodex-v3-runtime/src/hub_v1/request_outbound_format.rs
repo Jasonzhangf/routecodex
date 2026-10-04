@@ -1,8 +1,13 @@
 use super::V3HubEntryProtocol;
 use serde_json::{json, Map, Value};
 
+use crate::projection_drop_log::{
+    resolve_v3_json_path, split_v3_json_path, V3JsonPathSegment, V3ProjectionDropContext,
+    V3ProjectionDropRecord,
+};
+
 use super::anthropic_request_field_projection::project_chat_store_to_anthropic_wire;
-use super::request_outbound_builtin_tool_projection::project_openai_chat_provider_tools_for_web_search_mode;
+use super::request_outbound_builtin_tool_projection::project_openai_chat_provider_tools_for_web_search_mode_recording;
 use super::request_outbound_builtin_tool_projection::project_openai_responses_custom_tools_to_function_schema;
 use super::request_outbound_builtin_tool_projection::project_openai_responses_hosted_web_search_for_selected_target;
 use super::request_outbound_builtin_tool_projection::promote_tool_search_output_tools_to_provider_tools;
@@ -22,6 +27,18 @@ use self::request_outbound_responses_items::{
 pub(crate) fn build_v3_openai_chat_standard_request_from_chat_canonical(
     payload: &Value,
 ) -> Result<Value, String> {
+    build_v3_openai_chat_standard_request_from_chat_canonical_recording(
+        payload,
+        &V3ProjectionDropContext::disabled(),
+    )
+    .map(|(value, _drops)| value)
+}
+
+/// stage-3 openai_chat 出站投影的 non-error carrier 版本：返回投影值 + 丢弃记录。
+pub(crate) fn build_v3_openai_chat_standard_request_from_chat_canonical_recording(
+    payload: &Value,
+    drop_context: &V3ProjectionDropContext,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
     if payload.get("messages").and_then(Value::as_array).is_none() {
         return Err("OpenAI Chat provider wire requires Chat canonical messages".to_string());
     }
@@ -30,6 +47,7 @@ pub(crate) fn build_v3_openai_chat_standard_request_from_chat_canonical(
         None,
         routecodex_v3_config::V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
         true,
+        drop_context,
     )
 }
 pub(crate) fn build_v3_openai_chat_standard_request_for_selected_web_search_mode(
@@ -37,6 +55,22 @@ pub(crate) fn build_v3_openai_chat_standard_request_for_selected_web_search_mode
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
     has_web_search_capability: bool,
 ) -> Result<Value, String> {
+    build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording(
+        payload,
+        web_search_execution_mode,
+        has_web_search_capability,
+        &V3ProjectionDropContext::disabled(),
+    )
+    .map(|(value, _drops)| value)
+}
+
+/// 同上，携带显式 web search mode 的 non-error carrier 版本。
+pub(crate) fn build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording(
+    payload: &Value,
+    web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
+    has_web_search_capability: bool,
+    drop_context: &V3ProjectionDropContext,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
     if payload.get("messages").and_then(Value::as_array).is_none() {
         return Err("OpenAI Chat provider wire requires Chat canonical messages".to_string());
     }
@@ -47,6 +81,7 @@ pub(crate) fn build_v3_openai_chat_standard_request_for_selected_web_search_mode
         payload.get("model").and_then(Value::as_str),
         web_search_execution_mode,
         has_web_search_capability,
+        drop_context,
     )
 }
 pub(crate) fn build_v3_openai_responses_standard_request_from_chat_canonical(
@@ -59,28 +94,55 @@ pub(crate) fn build_v3_openai_responses_standard_request_for_selected_target(
     payload: &Value,
     has_web_search_capability: bool,
 ) -> Result<Value, String> {
+    let drop_context = V3ProjectionDropContext::disabled();
+    let (value, mut drops) =
+        build_v3_openai_responses_standard_request_for_selected_target_with_drops(
+            payload,
+            has_web_search_capability,
+        )?;
+    drop_context.restamp_and_emit(&mut drops);
+    Ok(value)
+}
+
+/// non-error carrier：把投影阶段的丢弃记录交给请求作用域盖章落盘。
+pub(crate) fn build_v3_openai_responses_standard_request_for_selected_target_with_drops(
+    payload: &Value,
+    has_web_search_capability: bool,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
     if payload.get("previous_response_id").is_some() {
         return Err(
             "UnmappedOutboundFields target_protocol=responses paths=$.previous_response_id"
                 .to_string(),
         );
     }
-    let mut projected = build_v3_openai_responses_request_from_chat_canonical(payload)?;
+    let (mut projected, drops) =
+        build_v3_openai_responses_request_from_chat_canonical_with_drops(payload)?;
     project_openai_responses_hosted_web_search_for_selected_target(
         &mut projected,
         has_web_search_capability,
     );
-    Ok(projected)
+    Ok((projected, drops))
 }
 
 fn build_v3_openai_responses_request_from_chat_canonical(payload: &Value) -> Result<Value, String> {
+    let drop_context = V3ProjectionDropContext::disabled();
+    let (value, mut drops) =
+        build_v3_openai_responses_request_from_chat_canonical_with_drops(payload)?;
+    drop_context.restamp_and_emit(&mut drops);
+    Ok(value)
+}
+
+/// non-error carrier：把投影阶段的丢弃记录交给请求作用域盖章落盘。
+fn build_v3_openai_responses_request_from_chat_canonical_with_drops(
+    payload: &Value,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
     if payload.get("reasoning").is_some() {
         return Err(
             "RawPayloadShortcut target_protocol=responses path=$.reasoning; use registered Chat reasoning fields"
                 .to_string(),
         );
     }
-    let projected_source = project_outbound_payload_for_target_protocol(
+    let (projected_source, drops) = project_outbound_payload_for_target_protocol_with_drops(
         payload,
         V3OutboundTargetProtocol::OpenAiResponses,
     )?;
@@ -138,7 +200,10 @@ fn build_v3_openai_responses_request_from_chat_canonical(payload: &Value) -> Res
             responses_payload.insert(key.to_string(), value.clone());
         }
     }
-    normalize_responses_payload_for_provider_standard(&Value::Object(responses_payload))
+    Ok((
+        normalize_responses_payload_for_provider_standard(&Value::Object(responses_payload))?,
+        drops,
+    ))
 }
 fn normalize_responses_payload_for_provider_standard(payload: &Value) -> Result<Value, String> {
     // The caller has already completed the adjacent Chat -> Responses projection.
@@ -315,10 +380,25 @@ pub(crate) fn build_v3_anthropic_provider_request_source_from_chat_canonical(
     payload: &Value,
     entry_protocol: V3HubEntryProtocol,
 ) -> Result<Value, String> {
+    let drop_context = V3ProjectionDropContext::disabled();
+    let (value, mut drops) =
+        build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops(
+            payload,
+            entry_protocol,
+        )?;
+    drop_context.restamp_and_emit(&mut drops);
+    Ok(value)
+}
+
+/// non-error carrier：把投影阶段的丢弃记录交给请求作用域盖章落盘。
+pub(crate) fn build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops(
+    payload: &Value,
+    entry_protocol: V3HubEntryProtocol,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
     match entry_protocol {
         V3HubEntryProtocol::Responses => {
             if payload.get("messages").and_then(Value::as_array).is_some() {
-                return project_outbound_payload_for_target_protocol(
+                return project_outbound_payload_for_target_protocol_with_drops(
                     payload,
                     V3OutboundTargetProtocol::Anthropic,
                 );
@@ -327,7 +407,7 @@ pub(crate) fn build_v3_anthropic_provider_request_source_from_chat_canonical(
         }
         V3HubEntryProtocol::Anthropic | V3HubEntryProtocol::OpenAiChat => {
             if payload.get("messages").and_then(Value::as_array).is_some() {
-                return project_outbound_payload_for_target_protocol(
+                return project_outbound_payload_for_target_protocol_with_drops(
                     payload,
                     V3OutboundTargetProtocol::Anthropic,
                 );
@@ -364,7 +444,20 @@ pub(crate) fn project_outbound_payload_for_target_protocol(
     source: &Value,
     target_protocol: V3OutboundTargetProtocol,
 ) -> Result<Value, String> {
-    project_outbound_payload_for_target_protocol_inner(source, target_protocol, None)
+    let drop_context = V3ProjectionDropContext::disabled();
+    let (value, mut drops) =
+        project_outbound_payload_for_target_protocol_with_drops(source, target_protocol)?;
+    drop_context.restamp_and_emit(&mut drops);
+    Ok(value)
+}
+
+/// stage-3 target output-protocol whitelist projection 的 non-error carrier：
+/// 返回投影值 + 丢弃记录，使丢弃走非错误通道（兼容优先，其次 drop+record+print）。
+pub(crate) fn project_outbound_payload_for_target_protocol_with_drops(
+    source: &Value,
+    target_protocol: V3OutboundTargetProtocol,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
+    project_outbound_payload_for_target_protocol_inner_with_drops(source, target_protocol, None)
 }
 
 pub(crate) fn project_outbound_payload_for_selected_target_protocol(
@@ -372,18 +465,35 @@ pub(crate) fn project_outbound_payload_for_selected_target_protocol(
     target_protocol: V3OutboundTargetProtocol,
     model_capabilities: &[String],
 ) -> Result<Value, String> {
-    project_outbound_payload_for_target_protocol_inner(
+    let drop_context = V3ProjectionDropContext::disabled();
+    let (value, mut drops) = project_outbound_payload_for_selected_target_protocol_with_drops(
+        source,
+        target_protocol,
+        model_capabilities,
+    )?;
+    drop_context.restamp_and_emit(&mut drops);
+    Ok(value)
+}
+
+/// 选中目标能力的 non-error carrier：丢弃记录交给请求作用域盖章落盘，
+/// 因此不会出现「投影算出丢弃但只有 stderr、没有持久化身份」的缺口。
+pub(crate) fn project_outbound_payload_for_selected_target_protocol_with_drops(
+    source: &Value,
+    target_protocol: V3OutboundTargetProtocol,
+    model_capabilities: &[String],
+) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
+    project_outbound_payload_for_target_protocol_inner_with_drops(
         source,
         target_protocol,
         Some(model_capabilities),
     )
 }
 
-fn project_outbound_payload_for_target_protocol_inner(
+fn project_outbound_payload_for_target_protocol_inner_with_drops(
     source: &Value,
     target_protocol: V3OutboundTargetProtocol,
     gemini_model_capabilities: Option<&[String]>,
-) -> Result<Value, String> {
+) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
     let mut source = source.clone();
     if matches!(target_protocol, V3OutboundTargetProtocol::Gemini) {
         match gemini_model_capabilities {
@@ -404,17 +514,66 @@ fn project_outbound_payload_for_target_protocol_inner(
             control_paths.join(",")
         ));
     }
+    // stage 3 白名单投影是「最大兼容优先，其次丢弃」：目标协议白名单之外的字段
+    // 不携带目标协议可表示的语义，按规则 DROP + RECORD + PRINT 后继续请求，
+    // 绝不变成客户端错误。`ControlFieldLeak`（上方）仍是 hard error 不变量。
     let unmapped = collect_unmapped_outbound_field_paths(source, target_protocol);
-    if !unmapped.is_empty() {
-        return Err(format!(
-            "UnmappedOutboundFields target_protocol={} paths={}",
+    let mut drops = Vec::new();
+    for json_path in &unmapped {
+        drops.push(V3ProjectionDropRecord::new(
             target_protocol.as_str(),
-            unmapped.join(",")
+            json_path.clone(),
+            "unmapped_target_protocol_field_unrepresentable",
+            resolve_v3_json_path(source, json_path).unwrap_or(Value::Null),
+            "project_outbound_payload_for_target_protocol_inner_with_drops",
         ));
     }
     let mut projected = source.clone();
+    for json_path in &unmapped {
+        remove_unmapped_outbound_field(&mut projected, json_path);
+    }
     apply_outbound_projection_transforms(&mut projected, target_protocol)?;
-    Ok(projected)
+    Ok((projected, drops))
+}
+
+/// 从投影结果中移除一个白名单外的出站字段。
+///
+/// 复用丢弃日志的同一个 path 解析器，因此 `json_path_child` 产出的任何形态
+/// （`$.key`、`$["non-identifier key"]`、`$.arr[i]`）都能被真正移除，不会出现
+/// 「已记录但没丢弃」的静默非丢弃。末段是对象成员时删除该成员，落在数组元素上
+/// 时删除该元素；父级缺失即视为已无可丢弃内容。
+fn remove_unmapped_outbound_field(projected: &mut Value, json_path: &str) {
+    let Some(segments) = split_v3_json_path(json_path) else {
+        return;
+    };
+    let Some((leaf, parents)) = segments.split_last() else {
+        return;
+    };
+    let mut current = projected;
+    for segment in parents {
+        let next = match segment {
+            V3JsonPathSegment::Key(key) => current.get_mut(key),
+            V3JsonPathSegment::Index(index) => current.get_mut(*index),
+        };
+        match next {
+            Some(next) => current = next,
+            None => return,
+        }
+    }
+    match leaf {
+        V3JsonPathSegment::Key(key) => {
+            if let Some(map) = current.as_object_mut() {
+                map.remove(key);
+            }
+        }
+        V3JsonPathSegment::Index(index) => {
+            if let Some(items) = current.as_array_mut() {
+                if *index < items.len() {
+                    items.remove(*index);
+                }
+            }
+        }
+    }
 }
 
 include!("request_outbound_gemini.rs");
@@ -833,9 +992,13 @@ fn collect_outbound_control_field_paths_inner(value: &Value, path: &str, paths: 
 }
 
 fn json_path_child(parent: &str, key: &str) -> String {
-    if key
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    // An empty key must take the quoted branch: the bare form would render as
+    // `$.`, which the path reader rejects, so the drop would be recorded
+    // without ever being removed from the wire.
+    if !key.is_empty()
+        && key
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
     {
         format!("{parent}.{key}")
     } else {
@@ -1034,16 +1197,22 @@ fn chat_assistant_reasoning_to_responses_input_item(row: &Map<String, Value>) ->
     }))
 }
 
+/// 返回 (投影值, 丢弃记录) 的 non-error carrier 版本；丢弃记录同时来自
+/// stage-3 顶层白名单投影与 openai_chat provider tools 投影。
 fn normalize_openai_chat_messages_payload(
     payload: &Value,
     model_id: Option<&str>,
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
     has_web_search_capability: bool,
-) -> Result<Value, String> {
-    let mut normalized = project_outbound_payload_for_target_protocol(
-        payload,
-        V3OutboundTargetProtocol::OpenAiChat,
-    )?;
+    drop_context: &V3ProjectionDropContext,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
+    let mut drops = Vec::new();
+    let (mut normalized, mut carrier_drops) =
+        project_outbound_payload_for_target_protocol_with_drops(
+            payload,
+            V3OutboundTargetProtocol::OpenAiChat,
+        )?;
+    drops.append(&mut carrier_drops);
     if let Some(row) = normalized.as_object_mut() {
         if let Some(max_output_tokens) = row.remove("max_output_tokens") {
             row.entry("max_completion_tokens".to_string())
@@ -1064,7 +1233,7 @@ fn normalize_openai_chat_messages_payload(
         &mut normalized,
     )?;
     let Some(messages) = normalized.get_mut("messages").and_then(Value::as_array_mut) else {
-        return Ok(normalized);
+        return Ok((normalized, drops));
     };
     if let Some(instructions) = instructions {
         let already_visible = messages.iter().any(|message| {
@@ -1135,14 +1304,16 @@ fn normalize_openai_chat_messages_payload(
             *content = Value::Array(normalized_parts);
         }
     }
-    project_openai_chat_provider_tools_for_web_search_mode(
+    project_openai_chat_provider_tools_for_web_search_mode_recording(
         &mut normalized,
         model_id,
         web_search_execution_mode,
         has_web_search_capability,
+        drop_context,
+        &mut drops,
     )?;
     ensure_openai_chat_stream_usage_option(&mut normalized);
-    Ok(normalized)
+    Ok((normalized, drops))
 }
 
 fn consume_routecodex_chat_extension_for_openai_chat_provider(
@@ -1189,3 +1360,7 @@ mod request_outbound_format_extra_tests;
 #[cfg(test)]
 #[path = "request_outbound_gemini_tests.rs"]
 mod request_outbound_gemini_tests;
+
+#[cfg(test)]
+#[path = "request_outbound_drop_tests.rs"]
+mod request_outbound_drop_tests;

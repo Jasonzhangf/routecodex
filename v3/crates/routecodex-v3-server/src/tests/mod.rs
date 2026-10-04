@@ -214,6 +214,7 @@ fn test_v3_listener_state_with_debug(
         debug: V3DebugManifest {
             log_console: false,
             log_file: Some(log_file.to_string_lossy().to_string()),
+            projection_drop_log_file: None,
             snapshots,
             codex_samples,
             snapshot_stages,
@@ -3915,6 +3916,7 @@ fn error_projection_appends_human_console_failure_line() {
         debug: V3DebugManifest {
             log_console: false,
             log_file: Some(log_file.to_string_lossy().to_string()),
+            projection_drop_log_file: None,
             snapshots: false,
             codex_samples: false,
             snapshot_stages: None,

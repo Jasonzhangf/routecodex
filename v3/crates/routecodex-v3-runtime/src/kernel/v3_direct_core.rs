@@ -105,6 +105,9 @@ where
     let accumulator = V3RuntimeObservabilityAccumulator::start();
     let runtime_timing = accumulator.timing();
     let mut trace = vec!["V3Config05ManifestPublished", "V3Server03HttpRequestRaw"];
+    // stage-3 丢弃记录要写「客户端原始值」，必须在 codec 标准化之前取句柄：
+    // `standardized` 之后还会被 before-send prepare 改写。
+    let client_original_body = std::sync::Arc::new(raw.body.clone());
     let mut standardized = match C::build_standardized(raw) {
         Ok(standardized) => standardized,
         Err(error) => {
@@ -381,7 +384,24 @@ where
         };
         let policy = C::run_route(selected.clone(), &standardized);
         trace.push(C::POLICY_STAGE);
-        let wire = match C::run_request_projection(&policy, request_key_catalog) {
+        // stage-3 丢弃上下文：请求身份 + 入口端口 + 客户端原始 payload 句柄 +
+        // 独立丢弃日志路径。客户端原始 payload 在此保留为 Arc 句柄向下传递，
+        // 使 stage 3 只看到 canonical payload 时仍能记录 source_value。
+        let projection_drop_context = crate::projection_drop_log::V3ProjectionDropContext::new(
+            C::request_id(&standardized).to_string(),
+            manifest
+                .servers
+                .get(C::server_id(&standardized))
+                .map(|server| server.port.to_string())
+                .unwrap_or_default(),
+            manifest.debug.projection_drop_log_file.clone(),
+            client_original_body.clone(),
+        );
+        let wire = match C::run_request_projection(
+            &policy,
+            request_key_catalog,
+            &projection_drop_context,
+        ) {
             Ok(value) => value,
             Err(source) => {
                 return error_output(

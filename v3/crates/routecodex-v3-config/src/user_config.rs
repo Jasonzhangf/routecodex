@@ -192,6 +192,15 @@ impl V3UserConfigStore {
                 authoring.debug.log_file = Some(config_dir.join(log_file).display().to_string());
             }
         }
+        // 独立的 stage-3 投影丢弃日志：显式配置时按 config 目录解析相对路径；
+        // 未配置时默认落在已解析 debug log 同目录的 projection-drops.jsonl，
+        // 没有 debug log 时落在 config 目录，保证丢弃证据始终有独立持久落点且
+        // 不混入 debug 日志。
+        authoring.debug.projection_drop_log_file = resolve_v3_projection_drop_log_file(
+            authoring.debug.projection_drop_log_file.as_deref(),
+            authoring.debug.log_file.as_deref(),
+            config_dir,
+        );
         authoring.providers = providers;
         Ok(V3Config02AuthoringResolved {
             authoring,
@@ -524,4 +533,75 @@ fn parse_provider_model_ref(value: &str) -> Result<(&str, &str), &'static str> {
         return Err("provider id and model id must both be non-empty");
     }
     Ok((provider, model))
+}
+
+/// 解析 stage-3 投影丢弃日志路径：显式配置的相对路径相对 config 目录；未配置时
+/// 默认落在已解析 debug log 同目录，没有 debug log 时落在 config 目录。
+fn resolve_v3_projection_drop_log_file(
+    configured: Option<&str>,
+    resolved_log_file: Option<&str>,
+    config_dir: &Path,
+) -> Option<String> {
+    if let Some(configured) = configured {
+        let path = Path::new(configured);
+        return Some(if path.is_relative() {
+            config_dir.join(path).display().to_string()
+        } else {
+            configured.to_string()
+        });
+    }
+    let parent = resolved_log_file
+        .and_then(|log_file| Path::new(log_file).parent())
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(config_dir);
+    Some(parent.join("projection-drops.jsonl").display().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_v3_projection_drop_log_file;
+    use std::path::Path;
+
+    #[test]
+    fn projection_drop_log_defaults_beside_resolved_debug_log() {
+        assert_eq!(
+            resolve_v3_projection_drop_log_file(
+                None,
+                Some("/var/log/rcc/debug.log"),
+                Path::new("/etc/rcc"),
+            )
+            .as_deref(),
+            Some("/var/log/rcc/projection-drops.jsonl")
+        );
+    }
+
+    #[test]
+    fn projection_drop_log_defaults_to_config_dir_without_debug_log() {
+        assert_eq!(
+            resolve_v3_projection_drop_log_file(None, None, Path::new("/etc/rcc")).as_deref(),
+            Some("/etc/rcc/projection-drops.jsonl")
+        );
+    }
+
+    #[test]
+    fn projection_drop_log_resolves_relative_config_and_keeps_absolute() {
+        assert_eq!(
+            resolve_v3_projection_drop_log_file(
+                Some("drops/projection.jsonl"),
+                None,
+                Path::new("/etc/rcc"),
+            )
+            .as_deref(),
+            Some("/etc/rcc/drops/projection.jsonl")
+        );
+        assert_eq!(
+            resolve_v3_projection_drop_log_file(
+                Some("/var/log/rcc/drops.jsonl"),
+                None,
+                Path::new("/etc/rcc"),
+            )
+            .as_deref(),
+            Some("/var/log/rcc/drops.jsonl")
+        );
+    }
 }
