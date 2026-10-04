@@ -454,7 +454,7 @@ features:
   - npm run verify:v3-architecture-ci
 - feature_id: v3.provider_compat_profile_loading
   change_risk: high
-  owner_scope: Provider compatibility profiles and fail-fast normal-payload boundary validation between Hub provider semantic/raw nodes and the provider wire/client semantic nodes.
+  owner_scope: Provider compatibility profiles, fail-fast normal-payload boundary validation, and provider-declared output-cap projection between Hub provider semantic/raw nodes and the provider wire/client semantic nodes.
   contract:
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-function-map.yml
@@ -465,6 +465,7 @@ features:
   - Request-shape compatibility failures remain typed internal errors and never authorize a client error response.
   - The explicitly selected anthropic:goaichat request profile preserves hosted web_search type/name/options and ordinary tool/history identity while supplying the gateway function envelope after standard Anthropic projection.
   - Public HTTP Responses (JSON/SSE), Chat and Messages consumers complete a tool execution and matching follow-up with exactly one accepted upstream attempt per turn; provider switching cannot mask a shape regression.
+  - When the client supplied no output limit, the provider-declared model output cap is projected into the provider wire payload; a client-supplied output limit is never overwritten on any registered provider protocol.
   required_negative:
   - Top-level semantics, processed, and processingMetadata fail at both request and response compat entrypoints.
   - Compat does not strip, reconstruct, or route control state and does not own Chat Process or SSE semantics.

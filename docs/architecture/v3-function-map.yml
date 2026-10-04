@@ -1186,7 +1186,7 @@ features:
 - feature_id: v3.provider_compat_profile_loading
   status: active
   owner_kind: rust_ssot
-  owner_scope: Provider compatibility profile loading and payload-boundary validation at the adjacent request and response compat nodes only.
+  owner_scope: Provider compatibility profile loading, payload-boundary validation, and the provider-declared output-cap projection into the provider wire payload at the adjacent request and response compat nodes only.
   owner_module: v3.provider_compat_core
   resource_bindings:
   - v3.provider_compat.payload_boundary_contract

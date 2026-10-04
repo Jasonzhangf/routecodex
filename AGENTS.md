@@ -17,6 +17,14 @@
 - HTTP framework parsing failures before application admission follow the same boundary: automatic `400`/`431` responses are forbidden, including after a successful keep-alive request. Server/Front owns this transport boundary; it must not identify errors by inspecting opaque business-body bytes or disable keep-alive to avoid the path. Application-authorized management responses are separate control-plane traffic.
 - **Required regression coverage:** real public HTTP/stream/WebSocket consumers must cover every enabled model entry, Direct and Relay where applicable, provider HTTP `4xx`/`5xx`, network disconnect/timeouts, internal errors, eligible-candidate recovery, full route-pool exhaustion, and malformed HTTP framing on fresh and reused connections. Assert zero client error statuses/payloads/events, truthful successful recovery, correct incomplete-transfer behavior at terminal failure, and continued success of an independent session. Preserve opaque and multi-flush successful bodies, interim HTTP heads, and upgraded WebSocket traffic. Unit tests or source-pattern checks alone do not satisfy this gate.
 
+## Mandatory: Runtime Lifecycle — Only `rcc restart`, Never stop/start
+
+- **禁止把 `rcc stop` + `rcc start`（或 `rcc start --restart`）当作重启手段。** 需要让新构建生效时，只调用一次 `rcc restart`（或 `rcc restart --port <locator-port>`），由**原进程/原 supervisor 在原 session 内**重新拉起 server child。
+- **`rcc stop`、`rcc start --snap`、`rcc restart` 均须人类明确批准。** 未取得明确批准不得对 live runtime 执行任何 lifecycle 动作；live runtime 存在时 `rcc restart` 只允许调用一次，禁止自行 spawn `start --restart` 接管。
+- 4444/7777 承载用户与其他 agent 的实时流量。任何 lifecycle 动作前必须先说明将造成的中断并取得批准；禁止 `pkill`、`killall`、`kill $(...)`。
+- 依据：`docs/loops/runtime-lifecycle/gate-matrix.md`（Blackbox 层）与 `docs/design/server-runtime-lifecycle-ssot.md`（`rcc restart` 第 6、9、10 条）。
+- 反例（2026-10-04）：用 stop+start 代替 `rcc restart`，导致 4444 中断并触发 supervisor 二次拉起，用户明确抗议。禁止重犯。
+
 ## Project Truth
 
 - RouteCodex V3 is the only active production implementation.
