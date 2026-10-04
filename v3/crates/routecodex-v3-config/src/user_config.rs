@@ -38,6 +38,11 @@ pub struct V3UserConfig02RoutingSelectionParsed {
     pub version: u16,
     #[serde(default)]
     pub servers: BTreeMap<String, V3UserServerAuthoringConfig>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::V3RuntimeAuthoringConfig::is_default"
+    )]
+    pub runtime: crate::V3RuntimeAuthoringConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -286,6 +291,7 @@ pub fn project_v3_user_config_03_authoring(
     provider_catalogue: &BTreeMap<String, BTreeSet<String>>,
 ) -> Result<V3Config02AuthoringParsed, V3ConfigError> {
     let user = validate_v3_user_config_02_routing(user)?;
+    internal.runtime = user.runtime;
     let template = internal
         .route_groups
         .get("routecodex_v3_4444")
