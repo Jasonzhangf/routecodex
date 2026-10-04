@@ -126,8 +126,13 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
     let mut result = result;
     project_reasoning_effort_for_selected_target(&mut result, selected, provider_protocol)?;
     normalize_deepseek_tool_choice(&mut result, selected, provider_protocol);
+    project_provider_declared_output_cap(&mut result, selected, provider_protocol);
     Ok(result)
 }
+
+#[path = "provider_req_compat_06_output_cap.rs"]
+mod provider_req_compat_06_output_cap;
+use provider_req_compat_06_output_cap::project_provider_declared_output_cap;
 
 fn project_reasoning_effort_for_selected_target(
     payload: &mut Value,
@@ -392,6 +397,7 @@ mod tests {
             model_capabilities: vec!["text".to_string()],
             web_search_execution_mode: V3WebSearchExecutionMode::None,
             max_context_tokens: None,
+            max_tokens: None,
             context_token_estimate_scale_bps: 10_000,
             base_url: "https://provider.invalid/v1".to_string(),
             responses_process: None,
