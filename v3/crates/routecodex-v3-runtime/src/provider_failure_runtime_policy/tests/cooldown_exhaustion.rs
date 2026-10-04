@@ -92,7 +92,8 @@ async fn serve_one_responses_probe(listener: TcpListener) {
             break;
         }
     }
-    let body = r#"{"status":"completed"}"#;
+    // lifeai-style 200 body: probe success is HTTP status only.
+    let body = r#"{"status":"incomplete","error":null}"#;
     let response = format!(
         "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
         body.len()
@@ -101,6 +102,41 @@ async fn serve_one_responses_probe(listener: TcpListener) {
         .write_all(response.as_bytes())
         .await
         .expect("provider probe response must be writable");
+}
+
+async fn serve_one_non_json_responses_probe(listener: TcpListener) {
+    let (mut socket, _) = listener
+        .accept()
+        .await
+        .expect("provider probe listener must accept one request");
+    let mut request = Vec::new();
+    let mut chunk = [0_u8; 4096];
+    loop {
+        let read = tokio::time::timeout(Duration::from_secs(1), socket.read(&mut chunk))
+            .await
+            .expect("provider probe request headers must arrive")
+            .expect("provider probe request must be readable");
+        if read == 0 {
+            break;
+        }
+        request.extend_from_slice(&chunk[..read]);
+        if request.windows(4).any(|window| window == b"\r\n\r\n") {
+            break;
+        }
+    }
+    let body = b"not-json";
+    let response = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+        body.len()
+    );
+    socket
+        .write_all(response.as_bytes())
+        .await
+        .expect("provider probe response headers must be writable");
+    socket
+        .write_all(body)
+        .await
+        .expect("provider probe response body must be writable");
 }
 
 async fn serve_two_gated_responses_probes(
@@ -259,6 +295,70 @@ async fn fresh_cooldown_only_exhaustion_runs_one_rescue_probe_and_resumes_same_r
     tokio::time::timeout(Duration::from_secs(1), probe_server)
         .await
         .expect("fresh cooldown exhaustion must run a rescue probe")
+        .expect("provider probe task must not panic");
+}
+
+#[tokio::test]
+async fn non_json_2xx_probe_body_still_recovers_provider() {
+    let server_id = "non_json_2xx_probe_body_still_recovers_provider";
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("provider probe listener must bind");
+    let base_url = format!(
+        "http://{}/v1",
+        listener
+            .local_addr()
+            .expect("provider probe listener address")
+    );
+    let mut manifest = global_pool_alive_manifest(server_id);
+    let provider = manifest.providers.get_mut("first").expect("first provider");
+    provider.base_url = base_url;
+    provider.auth.entries[0].env = Some("ROUTECODEX_V3_NON_JSON_PROBE_KEY".into());
+    std::env::set_var("ROUTECODEX_V3_NON_JSON_PROBE_KEY", "routecodex-test-key");
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let failure_session_scope =
+        test_provider_failure_scope(server_id, server_id, "non-json-probe-session")
+            .expect("failure session scope");
+    let expanded = match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
+        manifest: &manifest,
+        server_id,
+        failure_session_scope: &failure_session_scope,
+        entry_kind: "responses",
+        endpoint_path: "/v1/responses",
+        body: &json!({"model":"client-responses","input":"hello"}),
+        request_local_excluded_candidates: &BTreeSet::new(),
+        provider_health: &health,
+        now_ms: 20_001,
+        deterministic_sample: 0,
+    }) {
+        Ok(expanded) => expanded,
+        Err(_) => panic!("expanded candidates failed"),
+    };
+    put_all_candidates_in_provider_cooldown(&health, &expanded);
+    let probe_server = tokio::spawn(serve_one_non_json_responses_probe(listener));
+
+    let selection = tokio::time::timeout(
+        Duration::from_secs(2),
+        select_v3_expanded_target_with_exhaustion_rescue(
+            &manifest,
+            expanded,
+            &failure_session_scope,
+            &health,
+            &BTreeSet::new(),
+            20_001,
+            0,
+            true,
+        ),
+    )
+    .await
+    .expect("non-JSON 2xx probe must not wait forever");
+    match selection {
+        V3TargetSelectionAfterRescue::Selected(_) => {}
+        _ => panic!("non-JSON 2xx probe must recover the provider"),
+    }
+    tokio::time::timeout(Duration::from_secs(1), probe_server)
+        .await
+        .expect("non-JSON 2xx probe must run a rescue probe")
         .expect("provider probe task must not panic");
 }
 

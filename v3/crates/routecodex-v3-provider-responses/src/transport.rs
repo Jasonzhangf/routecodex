@@ -90,6 +90,7 @@ pub(crate) enum V3Transport13ResponsesRequestKind {
         concurrency_acquire_timeout_ms: u64,
         cancellation: Option<V3ProviderCancellation>,
         compatibility_profile: Option<String>,
+        status_only: bool,
     },
     WebSocketV2 {
         request_id: String,
@@ -178,6 +179,13 @@ impl V3Transport13ResponsesRequest {
 
     pub fn with_pre_acquired_admission(mut self, admission: V3AdaptiveConcurrencyLease) -> Self {
         self.pre_acquired_admission.set(admission);
+        self
+    }
+
+    pub fn with_status_only(mut self) -> Self {
+        if let V3Transport13ResponsesRequestKind::Http { status_only, .. } = &mut self.kind {
+            *status_only = true;
+        }
         self
     }
 
@@ -814,6 +822,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 concurrency_acquire_timeout_ms: _,
                 cancellation,
                 compatibility_profile,
+                status_only,
             } => {
                 self.send_http(
                     request_id,
@@ -827,6 +836,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                     sse_first_frame_timeout_ms,
                     cancellation,
                     compatibility_profile,
+                    status_only,
                 )
                 .await
             }
@@ -1046,6 +1056,7 @@ impl ProviderResponsesTransport {
         sse_first_frame_timeout_ms: Option<u64>,
         cancellation: Option<V3ProviderCancellation>,
         compatibility_profile: Option<String>,
+        status_only: bool,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
         ensure_not_cancelled(&request_id, &provider_id, cancellation.as_ref())?;
         let secret = resolve_secret(&request_id, &provider_id, &auth).await?;
@@ -1097,6 +1108,18 @@ impl ProviderResponsesTransport {
                     body_read_failure: None,
                 }),
             });
+        }
+
+        if status_only {
+            return Ok(V3ProviderResp14Raw::from_json(
+                request_id,
+                provider_id,
+                status,
+                headers,
+                Vec::new(),
+            )
+            .with_compatibility_profile(compatibility_profile)
+            .with_sse_first_frame_timeout_ms(sse_first_frame_timeout_ms));
         }
 
         if response_content_type

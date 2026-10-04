@@ -42,6 +42,7 @@ pub struct PatrolPlan {
     /// 计划间隔（秒）。启用时必须 > 0；0 表示仅手动触发。
     pub interval_secs: u64,
     /// 参与 patrol 的 stage，必须是 `l1_contract` / `l2_reachability_auth` / `l3_semantic` 的非空子集。
+    /// `l3_semantic` 是保留的 API 标识，当前语义为 HTTP 2xx 状态探测。
     pub stages: Vec<String>,
     pub model: Option<String>,
     pub auth_alias: Option<String>,
