@@ -950,6 +950,15 @@ async fn pending_endpoint(
     State(state): State<Arc<V3ListenerState>>,
     request: Request,
 ) -> Response<Body> {
+    let connection = request
+        .extensions()
+        .get::<V3FrontConnectionIdentity>()
+        .copied();
+    let response = pending_model_request(state.clone(), request).await;
+    commit_model_transport_outcome(&state, connection, response)
+}
+
+async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) -> Response<Body> {
     let front_connection_identity = request
         .extensions()
         .get::<V3FrontConnectionIdentity>()

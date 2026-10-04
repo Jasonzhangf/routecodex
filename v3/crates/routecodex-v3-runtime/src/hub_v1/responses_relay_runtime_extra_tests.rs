@@ -251,7 +251,7 @@ fn provider_failure_output_keeps_real_http_witness_outside_error06_body() {
             source_stage: "V3ProviderReqOutbound09TransportRequest",
             terminal_projection: Some(terminal_projection),
             terminal_disposition: Some(
-                routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(upstream.clone()),
+                routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
             ),
             observability: None,
             matched_policy: None,
@@ -261,7 +261,7 @@ fn provider_failure_output_keeps_real_http_witness_outside_error06_body() {
     );
     assert_eq!(
         output.terminal_disposition,
-        Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(upstream))
+        Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
     );
     let body = match &output.client_body {
         V3ResponsesRelayClientBody::Json(body) => body,

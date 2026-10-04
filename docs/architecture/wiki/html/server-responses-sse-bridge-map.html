@@ -123,6 +123,7 @@
       </header>
       <article>
         <h1>Server Responses SSE Bridge Map</h1>
+        <p>This page's TS surfaces are historical and do not describe the active V3 Rust server. Current model-client behavior follows AGENTS.md's mandatory all-entry no-client-error rule and [the client/provider boundary design](../../goals/provider-terminal-no-502-dag-20260930.md). Historical error-output surfaces below are not permitted V3 client behavior.</p>
         <h2>Purpose</h2>
         <p>这页只回答两件事：</p>
         <p>1. <code>server -&gt; response handler -&gt; SSE/JSON</code> 的出口 surface 在哪里，谁是 owner。 2. JSON 与 SSE 对同一响应语义的等价面是什么，哪些地方还存在缺口。</p>
@@ -179,7 +180,7 @@
         <tr><td>tool-call ids</td><td>final body ids</td><td>SSE terminal ids</td><td>exact id equality</td></tr>
         <tr><td>plain output text</td><td>final text field</td><td>accumulated visible text stream</td><td>semantic equality</td></tr>
         <tr><td>custom tool output / apply_patch freeform</td><td>final client-visible body projection</td><td>SSE frame projection</td><td>same replay-safe visible tool result</td></tr>
-        <tr><td>error result</td><td>JSON error body</td><td><code>event:error</code> / started-stream error frame</td><td>same error class</td></tr>
+        <tr><td>uncompletable model request</td><td>transport closes without a response</td><td>incomplete transport, no error event or semantic terminal</td><td>same internal failure; no client error response</td></tr>
         </tbody>
         </table>
         <h2>Server / SSE Boundary</h2>

@@ -304,9 +304,11 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
             "metadata_center":{"route":"must-not-leak"}
         }))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(isolation_response.status().as_u16(), 598);
+        .await;
+    assert!(
+        isolation_response.is_err(),
+        "a rejected control-plane leak must close transport without a client error response"
+    );
     if let Ok(Some(capture)) =
         tokio::time::timeout(Duration::from_millis(100), captures_rx.recv()).await
     {

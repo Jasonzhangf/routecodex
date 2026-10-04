@@ -165,7 +165,37 @@ pub(crate) fn required_dry_run_string(
         .ok_or_else(|| V3DebugError::MalformedFixture(format!("{field} is required")))
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct V3ModelClientNoResponse {
+    pub(crate) streaming: bool,
+}
+
+pub(crate) fn model_no_response_output(streaming: bool) -> Response<Body> {
+    let mut response = Response::new(Body::empty());
+    response
+        .extensions_mut()
+        .insert(V3ModelClientNoResponse { streaming });
+    response
+}
+
+pub(crate) fn commit_model_transport_outcome(
+    state: &V3ListenerState,
+    connection: Option<V3FrontConnectionIdentity>,
+    response: Response<Body>,
+) -> Response<Body> {
+    if let Some(outcome) = response.extensions().get::<V3ModelClientNoResponse>() {
+        return provider_terminal_response(
+            state,
+            connection,
+            routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+            outcome.streaming,
+        );
+    }
+    response
+}
+
 pub(crate) fn foundation_output_response(output: V3FoundationRuntimeOutput) -> Response<Body> {
+    let failure = !output.error_chain.is_empty();
     let frame = build_v3_server_16_http_frame_from_v3_foundation_output(output);
     let mut builder = Response::builder()
         .status(StatusCode::from_u16(frame.status).expect("typed V3 status"))
@@ -186,7 +216,15 @@ pub(crate) fn foundation_output_response(output: V3FoundationRuntimeOutput) -> R
                 .expect("typed response");
         }
     };
-    builder.body(Body::from(body)).expect("typed response")
+    let mut response = builder.body(Body::from(body)).expect("typed response");
+    // Control APIs retain diagnostic errors. The model-entry owner consumes
+    // this typed outcome before any response is committed to its transport.
+    if failure {
+        response
+            .extensions_mut()
+            .insert(V3ModelClientNoResponse { streaming: false });
+    }
+    response
 }
 
 pub(crate) fn responses_direct_output_response(
@@ -207,21 +245,10 @@ pub(crate) fn project_v3_responses_direct_stream_error_frame_if_requested(
     )
 }
 
-pub(crate) fn project_v3_responses_relay_stream_error_frame_if_requested(
-    frame: V3Server16HttpFrame,
-    requested_stream: bool,
-) -> V3Server16HttpFrame {
-    project_v3_protocol_stream_error_frame_if_requested(
-        frame,
-        requested_stream,
-        V3SseClientProtocol::Responses,
-    )
-}
-
 pub(crate) fn project_v3_protocol_stream_error_frame_if_requested(
     mut frame: V3Server16HttpFrame,
     requested_stream: bool,
-    protocol: V3SseClientProtocol,
+    _protocol: V3SseClientProtocol,
 ) -> V3Server16HttpFrame {
     if !requested_stream || frame.error_chain.is_empty() || frame.content_type != "application/json"
     {
@@ -234,27 +261,13 @@ pub(crate) fn project_v3_protocol_stream_error_frame_if_requested(
             return frame;
         }
     };
-    let (code, message) = v3_error_body_code_message(&body);
-    let (code, message) = if code.starts_with("provider_response_") {
-        (
-            "response_stream_terminated".to_string(),
-            "response stream terminated before completion".to_string(),
-        )
-    } else {
-        (code, message)
-    };
     if frame.error_body.is_none() {
         frame.error_body = Some(body);
     }
+    // Preserve diagnostics in the typed error frame, never prepare an error
+    // event for the client. The model entry consumes the transport outcome.
     frame.content_type = "text/event-stream".to_string();
-    frame.body = V3Server16Body::Bytes(match protocol {
-        V3SseClientProtocol::Responses => {
-            v3_responses_sse_error_event_chunk(frame.status, &code, &message)
-        }
-        V3SseClientProtocol::OpenAiChat
-        | V3SseClientProtocol::Anthropic
-        | V3SseClientProtocol::Gemini => v3_sse_error_event_chunk(frame.status, &code, &message),
-    });
+    frame.body = V3Server16Body::Bytes(Vec::new());
     frame
 }
 
@@ -275,61 +288,19 @@ pub(crate) fn v3_error_body_code_message(body: &Value) -> (String, String) {
     (code, message)
 }
 
-pub(crate) fn v3_sse_error_event_chunk(status: u16, code: &str, message: &str) -> Vec<u8> {
-    let event = json!({
-        "type": "error",
-        "status": status,
-        "error": {
-            "code": code,
-            "message": message
-        }
-    });
-    format!("event: error\ndata: {event}\n\ndata: [DONE]\n\n").into_bytes()
-}
-
-pub(crate) fn v3_responses_sse_error_event_chunk(
-    _status: u16,
-    code: &str,
-    message: &str,
-) -> Vec<u8> {
-    let event = json!({
-        "type": "response.failed",
-        "response": {
-            "status": "failed",
-            "error": {
-                "code": code,
-                "message": message
-            }
-        }
-    });
-    // Responses 客户端帧只由协议终态收口：`response.failed` 就是终态，
-    // 不得追加 Chat Completions 的 [DONE] 终止符。
-    format!("event: response.failed\ndata: {event}\n\n").into_bytes()
-}
-
 fn v3_sse_runtime_error_source_chunk_for_protocol(
     source_stage: &'static str,
     code: &'static str,
     message: impl Into<String>,
     status: u16,
-    protocol: V3SseClientProtocol,
-) -> Vec<u8> {
+    _protocol: V3SseClientProtocol,
+) -> io::Error {
     let projected = project_v3_post_commit_sse_source(
         raise_v3_sse_runtime_failure(source_stage, code, message),
         status,
     );
-    let (code, message) = v3_error_body_code_message(&projected.body);
-    match protocol {
-        V3SseClientProtocol::Responses => {
-            v3_responses_sse_error_event_chunk(projected.status, &code, &message)
-        }
-        V3SseClientProtocol::OpenAiChat => {
-            v3_sse_error_event_chunk(projected.status, &code, &message)
-        }
-        V3SseClientProtocol::Anthropic | V3SseClientProtocol::Gemini => {
-            v3_sse_error_event_chunk(projected.status, &code, &message)
-        }
-    }
+    // The typed error stays internal; Hyper must abort, not encode an error event.
+    io::Error::other(projected.error_detail)
 }
 
 pub(crate) fn responses_direct_output_response_with_console(
@@ -351,6 +322,9 @@ pub(crate) fn responses_direct_output_response_with_console_for_protocol(
     keepalive_interval: Option<Duration>,
     protocol: V3SseClientProtocol,
 ) -> Response<Body> {
+    if !frame.error_chain.is_empty() {
+        return model_no_response_output(frame.content_type == "text/event-stream");
+    }
     let mut builder = Response::builder()
         .status(StatusCode::from_u16(frame.status).expect("typed V3 status"))
         .header("content-type", &frame.content_type);
@@ -404,38 +378,35 @@ pub(crate) fn provider_terminal_response(
     requested_stream: bool,
 ) -> Response<Body> {
     match disposition {
-        // A real compatible upstream HTTP error is still a provider error. It is
-        // recorded in the Error chain with its real status and body, and the client
-        // observes a transport break instead of the provider's response.
-        routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(_)
-        | routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => {}
-    }
-    if requested_stream {
-        // A streaming client must observe a transport failure. The response
-        // head is written so the client stays in streaming mode and retries
-        // the same request, instead of reading a header-less close as a
-        // normal end of stream. No client payload and no fabricated upstream
-        // status is sent; the typed Error chain keeps the real cause.
-        if let Some(connection) = connection {
-            // Claim the boundary before Hyper can enqueue the response head, so
-            // a concurrent restart replacement defers instead of closing the
-            // socket and dropping that head. A closeout that already committed
-            // keeps its `503` as the client-visible boundary.
-            state
-                .front_transport_broker
-                .claim_current_connection_transport_break(connection);
+        routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => {
+            if requested_stream {
+                // A streaming client must observe a transport failure. The response
+                // head is written so the client stays in streaming mode and retries
+                // the same request, instead of reading a header-less close as a
+                // normal end of stream. No client payload and no fabricated upstream
+                // status is sent; the typed Error chain keeps the real cause.
+                if let Some(connection) = connection {
+                    // Claim the boundary before Hyper can enqueue the response head, so
+                    // a concurrent restart replacement defers instead of closing the
+                    // socket and dropping that head. Restart closeout carries
+                    // no client error frame.
+                    state
+                        .front_transport_broker
+                        .claim_current_connection_transport_break(connection);
+                }
+                return v3_sse_transport_disconnect_response(state, connection);
+            }
+            let connection = connection.expect("accepted Front connection identity");
+            assert!(
+                state
+                    .front_transport_broker
+                    .abort_current_connection_without_response(connection),
+                "current Front connection must be registered before no-response abort"
+            );
+            // The socket has been closed before Hyper can write this return value.
+            Response::new(Body::empty())
         }
-        return v3_sse_transport_disconnect_response(state, connection);
     }
-    let connection = connection.expect("accepted Front connection identity");
-    assert!(
-        state
-            .front_transport_broker
-            .abort_current_connection_without_response(connection),
-        "current Front connection must be registered before no-response abort"
-    );
-    // The socket has been closed before Hyper can write this return value.
-    Response::new(Body::empty())
 }
 
 /// Break the client SSE transport for a provider terminal that has no client payload.
@@ -455,25 +426,24 @@ pub(crate) fn provider_terminal_response(
 /// A concurrent exec replacement owns the same client boundary. This terminal
 /// suppresses a restart closeout that has not committed, and commits the restart
 /// closeout that the replacement deferred while waiting for the head. The client then
-/// observes either the SSE transport break or the restart `503`, never zero bytes.
+/// observes an incomplete transfer or a transport close, without an error frame.
 fn v3_sse_transport_disconnect_response(
     state: &V3ListenerState,
     connection: Option<V3FrontConnectionIdentity>,
 ) -> Response<Body> {
     let broker = state.front_transport_broker.clone();
-    let body = stream::once(async {
-        Ok::<Vec<u8>, io::Error>(b": routecodex provider transport break\n\n".to_vec())
-    })
-    .chain(stream::once(async move {
-        if let Some(connection) = connection {
-            broker
-                .settle_current_connection_transport_break(connection, Duration::from_secs(2))
-                .await;
-        }
-        Err(io::Error::other(
-            "provider pool exhausted; SSE transport unavailable",
-        ))
-    }));
+    let body = stream::once(async { Ok::<Vec<u8>, io::Error>(b":\n\n".to_vec()) }).chain(
+        stream::once(async move {
+            if let Some(connection) = connection {
+                broker
+                    .settle_current_connection_transport_break(connection, Duration::from_secs(2))
+                    .await;
+            }
+            Err(io::Error::other(
+                "provider pool exhausted; SSE transport unavailable",
+            ))
+        }),
+    );
     Response::builder()
         .status(StatusCode::OK)
         .header("content-type", "text/event-stream")
@@ -596,10 +566,8 @@ pub(crate) fn v3_live_client_sse_body_for_protocol(
     keepalive_interval: Option<Duration>,
     protocol: V3SseClientProtocol,
 ) -> Body {
-    // Provider unavailability and client disconnect already entered the typed
-    // Error chain. Close those streams as recoverable EOF so the caller can
-    // replay the same entry. Internal response failures remain explicit 599
-    // terminals at the shared SSE transport boundary.
+    // Failures already entered the typed Error chain. Abort the transfer;
+    // neither an error event nor a clean EOF may disguise an incomplete response.
     let stream: V3IoSseStream = Box::pin(stream::unfold(
         (stream, false),
         move |(mut stream, done)| async move {
@@ -608,23 +576,7 @@ pub(crate) fn v3_live_client_sse_body_for_protocol(
             }
             match stream.next().await {
                 Some(Ok(chunk)) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
-                Some(Err(source)) => {
-                    match routecodex_v3_error::v3_sse_post_commit_disposition(&source) {
-                        routecodex_v3_error::V3SsePostCommitDisposition::CloseEof => None,
-                        routecodex_v3_error::V3SsePostCommitDisposition::ProjectInternalTerminal => {
-                        Some((
-                            Ok(v3_sse_runtime_error_source_chunk_for_protocol(
-                                "V3ServerRespOutbound05ClientFrame",
-                                "internal_response_stream_error",
-                                "internal response stream failed",
-                                599,
-                                protocol,
-                            )),
-                            (stream, true),
-                        ))
-                        }
-                    }
-                }
+                Some(Err(source)) => Some((Err(io::Error::other(source.message)), (stream, true))),
                 None => None,
             }
         },
@@ -782,7 +734,7 @@ fn v3_io_sse_body_for_protocol(
             match stream.next().await {
                 Some(Ok(chunk)) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
                 Some(Err(error)) => Some((
-                    Ok(v3_sse_runtime_error_source_chunk_for_protocol(
+                    Err(v3_sse_runtime_error_source_chunk_for_protocol(
                         "V3ServerRespOutbound05ClientFrame",
                         "internal_response_stream_error",
                         format!("internal response stream failed: {error}"),
@@ -815,7 +767,7 @@ fn v3_io_sse_body_for_protocol(
                             599,
                             protocol,
                         );
-                        Some((Ok(frame), (Box::pin(stream::empty()), true)))
+                        Some((Err(frame), (Box::pin(stream::empty()), true)))
                     }
                     Ok(None) => None,
                     Err(payload) => {
@@ -831,7 +783,7 @@ fn v3_io_sse_body_for_protocol(
                             599,
                             protocol,
                         );
-                        Some((Ok(frame), (Box::pin(stream::empty()), true)))
+                        Some((Err(frame), (Box::pin(stream::empty()), true)))
                     }
                 }
             },
@@ -874,7 +826,7 @@ fn v3_io_sse_body_for_protocol(
                         protocol,
                     );
                     Some((
-                        Ok(frame),
+                        Err(frame),
                         (Box::pin(stream::empty()), interval, false, keepalive_chunk),
                     ))
                 }
@@ -1052,12 +1004,16 @@ pub(crate) async fn method_not_allowed(
     State(state): State<Arc<V3ListenerState>>,
     request: Request,
 ) -> Response<Body> {
+    let connection = request
+        .extensions()
+        .get::<V3FrontConnectionIdentity>()
+        .copied();
     let path = request.uri().path().to_string();
     let request_id = match allocate_v3_console_request_id(&state, &path, None) {
         Ok(request_id) => request_id,
-        Err(response) => return *response,
+        Err(response) => return commit_model_transport_outcome(&state, connection, *response),
     };
-    error_output_response_for_server(
+    let response = error_output_response_for_server(
         &state.server,
         &path,
         &request_id,
@@ -1065,19 +1021,24 @@ pub(crate) async fn method_not_allowed(
             V3HttpBoundaryErrorKind::MethodNotAllowed,
             "HTTP method is not allowed for this endpoint",
         ),
-    )
+    );
+    commit_model_transport_outcome(&state, connection, response)
 }
 
 pub(crate) async fn path_not_found(
     State(state): State<Arc<V3ListenerState>>,
     request: Request,
 ) -> Response<Body> {
+    let connection = request
+        .extensions()
+        .get::<V3FrontConnectionIdentity>()
+        .copied();
     let path = request.uri().path().to_string();
     let request_id = match allocate_v3_console_request_id(&state, &path, None) {
         Ok(request_id) => request_id,
-        Err(response) => return *response,
+        Err(response) => return commit_model_transport_outcome(&state, connection, *response),
     };
-    error_output_response_for_server(
+    let response = error_output_response_for_server(
         &state.server,
         &path,
         &request_id,
@@ -1085,7 +1046,8 @@ pub(crate) async fn path_not_found(
             V3HttpBoundaryErrorKind::PathNotFound,
             "HTTP path is not registered",
         ),
-    )
+    );
+    commit_model_transport_outcome(&state, connection, response)
 }
 
 pub(crate) fn project_http_input_error(
@@ -1115,6 +1077,12 @@ pub(crate) fn error_output_response_for_server_with_project_path(
 ) -> Response<Body> {
     let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
     emit_v3_frame_error_console_line(server, endpoint, request_id, &frame, project_path);
+    if endpoint.starts_with("/_routecodex/") {
+        return json_response(
+            frame.status,
+            frame.error_body.expect("typed diagnostic error"),
+        );
+    }
     responses_direct_output_response(
         frame,
         Some(Duration::from_millis(server.http_sse_keepalive_ms)),
