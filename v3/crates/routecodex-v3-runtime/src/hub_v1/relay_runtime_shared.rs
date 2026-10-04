@@ -25,7 +25,7 @@ use routecodex_v3_error::{
 };
 use routecodex_v3_provider_responses::{
     V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError, V3ProviderHttpFailure,
-    V3ResponsesProviderTarget,
+    V3ProviderResp14Raw, V3ResponsesProviderTarget,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, SseIncrementalDecoder, SseTransportLimits,
@@ -310,6 +310,34 @@ pub fn external_http_witness(response: &V3ProviderHttpFailure) -> V3ExternalHttp
         Some(reason) => witness.with_body_read_failure(reason),
         None => witness,
     }
+}
+
+/// The witness for a raw provider response the moment its head arrives,
+/// whatever its status or body kind.
+///
+/// `external_http_witness` only ever sees responses that came back through the
+/// transport-error path (`V3ProviderError::HttpStatus`). A stream does not: it
+/// is returned as `Ok`, held for buffering, and only fails once its body has
+/// been consumed. For a stream whose payload never decodes, the arrival of the
+/// head is the only moment the runtime observes that upstream really answered,
+/// so recording it here keeps the evidence honest: a received head is never
+/// reported as `no_response`. An already-buffered JSON body is kept losslessly;
+/// an SSE body is not materialized, so the empty body is the truthful statement
+/// that no readable bytes were captured. A branch that can read a body replaces
+/// this with the fuller witness.
+///
+/// Evidence capture only. It does not change client projection, provider
+/// rotation, or health.
+pub fn external_http_witness_head(response: &V3ProviderResp14Raw) -> V3ExternalHttpWitness {
+    V3ExternalHttpWitness::new(
+        response.status(),
+        response
+            .headers()
+            .iter()
+            .map(|header| (header.name.clone(), header.value.clone()))
+            .collect(),
+        response.json_body().map(<[u8]>::to_vec).unwrap_or_default(),
+    )
 }
 
 /// Build the witness from a provider transport error. A transport failure

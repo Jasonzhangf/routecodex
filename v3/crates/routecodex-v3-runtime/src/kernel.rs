@@ -924,6 +924,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         };
         let provider_response_is_stream =
             provider_raw.body_kind() == V3ProviderResponseBodyKind::Sse;
+        // The upstream answered: from this instant its head is real evidence,
+        // whatever the body turns out to be. Recorded before the body is
+        // interpreted so a stream whose payload never decodes is never reported
+        // as if no response had arrived. A branch below that can read a body
+        // replaces this with the fuller witness.
+        last_external_http = Some(crate::hub_v1::external_http_witness_head(&provider_raw));
         if !provider_response_is_stream {
             if let Err(error) = runtime_timing.finish_external() {
                 return error_output(

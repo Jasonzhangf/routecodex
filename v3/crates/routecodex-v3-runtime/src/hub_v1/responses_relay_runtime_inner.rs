@@ -556,6 +556,12 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 continue;
             }
         };
+        // The upstream answered: from this instant its head is real evidence,
+        // whatever the body turns out to be. It is recorded before the body is
+        // interpreted so a stream whose payload never decodes is never reported
+        // as if no response had arrived. A branch below that can read a body
+        // replaces this with the fuller witness.
+        last_external_http = Some(crate::hub_v1::external_http_witness_head(&provider_raw));
         if provider_raw.body_kind()
             == routecodex_v3_provider_responses::V3ProviderResponseBodyKind::Json
         {

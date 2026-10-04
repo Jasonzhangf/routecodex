@@ -866,6 +866,12 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 continue;
             }
         };
+        // The upstream answered: from this instant its head is real evidence,
+        // whatever the body turns out to be. Recorded before the body is
+        // interpreted so a stream whose payload never decodes is never reported
+        // as if no response had arrived. A branch that can read a body replaces
+        // this with the fuller witness.
+        last_external_http = Some(crate::hub_v1::external_http_witness_head(&provider_raw));
         if let Err(timing_error) = runtime_timing.finish_external() {
             return Err(V3AnthropicRelayRuntimeError::Target(timing_error));
         }

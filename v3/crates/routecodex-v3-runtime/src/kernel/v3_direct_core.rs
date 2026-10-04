@@ -656,6 +656,12 @@ where
             }
         };
         trace.push("V3ProviderResp14Raw");
+        // The upstream answered: from this instant its head is real evidence,
+        // whatever the body turns out to be. Recorded before the body is
+        // interpreted so a stream whose payload never decodes is never reported
+        // as if no response had arrived. A branch below that can read a body
+        // replaces this with the fuller witness.
+        last_external_http = Some(crate::hub_v1::external_http_witness_head(&provider_raw));
         if let Some(body) = provider_raw.json_body() {
             provider_response_snapshot = Some(json!({
                 "status": provider_raw.status(),

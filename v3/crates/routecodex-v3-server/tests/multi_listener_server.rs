@@ -1602,6 +1602,89 @@ async fn p6_real_upstream_502_is_recorded_as_provider_private_evidence() {
     failure_shutdown.send(()).unwrap();
 }
 
+/// A received response head is evidence even when the body never decodes.
+///
+/// This is the third face of bug `705d624`. The upstream really answered 200
+/// with `text/event-stream` and headers, but the stream's payload is malformed,
+/// so the relay lane fails while consuming it and never reaches a complete
+/// underlying response. Recording the witness only from a readable body would
+/// then report `no_response` — claiming upstream said nothing when it plainly
+/// did. The head must be recorded as `external_http`, and the client must still
+/// see only an aborted SSE transfer.
+#[tokio::test]
+async fn provider_stream_head_is_recorded_as_evidence_when_the_payload_never_decodes() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("provider-stream-head-evidence");
+    // `data:` that is not valid JSON: the SSE head and framing are real, the
+    // payload cannot be decoded.
+    let malformed_sse =
+        b"event: response.created\ndata: {\"type\":\"response.created\"\n\n".to_vec();
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "text/event-stream",
+        malformed_sse,
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-stream-head-evidence");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let port = handle.listeners[0].addr.port();
+
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("accept", "text/event-stream")
+        .json(&json!({"model":"client-test","input":"hello","stream":true}))
+        .send()
+        .await
+        .expect("a streaming client must receive the SSE response head");
+    assert!(
+        captures.recv().await.is_some(),
+        "the provider must be reached"
+    );
+    // Client contract: only the SSE head plus an aborted transfer. No upstream
+    // status, headers, or body is projected, and no proxy 502 is fabricated.
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    let body = response.text().await;
+    assert!(
+        body.is_err(),
+        "a malformed provider stream must abort the transfer, not project a response: {body:?}"
+    );
+
+    let evidence =
+        wait_for_v3_provider_terminal_evidence(&home_guard.codex_samples_root(port)).await;
+    assert_eq!(
+        evidence["kind"], "external_http",
+        "the upstream response head really arrived, so the evidence must not claim \
+         no response: {evidence}"
+    );
+    assert_eq!(evidence["status"], 200);
+    // The head is recorded verbatim; the payload was never readable, so no body
+    // bytes are invented for it.
+    let headers = evidence["headers"]
+        .as_array()
+        .unwrap_or_else(|| panic!("evidence headers must be an array: {evidence}"));
+    let recorded = headers
+        .iter()
+        .find(|entry| entry[0] == json!("content-type"))
+        .unwrap_or_else(|| panic!("the received head must be recorded: {evidence}"));
+    assert_eq!(recorded[1], json!("text/event-stream".as_bytes()));
+    assert_eq!(
+        evidence["body"],
+        json!(Vec::<u8>::new()),
+        "an unreadable stream body must not be materialized into the evidence: {evidence}"
+    );
+
+    std::env::remove_var("V3_P6_TEST_KEY");
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+}
+
 /// The WebSocket entry is a client boundary too: a provider terminal there must
 /// record the same provider-private evidence.
 ///

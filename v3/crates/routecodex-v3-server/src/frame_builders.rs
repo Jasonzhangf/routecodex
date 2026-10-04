@@ -389,6 +389,10 @@ pub(crate) fn responses_direct_output_response_with_console_for_protocol(
 }
 
 /// Request identity the client boundary needs to record provider-terminal evidence.
+///
+/// Copy so the admission handler allocates it once and every terminal branch
+/// passes it by value without restating the field list at each call site.
+#[derive(Clone, Copy)]
 pub(crate) struct V3ProviderTerminalEvidence<'a> {
     pub entry_protocol: &'a str,
     pub endpoint: &'a str,
