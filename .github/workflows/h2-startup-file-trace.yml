@@ -1,0 +1,35 @@
+name: H2 startup file trace
+
+on:
+  push:
+    branches:
+      - codex/4da2a38-h2-startup-trace-20261004
+
+permissions:
+  contents: read
+
+jobs:
+  linux-file-trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install file access tracer
+        run: sudo apt-get update && sudo apt-get install -y strace
+      - name: Compile the unchanged public H2 consumer
+        run: |
+          mkdir -p v3/build-control/h2-startup-trace
+          node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test h2_p6_controlled_replay --no-run > v3/build-control/h2-startup-trace/compile.log 2>&1
+      - name: Trace default parallel startup without suppressing failures
+        run: |
+          strace -f -tt -e trace=%file -o v3/build-control/h2-startup-trace/files.log node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test h2_p6_controlled_replay -- --nocapture > v3/build-control/h2-startup-trace/replay.log 2>&1
+      - name: Preserve file trace and original test result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: h2-startup-file-trace
+          path: v3/build-control/h2-startup-trace/
+          retention-days: 7
