@@ -744,7 +744,10 @@ async fn observability_records_stay_fresh_when_overview_polls_between_them() {
 
     append_observability_rows(
         &home,
-        &[observability_row_with_result("4444:second", Some("success"))],
+        &[observability_row_with_result(
+            "4444:second",
+            Some("success"),
+        )],
     );
     // A dashboard poll of the overview lands between two records polls.
     let overview = http_client()
@@ -914,7 +917,12 @@ async fn observability_records_rebuild_from_scratch_after_a_failed_refresh() {
             .as_array()
             .expect("records array")
             .iter()
-            .map(|row| row["request_key"].as_str().expect("request_key").to_string())
+            .map(|row| {
+                row["request_key"]
+                    .as_str()
+                    .expect("request_key")
+                    .to_string()
+            })
             .collect();
         keys.sort();
         keys

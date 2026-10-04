@@ -411,7 +411,10 @@ fn a_symlinked_log_file_is_capped_by_its_target_length() {
         .unwrap();
 
     assert!(
-        fs::symlink_metadata(&link).unwrap().file_type().is_symlink(),
+        fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink(),
         "rotating a symlinked log_file must not replace the link itself"
     );
     assert!(
@@ -489,7 +492,9 @@ fn an_unrotatable_debug_log_does_not_block_runtime_startup() {
             "{label}: the cap must still be enforced by truncating the live file"
         );
         assert!(
-            fs::read_to_string(&file).unwrap().contains("after rotation"),
+            fs::read_to_string(&file)
+                .unwrap()
+                .contains("after rotation"),
             "{label}: the sink must keep writing to the live file"
         );
         fs::remove_dir_all(path).unwrap();
