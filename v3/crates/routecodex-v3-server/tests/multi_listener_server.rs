@@ -8,7 +8,7 @@ use axum::{
     routing::post,
     Router,
 };
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{future::join_all, SinkExt, StreamExt};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
@@ -5658,6 +5658,60 @@ async fn responses_direct_sample_persist_failure_is_reported_after_live_sse_succ
     assert!(persist_failures
         .iter()
         .all(|failure| { !failure.request_id.is_empty() && !failure.reason.is_empty() }));
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_full_sampling_burst_does_not_drop_sample_writes() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("full-sampling-burst-no-drop");
+    let (base_url, _captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-key");
+    let mut manifest = p6_manifest(free_port(), free_port(), &base_url);
+    manifest.debug.snapshots = true;
+    manifest.debug.codex_samples = true;
+    manifest.debug.full_codex_sampling = true;
+    manifest.debug.snapshot_direct = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let port = handle.listeners[0].addr.port();
+    let samples_root = home_guard.codex_samples_root(port);
+
+    let client = reqwest::Client::new();
+    let requests = (0..80)
+        .map(|_| async {
+            client
+                .post(format!("http://127.0.0.1:{port}/v1/responses"))
+                .json(&json!({
+                    "model": "client-test",
+                    "input": "burst sample writes stay verbatim",
+                    "stream": true
+                }))
+                .send()
+                .await
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    for response in join_all(requests).await {
+        assert_eq!(response.status(), 200);
+        let body = response.text().await.expect("complete SSE body");
+        assert!(body.contains("response.completed"), "{body}");
+    }
+
+    let failures = handle.shutdown().await;
+    assert!(
+        failures.is_empty(),
+        "full-sampling burst must not drop sample writes: {failures:?}"
+    );
+    let written = fs::read_dir(&samples_root)
+        .unwrap()
+        .filter_map(Result::ok)
+        .count();
+    assert!(
+        written >= 80,
+        "expected at least one request sample dir per request, found {written}"
+    );
+
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
 }
