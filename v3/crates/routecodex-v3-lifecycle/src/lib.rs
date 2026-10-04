@@ -202,6 +202,39 @@ fn bool_is_false(value: &bool) -> bool {
     !*value
 }
 
+fn apply_v3_runtime_fd_limit(configured: Option<u64>) -> Result<(), V3LifecycleError> {
+    let Some(limit) = configured else {
+        return Ok(());
+    };
+    if limit == 0 {
+        return Err(V3LifecycleError::Validation(
+            "runtime fd_limit must be non-zero".to_string(),
+        ));
+    }
+    let mut current = std::mem::MaybeUninit::<libc::rlimit>::uninit();
+    if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, current.as_mut_ptr()) } != 0 {
+        return Err(V3LifecycleError::Io(std::io::Error::last_os_error()));
+    }
+    let current = unsafe { current.assume_init() };
+    let hard = current.rlim_max;
+    let target = if hard == libc::RLIM_INFINITY {
+        limit as libc::rlim_t
+    } else {
+        limit.min(hard as u64) as libc::rlim_t
+    };
+    if current.rlim_cur >= target {
+        return Ok(());
+    }
+    let next = libc::rlimit {
+        rlim_cur: target,
+        rlim_max: hard,
+    };
+    if unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &next) } != 0 {
+        return Err(V3LifecycleError::Io(std::io::Error::last_os_error()));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 struct ControlRestartPlan {
     control_instance_id: String,
@@ -858,9 +891,17 @@ impl V3ManagedLifecycle {
         executable_path: impl AsRef<Path>,
     ) -> Result<(), V3LifecycleError> {
         let (declaration, manifest) = self.declaration(&executable_path)?;
+        let runtime_fd_limit = load_v3_config_snapshot_from_path(&self.config_path)?
+            .runtime
+            .fd_limit;
         validate_auth_handles(&manifest)?;
-        self.run_managed_child_with_declaration(executable_path, declaration, manifest)
-            .await
+        self.run_managed_child_with_declaration(
+            executable_path,
+            declaration,
+            manifest,
+            runtime_fd_limit,
+        )
+        .await
     }
 
     async fn run_managed_child_with_declaration(
@@ -868,11 +909,13 @@ impl V3ManagedLifecycle {
         _executable_path: impl AsRef<Path>,
         declaration: V3ManagedInstanceDeclaration,
         manifest: V3Config05ManifestPublished,
+        runtime_fd_limit: Option<u64>,
     ) -> Result<(), V3LifecycleError> {
         if self.force_sse_dump {
             std::env::set_var("ROUTECODEX_V3_SSE_DUMP", "1");
         }
         validate_auth_handles(&manifest)?;
+        apply_v3_runtime_fd_limit(runtime_fd_limit)?;
         let instance_dir = self.instance_dir(&declaration.instance_id);
         ensure_private_dir(&instance_dir)?;
         if let Err(error) = verify_published_declaration(&instance_dir, &declaration) {
