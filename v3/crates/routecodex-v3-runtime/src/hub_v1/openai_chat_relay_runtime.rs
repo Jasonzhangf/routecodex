@@ -111,8 +111,6 @@ pub enum V3OpenAiChatRelayRuntimeError {
     Target(String),
     #[error("V3 OpenAI Chat provider pool exhausted after {attempted_candidates:?}")]
     ProviderPoolExhausted { attempted_candidates: Vec<String> },
-    #[error("V3 OpenAI Chat requested direct provider model not found: {0}")]
-    ModelNotFound(String),
     #[error("V3 OpenAI Chat provider contract failed: {0}")]
     Provider(#[from] V3ProviderError),
     #[error("V3 OpenAI Chat provider compat failed: {0}")]
@@ -266,9 +264,6 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
     )
     .await
     .map_err(|error| match error {
-        V3RelayCoreError::ModelNotFound(message) => {
-            V3OpenAiChatRelayRuntimeError::ModelNotFound(message)
-        }
         // 治理层拦截（Mode B web-search）必须保留原变体：fail-fast 投影语义
         // 由 server 端 `project_v3_openai_chat_relay_runtime_failure` 区分。
         V3RelayCoreError::WebSearchIntercepted(_) => {
@@ -299,12 +294,6 @@ pub fn project_v3_openai_chat_relay_runtime_failure(
         V3OpenAiChatRelayRuntimeError::ProviderPoolExhausted { .. }
     );
     let source = match error {
-        V3OpenAiChatRelayRuntimeError::ModelNotFound(message) => build_v3_error_01_source_raised(
-            V3ErrorSourceKind::ModelNotFound,
-            "V3Target10ConcreteProviderSelected",
-            "direct_model_not_found",
-            message,
-        ),
         V3OpenAiChatRelayRuntimeError::ProviderPoolExhausted {
             attempted_candidates,
         } => provider_pool_exhausted_source(

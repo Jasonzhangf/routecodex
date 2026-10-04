@@ -1010,6 +1010,7 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-config/src/lib.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/models_catalog.rs
   - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
   resource_bindings:
   - v3.config.published_manifest
@@ -1029,6 +1030,7 @@ features:
   allowed_paths:
   - v3/crates/routecodex-v3-config/src/lib.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/models_catalog.rs
   - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-function-map.yml
@@ -1037,6 +1039,7 @@ features:
   - docs/architecture/wiki/v3-live-provider-compat-parity.md
   - docs/design/codex-model-capability-contract.md
   - docs/goals/v3-models-capability-catalog-test-design.md
+  - docs/goals/models-catalog-direct-surface-run-notes-20261003.md
   - .agents/skills/rcc-dev-skills/references/93-lessons-2026-07.md
   - scripts/architecture/verify-v3-architecture-docs.mjs
   - note.md
@@ -1062,8 +1065,14 @@ features:
   - npm run test:v3-workspace
   - git diff --check
   required_contract:
-  - /v1/models is scoped by the current listener routing group; enabled provider models
-    outside that route group must not be exposed to Codex.
+  - '/v1/models projects three surfaces. (1) Route-group reachable visible ids, scoped
+    by the current listener routing group and narrowed by `expose_models` when it is
+    non-empty. (2) The direct-routing surface: every enabled provider model is
+    addressable as `provider.model` and must always be listed, because `expose_models`
+    names are client entry names rather than provider model ids. (3) Client entry names:
+    an `expose_models` name that matches no provider model is published as a virtual
+    entry with `direct_route: false`, and takes the same normal Virtual Router path as
+    `auto` instead of pinning a provider.'
   - Route group and forwarder expansion belongs to the config Manifest helper; Server
     only calls the helper and projects JSON, and must not interpret route targets
     directly.
@@ -2020,6 +2029,12 @@ features:
     explicit model routes map inbound model to declared targets, while default/no-explicit-model
     paths are filtered by configured target model ids before provider send. Provider
     aliases are not runtime routing truth.
+  - '`provider.model` direct routing pins a provider only when the segment before the
+    first `.` is an enabled provider id that declares that model or one of its aliases.
+    Every other client model string — no dot, an unknown provider segment, or an enabled
+    provider that declares no such model — falls back to normal classification, the same
+    path `auto` and virtual catalog entry names take. Only a resolved direct model that
+    cannot serve the request media requirement fails explicitly without rerouting.'
   - The stable gpt-5.5 Codex client surface remains a capability/priority-routed built-in
     selector and is not narrowed to one provider model.
   - 'Weighted selection is priority-first: only equal-minimum-priority targets participate
