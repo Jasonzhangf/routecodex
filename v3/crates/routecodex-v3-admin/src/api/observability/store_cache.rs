@@ -92,13 +92,13 @@ struct V3ObsPortCache {
 /// Process-wide observability read cache.
 ///
 /// `projected` is the folded query projection of `ports` in configured listener
-/// order, keyed by the store identities it was folded from, so a burst of
-/// polling endpoints and SSE clients shares one fold instead of each re-reading
-/// and re-projecting the whole history.
+/// order, refolded whenever any port's content changed or the configured path
+/// list changed, so a burst of polling endpoints and SSE clients shares one fold
+/// instead of each re-reading and re-projecting the whole history.
 #[derive(Default)]
 struct V3ObsStoreCache {
     ports: BTreeMap<PathBuf, V3ObsPortCache>,
-    projected_from: Vec<(PathBuf, u64, u64, u64)>,
+    projected_paths: Vec<PathBuf>,
     projected: Option<Arc<Vec<QueryRow>>>,
 }
 
@@ -115,9 +115,10 @@ fn v3_obs_cache_guard() -> std::sync::MutexGuard<'static, V3ObsStoreCache> {
 
 /// Refreshes one listener store cache entry from disk.
 ///
-/// Returns `false` when the store file does not exist yet ("no traffic recorded
-/// for this listener"). A store that exists but cannot be read or decoded is an
-/// explicit error and never becomes an empty result.
+/// Returns whether this port's cached rows changed, so the caller refolds the
+/// shared projection exactly when it must. An absent store file is an empty
+/// history for that listener, not an error; a store that exists but cannot be
+/// read or decoded is an explicit error and never becomes an empty result.
 fn refresh_v3_obs_port_cache(
     port: u16,
     path: &PathBuf,
@@ -126,8 +127,11 @@ fn refresh_v3_obs_port_cache(
     let metadata = match std::fs::metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            // Only a port that still held rows is a change; a store that was
+            // already absent stays absent without invalidating the projection.
+            let changed = entry.present || !entry.rows.is_empty();
             *entry = V3ObsPortCache::default();
-            return Ok(false);
+            return Ok(changed);
         }
         Err(error) => {
             return Err(format!("observability store {port} unavailable: {error}"));
@@ -142,7 +146,7 @@ fn refresh_v3_obs_port_cache(
         && entry.len == len
         && entry.modified == modified
     {
-        return Ok(true);
+        return Ok(false);
     }
     // The store contract permits only append-in-place or atomic replacement, so
     // the cache resumes only for the same device/inode with a strictly larger
@@ -233,29 +237,35 @@ pub(super) struct V3ObsProjection {
 /// Reads the folded projection of every configured listener store.
 ///
 /// Only records appended since the previous read are decoded; the fold itself
-/// is reused until a store identity changes. The cache lock also single-flights
-/// the concurrent polls of every open WebUI tab.
+/// is reused until a store's content changes or the configured path list
+/// changes. The cache lock also single-flights the concurrent polls of every
+/// open WebUI tab.
 pub(super) fn read_v3_obs_projection(
     state: &AppState,
 ) -> Result<V3ObsProjection, (StatusCode, Value)> {
     let ports = observability_store_paths(state)
         .map_err(|error| (StatusCode::BAD_GATEWAY, json!({ "error": error })))?;
     let mut cache = v3_obs_cache_guard();
-    let mut identity = Vec::with_capacity(ports.len());
+    let mut projected_paths = Vec::with_capacity(ports.len());
     let mut max_seq = 0u64;
+    let mut changed = false;
     for (port, path) in &ports {
         let entry = cache.ports.entry(path.clone()).or_default();
         match refresh_v3_obs_port_cache(*port, path, entry) {
-            Ok(true) => max_seq = max_seq.max(entry.max_seq),
-            Ok(false) => {}
+            Ok(port_changed) => {
+                changed |= port_changed;
+                if entry.present {
+                    max_seq = max_seq.max(entry.max_seq);
+                }
+            }
             Err(error) => return Err((StatusCode::BAD_GATEWAY, json!({ "error": error }))),
         }
-        identity.push((path.clone(), entry.dev, entry.ino, entry.offset));
+        projected_paths.push(path.clone());
     }
     cache
         .ports
         .retain(|path, _| ports.iter().any(|(_, known)| known == path));
-    if cache.projected.is_none() || cache.projected_from != identity {
+    if cache.projected.is_none() || changed || cache.projected_paths != projected_paths {
         let folded = project_query_rows(
             ports
                 .iter()
@@ -263,7 +273,7 @@ pub(super) fn read_v3_obs_projection(
                 .flat_map(|entry| entry.rows.iter()),
         );
         cache.projected = Some(Arc::new(folded));
-        cache.projected_from = identity;
+        cache.projected_paths = projected_paths;
     }
     Ok(V3ObsProjection {
         rows: Arc::clone(

@@ -867,6 +867,10 @@ async fn records(
                 .into_response()
         }
     };
+    // The matched rows are materialised as an owned, contiguous Vec: the stats,
+    // facet and by-port passes below all walk it after the page sort, and
+    // iterating owned rows there is measurably cheaper than chasing sorted
+    // references back into the shared projection.
     let mut filtered: Vec<QueryRow> = projection
         .rows
         .iter()
