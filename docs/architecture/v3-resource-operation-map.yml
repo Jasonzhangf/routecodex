@@ -173,8 +173,20 @@ resources:
     owner_node: V3ConfigLoadedSnapshot
     identity: [canonicalConfigPath, sourceSha256]
     allowed_writers: [V3ConfigStore::load_snapshot_with_source_identity, V3UserConfigStore::load_snapshot_with_source_identity]
-    allowed_readers: [V3ManagedLifecycle::declaration]
+    allowed_readers: [V3ManagedLifecycle::declaration_with_runtime]
     forbidden_writers: [routecodex-v3-lifecycle, routecodex-v3-cli, routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.config.runtime_limit
+    resource_kind: runtime_process_limit
+    lifecycle: v3.config.compile
+    owner_crate: routecodex-v3-config
+    owner_node: V3ConfigLoadedSnapshot
+    identity: [canonicalConfigPath, sourceSha256]
+    allowed_writers: [compile_runtime]
+    allowed_readers: [V3ManagedLifecycle::declaration_with_runtime, apply_v3_runtime_fd_limit]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-provider-responses, routecodex-v3-debug]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored

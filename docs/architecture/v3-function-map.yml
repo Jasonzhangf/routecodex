@@ -150,6 +150,7 @@ features:
   owner_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
   resource_bindings:
   - v3.config.source_identity
+  - v3.config.runtime_limit
   - v3.config.published_manifest
   - v3.server.listener_set
   - v3.lifecycle.instance_declaration

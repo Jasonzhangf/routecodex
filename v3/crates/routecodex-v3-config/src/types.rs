@@ -1,6 +1,7 @@
 use crate::attempt_store::{V3AttemptStorePolicyAuthoringConfig, V3AttemptStorePolicyManifest};
 use crate::memory_raw_capture::{V3MemoryRawCaptureAuthoringConfig, V3MemoryRawCaptureManifest};
 use crate::provider_priority_schedule::V3ProviderPriorityScheduleAuthoringConfig;
+use crate::runtime_config::{V3RuntimeAuthoringConfig, V3RuntimeManifest};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -34,6 +35,8 @@ pub struct V3Config02AuthoringParsed {
     pub admin_webui: V3AdminWebuiAuthoringConfig,
     #[serde(default)]
     pub memory_raw_capture: V3MemoryRawCaptureAuthoringConfig,
+    #[serde(default, skip_serializing_if = "V3RuntimeAuthoringConfig::is_default")]
+    pub runtime: V3RuntimeAuthoringConfig,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -945,6 +948,7 @@ pub struct V3Config04ResourceRegistryBuilt {
     pub error: V3ErrorManifest,
     pub admin_webui: Option<V3AdminWebuiManifest>,
     pub memory_raw_capture: V3MemoryRawCaptureManifest,
+    pub runtime: V3RuntimeManifest,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
