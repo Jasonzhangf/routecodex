@@ -278,8 +278,7 @@ pub(crate) struct V3RelayProviderFailurePolicyState<'state> {
     pub(crate) failed_candidates: &'state mut BTreeSet<String>,
     pub(crate) same_candidate_retries: &'state mut BTreeMap<String, usize>,
     pub(crate) trace: &'state mut Vec<&'static str>,
-    pub(crate) last_eligible_external_http:
-        &'state mut Option<routecodex_v3_error::V3EligibleExternalHttpResponse>,
+    pub(crate) last_external_http: &'state mut Option<routecodex_v3_error::V3ExternalHttpWitness>,
 }
 
 pub(crate) struct V3RelayProviderTargetResolutionInput<'input> {
@@ -1489,7 +1488,7 @@ fn terminal_disposition_for(
     decision.clone().try_into_terminal().ok().map(|terminal| {
         V3ErrorHandlingCenter::provider_terminal_disposition(
             terminal,
-            state.last_eligible_external_http.clone(),
+            state.last_external_http.clone(),
         )
     })
 }

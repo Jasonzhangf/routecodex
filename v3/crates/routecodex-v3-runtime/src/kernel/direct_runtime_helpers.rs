@@ -136,32 +136,13 @@ fn record_v3_direct_provider_success(
         .map_err(|error| runtime_source("V3ProviderHealthStateMutated", error))
 }
 
-fn eligible_external_http_from_provider_error(
-    error: &V3ProviderError,
-) -> Option<V3EligibleExternalHttpResponse> {
-    let V3ProviderError::HttpStatus { response } = error else {
-        return None;
-    };
-    if response.body_read_failure.is_some() {
-        return None;
-    }
-    V3EligibleExternalHttpResponse::new(
-        response.status,
-        response
-            .headers
-            .iter()
-            .map(|header| (header.name.clone(), header.value.clone()))
-            .collect(),
-        response.body.clone(),
-    )
-}
-
 #[cfg(test)]
 mod external_http_witness_tests {
+    use crate::hub_v1::external_http_witness_from_provider_error;
     use super::*;
 
     #[test]
-    fn direct_retains_exact_real_http_error_and_excludes_upstream_502() {
+    fn direct_retains_exact_real_http_error_including_upstream_502() {
         let response = routecodex_v3_provider_responses::V3ProviderHttpFailure {
             request_id: "request".into(),
             provider_id: "provider".into(),
@@ -176,17 +157,21 @@ mod external_http_witness_tests {
         let error = V3ProviderError::HttpStatus {
             response: Box::new(response.clone()),
         };
-        let witness = eligible_external_http_from_provider_error(&error).unwrap();
+        let witness = external_http_witness_from_provider_error(&error).unwrap();
         assert_eq!(witness.status(), 429);
         assert_eq!(witness.headers()[0].1, b"text/html; charset=utf-8");
         assert_eq!(witness.body(), response.body);
+        // An upstream 502 is real evidence even though it never reaches a client.
         let upstream_502 = V3ProviderError::HttpStatus {
             response: Box::new(routecodex_v3_provider_responses::V3ProviderHttpFailure {
                 status: 502,
+                body: b"bad gateway".to_vec(),
                 ..response
             }),
         };
-        assert!(eligible_external_http_from_provider_error(&upstream_502).is_none());
+        let witness = external_http_witness_from_provider_error(&upstream_502).unwrap();
+        assert_eq!(witness.status(), 502);
+        assert_eq!(witness.body(), b"bad gateway");
     }
 }
 

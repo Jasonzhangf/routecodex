@@ -569,22 +569,40 @@ impl V3Error05TerminalDecision {
     }
 }
 
-/// A real upstream HTTP error retained across provider attempts by the
-/// request owner. The original body bytes are kept outside diagnostic JSON.
+/// The provider's real external HTTP response, retained across provider
+/// attempts by the request owner. It keeps the status, headers, and original
+/// body bytes; the body is never reformatted or truncated, and a failed body
+/// read is recorded as such instead of being reported as a missing response.
+///
+/// The client *projection* eligibility rule (bug `705d624` keeps HTTP 502 out
+/// of any client response) is deliberately not part of this type. A response
+/// that is not eligible for client projection is still a real upstream
+/// response, and recording it as evidence must not be blocked by the rule that
+/// decides whether a client may see it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3EligibleExternalHttpResponse {
+pub struct V3ExternalHttpWitness {
     status: u16,
     headers: Vec<(String, Vec<u8>)>,
     body: Vec<u8>,
+    body_read_failure: Option<String>,
 }
 
-impl V3EligibleExternalHttpResponse {
-    pub fn new(status: u16, headers: Vec<(String, Vec<u8>)>, body: Vec<u8>) -> Option<Self> {
-        ((400..=599).contains(&status) && status != 502).then_some(Self {
+impl V3ExternalHttpWitness {
+    pub fn new(status: u16, headers: Vec<(String, Vec<u8>)>, body: Vec<u8>) -> Self {
+        Self {
             status,
             headers,
             body,
-        })
+            body_read_failure: None,
+        }
+    }
+
+    /// Mark that the response head was received but its body could not be read
+    /// to completion. The status and headers are still real; only the body is
+    /// incomplete.
+    pub fn with_body_read_failure(mut self, reason: impl Into<String>) -> Self {
+        self.body_read_failure = Some(reason.into());
+        self
     }
 
     pub fn status(&self) -> u16 {
@@ -598,11 +616,27 @@ impl V3EligibleExternalHttpResponse {
     pub fn body(&self) -> &[u8] {
         &self.body
     }
+
+    pub fn body_read_failure(&self) -> Option<&str> {
+        self.body_read_failure.as_deref()
+    }
 }
 
-/// Provider failures never authorize a client error payload.
+/// The provider failure terminal is either the real upstream HTTP response the
+/// provider returned, or no HTTP response at all.
+///
+/// Provider failures never authorize a client error payload: neither branch
+/// fabricates a proxy 502, and neither branch decides what the client sees —
+/// every provider terminal is a client transport break. The real response is
+/// carried here only so the boundary can record it as provider-private
+/// evidence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum V3ProviderTerminalDisposition {
+    /// A real upstream HTTP response was received and is recorded losslessly as
+    /// provider-private evidence, whatever its status.
+    ExternalHttp(V3ExternalHttpWitness),
+    /// No upstream HTTP response exists at all: the provider was never reached,
+    /// or the transport failed before any response head arrived.
     NoResponse,
 }
 
@@ -1021,7 +1055,7 @@ pub struct V3ErrorHandlingCenter;
 impl V3ErrorHandlingCenter {
     pub fn provider_terminal_disposition(
         terminal: V3Error05TerminalDecision,
-        _witness: Option<V3EligibleExternalHttpResponse>,
+        witness: Option<V3ExternalHttpWitness>,
     ) -> V3ProviderTerminalDisposition {
         debug_assert_eq!(
             terminal
@@ -1033,9 +1067,14 @@ impl V3ErrorHandlingCenter {
                 .source_kind,
             V3ErrorSourceKind::ProviderFailure,
         );
-        // Upstream HTTP evidence is internal. Exhaustion never authorizes a
-        // client error response, including a real upstream HTTP error.
-        V3ProviderTerminalDisposition::NoResponse
+        // The witness is evidence, never a client projection: exhaustion does
+        // not authorize a client error response, including a real upstream HTTP
+        // error, and the boundary records the witness as provider-private
+        // evidence before it breaks the client transport.
+        match witness {
+            Some(response) => V3ProviderTerminalDisposition::ExternalHttp(response),
+            None => V3ProviderTerminalDisposition::NoResponse,
+        }
     }
 
     pub fn project_terminal_decision(

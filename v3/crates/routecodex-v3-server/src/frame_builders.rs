@@ -184,7 +184,10 @@ pub(crate) fn commit_model_transport_outcome(
     response: Response<Body>,
 ) -> Response<Body> {
     if let Some(outcome) = response.extensions().get::<V3ModelClientNoResponse>() {
-        return provider_terminal_response(
+        // A model-entry outcome with no client payload breaks the client transport
+        // without a fabricated error. It carries no provider response head, so it has
+        // no provider-terminal witness to record.
+        return model_transport_break_response(
             state,
             connection,
             routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
@@ -362,51 +365,97 @@ pub(crate) fn responses_direct_output_response_with_console_for_protocol(
     builder.body(Body::from(body)).expect("typed response")
 }
 
+/// Request identity the client boundary needs to record provider-terminal evidence.
+///
+/// Copy so the admission handler allocates it once and every terminal branch
+/// passes it by value without restating the field list at each call site.
+#[derive(Clone, Copy)]
+pub(crate) struct V3ProviderTerminalEvidence<'a> {
+    pub entry_protocol: &'a str,
+    pub endpoint: &'a str,
+    pub request_id: &'a str,
+}
+
 /// Project a provider-terminal outcome onto the client boundary.
 ///
 /// The client entry is never coupled to a provider. A provider terminal is either
 /// absorbed by a remaining candidate (the runtime keeps rotating before it reaches
 /// this point) or becomes a client transport break. The provider's own status,
-/// headers, and body are provider-private: they stay in the typed Error chain and in
-/// provider evidence, and they must not be projected as a client response. The
-/// disposition is matched exhaustively so a new terminal shape has to state its client
-/// boundary explicitly instead of inheriting provider passthrough.
+/// headers, and body are provider-private: they are recorded as provider-terminal
+/// evidence, they stay in the typed Error chain, and they must not be projected as
+/// a client response. The disposition is matched exhaustively so a new terminal
+/// shape has to state its client boundary explicitly instead of inheriting
+/// provider passthrough.
 pub(crate) fn provider_terminal_response(
+    state: &Arc<V3ListenerState>,
+    connection: Option<V3FrontConnectionIdentity>,
+    disposition: routecodex_v3_error::V3ProviderTerminalDisposition,
+    requested_stream: bool,
+    evidence: V3ProviderTerminalEvidence<'_>,
+) -> Response<Body> {
+    // The provider's real error is recorded before the transport breaks. This is
+    // the only production reader of the witness: without it the provider status,
+    // headers, and body would be carried through every attempt and discarded.
+    // The debug sink cannot fail this boundary: it records persistence failures
+    // in its own ledger and reports them out of band.
+    persist_v3_provider_terminal_evidence(
+        state,
+        evidence.entry_protocol,
+        evidence.endpoint,
+        evidence.request_id,
+        &disposition,
+    );
+    model_transport_break_response(state, connection, disposition, requested_stream)
+}
+
+/// Break the model client's transport for a terminal outcome that has no client payload.
+///
+/// This is the single implementation of the model-client break. The provider terminal
+/// entry `provider_terminal_response` records the provider witness first and then
+/// delegates here; a model-entry outcome that carries no provider response enters
+/// directly through `commit_model_transport_outcome`. Neither entry projects a provider
+/// status, header, or body to the client, and only the provider terminal entry has a
+/// witness to record.
+fn model_transport_break_response(
     state: &V3ListenerState,
     connection: Option<V3FrontConnectionIdentity>,
     disposition: routecodex_v3_error::V3ProviderTerminalDisposition,
     requested_stream: bool,
 ) -> Response<Body> {
     match disposition {
-        routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => {
-            if requested_stream {
-                // A streaming client must observe a transport failure. The response
-                // head is written so the client stays in streaming mode and retries
-                // the same request, instead of reading a header-less close as a
-                // normal end of stream. No client payload and no fabricated upstream
-                // status is sent; the typed Error chain keeps the real cause.
-                if let Some(connection) = connection {
-                    // Claim the boundary before Hyper can enqueue the response head, so
-                    // a concurrent restart replacement defers instead of closing the
-                    // socket and dropping that head. Restart closeout carries
-                    // no client error frame.
-                    state
-                        .front_transport_broker
-                        .claim_current_connection_transport_break(connection);
-                }
-                return v3_sse_transport_disconnect_response(state, connection);
-            }
-            let connection = connection.expect("accepted Front connection identity");
-            assert!(
-                state
-                    .front_transport_broker
-                    .abort_current_connection_without_response(connection),
-                "current Front connection must be registered before no-response abort"
-            );
-            // The socket has been closed before Hyper can write this return value.
-            Response::new(Body::empty())
-        }
+        // A real compatible upstream HTTP error is still a provider error. Its real
+        // status, headers, and body are recorded as provider-terminal evidence and in
+        // the Error chain, and the client observes a transport break instead of the
+        // provider's response.
+        routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(_)
+        | routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => {}
     }
+    if requested_stream {
+        // A streaming client must observe a transport failure. The response
+        // head is written so the client stays in streaming mode and retries
+        // the same request, instead of reading a header-less close as a
+        // normal end of stream. No client payload and no fabricated upstream
+        // status is sent; the typed Error chain keeps the real cause.
+        if let Some(connection) = connection {
+            // Claim the boundary before Hyper can enqueue the response head, so
+            // a concurrent restart replacement defers instead of closing the
+            // socket and dropping that head. A closeout that already committed
+            // keeps its `503` as the client-visible boundary.
+            state
+                .front_transport_broker
+                .claim_current_connection_transport_break(connection);
+        }
+        return v3_sse_transport_disconnect_response(state, connection);
+    }
+    let connection = connection.expect("accepted Front connection identity");
+    assert!(
+        state
+            .front_transport_broker
+            .abort_current_connection_without_response(connection),
+        "current Front connection must be registered before no-response abort"
+    );
+    // The socket has been closed before Hyper can write this return value.
+    Response::new(Body::empty())
 }
 
 /// Break the client SSE transport for a provider terminal that has no client payload.

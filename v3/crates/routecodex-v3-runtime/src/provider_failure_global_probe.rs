@@ -186,6 +186,7 @@ fn provider_probe_error(error: V3ProviderError) -> V3ProviderHealthProbeFailure 
     match error {
         V3ProviderError::HttpStatus { .. }
         | V3ProviderError::Transport { .. }
+        | V3ProviderError::ResponseBodyUnreadable { .. }
         | V3ProviderError::WebSocketTransport { .. }
         | V3ProviderError::WebSocketProtocol { .. }
         | V3ProviderError::WebSocketProviderEvent { .. }
