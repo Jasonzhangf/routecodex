@@ -19,6 +19,12 @@ jobs:
           node-version: 24
       - name: Install file access tracer
         run: sudo apt-get update && sudo apt-get install -y strace
+      - name: Install the same V3 binaries as the failed host gate
+        run: |
+          npm ci
+          npm --prefix v3 ci
+          npm run install:v3
+          npm run fix:cli-shim
       - name: Compile the unchanged public H2 consumer
         run: |
           mkdir -p v3/build-control/h2-startup-trace
