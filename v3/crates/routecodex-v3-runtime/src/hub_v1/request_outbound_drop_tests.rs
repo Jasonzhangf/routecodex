@@ -49,3 +49,50 @@ fn unmapped_key_with_bracket_is_actually_removed_from_chat_wire() {
     assert!(wire.get("weird]key").is_none(), "{wire}");
     assert_eq!(wire["model"], json!("gpt-test"), "{wire}");
 }
+
+#[test]
+fn responses_target_carries_drop_records_for_unrepresentable_keys() {
+    // The Responses provider wire has no slot for a vendor key. The stage-3
+    // carrier must RETURN the record so the request-scoped context can stamp
+    // and persist it; a wrapper that swallows it leaves only a stderr line.
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "x-vendor-flag": true
+    });
+
+    let (wire, drops) =
+        build_v3_openai_responses_standard_request_for_selected_target_with_drops(&payload, false)
+            .expect("unrepresentable vendor key must drop, not fail the request");
+
+    assert!(wire.get("x-vendor-flag").is_none(), "{wire}");
+    let record = drops
+        .iter()
+        .find(|record| record.json_path == "$[\"x-vendor-flag\"]")
+        .unwrap_or_else(|| panic!("expected a drop record for the vendor key, got {drops:?}"));
+    assert_eq!(record.canonical_value, json!(true));
+    assert_eq!(record.target_protocol, "responses");
+}
+
+#[test]
+fn anthropic_target_carries_drop_records_for_unrepresentable_keys() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "x-vendor-flag": true
+    });
+
+    let (wire, drops) = build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops(
+        &payload,
+        V3HubEntryProtocol::Responses,
+    )
+    .expect("unrepresentable vendor key must drop, not fail the request");
+
+    assert!(wire.get("x-vendor-flag").is_none(), "{wire}");
+    assert!(
+        drops
+            .iter()
+            .any(|record| record.json_path == "$[\"x-vendor-flag\"]"),
+        "expected a drop record for the vendor key, got {drops:?}"
+    );
+}

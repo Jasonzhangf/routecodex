@@ -1,11 +1,10 @@
 use super::request_outbound_format::{
-    project_outbound_payload_for_selected_target_protocol,
     project_outbound_payload_for_selected_target_protocol_with_drops, V3OutboundTargetProtocol,
 };
 use super::{
-    build_v3_anthropic_provider_request_source_from_chat_canonical,
+    build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops,
     build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording,
-    build_v3_openai_responses_standard_request_for_selected_target,
+    build_v3_openai_responses_standard_request_for_selected_target_with_drops,
     classify_v3_provider_compat_error, encode_v3_responses_semantic_as_anthropic_request,
     provider_protocol_compat_id, ProviderReqCompat06Projected, V3HubOpaquePayload,
     V3HubProviderWireProtocol, V3HubReqOutbound07ProviderSemantic, V3ProviderCompatError,
@@ -292,19 +291,24 @@ fn build_v3_provider_standard_protocol_payload_from_req07(
             payload
         }
         V3HubProviderWireProtocol::Responses => {
-            build_v3_openai_responses_standard_request_for_selected_target(
-                input.provider_semantic_payload(),
-                selected
-                    .model_capabilities
-                    .iter()
-                    .any(|capability| capability == "web_search"),
-            )?
+            let (payload, responses_drops) =
+                build_v3_openai_responses_standard_request_for_selected_target_with_drops(
+                    input.provider_semantic_payload(),
+                    selected
+                        .model_capabilities
+                        .iter()
+                        .any(|capability| capability == "web_search"),
+                )?;
+            drops.extend(responses_drops);
+            payload
         }
         V3HubProviderWireProtocol::Anthropic => {
-            let source = build_v3_anthropic_provider_request_source_from_chat_canonical(
-                input.provider_semantic_payload(),
-                input.entry_protocol(),
-            )?;
+            let (source, anthropic_drops) =
+                build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops(
+                    input.provider_semantic_payload(),
+                    input.entry_protocol(),
+                )?;
+            drops.extend(anthropic_drops);
             encode_v3_responses_semantic_as_anthropic_request(source)
                 .map_err(|error| error.to_string())?
         }

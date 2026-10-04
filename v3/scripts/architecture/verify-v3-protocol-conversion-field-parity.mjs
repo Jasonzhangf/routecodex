@@ -587,7 +587,8 @@ const providerReqCompat = functionSlice(
 );
 for (const phrase of [
   'V3HubProviderWireProtocol::Anthropic',
-  'let source = build_v3_anthropic_provider_request_source_from_chat_canonical(',
+  'let (source, anthropic_drops) =',
+  'build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops(',
   'encode_v3_responses_semantic_as_anthropic_request(source)',
   'input.provider_semantic_payload()',
   'input.entry_protocol()',

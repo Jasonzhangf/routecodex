@@ -94,28 +94,55 @@ pub(crate) fn build_v3_openai_responses_standard_request_for_selected_target(
     payload: &Value,
     has_web_search_capability: bool,
 ) -> Result<Value, String> {
+    let drop_context = V3ProjectionDropContext::disabled();
+    let (value, mut drops) =
+        build_v3_openai_responses_standard_request_for_selected_target_with_drops(
+            payload,
+            has_web_search_capability,
+        )?;
+    drop_context.restamp_and_emit(&mut drops);
+    Ok(value)
+}
+
+/// non-error carrier：把投影阶段的丢弃记录交给请求作用域盖章落盘。
+pub(crate) fn build_v3_openai_responses_standard_request_for_selected_target_with_drops(
+    payload: &Value,
+    has_web_search_capability: bool,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
     if payload.get("previous_response_id").is_some() {
         return Err(
             "UnmappedOutboundFields target_protocol=responses paths=$.previous_response_id"
                 .to_string(),
         );
     }
-    let mut projected = build_v3_openai_responses_request_from_chat_canonical(payload)?;
+    let (mut projected, drops) =
+        build_v3_openai_responses_request_from_chat_canonical_with_drops(payload)?;
     project_openai_responses_hosted_web_search_for_selected_target(
         &mut projected,
         has_web_search_capability,
     );
-    Ok(projected)
+    Ok((projected, drops))
 }
 
 fn build_v3_openai_responses_request_from_chat_canonical(payload: &Value) -> Result<Value, String> {
+    let drop_context = V3ProjectionDropContext::disabled();
+    let (value, mut drops) =
+        build_v3_openai_responses_request_from_chat_canonical_with_drops(payload)?;
+    drop_context.restamp_and_emit(&mut drops);
+    Ok(value)
+}
+
+/// non-error carrier：把投影阶段的丢弃记录交给请求作用域盖章落盘。
+fn build_v3_openai_responses_request_from_chat_canonical_with_drops(
+    payload: &Value,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
     if payload.get("reasoning").is_some() {
         return Err(
             "RawPayloadShortcut target_protocol=responses path=$.reasoning; use registered Chat reasoning fields"
                 .to_string(),
         );
     }
-    let projected_source = project_outbound_payload_for_target_protocol(
+    let (projected_source, drops) = project_outbound_payload_for_target_protocol_with_drops(
         payload,
         V3OutboundTargetProtocol::OpenAiResponses,
     )?;
@@ -173,7 +200,10 @@ fn build_v3_openai_responses_request_from_chat_canonical(payload: &Value) -> Res
             responses_payload.insert(key.to_string(), value.clone());
         }
     }
-    normalize_responses_payload_for_provider_standard(&Value::Object(responses_payload))
+    Ok((
+        normalize_responses_payload_for_provider_standard(&Value::Object(responses_payload))?,
+        drops,
+    ))
 }
 fn normalize_responses_payload_for_provider_standard(payload: &Value) -> Result<Value, String> {
     // The caller has already completed the adjacent Chat -> Responses projection.
@@ -350,10 +380,25 @@ pub(crate) fn build_v3_anthropic_provider_request_source_from_chat_canonical(
     payload: &Value,
     entry_protocol: V3HubEntryProtocol,
 ) -> Result<Value, String> {
+    let drop_context = V3ProjectionDropContext::disabled();
+    let (value, mut drops) =
+        build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops(
+            payload,
+            entry_protocol,
+        )?;
+    drop_context.restamp_and_emit(&mut drops);
+    Ok(value)
+}
+
+/// non-error carrier：把投影阶段的丢弃记录交给请求作用域盖章落盘。
+pub(crate) fn build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops(
+    payload: &Value,
+    entry_protocol: V3HubEntryProtocol,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
     match entry_protocol {
         V3HubEntryProtocol::Responses => {
             if payload.get("messages").and_then(Value::as_array).is_some() {
-                return project_outbound_payload_for_target_protocol(
+                return project_outbound_payload_for_target_protocol_with_drops(
                     payload,
                     V3OutboundTargetProtocol::Anthropic,
                 );
@@ -362,7 +407,7 @@ pub(crate) fn build_v3_anthropic_provider_request_source_from_chat_canonical(
         }
         V3HubEntryProtocol::Anthropic | V3HubEntryProtocol::OpenAiChat => {
             if payload.get("messages").and_then(Value::as_array).is_some() {
-                return project_outbound_payload_for_target_protocol(
+                return project_outbound_payload_for_target_protocol_with_drops(
                     payload,
                     V3OutboundTargetProtocol::Anthropic,
                 );

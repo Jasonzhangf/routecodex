@@ -467,22 +467,25 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
         crate::hub_v1::V3HubProviderWireProtocol::Responses
             if request_body.get("messages").is_some() =>
         {
-            crate::hub_v1::build_v3_openai_responses_standard_request_for_selected_target(
-                &request_body,
-                candidate
-                    .model_capabilities
-                    .iter()
-                    .any(|capability| capability == "web_search"),
-            )
-            .map_err(|error| {
-                build_v3_error_01_source_raised_internal(
-                    V3ErrorSourceKind::RuntimeFailure,
-                    "V3ResponsesDirect11Policy",
-                    "responses_provider_request_projection_failed",
-                    error,
-                    V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+            let (wire_body, mut projection_drops) =
+                crate::hub_v1::build_v3_openai_responses_standard_request_for_selected_target_with_drops(
+                    &request_body,
+                    candidate
+                        .model_capabilities
+                        .iter()
+                        .any(|capability| capability == "web_search"),
                 )
-            })?
+                .map_err(|error| {
+                    build_v3_error_01_source_raised_internal(
+                        V3ErrorSourceKind::RuntimeFailure,
+                        "V3ResponsesDirect11Policy",
+                        "responses_provider_request_projection_failed",
+                        error,
+                        V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+                    )
+                })?;
+            drop_context.emit(&mut projection_drops);
+            wire_body
         }
         _ => request_body,
     };
