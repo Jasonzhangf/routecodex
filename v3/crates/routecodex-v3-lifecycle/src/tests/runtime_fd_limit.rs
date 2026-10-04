@@ -48,9 +48,11 @@ fn fd_limit_is_applied_to_the_current_process() {
         0
     );
     let before = unsafe { before.assume_init() };
-    if before.rlim_max != libc::RLIM_INFINITY && before.rlim_max < 1024 {
-        return;
-    }
+    let target = if before.rlim_max == libc::RLIM_INFINITY {
+        1024
+    } else {
+        1024.min(before.rlim_max as u64)
+    };
     apply_v3_runtime_fd_limit(Some(1024)).unwrap();
     let mut after = std::mem::MaybeUninit::<libc::rlimit>::uninit();
     assert_eq!(
@@ -58,6 +60,11 @@ fn fd_limit_is_applied_to_the_current_process() {
         0
     );
     let after = unsafe { after.assume_init() };
-    assert!(after.rlim_cur >= before.rlim_cur.min(1024));
-    assert!(after.rlim_cur >= 1024);
+    assert_eq!(
+        unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &before) },
+        0,
+        "restore the process fd limit after the test"
+    );
+    assert_eq!(after.rlim_cur, target as libc::rlim_t);
+    assert_eq!(after.rlim_max, before.rlim_max);
 }

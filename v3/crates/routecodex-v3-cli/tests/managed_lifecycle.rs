@@ -388,7 +388,7 @@ fn run_top_level(binary: &str, state_root: &Path, config: &Path, command: &str) 
         .unwrap()
 }
 
-fn run_with_lowered_nofile(
+fn run_with_soft_nofile(
     binary: &str,
     state_root: &Path,
     config: &Path,
@@ -878,13 +878,22 @@ fn managed_cli_start_status_restart_stop_is_one_aggregate_identity() {
 
 #[test]
 fn managed_child_applies_configured_fd_limit_before_hooks_sidecar() {
+    assert_managed_child_observes_configured_fd_limit(512, 4096);
+}
+
+#[test]
+fn managed_child_lowers_inherited_fd_limit_to_configured_value() {
+    assert_managed_child_observes_configured_fd_limit(8192, 4096);
+}
+
+fn assert_managed_child_observes_configured_fd_limit(inherited_soft: u64, configured: u64) {
     let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
     let config = write_config(&root, ports);
     let mut config_text = fs::read_to_string(&config).unwrap();
-    config_text.push_str("\n[runtime]\nfd_limit = 4096\n");
+    config_text.push_str(&format!("\n[runtime]\nfd_limit = {configured}\n"));
     fs::write(&config, config_text).unwrap();
 
     let binary = env!("CARGO_BIN_EXE_rccv3");
@@ -915,7 +924,14 @@ fn managed_child_applies_configured_fd_limit_before_hooks_sidecar() {
     )
     .unwrap();
 
-    let start = run_with_lowered_nofile(binary, &state_root, &config, "start", &record_path, 512);
+    let start = run_with_soft_nofile(
+        binary,
+        &state_root,
+        &config,
+        "start",
+        &record_path,
+        inherited_soft,
+    );
     assert!(
         start.status.success(),
         "{}{}",
@@ -940,7 +956,7 @@ fn managed_child_applies_configured_fd_limit_before_hooks_sidecar() {
         .parse()
         .unwrap();
     assert_eq!(
-        observed, 4096,
+        observed, configured,
         "managed child must apply [runtime] fd_limit before launching the hooks sidecar"
     );
 

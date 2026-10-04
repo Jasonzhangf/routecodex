@@ -1,0 +1,15 @@
+{
+  "id": "v3.runtime_fd_limit",
+  "version": "1",
+  "inputs": [{"id": "runtime-config-source", "schema": "Object"}],
+  "nodes": [
+    {"id": "compile_runtime_limit", "operator": "routecodex.v3.config.load_v3_config_snapshot_from_path", "operator_version": "1", "inputs": ["runtime-config-source"], "output": {"id": "runtime-snapshot", "schema": "Object"}, "input_selector": {"include": [], "exclude": [], "predicate": null}, "output_selector": {"include": [], "exclude": [], "predicate": null}, "iterator": "Whole", "resources": {"reads": ["v3.config.file_source"], "writes": ["v3.config.source_identity"]}},
+    {"id": "declare_managed_runtime", "operator": "routecodex.v3.lifecycle.V3ManagedLifecycle::declaration_with_runtime", "operator_version": "1", "inputs": ["runtime-snapshot"], "output": {"id": "runtime-declaration", "schema": "Object"}, "input_selector": {"include": [], "exclude": [], "predicate": null}, "output_selector": {"include": [], "exclude": [], "predicate": null}, "iterator": "Whole", "resources": {"reads": ["v3.config.source_identity"], "writes": []}},
+    {"id": "apply_managed_process_limit", "operator": "routecodex.v3.lifecycle.apply_v3_runtime_fd_limit", "operator_version": "1", "inputs": ["runtime-declaration"], "output": {"id": "runtime-limit-result", "schema": "Object"}, "input_selector": {"include": [], "exclude": [], "predicate": null}, "output_selector": {"include": [], "exclude": [], "predicate": null}, "iterator": "Whole", "resources": {"reads": [], "writes": []}}
+  ],
+  "edges": [
+    {"from": "compile_runtime_limit", "to": "declare_managed_runtime", "arc_id": "runtime-snapshot"},
+    {"from": "declare_managed_runtime", "to": "apply_managed_process_limit", "arc_id": "runtime-declaration"}
+  ],
+  "outputs": ["runtime-limit-result"]
+}

@@ -600,6 +600,20 @@ chains:
   summary: One Rust owner validates Config, declares aggregate instance identity, locks lifecycle operations, preserves old rcc start takeover for configured listener ports through managed control, foreign managed port-scoped release, and explicit listener PID signals, runs top-level start in the foreground with real Server console, retains hidden detached-child compatibility, publishes PID/control identity, restarts through one in-place exec with a nonce-bound restart plan when executable/snapshot overrides are needed, and gracefully stops the exact instance without broad kill while preserving terminal Codex sample persistence failures in managed status.
   manifest: docs/architecture/manifests/v3.managed_server_lifecycle.mainline.yml
   edges:
+  - step_id: v3-life-runtime-limit
+    from_node: V3Lifecycle01ValidatedConfig
+    to_node: V3Lifecycle04ChildSpawned
+    caller_symbol: V3ManagedLifecycle::run_managed_child
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: V3ManagedLifecycle::declaration_with_runtime
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.config.source_identity, v3.config.runtime_limit]
+      produces: [v3.lifecycle.instance_declaration]
+      side_channel_reads: [v3.config.runtime_limit]
+      side_channel_writes: []
   - step_id: v3-life-01
     from_node: V3Lifecycle01ValidatedConfig
     to_node: V3Lifecycle02InstanceDeclared
