@@ -2666,6 +2666,154 @@ async fn openai_chat_unknown_direct_provider_model_falls_back_to_default_pool() 
     );
 }
 
+fn projection_drop_log_path(label: &str) -> std::path::PathBuf {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock must follow the Unix epoch")
+        .as_nanos();
+    std::env::temp_dir().join(format!(
+        "rcc-projection-drops-{label}-{}-{nonce}.jsonl",
+        std::process::id()
+    ))
+}
+
+fn manifest_with_projection_drop_log(
+    drop_log_file: &std::path::Path,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let mut manifest = manifest();
+    manifest.debug.projection_drop_log_file = Some(drop_log_file.display().to_string());
+    manifest
+}
+
+/// RED→GREEN: a client-sent non-array `tools` must NOT produce a client error
+/// (no HTTP 598 `provider_request_payload_invalid`); stage 3 drops it, records
+/// it to the dedicated drop log, and the request continues to the provider.
+#[tokio::test]
+async fn non_array_tools_is_dropped_recorded_and_request_continues() {
+    let drop_log = projection_drop_log_path("non-array-tools");
+    let _ = std::fs::remove_file(&drop_log);
+    let manifest = manifest_with_projection_drop_log(&drop_log);
+    let runtime = JsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-non-array-tools".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"hello"}],
+                "tools":"not-an-array",
+                "stream":false
+            }),
+        },
+        &runtime,
+    )
+    .await
+    .expect("non-array tools must not fail the request (no 598 provider_request_payload_invalid)");
+    assert_ne!(output.status, 598, "runtime output: {output:?}");
+    if let V3OpenAiChatRelayClientBody::Json(body) = &output.client_body {
+        let text = body.to_string();
+        assert!(
+            !text.contains("provider_request_payload_invalid"),
+            "client must not receive provider_request_payload_invalid: {text}"
+        );
+    }
+
+    let wire_body = runtime
+        .captured_body
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("request must continue to provider transport");
+    assert!(
+        wire_body.get("tools").is_none(),
+        "non-array tools must be dropped from the provider wire: {wire_body}"
+    );
+
+    let log = std::fs::read_to_string(&drop_log)
+        .expect("the dedicated projection drop log must exist after a drop");
+    let lines = log
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect::<Vec<_>>();
+    assert_eq!(lines.len(), 1, "exactly one drop record expected: {log}");
+    let record: Value = serde_json::from_str(lines[0]).expect("drop record must be JSON");
+    assert_eq!(record["request_id"], "req-non-array-tools", "{record}");
+    assert_eq!(record["entry_port"], "1", "{record}");
+    assert_eq!(record["target_protocol"], "openai_chat", "{record}");
+    assert_eq!(record["json_path"], "$.tools", "{record}");
+    assert_eq!(record["source_value"], json!("not-an-array"), "{record}");
+    assert_eq!(record["canonical_value"], json!("not-an-array"), "{record}");
+    assert!(
+        record["drop_site"]
+            .as_str()
+            .is_some_and(|site| site.contains("project_openai_chat_provider_tools")),
+        "{record}"
+    );
+    let _ = std::fs::remove_file(&drop_log);
+}
+
+/// A valid array `tools` must NEVER be recorded as dropped.
+#[tokio::test]
+async fn valid_array_tools_is_never_recorded_as_dropped() {
+    let drop_log = projection_drop_log_path("valid-array-tools");
+    let _ = std::fs::remove_file(&drop_log);
+    let manifest = manifest_with_projection_drop_log(&drop_log);
+    let runtime = JsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-valid-array-tools".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"hello"}],
+                "tools":[{
+                    "type":"function",
+                    "function":{"name":"lookup","parameters":{"type":"object"}}
+                }],
+                "stream":false
+            }),
+        },
+        &runtime,
+    )
+    .await
+    .expect("valid array tools must succeed");
+    assert_ne!(output.status, 598, "runtime output: {output:?}");
+    let wire_body = runtime
+        .captured_body
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("valid array tools request must reach provider transport");
+    assert!(
+        wire_body.get("tools").is_some(),
+        "valid array tools must survive projection: {wire_body}"
+    );
+    assert!(
+        !drop_log.exists(),
+        "a valid array tools must never create a projection drop record"
+    );
+}
+
 fn manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
     ensure_openai_chat_relay_test_state_dir();
     compile_v3_config_05_manifest(

@@ -458,6 +458,7 @@ fn chat_direct_codec_consumes_the_registered_key_catalog() {
     let wire = <crate::kernel::V3ChatDirectCodec as crate::kernel::V3DirectProtocolCodec>::run_request_projection(
             &policy,
             &catalog,
+            &crate::projection_drop_log::V3ProjectionDropContext::disabled(),
         )
         .expect("Chat codec must consume the adjacent typed key catalog");
     assert!(wire.body()["messages"][0]["content"]

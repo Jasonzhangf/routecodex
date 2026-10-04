@@ -246,6 +246,11 @@ pub struct V3DebugAuthoringConfig {
     pub log_console: bool,
     #[serde(default)]
     pub log_file: Option<String>,
+    /// 独立的 stage-3 出站投影丢弃日志（append-only JSONL）。刻意与
+    /// `log_file` 分离：丢弃证据不得混入 debug 日志。未配置时默认落在
+    /// `log_file` 同目录的 `projection-drops.jsonl`。
+    #[serde(default)]
+    pub projection_drop_log_file: Option<String>,
     #[serde(default)]
     pub snapshots: bool,
     #[serde(default)]
@@ -1269,6 +1274,8 @@ pub struct V3ForwarderTargetManifest {
 pub struct V3DebugManifest {
     pub log_console: bool,
     pub log_file: Option<String>,
+    /// 独立的 stage-3 出站投影丢弃日志路径（append-only JSONL）。
+    pub projection_drop_log_file: Option<String>,
     pub snapshots: bool,
     pub codex_samples: bool,
     pub snapshot_stages: Option<String>,

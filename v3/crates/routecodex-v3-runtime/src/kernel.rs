@@ -688,7 +688,20 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         let policy = hook_registry.run_route(selected, &standardized);
         trace.push("V3ResponsesDirect11Policy");
 
-        let wire = match hook_registry.run_request_projection(&policy) {
+        // stage-3 丢弃上下文：请求身份 + 入口端口 + 客户端原始 payload 句柄 +
+        // 独立丢弃日志路径。
+        let projection_drop_context = crate::projection_drop_log::V3ProjectionDropContext::new(
+            standardized_request_id.clone(),
+            standardized
+                .port
+                .map(|port| port.to_string())
+                .unwrap_or_default(),
+            manifest.debug.projection_drop_log_file.clone(),
+            std::sync::Arc::new(standardized.body.clone()),
+        );
+        let wire = match hook_registry
+            .run_request_projection_with_drop_context(&policy, &projection_drop_context)
+        {
             Ok(value) => value,
             Err(source) => {
                 return error_output(source, trace, &hook_registry);

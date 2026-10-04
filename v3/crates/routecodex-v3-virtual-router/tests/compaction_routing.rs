@@ -92,6 +92,7 @@ fn manifest() -> V3Config05ManifestPublished {
         debug: V3DebugManifest {
             log_console: false,
             log_file: None,
+            projection_drop_log_file: None,
             snapshots: false,
             codex_samples: false,
             snapshot_stages: None,

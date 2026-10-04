@@ -10,6 +10,9 @@ use routecodex_v3_config::V3WebSearchExecutionMode;
 
 use super::is_v3_gpt_canonical_model;
 use super::request_outbound_mcp_names::provider_function_name;
+use crate::projection_drop_log::{
+    V3ProjectionDropContext, V3ProjectionDropRecord, V3_PROJECTION_DROP_STAGE3,
+};
 
 pub(crate) fn project_openai_responses_hosted_web_search_for_selected_target(
     payload: &mut Value,
@@ -182,6 +185,28 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
     web_search_execution_mode: V3WebSearchExecutionMode,
     has_web_search_capability: bool,
 ) -> Result<(), String> {
+    let mut drops = Vec::new();
+    project_openai_chat_provider_tools_for_web_search_mode_recording(
+        payload,
+        model_id,
+        web_search_execution_mode,
+        has_web_search_capability,
+        &V3ProjectionDropContext::disabled(),
+        &mut drops,
+    )
+}
+
+/// stage-3 openai_chat provider tools 投影：非数组 `tools` 不再 hard error，
+/// 而是 DROP（`root.remove` 已移除）+ RECORD + PRINT 后继续请求。
+#[allow(clippy::too_many_arguments)]
+pub(super) fn project_openai_chat_provider_tools_for_web_search_mode_recording(
+    payload: &mut Value,
+    model_id: Option<&str>,
+    web_search_execution_mode: V3WebSearchExecutionMode,
+    has_web_search_capability: bool,
+    drop_context: &V3ProjectionDropContext,
+    drops: &mut Vec<V3ProjectionDropRecord>,
+) -> Result<(), String> {
     let refreshed_provider_tool_names = validate_namespace_tool_dispatch_names(payload)?;
     let Some(root) = payload.as_object_mut() else {
         return Ok(());
@@ -189,9 +214,24 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
     let Some(tools) = root.remove("tools") else {
         return Ok(());
     };
-    let tools = tools.as_array().ok_or_else(|| {
-        "MalformedOutboundField target_protocol=openai_chat path=$.tools".to_string()
-    })?;
+    // 客户端可能发送非数组 `tools`（例如字符串/对象）。openai_chat wire 的
+    // tools 必须是声明数组，非数组不携带任何可转换的工具声明语义；stage 1/2
+    // 对 tools 无损，因此这里证明是客户端原始形态。没有兼容表示 → 丢弃并继续，
+    // 不再让客户端收到 598 provider_request_payload_invalid。
+    let Some(tools) = tools.as_array() else {
+        drops.push(V3ProjectionDropRecord {
+            request_id: drop_context.request_id.clone(),
+            entry_port: drop_context.entry_port.clone(),
+            target_protocol: "openai_chat".to_string(),
+            stage: V3_PROJECTION_DROP_STAGE3.to_string(),
+            json_path: "$.tools".to_string(),
+            reason: "non_array_tools_unrepresentable".to_string(),
+            source_value: drop_context.source_value_at("$.tools"),
+            canonical_value: tools.clone(),
+            drop_site: "project_openai_chat_provider_tools_for_web_search_mode".to_string(),
+        });
+        return Ok(());
+    };
     // gpt 家族模型保留标准 hosted web_search 语义（openai 官方支持）；其余
     // 所有模型统一替换为内部 websearch 工具（RouteCodex 本地搜索 hop 执行，
     // 不区分 provider、不依赖 provider 原生搜索能力）。家族判定真源在 compat

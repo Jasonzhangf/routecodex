@@ -586,6 +586,12 @@ where
         transport_intent,
     );
     trace.push("V3HubReqInbound01ClientRaw");
+    // stage-3 丢弃上下文：ReqInbound02 会用 canonical 覆盖 `payload`，此处先保留
+    // 客户端原始 payload 的 Arc 句柄。
+    let raw = std::sync::Arc::clone(&req01.payload.0);
+    let drop_ctx = crate::projection_drop_log::V3ProjectionDropContext::from_manifest(
+        manifest, server_id, request_id, raw,
+    );
     C::validate_client_payload(&req01.payload.0)?;
     let req02 = C::req_inbound_02(req01)?;
     trace.push("V3HubReqInbound02Normalized");
@@ -772,7 +778,7 @@ where
             }};
         }
         let req_compat = match build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07) {
-            Ok(req_compat) => req_compat,
+            Ok(projected) => record_projected_drops(&drop_ctx, projected),
             Err(error) => handle_provider_request_failure!(
                 "ProviderReqCompat06ProviderCompat",
                 "provider_request_compat_error",

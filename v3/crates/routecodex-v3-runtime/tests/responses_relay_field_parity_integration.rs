@@ -206,11 +206,13 @@ async fn responses_openai_chat_field_parity_legacy_tool_output_normalizes_before
 
 #[tokio::test]
 async fn responses_openai_chat_field_parity_normalization_preserves_failure_boundaries() {
+    // Non-array `tools` is deliberately NOT in this failure-boundary list. It is an
+    // openai_chat field that cannot be represented compatibly, so stage-3 output
+    // projection drops it, records the drop and continues the request instead of
+    // failing it; `non_array_tools_is_dropped_recorded_and_request_continues` pins
+    // that path. The remaining entries are genuine request contradictions whose
+    // boundary must stay visible.
     for (payload, expected) in [
-        (
-            serde_json::json!({"input":"hi","messages":[{"role":"user","content":"hi"}],"tools":"not-an-array"}),
-            "$.tools",
-        ),
         (
             serde_json::json!({"input":"hi","messages":[{"role":"user","content":"different"}]}),
             "conflicting input and messages",

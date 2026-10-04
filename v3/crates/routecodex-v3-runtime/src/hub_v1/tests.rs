@@ -294,7 +294,7 @@ fn all_adjacent_builders_form_the_fixed_typed_topology() {
         V3HubProviderWireProtocol::OpenAiChat,
     );
     let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();
-    let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
+    let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat.node);
     let _req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
 
     let resp01 = build_v3_provider_resp_inbound_01_raw(
@@ -446,7 +446,7 @@ fn provider_req_compat_loads_selected_target_profile() {
     );
     let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();
     assert_eq!(req_compat.profile().as_str(), "chat:minimax");
-    let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
+    let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat.node);
     let req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
     assert_eq!(req09.compat_profile_id(), "chat:minimax");
 }

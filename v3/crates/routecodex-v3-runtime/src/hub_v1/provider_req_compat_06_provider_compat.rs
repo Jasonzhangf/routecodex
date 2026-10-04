@@ -3,11 +3,12 @@ use super::request_outbound_format::{
 };
 use super::{
     build_v3_anthropic_provider_request_source_from_chat_canonical,
-    build_v3_openai_chat_standard_request_for_selected_web_search_mode,
+    build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording,
     build_v3_openai_responses_standard_request_for_selected_target,
     classify_v3_provider_compat_error, encode_v3_responses_semantic_as_anthropic_request,
-    provider_protocol_compat_id, V3HubOpaquePayload, V3HubProviderWireProtocol,
-    V3HubReqOutbound07ProviderSemantic, V3ProviderCompatError, V3ProviderCompatProfileId,
+    provider_protocol_compat_id, ProviderReqCompat06Projected, V3HubOpaquePayload,
+    V3HubProviderWireProtocol, V3HubReqOutbound07ProviderSemantic, V3ProviderCompatError,
+    V3ProviderCompatProfileId,
 };
 use provider_compat_core::req_outbound_stage3_compat::{
     run_req_outbound_stage3_compat, AdapterContext, ReqOutboundCompatInput,
@@ -15,6 +16,7 @@ use provider_compat_core::req_outbound_stage3_compat::{
 use serde_json::Value;
 
 use crate::hub_v1::{count_v3_payload_image_refs, normalize_v3_all_images_to_placeholder};
+use crate::projection_drop_log::{V3ProjectionDropContext, V3ProjectionDropRecord};
 use crate::selected_provider_model_binding::{
     bind_v3_selected_provider_model, V3SelectedProviderModelBinding,
 };
@@ -28,43 +30,35 @@ pub struct ProviderReqCompat06ProviderCompat {
 
 pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
     input: V3HubReqOutbound07ProviderSemantic,
-) -> Result<ProviderReqCompat06ProviderCompat, V3ProviderCompatError> {
+) -> Result<ProviderReqCompat06Projected, V3ProviderCompatError> {
     let profile = match input.selected_target().compatibility_profile.as_deref() {
         Some(profile) => V3ProviderCompatProfileId::from_config(Some(profile)),
         None => V3ProviderCompatProfileId::Passthrough,
     };
-    let payload = apply_v3_provider_req_compat(&input, &profile)?;
-    Ok(ProviderReqCompat06ProviderCompat {
-        previous: input,
-        profile,
-        payload: V3HubOpaquePayload(std::sync::Arc::new(payload)),
+    let (payload, drops) = apply_v3_provider_req_compat(&input, &profile)?;
+    Ok(ProviderReqCompat06Projected {
+        node: ProviderReqCompat06ProviderCompat {
+            previous: input,
+            profile,
+            payload: V3HubOpaquePayload(std::sync::Arc::new(payload)),
+        },
+        drops,
     })
 }
 
-impl ProviderReqCompat06ProviderCompat {
-    pub fn profile(&self) -> &V3ProviderCompatProfileId {
-        &self.profile
-    }
-
-    pub(crate) fn provider_semantic_payload(&self) -> &Value {
-        &self.payload.0
-    }
-}
-
-fn apply_v3_provider_req_compat(
+pub(super) fn apply_v3_provider_req_compat(
     input: &V3HubReqOutbound07ProviderSemantic,
     profile: &V3ProviderCompatProfileId,
-) -> Result<Value, V3ProviderCompatError> {
-    let reasoning_effort_explicit =
-        provider_req_compat_reasoning_effort_explicit(input.provider_semantic_payload());
-    let mut payload = build_v3_provider_standard_protocol_payload_from_req07(input)
+) -> Result<(Value, Vec<V3ProjectionDropRecord>), V3ProviderCompatError> {
+    let (payload, drops) = build_v3_provider_standard_protocol_payload_from_req07(input)
         .map_err(|reason| classify_v3_provider_compat_error("request_protocol", profile, reason))?;
-    apply_v3_provider_req_compat_to_provider_payload(
+    let payload = apply_v3_provider_req_compat_to_provider_payload(
         payload,
         input.selected_target(),
         input.provider_protocol,
         profile,
-    )
+    )?;
+    Ok((payload, drops))
 }
 
 fn project_v3_images_for_selected_target_session_compat(
@@ -278,18 +272,23 @@ fn project_reasoning_effort_for_selected_target(
 
 fn build_v3_provider_standard_protocol_payload_from_req07(
     input: &V3HubReqOutbound07ProviderSemantic,
-) -> Result<Value, String> {
+) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
     let selected = input.selected_target();
+    let mut drops = Vec::new();
     let provider_protocol_payload = match input.provider_protocol {
         V3HubProviderWireProtocol::OpenAiChat => {
-            build_v3_openai_chat_standard_request_for_selected_web_search_mode(
-                input.provider_semantic_payload(),
-                selected.web_search_execution_mode,
-                selected
-                    .model_capabilities
-                    .iter()
-                    .any(|capability| capability == "web_search"),
-            )?
+            let (payload, openai_chat_drops) =
+                build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording(
+                    input.provider_semantic_payload(),
+                    selected.web_search_execution_mode,
+                    selected
+                        .model_capabilities
+                        .iter()
+                        .any(|capability| capability == "web_search"),
+                    &V3ProjectionDropContext::disabled(),
+                )?;
+            drops.extend(openai_chat_drops);
+            payload
         }
         V3HubProviderWireProtocol::Responses => {
             build_v3_openai_responses_standard_request_for_selected_target(
@@ -314,8 +313,9 @@ fn build_v3_provider_standard_protocol_payload_from_req07(
             &selected.model_capabilities,
         )?,
     };
-    bind_v3_selected_provider_model(provider_protocol_payload, selected)
-        .map(V3SelectedProviderModelBinding::into_payload)
+    let payload = bind_v3_selected_provider_model(provider_protocol_payload, selected)
+        .map(V3SelectedProviderModelBinding::into_payload)?;
+    Ok((payload, drops))
 }
 
 fn normalize_deepseek_tool_choice(
