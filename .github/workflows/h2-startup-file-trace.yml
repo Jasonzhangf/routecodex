@@ -21,8 +21,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y strace
       - name: Install the same V3 binaries as the failed host gate
         run: |
-          npm ci
-          npm --prefix v3 ci
+          npm ci --ignore-scripts
+          npm --prefix v3 ci --ignore-scripts
+          cargo fetch --locked --manifest-path v3/Cargo.toml
           npm run install:v3
           npm run fix:cli-shim
       - name: Compile the unchanged public H2 consumer
