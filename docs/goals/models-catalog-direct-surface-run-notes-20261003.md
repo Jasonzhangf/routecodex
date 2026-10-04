@@ -290,3 +290,89 @@ live daemon PID 49150（`--config /Volumes/extension/.rcc/config.toml`，4444/77
 → 「已安装 runtime 的同入口重放」仍**不成立**，本节点标为 **BLOCKED**（非仅 UNVERIFIED）。
 未擅自重启：重启会解析失败导致 4444/7777 下线并中断本会话。已向用户升级该决策（选项：等 fd-limit 合并 /
 授权临时移除这 2 行后重启再恢复 / 其他）。
+
+## fd-limit 候选构建 + 安装 + 重启事故与用户手动恢复（2026-10-04 21:5x – 22:2x）
+
+（本节取代上一节：用户授权从 `3e31c0588` 构建安装，`[runtime]` 阻断已解除；
+但本次**自动重启失败并造成 live runtime 中断**，由用户手动恢复。）
+
+**已完成：构建 + 安装 fd-limit 候选（含本次 models-catalog 修复 + `[runtime] fd_limit`）**
+- 构建源 worktree：`/Volumes/Intel/playground/routecodex/fd-limit-live-install-20261004`，detached HEAD `3e31c0588`
+  （= `b6d834dfc` fd-limit 提交叠在 `73083890f` origin/main 上，**已含本次合并 `d1639c4fa`**）。
+- 首次构建失败：`[verify:v3-isolation] FAIL - V3 Node dependency yaml resolved outside v3/node_modules:
+  /Users/fanzhang/Documents/github/routecodex/v3/node_modules/yaml/dist/index.js`
+  → 原因：我把 `v3/node_modules` 做成指向主树的 **symlink**，而隔离门禁要求依赖解析落在本 worktree 内。
+  修复：删除 symlink，实体化拷贝真实 `v3/node_modules`（含 `yaml`、`.bin`）。
+  ⚠️ 教训：首次构建的失败被 `| tail -40` 管道**掩盖成 exit 0**；后续改为写日志文件 + 单独回读 `$?`。
+- 重跑：`CARGO_TARGET_DIR="$PWD/v3/target" CARGO_NET_OFFLINE=true npm --prefix v3 run install` → `install_exit=0`，
+  `[install-cli] ok`。
+- 安装产物：`/Users/fanzhang/.local/bin/rccv3` sha256
+  `01da2fb5e2e1261978600fc2ae626ac440c9a6920a95f9b7609bf0577135a7ef`（`rccv3 0.90.4832`），
+  size 34420928，mtime 2026-10-03 21:56。
+- **重启准入 gate（下次必查）**：新 binary 对真实 live config
+  `config check -c /Volumes/extension/.rcc/config.toml` → `config ok: version=3 servers=2`（exit 0）。
+  **`[runtime]` 阻断已解除。**
+- 另：`$HOME/.rcc` → `/Volumes/extension/.rcc`（symlink），故 `rccv3 start` 不带 `-c` 时用的也是同一份 live config。
+
+**本次自动重启失败（事故）与根因**
+- 21:59:24 按**显式 PID** 停掉旧 daemon 49150（正常，端口 1s 内释放）。
+- 21:59:36 用 `tmux send-keys -t rccstart:0.0` 发送
+  `rccv3 server run-managed-child --config /Volumes/extension/.rcc/config.toml --console`
+  → **180s 未起来**（120s + 重试 60s）。
+- 22:02:52 回退：`tmux new-session -d -s rcc-fallback-20261004 "rccv3 start -c <config>"` → **3s 内 healthy**
+  （PID 16152），5 项 replay 全 200。
+- 但该回退 daemon 随该**临时 tmux session 结束而消失**，4444 在 22:03–22:22 之间实际不可用；
+  **用户于 22:22:41 在 `rccstart:0.0` 里手动 `rccv3 start` 恢复**。
+- **根因（源码证据）**：`routecodex-v3-lifecycle/src/foreground.rs:20-46`
+  `build_foreground_exec_command` 用 `Command::exec()` —— `rccv3 start` 是**把自己 exec 成**
+  `rccv3 server run-managed-child --config <cfg> [--snapall|--snap] [--console]`，**不是** spawn 子进程；
+  而 `lib.rs:406-431 V3ManagedLifecycle::start()` 在 exec 之前先做
+  `ensure_private_dir` / `acquire_operation_lock` / `release_listener_set_for_start` /
+  `write_json_atomic(instance.json)` / `write_status(Starting)`。
+  → 直接跑内部子命令 `server run-managed-child` **跳过了实例注册**，child 无法进入 Running；这是 180s 起不来的原因。
+  → 第二个错误：前台模式（exec 后 daemon 即该 session 的前台进程）的 daemon 被放进
+  `tmux new-session -d` 的**临时 session**，session 一结束 daemon 即被带走。
+- 结论：正确入口是**公开命令 `rccv3 start -c <config>`，且在持久化的 `rccstart:0.0` pane 内执行**。
+
+**当前 live 状态（用户手动恢复后，已核验）**
+- 4444 listener：PID `10554`，启动 2026-10-03 22:22:41，cmdline
+  `/Users/fanzhang/.cargo/bin/rccv3 server run-managed-child --config /Volumes/extension/.rcc/config.toml --console`，
+  PPID `6912`（`rccstart:0.0` 的 zsh），cwd = 仓库根。
+- **`~/.cargo/bin/rccv3` 是指向 `~/.local/bin/rccv3` 的 symlink**（sha256 同上 `01da2fb5…`）；
+  `lsof -p 10554` 的 `txt` 项为 `/Users/fanzhang/.local/bin/rccv3`（34420928 B）
+  → **live runtime 运行的正是本次安装的新 binary**。
+- 独立佐证：该 daemon 能成功加载含 `[runtime] fd_limit = 65535` 的 live config，
+  而该字段只存在于 fd-limit 分支（main 无）→ 运行中的 binary 必然支持 `[runtime]`。
+- `/health`：`{"bind":"0.0.0.0","build_version":"0.90.4832","manifest_version":3,"port":4444,
+  "server_id":"routecodex_v3_4444","status":"ok","version":3}`。
+
+**同入口 replay（针对 PID 10554，2026-10-03 22:25–22:26，真实 HTTP）**
+- `GET /v1/models` → 24 条 = 23 `direct_route=true`（`owned_by=provider:*`）+ 1 虚拟条目
+  `gpt-5.5 direct_route=false owned_by=routecodex`（`/tmp/rcc-probe/live-models-final.json`）。
+- `POST /v1/chat/completions {"model":"goaichat.zzz-nonexistent-probe"}` → **200**，body `model=deepseek-v4.1-flash`
+  （未声明 provider model 回落正常 VR；`final-unknown.json`）。
+- `POST ... {"model":"gpt-5.5"}` → **200**（虚拟条目走正常 VR；`final-entry.json`）。
+- `POST ... {"model":"auto"}` → **200**（`final-auto.json`）。
+- `POST ... {"model":"goaichat.glm-5.3"}` → **200**，body `model=glm-5.3`（直连 provider.model；`final-direct.json`）。
+- 22:02 那轮（PID 16152）5 项同样全 200，编排日志 `/tmp/rcc-probe/live-restart.log`。
+
+**→ 本节点结论**：安装 ✅、live binary 身份 ✅、同入口 replay ✅；
+重启 ✅ **由用户手动 `rccv3 start` 完成**，本次**自动重启流程本身 ❌**（并造成 22:03–22:22 中断）。
+
+**下次重启前的自检清单（已按源码与实测校准）**
+1. `rccv3 config check -c <live-config>` 必须 `config ok`。
+2. 确认目标 binary 身份：`readlink "$HOME/.cargo/bin/rccv3"` + `shasum -a 256`。
+3. 显式确认当前 listener PID：`lsof -nP -iTCP:4444 -sTCP:LISTEN -t`。
+4. 确认 pane 可交互且不在 copy-mode：
+   `tmux display-message -p -t rccstart:0.0 '#{pane_in_mode} #{pane_current_command}'`。
+5. 停旧 daemon（**只允许显式 PID**），并等 4444/7777 真正释放。
+6. **用公开入口在持久 pane 内启动**：
+   `tmux send-keys -t rccstart:0.0 'rccv3 start -c /Volumes/extension/.rcc/config.toml' Enter`
+   —— **禁止**直接跑内部 `server run-managed-child`；**禁止**放进 `tmux new-session -d` 临时 session。
+7. 校验：`/health` ok、新 PID 的 `lsof txt` 指向已装 binary、`/v1/models` 24 条。
+8. 若 ~30s 未起：**在同一 pane 重发同一条 `rccv3 start`**（幂等，其
+   `release_listener_set_for_start` 会处理监听接管），不要换机制。
+
+**顺带观察（属 fd-limit 作者范围，未改）**：本机 shell `ulimit -n` 已是 `1048575`，
+live config 配 `fd_limit = 65535` 相对环境值是**下调**；live daemon 当前打开 fd 仅 78。
+是否需要「取 max」语义由 fd-limit 分支作者判断。
