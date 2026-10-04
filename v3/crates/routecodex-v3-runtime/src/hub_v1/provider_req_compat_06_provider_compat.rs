@@ -1,5 +1,6 @@
 use super::request_outbound_format::{
-    project_outbound_payload_for_selected_target_protocol, V3OutboundTargetProtocol,
+    project_outbound_payload_for_selected_target_protocol,
+    project_outbound_payload_for_selected_target_protocol_with_drops, V3OutboundTargetProtocol,
 };
 use super::{
     build_v3_anthropic_provider_request_source_from_chat_canonical,
@@ -307,11 +308,16 @@ fn build_v3_provider_standard_protocol_payload_from_req07(
             encode_v3_responses_semantic_as_anthropic_request(source)
                 .map_err(|error| error.to_string())?
         }
-        V3HubProviderWireProtocol::Gemini => project_outbound_payload_for_selected_target_protocol(
-            input.provider_semantic_payload(),
-            V3OutboundTargetProtocol::Gemini,
-            &selected.model_capabilities,
-        )?,
+        V3HubProviderWireProtocol::Gemini => {
+            let (payload, gemini_drops) =
+                project_outbound_payload_for_selected_target_protocol_with_drops(
+                    input.provider_semantic_payload(),
+                    V3OutboundTargetProtocol::Gemini,
+                    &selected.model_capabilities,
+                )?;
+            drops.extend(gemini_drops);
+            payload
+        }
     };
     let payload = bind_v3_selected_provider_model(provider_protocol_payload, selected)
         .map(V3SelectedProviderModelBinding::into_payload)?;

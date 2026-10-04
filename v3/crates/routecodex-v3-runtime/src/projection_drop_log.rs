@@ -231,36 +231,62 @@ fn v3_projection_drop_now_epoch_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// 最小 JSON path 解析，支持 `$.key`、`.key`、`[index]` 组合（丢弃站点使用）。
-pub fn resolve_v3_json_path(value: &Value, json_path: &str) -> Option<Value> {
-    let mut current = value;
+/// JSON path 段：对象成员或数组下标。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum V3JsonPathSegment {
+    Key(String),
+    Index(usize),
+}
+
+/// 把 `$.key` / `.key` / `["quoted key"]` / `[0]` 组合解析成段序列。
+///
+/// 与 `json_path_child` 的产出形态一一对应（裸标识符走 `.key`，含非
+/// `[A-Za-z0-9_]` 字符的键走 `["..."]`），因此丢弃站点产出的路径一定可以被
+/// 读回（`source_value`/`canonical_value`）并移除（真正的 drop）。
+pub fn split_v3_json_path(json_path: &str) -> Option<Vec<V3JsonPathSegment>> {
+    let mut segments = Vec::new();
     let mut rest = json_path.strip_prefix('$').unwrap_or(json_path);
     loop {
         if rest.is_empty() {
-            return Some(current.clone());
+            return Some(segments);
         }
         if let Some(stripped) = rest.strip_prefix('.') {
-            let (key, tail) = split_json_path_key(stripped);
-            current = current.get(key)?;
-            rest = tail;
+            let end = stripped
+                .find(|ch: char| ch == '.' || ch == '[')
+                .unwrap_or(stripped.len());
+            let key = &stripped[..end];
+            if key.is_empty() {
+                return None;
+            }
+            segments.push(V3JsonPathSegment::Key(key.to_string()));
+            rest = &stripped[end..];
             continue;
         }
         if let Some(stripped) = rest.strip_prefix('[') {
             let end = stripped.find(']')?;
-            let index: usize = stripped[..end].trim().parse().ok()?;
-            current = current.get(index)?;
+            let token = stripped[..end].trim();
             rest = &stripped[end + 1..];
+            if token.starts_with('"') {
+                segments.push(V3JsonPathSegment::Key(serde_json::from_str(token).ok()?));
+            } else {
+                segments.push(V3JsonPathSegment::Index(token.parse().ok()?));
+            }
             continue;
         }
         return None;
     }
 }
 
-fn split_json_path_key(rest: &str) -> (&str, &str) {
-    let end = rest
-        .find(|ch: char| ch == '.' || ch == '[')
-        .unwrap_or(rest.len());
-    (&rest[..end], &rest[end..])
+/// 最小 JSON path 读取，支持 `$.key`、`.key`、`["key"]`、`[index]` 组合。
+pub fn resolve_v3_json_path(value: &Value, json_path: &str) -> Option<Value> {
+    let mut current = value;
+    for segment in split_v3_json_path(json_path)? {
+        current = match segment {
+            V3JsonPathSegment::Key(key) => current.get(key)?,
+            V3JsonPathSegment::Index(index) => current.get(index)?,
+        };
+    }
+    Some(current.clone())
 }
 
 #[cfg(test)]
@@ -280,6 +306,29 @@ mod tests {
             Some(json!("b"))
         );
         assert_eq!(resolve_v3_json_path(&value, "$.missing"), None);
+    }
+
+    #[test]
+    fn resolve_json_path_reads_quoted_and_indexed_segments() {
+        // `json_path_child` emits `["..."]` for keys that are not bare
+        // identifiers; those paths must still be readable.
+        let value = json!({"x-foo": 1, "a.b": {"c": 2}, "arr": ["z"]});
+        assert_eq!(resolve_v3_json_path(&value, "$[\"x-foo\"]"), Some(json!(1)));
+        assert_eq!(resolve_v3_json_path(&value, "$[\"a.b\"].c"), Some(json!(2)));
+        assert_eq!(resolve_v3_json_path(&value, "$.arr[0]"), Some(json!("z")));
+        assert_eq!(
+            split_v3_json_path("$[\"x-foo\"]"),
+            Some(vec![V3JsonPathSegment::Key("x-foo".to_string())])
+        );
+        assert_eq!(
+            split_v3_json_path("$.arr[0]"),
+            Some(vec![
+                V3JsonPathSegment::Key("arr".to_string()),
+                V3JsonPathSegment::Index(0)
+            ])
+        );
+        assert_eq!(split_v3_json_path("$"), Some(Vec::new()));
+        assert_eq!(split_v3_json_path("$[\"unterminated]"), None);
     }
 
     #[test]

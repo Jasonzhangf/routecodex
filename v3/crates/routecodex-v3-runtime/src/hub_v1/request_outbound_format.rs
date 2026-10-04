@@ -2,7 +2,8 @@ use super::V3HubEntryProtocol;
 use serde_json::{json, Map, Value};
 
 use crate::projection_drop_log::{
-    resolve_v3_json_path, V3ProjectionDropContext, V3ProjectionDropRecord,
+    resolve_v3_json_path, split_v3_json_path, V3JsonPathSegment, V3ProjectionDropContext,
+    V3ProjectionDropRecord,
 };
 
 use super::anthropic_request_field_projection::project_chat_store_to_anthropic_wire;
@@ -420,13 +421,27 @@ pub(crate) fn project_outbound_payload_for_selected_target_protocol(
     model_capabilities: &[String],
 ) -> Result<Value, String> {
     let drop_context = V3ProjectionDropContext::disabled();
-    let (value, mut drops) = project_outbound_payload_for_target_protocol_inner_with_drops(
+    let (value, mut drops) = project_outbound_payload_for_selected_target_protocol_with_drops(
         source,
         target_protocol,
-        Some(model_capabilities),
+        model_capabilities,
     )?;
     drop_context.restamp_and_emit(&mut drops);
     Ok(value)
+}
+
+/// 选中目标能力的 non-error carrier：丢弃记录交给请求作用域盖章落盘，
+/// 因此不会出现「投影算出丢弃但只有 stderr、没有持久化身份」的缺口。
+pub(crate) fn project_outbound_payload_for_selected_target_protocol_with_drops(
+    source: &Value,
+    target_protocol: V3OutboundTargetProtocol,
+    model_capabilities: &[String],
+) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
+    project_outbound_payload_for_target_protocol_inner_with_drops(
+        source,
+        target_protocol,
+        Some(model_capabilities),
+    )
 }
 
 fn project_outbound_payload_for_target_protocol_inner_with_drops(
@@ -478,60 +493,41 @@ fn project_outbound_payload_for_target_protocol_inner_with_drops(
 
 /// 从投影结果中移除一个白名单外的出站字段。
 ///
-/// 丢弃站点使用 `$.key` / `$.key.sub` / `$.arr[i]` 形态；末段是对象成员时删除该
-/// 成员，末段落在数组元素上时删除该元素。父级缺失即视为已无可丢弃内容。
+/// 复用丢弃日志的同一个 path 解析器，因此 `json_path_child` 产出的任何形态
+/// （`$.key`、`$["non-identifier key"]`、`$.arr[i]`）都能被真正移除，不会出现
+/// 「已记录但没丢弃」的静默非丢弃。末段是对象成员时删除该成员，落在数组元素上
+/// 时删除该元素；父级缺失即视为已无可丢弃内容。
 fn remove_unmapped_outbound_field(projected: &mut Value, json_path: &str) {
-    let Some((parent_path, leaf)) = json_path.rsplit_once('.') else {
+    let Some(segments) = split_v3_json_path(json_path) else {
         return;
     };
-    let leaf = leaf.trim();
-    if leaf.is_empty() {
-        return;
-    }
-    let Some(parent) = pointer_mut_for_json_path(projected, parent_path) else {
+    let Some((leaf, parents)) = segments.split_last() else {
         return;
     };
-    if let Ok(index) = leaf.parse::<usize>() {
-        if let Some(items) = parent.as_array_mut() {
-            if index < items.len() {
-                items.remove(index);
+    let mut current = projected;
+    for segment in parents {
+        let next = match segment {
+            V3JsonPathSegment::Key(key) => current.get_mut(key),
+            V3JsonPathSegment::Index(index) => current.get_mut(*index),
+        };
+        match next {
+            Some(next) => current = next,
+            None => return,
+        }
+    }
+    match leaf {
+        V3JsonPathSegment::Key(key) => {
+            if let Some(map) = current.as_object_mut() {
+                map.remove(key);
             }
         }
-        return;
-    }
-    if let Some(map) = parent.as_object_mut() {
-        map.remove(leaf);
-    }
-}
-
-/// 把 `$.key` / `$.key.sub` / `$.arr[i]` 形态解析成可变引用。
-fn pointer_mut_for_json_path<'a>(value: &'a mut Value, json_path: &str) -> Option<&'a mut Value> {
-    let mut current = value;
-    let mut rest = json_path.strip_prefix('$').unwrap_or(json_path);
-    loop {
-        if rest.is_empty() {
-            return Some(current);
-        }
-        if let Some(stripped) = rest.strip_prefix('.') {
-            let end = stripped
-                .find(|ch: char| ch == '.' || ch == '[')
-                .unwrap_or(stripped.len());
-            let key = &stripped[..end];
-            if key.is_empty() {
-                return None;
+        V3JsonPathSegment::Index(index) => {
+            if let Some(items) = current.as_array_mut() {
+                if *index < items.len() {
+                    items.remove(*index);
+                }
             }
-            current = current.as_object_mut()?.get_mut(key)?;
-            rest = &stripped[end..];
-            continue;
         }
-        if let Some(stripped) = rest.strip_prefix('[') {
-            let end = stripped.find(']')?;
-            let index: usize = stripped[..end].trim().parse().ok()?;
-            current = current.as_array_mut()?.get_mut(index)?;
-            rest = &stripped[end + 1..];
-            continue;
-        }
-        return None;
     }
 }
 
@@ -1315,3 +1311,7 @@ mod request_outbound_format_extra_tests;
 #[cfg(test)]
 #[path = "request_outbound_gemini_tests.rs"]
 mod request_outbound_gemini_tests;
+
+#[cfg(test)]
+#[path = "request_outbound_drop_tests.rs"]
+mod request_outbound_drop_tests;
