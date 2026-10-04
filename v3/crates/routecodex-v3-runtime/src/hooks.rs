@@ -949,9 +949,9 @@ pub(crate) fn build_v3_provider_error_source(
 pub(crate) fn source_code_for_external_provider_error(error: &V3ProviderError) -> String {
     match error {
         V3ProviderError::HttpStatus { response } => format!("provider_http_{}", response.status),
-        V3ProviderError::Transport { .. } | V3ProviderError::WebSocketTransport { .. } => {
-            "provider_transport_error".to_string()
-        }
+        V3ProviderError::Transport { .. }
+        | V3ProviderError::WebSocketTransport { .. }
+        | V3ProviderError::ResponseBodyUnreadable { .. } => "provider_transport_error".to_string(),
         V3ProviderError::WebSocketProtocol { .. } => {
             "provider_websocket_protocol_error".to_string()
         }
@@ -1006,6 +1006,11 @@ fn external_link_for_provider_error(error: &V3ProviderError) -> V3ExternalErrorL
             ..
         }
         | V3ProviderError::WebSocketTransport {
+            provider_id,
+            reason,
+            ..
+        }
+        | V3ProviderError::ResponseBodyUnreadable {
             provider_id,
             reason,
             ..

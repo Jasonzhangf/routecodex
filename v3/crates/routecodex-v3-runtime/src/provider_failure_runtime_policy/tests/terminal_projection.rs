@@ -41,7 +41,7 @@ async fn transient_terminal_projection_releases_action_admission() {
                 failed_candidates: &mut failed_candidates,
                 same_candidate_retries: &mut same_candidate_retries,
                 trace: &mut trace,
-                last_eligible_external_http: &mut None,
+                last_external_http: &mut None,
             },
         ),
     )
@@ -144,7 +144,7 @@ targets = [
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
-            last_eligible_external_http: &mut None,
+            last_external_http: &mut None,
         },
     )
     .await
@@ -236,13 +236,12 @@ targets = [
         .iter()
         .find(|policy| policy.policy_id == "retry_same_policy")
         .expect("compiled retry policy");
-    let upstream = routecodex_v3_error::V3EligibleExternalHttpResponse::new(
+    let upstream = routecodex_v3_error::V3ExternalHttpWitness::new(
         429,
         vec![("retry-after".to_string(), b"17".to_vec())],
         br#"{"error":{"type":"rate_limit_error"}}"#.to_vec(),
-    )
-    .expect("real upstream HTTP 429 is eligible");
-    let mut last_eligible_external_http = Some(upstream.clone());
+    );
+    let mut last_external_http = Some(upstream.clone());
     let result = run_v3_relay_provider_failure_policy(
         &context,
         selected,
@@ -255,7 +254,7 @@ targets = [
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
-            last_eligible_external_http: &mut last_eligible_external_http,
+            last_external_http: &mut last_external_http,
         },
     )
     .await
@@ -271,8 +270,11 @@ targets = [
         "request-local compat must not consume a same-candidate retry budget"
     );
     assert!(!trace.contains(&"V3TargetPolicyRetriedSame"));
+    // The request-local compat failure is the terminal, but the real upstream 429
+    // head that arrived on an earlier attempt is still the provider terminal's
+    // evidence: it is recorded, never projected to the client.
     assert_eq!(
         result.terminal_disposition,
-        Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
+        Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(upstream))
     );
 }

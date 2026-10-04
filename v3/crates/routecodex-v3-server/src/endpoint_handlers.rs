@@ -54,6 +54,12 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         Err(response) => return *response,
     };
     let request_id = request_identity.request_id.clone();
+    // One allocation: every terminal branch records this same request identity.
+    let terminal_evidence = V3ProviderTerminalEvidence {
+        entry_protocol: &entry_protocol,
+        endpoint: &path,
+        request_id: &request_id,
+    };
     let toolreason_observation_session_id =
         resolve_v3_console_log_identity_from_parts(&request_headers, &payload, &request_id)
             .session_id;
@@ -202,6 +208,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         front_connection_identity,
                         routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
                         requested_stream,
+                        terminal_evidence,
                     );
                 }
                 let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
@@ -570,6 +577,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 front_connection_identity,
                 disposition,
                 requested_stream,
+                terminal_evidence,
             );
         }
         if output.error_chain.is_some() {
@@ -678,6 +686,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 front_connection_identity,
                 disposition,
                 requested_stream,
+                terminal_evidence,
             );
         }
         if let Some(response) = emit_relay_error_chain_if_any(
@@ -793,6 +802,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 front_connection_identity,
                 disposition,
                 requested_stream,
+                terminal_evidence,
             );
         }
         if let Some(response) = emit_relay_error_chain_if_any(
@@ -1032,6 +1042,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 front_connection_identity,
                 disposition,
                 requested_stream,
+                terminal_evidence,
             );
         }
         if output.protocol_direct_handoff.is_some() {
@@ -1070,6 +1081,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         front_connection_identity,
                         disposition,
                         requested_stream,
+                        terminal_evidence,
                     );
                 }
                 V3ResponsesDirectServerOutcome::DirectFrame(mut frame) => {
@@ -1175,6 +1187,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                             front_connection_identity,
                             disposition,
                             requested_stream,
+                            terminal_evidence,
                         );
                     }
                     prepend_v3_protocol_plan_trace_to_responses_relay_output(
@@ -1256,6 +1269,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     front_connection_identity,
                     disposition,
                     requested_stream,
+                    terminal_evidence,
                 )
             }
             V3ResponsesDirectServerOutcome::DirectFrame(mut frame) => {
@@ -1389,6 +1403,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         front_connection_identity,
                         disposition,
                         requested_stream,
+                        terminal_evidence,
                     );
                 }
                 finalize_v3_responses_relay_server_output(

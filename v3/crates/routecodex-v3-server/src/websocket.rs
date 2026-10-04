@@ -107,6 +107,28 @@ async fn responses_websocket_upgrade(
     })
 }
 
+/// Record a provider terminal on the WebSocket entry as provider-private
+/// evidence, exactly as the HTTP/SSE entry does.
+///
+/// The WebSocket client boundary is a transport break, so this is the only
+/// reader the witness has on this entry. The artifact and its shape have one
+/// owner (`persist_v3_provider_terminal_evidence`); this only supplies the
+/// entry identity, which the endpoint guard above already pins to
+/// `/v1/responses` over the `responses` entry protocol.
+fn record_responses_websocket_provider_terminal_evidence(
+    state: &Arc<V3ListenerState>,
+    request_id: &str,
+    disposition: &routecodex_v3_error::V3ProviderTerminalDisposition,
+) {
+    persist_v3_provider_terminal_evidence(
+        state,
+        "responses",
+        "/v1/responses",
+        request_id,
+        disposition,
+    );
+}
+
 // feature_id: v3.responses_inbound_websocket_proxy
 pub(crate) async fn responses_websocket_session(
     state: Arc<V3ListenerState>,
@@ -197,6 +219,9 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
             }
         };
     let request_id = request_identity.request_id.clone();
+    // The executors below take `request_id` by value, but the provider-terminal
+    // arms still need it to record provider-private evidence.
+    let evidence_request_id = request_id.clone();
     let execution_id = state.debug.next_execution_id(&state.server.id);
     let entry_facts = V3ResponsesEntryFacts::project(&payload);
     let protocol_plan = None;
@@ -222,19 +247,32 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
             )
             .await;
             match outcome {
-                V3ResponsesDirectServerOutcome::ProviderTerminal(_) => {
+                V3ResponsesDirectServerOutcome::ProviderTerminal(disposition) => {
                     // A provider terminal never projects onto the client. The
                     // WebSocket client boundary is a transport break, exactly
                     // like the HTTP/SSE boundary: close without a payload. The
-                    // provider's own status, headers, and body stay
-                    // provider-private typed Error evidence.
+                    // provider's own status, headers, and body are recorded as
+                    // provider-private evidence first, because otherwise the
+                    // witness built and carried across every attempt would be
+                    // dropped at this boundary with no reader at all.
+                    record_responses_websocket_provider_terminal_evidence(
+                        state,
+                        &evidence_request_id,
+                        &disposition,
+                    );
                     Err(())
                 }
                 V3ResponsesDirectServerOutcome::DirectFrame(frame) => {
                     send_responses_websocket_frame(socket, frame).await
                 }
                 V3ResponsesDirectServerOutcome::RelayOutput(output) => {
-                    send_responses_relay_websocket_output(socket, output).await
+                    send_responses_relay_websocket_output(
+                        state,
+                        &evidence_request_id,
+                        socket,
+                        output,
+                    )
+                    .await
                 }
             }
         }
@@ -250,19 +288,32 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
             )
             .await;
             match outcome {
-                V3ResponsesDirectServerOutcome::ProviderTerminal(_) => {
+                V3ResponsesDirectServerOutcome::ProviderTerminal(disposition) => {
                     // A provider terminal never projects onto the client. The
                     // WebSocket client boundary is a transport break, exactly
                     // like the HTTP/SSE boundary: close without a payload. The
-                    // provider's own status, headers, and body stay
-                    // provider-private typed Error evidence.
+                    // provider's own status, headers, and body are recorded as
+                    // provider-private evidence first, because otherwise the
+                    // witness built and carried across every attempt would be
+                    // dropped at this boundary with no reader at all.
+                    record_responses_websocket_provider_terminal_evidence(
+                        state,
+                        &evidence_request_id,
+                        &disposition,
+                    );
                     Err(())
                 }
                 V3ResponsesDirectServerOutcome::DirectFrame(frame) => {
                     send_responses_websocket_frame(socket, frame).await
                 }
                 V3ResponsesDirectServerOutcome::RelayOutput(output) => {
-                    send_responses_relay_websocket_output(socket, output).await
+                    send_responses_relay_websocket_output(
+                        state,
+                        &evidence_request_id,
+                        socket,
+                        output,
+                    )
+                    .await
                 }
             }
         }
@@ -567,12 +618,17 @@ pub(crate) async fn send_responses_websocket_committed_sse_stream(
 }
 
 pub(crate) async fn send_responses_relay_websocket_output(
+    state: &Arc<V3ListenerState>,
+    request_id: &str,
     socket: &mut WebSocket,
     output: V3ResponsesRelayRuntimeOutput,
 ) -> Result<(), ()> {
-    if output.terminal_disposition.is_some() {
+    if let Some(disposition) = output.terminal_disposition.as_ref() {
         // A provider terminal never projects onto the client: close the socket
-        // without a payload, exactly like the HTTP/SSE transport break.
+        // without a payload, exactly like the HTTP/SSE transport break. The
+        // witness is still recorded as provider-private evidence first, because
+        // the relay lane is a client boundary with no other reader.
+        record_responses_websocket_provider_terminal_evidence(state, request_id, disposition);
         return Err(());
     }
     if !output.error_chain.as_ref().is_none_or(Vec::is_empty) || output.status >= 400 {

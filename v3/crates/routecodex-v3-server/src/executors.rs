@@ -287,6 +287,11 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
                 front_connection_identity,
                 disposition,
                 v3_entry_request_wants_sse(request_headers, &console_payload),
+                V3ProviderTerminalEvidence {
+                    entry_protocol: "openai_chat",
+                    endpoint: &path,
+                    request_id: &request_id,
+                },
             );
         }
         let mut trace = relay_trace;
@@ -344,6 +349,11 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
             front_connection_identity,
             disposition,
             v3_entry_request_wants_sse(request_headers, &console_payload),
+            V3ProviderTerminalEvidence {
+                entry_protocol: "openai_chat",
+                endpoint: &path,
+                request_id: &request_id,
+            },
         );
     }
     let mut frame = build_v3_server_16_http_frame_from_v3_resp_15(

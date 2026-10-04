@@ -28,12 +28,11 @@ use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_debug::{V3DebugError, V3DebugRuntime, V3DryRunFixture};
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
-    is_v3_retryable_transient_source, V3EligibleExternalHttpResponse, V3Error01SourceRaised,
-    V3Error05ExecutionAction, V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness,
-    V3Error06ClientProjected, V3ErrorActionScope, V3ErrorHandlingCenter,
-    V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
-    V3ProviderFailureSessionScope, V3ProviderTerminalDisposition, V3_ERROR_CHAIN_NODE_IDS,
-    V3_TRANSIENT_TRANSPORT_HANG_CODE,
+    is_v3_retryable_transient_source, V3Error01SourceRaised, V3Error05ExecutionAction,
+    V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected,
+    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
+    V3ExternalErrorKind, V3ExternalErrorLink, V3ExternalHttpWitness, V3ProviderFailureSessionScope,
+    V3ProviderTerminalDisposition, V3_ERROR_CHAIN_NODE_IDS, V3_TRANSIENT_TRANSPORT_HANG_CODE,
 };
 use routecodex_v3_provider_responses::{
     ReqwestResponsesTransport, ResponsesTransport, V3ProviderAvailabilityProjection,
@@ -318,7 +317,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
     let mut initial_selected_target = initial_selected_target;
     let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
-    let mut last_external_http = None::<V3EligibleExternalHttpResponse>;
+    let mut last_external_http = None::<V3ExternalHttpWitness>;
     let mut send_attempts = 0usize;
     let mut provider_request_snapshot = None;
     let mut pending_provider_action_recovery = None;
@@ -792,7 +791,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         }) {
             Ok(raw) => raw,
             Err(error) => {
-                if let Some(witness) = eligible_external_http_from_provider_error(&error) {
+                if let Some(witness) =
+                    crate::hub_v1::external_http_witness_from_provider_error(&error)
+                {
                     last_external_http = Some(witness);
                 }
                 if let Err(timing_error) = runtime_timing.finish_external() {
@@ -923,6 +924,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         };
         let provider_response_is_stream =
             provider_raw.body_kind() == V3ProviderResponseBodyKind::Sse;
+        // The upstream answered: from this instant its head is real evidence,
+        // whatever the body turns out to be. Recorded before the body is
+        // interpreted so a stream whose payload never decodes is never reported
+        // as if no response had arrived. A branch below that can read a body
+        // replaces this with the fuller witness.
+        last_external_http = Some(crate::hub_v1::external_http_witness_head(&provider_raw));
         if !provider_response_is_stream {
             if let Err(error) = runtime_timing.finish_external() {
                 return error_output(
@@ -935,7 +942,11 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         let provider_status = provider_raw.status();
         trace.push("V3ProviderResp14Raw");
         if let Some(body) = provider_raw.json_body() {
-            if let Some(witness) = V3EligibleExternalHttpResponse::new(
+            // The real upstream response is retained even when it is not
+            // eligible for client projection (bug `705d624` keeps HTTP 502 out
+            // of any client response). Evidence capture is decoupled from that
+            // rule, so the status and body are never dropped.
+            last_external_http = Some(V3ExternalHttpWitness::new(
                 provider_status,
                 provider_raw
                     .headers()
@@ -943,9 +954,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     .map(|header| (header.name.clone(), header.value.clone()))
                     .collect(),
                 body.to_vec(),
-            ) {
-                last_external_http = Some(witness);
-            }
+            ));
         }
 
         let direct_response_compat_context =
