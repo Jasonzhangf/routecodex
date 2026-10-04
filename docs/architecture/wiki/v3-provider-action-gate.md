@@ -123,10 +123,11 @@ Review locks:
   post-terminal parse failures record provider failure and leave the next action gated.
 - Terminal exhaustion is not success: old waiters re-evaluate selection/Error05, and
   the next provider action remains serialized behind a new five-second generation.
-  Error06 projection itself consumes the same gate admission: an isolated terminal
-  provider error waits at least one second, sustained terminal projections remain
-  five seconds apart, and a concurrent routing-group success cannot release a stale
-  provider error directly to the client.
+  Internal terminal handling consumes the same gate admission: an isolated terminal
+  provider failure waits at least one second and sustained terminal decisions remain
+  five seconds apart. Terminal handling never authorizes a model-client error response;
+  AGENTS.md's mandatory all-entry no-client-error contract applies even on exhaustion.
+  A concurrent routing-group success cannot turn a stale failure into client output.
 - A fresh request bypasses an unrelated recovery lane.
 - Client disconnect is health-neutral and does not enter this gate.
 - SSE transport/decode/malformed-event/EOF/hang is also provider-health-neutral. Before

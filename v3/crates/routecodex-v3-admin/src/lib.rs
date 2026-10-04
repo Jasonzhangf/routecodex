@@ -57,10 +57,6 @@ pub struct AppState {
     /// Periodic provider patrol runtime (advisory diagnostics only; never runtime health truth).
     pub patrol: Arc<provider_patrol::PatrolRuntime>,
     pub started_at_epoch_ms: u64,
-    /// Incremental cache of the polled records projection; keeps the WebUI's
-    /// repeated `/api/observability/records` reads from re-decoding the whole
-    /// append-only store on every request.
-    pub records_cache: Arc<api::observability::RecordsProjectionCache>,
 }
 
 impl AppState {
@@ -86,7 +82,6 @@ impl AppState {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0),
-            records_cache: Arc::new(api::observability::RecordsProjectionCache::default()),
         }
     }
 

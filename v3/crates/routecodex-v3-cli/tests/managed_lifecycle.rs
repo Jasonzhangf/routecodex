@@ -545,10 +545,17 @@ fn send_invalid_json_request(port: u16) {
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
     let mut response = String::new();
-    let _ = stream.read_to_string(&mut response);
+    let received = stream.read_to_string(&mut response);
     assert!(
-        response.starts_with("HTTP/1.1 400"),
-        "invalid JSON response must fail visibly, got:\n{response}"
+        received.is_ok()
+            || received
+                .as_ref()
+                .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionReset),
+        "invalid JSON must reach a terminal transport outcome: {received:?}"
+    );
+    assert!(
+        response.is_empty(),
+        "invalid JSON must not receive an error response, got:\n{response}"
     );
 }
 
@@ -562,10 +569,17 @@ fn send_path_not_found_request(port: u16) {
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
     let mut response = String::new();
-    let _ = stream.read_to_string(&mut response);
+    let received = stream.read_to_string(&mut response);
     assert!(
-        response.starts_with("HTTP/1.1 404"),
-        "unknown path response must fail visibly, got:\n{response}"
+        received.is_ok()
+            || received
+                .as_ref()
+                .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionReset),
+        "unknown path must reach a terminal transport outcome: {received:?}"
+    );
+    assert!(
+        response.is_empty(),
+        "unknown path must not receive an error response, got:\n{response}"
     );
 }
 

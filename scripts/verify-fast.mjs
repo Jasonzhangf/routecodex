@@ -341,10 +341,11 @@ function affectedCargoPackages(rustFiles, { allowUnowned = new Set() } = {}) {
     metadata = JSON.parse(
       execFileSync(
         'cargo',
-        ['metadata', '--locked', '--no-deps', '--format-version', '1', '--manifest-path', 'v3/Cargo.toml'],
+        ['metadata', '--locked', '--format-version', '1', '--manifest-path', 'v3/Cargo.toml'],
         {
           cwd: root,
           encoding: 'utf8',
+          maxBuffer: 32 * 1024 * 1024,
           env: { ...process.env, CARGO_NET_OFFLINE: process.env.CARGO_NET_OFFLINE ?? 'true' },
         },
       ),

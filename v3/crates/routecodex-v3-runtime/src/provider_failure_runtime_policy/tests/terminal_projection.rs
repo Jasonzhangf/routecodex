@@ -272,6 +272,6 @@ targets = [
     assert!(!trace.contains(&"V3TargetPolicyRetriedSame"));
     assert_eq!(
         result.terminal_disposition,
-        Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(upstream))
+        Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
     );
 }

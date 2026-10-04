@@ -228,7 +228,7 @@ fn exhausted_provider_error_05(code: &str) -> V3Error05TerminalDecision {
 }
 
 #[test]
-fn provider_terminal_preserves_real_429_status_headers_and_raw_body() {
+fn provider_terminal_keeps_real_429_evidence_internal() {
     let body = br#"{"error":{"type":"rate_limit_error","message":"retry"}}"#.to_vec();
     let witness = V3ExternalHttpWitness::new(
         429,

@@ -623,9 +623,13 @@ impl V3ExternalHttpWitness {
 }
 
 /// The provider failure terminal is either the real upstream HTTP response the
-/// provider returned, or no HTTP response at all. Neither branch fabricates a
-/// proxy 502, and neither branch decides what the client sees: every provider
-/// terminal is a client transport break.
+/// provider returned, or no HTTP response at all.
+///
+/// Provider failures never authorize a client error payload: neither branch
+/// fabricates a proxy 502, and neither branch decides what the client sees —
+/// every provider terminal is a client transport break. The real response is
+/// carried here only so the boundary can record it as provider-private
+/// evidence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum V3ProviderTerminalDisposition {
     /// A real upstream HTTP response was received and is recorded losslessly as
@@ -1063,6 +1067,10 @@ impl V3ErrorHandlingCenter {
                 .source_kind,
             V3ErrorSourceKind::ProviderFailure,
         );
+        // The witness is evidence, never a client projection: exhaustion does
+        // not authorize a client error response, including a real upstream HTTP
+        // error, and the boundary records the witness as provider-private
+        // evidence before it breaks the client transport.
         match witness {
             Some(response) => V3ProviderTerminalDisposition::ExternalHttp(response),
             None => V3ProviderTerminalDisposition::NoResponse,

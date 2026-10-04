@@ -546,13 +546,18 @@ async fn direct_live_sse_provider_unavailable_closes_as_recoverable_disconnect()
     };
 
     let response = responses_direct_output_response(frame, None);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let mut client = response.into_body().into_data_stream();
+    let body = client.next().await.unwrap().unwrap();
     let text = String::from_utf8(body.to_vec()).unwrap();
     assert!(text.contains("event: response.output_text.delta"), "{text}");
     assert!(!text.contains("event: response.failed"), "{text}");
     assert!(!text.contains("internal_response_stream_error"), "{text}");
     assert!(!text.contains("provider secret detail"), "{text}");
     assert!(!text.contains("data: [DONE]"), "{text}");
+    assert!(
+        client.next().await.unwrap().is_err(),
+        "failure must abort, never clean EOF"
+    );
 }
 
 #[tokio::test]
@@ -2708,7 +2713,7 @@ fn openai_chat_relay_records_started_before_runtime_can_project_terminal_error()
 }
 
 #[test]
-fn openai_chat_relay_internal_error_keeps_http_error_projection() {
+fn openai_chat_relay_internal_error_returns_typed_no_response() {
     let output = routecodex_v3_runtime::V3OpenAiChatRelayRuntimeOutput {
         status: 598,
         client_body: routecodex_v3_runtime::V3OpenAiChatRelayClientBody::Json(json!({
@@ -2724,8 +2729,13 @@ fn openai_chat_relay_internal_error_keeps_http_error_projection() {
         terminal_disposition: None,
     };
     let response = openai_chat_relay_output_response(output, None, Duration::from_secs(1), false);
-    assert_eq!(response.status().as_u16(), 598);
-    assert_eq!(response.headers()["content-type"], "application/json");
+    assert!(
+        !response
+            .extensions()
+            .get::<V3ModelClientNoResponse>()
+            .unwrap()
+            .streaming
+    );
 }
 
 #[test]
@@ -3575,7 +3585,7 @@ async fn relay_sse_console_finalizer_prints_usage_for_chat_wire_finish_reason_te
 }
 
 #[tokio::test]
-async fn front_io_sse_error_is_explicit_599_without_keepalive() {
+async fn front_io_sse_error_aborts_without_error_event() {
     let stream: V3IoSseStream =
         Box::pin(stream::iter(vec![Err::<Vec<u8>, _>(std::io::Error::new(
             std::io::ErrorKind::UnexpectedEof,
@@ -3583,10 +3593,8 @@ async fn front_io_sse_error_is_explicit_599_without_keepalive() {
         ))]));
     let body = to_bytes(v3_io_sse_body(stream, None), usize::MAX)
         .await
-        .expect("Front must project an IO failure instead of closing the SSE silently");
-    let text = String::from_utf8_lossy(&body);
-    assert!(text.contains("internal_response_stream_error"), "{text}");
-    assert!(text.contains("\"status\":599"), "{text}");
+        .expect_err("Front IO failure must abort without encoding an error event");
+    assert!(body.to_string().contains("synthetic front IO failure"));
 }
 
 /// The predicate reads the client status only. A recovered (2xx) provider attempt
@@ -3702,7 +3710,7 @@ fn error_observability_does_not_emit_green_completed_line() {
 }
 
 #[tokio::test]
-async fn direct_stream_request_error06_projects_sse_error_not_json() {
+async fn direct_stream_request_error06_retains_diagnostics_without_wire_event() {
     let frame = V3Server16HttpFrame {
         status: 429,
         content_type: "application/json".to_string(),
@@ -3726,20 +3734,18 @@ async fn direct_stream_request_error06_projects_sse_error_not_json() {
     assert_eq!(projected.content_type, "text/event-stream");
     match projected.body {
         V3Server16Body::Bytes(bytes) => {
-            let text = std::str::from_utf8(&bytes).unwrap();
-            assert!(text.contains("event: response.failed"), "{text}");
-            assert!(text.contains("HTTP_429"), "{text}");
-            assert!(text.contains("Rate limited by upstream provider"), "{text}");
-            // Responses 错误流同样只由协议终态收口，不得追加 [DONE]。
-            assert!(!text.contains("data: [DONE]"), "{text}");
-            assert!(text.ends_with("}\n\n"), "{text}");
+            assert!(bytes.is_empty());
+            assert_eq!(
+                projected.error_body.as_ref().unwrap()["error"]["code"],
+                "HTTP_429"
+            );
         }
         other => panic!("stream request Error06 must project SSE body, got {other:?}"),
     }
 }
 
 #[test]
-fn non_responses_stream_error06_uses_protocol_error_event_once() {
+fn non_responses_stream_error06_never_prepares_protocol_error_event() {
     for protocol in [
         V3SseClientProtocol::OpenAiChat,
         V3SseClientProtocol::Anthropic,
@@ -3767,10 +3773,11 @@ fn non_responses_stream_error06_uses_protocol_error_event_once() {
         assert_eq!(projected.content_type, "text/event-stream");
         match projected.body {
             V3Server16Body::Bytes(bytes) => {
-                let text = std::str::from_utf8(&bytes).unwrap();
-                assert!(text.starts_with("event: error\n"), "{text}");
-                assert!(!text.contains("response.failed"), "{text}");
-                assert_eq!(text.matches("data: [DONE]").count(), 1, "{text}");
+                assert!(bytes.is_empty());
+                assert_eq!(
+                    projected.error_body.as_ref().unwrap()["error"]["code"],
+                    "provider_pool_exhausted"
+                );
             }
             other => panic!("stream Error06 must project SSE body, got {other:?}"),
         }
@@ -3830,15 +3837,15 @@ fn direct_stream_error_projection_response_uses_error_channel() {
         project_v3_responses_direct_stream_error_frame_if_requested(frame, true),
         None,
     );
-    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
-    assert_eq!(
-        response.headers().get("content-type").unwrap(),
-        "text/event-stream"
-    );
+    let outcome = response
+        .extensions()
+        .get::<V3ModelClientNoResponse>()
+        .unwrap();
+    assert!(outcome.streaming);
 }
 
 #[tokio::test]
-async fn accept_sse_error06_without_payload_projects_sse_error_not_json() {
+async fn accept_sse_error06_without_payload_preserves_only_internal_diagnostics() {
     let mut headers = HeaderMap::new();
     headers.insert("accept", HeaderValue::from_static("text/event-stream"));
     let frame = V3Server16HttpFrame {
@@ -3863,10 +3870,11 @@ async fn accept_sse_error06_without_payload_projects_sse_error_not_json() {
     assert_eq!(projected.content_type, "text/event-stream");
     match projected.body {
         V3Server16Body::Bytes(bytes) => {
-            let text = std::str::from_utf8(&bytes).unwrap();
-            assert!(text.contains("event: response.failed"), "{text}");
-            assert!(text.contains("malformed_json"), "{text}");
-            assert!(text.contains("malformed JSON request body"), "{text}");
+            assert!(bytes.is_empty());
+            assert_eq!(
+                projected.error_body.as_ref().unwrap()["error"]["code"],
+                "malformed_json"
+            );
         }
         other => panic!("Accept SSE Error06 must project SSE body, got {other:?}"),
     }
@@ -4147,7 +4155,7 @@ async fn responses_relay_output_accepts_runtime_sealed_sse() {
 }
 
 #[tokio::test]
-async fn responses_relay_json_error_projects_failure_terminal_with_done() {
+async fn responses_relay_json_error_returns_typed_no_response() {
     let output = V3ResponsesRelayRuntimeOutput {
         status: 598,
         client_body: V3ResponsesRelayClientBody::Json(json!({
@@ -4167,15 +4175,12 @@ async fn responses_relay_json_error_projects_failure_terminal_with_done() {
     };
 
     let response = responses_relay_output_response(output, None, None, true);
-    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    assert!(response
+        .extensions()
+        .get::<V3ModelClientNoResponse>()
+        .is_some());
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let text = String::from_utf8(body.to_vec()).unwrap();
-    assert!(text.starts_with("event: response.failed\n"), "{text}");
-    assert!(text.contains("provider_request_payload_invalid"), "{text}");
-    assert!(text.contains("UnmappedOutboundFields"), "{text}");
-    // response.failed 就是 Responses 终态，错误流不得追加 [DONE]。
-    assert!(!text.contains("data: [DONE]"), "{text}");
-    assert!(text.ends_with("}\n\n"), "{text}");
+    assert!(body.is_empty());
 }
 
 #[tokio::test]
@@ -4241,6 +4246,9 @@ async fn provider_terminal_external_http_never_projects_provider_response_to_cli
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["content-type"], "text/event-stream");
     assert!(!response.headers().contains_key("retry-after"));
+    assert!(!response.headers().contains_key("connection"));
+    assert!(!response.headers().contains_key("x-hop"));
+    assert!(!response.headers().contains_key("content-length"));
     let error = to_bytes(response.into_body(), usize::MAX)
         .await
         .expect_err("a streaming external provider terminal must break the client transport");
@@ -4435,7 +4443,7 @@ async fn completed_responses_sse_reaches_eof_without_late_keepalive_comments() {
 }
 
 #[tokio::test]
-async fn io_sse_body_internal_error_is_explicit_599_not_silent_eof() {
+async fn io_sse_body_internal_error_aborts_instead_of_emitting_599() {
     let provider = futures_util::stream::iter(vec![Err::<Vec<u8>, io::Error>(io::Error::other(
         "response body transport failed",
     ))]);
@@ -4445,12 +4453,9 @@ async fn io_sse_body_internal_error_is_explicit_599_not_silent_eof() {
     let error = client
         .next()
         .await
-        .expect("internal response error must emit an SSE error event")
-        .expect("error event must be transportable");
-    let error = std::str::from_utf8(&error).unwrap();
-    assert!(error.starts_with("event: error\n"), "{error}");
-    assert!(error.contains("\"status\":599"), "{error}");
-    assert!(error.contains("internal_response_stream_error"), "{error}");
+        .expect("internal response error must abort the transfer")
+        .expect_err("no error event may be transportable");
+    assert!(error.to_string().contains("response body transport failed"));
     assert!(
         client.next().await.is_none(),
         "error event must close the body"
@@ -4458,7 +4463,7 @@ async fn io_sse_body_internal_error_is_explicit_599_not_silent_eof() {
 }
 
 #[tokio::test]
-async fn responses_live_sse_error_emits_responses_failed_terminal() {
+async fn responses_live_sse_error_aborts_without_failed_terminal() {
     let provider = futures_util::stream::iter(vec![Err(
         routecodex_v3_error::raise_v3_sse_runtime_failure(
             "V3ProviderRespInbound01Raw",
@@ -4476,14 +4481,9 @@ async fn responses_live_sse_error_emits_responses_failed_terminal() {
     let error = client
         .next()
         .await
-        .expect("Responses stream failure must emit a terminal event")
-        .expect("terminal event must be transportable");
-    let error = std::str::from_utf8(&error).unwrap();
-    assert!(error.starts_with("event: response.failed\n"), "{error}");
-    assert!(error.contains("internal_response_stream_error"), "{error}");
-    // response.failed 就是 Responses 终态，错误流同样不得追加 [DONE]。
-    assert!(!error.contains("data: [DONE]"), "{error}");
-    assert!(error.ends_with("}\n\n"), "{error}");
+        .expect("Responses stream failure must abort the transfer")
+        .expect_err("a failed terminal must not be transportable");
+    assert!(error.to_string().contains("provider stream failed"));
     assert!(
         client.next().await.is_none(),
         "terminal event must close the body"
@@ -4597,7 +4597,7 @@ async fn successful_direct_responses_sse_injects_keepalive_then_preserves_provid
 }
 
 #[tokio::test]
-async fn error06_responses_sse_starts_with_error_and_never_receives_keepalive() {
+async fn error06_responses_sse_returns_empty_typed_outcome() {
     let error_chunk = b"event: error\ndata: {\"code\":\"request_in_flight\"}\n\n".to_vec();
     let frame = V3Server16HttpFrame {
         status: 409,
@@ -4612,17 +4612,14 @@ async fn error06_responses_sse_starts_with_error_and_never_receives_keepalive() 
         stream_observation: None,
     };
     let response = responses_direct_output_response(frame, Some(Duration::from_millis(10)));
-    let mut client = response.into_body().into_data_stream();
-
-    let first = client.next().await.unwrap().unwrap();
-    assert_eq!(first.as_ref(), error_chunk.as_slice());
     assert!(
-        std::str::from_utf8(&first)
+        response
+            .extensions()
+            .get::<V3ModelClientNoResponse>()
             .unwrap()
-            .starts_with("event: error\n"),
-        "{}",
-        std::str::from_utf8(&first).unwrap()
+            .streaming
     );
+    let mut client = response.into_body().into_data_stream();
     assert!(
         tokio::time::timeout(Duration::from_millis(50), client.next())
             .await

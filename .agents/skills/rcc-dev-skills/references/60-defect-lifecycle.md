@@ -20,7 +20,10 @@ a shadow tracker or ID. The issue owner remains accountable for intake,
 worktree, reproduction, fix, candidate validation, runtime evidence, cleanup,
 and bug disposition. Codex Review and AGY Review own separate independent
 verdicts on the same candidate SHA. The authorized delivery owner performs
-merge/push after both pass; integration failures go to the master. The master
+merge/push after author verification and applicable CI PASS, then main rebuild,
+restart and live acceptance precede completion of both reviews. Review pending
+keeps the bug open; integration failures go to the delivery owner (the live
+master only when Collab is active). The master
 owns the separate residual-resource inventory, while each issue owner cleans
 only that issue's resources.
 
@@ -34,9 +37,9 @@ bug intake / dedup
 -> fetch/combine latest origin/main in the issue worktree -> candidate commit + exact SHA
 -> mapped tests/build + author E2E + candidate install/restart/replay when runtime-impacting
 -> health + real-entry replay + post-restart sample audit
--> independent Codex review and independent AGY review on that exact validated candidate SHA
--> recheck origin/main -> merge reviewed candidate to clean main -> push + candidate/main equivalence + remote receipt
+-> applicable PR CI PASS -> recheck origin/main -> merge validated candidate to clean main -> push + candidate/main equivalence + remote receipt
 -> post-merge verification: runtime path rebuild/install/restart -> health -> real-entry replay -> sample audit; otherwise scoped consumer check
+-> independent Codex review and independent AGY review on the exact validated candidate, bound to delivered main content
 -> issue-owned resource cleanup + absence checks
 -> one issue disposition receipt
 ```
@@ -44,11 +47,13 @@ bug intake / dedup
 The candidate commit binds the exact tree and all downstream evidence; it is not
 the delivery merge and does not authorize integration. Freeze that SHA before
 mapped tests, required gates, author E2E, runtime replay, and architecture
-reviews. Any source change or newer
-`origin/main` after that point invalidates downstream evidence. Close that
-attempt as `open` with its recovery condition, then start a new candidate attempt
-under the same authoritative bug ID; rerun affected gates, E2E, and both reviews.
-Do not create a cross-attempt back-edge or silently reuse stale PASS evidence.
+reviews. Any source change or newer `origin/main` invalidates evidence whose
+bound inputs changed. Record the new candidate under the same authoritative
+bug ID and rerun affected gates and E2E before integration; bind post-delivery
+reviews to the final candidate/main content. Do not silently reuse stale PASS
+evidence. Review pending never means solved. Blocking findings require repair
+and affected revalidation; a confirmed delivered regression follows the global
+traceable revert/rebuild/restart/replay recovery contract.
 
 The disposition node records `solved` only if every applicable gate, both reviews,
 merge receipt, post-merge replay/sample audit, and owned-resource check passed.
