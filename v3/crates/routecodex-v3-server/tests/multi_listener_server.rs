@@ -8,7 +8,7 @@ use axum::{
     routing::post,
     Router,
 };
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{future::join_all, SinkExt, StreamExt};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
@@ -386,6 +386,75 @@ retention = {{ raw_requests = 8, raw_responses = 8, events = 64 }}
 selection = {{ strategy = "priority" }}
 match = {{ precedence = 10, models = ["client-test"] }}
 targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
+/// `p6_manifest` with a declared `expose_models` entry list. `client-test` and
+/// `offroute-test` are both reachable routed visible ids (one pool match each);
+/// `gpt-5.5` and `auto` match no provider model and are therefore client entry
+/// names rather than routed or direct ids.
+fn p6_manifest_with_expose_models(
+    port_a: u16,
+    port_b: u16,
+    provider_base_url: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
+    let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let source = format!(
+        r#"
+version = 3
+{hub_v1_declaration}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["responses"]
+expose_models = ["gpt-5.5", "auto", "client-test"]
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["responses"]
+{hub_v1_server_execution}
+[providers.test]
+type = "responses"
+base_url = "{provider_base_url}"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_P6_TEST_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+responses = {{ process = "chat", streaming = "always" }}
+[providers.test.models.test]
+wire_name = "wire-test"
+aliases = ["client-test"]
+capabilities = ["text", "tools", "vision"]
+supports_streaming = true
+max_tokens = 4096
+max_context_tokens = 128000
+[providers.test.models.offroute]
+wire_name = "offroute-wire"
+aliases = ["offroute-test"]
+capabilities = ["text", "tools"]
+supports_streaming = true
+max_tokens = 2048
+max_context_tokens = 64000
+[debug]
+log_console = false
+snapshots = true
+dry_run = true
+retention = {{ raw_requests = 8, raw_responses = 8, events = 64 }}
+[route_groups.default.pools.client_test]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, models = ["client-test"] }}
+targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
+[route_groups.default.pools.offroute]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 20, models = ["offroute-test"] }}
+targets = [{{ kind = "provider_model", provider = "test", model = "offroute", key = "key", priority = 1 }}]
 [route_groups.default.pools.default]
 selection = {{ strategy = "priority" }}
 targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
@@ -2149,6 +2218,72 @@ async fn p6_models_endpoint_projects_manifest_catalog_with_alias_capabilities() 
             .contains("V3_P6_TEST_KEY"),
         "model catalog must not expose auth handles"
     );
+    handle.shutdown().await;
+    let _ = shutdown.send(());
+}
+
+#[tokio::test]
+async fn p6_models_endpoint_expose_models_publishes_entry_names_and_keeps_direct_surface() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, _captures, shutdown) = start_controlled_upstream().await;
+    let handle = spawn_v3_server_aggregate(p6_manifest_with_expose_models(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let client = reqwest::Client::new();
+    let response: Value = client
+        .get(format!("http://{}/v1/models", handle.listeners[0].addr))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(response["object"], "list");
+    let data = response["data"].as_array().unwrap();
+    let find = |id: &str| data.iter().find(|model| model["id"] == id);
+
+    // `expose_models` 中不对应任何 provider model 的名字是客户端入口名：它们与
+    // `auto` 走同一条正常 VR 路由，只发布目录条目，不是直连条目。
+    for entry_id in ["gpt-5.5", "auto"] {
+        let entry = find(entry_id).unwrap_or_else(|| panic!("{entry_id} must be listed"));
+        assert_eq!(
+            entry["direct_route"], false,
+            "{entry_id} must not be a direct route"
+        );
+        assert_eq!(
+            entry["owned_by"], "routecodex",
+            "{entry_id} is a client entry name"
+        );
+    }
+    assert_eq!(
+        find("gpt-5.5").unwrap()["context_window"],
+        272000,
+        "the default entry keeps the gpt-5.5 Codex capability surface"
+    );
+    assert_eq!(find("auto").unwrap()["context_window"], 128000);
+
+    // 白名单仍裁剪"路由组可达条目"。
+    assert!(
+        find("client-test").is_some(),
+        "a whitelisted routed visible id must stay listed"
+    );
+    for suppressed in ["offroute-test", "offroute"] {
+        assert!(
+            find(suppressed).is_none(),
+            "{suppressed} is a routed visible id outside expose_models and must stay suppressed"
+        );
+    }
+
+    // 直连面（provider.model）不受 `expose_models` 裁剪。
+    for direct_id in ["test.test", "test.offroute"] {
+        let direct = find(direct_id)
+            .unwrap_or_else(|| panic!("{direct_id} must be listed as a direct route"));
+        assert_eq!(direct["direct_route"], true, "{direct_id}");
+    }
     handle.shutdown().await;
     let _ = shutdown.send(());
 }
@@ -5856,6 +5991,60 @@ async fn responses_direct_sample_persist_failure_is_reported_after_live_sse_succ
     assert!(persist_failures
         .iter()
         .all(|failure| { !failure.request_id.is_empty() && !failure.reason.is_empty() }));
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_full_sampling_burst_does_not_drop_sample_writes() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("full-sampling-burst-no-drop");
+    let (base_url, _captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-key");
+    let mut manifest = p6_manifest(free_port(), free_port(), &base_url);
+    manifest.debug.snapshots = true;
+    manifest.debug.codex_samples = true;
+    manifest.debug.full_codex_sampling = true;
+    manifest.debug.snapshot_direct = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let port = handle.listeners[0].addr.port();
+    let samples_root = home_guard.codex_samples_root(port);
+
+    let client = reqwest::Client::new();
+    let requests = (0..80)
+        .map(|_| async {
+            client
+                .post(format!("http://127.0.0.1:{port}/v1/responses"))
+                .json(&json!({
+                    "model": "client-test",
+                    "input": "burst sample writes stay verbatim",
+                    "stream": true
+                }))
+                .send()
+                .await
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    for response in join_all(requests).await {
+        assert_eq!(response.status(), 200);
+        let body = response.text().await.expect("complete SSE body");
+        assert!(body.contains("response.completed"), "{body}");
+    }
+
+    let failures = handle.shutdown().await;
+    assert!(
+        failures.is_empty(),
+        "full-sampling burst must not drop sample writes: {failures:?}"
+    );
+    let written = fs::read_dir(&samples_root)
+        .unwrap()
+        .filter_map(Result::ok)
+        .count();
+    assert!(
+        written >= 80,
+        "expected at least one request sample dir per request, found {written}"
+    );
+
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
 }

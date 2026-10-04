@@ -1918,7 +1918,7 @@ resources:
     owner_crate: routecodex-v3-debug
     owner_node: run_v3_codex_sample_persist_worker
     identity: [requestId, artifactName]
-    semantic_contract: Bounded to 64 queued jobs and 64 MiB of serialized payload across queued and in-flight writes. Capacity or byte-budget exhaustion is logged and recorded as a persistence failure without rejecting the business request.
+    semantic_contract: Bounded by 64 MiB across queued and in-flight writes; each queued job charges its serialized payload plus a fixed per-job overhead so both payload bytes and fixed message cost stay bounded. Budget exhaustion is logged and recorded as a persistence failure without rejecting the business request.
     allowed_readers: [run_v3_codex_sample_persist_worker]
     allowed_writers: [V3CodexSampleStore::enqueue_persist]
     forbidden_writers: [routecodex-v3-runtime, routecodex-v3-provider-responses, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]

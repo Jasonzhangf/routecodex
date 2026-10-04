@@ -74,8 +74,6 @@ pub enum V3AnthropicRelayRuntimeError {
     Target(String),
     #[error("V3 Relay provider pool exhausted after {attempted_candidates:?}")]
     ProviderPoolExhausted { attempted_candidates: Vec<String> },
-    #[error("V3 Relay requested direct provider model not found: {0}")]
-    ModelNotFound(String),
     #[error("V3 Relay provider contract failed: {0}")]
     Provider(#[from] V3ProviderError),
     #[error("V3 Relay provider compat failed: {0}")]
@@ -542,13 +540,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             match target_resolution {
                 V3RelayProviderAdmittedTargetResolution::Selected(selected) => {
                     (selected.selected, Some(selected.admission))
-                }
-                V3RelayProviderAdmittedTargetResolution::Failed(source)
-                    if source.source_kind == V3ErrorSourceKind::ModelNotFound =>
-                {
-                    return Err(V3AnthropicRelayRuntimeError::ModelNotFound(
-                        source.message.clone(),
-                    ))
                 }
                 V3RelayProviderAdmittedTargetResolution::Failed(source) => {
                     return Err(V3AnthropicRelayRuntimeError::Target(format!(

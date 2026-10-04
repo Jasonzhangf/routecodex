@@ -2632,13 +2632,13 @@ async fn request_side_channel_is_rejected_before_provider_transport() {
 }
 
 #[tokio::test]
-async fn openai_chat_unknown_direct_provider_model_returns_model_not_found() {
+async fn openai_chat_unknown_direct_provider_model_falls_back_to_default_pool() {
     let manifest = manifest();
     let runtime = JsonTransport {
         captured_url: Mutex::new(None),
         captured_body: Mutex::new(None),
     };
-    let error = execute_v3_openai_chat_relay_runtime(
+    execute_v3_openai_chat_relay_runtime(
         &manifest,
         V3OpenAiChatRelayRuntimeInput {
             server_id: "controlled".into(),
@@ -2658,12 +2658,11 @@ async fn openai_chat_unknown_direct_provider_model_returns_model_not_found() {
         &runtime,
     )
     .await
-    .unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("direct provider model controlled.unknown-model is not configured"),
-        "openai_chat provider.model absence must surface ModelNotFound: {error}"
+    .unwrap();
+    let body = runtime.captured_body.lock().unwrap().clone().unwrap();
+    assert_eq!(
+        body["model"], "chat-wire-model",
+        "an enabled provider that declares no such model must fall back to normal pool routing"
     );
 }
 
