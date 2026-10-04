@@ -424,7 +424,7 @@ resources:
     semantic_contract:
       context_admission: Target09 carries the typed request input token count as side-channel route evidence; Target10 compares it with each candidate max_context_tokens before availability or transport and records context_window_exceeded for candidates that cannot admit the request.
       priority_schedule: Target09 captures the server-scoped schedule and Target10 applies the local-time provider tier only as an effective-priority adjustment inside the selected route pool.
-      payload_boundary: requestInputTokens and max_context_tokens are control-side admission facts and must not enter provider wire payload or client response payload.
+      payload_boundary: requestInputTokens and max_context_tokens are control-side admission facts and must not enter provider wire payload or client response payload. The provider-declared output cap is the single candidate field that is a provider wire parameter rather than a control-side admission fact; Target09 attaches it from the published model declaration, Target10 carries it unchanged, and ProviderReqCompat06ProviderCompat may project it into the provider wire payload only when the client supplied no output limit.
     allowed_writers: [V3Target09CandidateSetExpanded]
     allowed_readers: [V3Target10ConcreteProviderSelected, V3Error03TargetLocalAction]
     forbidden_writers: [routecodex-v3-virtual-router, routecodex-v3-server, routecodex-v3-provider-responses]
@@ -867,7 +867,7 @@ resources:
     owner_node: V3HubReqOutbound07ProviderSemantic
     identity: [requestId, providerId, modelId, providerProtocol]
     allowed_writers: [V3HubReqOutbound07ProviderSemantic]
-    allowed_readers: [V3ProviderReqOutbound08WirePayload]
+    allowed_readers: [V3ProviderReqOutbound08WirePayload, ProviderReqCompat06ProviderCompat]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-debug, V3HubReqInbound02Normalized, V3HubReqChatProcess04Governed]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -961,7 +961,7 @@ resources:
     owner_crate: routecodex-v3-runtime
     owner_node: V3ProviderReqOutbound08WirePayload
     identity: [requestId, providerProtocol, providerId, modelId]
-    allowed_writers: [V3ProviderReqOutbound08WirePayload]
+    allowed_writers: [ProviderReqCompat06ProviderCompat, V3ProviderReqOutbound08WirePayload]
     allowed_readers: [V3ProviderReqOutbound09TransportRequest]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-debug, V3HubReqInbound02Normalized, V3HubReqChatProcess04Governed]
     may_enter_provider_body: true
