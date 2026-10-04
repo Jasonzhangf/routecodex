@@ -353,11 +353,18 @@ pub(super) fn read_v3_obs_rows_for_request_key(
     let ports = observability_store_paths(state)
         .map_err(|error| (StatusCode::BAD_GATEWAY, json!({ "error": error })))?;
     let mut cache = v3_obs_cache_guard();
-    let mut matching = Vec::new();
     for (port, path) in &ports {
         if let Err(error) = refresh_v3_obs_store(&mut cache, *port, path) {
             return Err((StatusCode::BAD_GATEWAY, json!({ "error": error })));
         }
+    }
+    // Drop entries for ports the config no longer lists, so a removed listener
+    // does not keep a decoded store resident.
+    cache
+        .ports
+        .retain(|path, _| ports.iter().any(|(_, known)| known == path));
+    let mut matching = Vec::new();
+    for (_, path) in &ports {
         if let Some(entry) = cache.ports.get(path) {
             matching.extend(
                 entry

@@ -673,15 +673,21 @@ impl V3DebugRuntime {
 /// cap holds across restarts as well as during a run.
 ///
 /// Rotation here is best effort: a log that cannot be rotated must not stop the
-/// runtime from starting. The sink still opens and keeps appending, and a
-/// rotation that fails outright is retried on the next write.
+/// runtime from starting. The sink still opens and keeps appending, and the cap
+/// is retried on the next write. A rotation that fails outright is announced
+/// rather than swallowed, so an oversized live log leaves evidence even when
+/// startup continues.
 fn open_v3_debug_log_sink(path: &str) -> V3DebugResult<BufWriter<File>> {
     ensure_log_file_parent_dir(path)?;
     if fs::metadata(path)
         .map(|metadata| metadata.len() > V3_DEBUG_LOG_MAX_BYTES)
         .unwrap_or(false)
     {
-        let _ = rotate_v3_debug_log_file(path);
+        if let Err(error) = rotate_v3_debug_log_file(path) {
+            eprintln!(
+                "[RouteCodexV3] debug log {path} could not be rotated at startup: {error}; continuing with the oversized file and retrying the cap on the next write"
+            );
+        }
     }
     open_log_file_for_append(path).map(BufWriter::new)
 }
