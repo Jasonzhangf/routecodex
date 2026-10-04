@@ -97,6 +97,7 @@ pub trait V3DirectProtocolCodec {
     fn run_request_projection(
         policy: &Self::Policy,
         request_key_catalog: &V3DirectRequestKeyHookCatalog,
+        drop_context: &crate::projection_drop_log::V3ProjectionDropContext,
     ) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised>;
 
     fn run_provider_transport(
@@ -276,10 +277,12 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
     fn run_request_projection(
         policy: &Self::Policy,
         request_key_catalog: &V3DirectRequestKeyHookCatalog,
+        drop_context: &crate::projection_drop_log::V3ProjectionDropContext,
     ) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
-        crate::hooks::responses_direct_request_projection_hook_with_key_catalog(
+        crate::hooks::responses_direct_request_projection_hook_with_key_catalog_and_drop_context(
             policy,
             request_key_catalog,
+            drop_context,
         )
     }
 
@@ -470,10 +473,12 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
     fn run_request_projection(
         policy: &Self::Policy,
         request_key_catalog: &V3DirectRequestKeyHookCatalog,
+        drop_context: &crate::projection_drop_log::V3ProjectionDropContext,
     ) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
-        crate::hooks::chat_direct_request_projection_hook_with_key_catalog(
+        crate::hooks::chat_direct_request_projection_hook_with_key_catalog_and_drop_context(
             policy,
             request_key_catalog,
+            drop_context,
         )
     }
 

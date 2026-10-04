@@ -424,6 +424,14 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
     let preflight = build_v3_server_startup_01_listener_set_from_config_05(&manifest);
     let debug =
         build_v3_debug_runtime_from_manifest(&debug_manifest).map_err(std::io::Error::other)?;
+    // 独立的 stage-3 投影丢弃日志 wiring：启动时确保父目录与 append-only 文件
+    // 就位。丢弃证据刻意与 debug 日志物理分离，不写入 debug runtime。
+    if let Some(projection_drop_log_file) = debug_manifest.projection_drop_log_file.as_deref() {
+        routecodex_v3_runtime::projection_drop_log::ensure_v3_projection_drop_log_file(
+            projection_drop_log_file,
+        )
+        .map_err(std::io::Error::other)?;
+    }
     let responses_direct_server_tool_state = Arc::new(
         V3ResponsesDirectServerToolState::default()
             .with_hooks_sidecar_socket(hooks_sidecar_socket.clone()),

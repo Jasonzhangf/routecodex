@@ -69,10 +69,13 @@ mod request_outbound_metadata;
 mod request_outbound_tool_id;
 pub(crate) use request_outbound_builtin_tool_projection::project_openai_responses_hosted_web_search_for_selected_target;
 pub(crate) use request_outbound_format::{
-    build_v3_anthropic_provider_request_source_from_chat_canonical,
+    build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops,
     build_v3_openai_chat_standard_request_for_selected_web_search_mode,
+    build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording,
     build_v3_openai_chat_standard_request_from_chat_canonical,
+    build_v3_openai_chat_standard_request_from_chat_canonical_recording,
     build_v3_openai_responses_standard_request_for_selected_target,
+    build_v3_openai_responses_standard_request_for_selected_target_with_drops,
     build_v3_openai_responses_standard_request_from_chat_canonical,
     normalize_v3_openai_responses_provider_request_payload,
 };
@@ -92,7 +95,9 @@ mod req_target_06_resolved;
 pub use req_target_06_resolved::*;
 mod req_outbound_07_provider_semantic;
 pub use req_outbound_07_provider_semantic::*;
+mod provider_req_compat_06_drop;
 mod provider_req_compat_06_provider_compat;
+pub use provider_req_compat_06_drop::*;
 pub use provider_req_compat_06_provider_compat::*;
 mod provider_req_outbound_08_wire_payload;
 pub use provider_req_outbound_08_wire_payload::*;

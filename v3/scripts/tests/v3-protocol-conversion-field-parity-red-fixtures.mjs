@@ -593,8 +593,8 @@ const cases = [
   {
     name: 'Anthropic provider compat drops original Responses reasoning surface',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
-    from: 'let source = build_v3_anthropic_provider_request_source_from_chat_canonical(',
-    to: 'let source = build_v3_anthropic_provider_request_source_removed(',
+    from: 'build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops(',
+    to: 'build_v3_anthropic_provider_request_source_removed(',
     diagnostic: /anthropic_original_responses_surface|build_v3_anthropic_provider_request_source_from_chat_canonical|Anthropic/u,
   },
   {
@@ -614,8 +614,8 @@ const cases = [
   {
     name: 'Responses outbound resurrects raw Responses passthrough',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
-    from: 'let projected_source = project_outbound_payload_for_target_protocol(\n        payload,\n        V3OutboundTargetProtocol::OpenAiResponses,\n    )?;',
-    to: 'if payload.get("messages").and_then(Value::as_array).is_none() && payload.get("input").and_then(Value::as_array).is_some() {\n        return normalize_responses_payload_for_provider_standard(payload);\n    }\n    let projected_source = project_outbound_payload_for_target_protocol(\n        payload,\n        V3OutboundTargetProtocol::OpenAiResponses,\n    )?;',
+    from: 'let (projected_source, drops) = project_outbound_payload_for_target_protocol_with_drops(\n        payload,\n        V3OutboundTargetProtocol::OpenAiResponses,\n    )?;',
+    to: 'if payload.get("messages").and_then(Value::as_array).is_none() && payload.get("input").and_then(Value::as_array).is_some() {\n        return normalize_responses_payload_for_provider_standard(payload);\n    }\n    let (projected_source, drops) = project_outbound_payload_for_target_protocol_with_drops(\n        payload,\n        V3OutboundTargetProtocol::OpenAiResponses,\n    )?;',
     diagnostic: /responses_outbound_requires_chat_canonical|normalize_responses_payload_for_provider_standard|payload\.get\("input"\)/u,
   },
   {

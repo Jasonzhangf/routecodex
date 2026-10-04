@@ -206,11 +206,13 @@ async fn responses_openai_chat_field_parity_legacy_tool_output_normalizes_before
 
 #[tokio::test]
 async fn responses_openai_chat_field_parity_normalization_preserves_failure_boundaries() {
+    // Non-array `tools` is deliberately NOT in this failure-boundary list. It is an
+    // openai_chat field that cannot be represented compatibly, so stage-3 output
+    // projection drops it, records the drop and continues the request instead of
+    // failing it; `non_array_tools_is_dropped_recorded_and_request_continues` pins
+    // that path. The remaining entries are genuine request contradictions whose
+    // boundary must stay visible.
     for (payload, expected) in [
-        (
-            serde_json::json!({"input":"hi","messages":[{"role":"user","content":"hi"}],"tools":"not-an-array"}),
-            "$.tools",
-        ),
         (
             serde_json::json!({"input":"hi","messages":[{"role":"user","content":"different"}]}),
             "conflicting input and messages",
@@ -290,8 +292,8 @@ async fn responses_openai_chat_field_parity_equivalent_tool_histories_merge_anno
 }
 
 #[tokio::test]
-async fn responses_openai_chat_field_parity_tool_output_extra_fields_roundtrip_or_fail_explicitly()
-{
+async fn responses_openai_chat_field_parity_tool_output_extra_fields_roundtrip_then_drop_on_chat_wire(
+) {
     let payload = serde_json::json!({
         "messages":[{"role":"assistant","tool_calls":[{"id":"call_extra","type":"function","function":{"name":"lookup","arguments":"{}"}}]}],
         "input":[{"type":"function_call_output","id":"fco_extra","status":"completed","call_id":"call_extra","output":"done","opaque_business":{"ticket":42}}],
@@ -332,18 +334,21 @@ async fn responses_openai_chat_field_parity_tool_output_extra_fields_roundtrip_o
         &transport,
     )
     .await
-    .expect("unmapped target field must enter the typed error projection");
-    assert_eq!(result.status, 598);
-    let routecodex_v3_runtime::V3ResponsesRelayClientBody::Json(body) = result.client_body else {
-        panic!("JSON request requires JSON error");
-    };
-    let message = body["error"]["message"].as_str().unwrap();
-    assert!(message.contains("UnmappedOutboundFields"), "{message}");
+    .expect("unrepresentable target field must drop, not fail the request");
+    assert_eq!(result.status, 200);
+    assert!(result.error_chain.is_none());
+    // The Responses-only extra-field carrier has no openai_chat representation:
+    // stage-3 projection drops it (recorded on the independent drop channel) and
+    // the request continues to the provider instead of projecting 598.
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    let body = provider_projection_body(&captures[0]);
     assert!(
-        message.contains("responses_tool_output_extra_fields"),
-        "{message}"
+        !body
+            .to_string()
+            .contains("responses_tool_output_extra_fields"),
+        "{body}"
     );
-    assert!(transport.captures.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
