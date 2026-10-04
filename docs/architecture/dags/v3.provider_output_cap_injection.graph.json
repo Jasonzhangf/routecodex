@@ -1,11 +1,10 @@
 {
   "id": "v3.provider_output_cap_injection",
-  "version": "2",
+  "version": "3",
   "inputs": [
     {
-      "id": "已选目标与语义请求",
-      "schema": "Object",
-      "schema_ref": "v3.request.provider_semantic"
+      "id": "路由目标",
+      "schema": "Object"
     }
   ],
   "output_contracts": [
@@ -17,12 +16,30 @@
   ],
   "nodes": [
     {
-      "id": "解析已选目标的输出上限",
-      "operator": "routecodex.v3.target.V3TargetInterpreter::expand_candidates",
+      "id": "展开候选集并挂载声明的输出上限",
+      "operator": "routecodex.v3.target.V3Target09CandidateSetExpanded",
       "operator_version": "1",
-      "inputs": ["已选目标与语义请求"],
+      "inputs": ["路由目标"],
       "output": {
-        "id": "目标声明的输出上限",
+        "id": "候选集",
+        "schema": "Object",
+        "schema_ref": "v3.target.candidate_set"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [],
+        "writes": ["v3.target.candidate_set"]
+      }
+    },
+    {
+      "id": "选定具体 provider 目标",
+      "operator": "routecodex.v3.target.V3Target10ConcreteProviderSelected",
+      "operator_version": "1",
+      "inputs": ["候选集"],
+      "output": {
+        "id": "已选 provider 目标",
         "schema": "Object",
         "schema_ref": "v3.target.concrete_provider"
       },
@@ -30,33 +47,15 @@
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": ["v3.config.published_manifest"],
-        "writes": []
-      }
-    },
-    {
-      "id": "投影为 provider wire 请求",
-      "operator": "routecodex.v3.runtime.build_v3_provider_standard_protocol_payload_from_req07",
-      "operator_version": "1",
-      "inputs": ["目标声明的输出上限"],
-      "output": {
-        "id": "provider wire 请求",
-        "schema": "Object",
-        "schema_ref": "v3.hub.provider_wire_payload"
-      },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
-      "iterator": "Whole",
-      "resources": {
-        "reads": ["v3.request.provider_semantic"],
-        "writes": ["v3.hub.provider_wire_payload"]
+        "reads": ["v3.target.candidate_set"],
+        "writes": ["v3.target.concrete_provider"]
       }
     },
     {
       "id": "补齐缺失的输出上限",
-      "operator": "routecodex.v3.runtime.apply_v3_provider_req_compat_to_provider_payload",
+      "operator": "routecodex.v3.runtime.ProviderReqCompat06ProviderCompat",
       "operator_version": "1",
-      "inputs": ["provider wire 请求"],
+      "inputs": ["已选 provider 目标"],
       "output": {
         "id": "已补齐输出上限的 provider wire 请求",
         "schema": "Object",
@@ -66,21 +65,25 @@
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": ["v3.target.concrete_provider", "v3.hub.provider_wire_payload"],
+        "reads": [
+          "v3.request.provider_semantic",
+          "v3.target.concrete_provider",
+          "v3.hub.resolved_target"
+        ],
         "writes": ["v3.hub.provider_wire_payload"]
       }
     }
   ],
   "edges": [
     {
-      "from": "解析已选目标的输出上限",
-      "to": "投影为 provider wire 请求",
-      "arc_id": "目标声明的输出上限"
+      "from": "展开候选集并挂载声明的输出上限",
+      "to": "选定具体 provider 目标",
+      "arc_id": "候选集"
     },
     {
-      "from": "投影为 provider wire 请求",
+      "from": "选定具体 provider 目标",
       "to": "补齐缺失的输出上限",
-      "arc_id": "provider wire 请求"
+      "arc_id": "已选 provider 目标"
     }
   ],
   "outputs": ["已补齐输出上限的 provider wire 请求"]
