@@ -73,7 +73,12 @@ async fn provider(
     if state.strict
         && historical_call
         && (hosted["function"]["name"] != hosted["name"]
-            || !hosted["function"]["parameters"].is_object())
+            || !hosted["function"]["parameters"].is_object()
+            || body["tools"].as_array().unwrap().iter().any(|tool| {
+                tool.get("input_schema").is_some()
+                    && (tool["function"]["name"] != tool["name"]
+                        || tool["function"]["parameters"] != tool["input_schema"])
+            }))
     {
         return (
             StatusCode::BAD_REQUEST,
@@ -163,24 +168,36 @@ retention = {{ raw_requests = 8, raw_responses = 8, events = 64 }}
 fn request(endpoint: &str, stream: bool) -> Value {
     let schema =
         json!({"type":"object","properties":{"value":{"type":"integer"}},"required":["value"]});
+    let wait_schema = json!({"type":"object","properties":{
+        "session_id":{"type":"integer"},"chars":{"type":"string"}},"required":["session_id"]});
     match endpoint {
         "/v1/responses" => json!({"model":"gateway.glm-5.3","stream":stream,
-            "tools":[{"type":"web_search"},{"type":"function","name":"exec_command","parameters":schema}],
+            "tools":[{"type":"web_search"},{"type":"function","name":"exec_command","parameters":schema},
+                {"type":"function","name":"write_stdin","parameters":wait_schema}],
             "input":[{"role":"user","content":"continue the calculation"},
                 {"type":"function_call","call_id":"call_old","name":"exec_command","arguments":"{\"value\":1}"},
-                {"type":"function_call_output","call_id":"call_old","output":"EXECUTED:2"}]}),
+                {"type":"function_call_output","call_id":"call_old","output":"EXECUTED:2"},
+                {"type":"function_call","call_id":"call_wait","name":"write_stdin","arguments":"{\"session_id\":44,\"chars\":\"\"}"},
+                {"type":"function_call_output","call_id":"call_wait","output":"POLL_COMPLETE:2"}]}),
         "/v1/chat/completions" => json!({"model":"gateway.glm-5.3","stream":stream,
-            "tools":[{"type":"web_search"},{"type":"function","function":{"name":"exec_command","parameters":schema}}],
+            "tools":[{"type":"web_search"},{"type":"function","function":{"name":"exec_command","parameters":schema}},
+                {"type":"function","function":{"name":"write_stdin","parameters":wait_schema}}],
             "messages":[{"role":"user","content":"continue the calculation"},
                 {"role":"assistant","content":null,"tool_calls":[{"id":"call_old","type":"function",
                     "function":{"name":"exec_command","arguments":"{\"value\":1}"}}]},
-                {"role":"tool","tool_call_id":"call_old","content":"EXECUTED:2"}]}),
+                {"role":"tool","tool_call_id":"call_old","content":"EXECUTED:2"},
+                {"role":"assistant","content":null,"tool_calls":[{"id":"call_wait","type":"function",
+                    "function":{"name":"write_stdin","arguments":"{\"session_id\":44,\"chars\":\"\"}"}}]},
+                {"role":"tool","tool_call_id":"call_wait","content":"POLL_COMPLETE:2"}]}),
         "/v1/messages" => json!({"model":"gateway.glm-5.3","stream":stream,"max_tokens":4096,
             "tools":[{"type":"web_search_20250305","name":"web_search"},
-                {"name":"exec_command","input_schema":schema}],
+                {"name":"exec_command","input_schema":schema},
+                {"name":"write_stdin","input_schema":wait_schema}],
             "messages":[{"role":"user","content":[{"type":"text","text":"continue the calculation"}]},
                 {"role":"assistant","content":[{"type":"tool_use","id":"call_old","name":"exec_command","input":{"value":1}}]},
-                {"role":"user","content":[{"type":"tool_result","tool_use_id":"call_old","content":"EXECUTED:2"}]}]}),
+                {"role":"user","content":[{"type":"tool_result","tool_use_id":"call_old","content":"EXECUTED:2"}]},
+                {"role":"assistant","content":[{"type":"tool_use","id":"call_wait","name":"write_stdin","input":{"session_id":44,"chars":""}}]},
+                {"role":"user","content":[{"type":"tool_result","tool_use_id":"call_wait","content":"POLL_COMPLETE:2"}]}]}),
         _ => unreachable!(),
     }
 }
@@ -339,6 +356,13 @@ async fn run_round_trip(endpoint: &str, stream: bool, profile: &str, strict: boo
         assert!(blocks.iter().any(|block| block["type"] == "tool_result"
             && block["tool_use_id"] == "call_old"
             && block["content"].to_string().contains("EXECUTED:2")));
+        assert!(blocks.iter().any(|block| block["type"] == "tool_use"
+            && block["name"] == "write_stdin"
+            && block["id"] == "call_wait"
+            && block["input"] == json!({"session_id":44,"chars":""})));
+        assert!(blocks.iter().any(|block| block["type"] == "tool_result"
+            && block["tool_use_id"] == "call_wait"
+            && block["content"].to_string().contains("POLL_COMPLETE:2")));
     }
     eprintln!("{endpoint} stream={stream} profile={profile}: attempts=2 execution={receipt} followup=accepted");
 }
