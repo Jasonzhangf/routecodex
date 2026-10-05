@@ -219,7 +219,9 @@ pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
                 let name = item.get("name").and_then(Value::as_str).unwrap_or_default();
                 // Chat dispatch uses the exact declared function name. Canonical
                 // Responses may split that identity into namespace and leaf.
-                let qualified = item.get("namespace").and_then(Value::as_str)
+                let qualified = item
+                    .get("namespace")
+                    .and_then(Value::as_str)
                     .map(|namespace| format!("{namespace}.{name}"));
                 let name = qualified.as_deref().and_then(|identity| {
                     chat_request.get("tools").and_then(Value::as_array)

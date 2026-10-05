@@ -54,6 +54,12 @@ PR #343（`eb77dc9b`）补充普通 function/custom 名称的碰撞保护。
 
 修复边界是显式 `anthropic:goaichat` Provider Compat。复用已有名称分配器，
 预留普通工具名，同步声明、历史 `tool_use.name` 与强制 `tool_choice.name`。
+真实强制选择验收又确认：带 description 的工具采用64位纯十六进制别名时，
+Goaichat 返回 `only auto, none, required or a named function are supported`。
+保留同一声明、description、schema、选择策略和请求，仅把声明及选择中的
+别名改为同长的 `tool_` 前缀形式，返回完整 `message_stop` 且无 SSE error。
+Goaichat 因此使用带前缀的64字符别名；共享分配器继续负责预留和碰撞。
+标准 OpenAI Chat 仍使用原有别名形式，不接收这个 provider 私有限制。
 反向映射属于 typed attempt context。它不能进入 payload、metadata 或日志，
 也不能跨 candidate 复用。JSON 与完整缓冲 SSE 均先还原标准 Anthropic
 工具名，再由原有协议投影恢复客户端 function/custom/namespace 身份。

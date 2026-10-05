@@ -7,7 +7,8 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3ProviderRespInbound01Raw {
-    pub(crate) goaichat_tool_names: provider_compat_core::goaichat_tool_names::GoaichatToolNameProjection,
+    pub(crate) goaichat_tool_names:
+        provider_compat_core::goaichat_tool_names::GoaichatToolNameProjection,
     pub(crate) payload: V3HubResponsePayload,
     pub(crate) raw_sse_chunks: Option<Arc<Vec<Vec<u8>>>>,
     pub(crate) entry_protocol: V3HubEntryProtocol,
@@ -28,7 +29,8 @@ pub struct V3ProviderRespInbound01Raw {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3ProviderRespInbound01RawContext {
-    pub(crate) goaichat_tool_names: provider_compat_core::goaichat_tool_names::GoaichatToolNameProjection,
+    pub(crate) goaichat_tool_names:
+        provider_compat_core::goaichat_tool_names::GoaichatToolNameProjection,
     pub(crate) entry_protocol: V3HubEntryProtocol,
     pub(crate) provider_protocol: V3HubProviderWireProtocol,
     pub(crate) source_provider_protocol: V3HubProviderWireProtocol,
@@ -71,7 +73,10 @@ impl V3ProviderRespInbound01RawContext {
         self
     }
 
-    pub(crate) fn with_goaichat_tool_names(mut self, names: provider_compat_core::goaichat_tool_names::GoaichatToolNameProjection) -> Self {
+    pub(crate) fn with_goaichat_tool_names(
+        mut self,
+        names: provider_compat_core::goaichat_tool_names::GoaichatToolNameProjection,
+    ) -> Self {
         self.goaichat_tool_names = names;
         self
     }

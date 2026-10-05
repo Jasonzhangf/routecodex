@@ -91,7 +91,13 @@ fn collision_fixture() -> (String, String) {
         "mcp__codex_apps__math___sha_allocator_collision_source_{}",
         "x".repeat(70)
     );
-    let alias = provider_compat_core::namespace_tools::openai_chat_namespace_wire_name(&source);
+    let alias = provider_compat_core::namespace_tools::provider_tool_wire_names_with_prefix(
+        [source.clone()].into(),
+        Default::default(),
+        "tool_",
+    )
+    .remove(&source)
+    .unwrap();
     assert_eq!(alias.len(), 64);
     assert_ne!(alias, source);
     (source, alias)

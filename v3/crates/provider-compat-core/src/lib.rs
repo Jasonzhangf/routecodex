@@ -12,8 +12,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 mod cc_sol;
 mod deepseek_console_go;
-mod minimax_anthropic;
 pub mod goaichat_tool_names;
+mod minimax_anthropic;
 pub mod namespace_tools;
 
 /// DeepSeek Console Go responses 网关的响应侧 custom/function 工具回射入口：
@@ -144,11 +144,17 @@ pub fn run_req_outbound_stage3_compat(
     };
 
     if profile_id == "anthropic:goaichat"
-        && provider_protocol_matches(adapter_context.provider_protocol.as_ref(), "anthropic-messages")
+        && provider_protocol_matches(
+            adapter_context.provider_protocol.as_ref(),
+            "anthropic-messages",
+        )
     {
         goaichat_tool_names::GoaichatToolNameProjection::for_request(
-            Some(profile_id), "anthropic-messages", &payload,
-        ).project_request(&mut payload);
+            Some(profile_id),
+            "anthropic-messages",
+            &payload,
+        )
+        .project_request(&mut payload);
         return Ok(build_compat_result(payload, Some(profile_id.to_owned())));
     }
 
@@ -294,10 +300,16 @@ pub fn run_resp_inbound_stage3_compat(
     };
 
     if profile_id == "anthropic:goaichat"
-        && provider_protocol_matches(input.adapter_context.provider_protocol.as_ref(), "anthropic-messages")
+        && provider_protocol_matches(
+            input.adapter_context.provider_protocol.as_ref(),
+            "anthropic-messages",
+        )
     {
         let mut payload = input.payload;
-        input.adapter_context.goaichat_tool_names.restore_response(&mut payload);
+        input
+            .adapter_context
+            .goaichat_tool_names
+            .restore_response(&mut payload);
         return Ok(build_compat_result(payload, Some(profile_id.to_owned())));
     }
 

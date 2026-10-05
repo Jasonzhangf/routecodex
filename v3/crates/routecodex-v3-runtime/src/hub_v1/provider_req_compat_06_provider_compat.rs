@@ -26,7 +26,8 @@ pub struct ProviderReqCompat06ProviderCompat {
     pub(crate) previous: V3HubReqOutbound07ProviderSemantic,
     pub(crate) profile: V3ProviderCompatProfileId,
     pub(crate) payload: V3HubOpaquePayload,
-    pub(crate) goaichat_tool_names: provider_compat_core::goaichat_tool_names::GoaichatToolNameProjection,
+    pub(crate) goaichat_tool_names:
+        provider_compat_core::goaichat_tool_names::GoaichatToolNameProjection,
 }
 
 pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
@@ -51,12 +52,22 @@ pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
 pub(super) fn apply_v3_provider_req_compat(
     input: &V3HubReqOutbound07ProviderSemantic,
     profile: &V3ProviderCompatProfileId,
-) -> Result<(Value, Vec<V3ProjectionDropRecord>, provider_compat_core::goaichat_tool_names::GoaichatToolNameProjection), V3ProviderCompatError> {
+) -> Result<
+    (
+        Value,
+        Vec<V3ProjectionDropRecord>,
+        provider_compat_core::goaichat_tool_names::GoaichatToolNameProjection,
+    ),
+    V3ProviderCompatError,
+> {
     let (payload, drops) = build_v3_provider_standard_protocol_payload_from_req07(input)
         .map_err(|reason| classify_v3_provider_compat_error("request_protocol", profile, reason))?;
-    let goaichat_tool_names = provider_compat_core::goaichat_tool_names::GoaichatToolNameProjection::for_request(
-        profile.as_optional_string().as_deref(), &provider_protocol_compat_id(input.provider_protocol), &payload,
-    );
+    let goaichat_tool_names =
+        provider_compat_core::goaichat_tool_names::GoaichatToolNameProjection::for_request(
+            profile.as_optional_string().as_deref(),
+            &provider_protocol_compat_id(input.provider_protocol),
+            &payload,
+        );
     let payload = apply_v3_provider_req_compat_to_provider_payload(
         payload,
         input.selected_target(),
@@ -70,9 +81,7 @@ fn project_v3_images_for_selected_target_session_compat(
     payload: &mut Value,
     model_capabilities: &[String],
 ) {
-    // Images route to multimodal by default. If the already-selected target
-    // has no multimodal/vision capability, preserve the session structure by
-    // projecting media to the deterministic [Image] compatibility token.
+    // Preserve session structure with [Image] for a target without vision support.
     if !model_capabilities
         .iter()
         .any(|capability| matches!(capability.as_str(), "multimodal" | "vision"))

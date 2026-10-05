@@ -101,8 +101,12 @@ pub(crate) async fn materialize_v3_provider_sse_as_canonical_response_with_tool_
     let mut context = V3AnthropicResponsesProjectionContext::default();
     context.provider_tool_names = provider_tool_names;
     build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
-        provider_protocol, provider, &V3RuntimeStreamObservation::default(), &context,
-    ).await
+        provider_protocol,
+        provider,
+        &V3RuntimeStreamObservation::default(),
+        &context,
+    )
+    .await
 }
 
 pub(super) async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(

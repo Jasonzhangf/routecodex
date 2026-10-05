@@ -1,5 +1,5 @@
-use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use axum::response::{IntoResponse, Response};
+use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
@@ -54,10 +54,7 @@ struct Gateway {
 // External HTTP peer reproduces the captured 115-message gateway regression:
 // adding an empty-parameters function envelope makes the first
 // attempt fail. The original native declaration and complete history pass.
-async fn provider(
-    State(state): State<Gateway>,
-    Json(body): Json<Value>,
-) -> Response {
+async fn provider(State(state): State<Gateway>, Json(body): Json<Value>) -> Response {
     state.captures.lock().await.push(body.clone());
     let hosted = body["tools"]
         .as_array()
@@ -78,14 +75,26 @@ async fn provider(
         tool.get("input_schema").is_some()
             && (tool.get("type").is_some() || tool.get("function").is_some())
     });
-    let names: Vec<&str> = body["tools"].as_array().unwrap().iter()
-        .filter_map(|tool| tool["name"].as_str()).collect();
+    let names: Vec<&str> = body["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect();
     let invalid_names = names.iter().any(|name| name.len() > 64)
-        || names.iter().collect::<std::collections::BTreeSet<_>>().len() != names.len();
+        || names
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            != names.len();
     if state.strict && invalid_names {
-        return (StatusCode::BAD_REQUEST, Json(json!({"type":"error","error":{
-            "type":"invalid_request_error","message":"invalid function name"
-        }}))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"type":"error","error":{
+                "type":"invalid_request_error","message":"invalid function name"
+            }})),
+        )
+            .into_response();
     }
     if state.strict
         && historical_call
@@ -96,28 +105,67 @@ async fn provider(
             Json(json!({"type":"error","error":{
                 "type":"invalid_request_error","message":"invalid function name"
             }})),
-        ).into_response();
+        )
+            .into_response();
     }
     let call_name = if state.long_call {
-        body["tools"].as_array().unwrap().iter()
-            .find(|tool| tool["description"] == "long-tool-target").unwrap()["name"].as_str().unwrap()
-    } else { "exec_command" };
-    if state.long_call && body["tool_choice"]["name"] != call_name {
-        return (StatusCode::BAD_REQUEST, Json(json!({"type":"error","error":{
-            "type":"invalid_request_error","message":"forced tool choice mismatch"
-        }}))).into_response();
+        body["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["description"] == "long-tool-target")
+            .unwrap()["name"]
+            .as_str()
+            .unwrap()
+    } else {
+        "exec_command"
+    };
+    if state.strict
+        && state.long_call
+        && call_name.len() == 64
+        && call_name.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"type":"error","error":{
+                "type":"invalid_request_error",
+                "message":"only auto, none, required or a named function are supported"
+            }})),
+        )
+            .into_response();
+    }
+    if state.long_call
+        && (body["tool_choice"]["type"] != "tool" || body["tool_choice"]["name"] != call_name)
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"type":"error","error":{
+                "type":"invalid_request_error","message":"forced tool choice mismatch"
+            }})),
+        )
+            .into_response();
     }
     let receipt = blocks.iter().any(|block| {
         block["type"] == "tool_result"
             && block["tool_use_id"] == "call_next"
             && block["content"].to_string().contains("EXECUTED:42")
     });
-    if receipt && state.long_call && !blocks.iter().any(|block|
-        block["type"] == "tool_use" && block["id"] == "call_next"
-        && block["name"] == call_name && block["input"] == json!({"value":41})) {
-        return (StatusCode::BAD_REQUEST, Json(json!({"type":"error","error":{
-            "type":"invalid_request_error","message":"followup tool identity mismatch"
-        }}))).into_response();
+    if receipt
+        && state.long_call
+        && !blocks.iter().any(|block| {
+            block["type"] == "tool_use"
+                && block["id"] == "call_next"
+                && block["name"] == call_name
+                && block["input"] == json!({"value":41})
+        })
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"type":"error","error":{
+                "type":"invalid_request_error","message":"followup tool identity mismatch"
+            }})),
+        )
+            .into_response();
     }
     let (content, stop) = if receipt {
         (
@@ -146,7 +194,8 @@ async fn provider(
         "model":"glm-5.3","content":content,"stop_reason":stop,
         "usage":{"input_tokens":20,"output_tokens":8}}),
         ),
-    ).into_response()
+    )
+        .into_response()
 }
 
 fn free_port() -> u16 {
@@ -183,8 +232,10 @@ auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_GOAICHAT_BLAC
 health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
 [providers.gateway.models."glm-5.3"]
 wire_name = "glm-5.3"
-capabilities = ["text", "tools"]
+capabilities = ["text", "tools", "reasoning"]
 supports_streaming = true
+supports_thinking = true
+thinking = "medium"
 max_tokens = 4096
 max_context_tokens = 128000
 [route_groups.default.pools.default]
@@ -280,7 +331,13 @@ async fn run_round_trip(endpoint: &str, stream: bool, profile: &str, strict: boo
     run_round_trip_with_long_call(endpoint, stream, profile, strict, false).await;
 }
 
-async fn run_round_trip_with_long_call(endpoint: &str, stream: bool, profile: &str, strict: bool, long_call: bool) {
+async fn run_round_trip_with_long_call(
+    endpoint: &str,
+    stream: bool,
+    profile: &str,
+    strict: bool,
+    long_call: bool,
+) {
     let _test_guard = TEST_LOCK.lock().await;
     let _counter_environment = CounterEnvironment::new();
     std::env::set_var("V3_GOAICHAT_BLACKBOX_KEY", "controlled-external-peer");
@@ -305,7 +362,8 @@ async fn run_round_trip_with_long_call(endpoint: &str, stream: bool, profile: &s
         .unwrap();
     let mut payload = request(endpoint, stream);
     let original_call_name = if long_call {
-        let name = "mcp__codex_apps__codex_security_cloud___defense_factory_workflow_repositories_0";
+        let name =
+            "mcp__codex_apps__codex_security_cloud___defense_factory_workflow_repositories_0";
         let target = &mut payload["tools"][3];
         match endpoint {
             "/v1/chat/completions" => target["function"]["description"] = json!("long-tool-target"),
@@ -318,7 +376,9 @@ async fn run_round_trip_with_long_call(endpoint: &str, stream: bool, profile: &s
             _ => unreachable!(),
         };
         name
-    } else { "exec_command" };
+    } else {
+        "exec_command"
+    };
     let first = client.post(&url).json(&payload).send().await;
     // Always release the server on a red run, before making assertions.
     if first.is_err() {
@@ -331,25 +391,62 @@ async fn run_round_trip_with_long_call(endpoint: &str, stream: bool, profile: &s
     let wire = first.text().await.unwrap();
     let response: Value = if stream && endpoint == "/v1/messages" {
         assert!(!wire.contains("event: error"), "{wire}");
-        let events: Vec<Value> = wire.lines().filter_map(|line| line.strip_prefix("data: "))
-            .filter_map(|data| serde_json::from_str(data).ok()).collect();
+        let events: Vec<Value> = wire
+            .lines()
+            .filter_map(|line| line.strip_prefix("data: "))
+            .filter_map(|data| serde_json::from_str(data).ok())
+            .collect();
         assert!(events.iter().any(|event| event["type"] == "message_stop"));
-        let mut message = events.iter().find(|event| event["type"] == "message_start").unwrap()["message"].clone();
-        let mut block = events.iter().find(|event| event["type"] == "content_block_start").unwrap()["content_block"].clone();
-        let arguments: String = events.iter().filter_map(|event| event.pointer("/delta/partial_json").and_then(Value::as_str)).collect();
-        if !arguments.is_empty() { block["input"] = serde_json::from_str(&arguments).unwrap(); }
+        let mut message = events
+            .iter()
+            .find(|event| event["type"] == "message_start")
+            .unwrap()["message"]
+            .clone();
+        let mut block = events
+            .iter()
+            .find(|event| event["type"] == "content_block_start")
+            .unwrap()["content_block"]
+            .clone();
+        let arguments: String = events
+            .iter()
+            .filter_map(|event| event.pointer("/delta/partial_json").and_then(Value::as_str))
+            .collect();
+        if !arguments.is_empty() {
+            block["input"] = serde_json::from_str(&arguments).unwrap();
+        }
         message["content"] = json!([block]);
         message
     } else if stream && endpoint == "/v1/chat/completions" {
         assert!(wire.lines().any(|line| line == "data: [DONE]"), "{wire}");
-        let chunks: Vec<Value> = wire.lines().filter_map(|line| line.strip_prefix("data: "))
+        let chunks: Vec<Value> = wire
+            .lines()
+            .filter_map(|line| line.strip_prefix("data: "))
             .filter(|data| *data != "[DONE]")
-            .map(|data| serde_json::from_str(data).expect("valid Chat SSE JSON")).collect();
-        assert!(chunks.iter().any(|chunk| chunk.pointer("/choices/0/finish_reason").and_then(Value::as_str) == Some("tool_calls")), "{wire}");
-        let calls: Vec<&Value> = chunks.iter().filter_map(|chunk| chunk.pointer("/choices/0/delta/tool_calls/0")).collect();
-        let name: String = calls.iter().filter_map(|call| call.pointer("/function/name").and_then(Value::as_str)).collect();
-        let arguments: String = calls.iter().filter_map(|call| call.pointer("/function/arguments").and_then(Value::as_str)).collect();
-        let id = calls.iter().find_map(|call| call.get("id").and_then(Value::as_str)).expect("tool call id");
+            .map(|data| serde_json::from_str(data).expect("valid Chat SSE JSON"))
+            .collect();
+        assert!(
+            chunks.iter().any(|chunk| chunk
+                .pointer("/choices/0/finish_reason")
+                .and_then(Value::as_str)
+                == Some("tool_calls")),
+            "{wire}"
+        );
+        let calls: Vec<&Value> = chunks
+            .iter()
+            .filter_map(|chunk| chunk.pointer("/choices/0/delta/tool_calls/0"))
+            .collect();
+        let name: String = calls
+            .iter()
+            .filter_map(|call| call.pointer("/function/name").and_then(Value::as_str))
+            .collect();
+        let arguments: String = calls
+            .iter()
+            .filter_map(|call| call.pointer("/function/arguments").and_then(Value::as_str))
+            .collect();
+        let id = calls
+            .iter()
+            .find_map(|call| call.get("id").and_then(Value::as_str))
+            .expect("tool call id");
         json!({"choices":[{"message":{"role":"assistant","tool_calls":[{"type":"function","id":id,"function":{"name":name,"arguments":arguments}}]}}]})
     } else if stream {
         assert!(
@@ -375,8 +472,14 @@ async fn run_round_trip_with_long_call(endpoint: &str, stream: bool, profile: &s
                 .unwrap();
             (
                 if let Some(namespace) = call["namespace"].as_str() {
-                    json!(format!("{}__{}", namespace.replacen('.', "__", 1), call["name"].as_str().unwrap()))
-                } else { call["name"].clone() },
+                    json!(format!(
+                        "{}__{}",
+                        namespace.replacen('.', "__", 1),
+                        call["name"].as_str().unwrap()
+                    ))
+                } else {
+                    call["name"].clone()
+                },
                 call["call_id"].clone(),
                 serde_json::from_str::<Value>(call["arguments"].as_str().unwrap()).unwrap(),
             )
@@ -405,7 +508,10 @@ async fn run_round_trip_with_long_call(endpoint: &str, stream: bool, profile: &s
         }
         _ => unreachable!(),
     };
-    assert_eq!(name, original_call_name, "endpoint={endpoint} stream={stream} response={response}");
+    assert_eq!(
+        name, original_call_name,
+        "endpoint={endpoint} stream={stream} response={response}"
+    );
     assert_eq!(id, "call_next");
     assert_eq!(arguments, json!({"value":41}));
     // Actual public consumer execution and receipt, then a matching next turn.
@@ -491,7 +597,13 @@ async fn run_round_trip_with_long_call(endpoint: &str, stream: bool, profile: &s
         for index in 0..377 {
             let name = format!("mcp__codex_apps__codex_security_cloud___defense_factory_workflow_repositories_{index}");
             let wire_name = if profile == "anthropic:goaichat" {
-                provider_compat_core::namespace_tools::openai_chat_namespace_wire_name(&name)
+                provider_compat_core::namespace_tools::provider_tool_wire_names_with_prefix(
+                    [name.clone()].into(),
+                    Default::default(),
+                    "tool_",
+                )
+                .remove(&name)
+                .unwrap()
             } else {
                 name.clone()
             };
@@ -559,8 +671,14 @@ async fn generic_glm_anthropic_hosted_history_preserved_blackbox() {
 
 #[tokio::test]
 async fn goaichat_long_flat_names_round_trip_json_and_provider_sse() {
-    for (endpoint, stream) in [("/v1/responses", false), ("/v1/responses", true),
-        ("/v1/chat/completions", false), ("/v1/chat/completions", true), ("/v1/messages", false), ("/v1/messages", true)] {
+    for (endpoint, stream) in [
+        ("/v1/responses", false),
+        ("/v1/responses", true),
+        ("/v1/chat/completions", false),
+        ("/v1/chat/completions", true),
+        ("/v1/messages", false),
+        ("/v1/messages", true),
+    ] {
         run_round_trip_with_long_call(endpoint, stream, "anthropic:goaichat", true, true).await;
     }
 }

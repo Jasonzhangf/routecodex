@@ -197,8 +197,11 @@ fn collect_declared_names(
                 }
             }
             Some("function") => {
-                if let Some(name) = provider_compat_core::namespace_tools::provider_function_tool_name(tool) {
-                    let wire_name = super::super::request_outbound_mcp_names::provider_function_name(name);
+                if let Some(name) =
+                    provider_compat_core::namespace_tools::provider_function_tool_name(tool)
+                {
+                    let wire_name =
+                        super::super::request_outbound_mcp_names::provider_function_name(name);
                     if wire_name != name {
                         history.insert(name.to_string(), wire_name);
                     }

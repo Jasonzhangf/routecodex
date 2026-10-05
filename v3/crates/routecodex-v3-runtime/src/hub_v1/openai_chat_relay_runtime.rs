@@ -246,8 +246,6 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
     request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
     route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
 ) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
-    // 统一 relay 主循环骨架（大骨架）：生命周期与编排在 execute_v3_relay_runtime_core，
-    // 协议差异收敛在 V3OpenAiChatRelayCodec。
     let routing_group = server_routing_group(manifest, &input.server_id)
         .map_err(|error| V3OpenAiChatRelayRuntimeError::Target(error.to_string()))?
         .to_string();
@@ -460,8 +458,11 @@ fn project_json_response(
         .and_then(Value::as_array)
         .is_some()
     {
-        project_v3_openai_chat_client_response_from_canonical(resp03.provider_payload(), chat_request)
-            .map_err(V3OpenAiChatRelayRuntimeError::Target)?
+        project_v3_openai_chat_client_response_from_canonical(
+            resp03.provider_payload(),
+            chat_request,
+        )
+        .map_err(V3OpenAiChatRelayRuntimeError::Target)?
     } else {
         resp03.provider_payload().clone()
     };

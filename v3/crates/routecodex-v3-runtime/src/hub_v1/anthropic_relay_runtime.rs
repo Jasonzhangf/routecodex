@@ -1147,7 +1147,10 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
                         let mut projection = V3AnthropicResponsesProjectionContext::default();
                         projection.provider_tool_names = goaichat_tool_names.clone();
-                        match project_v3_anthropic_message_as_responses_response_with_context(&provider_value, &projection) {
+                        match project_v3_anthropic_message_as_responses_response_with_context(
+                            &provider_value,
+                            &projection,
+                        ) {
                             Ok(value) => value,
                             Err(error) => {
                                 let failure = provider_runtime_failure(

@@ -382,8 +382,10 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         trace.push("V3HubReqTarget06Resolved");
         trace.push("V3HubReqOutbound07ProviderSemantic");
         trace.push("ProviderReqCompat06ProviderCompat");
-        let mut anthropic_response_projection_context = anthropic_response_projection_context.clone();
-        anthropic_response_projection_context.provider_tool_names = req_compat.goaichat_tool_names.clone();
+        let mut anthropic_response_projection_context =
+            anthropic_response_projection_context.clone();
+        anthropic_response_projection_context.provider_tool_names =
+            req_compat.goaichat_tool_names.clone();
         let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
         let _req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
         let provider_semantic = _req09.into_provider_semantic_payload();

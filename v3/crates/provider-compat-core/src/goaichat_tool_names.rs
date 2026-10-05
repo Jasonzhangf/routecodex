@@ -1,5 +1,5 @@
 //! Reversible wire representation for the explicit Goaichat Messages profile.
-use crate::namespace_tools::openai_chat_namespace_wire_names;
+use crate::namespace_tools::provider_tool_wire_names_with_prefix;
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
 
@@ -27,7 +27,8 @@ impl GoaichatToolNameProjection {
             .filter_map(|tool| tool.get("name").and_then(Value::as_str))
             .map(str::to_owned)
             .collect();
-        let aliases = openai_chat_namespace_wire_names(names.clone(), names);
+        // Goaichat rejects a pure 64-hex alias for a described forced tool.
+        let aliases = provider_tool_wire_names_with_prefix(names.clone(), names, "tool_");
         let inverse = aliases
             .iter()
             .map(|(original, alias)| (alias.clone(), original.clone()))
