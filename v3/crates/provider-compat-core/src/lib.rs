@@ -208,32 +208,6 @@ pub fn run_req_outbound_stage3_compat(
         });
     }
 
-    if profile_matches(profile_id, "anthropic:goaichat")
-        && provider_protocol_matches(
-            adapter_context.provider_protocol.as_ref(),
-            "anthropic-messages",
-        )
-    {
-        if let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) {
-            for tool in tools {
-                if tool["type"] == "web_search_20250305" && tool["name"] == "web_search" {
-                    if let Some(tool) = tool.as_object_mut() {
-                        // The gateway rejects hosted declarations combined with tool
-                        // history unless its function parser also sees parameters.
-                        // Keep the hosted type/options; this is not a client function.
-                        tool.entry("function")
-                            .or_insert_with(|| json!({"name":"web_search","parameters":{}}));
-                    }
-                }
-            }
-        }
-        return Ok(CompatResult {
-            payload,
-            applied_profile: Some(profile_id.to_string()),
-            native_applied: true,
-        });
-    }
-
     if is_glm_profile(profile_id) {
         if provider_protocol_matches(adapter_context.provider_protocol.as_ref(), "openai-chat") {
             return Ok(CompatResult {

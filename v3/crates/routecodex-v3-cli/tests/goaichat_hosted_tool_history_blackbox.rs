@@ -49,9 +49,9 @@ struct Gateway {
     captures: Arc<Mutex<Vec<Value>>>,
 }
 
-// External HTTP peer reproduces the observed Goaichat gateway contract. It
-// rejects the combined history + hosted shape, rather than blindly returning
-// 200 as the historical GLM internal-transport fixture did.
+// External HTTP peer reproduces the captured 115-message gateway regression:
+// adding an empty-parameters function envelope makes the first
+// attempt fail. The original native declaration and complete history pass.
 async fn provider(
     State(state): State<Gateway>,
     Json(body): Json<Value>,
@@ -78,9 +78,7 @@ async fn provider(
     });
     if state.strict
         && historical_call
-        && (hosted["function"]["name"] != hosted["name"]
-            || !hosted["function"]["parameters"].is_object()
-            || mixed_native)
+        && (hosted["function"] == json!({"name":"web_search","parameters":{}}) || mixed_native)
     {
         return (
             StatusCode::BAD_REQUEST,
@@ -374,6 +372,10 @@ async fn run_round_trip(endpoint: &str, stream: bool, profile: &str, strict: boo
             .find(|tool| tool["type"] == "web_search_20250305")
             .unwrap();
         assert_eq!(hosted["name"], "web_search");
+        assert!(
+            hosted.get("function").is_none(),
+            "native hosted declaration gained a synthetic function envelope"
+        );
         assert_eq!(capture["tools"].as_array().unwrap().len(), 380);
         for tool in capture["tools"]
             .as_array()
@@ -417,17 +419,6 @@ async fn run_round_trip(endpoint: &str, stream: bool, profile: &str, strict: boo
                     .any(|tool| tool["name"] == name
                         && tool["input_schema"] == native["input_schema"]),
                 "lost declaration {name}"
-            );
-        }
-        if strict {
-            assert_eq!(
-                hosted["function"],
-                json!({"name":"web_search","parameters":{}})
-            );
-        } else {
-            assert!(
-                hosted.get("function").is_none(),
-                "generic Anthropic must remain standard"
             );
         }
         let blocks: Vec<&Value> = capture["messages"]

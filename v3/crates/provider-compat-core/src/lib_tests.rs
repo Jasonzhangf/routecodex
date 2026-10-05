@@ -7,6 +7,7 @@ fn goaichat_profile_preserves_existing_hosted_extensions_and_other_protocols() {
             "function":{"name":"web_search","parameters":{"query":"provider-extension"}},
             "opaque":{"preserve":true}},
         {"type":"web_search_20990101","name":"web_search"},
+        {"type":"web_search_20250305","name":"web_search","max_uses":3},
         {"name":"exec_command","input_schema":{"type":"object"}}
     ],"messages":[{"role":"user","content":"opaque history"}]});
     for protocol in ["anthropic-messages", "openai-chat", "openai-responses"] {
