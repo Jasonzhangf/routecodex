@@ -1835,7 +1835,7 @@ fn console_plain_layer_keeps_diagnostic_on_the_same_line() {
 }
 
 #[test]
-fn console_machine_fields_start_at_one_column_across_session_lengths() {
+fn console_machine_fields_align_within_session_width_budget() {
     let short = format_v3_console_layered_block_plain(V3ConsoleLayeredBlock::new(
         "",
         "headline",
@@ -1848,41 +1848,62 @@ fn console_machine_fields_start_at_one_column_across_session_lengths() {
         "req=long event=started",
         "7a41-a44c-948f9ec6cf66",
     ));
-    let oversized_session =
-        "session-0123456789-abcdefghijklmnopqrstuvwxyz-ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    let oversized_plain = format_v3_console_layered_block_plain(V3ConsoleLayeredBlock::new(
+    let wide_session = "session-0123456789-abcdefghijklmnopqrstuvwxyz";
+    let wide_plain = format_v3_console_layered_block_plain(V3ConsoleLayeredBlock::new(
         "",
         "headline",
-        "req=oversized-plain event=started",
-        oversized_session,
+        "req=wide event=started",
+        wide_session,
     ));
-    let oversized_color = strip_test_ansi(&colorize_v3_layered_console_line(
+    let wide_color = strip_test_ansi(&colorize_v3_layered_console_line(
         V3ConsoleLayeredBlock::new(
             "",
             "headline",
-            "req=oversized-color event=started",
-            oversized_session,
+            "req=wide-color event=started",
+            wide_session,
         ),
         ANSI_REQUEST_CYAN,
         ANSI_DEBUG_DIM,
     ));
 
-    let columns = [&short, &long, &oversized_plain, &oversized_color].map(|block| {
+    let columns = [&short, &long, &wide_plain, &wide_color].map(|block| {
         let debug = block.lines().next().expect("diagnostic line");
         let req = debug.find("req=").expect("machine field");
         v3_console_display_width(&debug[..req])
     });
     assert_eq!(columns[0], columns[1], "{short:?}\n{long:?}");
-    assert_eq!(columns[0], columns[2], "{short:?}\n{oversized_plain:?}");
-    assert_eq!(columns[0], columns[3], "{short:?}\n{oversized_color:?}");
-    assert!(
-        oversized_plain.contains(&format!("sessionIDFull={oversized_session}")),
-        "{oversized_plain:?}"
+    assert_eq!(columns[0], columns[2], "{short:?}\n{wide_plain:?}");
+    assert_eq!(columns[0], columns[3], "{short:?}\n{wide_color:?}");
+}
+
+#[test]
+fn console_fallback_session_id_uses_full_request_id_without_truncation() {
+    let request_id = "openai-chat-router-gpt-5.5-20261005T032634234-763027-6913";
+    let color_key = resolve_v3_log_session_color_key(
+        &HeaderMap::new(),
+        &serde_json::json!({}),
+        request_id,
     );
-    assert!(
-        oversized_color.contains(&format!("sessionIDFull={oversized_session}")),
-        "{oversized_color:?}"
+    assert_eq!(
+        color_key.as_deref(),
+        Some("rcc-session:request:openai-chat-router-gpt-5.5-20261005T032634234-763027-6913")
     );
+
+    let plain = format_v3_console_layered_block_plain(V3ConsoleLayeredBlock::new(
+        "",
+        "headline",
+        "req=x event=started",
+        &color_key.unwrap(),
+    ));
+
+    assert!(
+        plain.contains(
+            "[sessionID:rcc-session:request:openai-chat-router-gpt-5.5-20261005T032634234-763027-6913]"
+        ),
+        "{plain:?}"
+    );
+    assert!(!plain.contains("..."), "must not truncate: {plain:?}");
+    assert!(!plain.contains("sessionIDFull="), "must not append sessionIDFull: {plain:?}");
 }
 
 #[test]
