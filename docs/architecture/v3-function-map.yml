@@ -2550,6 +2550,9 @@ features:
   - project_v3_responses_arguments_to_openai_chat_wire
   - build_v3_openai_chat_standard_request_from_chat_canonical
   - qualify_openai_chat_missing_mcp_tool_call_names
+  - openai_chat_namespace_wire_names
+  - openai_chat_namespace_wire_aliases
+  - project_openai_chat_namespace_wire_names
   - project_openai_client_metadata_to_metadata
   - unsupported_client_metadata_paths
   - validate_openai_metadata
