@@ -210,14 +210,30 @@ fn validate_v3_provider_probe_json(
     let object = value.as_object().ok_or_else(|| {
         format!("provider global probe returned non-object JSON for {provider_id}")
     })?;
-    if object.contains_key("error") {
+    // A successful Responses payload reports the absence of an error with an
+    // explicit `error: null` field, so only a real error payload fails the probe.
+    if object.get("error").is_some_and(|error| !error.is_null()) {
         return Err(format!(
             "provider global probe returned 2xx with embedded error payload for {provider_id}"
         ));
     }
     let completed = match provider_type {
         "responses" => {
-            object.get("status").and_then(serde_json::Value::as_str) == Some("completed")
+            let status = object.get("status").and_then(serde_json::Value::as_str);
+            // The probe spends a one-token budget, so a reasoning model reports the
+            // Responses output-cap terminal (`incomplete` + `max_output_tokens`)
+            // instead of `completed`. The openai_chat, anthropic and gemini arms
+            // already accept their output-cap shapes for the same reason, and the
+            // terminal-admission owner treats that exact reason as valid partial
+            // output. Any other terminal reason is a real provider rejection, so it
+            // must keep the provider cooled and stay a probe failure here.
+            status == Some("completed")
+                || (status == Some("incomplete")
+                    && object
+                        .get("incomplete_details")
+                        .and_then(|details| details.get("reason"))
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(crate::hub_v1::responses_incomplete_reason_is_output_cap))
         }
         "openai_chat" => object
             .get("choices")
@@ -380,5 +396,98 @@ mod tests {
         assert!(validate_v3_provider_probe_json("provider-a", "openai_chat", br#"{}"#).is_err());
         assert!(validate_v3_provider_probe_json("provider-a", "anthropic", br#"{}"#).is_err());
         assert!(validate_v3_provider_probe_json("provider-a", "gemini", br#"{}"#).is_err());
+    }
+
+    #[test]
+    fn responses_probe_accepts_truncated_terminal_payload() {
+        // The probe spends a one-token budget. A reasoning model cannot reach a
+        // terminal answer inside it, and the upstream still reports a terminal
+        // outcome: status=incomplete with a declared reason. The other three
+        // protocol arms already accept their truncated-but-terminal shapes
+        // (finish_reason=max_tokens, stop_reason=max_tokens, finishReason=MAX_TOKENS),
+        // so the responses arm must accept its equivalent or a healthy provider
+        // stays cooled forever.
+        assert!(validate_v3_provider_probe_json(
+            "provider-a",
+            "responses",
+            br#"{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}"#,
+        )
+        .is_ok());
+        assert!(validate_v3_provider_probe_json(
+            "provider-a",
+            "responses",
+            br#"{"status":"incomplete","incomplete_details":{"reason":" max_output_tokens "}}"#,
+        )
+        .is_ok());
+        // A rejected terminal must not pass the probe. The terminal-admission
+        // owner sends content_filter and unknown reasons into the provider
+        // failure path, so admitting them here would clear cooldown for a
+        // provider whose real Responses traffic is rejected.
+        assert!(validate_v3_provider_probe_json(
+            "provider-a",
+            "responses",
+            br#"{"status":"incomplete","incomplete_details":{"reason":"content_filter"}}"#,
+        )
+        .is_err());
+        assert!(validate_v3_provider_probe_json(
+            "provider-a",
+            "responses",
+            br#"{"status":"incomplete","incomplete_details":{"reason":"mystery"}}"#,
+        )
+        .is_err());
+        // A truncated terminal outcome with no declared reason stays unverifiable.
+        assert!(validate_v3_provider_probe_json(
+            "provider-a",
+            "responses",
+            br#"{"status":"incomplete"}"#,
+        )
+        .is_err());
+        assert!(validate_v3_provider_probe_json(
+            "provider-a",
+            "responses",
+            br#"{"status":"incomplete","incomplete_details":{"reason":""}}"#,
+        )
+        .is_err());
+        // Non-terminal and non-success statuses remain probe failures.
+        assert!(validate_v3_provider_probe_json(
+            "provider-a",
+            "responses",
+            br#"{"status":"cancelled"}"#,
+        )
+        .is_err());
+        assert!(validate_v3_provider_probe_json(
+            "provider-a",
+            "responses",
+            br#"{"status":"in_progress"}"#,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn responses_probe_accepts_null_error_field() {
+        // A successful Responses payload reports the absence of an error with an
+        // explicit null field. Only a real error payload may fail the probe.
+        assert!(validate_v3_provider_probe_json(
+            "provider-a",
+            "responses",
+            br#"{"status":"completed","error":null}"#,
+        )
+        .is_ok());
+        assert!(validate_v3_provider_probe_json(
+            "provider-a",
+            "responses",
+            br#"{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"error":null}"#,
+        )
+        .is_ok());
+        assert!(validate_v3_provider_probe_json(
+            "provider-a",
+            "responses",
+            br#"{"status":"completed","error":{"code":"invalid_api_key"}}"#,
+        )
+        .is_err());
+        assert!(
+            validate_v3_provider_probe_json("provider-a", "responses", br#"{"error":null}"#,)
+                .is_err()
+        );
     }
 }
