@@ -62,6 +62,72 @@ This is a confirmed contract/implementation conflict, not proof of every DSH dis
 
 Reuse the existing registered request, response, and error SESE graphs at `docs/architecture/dagpipe/v3.operation_runner.{request,response,error}.graph.json`. The Error graph's legacy-named projection candidate is internal evidence only, as specified in `docs/design/v3-unified-operation-runner-design.md`; it cannot enter a client body. Runtime consumes that control outcome and Server terminates the affected transport. The Server-owned typed `v3.server.model_transport_outcome` records no-response intent and is consumed by `commit_model_transport_outcome`; its writer and caller edges are declared in the existing maps. This repair adds no orchestration Operator or second lifecycle graph. The semantic lifecycle diagram above maps the existing owners; it does not claim a new executable graph cutover.
 
+## 实际逻辑图与隔离边界
+
+以下三张语义图对应上面已有的、版本化的 graph 文件。每张图只处理一种对象流，
+各有一个输入 ARC 和一个输出 ARC。不要把独立的请求、响应和错误对象合成多入口图。
+请求图中的两条规划依赖来自同一个请求：请求语义和选定目标，不是两个客户端入口。
+
+```mermaid
+flowchart LR
+  Q1[接收原始请求] --> Q2[无损归一化请求]
+  Q2 --> Q3[确定目标]
+  Q2 -->|请求语义| Q4[规划执行方式]
+  Q3 -->|选定目标| Q4
+  Q4 --> Q5[治理请求语义]
+  Q5 --> Q6[投影标准上游协议]
+  Q6 --> Q7[执行上游私有兼容]
+  Q7 --> Q8[编码上游请求]
+  Q8 --> Q9[形成上游传输请求]
+```
+
+请求图有 9 个节点、9 条边，唯一输出是上游传输请求。它不输出客户端响应，
+也不交出 Front 持有的客户端 socket。Provider 执行上游 I/O；Runtime 持有尝试结果。
+
+```mermaid
+flowchart LR
+  R1[处理上游私有响应表示] --> R2[无损归一化响应]
+  R2 --> R3[治理响应与工具身份]
+  R3 --> R4[恢复客户端协议语义]
+  R4 --> R5[形成待提交响应候选]
+```
+
+响应图有 5 个节点、4 条边，唯一输出是响应候选。候选不是 socket 写入授权。
+Runtime 必须完成整个尝试的缓冲和成功收据；Server/SSE 只能提交真实成功的业务响应。
+原始 provider 流、未完成候选及错误对象不能借响应图直接到达客户端。
+
+```mermaid
+flowchart LR
+  F1[形成真实错误来源] --> F2[捕获错误上下文]
+  F2 --> F3[分类错误]
+  F3 --> F4[执行内部恢复策略]
+  F4 --> F5[决定恢复或内部终止]
+  F5 --> F6[形成内部错误证据与控制结果]
+```
+
+错误图有 6 个节点、5 条边，唯一输出只在内部消费。图中没有客户端节点，
+也没有错误到客户端 payload 或 socket 的边。重试由 Runtime 发起新的尝试，
+不是图内回边。耗尽只产生终止本请求传输的 typed control intent，不能携带错误响应。
+
+| 已有图或边界 | 实际 owner / source | 允许输出 | 必须禁止 |
+| --- | --- | --- | --- |
+| 请求图 | 注册的 request Operators；`v3.operation_runner.request.graph.json` | `transport-request` | 客户端 socket 或响应 |
+| 响应图 | 注册的 response Operators；`v3.operation_runner.response.graph.json` | `client-frame-candidate` | 直接提交原始上游流或错误 |
+| 错误图 | 注册的 Error01–06 Operators；`v3.operation_runner.error.graph.json` | 内部 `v3.error.client_projection_candidate` | 客户端错误 payload；这个旧资源名不授予客户端写入权 |
+| 完整尝试与成功收据 | Runtime；`v3/crates/routecodex-v3-runtime/src/kernel.rs` | 已封存成功响应或内部终止结果 | 尝试失败后直接提交客户端响应 |
+| 无响应 intent 消费 | Server；`commit_model_transport_outcome` in `frame_builders.rs` | 完整成功响应，或不含错误语义的传输终止 | HTTP 错误、SSE/WS 错误事件、伪造成功终态 |
+| 唯一 socket 写入 | Front；`V3StableFrontSocket` in `restart_handoff.rs` | 已交付的客户端 framing | Provider 或 Error 持有并写入客户端 socket |
+
+`v3.error.client_projection_candidate` 和 `v3.server.model_transport_outcome` 的
+`may_enter_client_body`、`may_enter_provider_body` 均为 false，见 resource map。
+错误资源只承载内部事实；终止 intent 只承载控制事实；成功响应才承载业务内容。
+
+**单源单汇不能单独证明隔离。** 还必须核对真实 caller、资源读写权限、完整缓冲
+和最终提交边界，并从实际 HTTP/SSE/WebSocket 入口断言错误状态和错误 payload 为零。
+图校验、源码边界、已安装 blackbox 与真实发送观测要分别记证据。
+一次成功回放或没有匹配的错误日志，都不能证明所有 session 已不存在断连。
+高频发送诊断只写文件日志；人类 console 不承担这条观测数据流。
+
 ## Required blackbox regression and release gate
 
 ### HTTP framing failure before admission
