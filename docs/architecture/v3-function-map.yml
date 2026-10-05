@@ -5013,6 +5013,7 @@ features:
   - V3ServerRequestActivityGate
   - V3ServerAggregateHandle::prepare_for_exec
   allowed_paths:
+  - v3/scripts/architecture/verify-v3-runtime-restart-handoff.mjs
   - v3/crates/routecodex-v3-server/src/client_transport_observation.rs
   - v3/crates/routecodex-v3-server/src/restart_handoff_tests.rs
   - v3/crates/routecodex-v3-server/src/restart_handoff.rs

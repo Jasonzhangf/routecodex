@@ -13,11 +13,12 @@ const source = sourcePaths
 
 const requiredContracts = [
   "close_active_client_transports",
-  "build_v3_restart_closeout_http_error",
+  "close_for_exec_replacement",
   "V3FrontTransportRequestCycle",
-  "restart_closeout_has_explicit_terminal_for_request_before_response_headers",
+  "restart_closeout_closes_without_error_for_request_before_response_headers",
   "persistent_connection_second_request_gets_preheader_restart_terminal",
-  "front_socket_writes_restart_terminal_after_request_acceptance",
+  "front_socket_restart_after_request_acceptance_delivers_zero_bytes",
+  "front_socket_discards_configured_error_terminal_after_headers",
   "front_socket.mark_request_started();",
 ];
 

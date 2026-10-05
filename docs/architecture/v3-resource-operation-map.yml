@@ -1656,8 +1656,8 @@ resources:
     semantic_contract:
       keepalive_scope: each accepted HTTP request starts a fresh request cycle on the persistent connection
       cycle_reset: a new request clears the previous response phase and protocol-specific closeout frame atomically
-      preheader_restart: the current accepted request receives one HTTP 503 server_restart_in_progress terminal
-      postheader_restart: only the current request protocol's registered SSE closeout frame may be emitted
+      preheader_restart: terminate the accepted request transport without writing any HTTP response or error bytes
+      postheader_restart: terminate the incomplete transfer without emitting a protocol error or fabricated successful terminal; discard any registered error closeout frame
     allowed_writers: [V3StableFrontSocket::set_exec_closeout_frame, V3FrontSseAcceptSkeleton::accept]
     allowed_readers: [V3StableFrontSocket::close_for_exec_replacement]
     forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, MetadataCenter.payload]
