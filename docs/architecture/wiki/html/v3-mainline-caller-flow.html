@@ -283,7 +283,7 @@
         <span>Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-caller-flow.md</code></span>
         <span>Edge source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
         <span>85 functional paths</span>
-        <span>493 caller edges</span>
+        <span>495 caller edges</span>
       </div>
     </header>
 
@@ -472,7 +472,7 @@ flowchart TD
 <tr><td>Missing caller/callee fields</td><td><strong>none</strong></td></tr>
 <tr><td>Binding-pending edges</td><td><strong>22</strong></td></tr>
 <tr><td>typed-test-only edges</td><td><strong>15</strong></td></tr>
-<tr><td>live-bound source edges</td><td><strong>381</strong></td></tr>
+<tr><td>live-bound source edges</td><td><strong>383</strong></td></tr>
 <tr><td>aggregate-only wrapper edges</td><td><strong>2</strong></td></tr>
 </tbody>
 </table>
@@ -661,7 +661,7 @@ flowchart TD
 <tr><td><a href="#chain-v3_responses_chat_sse_typed_tree"><code>v3.responses_chat_sse_typed_tree</code></a><br/>v 3.responses_chat_sse_typed_tree</td><td><span class="status pending_review">pending review</span></td><td>5</td><td>6</td><td><code>v3.responses_chat_sse_typed_tree_refactor</code></td><td><code>sha256:ed4c47295d4e…</code></td></tr>
 <tr><td><a href="#chain-v3_openai_chat_sse_typed_tree"><code>v3.openai_chat_sse_typed_tree</code></a><br/>v 3.openai_chat_sse_typed_tree</td><td><span class="status pending_review">pending review</span></td><td>4</td><td>6</td><td><code>v3.responses_chat_sse_typed_tree_refactor</code></td><td><code>sha256:203220c6d905…</code></td></tr>
 <tr><td><a href="#chain-v3_sse_error_and_direct_consumer_pre_wiring"><code>v3.sse_error_and_direct_consumer_pre_wiring</code></a><br/>v 3.sse_error_and_direct_consumer_pre_wiring</td><td><span class="status pending_review">pending review</span></td><td>6</td><td>11</td><td><code>v3.responses_chat_sse_typed_tree_refactor</code></td><td><code>sha256:b8cf80c541ce…</code></td></tr>
-<tr><td><a href="#chain-v3_runtime_restart_handoff_skeleton"><code>v3.runtime_restart_handoff_skeleton</code></a><br/>v 3.runtime_restart_handoff_skeleton</td><td><span class="status pending_review">pending review</span></td><td>2</td><td>7</td><td><code>v3.runtime_restart_handoff_skeleton</code></td><td><code>sha256:094ed32b87b1…</code></td></tr>
+<tr><td><a href="#chain-v3_runtime_restart_handoff_skeleton"><code>v3.runtime_restart_handoff_skeleton</code></a><br/>v 3.runtime_restart_handoff_skeleton</td><td><span class="status pending_review">pending review</span></td><td>4</td><td>9</td><td><code>v3.runtime_restart_handoff_skeleton</code></td><td><code>sha256:ddeb2fb53fe0…</code></td></tr>
 <tr><td><a href="#chain-v3_direct_sse_accept_skeleton"><code>v3.direct_sse_accept_skeleton</code></a><br/>v 3.direct_sse_accept_skeleton</td><td><span class="status pending_review">pending review</span></td><td>3</td><td>7</td><td><code>v3.direct_sse_accept_skeleton</code></td><td><code>sha256:19b5830178fb…</code></td></tr>
 <tr><td><a href="#chain-v3_responses_direct_full_attempt_commit"><code>v3.responses_direct_full_attempt_commit</code></a><br/>v 3.responses_direct_full_attempt_commit</td><td><span class="status pending_review">pending review</span></td><td>1</td><td>2</td><td><code>v3.responses_direct_full_attempt_commit</code></td><td><code>sha256:982bdfb9e55a…</code></td></tr>
 <tr><td><a href="#chain-v3_execution_control_payload_architecture"><code>v3.execution_control_payload_architecture</code></a><br/>v 3.execution_control_payload_architecture</td><td><span class="status pending_review">pending review</span></td><td>7</td><td>11</td><td><code>v3.execution_request_lifecycle</code></td><td><code>sha256:7e759b7774f6…</code></td></tr>
@@ -912,7 +912,7 @@ flowchart TD
             <span class="chain-id">v 3.runtime_restart_handoff_skeleton</span>
             <span>V3Front01StableRequestOwner → V3Front08ClientTerminalOrError</span>
             <span><code>v3.runtime_restart_handoff_skeleton</code></span>
-            <span>2 edges · 7 resources · v3-server</span>
+            <span>4 edges · 9 resources · v3-server</span>
             <span class="status pending_review">pending review</span>
           </a>
 <a class="branch-card" href="#chain-v3_direct_sse_accept_skeleton">
@@ -4943,7 +4943,7 @@ flowchart TD
       <summary>
         <span class="summary-main">v 3.runtime_restart_handoff_skeleton</span>
         <span class="summary-sub">V3Front01StableRequestOwner → V3Front08ClientTerminalOrError</span>
-        <span class="summary-sub">2 edges · <code>v3.runtime_restart_handoff_skeleton</code> · V3Front01StableRequestOwner → V3Front08ClientTerminalOrError</span>
+        <span class="summary-sub">4 edges · <code>v3.runtime_restart_handoff_skeleton</code> · V3Front01StableRequestOwner → V3Front08ClientTerminalOrError</span>
       </summary>
       <div class="branch-body">
         <p class="chain-summary">Stable server response-body ownership drains or hands off in-flight requests across canonical Runtime Child replacement; every HTTP keep-alive request owns a fresh closeout cycle without changing the frozen execution plan or leaking provider frames.</p>
@@ -4951,7 +4951,7 @@ flowchart TD
           <span>owner: <code>v3.runtime_restart_handoff_skeleton</code></span>
           <span>audit: <span class="status pending_review">pending review</span></span>
           <span>modules: <code>v3-server</code></span>
-          <span>resources: <code>7</code></span>
+          <span>resources: <code>9</code></span>
           <span>manifest: <code>docs/architecture/manifests/v3.runtime_restart_handoff_skeleton.yml</code></span>
           <span class="pending-pill">2 binding pending</span>
         </div>
@@ -4959,18 +4959,24 @@ flowchart TD
           <pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 82, &quot;nodeSpacing&quot;: 46}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;18px&quot;}} }%%
 flowchart TD
   n_v3_runtime_restart_handoff_skeleton_0[&quot;&lt;b&gt;Front 01 Stable Request Owner&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3Front01StableRequestOwner&lt;/small&gt;&quot;]
-  n_v3_runtime_restart_handoff_skeleton_1[&quot;&lt;b&gt;Front 02 Request Lease Bound&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3Front02RequestLeaseBound&lt;/small&gt;&quot;]
-  n_v3_runtime_restart_handoff_skeleton_2[&quot;&lt;b&gt;Front 08 Client Terminal Or Error&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3Front08ClientTerminalOrError&lt;/small&gt;&quot;]
-  n_v3_runtime_restart_handoff_skeleton_0 --&gt;|v3-runtime-restart-handoff-01&lt;br/&gt;v3-server → v3-server| n_v3_runtime_restart_handoff_skeleton_1
-  n_v3_runtime_restart_handoff_skeleton_1 --&gt;|v3-runtime-restart-handoff-02&lt;br/&gt;v3-server → v3-server| n_v3_runtime_restart_handoff_skeleton_2
+  n_v3_runtime_restart_handoff_skeleton_1[&quot;&lt;b&gt;Client Transport Observation&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3ClientTransportObservation&lt;/small&gt;&quot;]
+  n_v3_runtime_restart_handoff_skeleton_2[&quot;&lt;b&gt;Stable Front Socket&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3StableFrontSocket&lt;/small&gt;&quot;]
+  n_v3_runtime_restart_handoff_skeleton_3[&quot;&lt;b&gt;Front 02 Request Lease Bound&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3Front02RequestLeaseBound&lt;/small&gt;&quot;]
+  n_v3_runtime_restart_handoff_skeleton_4[&quot;&lt;b&gt;Front 08 Client Terminal Or Error&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3Front08ClientTerminalOrError&lt;/small&gt;&quot;]
+  n_v3_runtime_restart_handoff_skeleton_0 --&gt;|v3-front-client-observation-01&lt;br/&gt;v3-server → v3-server| n_v3_runtime_restart_handoff_skeleton_1
+  n_v3_runtime_restart_handoff_skeleton_2 --&gt;|v3-front-client-observation-02&lt;br/&gt;v3-server → v3-server| n_v3_runtime_restart_handoff_skeleton_1
+  n_v3_runtime_restart_handoff_skeleton_0 --&gt;|v3-runtime-restart-handoff-01&lt;br/&gt;v3-server → v3-server| n_v3_runtime_restart_handoff_skeleton_3
+  n_v3_runtime_restart_handoff_skeleton_3 --&gt;|v3-runtime-restart-handoff-02&lt;br/&gt;v3-server → v3-server| n_v3_runtime_restart_handoff_skeleton_4
   classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
   classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
-  class n_v3_runtime_restart_handoff_skeleton_0,n_v3_runtime_restart_handoff_skeleton_1,n_v3_runtime_restart_handoff_skeleton_2 node;
-  class n_v3_runtime_restart_handoff_skeleton_0,n_v3_runtime_restart_handoff_skeleton_1,n_v3_runtime_restart_handoff_skeleton_2 pending;</pre>
+  class n_v3_runtime_restart_handoff_skeleton_0,n_v3_runtime_restart_handoff_skeleton_1,n_v3_runtime_restart_handoff_skeleton_2,n_v3_runtime_restart_handoff_skeleton_3,n_v3_runtime_restart_handoff_skeleton_4 node;
+  class n_v3_runtime_restart_handoff_skeleton_0,n_v3_runtime_restart_handoff_skeleton_3,n_v3_runtime_restart_handoff_skeleton_4 pending;</pre>
         </div>
         <table>
 <thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
 <tbody>
+<tr><td><code>v3-front-client-observation-01</code></td><td><code>V3Front01StableRequestOwner</code><br/>→ <code>V3ClientTransportObservation</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>control reads:</strong> <code>v3.debug.trace_context</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.debug.client_transport_receipt</code></div></td><td><code>serve_v3_front_http_connection</code><br/><small>routecodex-v3-server/src/restart_handoff.rs</small></td><td><code>V3ClientTransportObservation::prepared</code><br/><small>routecodex-v3-server/src/client_transport_observation.rs</small></td></tr>
+<tr><td><code>v3-front-client-observation-02</code></td><td><code>V3StableFrontSocket</code><br/>→ <code>V3ClientTransportObservation</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>control reads:</strong> <code>v3.debug.trace_context</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.debug.client_transport_receipt</code></div></td><td><code>V3StableFrontSocket::spawn</code><br/><small>routecodex-v3-server/src/restart_handoff.rs</small></td><td><code>V3ClientTransportObservation::wrote</code><br/><small>routecodex-v3-server/src/client_transport_observation.rs</small></td></tr>
 <tr><td><code>v3-runtime-restart-handoff-01</code></td><td><code>V3Front01StableRequestOwner</code><br/>→ <code>V3Front02RequestLeaseBound</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.front.request_lease</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.front.runtime_handoff_checkpoint</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.front.request_lease</code></div></td><td><code>V3FrontRequestLease</code><br/><small>routecodex-v3-server/src/restart_handoff.rs</small></td><td><code>V3FrontRequestLeaseKey</code><br/><small>routecodex-v3-server/src/restart_handoff.rs</small></td></tr>
 <tr><td><code>v3-runtime-restart-handoff-02</code></td><td><code>V3Front02RequestLeaseBound</code><br/>→ <code>V3Front08ClientTerminalOrError</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.front.request_activity_gate</code> <code>v3.front.deadline_budget</code> <code>v3.front.client_closeout_frame</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.error.chain</code> <code>v3.front.client_frame_sequence</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.front.request_activity_gate</code> <code>v3.front.client_closeout_frame</code> <code>v3.front.client_frame_sequence</code></div></td><td><code>V3ServerAggregateHandle::prepare_for_exec</code><br/><small>routecodex-v3-server/src/lib.rs</small></td><td><code>V3ServerRequestActivityGate::wait_for_quiescence</code><br/><small>routecodex-v3-server/src/session_admission.rs</small></td></tr>
 </tbody>

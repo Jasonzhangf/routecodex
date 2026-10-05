@@ -1,3 +1,6 @@
+use crate::client_transport_observation::{
+    V3ClientResponseObservation, V3ClientTransportObservation,
+};
 use crate::restart_closeout::V3FrontTransportCloseoutState;
 use crate::V3MetadataCenterExecutionPlan;
 use axum::body::Body;
@@ -307,6 +310,8 @@ impl V3FrontRequestLeaseRegistry {
 /// reconstructs a lease from payload/log data.
 #[derive(Debug, Clone, Default)]
 pub struct V3FrontTransportBroker {
+    observation_sink: Option<routecodex_v3_debug::V3DebugRuntime>,
+    observation_console: bool,
     generation: Arc<Mutex<u64>>,
     next_connection_id: Arc<Mutex<u64>>,
     checkpoints: Arc<Mutex<BTreeMap<V3FrontRequestLeaseKey, V3BrokerCheckpoint>>>,
@@ -325,6 +330,8 @@ struct V3BrokerCheckpoint {
 impl V3FrontTransportBroker {
     pub fn new(generation: u64) -> Self {
         Self {
+            observation_sink: None,
+            observation_console: false,
             generation: Arc::new(Mutex::new(generation)),
             next_connection_id: Arc::new(Mutex::new(0)),
             checkpoints: Arc::new(Mutex::new(BTreeMap::new())),
@@ -333,6 +340,16 @@ impl V3FrontTransportBroker {
             client_sockets: Arc::new(Mutex::new(BTreeMap::new())),
             client_connections: Arc::new(Mutex::new(BTreeMap::new())),
         }
+    }
+
+    pub(crate) fn with_client_observation(
+        mut self,
+        sink: routecodex_v3_debug::V3DebugRuntime,
+        console: bool,
+    ) -> Self {
+        self.observation_sink = Some(sink);
+        self.observation_console = console;
+        self
     }
 
     pub fn generation(&self) -> u64 {
@@ -799,7 +816,7 @@ impl V3FrontTransportBroker {
     }
 }
 
-fn v3_front_epoch_ms() -> u64 {
+pub(crate) fn v3_front_epoch_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis().min(u64::MAX as u128) as u64)
@@ -955,17 +972,29 @@ impl V3StableFrontConnection {
 /// Production Front socket owner for the HTTP adapter.
 #[derive(Clone, Debug)]
 pub struct V3StableFrontSocket {
-    write_tx: mpsc::Sender<Vec<u8>>,
+    write_tx: mpsc::Sender<(Vec<u8>, V3ClientResponseObservation)>,
+    observation: Arc<V3ClientTransportObservation>,
     close_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
     closeout_state: Arc<V3FrontTransportCloseoutState>,
 }
 
 impl V3StableFrontSocket {
-    fn spawn(mut write_half: OwnedWriteHalf) -> Self {
-        let (write_tx, mut write_rx) = mpsc::channel::<Vec<u8>>(32);
+    pub(crate) fn observe_request_trace(
+        &self,
+        trace: routecodex_v3_debug::V3DebugTraceScope,
+        session: String,
+    ) {
+        self.observation.bind_trace(trace, session);
+    }
+    fn spawn(
+        mut write_half: OwnedWriteHalf,
+        observation: Arc<V3ClientTransportObservation>,
+    ) -> Self {
+        let (write_tx, mut write_rx) = mpsc::channel::<(Vec<u8>, V3ClientResponseObservation)>(32);
         let (close_tx, mut close_rx) = oneshot::channel();
         let closeout_state = V3FrontTransportCloseoutState::new();
         let worker_closeout_state = Arc::clone(&closeout_state);
+        let worker_observation = Arc::clone(&observation);
         tokio::spawn(async move {
             let mut close_requested = false;
             loop {
@@ -982,23 +1011,28 @@ impl V3StableFrontSocket {
                         close_requested = true;
                     },
                     frame = write_rx.recv() => {
-                        let Some(frame) = frame else { break };
-                        if write_half.write_all(&frame).await.is_err() {
+                        let Some((frame, response_observation)) = frame else { break };
+                        if let Err(error) = write_half.write_all(&frame).await {
+                            worker_observation.emit("write_failure", &response_observation, None, Some(error.to_string()));
                             worker_closeout_state.close();
                             break;
                         }
-                        if write_half.flush().await.is_err() {
+                        if let Err(error) = write_half.flush().await {
+                            worker_observation.emit("flush_failure", &response_observation, None, Some(error.to_string()));
                             worker_closeout_state.close();
                             break;
                         }
+                        worker_observation.wrote(&response_observation, frame.len());
                         worker_closeout_state.mark_transport_wrote();
                     }
                 }
             }
             let _ = write_half.shutdown().await;
+            worker_observation.emit("socket_closed", &worker_observation.current(), None, None);
         });
         Self {
             write_tx,
+            observation,
             close_tx: Arc::new(Mutex::new(Some(close_tx))),
             closeout_state,
         }
@@ -1098,7 +1132,7 @@ impl AsyncWrite for V3FrontHttpIo {
         match sender.try_reserve() {
             Ok(permit) => {
                 let length = data.len();
-                permit.send(data.to_vec());
+                permit.send((data.to_vec(), self.front_socket.observation.current()));
                 std::task::Poll::Ready(Ok(length))
             }
             Err(mpsc::error::TrySendError::Full(_)) => {
@@ -1140,8 +1174,14 @@ where
         + 'static,
     S::Future: Future<Output = Result<Response<Body>, Infallible>> + Send + 'static,
 {
+    let observation = V3ClientTransportObservation::new(
+        front_transport_broker.observation_sink.clone(),
+        front_transport_broker.observation_console,
+        connection_identity,
+        stream.local_addr()?.port(),
+    );
     let (read_half, write_half) = stream.into_split();
-    let front_socket = V3StableFrontSocket::spawn(write_half);
+    let front_socket = V3StableFrontSocket::spawn(write_half, Arc::clone(&observation));
     front_transport_broker
         .register_front_socket(connection_identity, front_socket.clone())
         .map_err(std::io::Error::other)?;
@@ -1151,12 +1191,19 @@ where
         let front_socket = request_front_socket.clone();
         async move {
             front_socket.mark_request_started();
+            front_socket
+                .observation
+                .admitted(request.uri().path().to_owned());
             let (parts, body) = request.into_parts();
             let mut request = Request::from_parts(parts, Body::new(body));
             request.extensions_mut().insert(ConnectInfo(remote_addr));
             request.extensions_mut().insert(connection_identity);
-            request.extensions_mut().insert(front_socket);
-            service.call(request).await
+            request.extensions_mut().insert(front_socket.clone());
+            let response = service.call(request).await?;
+            front_socket
+                .observation
+                .prepared(response.status().as_u16(), front_socket.is_closed());
+            Ok::<_, Infallible>(response)
         }
     });
     let connection = hyper::server::conn::http1::Builder::new()
@@ -1181,6 +1228,12 @@ where
             result.map_err(std::io::Error::other)
         },
     };
+    observation.emit(
+        "http_connection_end",
+        &observation.current(),
+        None,
+        result.as_ref().err().map(ToString::to_string),
+    );
     front_transport_broker.release_connection(connection_identity);
     result
 }

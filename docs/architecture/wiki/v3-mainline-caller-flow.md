@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 85 functional paths, 493 caller edges.
+Generated view: 85 functional paths, 495 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -77,7 +77,7 @@ flowchart TD
   module_v3_server -->|3 edges / 2 paths| module_v3_error
   module_v3_server -->|4 edges / 3 paths| module_v3_runtime
   module_v3_server -->|6 edges / 5 paths| module_v3_runtime__hub_v1
-  module_v3_server -->|32 edges / 18 paths| module_v3_server
+  module_v3_server -->|34 edges / 18 paths| module_v3_server
   module_v3_server -->|1 edges / 1 paths| module_v3_vendor
   module_v3_target -->|1 edges / 1 paths| module_v3_provider_responses
   module_v3_scripts -->|2 edges / 1 paths| module_docs
@@ -129,7 +129,7 @@ flowchart TD
 | v3-server | v3-error | 3 | `v3.debug_error_foundation.mainline`<br/>`v3.server.startup` |
 | v3-server | v3-runtime | 4 | `v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline` |
 | v3-server | v3-runtime::hub_v1 | 6 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.runtime_timing_observability.mainline` |
-| v3-server | v3-server | 32 | `v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_restart_handoff_skeleton`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
+| v3-server | v3-server | 34 | `v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_restart_handoff_skeleton`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
 | v3-server | v3/vendor | 1 | `v3.server.startup` |
 | v3-target | v3-provider-responses | 1 | `v3.provider_key_health_model_granularity` |
 | v3/scripts | docs | 2 | `v3.live_provider_compat.parity` |
@@ -2979,17 +2979,25 @@ Manifest: `docs/architecture/manifests/v3.runtime_restart_handoff_skeleton.yml`
 ```mermaid
 flowchart TD
   subgraph c_71_v3_runtime_restart_handoff_skeleton_m_v3_server["v3-server"]
-    c_71_v3_runtime_restart_handoff_skeleton_0["v3-server<br/>V3FrontRequestLease<br/><small>routecodex-v3-server/src/restart_handoff.rs</small>"]
-    c_71_v3_runtime_restart_handoff_skeleton_1["v3-server<br/>V3FrontRequestLeaseKey<br/><small>routecodex-v3-server/src/restart_handoff.rs</small>"]
-    c_71_v3_runtime_restart_handoff_skeleton_2["v3-server<br/>V3ServerAggregateHandle::prepare_for_exec<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_71_v3_runtime_restart_handoff_skeleton_3["v3-server<br/>V3ServerRequestActivityGate::wait_for_quiescence<br/><small>routecodex-v3-server/src/session_admission.rs</small>"]
+    c_71_v3_runtime_restart_handoff_skeleton_0["v3-server<br/>serve_v3_front_http_connection<br/><small>routecodex-v3-server/src/restart_handoff.rs</small>"]
+    c_71_v3_runtime_restart_handoff_skeleton_1["v3-server<br/>V3ClientTransportObservation::prepared<br/><small>routecodex-v3-server/src/client_transport_observation.rs</small>"]
+    c_71_v3_runtime_restart_handoff_skeleton_2["v3-server<br/>V3StableFrontSocket::spawn<br/><small>routecodex-v3-server/src/restart_handoff.rs</small>"]
+    c_71_v3_runtime_restart_handoff_skeleton_3["v3-server<br/>V3ClientTransportObservation::wrote<br/><small>routecodex-v3-server/src/client_transport_observation.rs</small>"]
+    c_71_v3_runtime_restart_handoff_skeleton_4["v3-server<br/>V3FrontRequestLease<br/><small>routecodex-v3-server/src/restart_handoff.rs</small>"]
+    c_71_v3_runtime_restart_handoff_skeleton_5["v3-server<br/>V3FrontRequestLeaseKey<br/><small>routecodex-v3-server/src/restart_handoff.rs</small>"]
+    c_71_v3_runtime_restart_handoff_skeleton_6["v3-server<br/>V3ServerAggregateHandle::prepare_for_exec<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_71_v3_runtime_restart_handoff_skeleton_7["v3-server<br/>V3ServerRequestActivityGate::wait_for_quiescence<br/><small>routecodex-v3-server/src/session_admission.rs</small>"]
   end
-  c_71_v3_runtime_restart_handoff_skeleton_0 -->|v3-runtime-restart-handoff-01<br/>V3Front01StableRequestOwner → V3Front02RequestLeaseBound| c_71_v3_runtime_restart_handoff_skeleton_1
-  c_71_v3_runtime_restart_handoff_skeleton_2 -->|v3-runtime-restart-handoff-02<br/>V3Front02RequestLeaseBound → V3Front08ClientTerminalOrError| c_71_v3_runtime_restart_handoff_skeleton_3
+  c_71_v3_runtime_restart_handoff_skeleton_0 -->|v3-front-client-observation-01<br/>V3Front01StableRequestOwner → V3ClientTransportObservation| c_71_v3_runtime_restart_handoff_skeleton_1
+  c_71_v3_runtime_restart_handoff_skeleton_2 -->|v3-front-client-observation-02<br/>V3StableFrontSocket → V3ClientTransportObservation| c_71_v3_runtime_restart_handoff_skeleton_3
+  c_71_v3_runtime_restart_handoff_skeleton_4 -->|v3-runtime-restart-handoff-01<br/>V3Front01StableRequestOwner → V3Front02RequestLeaseBound| c_71_v3_runtime_restart_handoff_skeleton_5
+  c_71_v3_runtime_restart_handoff_skeleton_6 -->|v3-runtime-restart-handoff-02<br/>V3Front02RequestLeaseBound → V3Front08ClientTerminalOrError| c_71_v3_runtime_restart_handoff_skeleton_7
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
+| `v3-front-client-observation-01` | `V3Front01StableRequestOwner` → `V3ClientTransportObservation` | anchored | serve_v3_front_http_connection<br/><small>routecodex-v3-server/src/restart_handoff.rs</small> | V3ClientTransportObservation::prepared<br/><small>routecodex-v3-server/src/client_transport_observation.rs</small> | `v3.runtime_restart_handoff_skeleton` |
+| `v3-front-client-observation-02` | `V3StableFrontSocket` → `V3ClientTransportObservation` | anchored | V3StableFrontSocket::spawn<br/><small>routecodex-v3-server/src/restart_handoff.rs</small> | V3ClientTransportObservation::wrote<br/><small>routecodex-v3-server/src/client_transport_observation.rs</small> | `v3.runtime_restart_handoff_skeleton` |
 | `v3-runtime-restart-handoff-01` | `V3Front01StableRequestOwner` → `V3Front02RequestLeaseBound` | binding_pending | V3FrontRequestLease<br/><small>routecodex-v3-server/src/restart_handoff.rs</small> | V3FrontRequestLeaseKey<br/><small>routecodex-v3-server/src/restart_handoff.rs</small> | `v3.runtime_restart_handoff_skeleton` |
 | `v3-runtime-restart-handoff-02` | `V3Front02RequestLeaseBound` → `V3Front08ClientTerminalOrError` | binding_pending | V3ServerAggregateHandle::prepare_for_exec<br/><small>routecodex-v3-server/src/lib.rs</small> | V3ServerRequestActivityGate::wait_for_quiescence<br/><small>routecodex-v3-server/src/session_admission.rs</small> | `v3.runtime_restart_handoff_skeleton` |
 

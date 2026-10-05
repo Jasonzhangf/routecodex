@@ -346,10 +346,18 @@ fn key() -> V3FrontRequestLeaseKey {
     }
 }
 
-fn test_front_socket(write_tx: mpsc::Sender<Vec<u8>>) -> V3StableFrontSocket {
+fn test_front_socket(
+    write_tx: mpsc::Sender<(Vec<u8>, V3ClientResponseObservation)>,
+) -> V3StableFrontSocket {
     let (close_tx, _close_rx) = oneshot::channel();
     V3StableFrontSocket {
         write_tx,
+        observation: V3ClientTransportObservation::new(
+            None,
+            false,
+            V3FrontConnectionIdentity(0),
+            0,
+        ),
         close_tx: Arc::new(Mutex::new(Some(close_tx))),
         closeout_state: V3FrontTransportCloseoutState::new(),
     }

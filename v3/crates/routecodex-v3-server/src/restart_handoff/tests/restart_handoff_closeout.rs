@@ -119,7 +119,10 @@ async fn front_socket_deferred_closeout_keeps_the_sse_head_writable() {
     let accept = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
         let (_, write_half) = stream.into_split();
-        let socket = V3StableFrontSocket::spawn(write_half);
+        let socket = V3StableFrontSocket::spawn(
+            write_half,
+            V3ClientTransportObservation::new(None, false, V3FrontConnectionIdentity(0), 0),
+        );
         socket.mark_request_started();
         assert!(socket.suppress_restart_closeout_frame());
         // Hyper enqueued the SSE head (poll_write) before the streaming terminal's
@@ -133,11 +136,12 @@ async fn front_socket_deferred_closeout_keeps_the_sse_head_writable() {
         );
         socket
             .write_tx
-            .send(
+            .send((
                 b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\r\n\
                   :\n\n"
                     .to_vec(),
-            )
+                socket.observation.current(),
+            ))
             .await
             .expect("the deferred transport must still accept the SSE boundary frame");
         socket.wait_transport_wrote().await;
@@ -182,7 +186,10 @@ async fn front_socket_deferred_closeout_without_a_head_delivers_zero_bytes() {
     let accept = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
         let (_, write_half) = stream.into_split();
-        let socket = V3StableFrontSocket::spawn(write_half);
+        let socket = V3StableFrontSocket::spawn(
+            write_half,
+            V3ClientTransportObservation::new(None, false, V3FrontConnectionIdentity(0), 0),
+        );
         socket.mark_request_started();
         assert!(socket.suppress_restart_closeout_frame());
         socket.close_for_exec_replacement();
@@ -217,7 +224,10 @@ async fn front_socket_committed_closeout_delivers_zero_bytes() {
     let accept = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
         let (_, write_half) = stream.into_split();
-        let socket = V3StableFrontSocket::spawn(write_half);
+        let socket = V3StableFrontSocket::spawn(
+            write_half,
+            V3ClientTransportObservation::new(None, false, V3FrontConnectionIdentity(0), 0),
+        );
         socket.mark_request_started();
         socket.close_for_exec_replacement();
         assert!(
@@ -250,7 +260,10 @@ async fn front_socket_restart_after_request_acceptance_delivers_zero_bytes() {
     let accept = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
         let (_, write_half) = stream.into_split();
-        let socket = V3StableFrontSocket::spawn(write_half);
+        let socket = V3StableFrontSocket::spawn(
+            write_half,
+            V3ClientTransportObservation::new(None, false, V3FrontConnectionIdentity(0), 0),
+        );
         socket.mark_request_started();
         socket.close_for_exec_replacement();
     });
@@ -281,7 +294,10 @@ async fn front_socket_discards_configured_error_terminal_after_headers() {
     let accept = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
         let (_, write_half) = stream.into_split();
-        let socket = V3StableFrontSocket::spawn(write_half);
+        let socket = V3StableFrontSocket::spawn(
+            write_half,
+            V3ClientTransportObservation::new(None, false, V3FrontConnectionIdentity(0), 0),
+        );
         socket.mark_request_started();
         socket.closeout_state.mark_response_started();
         socket.set_exec_closeout_frame(accept_expected);

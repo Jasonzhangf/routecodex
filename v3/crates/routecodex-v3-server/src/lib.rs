@@ -1,3 +1,4 @@
+mod client_transport_observation;
 mod compaction_request;
 mod console;
 mod endpoint_handlers;
@@ -493,7 +494,8 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
     // Generation zero is reserved for an uninitialized handoff carrier. A
     // listener may accept requests as soon as it binds, so the normal startup
     // broker must already carry a valid positive runtime generation.
-    let front_transport_broker = V3FrontTransportBroker::new(1);
+    let front_transport_broker =
+        V3FrontTransportBroker::new(1).with_client_observation(debug.clone(), console_enabled);
     let admin_config_path_for_router = admin_config_path.clone();
     let canonical_admin_config_path = admin_config_path.clone().or_else(|| {
         std::env::var_os("HOME")

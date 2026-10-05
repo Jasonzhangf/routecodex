@@ -639,8 +639,20 @@ resources:
     owner_node: V3DebugTraceContextStarted
     identity: [serverId, requestId, executionId]
     allowed_writers: [V3DebugRuntime::start_trace]
-    allowed_readers: [V3DebugEventLedgerRecorded, V3DebugRawCaptureStored, V3DebugSnapshotSessionRegistered]
+    allowed_readers: [V3DebugEventLedgerRecorded, V3DebugRawCaptureStored, V3DebugSnapshotSessionRegistered, V3ClientTransportObservation]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-error, routecodex-v3-provider-responses]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.debug.client_transport_receipt
+    resource_kind: diagnostic
+    lifecycle: v3.runtime_restart_handoff_skeleton
+    owner_crate: routecodex-v3-server
+    owner_node: V3ClientTransportObservation
+    identity: [port, connectionId, requestSequence, requestId, stage]
+    allowed_writers: [V3ClientTransportObservation::emit]
+    allowed_readers: [developer_diagnostics]
+    forbidden_writers: [Provider, Error, MetadataCenter, client_response_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
