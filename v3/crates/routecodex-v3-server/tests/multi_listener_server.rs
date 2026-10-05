@@ -1099,6 +1099,97 @@ targets = [{{ kind = "forwarder", id = "mixed", priority = 1 }}]
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
 }
 
+fn responses_relay_route_policy_history_manifest(
+    port_a: u16,
+    port_b: u16,
+    failed_base_url: &str,
+    success_base_url: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    // Same Relay -> Direct -> Relay -> Direct nested handoff as
+    // `responses_relay_nested_protocol_handoff_manifest`, plus a route policy
+    // that only escalates to the `thinking` pool after two tool-error turns
+    // have been committed to the process-shared route-policy history.
+    let direct_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" }"#;
+    let relay_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "relay", protocol_profile_owner = "v3.hub_relay_runtime_closeout", implemented = true, forbidden_reentry_behavior = "Responses endpoint must enter Hub Relay runtime and must not fall through to Direct/P6 or pending runtime.", runtime_owner_symbol = "execute_v3_responses_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs" }"#;
+    let hub_v1_declaration = HUB_V1_TEST_DECLARATION.replace(direct_binding, relay_binding);
+    let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let source = format!(
+        r#"
+version = 3
+{hub_v1_declaration}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["responses"]
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["responses"]
+{hub_v1_server_execution}
+[providers.relay_first]
+type = "openai_chat"
+base_url = "{failed_base_url}"
+default_model = "relay-first"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_NESTED_HANDOFF_RELAY_FIRST_KEY" }}] }}
+[providers.relay_first.models.relay-first]
+wire_name = "wire-relay-first"
+[providers.direct_final]
+type = "responses"
+base_url = "{success_base_url}"
+default_model = "direct-final"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_NESTED_HANDOFF_DIRECT_FINAL_KEY" }}] }}
+[providers.direct_final.models.direct-final]
+wire_name = "wire-direct-final"
+[providers.direct_thinking]
+type = "responses"
+base_url = "{success_base_url}"
+default_model = "direct-thinking"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_ROUTE_POLICY_HISTORY_THINKING_KEY" }}] }}
+[providers.direct_thinking.models.direct-thinking]
+wire_name = "wire-direct-thinking"
+[forwarders.mixed]
+model = "client-test"
+aliases = ["client-test"]
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "relay_first", model = "relay-first", key = "key", priority = 40 }},
+  {{ kind = "provider_model", provider = "direct_final", model = "direct-final", key = "key", priority = 10 }}
+]
+[forwarders.thinking_mixed]
+model = "client-test"
+aliases = ["client-test"]
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "direct_thinking", model = "direct-thinking", key = "key", priority = 1 }}
+]
+[debug]
+log_console = false
+snapshots = true
+dry_run = true
+retention = {{ raw_requests = 8, raw_responses = 8, events = 128 }}
+[route_groups.default.pools.client_test]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, models = ["client-test"] }}
+targets = [{{ kind = "forwarder", id = "mixed", priority = 1 }}]
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "forwarder", id = "mixed", priority = 1 }}]
+[route_groups.default.pools.thinking]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 6, entry_protocol = "responses" }}
+targets = [{{ kind = "forwarder", id = "thinking_mixed", priority = 1 }}]
+[[route_groups.default.route_policies]]
+id = "tool-error-history"
+precedence = 10
+condition = {{ kind = "tool_execution_error_turns_at_least", window_turns = 5, count = 2 }}
+action = {{ select_route_pool = "thinking" }}
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
 fn p6_remote_continuation_manifest(
     port_a: u16,
     port_b: u16,
@@ -5789,6 +5880,107 @@ async fn responses_relay_direct_relay_nested_handoff_drains_before_http_projecti
         Some("Bearer secret-direct-final")
     );
     assert_eq!(capture.body["model"], "wire-direct-final");
+}
+
+#[tokio::test]
+async fn responses_relay_direct_handoff_commits_route_policy_history_for_next_request() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (failed_base_url, failed_shutdown) =
+        start_controlled_failure_upstream_all_protocols().await;
+    let (success_base_url, mut captures, success_shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_NESTED_HANDOFF_RELAY_FIRST_KEY", "secret-relay-first");
+    std::env::set_var(
+        "V3_NESTED_HANDOFF_DIRECT_SECOND_KEY",
+        "secret-direct-second",
+    );
+    std::env::set_var("V3_NESTED_HANDOFF_RELAY_THIRD_KEY", "secret-relay-third");
+    std::env::set_var("V3_NESTED_HANDOFF_DIRECT_FINAL_KEY", "secret-direct-final");
+    std::env::set_var(
+        "V3_ROUTE_POLICY_HISTORY_THINKING_KEY",
+        "secret-direct-thinking",
+    );
+    let handle = spawn_v3_server_aggregate(responses_relay_route_policy_history_manifest(
+        free_port(),
+        free_port(),
+        &failed_base_url,
+        &success_base_url,
+    ))
+    .await
+    .unwrap();
+    let client = reqwest::Client::new();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    // A continuation turn (no new user input) whose tool output is an error.
+    let tool_error_turn = json!({
+        "model": "client-test",
+        "stream": false,
+        "input": [
+            {
+                "type": "message",
+                "role": "user",
+                "content": "run the tool and report the result"
+            },
+            {
+                "type": "function_call",
+                "name": "exec_command",
+                "call_id": "call-1",
+                "arguments": "{\"command\":\"cargo test\"}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call-1",
+                "output": {"is_error": true}
+            }
+        ]
+    });
+
+    // Request 1: one tool-error turn. It stays on the default pool and drains the
+    // Relay -> Direct -> Relay -> Direct handoff, committing the turn on success.
+    let first = client
+        .post(&endpoint)
+        .header("session-id", "route-policy-history-session")
+        .header("thread-id", "route-policy-history-thread")
+        .json(&tool_error_turn)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status(), 200);
+    let first_capture = captures.recv().await.unwrap();
+    assert_eq!(
+        first_capture.body["model"], "wire-direct-final",
+        "first tool-error turn must stay on the default pool"
+    );
+
+    // Request 2: the committed history now holds two tool-error turns, so the
+    // route policy must select the thinking pool. If the Relay -> Direct handoff
+    // dropped the pending guard, the commit would be a no-op and this request
+    // would fall back to the default pool's direct_final instead.
+    let second = client
+        .post(&endpoint)
+        .header("session-id", "route-policy-history-session")
+        .header("thread-id", "route-policy-history-thread")
+        .json(&tool_error_turn)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(second.status(), 200);
+    let second_capture = captures.recv().await.unwrap();
+    assert_eq!(
+        second_capture.authorization.as_deref(),
+        Some("Bearer secret-direct-thinking")
+    );
+    assert_eq!(
+        second_capture.body["model"], "wire-direct-thinking",
+        "a committed Relay -> Direct turn must let the next request observe the tool-error history"
+    );
+
+    handle.shutdown().await;
+    std::env::remove_var("V3_NESTED_HANDOFF_RELAY_FIRST_KEY");
+    std::env::remove_var("V3_NESTED_HANDOFF_DIRECT_SECOND_KEY");
+    std::env::remove_var("V3_NESTED_HANDOFF_RELAY_THIRD_KEY");
+    std::env::remove_var("V3_NESTED_HANDOFF_DIRECT_FINAL_KEY");
+    std::env::remove_var("V3_ROUTE_POLICY_HISTORY_THINKING_KEY");
+    failed_shutdown.send(()).unwrap();
+    success_shutdown.send(()).unwrap();
 }
 
 #[tokio::test]

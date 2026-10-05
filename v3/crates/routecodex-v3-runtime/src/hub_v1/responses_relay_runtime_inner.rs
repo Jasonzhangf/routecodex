@@ -21,12 +21,24 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
     initial_expanded: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
     initial_request_local_excluded_candidates: BTreeSet<String>,
-    initial_observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
-    initial_request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
+    initial_relay_seeds: V3ResponsesRelayRuntimeSeeds,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    let observability_accumulator =
-        initial_observability_accumulator.unwrap_or_else(V3RuntimeObservabilityAccumulator::start);
+    let observability_accumulator = initial_relay_seeds
+        .observability_accumulator
+        .unwrap_or_else(V3RuntimeObservabilityAccumulator::start);
+    let route_policy_pending = initial_relay_seeds.route_policy_pending;
+    let route_policy_scope = initial_relay_seeds.route_policy_scope;
     let runtime_timing = observability_accumulator.timing();
+    macro_rules! commit_route_policy_if_present {
+        () => {{
+            if let Some(pending) = route_policy_pending.as_ref() {
+                let now = v3_responses_relay_now_epoch_ms()?;
+                pending
+                    .commit_from_manifest(manifest, now)
+                    .map_err(V3ResponsesRelayRuntimeError::Target)?;
+            }
+        }};
+    }
     compile_v3_hub_v1_static_registry()
         .map_err(|error| V3ResponsesRelayRuntimeError::StaticRegistry(error.to_string()))?;
     let mut trace = Vec::with_capacity(17);
@@ -131,7 +143,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut last_external_http = None;
     let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
-    let request_execution_control = match initial_request_execution_control {
+    let request_execution_control = match initial_relay_seeds.request_execution_control {
         Some(control) => control,
         None => crate::nodes::V3RequestExecutionControl::from_manifest(manifest, &input.server_id)
             .map_err(|error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string()))?,
@@ -286,7 +298,11 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         expanded: captured_expanded,
                         protocol_candidate_keys,
                         request_local_excluded_candidates: failed_candidates.clone(),
+                        _route_policy_pending: route_policy_pending.clone(),
+                        _route_policy_scope: route_policy_scope.clone(),
                     },
+                    route_policy_pending: route_policy_pending.clone(),
+                    route_policy_scope: route_policy_scope.clone(),
                     node_trace: handoff_trace,
                     provider_failure_events,
                     observability_accumulator: observability_accumulator
@@ -966,6 +982,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     ),
                     attempt_budget.clone(),
                 )?;
+                commit_route_policy_if_present!();
                 return Ok(V3ResponsesRelayRuntimeOutput {
                     status: 200,
                     terminal_disposition: None,
@@ -1351,6 +1368,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     ),
                     attempt_budget.clone(),
                 )?;
+                commit_route_policy_if_present!();
                 return Ok(V3ResponsesRelayRuntimeOutput {
                     status: 200,
                     terminal_disposition: None,

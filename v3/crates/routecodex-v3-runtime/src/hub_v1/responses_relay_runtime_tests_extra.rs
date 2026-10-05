@@ -145,8 +145,7 @@ async fn responses_tool_search_output_anthropic_json_relay_preserves_tool_roundt
         None,
         None,
         BTreeSet::new(),
-        None,
-        None,
+        V3ResponsesRelayRuntimeSeeds::default(),
     )
     .await
     .expect("Anthropic JSON response must traverse the full Relay runtime");

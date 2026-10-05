@@ -77,12 +77,13 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
         &standardized.body,
         &classified.facts.route_classification.route_name,
     );
-    let classified = match route_policy_state.evaluate_request(
+    let (classified, route_policy_pending) = match route_policy_state.evaluate_request(
         manifest,
         classified,
-        route_policy_scope,
+        route_policy_scope.clone(),
         &standardized.request_id,
         route_policy_observation,
+        now_epoch_ms,
     ) {
         Ok(value) => value,
         Err(error) => {
@@ -195,6 +196,8 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
         expanded,
         protocol_candidate_keys,
         request_local_excluded_candidates: BTreeSet::new(),
+        _route_policy_pending: Some(route_policy_pending),
+        _route_policy_scope: Some(route_policy_scope),
     })
 }
 
