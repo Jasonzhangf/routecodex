@@ -1446,7 +1446,7 @@ pub(crate) const V3_CONSOLE_CONTENT_TAG_WIDTH: usize = 24;
 pub(crate) const V3_CONSOLE_PREFIX_PORT_PROTOCOL_COLUMN_WIDTH: usize = 24;
 pub(crate) const V3_CONSOLE_PREFIX_PROJECT_COLUMN_WIDTH: usize = 20;
 pub(crate) const V3_CONSOLE_PREFIX_ROUTE_MODEL_COLUMN_WIDTH: usize = 36;
-pub(crate) const V3_CONSOLE_DEBUG_SCOPE_COLUMN_WIDTH: usize = 90;
+pub(crate) const V3_CONSOLE_DEBUG_SCOPE_COLUMN_WIDTH: usize = 96;
 pub(crate) const V3_CONSOLE_REQUEST_COUNT_COLUMN_WIDTH: usize = 18;
 
 pub(crate) fn format_v3_console_timed_content(tag: &str, fields: &str) -> String {
