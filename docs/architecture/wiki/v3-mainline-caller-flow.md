@@ -39,7 +39,7 @@ flowchart TD
   module_pending -->|19 edges / 4 paths| module_pending
   module_routecodex_v3_admin -->|17 edges / 6 paths| module_routecodex_v3_admin
   module_routecodex_v3_admin -->|1 edges / 1 paths| module_v3_debug
-  module_routecodex_v3_hooks -->|6 edges / 1 paths| module_routecodex_v3_hooks
+  module_routecodex_v3_hooks -->|8 edges / 1 paths| module_routecodex_v3_hooks
   module_routecodex_v3_route_classifier -->|3 edges / 2 paths| module_routecodex_v3_route_classifier
   module_routecodex_v3_sse -->|2 edges / 1 paths| module_routecodex_v3_sse
   module_v3_cli -->|1 edges / 1 paths| module_v3_lifecycle
@@ -91,7 +91,7 @@ flowchart TD
 | pending | pending | 19 | `v3.operation_runner.dagpipe.error`<br/>`v3.operation_runner.dagpipe.request`<br/>`v3.operation_runner.dagpipe.response`<br/>`v3.responses_chat_sse_typed_tree` |
 | routecodex-v3-admin | routecodex-v3-admin | 17 | `v3.admin.control_plane_admission`<br/>`v3.admin.environment_projection`<br/>`v3.admin.provider_authoring_write`<br/>`v3.admin.provider_candidate_probe`<br/>`v3.admin.provider_patrol_plan_authoring`<br/>`v3.admin.provider_patrol_run` |
 | routecodex-v3-admin | v3-debug | 1 | `v3.server.internal_observability_projection` |
-| routecodex-v3-hooks | routecodex-v3-hooks | 6 | `v3.rcc_internal_hooks_sidecar` |
+| routecodex-v3-hooks | routecodex-v3-hooks | 8 | `v3.rcc_internal_hooks_sidecar` |
 | routecodex-v3-route-classifier | routecodex-v3-route-classifier | 3 | `v3.route_policy.condition_evaluation`<br/>`vr.current_turn_typed_route_facts` |
 | routecodex-v3-sse | routecodex-v3-sse | 2 | `v3.sse.transport_boundary` |
 | v3-cli | v3-lifecycle | 1 | `v3.server.managed_lifecycle` |
@@ -182,43 +182,51 @@ flowchart TD
 
 ## v3.rcc_internal_hooks_sidecar
 
-Optional RouteCodex lifecycle starts the installed rccv3-hooksd; the daemon uses only the default Codex App Server socket for session status, send, and continuation evidence.
+Optional RouteCodex lifecycle leases an isolated project registration on one per-user daemon; release or owner EOF drains that project and the last lease permits bounded idle exit.
 
 Owner feature: `v3.rcc_internal_hooks_sidecar`
 
 ```mermaid
 flowchart TD
   subgraph c_0_v3_rcc_internal_hooks_sidecar_m_routecodex_v3_hooks["routecodex-v3-hooks"]
-    c_0_v3_rcc_internal_hooks_sidecar_2["routecodex-v3-hooks<br/>ControlServer::with_native_sockets_handlers_and_state<br/><small>routecodex-v3-hooks/src/control.rs</small>"]
-    c_0_v3_rcc_internal_hooks_sidecar_3["routecodex-v3-hooks<br/>handle_control_request<br/><small>routecodex-v3-hooks/src/control.rs</small>"]
-    c_0_v3_rcc_internal_hooks_sidecar_4["routecodex-v3-hooks<br/>HooksSidecarCore::forward<br/><small>routecodex-v3-hooks/src/lib.rs</small>"]
-    c_0_v3_rcc_internal_hooks_sidecar_5["routecodex-v3-hooks<br/>HooksSidecarCore::send_to_target<br/><small>routecodex-v3-hooks/src/lib.rs</small>"]
-    c_0_v3_rcc_internal_hooks_sidecar_6["routecodex-v3-hooks<br/>NativeAppServerTransport::send_message<br/><small>routecodex-v3-hooks/src/appserver.rs</small>"]
-    c_0_v3_rcc_internal_hooks_sidecar_7["routecodex-v3-hooks<br/>NativeAppServerTransport::session_status<br/><small>routecodex-v3-hooks/src/appserver.rs</small>"]
-    c_0_v3_rcc_internal_hooks_sidecar_8["routecodex-v3-hooks<br/>timer_tick<br/><small>routecodex-v3-hooks/src/control.rs</small>"]
-    c_0_v3_rcc_internal_hooks_sidecar_9["routecodex-v3-hooks<br/>HooksSidecarCore::run_due_schedules<br/><small>routecodex-v3-hooks/src/lib.rs</small>"]
-    c_0_v3_rcc_internal_hooks_sidecar_10["routecodex-v3-hooks<br/>HooksSidecarCore::dispatch_hook_event<br/><small>routecodex-v3-hooks/src/lib.rs</small>"]
-    c_0_v3_rcc_internal_hooks_sidecar_11["routecodex-v3-hooks<br/>HookRegistry::dispatch<br/><small>routecodex-v3-hooks/src/lib.rs</small>"]
-    c_0_v3_rcc_internal_hooks_sidecar_12["routecodex-v3-hooks<br/>HooksSidecarCore::execute_web_search<br/><small>routecodex-v3-hooks/src/lib.rs</small>"]
+    c_0_v3_rcc_internal_hooks_sidecar_3["routecodex-v3-hooks<br/>register_shared_project_cancelable<br/><small>routecodex-v3-hooks/src/shared.rs</small>"]
+    c_0_v3_rcc_internal_hooks_sidecar_4["routecodex-v3-hooks<br/>serve_registration<br/><small>routecodex-v3-hooks/src/shared.rs</small>"]
+    c_0_v3_rcc_internal_hooks_sidecar_5["routecodex-v3-hooks<br/>ControlServer::with_appserver_sockets_handlers_and_state<br/><small>routecodex-v3-hooks/src/control.rs</small>"]
+    c_0_v3_rcc_internal_hooks_sidecar_6["routecodex-v3-hooks<br/>ControlHandle::stop<br/><small>routecodex-v3-hooks/src/hook_control.rs</small>"]
+    c_0_v3_rcc_internal_hooks_sidecar_7["routecodex-v3-hooks<br/>handle_control_request<br/><small>routecodex-v3-hooks/src/control.rs</small>"]
+    c_0_v3_rcc_internal_hooks_sidecar_8["routecodex-v3-hooks<br/>HooksSidecarCore::forward<br/><small>routecodex-v3-hooks/src/lib.rs</small>"]
+    c_0_v3_rcc_internal_hooks_sidecar_9["routecodex-v3-hooks<br/>HooksSidecarCore::send_to_target<br/><small>routecodex-v3-hooks/src/lib.rs</small>"]
+    c_0_v3_rcc_internal_hooks_sidecar_10["routecodex-v3-hooks<br/>NativeAppServerTransport::send_message<br/><small>routecodex-v3-hooks/src/appserver.rs</small>"]
+    c_0_v3_rcc_internal_hooks_sidecar_11["routecodex-v3-hooks<br/>NativeAppServerTransport::session_status<br/><small>routecodex-v3-hooks/src/appserver.rs</small>"]
+    c_0_v3_rcc_internal_hooks_sidecar_12["routecodex-v3-hooks<br/>timer_tick<br/><small>routecodex-v3-hooks/src/control.rs</small>"]
+    c_0_v3_rcc_internal_hooks_sidecar_13["routecodex-v3-hooks<br/>HooksSidecarCore::run_due_schedules<br/><small>routecodex-v3-hooks/src/lib.rs</small>"]
+    c_0_v3_rcc_internal_hooks_sidecar_14["routecodex-v3-hooks<br/>HooksSidecarCore::dispatch_hook_event<br/><small>routecodex-v3-hooks/src/lib.rs</small>"]
+    c_0_v3_rcc_internal_hooks_sidecar_15["routecodex-v3-hooks<br/>HookRegistry::dispatch<br/><small>routecodex-v3-hooks/src/lib.rs</small>"]
+    c_0_v3_rcc_internal_hooks_sidecar_16["routecodex-v3-hooks<br/>HooksSidecarCore::execute_web_search<br/><small>routecodex-v3-hooks/src/lib.rs</small>"]
   end
   subgraph c_0_v3_rcc_internal_hooks_sidecar_m_v3_lifecycle["v3-lifecycle"]
     c_0_v3_rcc_internal_hooks_sidecar_0["v3-lifecycle<br/>start_configured_hooks_sidecar<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small>"]
     c_0_v3_rcc_internal_hooks_sidecar_1["v3-lifecycle<br/>hooks_runtime_mode<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small>"]
+    c_0_v3_rcc_internal_hooks_sidecar_2["v3-lifecycle<br/>start_configured_hooks_sidecar_with_timeout_and_cancel<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small>"]
   end
   c_0_v3_rcc_internal_hooks_sidecar_0 -->|v3-hooks-sidecar-life-01<br/>V3Lifecycle04ChildSpawned → V3HooksInstallRecord| c_0_v3_rcc_internal_hooks_sidecar_1
-  c_0_v3_rcc_internal_hooks_sidecar_0 -->|v3-hooks-sidecar-life-02<br/>V3HooksInstallRecord → ControlServer| c_0_v3_rcc_internal_hooks_sidecar_2
-  c_0_v3_rcc_internal_hooks_sidecar_3 -->|v3-hooks-sidecar-forward-01<br/>ControlServer → HooksSidecarCore| c_0_v3_rcc_internal_hooks_sidecar_4
-  c_0_v3_rcc_internal_hooks_sidecar_5 -->|v3-hooks-sidecar-native-01<br/>HooksSidecarCore → NativeAppServerTransport| c_0_v3_rcc_internal_hooks_sidecar_6
-  c_0_v3_rcc_internal_hooks_sidecar_3 -->|v3-hooks-sidecar-status-01<br/>ControlServer → NativeAppServerTransport| c_0_v3_rcc_internal_hooks_sidecar_7
-  c_0_v3_rcc_internal_hooks_sidecar_8 -->|v3-hooks-sidecar-timer-01<br/>ControlServer → HooksSidecarCore| c_0_v3_rcc_internal_hooks_sidecar_9
-  c_0_v3_rcc_internal_hooks_sidecar_10 -->|v3-hooks-sidecar-hook-01<br/>HooksSidecarCore → HookRegistry| c_0_v3_rcc_internal_hooks_sidecar_11
-  c_0_v3_rcc_internal_hooks_sidecar_3 -->|v3-hooks-sidecar-web-search-01<br/>ControlServer → HooksSidecarCore| c_0_v3_rcc_internal_hooks_sidecar_12
+  c_0_v3_rcc_internal_hooks_sidecar_2 -->|v3-hooks-sidecar-life-02<br/>V3HooksInstallRecord → SharedProjectLease| c_0_v3_rcc_internal_hooks_sidecar_3
+  c_0_v3_rcc_internal_hooks_sidecar_4 -->|v3-hooks-sidecar-register-01<br/>SharedProjectLease → ControlServer| c_0_v3_rcc_internal_hooks_sidecar_5
+  c_0_v3_rcc_internal_hooks_sidecar_4 -->|v3-hooks-sidecar-reclaim-01<br/>SharedProjectLease → ControlHandle| c_0_v3_rcc_internal_hooks_sidecar_6
+  c_0_v3_rcc_internal_hooks_sidecar_7 -->|v3-hooks-sidecar-forward-01<br/>ControlServer → HooksSidecarCore| c_0_v3_rcc_internal_hooks_sidecar_8
+  c_0_v3_rcc_internal_hooks_sidecar_9 -->|v3-hooks-sidecar-native-01<br/>HooksSidecarCore → NativeAppServerTransport| c_0_v3_rcc_internal_hooks_sidecar_10
+  c_0_v3_rcc_internal_hooks_sidecar_7 -->|v3-hooks-sidecar-status-01<br/>ControlServer → NativeAppServerTransport| c_0_v3_rcc_internal_hooks_sidecar_11
+  c_0_v3_rcc_internal_hooks_sidecar_12 -->|v3-hooks-sidecar-timer-01<br/>ControlServer → HooksSidecarCore| c_0_v3_rcc_internal_hooks_sidecar_13
+  c_0_v3_rcc_internal_hooks_sidecar_14 -->|v3-hooks-sidecar-hook-01<br/>HooksSidecarCore → HookRegistry| c_0_v3_rcc_internal_hooks_sidecar_15
+  c_0_v3_rcc_internal_hooks_sidecar_7 -->|v3-hooks-sidecar-web-search-01<br/>ControlServer → HooksSidecarCore| c_0_v3_rcc_internal_hooks_sidecar_16
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
 | `v3-hooks-sidecar-life-01` | `V3Lifecycle04ChildSpawned` → `V3HooksInstallRecord` | as_is_bound | start_configured_hooks_sidecar<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small> | hooks_runtime_mode<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small> | `v3.rcc_internal_hooks_sidecar` |
-| `v3-hooks-sidecar-life-02` | `V3HooksInstallRecord` → `ControlServer` | as_is_bound | start_configured_hooks_sidecar<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small> | ControlServer::with_native_sockets_handlers_and_state<br/><small>routecodex-v3-hooks/src/control.rs</small> | `v3.rcc_internal_hooks_sidecar` |
+| `v3-hooks-sidecar-life-02` | `V3HooksInstallRecord` → `SharedProjectLease` | as_is_bound | start_configured_hooks_sidecar_with_timeout_and_cancel<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small> | register_shared_project_cancelable<br/><small>routecodex-v3-hooks/src/shared.rs</small> | `v3.rcc_internal_hooks_sidecar` |
+| `v3-hooks-sidecar-register-01` | `SharedProjectLease` → `ControlServer` | as_is_bound | serve_registration<br/><small>routecodex-v3-hooks/src/shared.rs</small> | ControlServer::with_appserver_sockets_handlers_and_state<br/><small>routecodex-v3-hooks/src/control.rs</small> | `v3.rcc_internal_hooks_sidecar` |
+| `v3-hooks-sidecar-reclaim-01` | `SharedProjectLease` → `ControlHandle` | as_is_bound | serve_registration<br/><small>routecodex-v3-hooks/src/shared.rs</small> | ControlHandle::stop<br/><small>routecodex-v3-hooks/src/hook_control.rs</small> | `v3.rcc_internal_hooks_sidecar` |
 | `v3-hooks-sidecar-forward-01` | `ControlServer` → `HooksSidecarCore` | as_is_bound | handle_control_request<br/><small>routecodex-v3-hooks/src/control.rs</small> | HooksSidecarCore::forward<br/><small>routecodex-v3-hooks/src/lib.rs</small> | `v3.rcc_internal_hooks_sidecar` |
 | `v3-hooks-sidecar-native-01` | `HooksSidecarCore` → `NativeAppServerTransport` | obsolete | HooksSidecarCore::send_to_target<br/><small>routecodex-v3-hooks/src/lib.rs</small> | NativeAppServerTransport::send_message<br/><small>routecodex-v3-hooks/src/appserver.rs</small> | `v3.rcc_internal_hooks_sidecar` |
 | `v3-hooks-sidecar-status-01` | `ControlServer` → `NativeAppServerTransport` | obsolete | handle_control_request<br/><small>routecodex-v3-hooks/src/control.rs</small> | NativeAppServerTransport::session_status<br/><small>routecodex-v3-hooks/src/appserver.rs</small> | `v3.rcc_internal_hooks_sidecar` |

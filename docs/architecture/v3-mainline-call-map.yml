@@ -4,7 +4,7 @@ scope: routecodex-v3
 chains:
 - chain_id: v3.rcc_internal_hooks_sidecar
   owner_feature_id: v3.rcc_internal_hooks_sidecar
-  summary: Optional RouteCodex lifecycle starts the installed rccv3-hooksd; the daemon uses only the default Codex App Server socket for session status, send, and continuation evidence.
+  summary: Optional RouteCodex lifecycle leases an isolated project registration on one per-user daemon; release or owner EOF drains that project and the last lease permits bounded idle exit.
   edges:
   - step_id: v3-hooks-sidecar-life-01
     from_node: V3Lifecycle04ChildSpawned
@@ -22,16 +22,44 @@ chains:
       side_channel_writes: []
   - step_id: v3-hooks-sidecar-life-02
     from_node: V3HooksInstallRecord
-    to_node: ControlServer
-    caller_symbol: start_configured_hooks_sidecar
+    to_node: SharedProjectLease
+    caller_symbol: start_configured_hooks_sidecar_with_timeout_and_cancel
     caller_file: v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
-    callee_symbol: ControlServer::with_native_sockets_handlers_and_state
-    callee_file: v3/crates/routecodex-v3-hooks/src/control.rs
+    callee_symbol: register_shared_project_cancelable
+    callee_file: v3/crates/routecodex-v3-hooks/src/shared.rs
     status: as_is_bound
     owner_feature_id: v3.rcc_internal_hooks_sidecar
     resource_flow:
       consumes: [v3.hooks.sidecar_install_record]
-      produces: [v3.lifecycle.hooks_sidecar_process, v3.hooks.control_socket]
+      produces: [v3.hooks.global_daemon, v3.hooks.project_registration]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-hooks-sidecar-register-01
+    from_node: SharedProjectLease
+    to_node: ControlServer
+    caller_symbol: serve_registration
+    caller_file: v3/crates/routecodex-v3-hooks/src/shared.rs
+    callee_symbol: ControlServer::with_appserver_sockets_handlers_and_state
+    callee_file: v3/crates/routecodex-v3-hooks/src/control.rs
+    status: as_is_bound
+    owner_feature_id: v3.rcc_internal_hooks_sidecar
+    resource_flow:
+      consumes: [v3.hooks.project_registration]
+      produces: [v3.hooks.control_socket]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-hooks-sidecar-reclaim-01
+    from_node: SharedProjectLease
+    to_node: ControlHandle
+    caller_symbol: serve_registration
+    caller_file: v3/crates/routecodex-v3-hooks/src/shared.rs
+    callee_symbol: ControlHandle::stop
+    callee_file: v3/crates/routecodex-v3-hooks/src/hook_control.rs
+    status: as_is_bound
+    owner_feature_id: v3.rcc_internal_hooks_sidecar
+    resource_flow:
+      consumes: [v3.hooks.project_registration, v3.hooks.control_socket]
+      produces: []
       side_channel_reads: []
       side_channel_writes: []
   - step_id: v3-hooks-sidecar-forward-01

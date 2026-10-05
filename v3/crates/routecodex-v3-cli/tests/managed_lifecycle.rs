@@ -308,6 +308,7 @@ fn run_with_hooks_record(
         )
         .env("V3_MANAGED_TEST_KEY", SECRET)
         .env("ROUTECODEX_HOOKS_INSTALL_RECORD", hooks_record)
+        .env("HOME", hooks_record.parent().unwrap())
         .output()
         .unwrap()
 }
@@ -330,6 +331,7 @@ fn run_with_hooks_record_tmpdir(
         )
         .env("V3_MANAGED_TEST_KEY", SECRET)
         .env("ROUTECODEX_HOOKS_INSTALL_RECORD", hooks_record)
+        .env("HOME", hooks_record.parent().unwrap())
         .env("TMPDIR", tmp_dir)
         .env("TMP", tmp_dir)
         .env("TEMP", tmp_dir)
@@ -1038,7 +1040,10 @@ fn failed_hooks_sidecar_does_not_block_managed_start_or_live_status() {
 #[test]
 fn default_install_record_uses_internal_hooksd_from_cli_lifecycle() {
     let _guard = lifecycle_test_guard();
-    let root = TempDir::new().unwrap();
+    let root = tempfile::Builder::new()
+        .prefix("rcc-cli-hooks-")
+        .tempdir_in("/tmp")
+        .unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
     let config = write_config(&root, ports);
@@ -1047,19 +1052,11 @@ fn default_install_record_uses_internal_hooksd_from_cli_lifecycle() {
     let bin_directory = hooks_root.join("bin");
     let record_path = hooks_root.join("install.json");
     let legacy_wrapper = hooks_root.join("supervisor-wrapper");
-    let hooksd_started = hooks_root.join("hooksd-started");
     let legacy_started = hooks_root.join("legacy-started");
     fs::create_dir_all(&bin_directory).unwrap();
     let hooksd = bin_directory.join("rccv3-hooksd");
-    fs::write(
-        &hooksd,
-        format!(
-            "#!/bin/sh\nprintf 'started\\n' > '{}'\nprintf '%s\\n' '{{\"protocol\":\"rcc-hooks-sidecar/v1\",\"ready\":true}}'\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n",
-            hooksd_started.display()
-        ),
-    )
-    .unwrap();
-    fs::set_permissions(&hooksd, fs::Permissions::from_mode(0o755)).unwrap();
+    let built_hooksd = Path::new(binary).parent().unwrap().join("rccv3-hooksd");
+    fs::copy(&built_hooksd, &hooksd).expect("build the real workspace hooks binary first");
     fs::write(
         &legacy_wrapper,
         format!(
@@ -1098,8 +1095,8 @@ fn default_install_record_uses_internal_hooksd_from_cli_lifecycle() {
     let instance_dir = single_instance_dir(&state_root);
     wait_for_hooksd_marker(
         &instance_dir,
-        &hooksd_started,
-        "default install record did not launch rccv3-hooksd",
+        &instance_dir.join("hooks-sidecar.sock"),
+        "default install record did not register the project with shared hooksd",
     );
     assert!(
         !legacy_started.exists(),
@@ -1115,6 +1112,15 @@ fn default_install_record_uses_internal_hooksd_from_cli_lifecycle() {
     assert_eq!(last_json(&stop)["state"], "stopped");
     for port in ports {
         wait_port(port, false);
+    }
+    let global_socket = hooks_root.join(".rcc/hooks/daemon.sock");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while global_socket.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "last project stop must recycle the shared daemon"
+        );
+        sleep(Duration::from_millis(20));
     }
 }
 
@@ -1207,7 +1213,10 @@ fn invalid_hooks_runtime_type_keeps_managed_cli_running_without_sidecar() {
 #[test]
 fn internal_hooksd_crash_after_readiness_keeps_managed_runtime_healthy() {
     let _guard = lifecycle_test_guard();
-    let root = TempDir::new().unwrap();
+    let root = tempfile::Builder::new()
+        .prefix("rcc-cli-hooks-")
+        .tempdir_in("/tmp")
+        .unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
     let config = write_config(&root, ports);
@@ -1215,18 +1224,13 @@ fn internal_hooksd_crash_after_readiness_keeps_managed_runtime_healthy() {
     let hooks_root = root.path().join("hooks");
     let bin_directory = hooks_root.join("bin");
     let record_path = hooks_root.join("install.json");
-    let hooksd_started = hooks_root.join("hooksd-started");
     fs::create_dir_all(&bin_directory).unwrap();
     let hooksd = bin_directory.join("rccv3-hooksd");
-    fs::write(
+    fs::copy(
+        Path::new(binary).parent().unwrap().join("rccv3-hooksd"),
         &hooksd,
-        format!(
-            "#!/bin/sh\nprintf 'started\\n' > '{}'\nprintf '%s\\n' '{{\"protocol\":\"rcc-hooks-sidecar/v1\",\"ready\":true}}'\nsleep 0.2\nexit 17\n",
-            hooksd_started.display()
-        ),
     )
-    .unwrap();
-    fs::set_permissions(&hooksd, fs::Permissions::from_mode(0o755)).unwrap();
+    .expect("build the real workspace hooks binary first");
     fs::write(
         &record_path,
         serde_json::json!({
@@ -1253,9 +1257,20 @@ fn internal_hooksd_crash_after_readiness_keeps_managed_runtime_healthy() {
     let instance_dir = single_instance_dir(&state_root);
     wait_for_hooksd_marker(
         &instance_dir,
-        &hooksd_started,
-        "ready hooksd did not start before crash",
+        &instance_dir.join("hooks-sidecar.sock"),
+        "real hooksd project registration must be ready before crash",
     );
+    let mut global = UnixStream::connect(hooks_root.join(".rcc/hooks/daemon.sock")).unwrap();
+    global
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    writeln!(global, "{{\"method\":\"health\"}}").unwrap();
+    let mut line = String::new();
+    BufReader::new(global).read_line(&mut line).unwrap();
+    let response: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(response["ok"], true);
+    let owned_daemon_pid = response["daemon_pid"].as_u64().unwrap() as libc::pid_t;
+    assert_eq!(unsafe { libc::kill(owned_daemon_pid, libc::SIGKILL) }, 0);
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let detail = wait_status_file_state(&instance_dir, "running")
@@ -1264,8 +1279,8 @@ fn internal_hooksd_crash_after_readiness_keeps_managed_runtime_healthy() {
             .unwrap_or_default()
             .to_string();
         if detail.contains("hooks_unavailable:crashed")
-            && (detail.contains("exited after readiness")
-                || detail.contains("control socket became unavailable"))
+            && (detail.contains("shared daemon lease closed")
+                || detail.contains("project control socket lost"))
         {
             break;
         }
@@ -1449,7 +1464,10 @@ fn slow_hooks_sidecar_does_not_block_managed_restart() {
 #[test]
 fn malformed_control_json_does_not_stop_managed_runtime_or_escape_hooks_cleanup() {
     let _guard = lifecycle_test_guard();
-    let root = TempDir::new().unwrap();
+    let root = tempfile::Builder::new()
+        .prefix("rcc-cli-hooks-")
+        .tempdir_in("/tmp")
+        .unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
     let config = write_config(&root, ports);
@@ -1457,21 +1475,16 @@ fn malformed_control_json_does_not_stop_managed_runtime_or_escape_hooks_cleanup(
     let hooks_root = root.path().join("hooks");
     let bin_directory = hooks_root.join("bin");
     let record_path = hooks_root.join("install.json");
-    let hooksd_started = hooks_root.join("hooksd-started");
     let managed_tmp = tempfile::Builder::new()
         .tempdir_in(std::path::Path::new("/tmp"))
         .unwrap();
     fs::create_dir_all(&bin_directory).unwrap();
     let hooksd = bin_directory.join("rccv3-hooksd");
-    fs::write(
+    fs::copy(
+        Path::new(binary).parent().unwrap().join("rccv3-hooksd"),
         &hooksd,
-        format!(
-            "#!/bin/sh\nprintf 'started\\n' > '{}'\nprintf '%s\\n' '{{\"protocol\":\"rcc-hooks-sidecar/v1\",\"ready\":true}}'\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n",
-            hooksd_started.display()
-        ),
     )
-    .unwrap();
-    fs::set_permissions(&hooksd, fs::Permissions::from_mode(0o755)).unwrap();
+    .expect("build the real workspace hooks binary first");
     fs::write(
         &record_path,
         serde_json::json!({
@@ -1503,8 +1516,8 @@ fn malformed_control_json_does_not_stop_managed_runtime_or_escape_hooks_cleanup(
     let instance_dir = single_instance_dir(&state_root);
     wait_for_hooksd_marker(
         &instance_dir,
-        &hooksd_started,
-        "malformed-json test hooksd did not start",
+        &instance_dir.join("hooks-sidecar.sock"),
+        "malformed-json test project registration did not become ready",
     );
 
     let control: Value =
@@ -1537,7 +1550,7 @@ fn malformed_control_json_does_not_stop_managed_runtime_or_escape_hooks_cleanup(
     );
     assert!(status.status.success());
     assert_eq!(last_json(&status)["state"], "running");
-    assert!(hooksd_started.exists());
+    assert!(instance_dir.join("hooks-sidecar.sock").exists());
     for port in ports {
         wait_port(port, true);
     }

@@ -6,7 +6,9 @@
 
 use crate::*;
 use serde::{Deserialize, Serialize};
-use std::io::Write;
+use std::io::{Read, Write};
+use std::os::fd::AsRawFd;
+use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use thiserror::Error;
 
@@ -87,15 +89,39 @@ pub fn mount_configured_handler<T: AppServerTransport>(
     core.mount_handler_config(config.clone());
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct CommandHookHandler {
     command: String,
     args: Vec<String>,
+    cancellation: HookCancellation,
 }
+
+impl PartialEq for CommandHookHandler {
+    fn eq(&self, other: &Self) -> bool {
+        self.command == other.command && self.args == other.args
+    }
+}
+impl Eq for CommandHookHandler {}
 
 impl CommandHookHandler {
     pub fn new(command: String, args: Vec<String>) -> Self {
-        Self { command, args }
+        Self {
+            command,
+            args,
+            cancellation: HookCancellation::new(),
+        }
+    }
+
+    pub fn with_cancellation(
+        command: String,
+        args: Vec<String>,
+        cancellation: HookCancellation,
+    ) -> Self {
+        Self {
+            command,
+            args,
+            cancellation,
+        }
     }
 }
 
@@ -111,6 +137,7 @@ impl HookHandler for CommandHookHandler {
         });
         let mut child = Command::new(&self.command)
             .args(&self.args)
+            .process_group(0)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -121,30 +148,80 @@ impl HookHandler for CommandHookHandler {
                     self.command
                 ))
             })?;
-        let mut stdin = child.stdin.take().ok_or_else(|| {
+        let stdin = child.stdin.take().ok_or_else(|| {
             HookRegistryError::HandlerError(format!(
                 "hook command {} stdin unavailable",
                 self.command
             ))
         })?;
-        let stdin_write_error = match stdin.write_all(input.to_string().as_bytes()) {
-            Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => None,
-            Err(error) => Some(error),
-            Ok(()) => None,
+        let mut stdout = child.stdout.take().expect("piped stdout");
+        let mut stderr = child.stderr.take().expect("piped stderr");
+        for fd in [stdin.as_raw_fd(), stdout.as_raw_fd(), stderr.as_raw_fd()] {
+            let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+            if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0
+            {
+                let error = std::io::Error::last_os_error();
+                terminate_handler(&mut child)?;
+                return Err(HookRegistryError::HandlerError(error.to_string()));
+            }
+        }
+        let input = input.to_string().into_bytes();
+        let mut sent = 0;
+        let mut stdin = Some(stdin);
+        let mut stdout_bytes = Vec::new();
+        let mut stderr_bytes = Vec::new();
+        let mut stdout_done = false;
+        let mut stderr_done = false;
+        let mut stdin_write_error = None;
+        let result = (|| -> std::io::Result<std::process::ExitStatus> {
+            loop {
+                if self.cancellation.is_cancelled() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Interrupted,
+                        "project released during hook command",
+                    ));
+                }
+                if let Some(writer) = stdin.as_mut() {
+                    match writer.write(&input[sent..]) {
+                        Ok(count) => sent += count,
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                        Err(error) => {
+                            if error.kind() != std::io::ErrorKind::BrokenPipe {
+                                stdin_write_error = Some(error);
+                            }
+                            stdin = None;
+                        }
+                    }
+                    if sent == input.len() {
+                        stdin = None;
+                    }
+                }
+                stdout_done |= drain_handler_output(&mut stdout, &mut stdout_bytes)?;
+                stderr_done |= drain_handler_output(&mut stderr, &mut stderr_bytes)?;
+                if let Some(status) = child.try_wait()? {
+                    if stdout_done && stderr_done {
+                        return Ok(status);
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        })();
+        let status = match result {
+            Ok(status) => status,
+            Err(error) => {
+                terminate_handler(&mut child)?;
+                return Err(HookRegistryError::HandlerError(format!(
+                    "hook command {} failed: {error}",
+                    self.command
+                )));
+            }
         };
-        drop(stdin);
-        let output = child.wait_with_output().map_err(|error| {
-            HookRegistryError::HandlerError(format!(
-                "hook command {} wait failed: {error}",
-                self.command
-            ))
-        })?;
-        if !output.status.success() {
+        if !status.success() {
             return Err(HookRegistryError::HandlerError(format!(
                 "hook command {} exited {}: {}",
                 self.command,
-                output.status,
-                String::from_utf8_lossy(&output.stderr)
+                status,
+                String::from_utf8_lossy(&stderr_bytes)
             )));
         }
         if let Some(error) = stdin_write_error {
@@ -153,13 +230,32 @@ impl HookHandler for CommandHookHandler {
                 self.command
             )));
         }
-        serde_json::from_slice(&output.stdout).map_err(|error| {
+        serde_json::from_slice(&stdout_bytes).map_err(|error| {
             HookRegistryError::HandlerError(format!(
                 "hook command {} returned invalid decision JSON: {error}",
                 self.command
             ))
         })
     }
+}
+
+fn drain_handler_output(reader: &mut impl Read, output: &mut Vec<u8>) -> std::io::Result<bool> {
+    let mut buffer = [0; 8192];
+    for _ in 0..16 {
+        match reader.read(&mut buffer) {
+            Ok(0) => return Ok(true),
+            Ok(count) => output.extend_from_slice(&buffer[..count]),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(false),
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(false)
+}
+
+fn terminate_handler(child: &mut std::process::Child) -> Result<(), HookRegistryError> {
+    crate::hook_control::terminate_project_command(child).map_err(|error| {
+        HookRegistryError::HandlerError(format!("hook command cleanup failed: {error}"))
+    })
 }
 
 #[cfg(test)]
