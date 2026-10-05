@@ -75,11 +75,29 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
     let mut output = Vec::new();
     let mut output_text_parts = Vec::new();
     let mut finish_reason = None;
-    let custom_tool_names = collect_v3_responses_custom_tool_names(provider_semantic_body);
+    let custom_tool_names = collect_v3_responses_custom_tool_names(provider_semantic_body)
+        .into_iter()
+        .map(|(name, identity)| {
+            let name = if identity.namespace.is_some() {
+                provider_compat_core::namespace_tools::openai_chat_namespace_wire_name(&name)
+            } else {
+                name
+            };
+            (name, identity)
+        })
+        .collect();
     let mcp_tool_identities = super::request_outbound_mcp_names::responses_mcp_dispatch_identities(
         provider_semantic_body,
     )
-    .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
+    .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?
+    .into_iter()
+    .map(|(name, identity)| {
+        (
+            provider_compat_core::namespace_tools::openai_chat_namespace_wire_name(&name),
+            identity,
+        )
+    })
+    .collect();
     for choice in choices {
         if finish_reason.is_none() {
             finish_reason = choice

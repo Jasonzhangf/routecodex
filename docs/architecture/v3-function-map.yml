@@ -2588,7 +2588,9 @@ features:
   - responses_inbound_does_not_rewrite_string_session_id_schema
   - responses_inbound_does_not_rewrite_same_named_user_tool_schema
   - responses_agent_message_with_encrypted_content_part_does_not_leak_ciphertext
+  - responses_chat_long_namespace_names_round_trip_on_first_attempt_json_and_sse
   allowed_paths:
+  - v3/crates/routecodex-v3-server/tests/openai_chat_namespace_names.rs
   - package.json
   - v3/package.json
   - v3/scripts/architecture/verify-v3-protocol-conversion-field-parity.mjs

@@ -1,5 +1,16 @@
 use serde_json::{Map, Value};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+
+/// OpenAI Chat permits at most 64 characters. The current request declaration
+/// supplies the inverse identity; other protocols keep their own representation.
+pub fn openai_chat_namespace_wire_name(name: &str) -> String {
+    if name.len() <= 64 {
+        name.to_owned()
+    } else {
+        format!("{:x}", Sha256::digest(name.as_bytes()))
+    }
+}
 
 pub fn normalize_provider_function_name(name: &str) -> String {
     let name = name

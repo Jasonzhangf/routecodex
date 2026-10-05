@@ -340,6 +340,58 @@ pub(super) fn normalize_openai_chat_namespace_history_names(
     rewrite_openai_chat_declared_namespace_history(payload)
 }
 
+pub(super) fn project_openai_chat_namespace_wire_names(
+    wire: &mut Value,
+    request: &Value,
+) -> Result<(), String> {
+    let aliases = responses_mcp_dispatch_identities(request)?
+        .into_keys()
+        .filter(|name| name.len() > 64)
+        .map(|name| {
+            let alias =
+                provider_compat_core::namespace_tools::openai_chat_namespace_wire_name(&name);
+            (name, alias)
+        })
+        .collect::<HashMap<_, _>>();
+    if aliases.is_empty() {
+        return Ok(());
+    }
+    let rewrite = |value: Option<&mut Value>| {
+        if let Some(value) = value {
+            if let Some(alias) = value.as_str().and_then(|name| aliases.get(name)) {
+                *value = Value::String(alias.clone());
+            }
+        }
+    };
+    for tool in wire
+        .get_mut("tools")
+        .and_then(Value::as_array_mut)
+        .into_iter()
+        .flatten()
+    {
+        rewrite(tool.pointer_mut("/function/name"));
+        rewrite(tool.get_mut("name"));
+    }
+    for message in wire
+        .get_mut("messages")
+        .and_then(Value::as_array_mut)
+        .into_iter()
+        .flatten()
+    {
+        for call in message
+            .get_mut("tool_calls")
+            .and_then(Value::as_array_mut)
+            .into_iter()
+            .flatten()
+        {
+            rewrite(call.pointer_mut("/function/name"));
+        }
+    }
+    rewrite(wire.pointer_mut("/tool_choice/function/name"));
+    rewrite(wire.pointer_mut("/tool_choice/name"));
+    Ok(())
+}
+
 fn is_custom_tool_call(tool_call: &Map<String, Value>) -> bool {
     tool_call
         .get("routecodex_chat_extension")

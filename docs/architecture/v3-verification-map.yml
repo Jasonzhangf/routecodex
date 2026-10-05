@@ -1788,6 +1788,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
   - v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs
+  - v3/crates/routecodex-v3-server/tests/openai_chat_namespace_names.rs
   design:
   - docs/goals/v3-protocol-conversion-field-parity-test-design.md
   - docs/goals/v3-responses-malformed-input-error-origin-test-design.md
@@ -1861,6 +1862,7 @@ features:
     nodes.
   required_blackbox:
   - responses_additional_tools_refreshes_same_namespace_tool_before_chat_projection
+  - responses_chat_long_namespace_names_round_trip_on_first_attempt_json_and_sse
   - responses_additional_tools_refreshes_nested_mcpx_alias_before_chat_projection
   - openai_chat_nested_mcpx_function_call_restores_dotted_client_namespace
   - responses_provider_sse_restores_declared_mcp_identity_for_tool_followup
