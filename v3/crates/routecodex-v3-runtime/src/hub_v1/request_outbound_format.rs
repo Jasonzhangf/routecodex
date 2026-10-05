@@ -1313,6 +1313,22 @@ fn normalize_openai_chat_messages_payload(
         &mut drops,
     )?;
     ensure_openai_chat_stream_usage_option(&mut normalized);
+    super::request_outbound_mcp_names::project_openai_chat_namespace_wire_names(
+        &mut normalized,
+        payload,
+    )?;
+    if let Some(choice) = normalized
+        .get_mut("tool_choice")
+        .and_then(Value::as_object_mut)
+    {
+        if choice.get("type").and_then(Value::as_str) == Some("function")
+            && !choice.contains_key("function")
+        {
+            if let Some(name) = choice.remove("name") {
+                choice.insert("function".to_owned(), json!({"name": name}));
+            }
+        }
+    }
     Ok((normalized, drops))
 }
 

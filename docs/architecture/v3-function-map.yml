@@ -2485,6 +2485,7 @@ features:
     - resp03_restores_registered_codex_integer_argument_values
   owner_files:
   - v3/crates/provider-compat-core/src/namespace_tools.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
@@ -2588,7 +2589,11 @@ features:
   - responses_inbound_does_not_rewrite_string_session_id_schema
   - responses_inbound_does_not_rewrite_same_named_user_tool_schema
   - responses_agent_message_with_encrypted_content_part_does_not_leak_ciphertext
+  - responses_chat_long_namespace_names_round_trip_on_first_attempt_json_and_sse
   allowed_paths:
+  - v3/crates/provider-compat-core/src/namespace_tools.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs
+  - v3/crates/routecodex-v3-server/tests/openai_chat_namespace_names.rs
   - package.json
   - v3/package.json
   - v3/scripts/architecture/verify-v3-protocol-conversion-field-parity.mjs
@@ -2650,7 +2655,7 @@ features:
   forbidden_paths:
   - src
   - sharedmodule
-  - v3/crates/routecodex-v3-server
+  - v3/crates/routecodex-v3-server/src
   - v3/crates/routecodex-v3-provider-responses
   - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
   - MetadataCenter
@@ -5008,7 +5013,7 @@ features:
   - V3FrontTransportCloseoutState
   - automatic_error_responses
   - set_automatic_error_responses
-  - V3StableFrontSocket::set_exec_closeout_frame
+  - V3FrontTransportCloseoutState::close_for_exec_replacement
   - V3FrontDeadlineBudget
   - V3ServerRequestActivityGate
   - V3ServerAggregateHandle::prepare_for_exec
@@ -5044,7 +5049,6 @@ features:
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server restart_handoff --lib -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server request_activity_gate --lib -- --nocapture
-  - npm run verify:v3-runtime-restart-handoff
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - git diff --check

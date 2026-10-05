@@ -495,7 +495,7 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
     // listener may accept requests as soon as it binds, so the normal startup
     // broker must already carry a valid positive runtime generation.
     let front_transport_broker =
-        V3FrontTransportBroker::new(1).with_client_observation(debug.clone(), console_enabled);
+        V3FrontTransportBroker::new(1).with_client_observation(debug.clone());
     let admin_config_path_for_router = admin_config_path.clone();
     let canonical_admin_config_path = admin_config_path.clone().or_else(|| {
         std::env::var_os("HOME")

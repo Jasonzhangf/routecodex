@@ -1655,10 +1655,10 @@ resources:
     identity: [connection_identity, request_cycle, response_started, closeout_state]
     semantic_contract:
       keepalive_scope: each accepted HTTP request starts a fresh request cycle on the persistent connection
-      cycle_reset: a new request clears the previous response phase and protocol-specific closeout frame atomically
-      preheader_restart: the current accepted request receives one HTTP 503 server_restart_in_progress terminal
-      postheader_restart: only the current request protocol's registered SSE closeout frame may be emitted
-    allowed_writers: [V3StableFrontSocket::set_exec_closeout_frame, V3FrontSseAcceptSkeleton::accept]
+      cycle_reset: a new request clears the previous response phase and transport-write observation atomically
+      preheader_restart: terminate the accepted request transport without writing any HTTP response or error bytes
+      postheader_restart: terminate the incomplete transfer without emitting a protocol error or fabricated successful terminal; closeout control has no business-byte storage or writer
+    allowed_writers: [V3FrontTransportCloseoutState::mark_request_started, V3FrontTransportCloseoutState::close_for_exec_replacement, V3FrontTransportCloseoutState::suppress_restart_closeout_frame, V3FrontTransportCloseoutState::commit_deferred_restart_closeout]
     allowed_readers: [V3StableFrontSocket::close_for_exec_replacement]
     forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, MetadataCenter.payload]
     may_enter_provider_body: false
