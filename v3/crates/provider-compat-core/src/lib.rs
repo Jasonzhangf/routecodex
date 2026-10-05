@@ -158,29 +158,6 @@ pub fn run_req_outbound_stage3_compat(
         return Ok(build_compat_result(payload, Some(profile_id.to_owned())));
     }
 
-    if profile_matches(profile_id, "responses:qiluyun")
-        && provider_protocol_matches(
-            adapter_context.provider_protocol.as_ref(),
-            "openai-responses",
-        )
-    {
-        // Qiluyun represents an empty optional reasoning content field as [].
-        // Preserve the reasoning item, summary, and every other history field.
-        for item in payload
-            .get_mut("input")
-            .and_then(Value::as_array_mut)
-            .into_iter()
-            .flatten()
-        {
-            if item.get("type").and_then(Value::as_str) == Some("reasoning") {
-                if let Some(content) = item.get_mut("content").filter(|content| content.is_null()) {
-                    *content = Value::Array(Vec::new());
-                }
-            }
-        }
-        return Ok(build_compat_result(payload, Some(profile_id.to_owned())));
-    }
-
     if is_responses_temperature_unsupported_profile(profile_id) {
         if provider_protocol_matches(
             adapter_context.provider_protocol.as_ref(),

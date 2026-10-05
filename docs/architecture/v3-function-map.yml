@@ -1228,7 +1228,6 @@ features:
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
   - v3/crates/routecodex-v3-runtime/tests
   - v3/crates/routecodex-v3-cli/tests/goaichat_hosted_tool_history_blackbox.rs
-  - v3/crates/routecodex-v3-cli/tests/qiluyun_reasoning_content_blackbox.rs
   - v3/scripts/test.mjs
   - v3/package.json
   - package.json
