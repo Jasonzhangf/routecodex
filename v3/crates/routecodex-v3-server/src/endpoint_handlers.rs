@@ -66,19 +66,21 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
     let responses_entry_facts =
         (entry_protocol == "responses").then(|| V3ResponsesEntryFacts::project(&payload));
     let requested_stream = v3_request_wants_sse(&request_headers, &payload);
-    let execution_id = state.debug.next_execution_id(&state.server.id);
-    let trace_scope = match state
-        .debug
-        .start_trace(&state.server.id, &request_id, &execution_id)
-    {
-        Ok(scope) => scope,
-        Err(error) => {
-            return foundation_output_response(project_v3_debug_failure(
-                "V3Server03HttpRequestRaw",
-                error,
-            ));
-        }
-    };
+    let (execution_id, trace_scope) =
+        match crate::client_transport_observation::start_v3_client_trace(
+            &state,
+            front_connection_identity,
+            &request_id,
+            toolreason_observation_session_id.clone(),
+        ) {
+            Ok(trace) => trace,
+            Err(error) => {
+                return foundation_output_response(project_v3_debug_failure(
+                    "V3Server03HttpRequestRaw",
+                    error,
+                ));
+            }
+        };
     if let Err(error) = state.debug.record_node_event(
         &trace_scope,
         "V3Server03HttpRequestRaw",

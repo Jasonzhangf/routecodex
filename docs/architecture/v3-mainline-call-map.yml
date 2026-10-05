@@ -7998,6 +7998,34 @@ chains:
     node: V3Front01StableRequestOwner
     owner_doc: docs/architecture/wiki/v3-runtime-restart-handoff-skeleton.md
   edges:
+  - step_id: v3-front-client-observation-01
+    from_node: V3Front01StableRequestOwner
+    to_node: V3ClientTransportObservation
+    caller_symbol: serve_v3_front_http_connection
+    caller_file: v3/crates/routecodex-v3-server/src/restart_handoff.rs
+    callee_symbol: V3ClientTransportObservation::prepared
+    callee_file: v3/crates/routecodex-v3-server/src/client_transport_observation.rs
+    status: anchored
+    owner_feature_id: v3.runtime_restart_handoff_skeleton
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads: [v3.debug.trace_context]
+      side_channel_writes: [v3.debug.client_transport_receipt]
+  - step_id: v3-front-client-observation-02
+    from_node: V3StableFrontSocket
+    to_node: V3ClientTransportObservation
+    caller_symbol: V3StableFrontSocket::spawn
+    caller_file: v3/crates/routecodex-v3-server/src/restart_handoff.rs
+    callee_symbol: V3ClientTransportObservation::wrote
+    callee_file: v3/crates/routecodex-v3-server/src/client_transport_observation.rs
+    status: anchored
+    owner_feature_id: v3.runtime_restart_handoff_skeleton
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads: [v3.debug.trace_context]
+      side_channel_writes: [v3.debug.client_transport_receipt]
   - step_id: v3-runtime-restart-handoff-01
     from_node: V3Front01StableRequestOwner
     to_node: V3Front02RequestLeaseBound

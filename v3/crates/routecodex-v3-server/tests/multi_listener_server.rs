@@ -53,6 +53,94 @@ async fn read_raw_content_length_response(socket: &mut TcpStream) -> Vec<u8> {
 
 // Stable public gate: test:v3-server-debug-error-blackbox (workspace CI).
 #[tokio::test]
+async fn client_transport_observation_public_blackbox() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("client-transport-observation");
+    let log = std::env::temp_dir().join(format!("v3-client-wire-{}.jsonl", free_port()));
+    let mut manifest = p6_manifest(free_port(), free_port(), "http://127.0.0.1:9/v1");
+    manifest.debug.log_file = Some(log.to_string_lossy().into_owned());
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let addr = handle.listeners[0].addr;
+    let mut socket = TcpStream::connect(addr).await.unwrap();
+    for _ in 0..2 {
+        socket
+            .write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .await
+            .unwrap();
+        let wire = read_raw_content_length_response(&mut socket).await;
+        assert!(wire.starts_with(b"HTTP/1.1 200 OK\r\n"));
+    }
+    socket
+        .write_all(
+            b"POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Length: invalid\r\n\r\n",
+        )
+        .await
+        .unwrap();
+    let mut terminal = Vec::new();
+    timeout(Duration::from_secs(5), socket.read_to_end(&mut terminal))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        terminal.is_empty(),
+        "framing error cannot become client error bytes"
+    );
+    let response = reqwest::get(format!("http://{addr}/health")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    response.bytes().await.unwrap();
+    let control = reqwest::Client::new()
+        .post(format!("http://{addr}/_routecodex/debug/dry-run"))
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    let control_status = control.status().as_u16();
+    assert!(control_status >= 400);
+    control.bytes().await.unwrap();
+    handle.shutdown().await;
+    let records = fs::read_to_string(&log).unwrap();
+    let events = records
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|record| record["event"] == "client_transport")
+        .collect::<Vec<_>>();
+    fs::remove_file(&log).unwrap();
+    assert!(
+        !events.is_empty(),
+        "actual client boundary has no diagnostic receipts"
+    );
+    let written = events
+        .iter()
+        .filter(|e| e["stage"] == "socket_write" && e["prepared_status"] == 200)
+        .collect::<Vec<_>>();
+    assert!(
+        written.len() >= 3,
+        "each real successful response needs a socket receipt: {events:?}"
+    );
+    let first_connection = &written[0]["connection_id"];
+    let sequences = written
+        .iter()
+        .filter(|e| &e["connection_id"] == first_connection)
+        .map(|e| e["request_sequence"].as_u64().unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        sequences.len(),
+        2,
+        "keep-alive writes must retain their own request sequence"
+    );
+    assert!(events
+        .iter()
+        .any(|e| e["stage"] == "http_connection_end" && !e["error"].is_null()));
+    assert!(events.iter().any(|e| e["stage"] == "socket_write"
+        && e["prepared_status"] == control_status
+        && e["endpoint"] == "/_routecodex/debug/dry-run"));
+    assert!(!events.iter().any(|e| e["stage"] == "socket_write"
+        && e["endpoint"] == "/v1/responses"
+        && e["prepared_status"].as_u64().is_some_and(|s| s >= 400)));
+}
+
+// Stable public gate: test:v3-server-debug-error-blackbox (workspace CI).
+#[tokio::test]
 async fn malformed_http_framing_never_sends_client_error_blackbox() {
     let _test_guard = TEST_LOCK.lock().await;
     let handle = spawn_v3_server_aggregate(p6_manifest(
@@ -5953,6 +6041,7 @@ async fn responses_direct_provider_http_error_never_reaches_the_client() {
 #[tokio::test]
 async fn model_entries_never_deliver_provider_or_sse_decode_errors_blackbox() {
     let _test_guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("client-transport-error-observation");
     std::env::set_var("V3_P6_TEST_KEY", "controlled-no-client-errors");
     for (status, content_type, provider_body) in [
         (
@@ -5997,6 +6086,8 @@ async fn model_entries_never_deliver_provider_or_sse_decode_errors_blackbox() {
                     )
                     .await;
                 let mut config = p6_manifest(free_port(), free_port(), &provider_url);
+                let transport_log = std::env::temp_dir().join(format!("v3-isolation-wire-{}.jsonl", free_port()));
+                config.debug.log_file = Some(transport_log.to_string_lossy().into_owned());
                 if endpoint.starts_with("/v1beta/") {
                     let provider = config.providers.get_mut("test").unwrap();
                     provider.provider_type = "gemini".to_owned();
@@ -6035,6 +6126,14 @@ async fn model_entries_never_deliver_provider_or_sse_decode_errors_blackbox() {
                 // Shutdown our servers before asserting, including the red baseline.
                 handle.shutdown().await;
                 shutdown.send(()).unwrap();
+                let records = fs::read_to_string(&transport_log).unwrap();
+                fs::remove_file(&transport_log).unwrap();
+                let observations = records.lines().filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                    .filter(|event| event["event"] == "client_transport").collect::<Vec<_>>();
+                assert!(observations.iter().any(|e| e["stage"] == "request_identified" && e["request_id"].as_str().is_some()), "{endpoint} needs the actual allocated request identity");
+                let writes = observations.iter().filter(|e| e["stage"] == "socket_write").collect::<Vec<_>>();
+                assert_eq!(writes.iter().map(|e| e["written_bytes"].as_u64().unwrap()).sum::<u64>(), wire.len() as u64, "{endpoint} socket receipts must match actual received bytes");
+                assert!(writes.iter().all(|e| e["prepared_status"] == 200 && e["request_id"].as_str().is_some()), "{endpoint} provider error cannot be logged as a client error write");
                 assert!(
                     captures.try_recv().is_ok(),
                     "{endpoint} must exercise actual provider transport"

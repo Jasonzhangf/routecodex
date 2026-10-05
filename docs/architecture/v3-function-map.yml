@@ -4980,6 +4980,7 @@ features:
   change_risk: critical
   owner_crate: routecodex-v3-server
   owner_files:
+  - v3/crates/routecodex-v3-server/src/client_transport_observation.rs
   - v3/crates/routecodex-v3-server/src/restart_handoff.rs
   - v3/crates/routecodex-v3-server/src/restart_closeout.rs
   - v3/vendor/hyper/src/server/conn/http1.rs
@@ -4991,6 +4992,8 @@ features:
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
   - v3/crates/routecodex-v3-lifecycle/src/control_plane.rs
   resource_bindings:
+  - v3.debug.client_transport_receipt
+  - v3.debug.trace_context
   - v3.front.request_lease
   - v3.front.runtime_handoff_checkpoint
   - v3.front.client_frame_sequence
@@ -5010,6 +5013,8 @@ features:
   - V3ServerRequestActivityGate
   - V3ServerAggregateHandle::prepare_for_exec
   allowed_paths:
+  - v3/crates/routecodex-v3-server/src/client_transport_observation.rs
+  - v3/crates/routecodex-v3-server/src/restart_handoff_tests.rs
   - v3/crates/routecodex-v3-server/src/restart_handoff.rs
   - v3/crates/routecodex-v3-server/src/restart_closeout.rs
   - v3/vendor/hyper
