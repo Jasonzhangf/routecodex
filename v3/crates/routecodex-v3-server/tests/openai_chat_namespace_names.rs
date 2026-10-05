@@ -15,6 +15,10 @@ mod test_ports;
 const NAMESPACE: &str = "mcp__codex_apps__codex_security_cloud";
 const TOOL: &str = "_defense_factory_environments_search";
 const CUSTOM: &str = "_defense_factory_environments_execute";
+const COLLIDING_PLAIN_NAME: &str =
+    "4d38cd95f8d6372ca282b6e42f30027fba935d6101a6373e0b8de162aead306b";
+const COLLIDING_PLAIN_CUSTOM: &str =
+    "80a662fbb9b3fbb362dcfcd35d46859f517a5ca297457df631b99265925f6296";
 
 async fn strict_chat(
     State(captures): State<Arc<mpsc::UnboundedSender<Value>>>,
@@ -26,7 +30,7 @@ async fn strict_chat(
         .iter()
         .map(|tool| tool["function"]["name"].as_str().unwrap())
         .collect::<HashSet<_>>();
-    if names.iter().any(|name| name.len() > 64) {
+    if names.iter().any(|name| name.len() > 64) || names.len() != tools.len() {
         return Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .header("content-type", "application/json")
@@ -66,10 +70,24 @@ async fn strict_chat(
     let message = if followup {
         json!({"role":"assistant","content":"42"})
     } else {
-        json!({"role":"assistant","content":null,"tool_calls":[
+        let mut message = json!({"role":"assistant","content":null,"tool_calls":[
             {"id":"call_math","type":"function","function":{"name":selected,"arguments":"{\"a\":19,\"b\":23}"}},
             {"id":"call_custom","type":"function","function":{"name":custom,"arguments":"{\"input\":\"19+23\"}"}}
-        ]})
+        ]});
+        if tools
+            .iter()
+            .any(|tool| tool["function"]["description"] == "plain evaluator")
+        {
+            message["tool_calls"].as_array_mut().unwrap().push(json!({
+                "id":"call_plain","type":"function",
+                "function":{"name":COLLIDING_PLAIN_NAME,"arguments":"{\"a\":20,\"b\":22}"}
+            }));
+            message["tool_calls"].as_array_mut().unwrap().push(json!({
+                "id":"call_plain_custom","type":"function",
+                "function":{"name":COLLIDING_PLAIN_CUSTOM,"arguments":"{\"input\":\"20+22\"}"}
+            }));
+        }
+        message
     };
     let finish = if followup { "stop" } else { "tool_calls" };
     if body["stream"] == true {
@@ -82,8 +100,8 @@ async fn strict_chat(
     Response::builder().header("content-type", "application/json").body(Body::from(json!({"id":"chatcmpl-name","object":"chat.completion","model":"wire-model","choices":[{"index":0,"message":message,"finish_reason":finish}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}).to_string())).unwrap()
 }
 
-fn request(stream: bool) -> Value {
-    json!({"model":"name-client","stream":stream,"input":[{"role":"user","content":"calculate"}],
+fn request(stream: bool, collision: bool) -> Value {
+    let mut request = json!({"model":"name-client","stream":stream,"input":[{"role":"user","content":"calculate"}],
         "tools":[
             {"type":"namespace","name":"n","tools":[
                 {"type":"function","name":"a".repeat(61),"parameters":{"type":"object","properties":{}}},
@@ -94,7 +112,18 @@ fn request(stream: bool) -> Value {
                 {"type":"function","name":format!("{TOOL}_other"),"description":"same prefix","parameters":{"type":"object","properties":{}}},
                 {"type":"custom","name":CUSTOM,"description":"custom evaluator","format":{"type":"text"}}
             ]}
-        ],"tool_choice":{"type":"function","name":format!("{NAMESPACE}.{TOOL}")}})
+        ],"tool_choice":{"type":"function","name":format!("{NAMESPACE}.{TOOL}")}});
+    if collision {
+        request["tools"].as_array_mut().unwrap().push(json!({
+            "type":"function","name":COLLIDING_PLAIN_NAME,"description":"plain evaluator",
+            "parameters":{"type":"object","properties":{"a":{"type":"integer"},"b":{"type":"integer"}},"required":["a","b"],"additionalProperties":false}
+        }));
+        request["tools"].as_array_mut().unwrap().push(json!({
+            "type":"custom","name":COLLIDING_PLAIN_CUSTOM,"description":"plain custom evaluator",
+            "format":{"type":"text"}
+        }));
+    }
+    request
 }
 
 async fn response_body(response: reqwest::Response, stream: bool) -> Value {
@@ -147,8 +176,8 @@ async fn responses_chat_long_namespace_names_round_trip_on_first_attempt_json_an
         .timeout(Duration::from_secs(10))
         .build()
         .unwrap();
-    for stream in [false, true] {
-        let mut input = request(stream);
+    for (stream, collision) in [(false, false), (true, false), (false, true), (true, true)] {
+        let mut input = request(stream, collision);
         let first_response = client.post(&endpoint).json(&input).send().await;
         assert!(
             first_response.is_ok(),
@@ -175,8 +204,60 @@ async fn responses_chat_long_namespace_names_round_trip_on_first_attempt_json_an
         assert_eq!(custom["name"], CUSTOM);
         assert_eq!(custom["input"], "19+23");
         assert_eq!(custom["call_id"], "call_custom");
+        let plain_output = if collision {
+            let plain = output
+                .iter()
+                .find(|item| item["call_id"] == "call_plain")
+                .unwrap();
+            assert_eq!(plain["type"], "function_call");
+            assert_eq!(plain["name"], COLLIDING_PLAIN_NAME);
+            assert!(plain.get("namespace").is_none());
+            let args: Value = serde_json::from_str(plain["arguments"].as_str().unwrap()).unwrap();
+            let value = args["a"].as_i64().unwrap() + args["b"].as_i64().unwrap();
+            assert_eq!(value, 42);
+            let plain_custom = output
+                .iter()
+                .find(|item| item["call_id"] == "call_plain_custom")
+                .unwrap();
+            assert_eq!(plain_custom["type"], "custom_tool_call");
+            assert_eq!(plain_custom["name"], COLLIDING_PLAIN_CUSTOM);
+            assert!(plain_custom.get("namespace").is_none());
+            let operands = plain_custom["input"]
+                .as_str()
+                .unwrap()
+                .split('+')
+                .map(|value| value.parse::<i64>().unwrap())
+                .collect::<Vec<_>>();
+            assert_eq!(operands.iter().sum::<i64>(), 42);
+            Some(
+                json!({"type":"function_call_output","call_id":"call_plain","output":value.to_string()}),
+            )
+        } else {
+            None
+        };
         let first_wire = rx.recv().await.unwrap();
-        assert_eq!(first_wire["tools"].as_array().unwrap().len(), 5);
+        assert_eq!(
+            first_wire["tools"].as_array().unwrap().len(),
+            if collision { 7 } else { 5 }
+        );
+        if collision {
+            assert_eq!(
+                first_wire["tools"][5]["function"]["name"],
+                COLLIDING_PLAIN_NAME
+            );
+            assert_ne!(
+                first_wire["tools"][2]["function"]["name"],
+                COLLIDING_PLAIN_NAME
+            );
+            assert_eq!(
+                first_wire["tools"][6]["function"]["name"],
+                COLLIDING_PLAIN_CUSTOM
+            );
+            assert_ne!(
+                first_wire["tools"][4]["function"]["name"],
+                COLLIDING_PLAIN_CUSTOM
+            );
+        }
         assert_eq!(
             first_wire["tools"][0]["function"]["name"],
             format!("n__{}", "a".repeat(61))
@@ -207,6 +288,10 @@ async fn responses_chat_long_namespace_names_round_trip_on_first_attempt_json_an
         history.push(json!({"type":"function_call_output","call_id":"call_math","output":result.to_string()}));
         history
             .push(json!({"type":"custom_tool_call_output","call_id":"call_custom","output":"42"}));
+        if let Some(plain_output) = plain_output {
+            history.push(plain_output);
+            history.push(json!({"type":"custom_tool_call_output","call_id":"call_plain_custom","output":"42"}));
+        }
         let followup = response_body(
             client.post(&endpoint).json(&input).send().await.unwrap(),
             stream,

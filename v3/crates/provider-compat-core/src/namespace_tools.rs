@@ -12,6 +12,26 @@ pub fn openai_chat_namespace_wire_name(name: &str) -> String {
     }
 }
 
+/// Allocate aliases against every current declaration, including plain tools.
+pub fn openai_chat_namespace_wire_names(
+    namespace_names: BTreeSet<String>,
+    mut used: BTreeSet<String>,
+) -> HashMap<String, String> {
+    let mut aliases = HashMap::new();
+    for name in namespace_names.into_iter().filter(|name| name.len() > 64) {
+        let base = openai_chat_namespace_wire_name(&name);
+        let mut alias = base.clone();
+        let mut collision = 0;
+        while !used.insert(alias.clone()) {
+            collision += 1;
+            let suffix = format!("_{collision}");
+            alias = format!("{}{}", &base[..64 - suffix.len()], suffix);
+        }
+        aliases.insert(name, alias);
+    }
+    aliases
+}
+
 pub fn normalize_provider_function_name(name: &str) -> String {
     let name = name
         .strip_prefix("functions.mcp__")

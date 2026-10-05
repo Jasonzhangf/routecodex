@@ -75,14 +75,14 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
     let mut output = Vec::new();
     let mut output_text_parts = Vec::new();
     let mut finish_reason = None;
+    let aliases = super::request_outbound_mcp_names::openai_chat_namespace_wire_aliases(
+        provider_semantic_body,
+    )
+    .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
     let custom_tool_names = collect_v3_responses_custom_tool_names(provider_semantic_body)
         .into_iter()
         .map(|(name, identity)| {
-            let name = if identity.namespace.is_some() {
-                provider_compat_core::namespace_tools::openai_chat_namespace_wire_name(&name)
-            } else {
-                name
-            };
+            let name = aliases.get(&name).cloned().unwrap_or(name);
             (name, identity)
         })
         .collect();
@@ -91,12 +91,7 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
     )
     .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?
     .into_iter()
-    .map(|(name, identity)| {
-        (
-            provider_compat_core::namespace_tools::openai_chat_namespace_wire_name(&name),
-            identity,
-        )
-    })
+    .map(|(name, identity)| (aliases.get(&name).cloned().unwrap_or(name), identity))
     .collect();
     for choice in choices {
         if finish_reason.is_none() {
