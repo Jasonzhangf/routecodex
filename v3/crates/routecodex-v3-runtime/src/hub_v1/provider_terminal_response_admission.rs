@@ -39,15 +39,21 @@ fn responses_incomplete_reason(payload: &Value) -> Option<&str> {
         .map(str::trim)
         .filter(|reason| !reason.is_empty())
         .unwrap_or("unknown");
-    // A Responses-wire provider reports its own output cap with the standard
-    // `response.incomplete` + `max_output_tokens` terminal. That is the same
-    // output-cap semantic as the Chat aliases and the Anthropic `max_tokens`
-    // stop reason, i.e. valid partial output, so it must not enter the provider
-    // failure/cooldown path on any entry.
-    if reason == "max_output_tokens" {
+    if responses_incomplete_reason_is_output_cap(reason) {
         return None;
     }
     Some(reason)
+}
+
+/// A Responses-wire provider reports its own output cap with the standard
+/// `response.incomplete` + `max_output_tokens` terminal. That is the same
+/// output-cap semantic as the Chat aliases and the Anthropic `max_tokens` stop
+/// reason, i.e. valid partial output, so it must not enter the provider
+/// failure/cooldown path on any entry. This function is the single owner of that
+/// rule; the provider health probe reuses it to admit an output-cap probe
+/// terminal without also admitting a genuine provider rejection.
+pub(crate) fn responses_incomplete_reason_is_output_cap(reason: &str) -> bool {
+    reason.trim() == "max_output_tokens"
 }
 
 /// Chat output-cap terminals, including gateway aliases such as `max_tokens`,

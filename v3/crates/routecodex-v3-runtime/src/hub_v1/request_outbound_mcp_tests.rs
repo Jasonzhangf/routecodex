@@ -194,7 +194,7 @@ fn responses_namespace_custom_tool_choice_uses_declared_chat_provider_name() {
     let request = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
         .expect("namespace custom choice must project");
     assert_eq!(request["tools"][0]["function"]["name"], "functions__exec");
-    assert_eq!(request["tool_choice"]["name"], "functions__exec");
+    assert_eq!(request["tool_choice"]["function"]["name"], "functions__exec");
 }
 
 #[test]

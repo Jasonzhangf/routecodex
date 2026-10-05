@@ -35,11 +35,11 @@ provider-attempt handoff. Both Direct and Relay use this skeleton; only their
 protocol codecs and semantic projectors differ.
 
 One persistent HTTP/1.1 connection may carry multiple sequential requests.
-Connection identity is stable, but closeout phase and the registered protocol
-terminal are request-scoped: accepting the next request must atomically clear
-the previous response-started phase and closeout frame. A restart before the
-new response headers therefore emits the generic HTTP 503 terminal; it must
-never inherit a completed Chat/Responses SSE phase from the preceding request.
+Connection identity is stable, but response-started phase and closeout control
+are request-scoped: accepting the next request must atomically clear the
+previous response phase. A restart before the new response headers terminates
+the transport without an HTTP response or error bytes. It must never inherit
+a completed Chat/Responses SSE phase from the preceding request.
 
 Every lease is keyed by `request_id`, `pipeline_id`, `server_id`, `port`,
 `session_scope`, and `generation`. A restart exports a typed checkpoint through
@@ -50,15 +50,14 @@ identity from payload, logs, or session alone.
 
 ## Error contract
 
-Provider transport and response-shape failures enter Error01 through Error05
-before Error06 can close the client response. RouteCodex request-stage internal
-failures project as 598; response-stage internal failures project as 599;
-external provider HTTP identity remains external. No provider retry, switch,
-decode failure, malformed terminal, or illegal EOF may directly close the
-client stream or become a silent EOF. If aggregate exec replacement interrupts
-an accepted request before response headers, the Front owner must emit one
-explicit HTTP 503 terminal with `server_restart_in_progress`; an unstarted
-request and an already-started response must not receive that pre-header frame.
+Provider transport and response-shape failures enter the typed Error chain.
+Request-stage 598, response-stage 599 and external provider status describe
+internal causes only. They never authorize a client error status or payload.
+Recovery remains internal while an eligible candidate exists. On exhaustion
+or exec replacement, the Front terminates transport without an HTTP error,
+JSON envelope, protocol error event or fabricated successful terminal. A
+response whose headers have started remains observably incomplete; it must
+not receive a second response or inherit another request's framing state.
 
 ## Required gates
 

@@ -34,7 +34,6 @@ pub(crate) struct V3ClientResponseObservation {
 #[derive(Debug)]
 pub(crate) struct V3ClientTransportObservation {
     sink: Option<V3DebugRuntime>,
-    console: bool,
     connection: V3FrontConnectionIdentity,
     port: u16,
     response: Mutex<V3ClientResponseObservation>,
@@ -44,13 +43,11 @@ pub(crate) struct V3ClientTransportObservation {
 impl V3ClientTransportObservation {
     pub(crate) fn new(
         sink: Option<V3DebugRuntime>,
-        console: bool,
         connection: V3FrontConnectionIdentity,
         port: u16,
     ) -> Arc<Self> {
         let observer = Arc::new(Self {
             sink,
-            console,
             connection,
             port,
             response: Mutex::new(V3ClientResponseObservation::default()),
@@ -138,9 +135,6 @@ impl V3ClientTransportObservation {
             "connection_written_bytes": *self.written_bytes.lock().expect("client byte observation lock"),
             "error": error,
         }).to_string();
-        if self.console {
-            eprintln!("{line}");
-        }
         if let Err(error) = sink.append_human_console_line(&line) {
             eprintln!("V3 client transport observation sink failed: {error}");
         }

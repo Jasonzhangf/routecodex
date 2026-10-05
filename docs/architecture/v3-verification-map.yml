@@ -1788,6 +1788,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
   - v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs
+  - v3/crates/routecodex-v3-server/tests/openai_chat_namespace_names.rs
   design:
   - docs/goals/v3-protocol-conversion-field-parity-test-design.md
   - docs/goals/v3-responses-malformed-input-error-origin-test-design.md
@@ -1850,6 +1851,8 @@ features:
   - Responses provider response to Anthropic client projection preserves ordered thinking/text/tool_use, usage, stop_reason, and rejects malformed function arguments.
   - Paired and unpaired malformed Responses function-call argument text is preserved exactly at the adjacent OpenAI Chat field projector without JSON-string rewrapping, MetadataCenter reconstruction, provider failure, or reselect.
   - Valid Responses function-call argument JSON remains unchanged on OpenAI Chat wire.
+  - Standard OpenAI Chat projects declared namespace function/custom names over 64 bytes to a deterministic 64-character wire alias. SHA256 is the default; collision allocation reserves every current plain function/custom and namespace declaration before assigning sorted namespace aliases. Declarations, history and forced choice share this collision-free representation; current-request declarations restore the original namespace, name, call ID and arguments on Responses JSON/SSE output. Plain tools keep their names even when those names equal a namespace digest. Other target protocols retain their own name representation.
+  - A Responses flat forced function choice projects to the standard OpenAI Chat tool_choice.function.name shape.
   - The registered Codex black-box compatibility exception rewrites only the five exact built-in shell-tool schema fields from direct `number` to `integer` at Responses inbound; user tools, unrelated numeric fields, non-direct schemas, and outbound paths remain unchanged.
   - OpenAI Chat same-protocol Relay preserves request and response field families without cross-protocol repair.
   - Legacy OpenAI Chat outbound currently maps exact client_metadata.user_id to public metadata.user_id and consumes registered Codex client-local keys before provider send; unknown client_metadata and reasoning-summary rejection are known transparency defects, not acceptance requirements. Their owner cutover must prove opaque preservation, provider attempt forwarding, and paired client inverse projection.
@@ -1861,6 +1864,7 @@ features:
     nodes.
   required_blackbox:
   - responses_additional_tools_refreshes_same_namespace_tool_before_chat_projection
+  - responses_chat_long_namespace_names_round_trip_on_first_attempt_json_and_sse
   - responses_additional_tools_refreshes_nested_mcpx_alias_before_chat_projection
   - openai_chat_nested_mcpx_function_call_restores_dotted_client_namespace
   - responses_provider_sse_restores_declared_mcp_identity_for_tool_followup
@@ -3250,10 +3254,10 @@ features:
   - response shape never reselects Direct or Relay.
   - restart never fabricates a client HTTP error or protocol error event, before or after headers.
   - prepared responses, provider statuses, and socket-write receipts cannot be conflated; diagnostics never change business bytes or drive transport/recovery decisions.
-  - a new keep-alive request cannot inherit the previous request's response-started phase or protocol-specific SSE closeout frame.
+  - high-frequency client_transport diagnostics remain complete in the file sink and never appear on stdout/stderr, including when human console logging is enabled.
+  - a new keep-alive request cannot inherit the previous request's response-started phase or transport-write observation; closeout control cannot store or write business bytes.
   required_gates:
   - npm --prefix v3 run test:v3-server-debug-error-blackbox
-  - npm run verify:v3-runtime-restart-handoff
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server restart_handoff --lib -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server request_activity_gate --lib -- --nocapture
   - npm run verify:v3-resource-map
