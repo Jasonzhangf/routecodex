@@ -115,6 +115,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         initial_selected_target,
         initial_expanded,
         initial_request_local_excluded_candidates,
+        initial_route_policy_scope,
+        initial_route_policy_pending,
         initial_protocol_decision,
         initial_plan_trace,
         provider_health_neutral,
@@ -188,13 +190,16 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     let mut pinned_selected = None;
     let initial_selected_target_present = initial_selected_target.is_some();
     let route_policy_state = crate::route_policy::V3RoutePolicyRuntimeState::process_shared();
-    let mut route_policy_scope = crate::route_policy::V3RoutePolicyScope::without_conversation(
-        &standardized.server_id,
-        direct_failure_session_scope.routing_group(),
-        direct_failure_session_scope.session_id(),
-        &standardized.server_id,
-    )
-    .with_conversation(direct_failure_session_scope.session_id());
+    let mut route_policy_pending = initial_route_policy_pending;
+    let mut route_policy_scope = initial_route_policy_scope.unwrap_or_else(|| {
+        crate::route_policy::V3RoutePolicyScope::without_conversation(
+            &standardized.server_id,
+            direct_failure_session_scope.routing_group(),
+            direct_failure_session_scope.session_id(),
+            &standardized.server_id,
+        )
+        .with_conversation(direct_failure_session_scope.session_id())
+    });
     let expanded = if let Some(initial_expanded) = initial_expanded {
         // Server-side protocol plan already ran Router05..Target09; reuse its
         // candidate set for in-Target reselection instead of re-entering the
@@ -223,12 +228,13 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             &standardized.body,
             &classified.facts.route_classification.route_name,
         );
-        let classified = match route_policy_state.evaluate_request(
+        let (classified, pending) = match route_policy_state.evaluate_request(
             manifest,
             classified,
             route_policy_scope.clone(),
             &standardized.request_id,
             route_policy_observation,
+            now_epoch_ms,
         ) {
             Ok(value) => value,
             Err(error) => {
@@ -239,6 +245,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 )
             }
         };
+        route_policy_pending = Some(pending);
         let request_is_compaction = standardized.request_purpose.is_compaction()
             || standardized
                 .endpoint
@@ -309,11 +316,10 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     let standardized_request_id = standardized.request_id.clone();
     let standardized_server_id = standardized.server_id.clone();
     let commit_route_policy = |_receipt: &V3AttemptSuccessReceipt| -> Result<(), String> {
-        route_policy_state.commit_request(
-            &route_policy_scope,
-            &standardized_request_id,
-            &route_policy_policies,
-        )
+        match route_policy_pending.as_ref() {
+            Some(pending) => pending.commit(&route_policy_policies, now_epoch_ms),
+            None => Ok(()),
+        }
     };
     let mut failed_candidates = initial_request_local_excluded_candidates;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
@@ -645,6 +651,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 decision.target,
                 captured_target_09,
                 failed_candidates.clone(),
+                route_policy_pending.clone(),
+                Some(route_policy_scope.clone()),
                 trace,
                 provider_failure_events.clone(),
                 accumulator.with_additional_attempts(send_attempts),

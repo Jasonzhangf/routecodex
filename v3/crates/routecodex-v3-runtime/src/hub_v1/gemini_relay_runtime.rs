@@ -211,6 +211,7 @@ async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(
         Vec::new(),
         true,
         None,
+        None,
     )
     .await
     .map_err(|error| match error {

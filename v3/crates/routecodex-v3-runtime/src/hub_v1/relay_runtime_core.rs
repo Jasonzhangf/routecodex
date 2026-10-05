@@ -556,6 +556,7 @@ pub async fn execute_v3_relay_runtime_core<C, T>(
     provider_header_overrides: Vec<V3ProviderRequestHeader>,
     allow_exhaustion_rescue_probe: bool,
     initial_request_execution_control: Option<V3RequestExecutionControl>,
+    route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
 ) -> Result<C::Output, V3RelayCoreError>
 where
     C: V3RelayProtocolCodec,
@@ -1146,6 +1147,11 @@ where
                         .finish_runtime()
                         .map_err(|timing_error| V3RelayCoreError::Target(timing_error))?,
                 );
+                if let Some(pending) = route_policy_pending.as_ref() {
+                    pending
+                        .commit_manifest_now(manifest)
+                        .map_err(V3RelayCoreError::Target)?;
+                }
                 return Ok(C::assemble_json_output(
                     client_response,
                     trace,
@@ -1469,6 +1475,11 @@ where
                         .finish_runtime()
                         .map_err(|timing_error| V3RelayCoreError::Target(timing_error))?,
                 );
+                if let Some(pending) = route_policy_pending.as_ref() {
+                    pending
+                        .commit_manifest_now(manifest)
+                        .map_err(V3RelayCoreError::Target)?;
+                }
                 return Ok(C::assemble_sse_output(
                     committed_sse,
                     trace,

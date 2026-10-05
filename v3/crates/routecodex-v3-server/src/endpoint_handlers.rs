@@ -922,8 +922,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     Some(plan.decision.target.clone()),
                     Some(plan.expanded.clone()),
                     BTreeSet::new(),
-                    None,
-                    None,
+                    plan.relay_runtime_seeds(),
                 )
                 .await
                 {
@@ -951,8 +950,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     None,
                     None,
                     BTreeSet::new(),
-                    None,
-                    None,
+                    V3ResponsesRelayRuntimeSeeds::default(),
                 )
                 .await
                 {
@@ -974,8 +972,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     Some(plan.decision.target.clone()),
                     Some(plan.expanded.clone()),
                     BTreeSet::new(),
-                    None,
-                    None,
+                    plan.relay_runtime_seeds(),
                 )
                 .await
                 {
@@ -1000,8 +997,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     None,
                     None,
                     BTreeSet::new(),
-                    None,
-                    None,
+                    V3ResponsesRelayRuntimeSeeds::default(),
                 )
                 .await
                 {

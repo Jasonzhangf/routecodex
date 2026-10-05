@@ -169,6 +169,7 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport_provide
     provider_health: V3ProviderFailureRuntimeHealth,
     execution_mode: V3HubExecutionMode,
     request_execution_control: crate::nodes::V3RequestExecutionControl,
+    route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
 ) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
     execute_v3_openai_chat_relay_runtime_inner(
         manifest,
@@ -178,6 +179,7 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport_provide
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         execution_mode,
         Some(request_execution_control),
+        route_policy_pending,
     )
     .await
 }
@@ -229,6 +231,7 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_provider_health_and_execu
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         execution_mode,
         None,
+        None,
     )
     .await
 }
@@ -241,6 +244,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
     retry_policy: V3RelayProviderFailureRetryPolicy,
     execution_mode: V3HubExecutionMode,
     request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
+    route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
 ) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
     // 统一 relay 主循环骨架（大骨架）：生命周期与编排在 execute_v3_relay_runtime_core，
     // 协议差异收敛在 V3OpenAiChatRelayCodec。
@@ -261,6 +265,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
         Vec::new(),
         true,
         request_execution_control,
+        route_policy_pending,
     )
     .await
     .map_err(|error| match error {

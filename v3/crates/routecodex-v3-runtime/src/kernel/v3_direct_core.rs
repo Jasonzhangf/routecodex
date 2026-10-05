@@ -166,12 +166,13 @@ where
         C::body(&standardized),
         &classified.facts.route_classification.route_name,
     );
-    let classified = match route_policy_state.evaluate_request(
+    let (classified, route_policy_pending) = match route_policy_state.evaluate_request(
         manifest,
         classified,
         route_policy_scope.clone(),
         C::request_id(&standardized),
         route_policy_observation,
+        now_epoch_ms,
     ) {
         Ok(value) => value,
         Err(error) => {
@@ -182,6 +183,7 @@ where
             )
         }
     };
+    let route_policy_pending = route_policy_pending;
     trace.push("V3Router05RequestClassified");
     let route_policy_group_id = classified.routing_group_id.clone();
     let plan = match router.resolve_route_pool_plan(manifest, classified) {
@@ -356,6 +358,8 @@ where
                 decision.target,
                 expanded.clone(),
                 failed_candidates.clone(),
+                Some(route_policy_pending.clone()),
+                Some(route_policy_scope.clone()),
                 trace,
                 provider_failure_events.clone(),
                 accumulator.with_additional_attempts(send_attempts),
@@ -1209,11 +1213,7 @@ where
                     )
                 }
             };
-        if let Err(error) = route_policy_state.commit_request(
-            &route_policy_scope,
-            C::request_id(&standardized),
-            &policies,
-        ) {
+        if let Err(error) = route_policy_pending.commit(&policies, now_epoch_ms) {
             return error_output(
                 runtime_source("V3Router06RoutePoolResolved", error),
                 trace,

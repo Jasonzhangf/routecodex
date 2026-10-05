@@ -308,7 +308,7 @@ requireMatch(
 );
 requireMatch(
   directServerOutcome,
-  /Some\(handoff\.observability_accumulator\)[\s\S]*Some\(next_handoff\.observability_accumulator\)/,
+  /(Some\(handoff\.observability_accumulator\)|handoff\.relay_runtime_seeds\(\))[\s\S]*Some\(next_handoff\.observability_accumulator\)/,
   "Server must move the opaque accumulator through Direct-to-Relay and nested Relay-to-Direct handoffs",
 );
 requireMatch(

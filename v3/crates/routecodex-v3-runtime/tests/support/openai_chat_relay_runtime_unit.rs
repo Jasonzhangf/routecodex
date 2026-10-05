@@ -473,6 +473,7 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             V3RelayProviderFailureRetryPolicy::default(),
             V3HubExecutionMode::Relay,
             Some(request_execution_control),
+            None,
         )
         .await
         .expect_err("Relay must reject the next transport attempt from the shared budget");

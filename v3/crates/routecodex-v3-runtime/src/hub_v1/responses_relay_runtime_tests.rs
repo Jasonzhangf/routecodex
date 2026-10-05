@@ -187,8 +187,7 @@ async fn execution_control_payload_architecture_relay_reselection_returns_typed_
         None,
         None,
         BTreeSet::new(),
-        None,
-        None,
+        V3ResponsesRelayRuntimeSeeds::default(),
     )
     .await
     .expect("Relay failure must return a typed Direct handoff");
@@ -284,8 +283,7 @@ async fn target_protocol_unmapped_field_projects_internal_598_without_switching_
         None,
         None,
         BTreeSet::new(),
-        None,
-        None,
+        V3ResponsesRelayRuntimeSeeds::default(),
     )
     .await
     .expect("unmapped target field must project as client request error");
@@ -356,8 +354,10 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
         None,
         None,
         BTreeSet::new(),
-        None,
-        Some(request_execution_control.clone()),
+        V3ResponsesRelayRuntimeSeeds {
+            request_execution_control: Some(request_execution_control.clone()),
+            ..Default::default()
+        },
     )
     .await
     .expect_err("the configured attempt ceiling must reject the exhausted handoff");
