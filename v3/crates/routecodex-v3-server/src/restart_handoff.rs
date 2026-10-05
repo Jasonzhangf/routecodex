@@ -311,7 +311,6 @@ impl V3FrontRequestLeaseRegistry {
 #[derive(Debug, Clone, Default)]
 pub struct V3FrontTransportBroker {
     observation_sink: Option<routecodex_v3_debug::V3DebugRuntime>,
-    observation_console: bool,
     generation: Arc<Mutex<u64>>,
     next_connection_id: Arc<Mutex<u64>>,
     checkpoints: Arc<Mutex<BTreeMap<V3FrontRequestLeaseKey, V3BrokerCheckpoint>>>,
@@ -331,7 +330,6 @@ impl V3FrontTransportBroker {
     pub fn new(generation: u64) -> Self {
         Self {
             observation_sink: None,
-            observation_console: false,
             generation: Arc::new(Mutex::new(generation)),
             next_connection_id: Arc::new(Mutex::new(0)),
             checkpoints: Arc::new(Mutex::new(BTreeMap::new())),
@@ -345,10 +343,8 @@ impl V3FrontTransportBroker {
     pub(crate) fn with_client_observation(
         mut self,
         sink: routecodex_v3_debug::V3DebugRuntime,
-        console: bool,
     ) -> Self {
         self.observation_sink = Some(sink);
-        self.observation_console = console;
         self
     }
 
@@ -1002,10 +998,6 @@ impl V3StableFrontSocket {
                     biased;
                     close = &mut close_rx, if !close_requested => {
                         if close.is_ok() {
-                            if let Some(frame) = worker_closeout_state.take_frame() {
-                                let _ = write_half.write_all(&frame).await;
-                                let _ = write_half.flush().await;
-                            }
                             break;
                         }
                         close_requested = true;
@@ -1042,10 +1034,6 @@ impl V3StableFrontSocket {
         self.closeout_state.mark_request_started();
     }
 
-    pub(crate) fn set_exec_closeout_frame(&self, frame: Vec<u8>) {
-        self.closeout_state.set_frame(frame);
-    }
-
     fn close_for_exec_replacement(&self) {
         if self.closeout_state.close_for_exec_replacement() {
             self.signal_close();
@@ -1071,8 +1059,8 @@ impl V3StableFrontSocket {
     }
 
     /// Commit a restart closeout that was deferred because a streaming terminal had
-    /// not written its response head yet. Signalling the closeout lets the write
-    /// worker deliver the `503` frame instead of leaving the client with zero bytes.
+    /// not written its response head yet. Signalling the closeout terminates the
+    /// transport without emitting an error frame or fabricated successful terminal.
     fn commit_deferred_restart_closeout(&self) -> bool {
         if self.closeout_state.commit_deferred_restart_closeout() {
             self.signal_close();
@@ -1176,7 +1164,6 @@ where
 {
     let observation = V3ClientTransportObservation::new(
         front_transport_broker.observation_sink.clone(),
-        front_transport_broker.observation_console,
         connection_identity,
         stream.local_addr()?.port(),
     );

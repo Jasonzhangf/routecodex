@@ -7,7 +7,9 @@ does not create an Error-to-client edge, change bytes, or drive recovery.
 
 Record every accepted connection, admitted request, prepared HTTP response,
 each successful socket write for that response, write/flush failure, and socket
-close. Use the declared Debug log sink and console setting. Include time, local
+close. Write high-frequency diagnostics only to the declared Debug file sink;
+never mirror them to the human console, even when console logging is enabled.
+Include time, local
 port, connection identity, request sequence, endpoint, and the existing Debug
 trace identity when allocated. Do not capture bodies, credentials, query strings,
 or infer identity/status from opaque business bytes.

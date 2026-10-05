@@ -14,7 +14,6 @@ pub(crate) struct V3FrontTransportCloseoutState {
 
 #[derive(Debug, Default)]
 struct V3FrontTransportRequestCycle {
-    frame: Option<Vec<u8>>,
     request_started: bool,
     response_started: bool,
     terminal_frame_suppressed: bool,
@@ -33,20 +32,11 @@ impl V3FrontTransportCloseoutState {
         })
     }
 
-    pub(crate) fn take_frame(&self) -> Option<Vec<u8>> {
-        self.request_cycle
-            .lock()
-            .expect("front closeout request cycle lock")
-            .frame
-            .take()
-    }
-
     pub(crate) fn mark_request_started(&self) {
         let mut request_cycle = self
             .request_cycle
             .lock()
             .expect("front closeout request cycle lock");
-        request_cycle.frame = None;
         request_cycle.request_started = true;
         request_cycle.response_started = false;
         request_cycle.restart_deferred = false;
@@ -58,13 +48,6 @@ impl V3FrontTransportCloseoutState {
             .lock()
             .expect("front closeout request cycle lock")
             .response_started = true;
-    }
-
-    pub(crate) fn set_frame(&self, frame: Vec<u8>) {
-        self.request_cycle
-            .lock()
-            .expect("front closeout request cycle lock")
-            .frame = Some(frame);
     }
 
     /// Close this connection for an exec replacement.
@@ -82,11 +65,9 @@ impl V3FrontTransportCloseoutState {
             .expect("front closeout request cycle lock");
         if request_cycle.terminal_frame_suppressed && !self.transport_wrote() {
             request_cycle.restart_deferred = true;
-            request_cycle.frame = None;
             return false;
         }
         self.closed.store(true, Ordering::Release);
-        request_cycle.frame = None;
         true
     }
 
@@ -104,12 +85,10 @@ impl V3FrontTransportCloseoutState {
             .lock()
             .expect("front closeout request cycle lock");
         if self.transport_wrote() || !request_cycle.restart_deferred {
-            request_cycle.frame = None;
             request_cycle.restart_deferred = false;
             return false;
         }
         self.closed.store(true, Ordering::Release);
-        request_cycle.frame = None;
         request_cycle.restart_deferred = false;
         true
     }
@@ -124,7 +103,6 @@ impl V3FrontTransportCloseoutState {
             .lock()
             .expect("front closeout request cycle lock");
         request_cycle.terminal_frame_suppressed = true;
-        request_cycle.frame = None;
         self.closed.store(true, Ordering::Release);
     }
 
@@ -147,7 +125,6 @@ impl V3FrontTransportCloseoutState {
             return false;
         }
         request_cycle.terminal_frame_suppressed = true;
-        request_cycle.frame = None;
         true
     }
 
