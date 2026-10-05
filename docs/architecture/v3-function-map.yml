@@ -2485,6 +2485,7 @@ features:
     - resp03_restores_registered_codex_integer_argument_values
   owner_files:
   - v3/crates/provider-compat-core/src/namespace_tools.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
@@ -2590,6 +2591,8 @@ features:
   - responses_agent_message_with_encrypted_content_part_does_not_leak_ciphertext
   - responses_chat_long_namespace_names_round_trip_on_first_attempt_json_and_sse
   allowed_paths:
+  - v3/crates/provider-compat-core/src/namespace_tools.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs
   - v3/crates/routecodex-v3-server/tests/openai_chat_namespace_names.rs
   - package.json
   - v3/package.json
@@ -2652,7 +2655,7 @@ features:
   forbidden_paths:
   - src
   - sharedmodule
-  - v3/crates/routecodex-v3-server
+  - v3/crates/routecodex-v3-server/src
   - v3/crates/routecodex-v3-provider-responses
   - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
   - MetadataCenter
