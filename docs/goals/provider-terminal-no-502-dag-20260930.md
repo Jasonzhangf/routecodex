@@ -122,6 +122,10 @@ flowchart LR
 `may_enter_client_body`、`may_enter_provider_body` 均为 false，见 resource map。
 错误资源只承载内部事实；终止 intent 只承载控制事实；成功响应才承载业务内容。
 
+Front 的重启 closeout 只保存 typed control 状态，不保存待发送业务字节。
+旧的任意 closeout frame 存储、setter 和写入分支已移除；关闭信号只能终止传输。
+验收由实际 TCP/HTTP 消费端回归完成，源码符号或测试名称搜索不作为行为门禁。
+
 **单源单汇不能单独证明隔离。** 还必须核对真实 caller、资源读写权限、完整缓冲
 和最终提交边界，并从实际 HTTP/SSE/WebSocket 入口断言错误状态和错误 payload 为零。
 图校验、源码边界、已安装 blackbox 与真实发送观测要分别记证据。

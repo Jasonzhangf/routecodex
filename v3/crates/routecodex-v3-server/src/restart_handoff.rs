@@ -998,10 +998,6 @@ impl V3StableFrontSocket {
                     biased;
                     close = &mut close_rx, if !close_requested => {
                         if close.is_ok() {
-                            if let Some(frame) = worker_closeout_state.take_frame() {
-                                let _ = write_half.write_all(&frame).await;
-                                let _ = write_half.flush().await;
-                            }
                             break;
                         }
                         close_requested = true;
@@ -1038,10 +1034,6 @@ impl V3StableFrontSocket {
         self.closeout_state.mark_request_started();
     }
 
-    pub(crate) fn set_exec_closeout_frame(&self, frame: Vec<u8>) {
-        self.closeout_state.set_frame(frame);
-    }
-
     fn close_for_exec_replacement(&self) {
         if self.closeout_state.close_for_exec_replacement() {
             self.signal_close();
@@ -1067,8 +1059,8 @@ impl V3StableFrontSocket {
     }
 
     /// Commit a restart closeout that was deferred because a streaming terminal had
-    /// not written its response head yet. Signalling the closeout lets the write
-    /// worker deliver the `503` frame instead of leaving the client with zero bytes.
+    /// not written its response head yet. Signalling the closeout terminates the
+    /// transport without emitting an error frame or fabricated successful terminal.
     fn commit_deferred_restart_closeout(&self) -> bool {
         if self.closeout_state.commit_deferred_restart_closeout() {
             self.signal_close();

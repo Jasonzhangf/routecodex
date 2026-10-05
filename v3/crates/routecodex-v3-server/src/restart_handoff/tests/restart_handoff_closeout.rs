@@ -6,33 +6,32 @@ fn restart_closeout_closes_without_error_for_request_before_response_headers() {
     frame.mark_request_started();
     frame.close_for_exec_replacement();
     assert!(frame.is_closed());
-    assert!(frame.take_frame().is_none());
     let unstarted = V3FrontTransportCloseoutState::new();
     unstarted.close_for_exec_replacement();
-    assert!(unstarted.take_frame().is_none());
+    assert!(unstarted.is_closed());
     let started = V3FrontTransportCloseoutState::new();
     started.mark_request_started();
     started.mark_response_started();
     started.close_for_exec_replacement();
-    assert!(started.take_frame().is_none());
+    assert!(started.is_closed());
 }
 
 #[test]
-fn persistent_connection_second_request_gets_preheader_restart_terminal() {
+fn persistent_connection_second_request_resets_restart_closeout_state() {
     let state = V3FrontTransportCloseoutState::new();
 
     state.mark_request_started();
     state.mark_response_started();
-    state.set_frame(b"event: response.failed\ndata: stale\n\n".to_vec());
+    state.mark_transport_wrote();
+    assert!(state.transport_wrote());
 
     state.mark_request_started();
-    state.close_for_exec_replacement();
-
-    assert!(state.is_closed());
     assert!(
-        state.take_frame().is_none(),
-        "restart must clear stale response bytes"
+        !state.transport_wrote(),
+        "a new request must not inherit the preceding response write"
     );
+    state.close_for_exec_replacement();
+    assert!(state.is_closed());
 }
 
 #[test]
@@ -58,7 +57,6 @@ fn deferred_restart_closeout_commits_when_the_enqueued_head_never_reached_the_cl
         "the deferred close must commit when the head never reached the client"
     );
     assert!(state.is_closed());
-    assert!(state.take_frame().is_none());
 }
 
 #[test]
@@ -74,7 +72,6 @@ fn deferred_restart_closeout_is_dropped_once_the_transport_wrote_the_response() 
         "response bytes that reached the client keep the SSE transport break as the boundary"
     );
     assert!(!state.is_closed());
-    assert!(state.take_frame().is_none());
 }
 
 #[test]
@@ -95,11 +92,10 @@ fn deferred_restart_closeout_stays_pending_until_the_transport_reports_the_write
         "a written head keeps the SSE transport break as the client boundary"
     );
     assert!(!state.is_closed());
-    assert!(state.take_frame().is_none());
 }
 
 #[test]
-fn committed_restart_closeout_has_no_frame_after_late_suppression() {
+fn committed_restart_closeout_remains_closed_after_late_suppression() {
     let state = V3FrontTransportCloseoutState::new();
     state.mark_request_started();
     assert!(state.close_for_exec_replacement());
@@ -107,7 +103,7 @@ fn committed_restart_closeout_has_no_frame_after_late_suppression() {
         !state.suppress_restart_closeout_frame(),
         "a committed restart closeout must not be cleared by a late suppression"
     );
-    assert!(state.take_frame().is_none());
+    assert!(state.is_closed());
 }
 
 #[tokio::test]
@@ -174,7 +170,7 @@ async fn front_socket_deferred_closeout_keeps_the_sse_head_writable() {
         "a deferred closeout must not write the restart frame: {text:?}"
     );
     let socket = accept.await.unwrap();
-    assert!(socket.closeout_state.take_frame().is_none());
+    assert!(!socket.is_closed());
 }
 
 #[tokio::test]
@@ -284,13 +280,11 @@ async fn front_socket_restart_after_request_acceptance_delivers_zero_bytes() {
 }
 
 #[tokio::test]
-async fn front_socket_discards_configured_error_terminal_after_headers() {
+async fn front_socket_restart_after_response_headers_delivers_no_error_bytes() {
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
         .await
         .unwrap();
     let address = listener.local_addr().unwrap();
-    let expected = b"event: response.failed\ndata: {}\n\n".to_vec();
-    let accept_expected = expected.clone();
     let accept = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
         let (_, write_half) = stream.into_split();
@@ -300,7 +294,6 @@ async fn front_socket_discards_configured_error_terminal_after_headers() {
         );
         socket.mark_request_started();
         socket.closeout_state.mark_response_started();
-        socket.set_exec_closeout_frame(accept_expected);
         socket.close_for_exec_replacement();
     });
     let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
@@ -314,7 +307,7 @@ async fn front_socket_discards_configured_error_terminal_after_headers() {
     .expect("client read must succeed");
     assert!(
         response.is_empty(),
-        "restart must discard error frames: {response:?}"
+        "restart must not emit error frames: {response:?}"
     );
     accept.await.unwrap();
 }

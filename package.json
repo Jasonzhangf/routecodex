@@ -75,7 +75,6 @@
     "verify:v3-architecture-docs": "npm run verify:v3-provider-action-gate && ROUTECODEX_V3_PROVIDER_ACTION_GATE=1 npm --prefix v3 run verify:v3-architecture-docs",
     "verify:v3-execution-control-payload-architecture": "npm --prefix v3 run verify:v3-execution-control-payload-architecture",
     "test:v3-execution-control-payload-architecture-red-fixtures": "npm --prefix v3 run test:v3-execution-control-payload-architecture-red-fixtures",
-    "verify:v3-runtime-restart-handoff": "node v3/scripts/architecture/verify-v3-runtime-restart-handoff.mjs",
     "verify:v3-managed-server-lifecycle": "npm --prefix v3 run verify:v3-managed-server-lifecycle",
     "verify:webui-smoke": "npm --prefix v3 run verify:webui-smoke",
     "test:v3-managed-server-lifecycle-red-fixtures": "npm --prefix v3 run test:v3-managed-server-lifecycle-red-fixtures",

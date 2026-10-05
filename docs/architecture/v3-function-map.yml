@@ -5008,12 +5008,11 @@ features:
   - V3FrontTransportCloseoutState
   - automatic_error_responses
   - set_automatic_error_responses
-  - V3StableFrontSocket::set_exec_closeout_frame
+  - V3FrontTransportCloseoutState::close_for_exec_replacement
   - V3FrontDeadlineBudget
   - V3ServerRequestActivityGate
   - V3ServerAggregateHandle::prepare_for_exec
   allowed_paths:
-  - v3/scripts/architecture/verify-v3-runtime-restart-handoff.mjs
   - v3/crates/routecodex-v3-server/src/client_transport_observation.rs
   - v3/crates/routecodex-v3-server/src/restart_handoff_tests.rs
   - v3/crates/routecodex-v3-server/src/restart_handoff.rs
@@ -5045,7 +5044,6 @@ features:
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server restart_handoff --lib -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server request_activity_gate --lib -- --nocapture
-  - npm run verify:v3-runtime-restart-handoff
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - git diff --check
