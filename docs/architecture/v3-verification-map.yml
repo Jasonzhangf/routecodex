@@ -3250,6 +3250,7 @@ features:
   - response shape never reselects Direct or Relay.
   - restart never fabricates a client HTTP error or protocol error event, before or after headers.
   - prepared responses, provider statuses, and socket-write receipts cannot be conflated; diagnostics never change business bytes or drive transport/recovery decisions.
+  - high-frequency client_transport diagnostics remain complete in the file sink and never appear on stdout/stderr, including when human console logging is enabled.
   - a new keep-alive request cannot inherit the previous request's response-started phase or protocol-specific SSE closeout frame.
   required_gates:
   - npm --prefix v3 run test:v3-server-debug-error-blackbox

@@ -54,11 +54,35 @@ async fn read_raw_content_length_response(socket: &mut TcpStream) -> Vec<u8> {
 // Stable public gate: test:v3-server-debug-error-blackbox (workspace CI).
 #[tokio::test]
 async fn client_transport_observation_public_blackbox() {
+    if std::env::var_os("V3_CLIENT_OBSERVATION_CONSOLE_CHILD").is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "client_transport_observation_public_blackbox",
+                "--nocapture",
+            ])
+            .env("V3_CLIENT_OBSERVATION_CONSOLE_CHILD", "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "public consumer failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        for bytes in [&output.stdout, &output.stderr] {
+            assert!(
+                !String::from_utf8_lossy(bytes).contains("\"event\":\"client_transport\""),
+                "high-frequency transport diagnostics reached the human console"
+            );
+        }
+        return;
+    }
     let _test_guard = TEST_LOCK.lock().await;
     let _home_guard = TestHomeGuard::new("client-transport-observation");
     let log = std::env::temp_dir().join(format!("v3-client-wire-{}.jsonl", free_port()));
     let mut manifest = p6_manifest(free_port(), free_port(), "http://127.0.0.1:9/v1");
     manifest.debug.log_file = Some(log.to_string_lossy().into_owned());
+    manifest.debug.log_console = true;
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let addr = handle.listeners[0].addr;
     let mut socket = TcpStream::connect(addr).await.unwrap();

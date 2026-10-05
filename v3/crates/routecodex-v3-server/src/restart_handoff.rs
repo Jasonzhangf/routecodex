@@ -311,7 +311,6 @@ impl V3FrontRequestLeaseRegistry {
 #[derive(Debug, Clone, Default)]
 pub struct V3FrontTransportBroker {
     observation_sink: Option<routecodex_v3_debug::V3DebugRuntime>,
-    observation_console: bool,
     generation: Arc<Mutex<u64>>,
     next_connection_id: Arc<Mutex<u64>>,
     checkpoints: Arc<Mutex<BTreeMap<V3FrontRequestLeaseKey, V3BrokerCheckpoint>>>,
@@ -331,7 +330,6 @@ impl V3FrontTransportBroker {
     pub fn new(generation: u64) -> Self {
         Self {
             observation_sink: None,
-            observation_console: false,
             generation: Arc::new(Mutex::new(generation)),
             next_connection_id: Arc::new(Mutex::new(0)),
             checkpoints: Arc::new(Mutex::new(BTreeMap::new())),
@@ -345,10 +343,8 @@ impl V3FrontTransportBroker {
     pub(crate) fn with_client_observation(
         mut self,
         sink: routecodex_v3_debug::V3DebugRuntime,
-        console: bool,
     ) -> Self {
         self.observation_sink = Some(sink);
-        self.observation_console = console;
         self
     }
 
@@ -1176,7 +1172,6 @@ where
 {
     let observation = V3ClientTransportObservation::new(
         front_transport_broker.observation_sink.clone(),
-        front_transport_broker.observation_console,
         connection_identity,
         stream.local_addr()?.port(),
     );
