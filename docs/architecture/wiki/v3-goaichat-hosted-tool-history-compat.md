@@ -1,64 +1,51 @@
 # Goaichat hosted 工具与调用历史的请求兼容
 
-缺陷 `908e8aa`：Codex Responses 进入标准 Anthropic Messages 投影后，
-Goaichat AI / GLM-5.3 网关在 hosted `web_search_20250305` 与已有普通
-`tool_use`/`tool_result` 历史同时出现时返回 400 `invalid function name`。
-同一真实请求的工具单独声明可接受；移除 hosted 声明可接受；保留全部声明与
-历史并增加 `function: {name: "web_search", parameters: {}}` 可接受。
-只有 `function.name` 的对照仍失败。另一些对照接受了原始长名称，
-不能从错误文本推断名称长度或 namespace 就是根因。
+缺陷 `908e8aa` 必须分别验证 provider 请求接受与客户端错误隔离。
+切换成功或最终客户端 200 不能证明首个 provider 请求形状兼容。
+所有模型入口的错误隔离合同由项目 AGENTS.md 唯一维护。
 
-后续修复给普通 Anthropic 工具补充嵌套 `function`，再补充 `type: "function"`，
-均引入了新的请求兼容回归。这些改动已通过可追溯 revert 撤销。
-最新112条历史、380个工具的原始请求，在配置的 `key2` 上交错重放三轮：
-普通工具包含新增的 type/function 时三次400；恢复原有 name/input_schema
-形状时三次首次200。`key1` 的完整声明也曾200，不能将此规律扩大为
-所有后台对所有请求都必然拒绝。更不能用一次最终200或切换成功证明形状安全。
+2026-10-04 的请求 `743898-45622` 包含380个工具、115条 Anthropic 历史，
+历史中的67次调用均为已声明的 `exec_command`。没有重复名称、非法名称字符
+或为普通工具添加的 type/function。原始 provider-bound 请求在两把配置 key
+上均返回400 `invalid function name`。只删除 Compat 给原生 hosted
+`web_search_20250305` 添加的 `function` 字段，保留全部工具、历史、名称与
+schema 后，两把 key 均返回200与真实 `exec_command` 调用；恢复原样均再400。
 
-历史提交 `c3946aeb` 修复的是另一个 GLM Anthropic 网关的标准协议选择；
-`0bbd8d27` 修复的是 OpenAI Chat 的 hosted 工具能力投影。它们仍在主链，
-不等价于本次网关组合契约。原 GLM 回归内部 transport 固定返回 200，
-请求没有工具历史，无法发现这次失败。禁止通过删除 hosted 工具、改名、
-切换 provider 或 HTTP 200 包装错误让回归变绿。
+该额外 envelope 来自此前的 Goaichat Compat 修复。早期14条历史样本曾在
+标准 hosted 声明上400，添加 envelope 后200；但该早期标准原样请求在本轮
+两把 key 的六次回放均200。历史诊断不能证明网关永远需要这个私有字段。
+本次删除代理自行添加的混合协议形状，恢复标准 Anthropic 声明。
+客户端已提供的扩展字段保持原样，不能用过滤未知字段替代此修复。
 
-唯一 owner 是 `provider-compat-core`，选择源是 provider authoring 的
-`compatibilityProfile = "anthropic:goaichat"`。请求图复用
-`../dagpipe/v3.operation_runner.request.graph.json` 的
-`adjust_provider_private_request`，无需更改拓扑或通用协议编解码。
+唯一 owner 是 `provider-compat-core` 的 request Compat。复用
+`../dagpipe/v3.operation_runner.request.graph.json` 中
+`adjust_provider_private_request`，不更改拓扑、通用编解码或错误恢复。
+`anthropic:goaichat` authoring 选择可以保留；没有需要执行的私有变换时，
+沿现有 passthrough 返回原始标准 payload，不另建一条空的 provider 分支。
 
 ```mermaid
 flowchart LR
-    A[接收客户端请求] --> B[保留请求与工具历史]
-    B --> C[投影标准 Anthropic 请求]
-    C --> D[按显式网关契约补充 hosted 声明]
+    A[接收客户端请求] --> B[保留全部工具与配对历史]
+    B --> C[标准 Anthropic 投影]
+    C --> D[Compat 保留原生 hosted 声明]
     D --> E[发送原目标 provider]
-    E --> F[记录接受结果与配对工具往返]
+    E --> F[验证首次接受与真实工具往返]
 ```
 
-该 profile 只在 `anthropic-messages` 请求 Compat 中调整确切声明
-`type=web_search_20250305,name=web_search`。保留原始字段和已有 function
-扩展；缺少 function 时补充同名 envelope 和空 parameters。不修改普通工具、
-调用 ID、参数、历史、响应、控制状态或标准 `chat:glm` passthrough。
-它不赋予客户端新工具，也不宣称网关原生搜索已经执行。
+普通 Anthropic 工具不得由 Compat 添加 OpenAI type/function。
+原生 hosted 声明也不得由 Compat 添加 function。工具名称、参数、call ID、
+schema、历史和配对结果完整保留。已退役的历史工具不得重新加入当前工具集合。
+不截断或改名、不删除 hosted 工具、不排序工具来规避错误、不添加新 fallback。
 
-兼容边界必须按声明逐项保持。hosted 工具的已证实私有调整只作用于该
-hosted 声明，不能传播到普通工具。普通工具保留标准 Anthropic name、
-input_schema、description 及客户端已有扩展；不得凭 hosted 同时出现而
-增加 OpenAI type/function 形状。保留当前工具集合、名称、schema 和全部
-调用/结果历史；历史中已退役的工具不能重新增加为可调用声明。
+必跑黑盒 `npm run test:v3-goaichat-hosted-tool-history-blackbox`：
+公开 Responses JSON/SSE、Chat、Messages -> 外部 TCP Anthropic peer ->
+客户端实际执行 `exec_command` 的确定性 consumer -> 匹配输出的下一轮 ->
+正常响应。外部 peer 对本次已证实的额外 hosted function 与普通工具
+type/function 形状返回400，而非无条件200。每轮只允许一次接受的 provider
+请求。用例保留380个工具、长名称、write_stdin 与已退役 update_plan 的配对
+历史。标准 `chat:glm` 对照同样保留原生 hosted 声明。
 
-真实 provider 的 200 证明该形状被接受；搜索执行必须另有真实搜索 receipt，
-文本模拟搜索或工具标记不算完成。本次验收要求普通工具的真实 consumer
-执行输出及后续请求，同时保持原 hosted 声明。
-
-必跑黑盒 `npm run test:v3-goaichat-hosted-tool-history-blackbox`：真实公开 HTTP
-Responses JSON/SSE、Chat、Messages -> 外部 TCP Anthropic peer -> 客户端执行
-`exec_command` 的确定性 consumer -> 匹配输出的下一轮 -> 最终正常响应。
-用例携带380个工具、长工具名称、write_stdin 与已退役 update_plan 的调用
-及配对结果。外部 peer 检查 hosted 兼容，同时拒绝为普通工具新增第二套
-协议形状；客户端原本没有这些扩展，不能由 Compat 凭空增加。
-捕获的声明必须保持数量、名称、schema，历史必须保持完整且不扩大能力。
-每轮只允许一次接受的 provider 请求；重试或切换后成功仍判失败。
-标准 `chat:glm` 对照要求 hosted 声明没有私有 function 字段。
-该套件同时纳入 provider-compat gate 和 V3 canonical CI 的 CLI 测试列表。
-真实 provider 错误的客户端隔离仍遵守项目 AGENTS 的所有入口统一禁令。
+真实 provider 验收须覆盖新115条历史与早期14条历史样本，断言首个 provider
+200、无失败 attempt、无切换，并验证真实 consumer 输出与匹配 follow-up。
+一次 provider 200 只证明该请求被接受；原生搜索执行仍须独立搜索 receipt。
+本次对照不证明所有网关后台或所有其他400原因已经解决。
