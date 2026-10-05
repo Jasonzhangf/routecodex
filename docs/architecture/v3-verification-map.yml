@@ -459,9 +459,11 @@ features:
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/wiki/v3-qiluyun-reasoning-content-compat.md
   required_positive:
   - Ordinary protocol and business fields remain unchanged through request and response compatibility.
   - Provider compatibility remains limited to registered provider-family wire projections.
+  - The explicit responses:qiluyun profile represents reasoning.content null as an empty array and preserves all history items, nonempty reasoning, absent optional content, and tool call/output pairs.
   - Request-shape compatibility failures remain typed internal errors and never authorize a client error response.
   - Anthropic Goaichat requests preserve standard hosted web_search type/name/options and ordinary tool/history identity without synthesizing function envelopes after standard projection; client-authored extensions remain unchanged.
   - Public HTTP Responses (JSON/SSE), Chat and Messages consumers preserve the 380-tool inventory, schemas, long names, write_stdin and retired update_plan history, and complete execution plus matching follow-up with exactly one accepted upstream attempt per turn; provider switching cannot mask a shape regression.
@@ -489,6 +491,7 @@ features:
   - npm run test:v3-provider-compat-profile-loading
   - npm run test:v3-goaichat-hosted-tool-history-blackbox
   - npm --prefix v3 run test:v3-goaichat-long-tool-names
+  - npm run test:v3-qiluyun-reasoning-content-blackbox
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries

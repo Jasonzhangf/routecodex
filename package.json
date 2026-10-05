@@ -154,6 +154,7 @@
     "test:v3-relay-hook-resources": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --test-threads=1 && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test hub_v1_h1_contract -- --test-threads=1",
     "test:v3-provider-compat-profile-loading": "npm --prefix v3 run test:v3-provider-compat-profile-loading",
     "test:v3-goaichat-hosted-tool-history-blackbox": "npm --prefix v3 run test:v3-goaichat-hosted-tool-history-blackbox",
+    "test:v3-qiluyun-reasoning-content-blackbox": "npm --prefix v3 run test:v3-qiluyun-reasoning-content-blackbox",
     "test:v3-responses-websocket-v2-transport-hardening": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test responses_websocket_v2 -- --nocapture",
     "verify:v3-responses-websocket-v2-transport-hardening": "node scripts/architecture/verify-v3-responses-websocket-v2-transport-hardening.mjs",
     "test:v3-responses-websocket-v2-transport-hardening-red-fixtures": "node scripts/tests/v3-responses-websocket-v2-transport-hardening-red-fixtures.mjs",

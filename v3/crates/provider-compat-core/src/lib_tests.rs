@@ -82,6 +82,46 @@ fn goaichat_long_names_reserve_short_dispatch_and_round_trip_typed_inverse() {
 }
 
 #[test]
+fn qiluyun_reasoning_content_is_request_profile_and_protocol_specific() {
+    let payload = json!({"input":[
+        {"type":"reasoning","id":"empty","content":null,"summary":[{"type":"summary_text","text":"preserve"}]},
+        {"type":"reasoning","id":"present","content":[{"type":"reasoning_text","text":"preserve"}]},
+        {"type":"reasoning","id":"absent"},
+        {"type":"message","role":"assistant","content":null}
+    ]});
+    for (profile, protocol, projected) in [
+        ("responses:qiluyun", "openai-responses", true),
+        ("compat:passthrough", "openai-responses", false),
+        ("responses:qiluyun", "openai-chat", false),
+        ("responses:qiluyun", "anthropic-messages", false),
+    ] {
+        let input = ReqOutboundCompatInput {
+            payload: payload.clone(),
+            adapter_context: AdapterContext {
+                compatibility_profile: Some(profile.into()),
+                provider_protocol: Some(protocol.into()),
+                ..Default::default()
+            },
+            explicit_profile: None,
+        };
+        let mut expected = payload.clone();
+        if projected {
+            expected["input"][0]["content"] = json!([]);
+        }
+        assert_eq!(
+            run_req_outbound_stage3_compat(input.clone())
+                .unwrap()
+                .payload,
+            expected
+        );
+        assert_eq!(
+            run_resp_inbound_stage3_compat(input).unwrap().payload,
+            payload
+        );
+    }
+}
+
+#[test]
 fn goaichat_profile_preserves_existing_hosted_extensions_and_other_protocols() {
     let payload = json!({"tools":[
         {"type":"web_search_20250305","name":"web_search","max_uses":7,
