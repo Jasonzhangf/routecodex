@@ -1856,12 +1856,7 @@ fn console_machine_fields_align_within_session_width_budget() {
         wide_session,
     ));
     let wide_color = strip_test_ansi(&colorize_v3_layered_console_line(
-        V3ConsoleLayeredBlock::new(
-            "",
-            "headline",
-            "req=wide-color event=started",
-            wide_session,
-        ),
+        V3ConsoleLayeredBlock::new("", "headline", "req=wide-color event=started", wide_session),
         ANSI_REQUEST_CYAN,
         ANSI_DEBUG_DIM,
     ));
@@ -1880,11 +1875,8 @@ fn console_machine_fields_align_within_session_width_budget() {
 fn console_fallback_session_id_uses_full_request_id_without_truncation() {
     let request_id =
         "openai-responses-router-goaichat_ai_responses.deepseek-v4.1-flash-20261005T064615076-767995-11881";
-    let color_key = resolve_v3_log_session_color_key(
-        &HeaderMap::new(),
-        &serde_json::json!({}),
-        request_id,
-    );
+    let color_key =
+        resolve_v3_log_session_color_key(&HeaderMap::new(), &serde_json::json!({}), request_id);
     let expected_session = format!("rcc-session:request:{request_id}");
     assert_eq!(color_key.as_deref(), Some(expected_session.as_str()));
 
@@ -1898,10 +1890,16 @@ fn console_fallback_session_id_uses_full_request_id_without_truncation() {
     let expected_scope = format!("[sessionID:rcc-session:request:{request_id}]");
     assert!(plain.contains(&expected_scope), "{plain:?}");
     assert!(!plain.contains("..."), "must not truncate: {plain:?}");
-    assert!(!plain.contains("sessionIDFull="), "must not append sessionIDFull: {plain:?}");
+    assert!(
+        !plain.contains("sessionIDFull="),
+        "must not append sessionIDFull: {plain:?}"
+    );
     // Over-budget scopes shift the debug fields right instead of truncating;
     // `req=` must still be present in the diagnostic content.
-    assert!(plain.contains("req="), "req= must survive over-budget scope: {plain:?}");
+    assert!(
+        plain.contains("req="),
+        "req= must survive over-budget scope: {plain:?}"
+    );
 }
 
 #[test]
