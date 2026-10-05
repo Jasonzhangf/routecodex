@@ -355,6 +355,7 @@ mod tests {
             V3HubTransportIntent::Sse,
             &mut trace,
             None,
+            &Default::default(),
             V3WebSearchExecutionMode::None,
             None,
             false,

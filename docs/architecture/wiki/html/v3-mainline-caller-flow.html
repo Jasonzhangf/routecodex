@@ -595,9 +595,9 @@ flowchart TD
 <tr><td><a href="#chain-v3_provider_key_health_model_granularity"><code>v3.provider_key_health_model_granularity</code></a><br/>v 3.provider_key_health_model_granularity</td><td><span class="status pending_review">pending review</span></td><td>3</td><td>5</td><td><code>v3.provider_key_health_model_granularity</code></td><td><code>sha256:fd2c62f27661…</code></td></tr>
 <tr><td><a href="#chain-v3_global_binary_install"><code>v3.global_binary_install</code></a><br/>v 3.global_binary_install</td><td><span class="status audited_locked">locked by Jason</span></td><td>1</td><td>1</td><td><code>v3.global_binary_install</code></td><td><code>sha256:34c3f3e588a9…</code></td></tr>
 <tr><td><a href="#chain-v3_direct_request_key_hooks"><code>v3.direct.request_key_hooks</code></a><br/>v 3.direct.request_key_hooks</td><td><span class="status pending_review">pending review</span></td><td>6</td><td>3</td><td><code>v3.direct.request_key_hooks</code></td><td><code>sha256:d680f1142ebb…</code></td></tr>
-<tr><td><a href="#chain-v3_provider_compat_profile_request"><code>v3.provider_compat_profile.request</code></a><br/>v 3.provider_compat_profile.request</td><td><span class="status pending_review">pending review</span></td><td>1</td><td>5</td><td><code>v3.provider_compat_profile_loading</code></td><td><code>sha256:8115448683b5…</code></td></tr>
+<tr><td><a href="#chain-v3_provider_compat_profile_request"><code>v3.provider_compat_profile.request</code></a><br/>v 3.provider_compat_profile.request</td><td><span class="status pending_review">pending review</span></td><td>1</td><td>6</td><td><code>v3.provider_compat_profile_loading</code></td><td><code>sha256:39f1f48e561c…</code></td></tr>
 <tr><td><a href="#chain-v3_provider_compat_request_invalid_error_source"><code>v3.provider_compat.request_invalid_error_source</code></a><br/>v 3.provider_compat.request_invalid_error_source</td><td><span class="status pending_review">pending review</span></td><td>1</td><td>2</td><td><code>v3.provider_compat_profile_loading</code></td><td><code>sha256:8e5435ba6720…</code></td></tr>
-<tr><td><a href="#chain-v3_provider_compat_profile_response"><code>v3.provider_compat_profile.response</code></a><br/>v 3.provider_compat_profile.response</td><td><span class="status pending_review">pending review</span></td><td>1</td><td>4</td><td><code>v3.provider_compat_profile_loading</code></td><td><code>sha256:cb52e8e22579…</code></td></tr>
+<tr><td><a href="#chain-v3_provider_compat_profile_response"><code>v3.provider_compat_profile.response</code></a><br/>v 3.provider_compat_profile.response</td><td><span class="status pending_review">pending review</span></td><td>1</td><td>5</td><td><code>v3.provider_compat_profile_loading</code></td><td><code>sha256:d08b39a7b632…</code></td></tr>
 <tr><td><a href="#chain-v3_target_session_global_selection"><code>v3.target.session_global_selection</code></a><br/>v 3.target.session_global_selection</td><td><span class="status audited_locked">locked by Jason</span></td><td>4</td><td>4</td><td><code>v3.virtual_router_target_interpreter</code></td><td><code>sha256:ff56cb023f01…</code></td></tr>
 <tr><td><a href="#chain-v3_codex_sample_retention_snap_scope"><code>v3.codex_sample_retention_snap_scope</code></a><br/>v 3.codex_sample_retention_snap_scope</td><td><span class="status audited_locked">locked by Jason</span></td><td>9</td><td>5</td><td><code>v3.codex_sample_retention_snap_scope</code></td><td><code>sha256:73893d0d8082…</code></td></tr>
 <tr><td><a href="#chain-v3_runtime_fd_limit"><code>v3.runtime_fd_limit</code></a><br/>v 3.runtime_fd_limit</td><td><span class="status pending_review">pending review</span></td><td>1</td><td>3</td><td><code>v3.managed_server_lifecycle</code></td><td><code>sha256:230ea3281ec6…</code></td></tr>
@@ -723,14 +723,14 @@ flowchart TD
             <span class="chain-id">v 3.provider_compat_profile.request</span>
             <span>V3HubReqOutbound07ProviderSemantic → ProviderReqCompat06ProviderCompat</span>
             <span><code>v3.provider_compat_profile.request</code></span>
-            <span>1 edges · 5 resources · provider-compat-core, v3-runtime::hub_v1</span>
+            <span>1 edges · 6 resources · provider-compat-core, v3-runtime::hub_v1</span>
             <span class="status pending_review">pending review</span>
           </a>
 <a class="branch-card" href="#chain-v3_provider_compat_profile_response">
             <span class="chain-id">v 3.provider_compat_profile.response</span>
             <span>V3ProviderRespInbound01Raw → ProviderRespCompat02ProviderCompat</span>
             <span><code>v3.provider_compat_profile.response</code></span>
-            <span>1 edges · 4 resources · provider-compat-core, v3-runtime::hub_v1</span>
+            <span>1 edges · 5 resources · provider-compat-core, v3-runtime::hub_v1</span>
             <span class="status pending_review">pending review</span>
           </a>
 <a class="branch-card" href="#chain-v3_target_session_global_selection">
@@ -1560,7 +1560,7 @@ flowchart TD
           <span>owner: <code>v3.provider_compat_profile_loading</code></span>
           <span>audit: <span class="status pending_review">pending review</span></span>
           <span>modules: <code>provider-compat-core · v3-runtime::hub_v1</code></span>
-          <span>resources: <code>5</code></span>
+          <span>resources: <code>6</code></span>
 
 
         </div>
@@ -1577,7 +1577,7 @@ flowchart TD
         <table>
 <thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
 <tbody>
-<tr><td><code>v3-provider-compat-profile-request-01</code></td><td><code>V3HubReqOutbound07ProviderSemantic</code><br/>→ <code>ProviderReqCompat06ProviderCompat</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.request.provider_semantic</code> <code>v3.provider_compat.payload_boundary_contract</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.provider_wire_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.hub.resolved_target</code> <code>v3.hub.provider_protocol</code></div></td><td><code>apply_v3_provider_req_compat_to_provider_payload</code><br/><small>routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs</small></td><td><code>run_req_outbound_stage3_compat</code><br/><small>provider-compat-core/src/lib.rs</small></td></tr>
+<tr><td><code>v3-provider-compat-profile-request-01</code></td><td><code>V3HubReqOutbound07ProviderSemantic</code><br/>→ <code>ProviderReqCompat06ProviderCompat</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.request.provider_semantic</code> <code>v3.provider_compat.payload_boundary_contract</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.provider_wire_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.hub.resolved_target</code> <code>v3.hub.provider_protocol</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.provider_compat.tool_name_projection</code></div></td><td><code>apply_v3_provider_req_compat_to_provider_payload</code><br/><small>routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs</small></td><td><code>run_req_outbound_stage3_compat</code><br/><small>provider-compat-core/src/lib.rs</small></td></tr>
 </tbody>
 </table>
       </div>
@@ -1632,7 +1632,7 @@ flowchart TD
           <span>owner: <code>v3.provider_compat_profile_loading</code></span>
           <span>audit: <span class="status pending_review">pending review</span></span>
           <span>modules: <code>provider-compat-core · v3-runtime::hub_v1</code></span>
-          <span>resources: <code>4</code></span>
+          <span>resources: <code>5</code></span>
 
 
         </div>
@@ -1649,7 +1649,7 @@ flowchart TD
         <table>
 <thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
 <tbody>
-<tr><td><code>v3-provider-compat-profile-response-01</code></td><td><code>V3ProviderRespInbound01Raw</code><br/>→ <code>ProviderRespCompat02ProviderCompat</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.response.provider_raw</code> <code>v3.provider_compat.payload_boundary_contract</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.hub.provider_protocol</code></div></td><td><code>apply_v3_provider_resp_compat</code><br/><small>routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs</small></td><td><code>run_resp_inbound_stage3_compat</code><br/><small>provider-compat-core/src/lib.rs</small></td></tr>
+<tr><td><code>v3-provider-compat-profile-response-01</code></td><td><code>V3ProviderRespInbound01Raw</code><br/>→ <code>ProviderRespCompat02ProviderCompat</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.response.provider_raw</code> <code>v3.provider_compat.payload_boundary_contract</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.hub.provider_protocol</code> <code>v3.provider_compat.tool_name_projection</code></div></td><td><code>apply_v3_provider_resp_compat</code><br/><small>routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs</small></td><td><code>run_resp_inbound_stage3_compat</code><br/><small>provider-compat-core/src/lib.rs</small></td></tr>
 </tbody>
 </table>
       </div>

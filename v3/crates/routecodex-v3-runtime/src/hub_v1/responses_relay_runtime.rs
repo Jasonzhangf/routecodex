@@ -734,6 +734,7 @@ fn build_v3_runtime_sse_json_frame(event: &str, payload: &Value) -> Vec<u8> {
 }
 
 mod provider_stream_materialization;
+pub(crate) use provider_stream_materialization::materialize_v3_provider_sse_as_canonical_response_with_tool_names;
 mod responses_provider_event_codec;
 
 use provider_stream_materialization::*;

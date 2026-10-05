@@ -100,7 +100,7 @@
       "iterator": "Whole",
       "resources": {
         "reads": ["v3.hub.provider_wire_payload"],
-        "writes": ["v3.hub.provider_wire_payload"]
+        "writes": ["v3.hub.provider_wire_payload", "v3.provider_compat.tool_name_projection"]
       }
     },
     {

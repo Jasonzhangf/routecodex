@@ -20,8 +20,8 @@ schema 后，两把 key 均返回200与真实 `exec_command` 调用；恢复原�
 唯一 owner 是 `provider-compat-core` 的 request Compat。复用
 `../dagpipe/v3.operation_runner.request.graph.json` 中
 `adjust_provider_private_request`，不更改拓扑、通用编解码或错误恢复。
-`anthropic:goaichat` authoring 选择可以保留；没有需要执行的私有变换时，
-沿现有 passthrough 返回原始标准 payload，不另建一条空的 provider 分支。
+`anthropic:goaichat` 的私有变换只处理已复现的网关表示限制。
+原生 hosted 声明继续保持标准形状。
 
 ```mermaid
 flowchart LR
@@ -35,7 +35,36 @@ flowchart LR
 普通 Anthropic 工具不得由 Compat 添加 OpenAI type/function。
 原生 hosted 声明也不得由 Compat 添加 function。工具名称、参数、call ID、
 schema、历史和配对结果完整保留。已退役的历史工具不得重新加入当前工具集合。
-不截断或改名、不删除 hosted 工具、不排序工具来规避错误、不添加新 fallback。
+客户端工具身份不得改变；私有 wire 别名必须可逆。不删除 hosted 工具、
+不排序工具来规避错误、不添加新 fallback。
+
+## 2026-10-05：Goaichat 私有长名称表示
+
+GitHub PR #341（`7eee82d2`）修复 OpenAI Chat 的长 namespace 工具名，
+PR #343（`eb77dc9b`）补充普通 function/custom 名称的碰撞保护。
+两项修复仍在 main。Anthropic `/v1/messages` 未接入该私有长度表示。
+这与上述 hosted function envelope 缺陷有不同的因果证据。
+
+4444 请求 `062420249-767310-11196` 的第二次 attempt 包含380个工具、
+117条消息与66次历史调用。原始 Goaichat `glm-5.3` 请求返回400
+`invalid function name`。只将24个超过64字符的声明名称映射为唯一的
+64字符名称，保留其他 body、历史、headers、key、模型，返回200和
+`message_stop`，没有 SSE error。简化工具探针曾成功，不能替代这个
+完整失败样本的因果对照。该对照只证明本次名称限制，不证明所有400均已修复。
+
+修复边界是显式 `anthropic:goaichat` Provider Compat。复用已有名称分配器，
+预留普通工具名，同步声明、历史 `tool_use.name` 与强制 `tool_choice.name`。
+真实强制选择验收又确认：带 description 的工具采用64位纯十六进制别名时，
+Goaichat 返回 `only auto, none, required or a named function are supported`。
+保留同一声明、description、schema、选择策略和请求，仅把声明及选择中的
+别名改为同长的 `tool_` 前缀形式，返回完整 `message_stop` 且无 SSE error。
+Goaichat 因此使用带前缀的64字符别名；共享分配器继续负责预留和碰撞。
+标准 OpenAI Chat 仍使用原有别名形式，不接收这个 provider 私有限制。
+反向映射属于 typed attempt context。它不能进入 payload、metadata 或日志，
+也不能跨 candidate 复用。JSON 与完整缓冲 SSE 均先还原标准 Anthropic
+工具名，再由原有协议投影恢复客户端 function/custom/namespace 身份。
+同协议 Messages 入口同样必须还原。其他 Anthropic profile
+继续保留原始名称，不把 Goaichat 的64字符限制升级成通用协议限制。
 
 必跑黑盒 `npm run test:v3-goaichat-hosted-tool-history-blackbox`：
 公开 Responses JSON/SSE、Chat、Messages -> 外部 TCP Anthropic peer ->
@@ -44,6 +73,12 @@ schema、历史和配对结果完整保留。已退役的历史工具不得重�
 type/function 形状返回400，而非无条件200。每轮只允许一次接受的 provider
 请求。用例保留380个工具、长名称、write_stdin 与已退役 update_plan 的配对
 历史。标准 `chat:glm` 对照同样保留原生 hosted 声明。
+
+`npm --prefix v3 run test:v3-goaichat-long-tool-names` 通过公开 HTTP 验证
+64/65字符边界、普通 function 与 custom 的 hash 别名碰撞、JSON/SSE
+原 dispatch 身份与匹配回传。测试不复制名称分配器或 SHA256 实现。
+标准 Anthropic 名称 owner 同步点号 MCP 声明的强制选择和历史；
+标准 Chat outbound 由声明恢复完整名称，避免丢失 canonical namespace。
 
 真实 provider 验收须覆盖新115条历史与早期14条历史样本，断言首个 provider
 200、无失败 attempt、无切换，并验证真实 consumer 输出与匹配 follow-up。

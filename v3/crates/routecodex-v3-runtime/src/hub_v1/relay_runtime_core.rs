@@ -1,14 +1,6 @@
-//! relay 统一主循环骨架（大骨架）。
-//!
-//! 设计契约（Jason 2026-08-08）：
-//! - 所有 relay 协议（responses / anthropic / openai_chat / gemini）共享同一个主循环
-//!   `execute_v3_relay_runtime_core<C, T>`，协议差异收敛到 [`V3RelayProtocolCodec`]；
-//! - 生命周期（VR 重试 loop、错误策略循环、provider action recovery、SSE unfold）只存在于
-//!   骨架；骨架上的逻辑（共享辅助、codec 方法）不自己管理生命周期；
-//! - 禁止在骨架中出现协议字段名 / provider 特例；新增协议只需实现 codec。
-//!
-//! 里程碑 2：trait + 骨架。SSE 状态机（协议特定）经 [`V3RelayProtocolCodec::project_sse`]
-//! 收敛；JSON 响应链（resp01->02->03->04->05->06）经 `project_json_response` 收敛。
+//! Relay lifecycle executor. Protocol codecs own JSON/SSE projection;
+//! this skeleton owns selection, retry, provider recovery and attempt buffering.
+//! Architecture contract: docs/design/v3-hub-relay-fixed-pipeline-contract.md.
 
 use super::*;
 use crate::nodes::{V3AttemptStoreError, V3CommittedClientSseBuilder, V3RequestExecutionControl};
@@ -23,6 +15,7 @@ use crate::provider_failure_runtime_policy::{
 };
 use crate::runtime_timing::V3RuntimeTimingState;
 use futures_util::StreamExt;
+use provider_compat_core::goaichat_tool_names::GoaichatToolNameProjection;
 use routecodex_v3_config::{V3Config05ManifestPublished, V3WebSearchExecutionMode};
 use routecodex_v3_error::V3ProviderFailureSessionScope;
 use routecodex_v3_provider_responses::{
@@ -471,6 +464,7 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
         transport_intent: V3HubTransportIntent,
         trace: &mut Vec<&'static str>,
         compatibility_profile: Option<&str>,
+        provider_tool_names: &GoaichatToolNameProjection,
         web_search_execution_mode: V3WebSearchExecutionMode,
         web_search_state: Option<&V3WebSearchCenterState>,
         retain_response_cipher: bool,
@@ -495,6 +489,7 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
         provider: V3ProviderSseStream,
         provider_wire_protocol: V3HubProviderWireProtocol,
         compatibility_profile: Option<String>,
+        provider_tool_names: GoaichatToolNameProjection,
         web_search_execution_mode: V3WebSearchExecutionMode,
         web_search_state: Option<V3WebSearchCenterState>,
         retain_response_cipher: bool,
@@ -787,6 +782,7 @@ where
             ),
         };
         trace.push("ProviderReqCompat06ProviderCompat");
+        let provider_tool_names = req_compat.goaichat_tool_names.clone();
         let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
         let req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
         let provider_semantic = req09.into_provider_semantic_payload();
@@ -1073,6 +1069,7 @@ where
                     transport_intent,
                     &mut trace,
                     selected_target_compatibility_profile.as_deref(),
+                    &provider_tool_names,
                     selected.candidate.web_search_execution_mode,
                     request_web_search_state.as_ref(),
                     retain_response_cipher,
@@ -1261,6 +1258,7 @@ where
                     idle_guarded_stream,
                     provider_wire_protocol,
                     selected_target_compatibility_profile,
+                    provider_tool_names.clone(),
                     selected.candidate.web_search_execution_mode,
                     request_web_search_state.clone(),
                     retain_response_cipher,

@@ -348,7 +348,7 @@ chains:
       consumes: [v3.request.provider_semantic, v3.provider_compat.payload_boundary_contract]
       produces: [v3.hub.provider_wire_payload]
       side_channel_reads: [v3.hub.resolved_target, v3.hub.provider_protocol]
-      side_channel_writes: []
+      side_channel_writes: [v3.provider_compat.tool_name_projection]
   
 - chain_id: v3.provider_compat.request_invalid_error_source
   owner_feature_id: v3.provider_compat_profile_loading
@@ -386,7 +386,7 @@ chains:
     resource_flow:
       consumes: [v3.response.provider_raw, v3.provider_compat.payload_boundary_contract]
       produces: [v3.hub.response_semantic]
-      side_channel_reads: [v3.hub.provider_protocol]
+      side_channel_reads: [v3.hub.provider_protocol, v3.provider_compat.tool_name_projection]
       side_channel_writes: []
 - chain_id: v3.target.session_global_selection
   owner_feature_id: v3.virtual_router_target_interpreter

@@ -12,6 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 mod cc_sol;
 mod deepseek_console_go;
+pub mod goaichat_tool_names;
 mod minimax_anthropic;
 pub mod namespace_tools;
 
@@ -46,6 +47,8 @@ pub fn apply_cc_sol_response_compat(payload: Value) -> Value {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AdapterContext {
+    #[serde(skip)]
+    pub goaichat_tool_names: goaichat_tool_names::GoaichatToolNameProjection,
     #[serde(default)]
     pub compatibility_profile: Option<String>,
     #[serde(default)]
@@ -139,6 +142,21 @@ pub fn run_req_outbound_stage3_compat(
     let Some(profile_id) = profile.as_deref() else {
         return Ok(build_compat_result(payload, None));
     };
+
+    if profile_id == "anthropic:goaichat"
+        && provider_protocol_matches(
+            adapter_context.provider_protocol.as_ref(),
+            "anthropic-messages",
+        )
+    {
+        goaichat_tool_names::GoaichatToolNameProjection::for_request(
+            Some(profile_id),
+            "anthropic-messages",
+            &payload,
+        )
+        .project_request(&mut payload);
+        return Ok(build_compat_result(payload, Some(profile_id.to_owned())));
+    }
 
     if is_responses_temperature_unsupported_profile(profile_id) {
         if provider_protocol_matches(
@@ -280,6 +298,20 @@ pub fn run_resp_inbound_stage3_compat(
     let Some(profile_id) = profile.as_deref() else {
         return Ok(build_compat_result(input.payload, None));
     };
+
+    if profile_id == "anthropic:goaichat"
+        && provider_protocol_matches(
+            input.adapter_context.provider_protocol.as_ref(),
+            "anthropic-messages",
+        )
+    {
+        let mut payload = input.payload;
+        input
+            .adapter_context
+            .goaichat_tool_names
+            .restore_response(&mut payload);
+        return Ok(build_compat_result(payload, Some(profile_id.to_owned())));
+    }
 
     if is_gemini_profile(profile_id) {
         if provider_protocol_matches(

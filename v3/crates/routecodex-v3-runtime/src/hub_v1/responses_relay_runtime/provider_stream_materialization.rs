@@ -85,10 +85,26 @@ pub async fn materialize_v3_provider_sse_as_canonical_response(
     provider_protocol: V3HubProviderWireProtocol,
     provider: routecodex_v3_provider_responses::V3ProviderSseStream,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
-    build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+    materialize_v3_provider_sse_as_canonical_response_with_tool_names(
+        provider_protocol,
+        provider,
+        Default::default(),
+    )
+    .await
+}
+
+pub(crate) async fn materialize_v3_provider_sse_as_canonical_response_with_tool_names(
+    provider_protocol: V3HubProviderWireProtocol,
+    provider: routecodex_v3_provider_responses::V3ProviderSseStream,
+    provider_tool_names: provider_compat_core::goaichat_tool_names::GoaichatToolNameProjection,
+) -> Result<Value, V3ResponsesRelayRuntimeError> {
+    let mut context = V3AnthropicResponsesProjectionContext::default();
+    context.provider_tool_names = provider_tool_names;
+    build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
         provider_protocol,
         provider,
         &V3RuntimeStreamObservation::default(),
+        &context,
     )
     .await
 }

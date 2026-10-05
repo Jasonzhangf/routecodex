@@ -43,9 +43,10 @@ pub async fn build_provider_resp_compat_02_from_v3_provider_resp_inbound_01_sse(
     })?;
     let provider = Box::pin(futures_util::stream::iter(chunks.into_iter().map(Ok)));
     let payload =
-        super::responses_relay_runtime::materialize_v3_provider_sse_as_canonical_response(
+        super::responses_relay_runtime::materialize_v3_provider_sse_as_canonical_response_with_tool_names(
             provider_protocol,
             provider,
+            input.goaichat_tool_names.clone(),
         )
         .await
         .map_err(|error| {
@@ -80,6 +81,7 @@ fn apply_v3_provider_resp_compat(
     run_resp_inbound_stage3_compat(ReqOutboundCompatInput {
         payload: input.payload.0.as_ref().clone(),
         adapter_context: AdapterContext {
+            goaichat_tool_names: input.goaichat_tool_names.clone(),
             compatibility_profile: profile.as_optional_string(),
             provider_protocol: Some(provider_protocol_compat_id(input.provider_protocol)),
             ..Default::default()

@@ -60,6 +60,7 @@ pub(super) fn anthropic_tool_use_as_responses_call(
         .ok_or(V3AnthropicCodecError::MalformedField {
             field: "tool_use.name",
         })?;
+    let name = context.provider_tool_names.client_name(name);
     let input = part
         .get("input")
         .ok_or(V3AnthropicCodecError::MalformedField {

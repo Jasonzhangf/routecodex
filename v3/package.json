@@ -1,6 +1,6 @@
 {
   "name": "routecodex-v3",
-  "version": "0.90.4832",
+  "version": "0.90.4835",
   "private": true,
   "description": "RouteCodex V3 independent build domain",
   "type": "module",
@@ -77,6 +77,7 @@
     "test:v3-provider-session-cooldown": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --lib health::tests -- --nocapture && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test provider_action_gate_session_isolation_contract -- --nocapture && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_direct_without_failure_session_header_reaches_provider -- --nocapture",
     "test:v3-provider-compat-profile-loading": "node scripts/run-v3-cargo-test.mjs -p provider-compat-core -- --nocapture && npm run test:v3-goaichat-hosted-tool-history-blackbox",
     "test:v3-goaichat-hosted-tool-history-blackbox": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test goaichat_hosted_tool_history_blackbox -- --nocapture --test-threads=1",
+    "test:v3-goaichat-long-tool-names": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test goaichat_long_tool_names -- --nocapture --test-threads=1",
     "verify:v3-responses-session-admission": "node scripts/architecture/verify-v3-responses-session-admission.mjs",
     "test:v3-responses-session-admission-red-fixtures": "node scripts/tests/v3-responses-session-admission-red-fixtures.mjs",
     "test:v3-responses-session-admission": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract http_sse_keepalive_config_ -- --nocapture && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --lib http_sse_keepalive_environment_compiler_ -- --nocapture && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --lib session_admission -- --nocapture && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --lib responses_sse -- --nocapture && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_same_listener_same_session_waits_for_release_then_returns_ok -- --exact --nocapture && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_same_listener_different_session_remains_concurrent -- --exact --nocapture && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_client_drop_releases_same_session_before_provider_eof -- --exact --nocapture",

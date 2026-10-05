@@ -246,8 +246,6 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
     request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
     route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
 ) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
-    // 统一 relay 主循环骨架（大骨架）：生命周期与编排在 execute_v3_relay_runtime_core，
-    // 协议差异收敛在 V3OpenAiChatRelayCodec。
     let routing_group = server_routing_group(manifest, &input.server_id)
         .map_err(|error| V3OpenAiChatRelayRuntimeError::Target(error.to_string()))?
         .to_string();
@@ -348,6 +346,7 @@ fn project_json_response(
     transport_intent: V3HubTransportIntent,
     trace: &mut Vec<&'static str>,
     compatibility_profile: Option<&str>,
+    provider_tool_names: &provider_compat_core::goaichat_tool_names::GoaichatToolNameProjection,
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
     web_search_center_state: Option<&V3WebSearchCenterState>,
     retain_response_cipher: bool,
@@ -412,7 +411,8 @@ fn project_json_response(
             V3HubInvocationSource::Client,
             transport_intent,
         )
-        .with_compatibility_profile(compatibility_profile),
+        .with_compatibility_profile(compatibility_profile)
+        .with_goaichat_tool_names(provider_tool_names.clone()),
     );
     trace.push("V3ProviderRespInbound01Raw");
     let compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01)?;
@@ -458,8 +458,11 @@ fn project_json_response(
         .and_then(Value::as_array)
         .is_some()
     {
-        project_v3_openai_chat_client_response_from_canonical(resp03.provider_payload())
-            .map_err(V3OpenAiChatRelayRuntimeError::Target)?
+        project_v3_openai_chat_client_response_from_canonical(
+            resp03.provider_payload(),
+            chat_request,
+        )
+        .map_err(V3OpenAiChatRelayRuntimeError::Target)?
     } else {
         resp03.provider_payload().clone()
     };
@@ -1411,6 +1414,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         transport_intent: V3HubTransportIntent,
         trace: &mut Vec<&'static str>,
         compatibility_profile: Option<&str>,
+        provider_tool_names: &provider_compat_core::goaichat_tool_names::GoaichatToolNameProjection,
         web_search_execution_mode: V3WebSearchExecutionMode,
         web_search_state: Option<&V3WebSearchCenterState>,
         retain_response_cipher: bool,
@@ -1426,6 +1430,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             transport_intent,
             trace,
             compatibility_profile,
+            provider_tool_names,
             web_search_execution_mode,
             web_search_state,
             retain_response_cipher,
@@ -1467,6 +1472,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         provider: V3ProviderSseStream,
         provider_wire_protocol: V3HubProviderWireProtocol,
         compatibility_profile: Option<String>,
+        provider_tool_names: provider_compat_core::goaichat_tool_names::GoaichatToolNameProjection,
         web_search_execution_mode: V3WebSearchExecutionMode,
         web_search_state: Option<V3WebSearchCenterState>,
         _retain_response_cipher: bool,
@@ -1482,6 +1488,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
                 session_id.clone(),
                 provider,
                 compatibility_profile,
+                provider_tool_names,
                 web_search_execution_mode,
                 web_search_state,
                 _retain_response_cipher,

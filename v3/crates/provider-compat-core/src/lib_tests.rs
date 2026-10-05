@@ -1,6 +1,87 @@
 use super::*;
 
 #[test]
+fn goaichat_long_names_reserve_short_dispatch_and_round_trip_typed_inverse() {
+    use goaichat_tool_names::GoaichatToolNameProjection;
+    let long = "f".repeat(65);
+    let sibling = format!("{}g", "f".repeat(64));
+    let reserved = namespace_tools::provider_tool_wire_names_with_prefix(
+        [long.clone()].into(),
+        Default::default(),
+        "tool_",
+    )
+    .remove(&long)
+    .unwrap();
+    let original = json!({"tools":[
+        {"name":long,"input_schema":{"type":"object","properties":{"a":{"type":"integer"}}}},
+        {"name":sibling,"input_schema":{"type":"object","properties":{"input":{"type":"string"}}}},
+        {"name":reserved,"input_schema":{"type":"object","properties":{"reserved":{"type":"boolean"}}}}
+    ],"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"paired","name":long,"input":{"a":19}}]}],
+    "tool_choice":{"type":"tool","name":long}});
+    let names = GoaichatToolNameProjection::for_request(
+        Some("anthropic:goaichat"),
+        "anthropic-messages",
+        &original,
+    );
+    let input = ReqOutboundCompatInput {
+        payload: original.clone(),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("anthropic:goaichat".into()),
+            provider_protocol: Some("anthropic-messages".into()),
+            goaichat_tool_names: names.clone(),
+            ..Default::default()
+        },
+        explicit_profile: None,
+    };
+    let wire = run_req_outbound_stage3_compat(input.clone())
+        .unwrap()
+        .payload;
+    let tool_names: Vec<&str> = wire["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect();
+    assert!(tool_names.iter().all(|name| name.len() <= 64));
+    assert_eq!(
+        tool_names
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        3
+    );
+    assert_eq!(wire["tools"][2], original["tools"][2]);
+    assert_eq!(
+        wire["tools"][0]["input_schema"],
+        original["tools"][0]["input_schema"]
+    );
+    assert_eq!(
+        wire["tools"][0]["name"],
+        wire["messages"][0]["content"][0]["name"]
+    );
+    assert_eq!(wire["tools"][0]["name"], wire["tool_choice"]["name"]);
+    let response = json!({"content":[
+        {"type":"tool_use","id":"paired","name":wire["tools"][0]["name"],"input":{"a":19}},
+        {"type":"tool_use","id":"reserved","name":reserved,"input":{"reserved":true}}
+    ]});
+    let restored = run_resp_inbound_stage3_compat(ReqOutboundCompatInput {
+        payload: response,
+        ..input.clone()
+    })
+    .unwrap()
+    .payload;
+    assert_eq!(restored["content"][0]["name"], long);
+    assert_eq!(restored["content"][0]["input"], json!({"a":19}));
+    assert_eq!(restored["content"][1]["name"], reserved);
+    let serialized = serde_json::to_value(input.adapter_context).unwrap();
+    assert!(serialized.get("goaichatToolNames").is_none());
+    let mut generic = original.clone();
+    GoaichatToolNameProjection::for_request(Some("chat:glm"), "anthropic-messages", &original)
+        .project_request(&mut generic);
+    assert_eq!(generic, original);
+}
+
+#[test]
 fn goaichat_profile_preserves_existing_hosted_extensions_and_other_protocols() {
     let payload = json!({"tools":[
         {"type":"web_search_20250305","name":"web_search","max_uses":7,

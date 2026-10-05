@@ -1,3 +1,4 @@
+use axum::response::{IntoResponse, Response};
 use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::spawn_v3_server_aggregate;
@@ -46,16 +47,14 @@ impl Drop for CounterEnvironment {
 #[derive(Clone)]
 struct Gateway {
     strict: bool,
+    long_call: bool,
     captures: Arc<Mutex<Vec<Value>>>,
 }
 
 // External HTTP peer reproduces the captured 115-message gateway regression:
 // adding an empty-parameters function envelope makes the first
 // attempt fail. The original native declaration and complete history pass.
-async fn provider(
-    State(state): State<Gateway>,
-    Json(body): Json<Value>,
-) -> (StatusCode, Json<Value>) {
+async fn provider(State(state): State<Gateway>, Json(body): Json<Value>) -> Response {
     state.captures.lock().await.push(body.clone());
     let hosted = body["tools"]
         .as_array()
@@ -76,6 +75,27 @@ async fn provider(
         tool.get("input_schema").is_some()
             && (tool.get("type").is_some() || tool.get("function").is_some())
     });
+    let names: Vec<&str> = body["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect();
+    let invalid_names = names.iter().any(|name| name.len() > 64)
+        || names
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            != names.len();
+    if state.strict && invalid_names {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"type":"error","error":{
+                "type":"invalid_request_error","message":"invalid function name"
+            }})),
+        )
+            .into_response();
+    }
     if state.strict
         && historical_call
         && (hosted["function"] == json!({"name":"web_search","parameters":{}}) || mixed_native)
@@ -85,13 +105,68 @@ async fn provider(
             Json(json!({"type":"error","error":{
                 "type":"invalid_request_error","message":"invalid function name"
             }})),
-        );
+        )
+            .into_response();
+    }
+    let call_name = if state.long_call {
+        body["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["description"] == "long-tool-target")
+            .unwrap()["name"]
+            .as_str()
+            .unwrap()
+    } else {
+        "exec_command"
+    };
+    if state.strict
+        && state.long_call
+        && call_name.len() == 64
+        && call_name.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"type":"error","error":{
+                "type":"invalid_request_error",
+                "message":"only auto, none, required or a named function are supported"
+            }})),
+        )
+            .into_response();
+    }
+    if state.long_call
+        && (body["tool_choice"]["type"] != "tool" || body["tool_choice"]["name"] != call_name)
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"type":"error","error":{
+                "type":"invalid_request_error","message":"forced tool choice mismatch"
+            }})),
+        )
+            .into_response();
     }
     let receipt = blocks.iter().any(|block| {
         block["type"] == "tool_result"
             && block["tool_use_id"] == "call_next"
             && block["content"].to_string().contains("EXECUTED:42")
     });
+    if receipt
+        && state.long_call
+        && !blocks.iter().any(|block| {
+            block["type"] == "tool_use"
+                && block["id"] == "call_next"
+                && block["name"] == call_name
+                && block["input"] == json!({"value":41})
+        })
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"type":"error","error":{
+                "type":"invalid_request_error","message":"followup tool identity mismatch"
+            }})),
+        )
+            .into_response();
+    }
     let (content, stop) = if receipt {
         (
             json!([{"type":"text","text":"receipt accepted:42"}]),
@@ -99,11 +174,19 @@ async fn provider(
         )
     } else {
         (
-            json!([{"type":"tool_use","id":"call_next","name":"exec_command",
+            json!([{"type":"tool_use","id":"call_next","name":call_name,
             "input":{"value":41}}]),
             "tool_use",
         )
     };
+    if state.long_call && body["stream"] == true {
+        let start = json!({"type":"message_start","message":{"id":"msg_gateway","type":"message","role":"assistant","model":"glm-5.3","content":[],"stop_reason":null,"usage":{"input_tokens":20,"output_tokens":0}}});
+        let block = json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call_next","name":call_name,"input":{}}});
+        let delta = json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"value\":41}"}});
+        let terminal = json!({"type":"message_delta","delta":{"stop_reason":stop},"usage":{"output_tokens":8}});
+        let sse = format!("event: message_start\ndata: {start}\n\nevent: content_block_start\ndata: {block}\n\nevent: content_block_delta\ndata: {delta}\n\nevent: content_block_stop\ndata: {{\"type\":\"content_block_stop\",\"index\":0}}\n\nevent: message_delta\ndata: {terminal}\n\nevent: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n");
+        return (StatusCode::OK, [("content-type", "text/event-stream")], sse).into_response();
+    }
     (
         StatusCode::OK,
         Json(
@@ -112,6 +195,7 @@ async fn provider(
         "usage":{"input_tokens":20,"output_tokens":8}}),
         ),
     )
+        .into_response()
 }
 
 fn free_port() -> u16 {
@@ -148,8 +232,10 @@ auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_GOAICHAT_BLAC
 health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
 [providers.gateway.models."glm-5.3"]
 wire_name = "glm-5.3"
-capabilities = ["text", "tools"]
+capabilities = ["text", "tools", "reasoning"]
 supports_streaming = true
+supports_thinking = true
+thinking = "medium"
 max_tokens = 4096
 max_context_tokens = 128000
 [route_groups.default.pools.default]
@@ -198,7 +284,7 @@ fn request(endpoint: &str, stream: bool) -> Value {
         _ => unreachable!(),
     });
     // Match the failing request's large inventory, including names that must
-    // not be truncated or replaced just because the hosted profile is active.
+    // retain their identity and schemas through the private wire representation.
     for index in 0..377 {
         let name = format!(
             "mcp__codex_apps__codex_security_cloud___defense_factory_workflow_repositories_{index}"
@@ -242,6 +328,16 @@ fn request(endpoint: &str, stream: bool) -> Value {
 }
 
 async fn run_round_trip(endpoint: &str, stream: bool, profile: &str, strict: bool) {
+    run_round_trip_with_long_call(endpoint, stream, profile, strict, false).await;
+}
+
+async fn run_round_trip_with_long_call(
+    endpoint: &str,
+    stream: bool,
+    profile: &str,
+    strict: bool,
+    long_call: bool,
+) {
     let _test_guard = TEST_LOCK.lock().await;
     let _counter_environment = CounterEnvironment::new();
     std::env::set_var("V3_GOAICHAT_BLACKBOX_KEY", "controlled-external-peer");
@@ -252,6 +348,7 @@ async fn run_round_trip(endpoint: &str, stream: bool, profile: &str, strict: boo
         .route("/v1/messages", post(provider))
         .with_state(Gateway {
             strict,
+            long_call,
             captures: captures.clone(),
         });
     let peer = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
@@ -264,6 +361,24 @@ async fn run_round_trip(endpoint: &str, stream: bool, profile: &str, strict: boo
         .build()
         .unwrap();
     let mut payload = request(endpoint, stream);
+    let original_call_name = if long_call {
+        let name =
+            "mcp__codex_apps__codex_security_cloud___defense_factory_workflow_repositories_0";
+        let target = &mut payload["tools"][3];
+        match endpoint {
+            "/v1/chat/completions" => target["function"]["description"] = json!("long-tool-target"),
+            _ => target["description"] = json!("long-tool-target"),
+        }
+        payload["tool_choice"] = match endpoint {
+            "/v1/responses" => json!({"type":"function","name":name}),
+            "/v1/chat/completions" => json!({"type":"function","function":{"name":name}}),
+            "/v1/messages" => json!({"type":"tool","name":name}),
+            _ => unreachable!(),
+        };
+        name
+    } else {
+        "exec_command"
+    };
     let first = client.post(&url).json(&payload).send().await;
     // Always release the server on a red run, before making assertions.
     if first.is_err() {
@@ -274,7 +389,66 @@ async fn run_round_trip(endpoint: &str, stream: bool, profile: &str, strict: boo
     let first = first.unwrap();
     assert_eq!(first.status(), StatusCode::OK);
     let wire = first.text().await.unwrap();
-    let response: Value = if stream {
+    let response: Value = if stream && endpoint == "/v1/messages" {
+        assert!(!wire.contains("event: error"), "{wire}");
+        let events: Vec<Value> = wire
+            .lines()
+            .filter_map(|line| line.strip_prefix("data: "))
+            .filter_map(|data| serde_json::from_str(data).ok())
+            .collect();
+        assert!(events.iter().any(|event| event["type"] == "message_stop"));
+        let mut message = events
+            .iter()
+            .find(|event| event["type"] == "message_start")
+            .unwrap()["message"]
+            .clone();
+        let mut block = events
+            .iter()
+            .find(|event| event["type"] == "content_block_start")
+            .unwrap()["content_block"]
+            .clone();
+        let arguments: String = events
+            .iter()
+            .filter_map(|event| event.pointer("/delta/partial_json").and_then(Value::as_str))
+            .collect();
+        if !arguments.is_empty() {
+            block["input"] = serde_json::from_str(&arguments).unwrap();
+        }
+        message["content"] = json!([block]);
+        message
+    } else if stream && endpoint == "/v1/chat/completions" {
+        assert!(wire.lines().any(|line| line == "data: [DONE]"), "{wire}");
+        let chunks: Vec<Value> = wire
+            .lines()
+            .filter_map(|line| line.strip_prefix("data: "))
+            .filter(|data| *data != "[DONE]")
+            .map(|data| serde_json::from_str(data).expect("valid Chat SSE JSON"))
+            .collect();
+        assert!(
+            chunks.iter().any(|chunk| chunk
+                .pointer("/choices/0/finish_reason")
+                .and_then(Value::as_str)
+                == Some("tool_calls")),
+            "{wire}"
+        );
+        let calls: Vec<&Value> = chunks
+            .iter()
+            .filter_map(|chunk| chunk.pointer("/choices/0/delta/tool_calls/0"))
+            .collect();
+        let name: String = calls
+            .iter()
+            .filter_map(|call| call.pointer("/function/name").and_then(Value::as_str))
+            .collect();
+        let arguments: String = calls
+            .iter()
+            .filter_map(|call| call.pointer("/function/arguments").and_then(Value::as_str))
+            .collect();
+        let id = calls
+            .iter()
+            .find_map(|call| call.get("id").and_then(Value::as_str))
+            .expect("tool call id");
+        json!({"choices":[{"message":{"role":"assistant","tool_calls":[{"type":"function","id":id,"function":{"name":name,"arguments":arguments}}]}}]})
+    } else if stream {
         assert!(
             !wire.contains("response.failed") && !wire.contains("event: error"),
             "{wire}"
@@ -297,7 +471,15 @@ async fn run_round_trip(endpoint: &str, stream: bool, profile: &str, strict: boo
                 .find(|item| item["type"] == "function_call")
                 .unwrap();
             (
-                call["name"].clone(),
+                if let Some(namespace) = call["namespace"].as_str() {
+                    json!(format!(
+                        "{}__{}",
+                        namespace.replacen('.', "__", 1),
+                        call["name"].as_str().unwrap()
+                    ))
+                } else {
+                    call["name"].clone()
+                },
                 call["call_id"].clone(),
                 serde_json::from_str::<Value>(call["arguments"].as_str().unwrap()).unwrap(),
             )
@@ -326,7 +508,10 @@ async fn run_round_trip(endpoint: &str, stream: bool, profile: &str, strict: boo
         }
         _ => unreachable!(),
     };
-    assert_eq!(name, "exec_command");
+    assert_eq!(
+        name, original_call_name,
+        "endpoint={endpoint} stream={stream} response={response}"
+    );
     assert_eq!(id, "call_next");
     assert_eq!(arguments, json!({"value":41}));
     // Actual public consumer execution and receipt, then a matching next turn.
@@ -411,12 +596,23 @@ async fn run_round_trip(endpoint: &str, stream: bool, profile: &str, strict: boo
         assert_eq!(stdin["input_schema"]["required"], json!(["session_id"]));
         for index in 0..377 {
             let name = format!("mcp__codex_apps__codex_security_cloud___defense_factory_workflow_repositories_{index}");
+            let wire_name = if profile == "anthropic:goaichat" {
+                provider_compat_core::namespace_tools::provider_tool_wire_names_with_prefix(
+                    [name.clone()].into(),
+                    Default::default(),
+                    "tool_",
+                )
+                .remove(&name)
+                .unwrap()
+            } else {
+                name.clone()
+            };
             assert!(
                 capture["tools"]
                     .as_array()
                     .unwrap()
                     .iter()
-                    .any(|tool| tool["name"] == name
+                    .any(|tool| tool["name"] == wire_name
                         && tool["input_schema"] == native["input_schema"]),
                 "lost declaration {name}"
             );
@@ -471,4 +667,18 @@ async fn goaichat_messages_hosted_history_round_trip_blackbox() {
 #[tokio::test]
 async fn generic_glm_anthropic_hosted_history_preserved_blackbox() {
     run_round_trip("/v1/responses", false, "chat:glm", false).await;
+}
+
+#[tokio::test]
+async fn goaichat_long_flat_names_round_trip_json_and_provider_sse() {
+    for (endpoint, stream) in [
+        ("/v1/responses", false),
+        ("/v1/responses", true),
+        ("/v1/chat/completions", false),
+        ("/v1/chat/completions", true),
+        ("/v1/messages", false),
+        ("/v1/messages", true),
+    ] {
+        run_round_trip_with_long_call(endpoint, stream, "anthropic:goaichat", true, true).await;
+    }
 }

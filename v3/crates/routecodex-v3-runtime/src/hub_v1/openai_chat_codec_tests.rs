@@ -386,23 +386,26 @@ fn transducer_projects_custom_tool_call_items() {
 // and custom_tool_call projection.
 #[test]
 fn non_stream_projection_resolves_item_id_and_projects_custom_tool_call() {
-    let projected = project_v3_openai_chat_client_response_from_canonical(&json!({
-        "status": "completed",
-        "output": [
-            {
-                "type": "function_call",
-                "id": "fc_item_only",
-                "name": "lookup",
-                "arguments": "{\"q\":\"alpha\"}"
-            },
-            {
-                "type": "custom_tool_call",
-                "call_id": "call_custom_1",
-                "name": "apply_patch",
-                "input": "*** Begin Patch"
-            }
-        ]
-    }))
+    let projected = project_v3_openai_chat_client_response_from_canonical(
+        &json!({
+            "status": "completed",
+            "output": [
+                {
+                    "type": "function_call",
+                    "id": "fc_item_only",
+                    "name": "lookup",
+                    "arguments": "{\"q\":\"alpha\"}"
+                },
+                {
+                    "type": "custom_tool_call",
+                    "call_id": "call_custom_1",
+                    "name": "apply_patch",
+                    "input": "*** Begin Patch"
+                }
+            ]
+        }),
+        &Value::Null,
+    )
     .expect("canonical tool items must project");
     let tool_calls = projected["choices"][0]["message"]["tool_calls"]
         .as_array()
@@ -428,10 +431,13 @@ fn non_stream_projection_resolves_item_id_and_projects_custom_tool_call() {
 #[test]
 fn non_stream_projection_never_emits_null_chat_finish_reason_for_in_progress_canonical() {
     for status in ["in_progress", "queued", "completed"] {
-        let projected = project_v3_openai_chat_client_response_from_canonical(&json!({
-            "status": status,
-            "output": [{"type": "output_text", "text": "pong"}]
-        }))
+        let projected = project_v3_openai_chat_client_response_from_canonical(
+            &json!({
+                "status": status,
+                "output": [{"type": "output_text", "text": "pong"}]
+            }),
+            &Value::Null,
+        )
         .expect("text output must project");
         let finish_reason = &projected["choices"][0]["finish_reason"];
         assert!(

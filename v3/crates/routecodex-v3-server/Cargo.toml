@@ -23,5 +23,6 @@ tokio.workspace = true
 tower-service.workspace = true
 
 [dev-dependencies]
+provider-compat-core = { path = "../provider-compat-core" }
 reqwest.workspace = true
 tokio-tungstenite.workspace = true
