@@ -40,7 +40,7 @@ schema、历史和配对结果完整保留。已退役的历史工具不得重�
 必跑黑盒 `npm run test:v3-goaichat-hosted-tool-history-blackbox`：
 公开 Responses JSON/SSE、Chat、Messages -> 外部 TCP Anthropic peer ->
 客户端实际执行 `exec_command` 的确定性 consumer -> 匹配输出的下一轮 ->
-正常响应。外部 peer 对本次已证实的额外 hosted function 与普通工具
+正常响应。外部 peer 对本次已证实的额外 hosted 空 parameters function 与普通工具
 type/function 形状返回400，而非无条件200。每轮只允许一次接受的 provider
 请求。用例保留380个工具、长名称、write_stdin 与已退役 update_plan 的配对
 历史。标准 `chat:glm` 对照同样保留原生 hosted 声明。

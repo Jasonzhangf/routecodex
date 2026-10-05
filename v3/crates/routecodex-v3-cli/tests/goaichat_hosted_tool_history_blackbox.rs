@@ -50,7 +50,7 @@ struct Gateway {
 }
 
 // External HTTP peer reproduces the captured 115-message gateway regression:
-// adding a function envelope to the native hosted declaration makes the first
+// adding an empty-parameters function envelope makes the first
 // attempt fail. The original native declaration and complete history pass.
 async fn provider(
     State(state): State<Gateway>,
@@ -76,7 +76,10 @@ async fn provider(
         tool.get("input_schema").is_some()
             && (tool.get("type").is_some() || tool.get("function").is_some())
     });
-    if state.strict && historical_call && (hosted.get("function").is_some() || mixed_native) {
+    if state.strict
+        && historical_call
+        && (hosted["function"] == json!({"name":"web_search","parameters":{}}) || mixed_native)
+    {
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({"type":"error","error":{
