@@ -36,6 +36,7 @@ fn project_sse_event_payload(
         V3HubTransportIntent::Sse,
         &mut trace,
         compatibility_profile,
+        &Default::default(),
         web_search_execution_mode,
         web_search_center_state,
         retain_response_cipher,
@@ -51,6 +52,7 @@ fn project_anthropic_sse_as_openai_chat_stream(
     session_id: String,
     stream: routecodex_v3_provider_responses::V3ProviderSseStream,
     compatibility_profile: Option<String>,
+    provider_tool_names: provider_compat_core::goaichat_tool_names::GoaichatToolNameProjection,
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
     web_search_center_state: Option<V3WebSearchCenterState>,
     retain_response_cipher: bool,
@@ -97,6 +99,7 @@ fn project_anthropic_sse_as_openai_chat_stream(
         )| {
             let request_id = request_id.clone();
             let session_id = session_id.clone();
+            let provider_tool_names = provider_tool_names.clone();
             async move {
             loop {
                 if let Some(frame) = pending.pop_front() {
@@ -274,7 +277,7 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                         "Anthropic SSE emitted data after [DONE]".to_string()
                                     );
                                 }
-                                let event: Value = serde_json::from_str(data)
+                                let mut event: Value = serde_json::from_str(data)
                                     .map_err(|error| error.to_string())?;
                                 if let Some(failure) = classify_v3_provider_terminal_admission(
                                     V3HubProviderWireProtocol::Anthropic,
@@ -285,6 +288,7 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                         failure.code, failure.message
                                     ));
                                 }
+                                provider_tool_names.restore_response(&mut event);
                                 for mut payload in transducer.push_event(event)? {
                                     let governed = project_sse_event_payload(
                                         request_id.as_str(),

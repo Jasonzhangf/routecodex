@@ -402,7 +402,7 @@ fn non_stream_projection_resolves_item_id_and_projects_custom_tool_call() {
                 "input": "*** Begin Patch"
             }
         ]
-    }))
+    }), &Value::Null)
     .expect("canonical tool items must project");
     let tool_calls = projected["choices"][0]["message"]["tool_calls"]
         .as_array()
@@ -431,7 +431,7 @@ fn non_stream_projection_never_emits_null_chat_finish_reason_for_in_progress_can
         let projected = project_v3_openai_chat_client_response_from_canonical(&json!({
             "status": status,
             "output": [{"type": "output_text", "text": "pong"}]
-        }))
+        }), &Value::Null)
         .expect("text output must project");
         let finish_reason = &projected["choices"][0]["finish_reason"];
         assert!(

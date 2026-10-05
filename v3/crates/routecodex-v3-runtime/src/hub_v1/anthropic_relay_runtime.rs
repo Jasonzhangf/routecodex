@@ -656,6 +656,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             }
         };
         trace.push("ProviderReqCompat06ProviderCompat");
+        let goaichat_tool_names = req_compat.goaichat_tool_names.clone();
         let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
         let req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
         let provider_semantic = req09.into_provider_semantic_payload();
@@ -957,7 +958,8 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         V3HubInvocationSource::Client,
                         V3HubTransportIntent::Sse,
                     )
-                    .with_compatibility_profile(selected_target_compatibility_profile.as_deref()),
+                    .with_compatibility_profile(selected_target_compatibility_profile.as_deref())
+                    .with_goaichat_tool_names(goaichat_tool_names.clone()),
                 );
                 let (client_response, servertool_followup_required, stream_observation) =
                     match closeout_anthropic_relay_sse_response(
@@ -1143,7 +1145,9 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 let provider_response_snapshot = provider_value.clone();
                 let hook_provider_value =
                     if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
-                        match project_v3_anthropic_message_as_responses_response(&provider_value) {
+                        let mut projection = V3AnthropicResponsesProjectionContext::default();
+                        projection.provider_tool_names = goaichat_tool_names.clone();
+                        match project_v3_anthropic_message_as_responses_response_with_context(&provider_value, &projection) {
                             Ok(value) => value,
                             Err(error) => {
                                 let failure = provider_runtime_failure(
@@ -1195,7 +1199,8 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         V3HubInvocationSource::Client,
                         transport_intent,
                     )
-                    .with_compatibility_profile(selected_target_compatibility_profile.as_deref()),
+                    .with_compatibility_profile(selected_target_compatibility_profile.as_deref())
+                    .with_goaichat_tool_names(goaichat_tool_names.clone()),
                 );
                 let (client_response, servertool_followup_required, stream_observation) =
                     match closeout_anthropic_relay_response(

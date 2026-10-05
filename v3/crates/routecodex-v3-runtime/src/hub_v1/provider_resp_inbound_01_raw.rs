@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3ProviderRespInbound01Raw {
+    pub(crate) goaichat_tool_names: provider_compat_core::goaichat_tool_names::GoaichatToolNameProjection,
     pub(crate) payload: V3HubResponsePayload,
     pub(crate) raw_sse_chunks: Option<Arc<Vec<Vec<u8>>>>,
     pub(crate) entry_protocol: V3HubEntryProtocol,
@@ -27,6 +28,7 @@ pub struct V3ProviderRespInbound01Raw {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3ProviderRespInbound01RawContext {
+    pub(crate) goaichat_tool_names: provider_compat_core::goaichat_tool_names::GoaichatToolNameProjection,
     pub(crate) entry_protocol: V3HubEntryProtocol,
     pub(crate) provider_protocol: V3HubProviderWireProtocol,
     pub(crate) source_provider_protocol: V3HubProviderWireProtocol,
@@ -45,6 +47,7 @@ impl V3ProviderRespInbound01RawContext {
         transport_intent: V3HubTransportIntent,
     ) -> Self {
         Self {
+            goaichat_tool_names: Default::default(),
             entry_protocol,
             provider_protocol,
             source_provider_protocol: provider_protocol,
@@ -65,6 +68,11 @@ impl V3ProviderRespInbound01RawContext {
 
     pub fn with_compatibility_profile(mut self, compatibility_profile: Option<&str>) -> Self {
         self.compatibility_profile = V3ProviderCompatProfileId::from_config(compatibility_profile);
+        self
+    }
+
+    pub(crate) fn with_goaichat_tool_names(mut self, names: provider_compat_core::goaichat_tool_names::GoaichatToolNameProjection) -> Self {
+        self.goaichat_tool_names = names;
         self
     }
 }
@@ -95,6 +103,7 @@ pub fn build_v3_provider_resp_inbound_01_raw_with_compat_profile(
 ) -> V3ProviderRespInbound01Raw {
     V3ProviderRespInbound01Raw {
         payload: V3HubResponsePayload(Arc::new(payload)),
+        goaichat_tool_names: context.goaichat_tool_names,
         raw_sse_chunks: None,
         entry_protocol: context.entry_protocol,
         provider_protocol: context.provider_protocol,
@@ -112,6 +121,7 @@ pub fn build_v3_provider_resp_inbound_01_raw_from_sse_chunks(
 ) -> V3ProviderRespInbound01Raw {
     V3ProviderRespInbound01Raw {
         payload: V3HubResponsePayload(Arc::new(Value::Null)),
+        goaichat_tool_names: context.goaichat_tool_names,
         raw_sse_chunks: Some(Arc::new(chunks)),
         entry_protocol: context.entry_protocol,
         provider_protocol: context.provider_protocol,

@@ -5,6 +5,7 @@ use super::V3AnthropicCodecError;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct V3AnthropicResponsesProjectionContext {
+    pub(crate) provider_tool_names: provider_compat_core::goaichat_tool_names::GoaichatToolNameProjection,
     metadata: Option<Value>,
     custom_tool_names: BTreeMap<String, String>,
     namespaced_custom_tool_identities: BTreeMap<String, (String, String)>,
@@ -34,8 +35,10 @@ impl V3AnthropicResponsesProjectionContext {
             super::namespace_tool_names::anthropic_declared_tool_names(request);
         for (client_path, provider_name) in anthropic_client_names {
             if let Some((namespace, name)) = client_path.rsplit_once('.') {
-                mcp_tool_identities
-                    .insert(provider_name, (namespace.to_string(), name.to_string()));
+                // Standard flat-function dispatch normalization already owns
+                // its identity, including the optional functions.mcp__ prefix.
+                mcp_tool_identities.entry(provider_name)
+                    .or_insert_with(|| (namespace.to_string(), name.to_string()));
             }
         }
         let custom_tool_names = governed_custom_tool_names(request)?;
@@ -54,6 +57,7 @@ impl V3AnthropicResponsesProjectionContext {
                 })
                 .collect();
         Ok(Self {
+            provider_tool_names: Default::default(),
             metadata,
             custom_tool_names,
             namespaced_custom_tool_identities,
@@ -65,6 +69,7 @@ impl V3AnthropicResponsesProjectionContext {
     pub(crate) fn governed_custom_tool_client_name(&self, name: &str) -> Option<&str> {
         self.custom_tool_names.get(name).map(String::as_str)
     }
+
 
     pub(crate) fn namespaced_custom_tool_identity(&self, name: &str) -> Option<(&str, &str)> {
         self.namespaced_custom_tool_identities

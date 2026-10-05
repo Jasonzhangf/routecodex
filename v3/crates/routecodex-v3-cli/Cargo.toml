@@ -20,6 +20,7 @@ servertool-core.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+provider-compat-core = { path = "../provider-compat-core" }
 axum.workspace = true
 libc.workspace = true
 reqwest.workspace = true

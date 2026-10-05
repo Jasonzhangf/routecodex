@@ -471,6 +471,7 @@ features:
   - Compat does not strip, reconstruct, or route control state and does not own Chat Process or SSE semantics.
   - Compat does not own retry, provider switching or health; typed Error owns request-local compatibility handling.
   - Generic chat:glm Anthropic passthrough and other provider protocols never receive Goaichat private hosted-tool fields.
+  - Only anthropic:goaichat maps long wire names; generic Anthropic keeps the original names. Private aliases reserve all current names and restore typed attempt-local function/custom dispatch in JSON and buffered SSE.
   - Goaichat compatibility never adds function envelopes to native hosted declarations, adds type/function envelopes to ordinary Anthropic declarations, or restores retired historical tools to the callable inventory.
   black_box_regression:
     command: npm run test:v3-goaichat-hosted-tool-history-blackbox
@@ -480,9 +481,14 @@ features:
     - goaichat_chat_hosted_history_round_trip_blackbox
     - goaichat_messages_hosted_history_round_trip_blackbox
     - generic_glm_anthropic_hosted_history_preserved_blackbox
+    - goaichat_long_flat_names_round_trip_json_and_provider_sse
+    additional_commands:
+    - command: npm --prefix v3 run test:v3-goaichat-long-tool-names
+      test_ids: [goaichat_long_tool_names_public_http_regression]
   required_gates:
   - npm run test:v3-provider-compat-profile-loading
   - npm run test:v3-goaichat-hosted-tool-history-blackbox
+  - npm --prefix v3 run test:v3-goaichat-long-tool-names
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries

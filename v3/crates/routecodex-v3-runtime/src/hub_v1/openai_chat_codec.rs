@@ -166,6 +166,7 @@ fn read_v3_openai_chat_tool_identity(item: &Map<String, Value>) -> &str {
 /// Chat client contract at RespOutbound05.
 pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
     canonical: &Value,
+    chat_request: &Value,
 ) -> Result<Value, String> {
     let object = canonical
         .as_object()
@@ -216,6 +217,16 @@ pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
                     .map(read_v3_openai_chat_tool_identity)
                     .unwrap_or_default();
                 let name = item.get("name").and_then(Value::as_str).unwrap_or_default();
+                // Chat dispatch uses the exact declared function name. Canonical
+                // Responses may split that identity into namespace and leaf.
+                let qualified = item.get("namespace").and_then(Value::as_str)
+                    .map(|namespace| format!("{namespace}.{name}"));
+                let name = qualified.as_deref().and_then(|identity| {
+                    chat_request.get("tools").and_then(Value::as_array)
+                        .into_iter().flatten()
+                        .filter_map(provider_compat_core::namespace_tools::provider_function_tool_name)
+                        .find(|declared| provider_compat_core::namespace_tools::normalize_client_tool_dispatch_name(declared) == identity)
+                }).unwrap_or(qualified.as_deref().unwrap_or(name));
                 let arguments = item
                     .get("arguments")
                     .and_then(Value::as_str)

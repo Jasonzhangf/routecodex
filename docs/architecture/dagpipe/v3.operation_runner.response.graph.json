@@ -15,7 +15,7 @@
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": ["v3.operation_runner.attempt_projection_context"],
+        "reads": ["v3.operation_runner.attempt_projection_context", "v3.provider_compat.tool_name_projection"],
         "writes": []
       }
     },

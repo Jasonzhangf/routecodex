@@ -884,6 +884,24 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+  - resource_id: v3.provider_compat.tool_name_projection
+    resource_kind: projection_resource
+    lifecycle: v3.hub_pipeline.v1.provider_compat
+    owner_feature_id: v3.provider_compat_profile_loading
+    owner_crate: provider-compat-core
+    owner_node: ProviderReqCompat06ProviderCompat / ProviderRespCompat02ProviderCompat
+    identity: [requestId, attemptId, providerProtocol, compatibilityProfile]
+    semantic_contract:
+      profile: Only explicit anthropic:goaichat Messages wire uses the collision-free 64-character allocator.
+      request: Keep declarations, tool_use history and forced tool choice consistent; preserve schemas and hosted shape.
+      inverse: Carry GoaichatToolNameProjection from the selected request attempt through typed raw/projection context; restore original tool dispatch before client projection.
+      isolation: The inverse is not serialized into payload, metadata, logs or snapshots; it is never shared with the next candidate.
+    allowed_writers: [ProviderReqCompat06ProviderCompat]
+    allowed_readers: [ProviderRespCompat02ProviderCompat, V3ProviderRespInbound01Raw, V3AnthropicResponsesProjectionContext]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-debug, MetadataCenter, SSE transport]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
   - resource_id: v3.provider_compat.payload_boundary_contract
     resource_kind: protocol_contract
     lifecycle: v3.hub_pipeline.v1.provider_compat

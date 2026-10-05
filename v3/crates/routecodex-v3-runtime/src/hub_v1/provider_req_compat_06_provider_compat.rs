@@ -26,6 +26,7 @@ pub struct ProviderReqCompat06ProviderCompat {
     pub(crate) previous: V3HubReqOutbound07ProviderSemantic,
     pub(crate) profile: V3ProviderCompatProfileId,
     pub(crate) payload: V3HubOpaquePayload,
+    pub(crate) goaichat_tool_names: provider_compat_core::goaichat_tool_names::GoaichatToolNameProjection,
 }
 
 pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
@@ -35,12 +36,13 @@ pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
         Some(profile) => V3ProviderCompatProfileId::from_config(Some(profile)),
         None => V3ProviderCompatProfileId::Passthrough,
     };
-    let (payload, drops) = apply_v3_provider_req_compat(&input, &profile)?;
+    let (payload, drops, goaichat_tool_names) = apply_v3_provider_req_compat(&input, &profile)?;
     Ok(ProviderReqCompat06Projected {
         node: ProviderReqCompat06ProviderCompat {
             previous: input,
             profile,
             payload: V3HubOpaquePayload(std::sync::Arc::new(payload)),
+            goaichat_tool_names,
         },
         drops,
     })
@@ -49,16 +51,19 @@ pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
 pub(super) fn apply_v3_provider_req_compat(
     input: &V3HubReqOutbound07ProviderSemantic,
     profile: &V3ProviderCompatProfileId,
-) -> Result<(Value, Vec<V3ProjectionDropRecord>), V3ProviderCompatError> {
+) -> Result<(Value, Vec<V3ProjectionDropRecord>, provider_compat_core::goaichat_tool_names::GoaichatToolNameProjection), V3ProviderCompatError> {
     let (payload, drops) = build_v3_provider_standard_protocol_payload_from_req07(input)
         .map_err(|reason| classify_v3_provider_compat_error("request_protocol", profile, reason))?;
+    let goaichat_tool_names = provider_compat_core::goaichat_tool_names::GoaichatToolNameProjection::for_request(
+        profile.as_optional_string().as_deref(), &provider_protocol_compat_id(input.provider_protocol), &payload,
+    );
     let payload = apply_v3_provider_req_compat_to_provider_payload(
         payload,
         input.selected_target(),
         input.provider_protocol,
         profile,
     )?;
-    Ok((payload, drops))
+    Ok((payload, drops, goaichat_tool_names))
 }
 
 fn project_v3_images_for_selected_target_session_compat(
