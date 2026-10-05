@@ -510,20 +510,12 @@ impl<'a> V3ConsoleLayeredBlock<'a> {
         } else {
             &safe_session
         };
-        let session_width =
-            V3_CONSOLE_DEBUG_SCOPE_COLUMN_WIDTH - v3_console_display_width("[sessionID:]");
-        let display_session = truncate_v3_console_display_width_middle(session, session_width);
-        let scope = format!("[sessionID:{display_session}]");
-        let diagnostic = format!(
+        let scope = format!("[sessionID:{session}]");
+        format!(
             "{} {}",
             align_v3_console_display_width(&scope, V3_CONSOLE_DEBUG_SCOPE_COLUMN_WIDTH),
             self.debug
-        );
-        if display_session == session {
-            diagnostic
-        } else {
-            format!("{diagnostic} sessionIDFull={session}")
-        }
+        )
     }
 }
 

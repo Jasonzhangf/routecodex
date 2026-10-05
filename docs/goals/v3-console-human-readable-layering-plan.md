@@ -31,7 +31,7 @@ Out of scope（保留 dirty worktree，不在本次清理）：
 4. **唯一 owner**：`routecodex-v3-server` 拥有 console 投影；runtime / virtual-router / provider-responses 不写 console，不写分层。
 5. **no payload mutation**：metadata / request payload / response payload / SSE 字节不进 headline。
 6. **真实 observability**：routed request/response block 当前只接 Responses Direct/Relay 的真实 runtime observability；Server 不为 OpenAI Chat / Anthropic / Gemini Relay 伪造 completed/relay/provider/model/usage/attempts。
-7. **颜色与列宽**：完整 human line 使用 request/session color（错误红色、Stopless 橙色）；只有完整 diagnostic line 使用 dim。human 三列严格限制为 24/20/36 terminal display-width，超长 ASCII/CJK 中间截断；diagnostic session scope 宽 52。
+7. **颜色与列宽**：完整 human line 使用 request/session color（错误红色、Stopless 橙色）；只有完整 diagnostic line 使用 dim。human 三列严格限制为 24/20/36 terminal display-width，超长 ASCII/CJK 中间截断；diagnostic session scope 宽 96，保留完整 safe session id，只在短于 96 列时 pad，不截断也不追加 `sessionIDFull`。
 8. **路由真相 fail-fast**：human prefix 与 headline 消费同一个 `V3ConsoleRouteProjection`；缺少 `pool_id` 与 `routing_group_id` 时 panic，不生成 `route:selected` 或其它成功态占位。
 9. **错误链真实对象**：Relay 首次观察到 SSE failure 时把 observation 交给 error owner 的 `raise_v3_sse_provider_failure`；Direct 保留 provider stream 已给出的原始 typed Error01；client disconnect 在 `V3ServerRespOutbound06ClientFrame` 调用 error owner 的 `raise_v3_sse_client_disconnect`。HTTP/SSE 已提交后的 closeout 只能投影该 Error01 到 console 并让流显式失败，不能伪造 route/default exhaustion 或 Error06；只有请求仍可执行路由策略时，Runtime 才能基于真实 availability 生成 terminal Error05→Error06。Server 不拥有 Error builder/classifier，禁止 typed error 降成字符串后重建。Error01→Error06 的相邻错误链唯一归 `v3.debug_error_foundation.mainline`；Console 只消费已构造的 Error01 或 Error06。
 10. **terminal output 资源**：stdout/stderr 是 Server-owned `v3.console.terminal_output`；startup 与 debug-sink failure 不得伪登记为 `v3.debug.artifact` 成功写入。
@@ -44,7 +44,7 @@ Out of scope（保留 dirty worktree，不在本次清理）：
 V3ConsoleLayeredBlock::new(human_prefix, headline, debug, session_id)
 ```
 
-plain/color renderer 都拼 human_prefix + headline + `  [sessionID:...] ` + debug，并在同一物理行内维持 headline/diagnostic 的颜色层级。session_id 走 safe-label；超长值中间截断以保持列宽，并在 diagnostic 尾部保留 `sessionIDFull`。
+plain/color renderer 都拼 human_prefix + headline + `  [sessionID:...] ` + debug，并在同一物理行内维持 headline/diagnostic 的颜色层级。session_id 走 safe-label；diagnostic scope 保留完整 session id，超过 96 列预算时不截断、不追加 `sessionIDFull`，只让 debug 向右排。
 
 `colorize_v3_layered_console_line(block, headline_color, debug_color)` 对完整 human line 和完整 diagnostic line 分层着色；缺 headline/debug 即 panic（fail-fast）。
 
