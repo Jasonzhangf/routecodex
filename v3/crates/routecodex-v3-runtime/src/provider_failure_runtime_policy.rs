@@ -1685,6 +1685,28 @@ pub(crate) fn resolve_v3_relay_opaque_target_once(
         })
 }
 
+/// REQ04 Target expansion owner: consume one real opaque target hit and expand
+/// it through the existing Target interpreter. This helper does not classify
+/// the request or hit the Router again. It also does not read health, probe,
+/// select a concrete provider, or decide execution mode.
+pub(crate) fn expand_v3_relay_target_candidates_from_opaque_hit(
+    manifest: &V3Config05ManifestPublished,
+    hit: V3Router07OpaqueTargetHitOnce,
+    deterministic_sample: u64,
+) -> Result<V3Target09CandidateSetExpanded, V3Error01SourceRaised> {
+    let target = V3TargetInterpreter::default();
+    let kind = target.classify_kind(hit);
+    target
+        .expand_candidates(manifest, kind, deterministic_sample)
+        .map_err(|error| {
+            target_resolution_source(
+                "V3Target09CandidateSetExpanded",
+                "target_resolution_candidate_expansion_failed",
+                error,
+            )
+        })
+}
+
 fn build_v3_relay_target_candidates(
     input: &V3RelayProviderTargetResolutionInput<'_>,
 ) -> Result<V3Target09CandidateSetExpanded, V3RelayProviderTargetResolution> {
@@ -1697,22 +1719,12 @@ fn build_v3_relay_target_candidates(
         input.deterministic_sample,
     )
     .map_err(V3RelayProviderTargetResolution::Failed)?;
-    let target = V3TargetInterpreter::default();
-    let kind = target.classify_kind(hit);
-    let expanded = match target.expand_candidates(input.manifest, kind, input.deterministic_sample)
-    {
-        Ok(expanded) => expanded,
-        Err(error) => {
-            return Err(V3RelayProviderTargetResolution::Failed(
-                target_resolution_source(
-                    "V3Target09CandidateSetExpanded",
-                    "target_resolution_candidate_expansion_failed",
-                    error,
-                ),
-            ));
-        }
-    };
-    Ok(expanded)
+    expand_v3_relay_target_candidates_from_opaque_hit(
+        input.manifest,
+        hit,
+        input.deterministic_sample,
+    )
+    .map_err(V3RelayProviderTargetResolution::Failed)
 }
 
 pub(crate) fn resolve_v3_relay_target_outcome(
@@ -1801,3 +1813,7 @@ mod tests;
 #[cfg(test)]
 #[path = "provider_failure_runtime_policy/req03_opaque_owner_tests.rs"]
 mod req03_opaque_owner_tests;
+
+#[cfg(test)]
+#[path = "provider_failure_runtime_policy/req04_target_owner_tests.rs"]
+mod req04_target_owner_tests;
