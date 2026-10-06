@@ -2,6 +2,7 @@ use crate::attempt_store::{V3AttemptStorePolicyAuthoringConfig, V3AttemptStorePo
 use crate::memory_raw_capture::{V3MemoryRawCaptureAuthoringConfig, V3MemoryRawCaptureManifest};
 use crate::provider_priority_schedule::V3ProviderPriorityScheduleAuthoringConfig;
 use crate::runtime_config::{V3RuntimeAuthoringConfig, V3RuntimeManifest};
+use crate::V3ReasoningEffort;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -569,6 +570,8 @@ pub struct V3ProviderAuthoringConfig {
     pub semantic_error_policy: Vec<V3ProviderSemanticErrorPolicyAuthoringConfig>,
     #[serde(default)]
     pub provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig,
+    #[serde(default)]
+    pub reasoning_effort: Option<V3ReasoningEffort>,
     #[serde(default, alias = "compatibilityProfile")]
     pub compatibility_profile: Option<String>,
     #[serde(default)]
@@ -1192,6 +1195,7 @@ pub struct V3ProviderManifest {
     pub concurrency: Option<V3ProviderConcurrencyAuthoringConfig>,
     pub health: Option<V3ProviderHealthAuthoringConfig>,
     pub provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig,
+    pub reasoning_effort: Option<V3ReasoningEffort>,
     pub compatibility_profile: Option<String>,
     pub features: BTreeMap<String, bool>,
     /// per-request 总超时（毫秒）

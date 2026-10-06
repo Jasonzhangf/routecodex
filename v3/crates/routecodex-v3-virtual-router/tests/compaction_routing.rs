@@ -80,6 +80,7 @@ fn manifest() -> V3Config05ManifestPublished {
                 concurrency: None,
                 health: None,
                 provider_request_cleanup: Default::default(),
+                reasoning_effort: None,
                 compatibility_profile: None,
                 headers: BTreeMap::new(),
                 features: BTreeMap::new(),

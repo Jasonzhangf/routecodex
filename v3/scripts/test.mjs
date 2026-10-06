@@ -61,6 +61,8 @@ await run(
     '--test',
     'user_config_provider_request_dry_run',
     '--test',
+    'provider_reasoning_effort_policy_blackbox',
+    '--test',
     'vr_full_function_controlled_replay',
     '--',
     '--nocapture',

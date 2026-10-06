@@ -39,6 +39,7 @@ const files = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_reasoning_effort.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests.rs',
@@ -642,7 +643,7 @@ const cases = [
   },
   {
     name: 'DeepSeek max effort compatibility projection regresses to high',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_reasoning_effort.rs',
     from: '"xhigh" | "max" => "max",',
     to: '"xhigh" | "max" => "high",',
     diagnostic: /"xhigh" \| "max" => "max"/u,
