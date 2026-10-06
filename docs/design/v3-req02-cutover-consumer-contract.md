@@ -43,19 +43,21 @@ REQ06 owner提供最小`project_canonical_request(...) -> CanonicalRequestProjec
 
 response owner提供`ResponseProjectionView::from_successful_attempt(request_context, attempt_context)`并接入既有JSON/SSE/client projector；这项必须有真实反向恢复行为和工具回合证据，类型定义本身不算消费。
 
-### Direct-to-Relay 已归一输入的显式搬运补链
+### Direct-to-Relay / Relay-to-Direct 已归一输入的显式搬运补链
 
 2026-10-05 的公开 Chat runtime probe 在同一请求句柄已发布原始 pair 后进入 Relay，返回 `request scope already has an original pair; raw entry cannot republish`，且没有 provider attempt。这是重复归一化的接线缺口。本节补齐已有 handoff 合同的 typed 表达；编码准入等待本节独立设计审查，不表示实现或接线通过。
 
 - Direct kernel 的 handoff carrier 增加 `canonical_request: Value`，搬运当次已归一结果；`request_execution_control`、selected target、expanded candidates、exclusions、observability accumulator 和 finalizer 仍移动原对象。Server 不从 raw payload 重建这些数据。
 - Runtime invocation origin 增加 `DirectRelayHandoff`。它只消费 `AlreadyCanonical`，且只读同一 handle 的已发布原始 pair；不得伪称 Retry/InternalFollowup，不 recapture、不清空 slots、不另建 scope。
 - 普通客户端 Relay 入口继续显式选择 `ClientEntry + RawEntry`。handoff 的公开 adapter 显式选择 `DirectRelayHandoff + AlreadyCanonical`。协议只搬运 carrier，归一选择和资源政策在共享 Runtime entry 执行；不按 payload shape、模型、pair 是否存在或日志推断 origin。
+- **反向 Relay-to-Direct 边（2026-10-06 R53 独立设计审查补正）**：反向同样使用本节的 typed 形状，但载具与入口不同名，必须显式实现。Relay→Direct 的 carrier 是 `hub_v1/responses_relay_types.rs` 的 `V3ResponsesProtocolDirectHandoff`；它增加**一个 control 字段**承载 Direct 入口 origin 枚举 `{ClientEntry, DirectRelayHandoff}`，业务半边仍是已归一的 `canonical_request`。Direct kernel 入口 `kernel/direct_request_scope.rs` 的 `build_v3_direct_request_canonical_from_captured` 当前把 origin 硬编码为 `RequestOriginKind::ClientEntry`；修订后 origin 必须是显式入参，由其两个调用方 `kernel.rs` 与 `kernel/v3_direct_core.rs` 传入：普通客户端入口传 `ClientEntry`，Server 的 Relay→Direct adapter 传 `DirectRelayHandoff`。禁止用 `original_pair().is_ok()` 之类存在性推断代替显式 origin。
+- 镜像 Direct→Relay **不是**充分条件：Direct→Relay 方向可用，是因为 Relay entry 已接受显式 origin 形参（`hub_v1/relay_runtime_core.rs` 的 `V3RelayEntryOrigin`）；而 Direct kernel 入口此前没有 origin 形参，直接复制字段会得到惰性字段。同时 `kernel/direct_state.rs` 的 `V3DirectRelayHandoffRequestOrigin` 已声明但全树无消费者，属同一语义的死实现：本次修改必须消费它或物理删除它，不得保留第二套 origin 表达。
 - 同协议 Data 与 control 分离：canonical_request 是业务数据，origin/target/候选及请求资源是 typed control。adapter 不把这些控制事实写入业务 metadata。
 - Chat handoff 复用已选 target、expanded candidates 与本请求 exclusions；不再次进入 Virtual Router。首 attempt 消费原选中候选；后续失败仍由 Error/Target Interpreter 在原候选集合内选择。Responses handoff 复用现有预选与候选参数，补同一 canonical/origin 边。不得为消除重复归一化而重写 routing/retry 策略。
 - 共享 REQ02 builder 处理新增 origin；既有 request graph 的 Capture/Normalize/Chat Process/Outbound 顺序不变。本节没有新增节点、跨图 shortcut 或第二 normalization 实现。
 - handoff guard 仍由 Runtime 搬运：成功输出、失败、取消/future drop/HTTP断连均先清 attempt 再清 request。Server 不复制 finalizer。
 
-唯一实现范围是 `kernel/{direct_state.rs,direct_runtime_helpers_stream.rs,v3_direct_core.rs}` 的 handoff 搬运行、`operation_runner/request_context_store.rs` 的 origin 契约、`req_inbound_02_normalized.rs` 的 entry 选择、共享 `relay_runtime_core{.rs,/request_scope.rs}` 和 Responses Relay entry、Chat handoff adapter、Server 两条 handoff caller。Direct actual-emission worker 的 request projection 和 response worker 的 successful publication/inverse 行不属于本补链。
+唯一实现范围是 `kernel/{direct_state.rs,direct_runtime_helpers_stream.rs,v3_direct_core.rs}` 的 handoff 搬运行、`operation_runner/request_context_store.rs` 的 origin 契约、`req_inbound_02_normalized.rs` 的 entry 选择、共享 `relay_runtime_core{.rs,/request_scope.rs}` 和 Responses Relay entry、Chat handoff adapter、Server 两条 handoff caller。**反向边（2026-10-06 补正）另含**：`kernel/direct_request_scope.rs` 的 Direct 入口 origin 形参（含其调用方 `kernel.rs`、`kernel/v3_direct_core.rs`）、`hub_v1/responses_relay_types.rs` 的反向 carrier control 字段，以及 Server 的 Relay→Direct adapter 消费点（`hub_v1/responses_direct_server_outcome.rs`、`server/src/websocket.rs`、`server/src/endpoint_handlers.rs`）。Direct actual-emission worker 的 request projection 和 response worker 的 successful publication/inverse 行不属于本补链。
 
 公开行为验收必须从真实 HTTP Chat/Responses 入口到 loopback provider capture，再到客户端 JSON/SSE。断言首 attempt 到达原 target、没有第二路由、完整 exec/custom patch/MCP 历史与 opaque 值、正确客户端成功结果、同请求 pair 不重发布，失败切 provider 不提交错误与取消释放。另保留 RawEntry 正常入口、禁止 RawEntry handoff 的 typed 内部契约负向测试。SDK内部状态测试只辅助定位，不能替代上述 consumer。
 
