@@ -437,7 +437,7 @@ async fn direct_same_protocol_preserves_payload_and_image_history_rules() {
     assert_eq!(input[1]["content"][0]["text"], "old answer");
     assert_eq!(
         input[2]["content"][1],
-        json!({"type": "input_image", "image_url": {"url": current_image_url}}),
+        json!({"type": "input_image", "image_url": current_image_url}),
         "the current user image must be retained"
     );
     assert_eq!(input[3]["call_id"], "call_direct_exec");
