@@ -175,7 +175,7 @@ live 样本；独立架构 review PASS；clean-main merge + push + 远端回执�
   artifact-budget），把红项逐个归因（R43 引入 / 上游既有 / 组合引入）并清零或记录授权差异；
   push 前该集合必须无 R43 引入项。
 - 退出条件：三路结论落盘；绑定准确；admission compile exit0；完整 `architecture-ci` PASS
-  （R45 基线 39/40，唯一失败为 `verify:v3-mainline-caller-flow` 锁漂移，R49 已复测为 PASS）；
+  （R49b 已实测 40/40 全绿，优于 R45 基线 39/40；R50/R50c 改动后须重跑维持）；
   52d 清单落盘且无 R43 引入的未授权红项。
 - 停止条件：固定锁漂移且无授权 → 保留锁，记录缺口，不修改锁规避。
 
