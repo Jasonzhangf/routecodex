@@ -282,8 +282,8 @@
       <div class="hero-meta">
         <span>Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-caller-flow.md</code></span>
         <span>Edge source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
-        <span>85 functional paths</span>
-        <span>495 caller edges</span>
+        <span>86 functional paths</span>
+        <span>496 caller edges</span>
       </div>
     </header>
 
@@ -472,7 +472,7 @@ flowchart TD
 <tr><td>Missing caller/callee fields</td><td><strong>none</strong></td></tr>
 <tr><td>Binding-pending edges</td><td><strong>22</strong></td></tr>
 <tr><td>typed-test-only edges</td><td><strong>15</strong></td></tr>
-<tr><td>live-bound source edges</td><td><strong>383</strong></td></tr>
+<tr><td>live-bound source edges</td><td><strong>384</strong></td></tr>
 <tr><td>aggregate-only wrapper edges</td><td><strong>2</strong></td></tr>
 </tbody>
 </table>
@@ -647,6 +647,7 @@ flowchart TD
 <tr><td><a href="#chain-v3_runtime_timing_observability_mainline"><code>v3.runtime_timing_observability.mainline</code></a><br/>v 3.runtime_timing_observability.mainline</td><td><span class="status audited_locked">locked by Jason</span></td><td>14</td><td>2</td><td><code>v3.runtime_timing_observability</code></td><td><code>sha256:d3cf88658ce4…</code></td></tr>
 <tr><td><a href="#chain-v3_responses_session_admission"><code>v3.responses_session_admission</code></a><br/>v 3.responses_session_admission</td><td><span class="status audited_locked">locked by Jason</span></td><td>2</td><td>3</td><td><code>v3.responses_session_inflight_admission</code></td><td><code>sha256:c5c8a7157115…</code></td></tr>
 <tr><td><a href="#chain-v3_sse_http_keepalive_boundary"><code>v3.sse.http_keepalive_boundary</code></a><br/>v 3.sse.http_keepalive_boundary</td><td><span class="status audited_locked">locked by Jason</span></td><td>1</td><td>3</td><td><code>v3.sse_http_keepalive_boundary</code></td><td><code>sha256:efbfef1b5d98…</code></td></tr>
+<tr><td><a href="#chain-v3_client_sse_head_commit"><code>v3.client_sse_head_commit</code></a><br/>v 3.client_sse_head_commit</td><td><span class="status pending_review">pending review</span></td><td>1</td><td>4</td><td><code>v3.client_sse_head_commit</code></td><td><code>sha256:7d93d5615a55…</code></td></tr>
 <tr><td><a href="#chain-v3_provider_action_gate_mainline"><code>v3.provider_action_gate.mainline</code></a><br/>v 3.provider_action_gate.mainline</td><td><span class="status audited_locked">locked by Jason</span></td><td>48</td><td>3</td><td><code>v3.provider_action_gate</code></td><td><code>sha256:10acfd36a3dd…</code></td></tr>
 <tr><td><a href="#chain-v3_build_test_artifact_budget"><code>v3.build_test_artifact_budget</code></a><br/>v 3.build_test_artifact_budget</td><td><span class="status audited_locked">locked by Jason</span></td><td>3</td><td>12</td><td><code>v3.build_test_artifact_budget</code></td><td><code>sha256:ce962682d064…</code></td></tr>
 <tr><td><a href="#chain-v3_route_classifier_facts_classification"><code>v3.route_classifier.facts_classification</code></a><br/>v 3.route_classifier.facts_classification</td><td><span class="status audited_locked">locked by Jason</span></td><td>1</td><td>2</td><td><code>v3.route_classifier_local_owner</code></td><td><code>sha256:36f4b1ffde37…</code></td></tr>
@@ -816,6 +817,13 @@ flowchart TD
             <span><code>v3.sse.http_keepalive_boundary</code></span>
             <span>1 edges · 3 resources · routecodex-v3-sse, v3-server</span>
             <span class="status audited_locked">locked by Jason</span>
+          </a>
+<a class="branch-card" href="#chain-v3_client_sse_head_commit">
+            <span class="chain-id">v 3.client_sse_head_commit</span>
+            <span>V3ServerSseHeadCommit01ClientHead → V3ServerRespOutbound06ClientFrame</span>
+            <span><code>v3.client_sse_head_commit</code></span>
+            <span>1 edges · 4 resources · v3-server</span>
+            <span class="status pending_review">pending review</span>
           </a>
 <a class="branch-card" href="#chain-v3_provider_action_gate_mainline">
             <span class="chain-id">v 3.provider_action_gate.mainline</span>
@@ -4159,6 +4167,42 @@ flowchart TD
 <thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
 <tbody>
 <tr><td><code>v3-sse-http-keepalive-01</code></td><td><code>V3SseTransportOut04EncodedChunk</code><br/>→ <code>V3ServerRespOutbound06ClientFrame</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.sse.transport_encoded_chunk</code> <code>v3.response.client_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.config.http_sse_keepalive_interval</code></div></td><td><code>v3_io_sse_body</code><br/><small>routecodex-v3-server/src/frame_builders.rs</small></td><td><code>build_v3_sse_transport_out_04_keepalive_comment</code><br/><small>routecodex-v3-sse/src/lib.rs</small></td></tr>
+</tbody>
+</table>
+      </div>
+    </details>
+
+
+    <details class="branch-detail" id="chain-v3_client_sse_head_commit" >
+      <summary>
+        <span class="summary-main">v 3.client_sse_head_commit</span>
+        <span class="summary-sub">V3ServerSseHeadCommit01ClientHead → V3ServerRespOutbound06ClientFrame</span>
+        <span class="summary-sub">1 edges · <code>v3.client_sse_head_commit</code> · V3ServerSseHeadCommit01ClientHead → V3ServerRespOutbound06ClientFrame</span>
+      </summary>
+      <div class="branch-body">
+        <p class="chain-summary">A streamed client request commits the HTTP SSE response head and transport keepalives at the Server boundary while the Runtime still buffers the full provider attempt, and an exec replacement drains in-flight client responses before closing their transports.</p>
+        <div class="branch-meta">
+          <span>owner: <code>v3.client_sse_head_commit</code></span>
+          <span>audit: <span class="status pending_review">pending review</span></span>
+          <span>modules: <code>v3-server</code></span>
+          <span>resources: <code>4</code></span>
+          <span>manifest: <code>docs/architecture/manifests/v3.client_sse_head_commit.mainline.yml</code></span>
+
+        </div>
+        <div class="diagram-shell">
+          <pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 82, &quot;nodeSpacing&quot;: 46}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;18px&quot;}} }%%
+flowchart TD
+  n_v3_client_sse_head_commit_0[&quot;&lt;b&gt;Server Sse Head Commit 01 Client Head&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3ServerSseHeadCommit01ClientHead&lt;/small&gt;&quot;]
+  n_v3_client_sse_head_commit_1[&quot;&lt;b&gt;Server client frame&lt;/b&gt;&lt;br/&gt;server 发送最终 client frame&lt;br/&gt;&lt;small&gt;V3ServerRespOutbound06ClientFrame&lt;/small&gt;&quot;]
+  n_v3_client_sse_head_commit_0 --&gt;|v3-client-sse-head-commit-01&lt;br/&gt;v3-server → v3-server| n_v3_client_sse_head_commit_1
+  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+  classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
+  class n_v3_client_sse_head_commit_0,n_v3_client_sse_head_commit_1 node;</pre>
+        </div>
+        <table>
+<thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
+<tbody>
+<tr><td><code>v3-client-sse-head-commit-01</code></td><td><code>V3ServerSseHeadCommit01ClientHead</code><br/>→ <code>V3ServerRespOutbound06ClientFrame</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.sse.direct.accept_skeleton</code> <code>v3.sse.transport_encoded_chunk</code> <code>v3.config.http_sse_keepalive_interval</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.front.request_activity_gate</code></div></td><td><code>pending_model_request</code><br/><small>routecodex-v3-server/src/lib.rs</small></td><td><code>accept_v3_client_sse_transport</code><br/><small>routecodex-v3-server/src/client_sse_transport.rs</small></td></tr>
 </tbody>
 </table>
       </div>

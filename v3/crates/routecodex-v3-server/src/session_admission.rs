@@ -55,10 +55,15 @@ impl V3ServerRequestActivityGate {
 
     pub(crate) async fn wait_for_quiescence(&self) {
         loop {
+            // Register interest before the state check, so a permit that drops
+            // between the check and the await cannot be missed.
+            let notified = self.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
             if self.active.load(Ordering::Acquire) == 0 {
                 return;
             }
-            self.notify.notified().await;
+            notified.await;
         }
     }
 }

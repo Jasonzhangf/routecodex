@@ -2752,6 +2752,58 @@ features:
     live_cutover: false
     global_install_restart: false
     forbidden_claim: Do not claim provider semantic correctness from HTTP keepalive scheduling evidence.
+- feature_id: v3.client_sse_head_commit
+  status: source_controlled_blackbox_verified
+  change_risk: critical
+  owner_kind: rust_v3_server_http_transport_boundary
+  owner_scope: Server-owned client SSE transport channel for a streamed client request while the Runtime still buffers the full provider attempt, plus the bounded exec-replacement drain of in-flight client responses. The channel implements the declared v3.sse.direct.accept_skeleton client accept node in the independent module v3/crates/routecodex-v3-server/src/client_sse_transport.rs.
+  owner_modules:
+  - v3/crates/routecodex-v3-server/src/client_sse_transport.rs
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/restart_handoff.rs
+  - v3/crates/routecodex-v3-server/src/restart_closeout.rs
+  mainline_bindings:
+  - v3-client-sse-head-commit-01
+  design:
+  - docs/architecture/wiki/v3-client-sse-head-commit.md
+  contract:
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/manifests/v3.client_sse_head_commit.mainline.yml
+  required_contract:
+  - The Server commits the client SSE transport channel and its transport-only keepalives; the Runtime still buffers the full provider attempt before any provider payload byte is projected.
+  - An outcome that arrives inside one keepalive interval keeps the exact runtime status, headers, and body; the committed channel carries only transport framing.
+  - The committed channel carries the projected client payload with SSE transport framing only; the transport module reads the HTTP status and content type and never parses, reclassifies, or rewrites the payload.
+  - The keepalive has exactly one owner at a time: the committed channel while the runtime outcome is pending, and the drained SSE body afterwards.
+  - A successful runtime outcome is never turned into a client transport failure; only an outcome with no successful client payload closes the transport, without projecting a provider status, error payload, or fabricated success.
+  - A non-SSE client keeps waiting for the runtime outcome and never receives a committed channel.
+  - An exec replacement stops accepting work, drains in-flight client responses for a bounded window, then closes the remaining transports without a fabricated client error.
+  required_reverse:
+  - A provider payload byte or provider status never reaches the client before the runtime outcome exists.
+  - Provider error detail, internal status, and pool-exhaustion text never appear in a committed client body.
+  - The transport module never imports Runtime, provider transport, or payload-parsing code.
+  - The drain never waits forever on a provider attempt that does not finish.
+  - A committed channel never closes the connection cleanly in place of the typed transport break.
+  required_blackbox:
+  - The real /v1/chat/completions entry returns a 200 text/event-stream head plus a keepalive comment while the controlled provider attempt is still gated.
+  - The buffered provider payload and the runtime terminal still stream through the committed channel once the provider is released.
+  - A non-SSE client on the same entry receives no committed channel and still receives the runtime JSON outcome.
+  - An SSE client whose released provider returns a complete JSON document receives that successful payload by SSE transport framing with no transport failure and no error frame.
+  - A controlled provider 429 released after the commit produces a client transport failure with no provider detail and no projected error frame.
+  - An exec preparation that races a gated provider response waits for the in-flight client response, delivers its payload and terminal, and stays bounded when the provider never finishes.
+  required_gates:
+  - npm run test:v3-client-sse-head-commit
+  - npm run test:v3-client-transport-boundary
+  - npm run verify:v3-client-sse-head-commit
+  - npm run verify:v3-architecture-docs
+  - npm run verify:architecture-wiki-html-sync
+  - git diff --check
+  completion_boundary:
+    source_controlled: true
+    live_cutover: false
+    global_install_restart: false
+    forbidden_claim: Do not claim live provider compatibility, install, restart, or production cutover from the controlled entry tests alone; the installed runtime restart replay is separate evidence.
 - feature_id: v3.provider_action_gate
   status: source_active_live_verification_required
   change_risk: high
