@@ -354,4 +354,21 @@ live 样本；独立架构 review PASS；clean-main merge + push + 远端回执�
 | `verify:v3-mainline-caller-flow` audit lock 漂移 | R45 基线 | R49 复测已 PASS；R52 记录 |
 | CI 其余 BLOCK 门禁（isolation/admission/distribution/install-cleanup/artifact-budget） | 待定 | R52 52d 全量归因 |
 
+**已知红项台账（2026-10-06 R52d 全量重扫，候选 `d38a5d3cd`）** —— 上表"只剩 1 个父红"的假设已被推翻：
+
+| 红项 | 归属（基线对照证据） | 处置 |
+| --- | --- | --- |
+| `multi_listener_server` 4 FAILED + 1 HANG | R43 回归（`ec8048b6a` 全绿） | task-4（custom-tool 身份，1 项 + R47 剩余 3 红）、task-6（handoff 重归一，4 项） |
+| `anthropic_relay_runtime_integration` 2 FAILED | R43 回归（`ec8048b6a` 18/0，`dbdf06181` 16/2） | task-7 |
+| `anthropic_relay_anthropic_provider_wire_integration` 1 FAILED | R43 回归（同 crate 同区域） | task-7 判定是否同根因 |
+| `cli h2_p6_controlled_replay` 1 FAILED（缺 `response.created` 帧） | 待 task-8 在 `ec8048b6a` 上归因 | task-8 |
+| `req02_scope_runtime_consumer::req02_attempt_buffer_boundary_direct` | ~~父候选已知红~~ **实测 7/7 全绿** | 已关闭，记账删除 |
+| `verify:v3-file-size` `anthropic_relay_runtime.rs` 1506 | 组合引入 | R51d 已修（`d38a5d3cd`，1414 行） |
+| `verify:v3-file-size` `responses_relay_runtime_inner.rs` 1503 | 组合引入 | R51d 待 task-6 落地后拆解 |
+| `chain:v3.provider_action_gate.mainline` 指纹第三状态 | 组合引入 | 需 Jason 人工授权，未授权前不动锁 |
+
+扫描口径：逐 crate `npm --prefix v3 run test`（`--test-threads=1`，skip 已知挂起用例）；
+**cargo 在首个失败 target 后停止**，故另跑逐 target 重扫补全（`/tmp/v3-target-sweep.txt`）。
+15/18 crate 全绿；`routecodex-v3-runtime --lib` 1308 passed / 0 failed。
+
 R47 作者结果仅在 sandbox（loopback bind EPERM）中运行，Lead 须在允许 loopback 的环境重跑。
