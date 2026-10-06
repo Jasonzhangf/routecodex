@@ -127,6 +127,18 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
     project_reasoning_effort_for_selected_target(&mut result, selected, provider_protocol)?;
     normalize_deepseek_tool_choice(&mut result, selected, provider_protocol);
     project_provider_declared_output_cap(&mut result, selected, provider_protocol);
+    if let Some(effort) = selected.reasoning_effort {
+        match provider_protocol {
+            V3HubProviderWireProtocol::OpenAiChat => {
+                result["reasoning_effort"] = serde_json::json!(effort);
+            }
+            V3HubProviderWireProtocol::Responses => {
+                result["reasoning"]["effort"] = serde_json::json!(effort);
+            }
+            // Config compile excludes effort policies on these protocols.
+            V3HubProviderWireProtocol::Anthropic | V3HubProviderWireProtocol::Gemini => {}
+        }
+    }
     Ok(result)
 }
 
@@ -384,6 +396,7 @@ mod tests {
             responses_transport: V3ResponsesTransportKind::Http,
             websocket_v2_url: None,
             provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig::default(),
+            reasoning_effort: None,
             request_timeout_ms: 300_000,
             priority: 0,
             weight: 1,

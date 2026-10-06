@@ -67,6 +67,7 @@ mod tests {
             responses_transport: V3ResponsesTransportKind::Http,
             websocket_v2_url: None,
             provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig::default(),
+            reasoning_effort: None,
             request_timeout_ms: 300_000,
             priority: 0,
             weight: 1,

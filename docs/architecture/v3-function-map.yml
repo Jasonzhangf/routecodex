@@ -1186,7 +1186,7 @@ features:
 - feature_id: v3.provider_compat_profile_loading
   status: active
   owner_kind: rust_ssot
-  owner_scope: Provider compatibility profile loading, payload-boundary validation, and the provider-declared output-cap projection into the provider wire payload at the adjacent request and response compat nodes only.
+  owner_scope: Provider compatibility profile loading, payload-boundary validation, provider-declared output-cap projection, and the provider-configurable reasoning-effort override into the provider wire payload at the adjacent request and response compat nodes only.
   owner_module: v3.provider_compat_core
   resource_bindings:
   - v3.provider_compat.payload_boundary_contract
@@ -1211,6 +1211,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
   - v3/crates/routecodex-v3-runtime/tests
   - v3/crates/routecodex-v3-cli/tests/goaichat_hosted_tool_history_blackbox.rs
+  - v3/crates/routecodex-v3-cli/tests/provider_reasoning_effort_policy_blackbox.rs
   - v3/scripts/test.mjs
   - v3/package.json
   - package.json
@@ -1224,6 +1225,8 @@ features:
   - fallback
   required_gates:
   - npm run test:v3-provider-compat-profile-loading
+  - npm run test:v3-provider-reasoning-effort-policy-blackbox
+  - npm run test:v3-provider-reasoning-effort-policy-config-failures
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries

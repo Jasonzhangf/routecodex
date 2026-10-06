@@ -1563,7 +1563,7 @@ flowchart TD
         <span class="summary-sub">1 edges · <code>v3.provider_compat_profile.request</code> · V3HubReqOutbound07ProviderSemantic → ProviderReqCompat06ProviderCompat</span>
       </summary>
       <div class="branch-body">
-        <p class="chain-summary">The request provider-compat node consumes the adjacent provider-semantic payload plus the selected target capability carrier, validates the normal-payload boundary, applies the selected provider-family wire profile, and performs the registered session-preserving image compatibility projection only for a selected target without multimodal/vision capability.</p>
+        <p class="chain-summary">The request provider-compat node consumes the adjacent provider-semantic payload plus the selected target capability and provider-policy carrier, validates the normal-payload boundary, applies the selected provider-family wire profile, projects the provider-declared output cap, applies the provider-configurable reasoning-effort override, and performs the registered session-preserving image compatibility projection only for a selected target without multimodal/vision capability.</p>
         <div class="branch-meta">
           <span>owner: <code>v3.provider_compat_profile_loading</code></span>
           <span>audit: <span class="status pending_review">pending review</span></span>
