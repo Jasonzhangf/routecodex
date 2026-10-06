@@ -17,6 +17,34 @@ mod hooks_lifecycle;
 mod runtime_fd_limit;
 
 #[test]
+fn managed_config_ephemeral_detection_covers_system_temp_roots() {
+    // Codex-managed orphans were observed under both the caller TMPDIR
+    // (`/private/var/folders/.../T/...`) and the fixed `/private/tmp/...` root,
+    // so both must select the managed-child watchdog.
+    #[cfg(target_os = "macos")]
+    assert!(managed_config_is_ephemeral(Path::new(
+        "/private/tmp/rc-ab/config.toml"
+    )));
+    #[cfg(target_os = "macos")]
+    assert!(managed_config_is_ephemeral(Path::new(
+        "/private/var/folders/rc/T/rc-ab/config.toml"
+    )));
+    assert!(managed_config_is_ephemeral(
+        &std::env::temp_dir().join("rc-mmx/config.toml")
+    ));
+    let real_temp = TempDir::new().unwrap();
+    assert!(managed_config_is_ephemeral(
+        &real_temp.path().join("config.toml")
+    ));
+    assert!(!managed_config_is_ephemeral(Path::new(
+        "/etc/routecodex/config.toml"
+    )));
+    assert!(!managed_config_is_ephemeral(Path::new(
+        "/Volumes/extension/.rcc/config.toml"
+    )));
+}
+
+#[test]
 fn control_client_disconnect_is_not_a_managed_runtime_failure() {
     assert!(is_control_client_disconnect(&std::io::Error::new(
         std::io::ErrorKind::BrokenPipe,

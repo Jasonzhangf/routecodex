@@ -409,6 +409,29 @@ fn kill_explicit_pid(pid: u64) {
     );
 }
 
+fn wait_for_explicit_pid_exit(pid: u64, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        let result = unsafe { libc::kill(pid as libc::pid_t, 0) };
+        if result == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
+            return true;
+        }
+        sleep(Duration::from_millis(50));
+    }
+    false
+}
+
+fn wait_for_child_exit(child: &mut Child, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if child.try_wait().unwrap().is_some() {
+            return true;
+        }
+        sleep(Duration::from_millis(50));
+    }
+    false
+}
+
 fn assert_start_stdout(output: &Output, label: &str) {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -421,6 +444,114 @@ fn assert_start_stdout(output: &Output, label: &str) {
             && stdout.contains("[RouteCodexV3] Server started version=")
             && last_json(output)["state"] == "running",
         "{label} must print visible start success and final status JSON, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn temporary_config_managed_child_exits_after_config_removal() {
+    let _guard = lifecycle_test_guard();
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let temp_config_dir = tempfile::Builder::new()
+        .tempdir_in(std::env::temp_dir())
+        .unwrap();
+    let ports = [free_port(), free_port()];
+    let config = write_config_with_debug(&root, ports, true, false);
+    let temp_config = temp_config_dir.path().join("config.v3.toml");
+    fs::copy(&config, &temp_config).unwrap();
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+
+    let start = managed_test_command(binary, &state_root)
+        .args(["server", "start", "--config"])
+        .arg(&temp_config)
+        .env("ROUTECODEX_V3_STATE_DIR", &state_root)
+        .env(
+            "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
+            request_counter_file(&state_root),
+        )
+        .env("V3_MANAGED_TEST_KEY", SECRET)
+        .env("TMPDIR", temp_config_dir.path())
+        .env("TMP", temp_config_dir.path())
+        .env("TEMP", temp_config_dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        start.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&start.stderr),
+        state_root_diagnostics(&state_root)
+    );
+    for port in ports {
+        wait_port(port, true);
+    }
+    let instance_dir = single_instance_dir(&state_root);
+    let pid_cache: Value =
+        serde_json::from_slice(&fs::read(instance_dir.join("pid.cache")).unwrap()).unwrap();
+    let managed_pid = pid_cache["pid"].as_u64().unwrap();
+
+    fs::remove_file(&temp_config).unwrap();
+
+    assert!(
+        wait_for_explicit_pid_exit(managed_pid, Duration::from_secs(10)),
+        "managed child PID {managed_pid} must exit after its temporary config is removed"
+    );
+    for port in ports {
+        wait_port(port, false);
+    }
+}
+
+#[test]
+fn temporary_config_foreground_start_exits_after_config_removal() {
+    let _guard = lifecycle_test_guard();
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let temp_config_dir = tempfile::Builder::new()
+        .tempdir_in(std::env::temp_dir())
+        .unwrap();
+    let ports = [free_port(), free_port()];
+    let config = write_config_with_debug(&root, ports, true, false);
+    let temp_config = temp_config_dir.path().join("config.v3.toml");
+    fs::copy(&config, &temp_config).unwrap();
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+
+    let mut start = managed_test_command(binary, &state_root)
+        .args(["start", "--config"])
+        .arg(&temp_config)
+        .env("ROUTECODEX_V3_STATE_DIR", &state_root)
+        .env(
+            "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
+            request_counter_file(&state_root),
+        )
+        .env("V3_MANAGED_TEST_KEY", SECRET)
+        .env("TMPDIR", temp_config_dir.path())
+        .env("TMP", temp_config_dir.path())
+        .env("TEMP", temp_config_dir.path())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    for port in ports {
+        wait_port(port, true);
+    }
+
+    fs::remove_file(&temp_config).unwrap();
+
+    if !wait_for_child_exit(&mut start, Duration::from_secs(10)) {
+        let pid = start.id();
+        let _ = unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+        let _ = start.wait_with_output();
+        panic!(
+            "foreground managed child PID {pid} must exit after its temporary config is removed"
+        );
+    }
+    for port in ports {
+        wait_port(port, false);
+    }
+    let output = start.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 
