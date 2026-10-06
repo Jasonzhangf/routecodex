@@ -77,6 +77,12 @@ MTPLX、provider id、模型 id 或固定 `medium` 的分支。
 覆盖只改 effort 值；同一 payload 的其他字段保持原值。配置值不写入客户端响应、
 metadata、错误 payload 或控制日志。
 
+Responses 的 `reasoning` 缺失或为 null 时，创建可承载 effort 的对象；已是对象时
+只覆盖 effort，保留其他成员。非 null 的非对象值属于 opaque business data，
+不能在保留原值的同时表示 `reasoning.effort`。配置覆盖在此处返回现有 typed
+`V3ProviderCompatError`，分类为 `RequestPayloadInvalid`，由既有 Error 链处理；
+不 panic，不替换原始值，也不向客户端发送错误。省略配置时，此类原值照常透传。
+
 ## DAG、终止与清理边界
 
 项目图产物：
@@ -133,6 +139,9 @@ metadata、错误 payload 或控制日志。
 - 同一 manifest 中未配置 effort 的其他 provider 不受影响。
 - 无效 enum 和 unsupported protocol 编译失败，且不发布 manifest。
 - 失败路径遵守项目 no-client-error contract；测试不期待 client `502`。
+- Responses 覆盖遇到 boolean、string、number、array reasoning 时，transport
+  及时结束且没有 client error；原始 request 和 typed Error 链保留在诊断样本。
+  同一 listener 的后续独立请求成功；省略配置可透传 opaque 值，null 可承载覆盖。
 - 测试结束后 listener 和 fixture 资源已清理。
 
 定向测试和公开 consumer E2E 通过后，运行受影响的 architecture gates 和完整

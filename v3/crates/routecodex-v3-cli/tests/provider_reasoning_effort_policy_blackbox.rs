@@ -126,7 +126,7 @@ tiers = [[{targets}]]
     )
     .unwrap();
     let internal = parse_v3_config_02_authoring(&format!(
-        "version = 3\n[route_groups.routecodex_v3_4444.pools.default]\ntargets = []\n{}\n[debug]\nlog_console = false\nsnapshots = false\n",
+        "version = 3\n[route_groups.routecodex_v3_4444.pools.default]\ntargets = []\n{}\n[debug]\nlog_console = false\nsnapshots = true\nretention = {{ raw_requests = 128, raw_responses = 128, events = 256 }}\n",
         hub_v1_fixture::hub_v1_test_declaration()
     )).unwrap();
     V3UserConfigStore::with_internal_authoring(path, internal)
@@ -256,6 +256,57 @@ async fn provider_reasoning_effort_policy_direct_relay_public_http() {
         .build()
         .unwrap();
     let mut failure = None;
+    // These opaque shapes cannot represent reasoning.effort without deleting
+    // business data. They must reach typed Error, never unwind or send a client
+    // error. The following ordinary requests prove the failure stays local.
+    let opaque_reasoning = [json!(false), json!("opaque"), json!(7), json!([1, 2])];
+    for reasoning in &opaque_reasoning {
+        let mut body = request(true, "respmedium", None);
+        body["reasoning"] = reasoning.clone();
+        let result = client
+            .post(format!("http://127.0.0.1:{server_port}/v1/responses"))
+            .json(&body)
+            .send()
+            .await;
+        if !matches!(result, Err(ref error) if !error.is_timeout()) {
+            failure = Some(format!(
+                "non-object reasoning did not terminate without client error: {result:?}"
+            ));
+            break;
+        }
+    }
+    // Omitting the policy forwards opaque reasoning unchanged. Null can carry
+    // the configured effort; neither shape may make later sessions unusable.
+    for (id, reasoning) in opaque_reasoning
+        .iter()
+        .map(|reasoning| ("respplain", reasoning.clone()))
+        .chain(std::iter::once(("respmedium", Value::Null)))
+    {
+        let mut body = request(true, id, None);
+        body["reasoning"] = reasoning.clone();
+        let response = client
+            .post(format!("http://127.0.0.1:{server_port}/v1/responses"))
+            .json(&body)
+            .send()
+            .await;
+        let check = match response {
+            Ok(response) if response.status().is_success() => {
+                response.text().await.map_err(|error| error.to_string())
+            }
+            other => Err(format!("opaque/null success request failed: {other:?}")),
+        };
+        let wire = captures.lock().await.pop();
+        if !matches!(check, Ok(ref text) if text.contains("policy fixture ok") && !text.contains("\"error\""))
+            || !matches!(wire, Some(ref wire) if wire["reasoning"] ==
+                if id == "respplain" { reasoning.clone() } else { json!({"effort":"medium"}) })
+        {
+            failure = Some(format!(
+                "opaque/null shape changed: {id} {reasoning}; {check:?}; {wire:?}"
+            ));
+            break;
+        }
+        println!("PASS /v1/responses -> {id}: opaque/null reasoning {reasoning}");
+    }
     // Cross-protocol entries select Relay; same-protocol entries select Direct.
     // Keep both configured and unconfigured providers in this single manifest.
     'cases: for responses_entry in [false, true] {
@@ -316,7 +367,7 @@ async fn provider_reasoning_effort_policy_direct_relay_public_http() {
             }
         }
     }
-    handle.shutdown().await;
+    let persistence_failures = handle.shutdown().await;
     shutdown_tx.send(()).unwrap();
     fixture_task.await.unwrap();
     assert!(
@@ -330,6 +381,33 @@ async fn provider_reasoning_effort_policy_direct_relay_public_http() {
         "server listener leaked"
     );
     assert!(captures.lock().await.is_empty(), "extra provider attempts");
+    assert!(persistence_failures.is_empty(), "{persistence_failures:?}");
+    let samples = environment
+        .root
+        .path()
+        .join(".rcc/codex-samples/openai-responses/ports")
+        .join(server_port.to_string());
+    let errors: Vec<Value> = fs::read_dir(samples)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.join("error.json").is_file())
+        .map(|path| {
+            let request: Value =
+                serde_json::from_slice(&fs::read(path.join("request.json")).unwrap()).unwrap();
+            let error: Value =
+                serde_json::from_slice(&fs::read(path.join("error.json")).unwrap()).unwrap();
+            json!({"request":request,"error":error})
+        })
+        .collect();
+    for reasoning in opaque_reasoning {
+        assert!(errors.iter().any(|evidence|
+            evidence["request"]["reasoning"] == reasoning
+                && evidence["error"]["object"] == "routecodex.v3.error_evidence"
+                && evidence["error"]["error_chain"].as_array().is_some_and(|chain|
+                    chain.contains(&json!("V3Error01SourceRaised")) && chain.contains(&json!("V3Error06ClientProjected")))
+        ), "non-object reasoning lacked truthful typed error and original payload: {reasoning}; {errors:?}");
+        println!("PASS /v1/responses -> respmedium: opaque reasoning {reasoning} terminated without client error; original payload and typed Error evidence retained");
+    }
     assert!(failure.is_none(), "{}", failure.unwrap_or_default());
 }
 
