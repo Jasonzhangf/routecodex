@@ -3,11 +3,10 @@ use routecodex_v3_config::{
 };
 use routecodex_v3_runtime::hub_v1::{V3HubExecutionMode, V3HubProviderWireProtocol};
 use routecodex_v3_runtime::operation_runner::{
-    apply_canonical_field_edit, CanonicalFieldEdit,
-    execute_v3_operation_runner_request_capture_client_json,
+    apply_canonical_field_edit, execute_v3_operation_runner_request_capture_client_json,
     execute_v3_operation_runner_request_normalize_losslessly, project_canonical_request,
-    CurrentFieldAssociations, RequestInvocationContext, RequestNormalizationEntry,
-    RequestOriginKind, V3RequestContextHandle, V3TargetCandidate,
+    CanonicalFieldEdit, CurrentFieldAssociations, RequestInvocationContext,
+    RequestNormalizationEntry, RequestOriginKind, V3RequestContextHandle, V3TargetCandidate,
 };
 use serde_json::{json, Value};
 
@@ -70,8 +69,8 @@ fn sdk_request(
         format!("{request_id}-attempt"),
         RequestOriginKind::ClientEntry,
     );
-    let captured = execute_v3_operation_runner_request_capture_client_json(raw)
-        .expect("public SDK capture");
+    let captured =
+        execute_v3_operation_runner_request_capture_client_json(raw).expect("public SDK capture");
     let canonical = execute_v3_operation_runner_request_normalize_losslessly(
         &handle,
         &invocation,
@@ -139,11 +138,8 @@ fn chat_canonical_projects_to_actual_gemini_wire_with_complete_tool_identity() {
         "tool_choice": {"type": "function", "function": {"name": "exec"}},
         "stream": false
     });
-    let (_handle, canonical, pair, current) = sdk_request(
-        "gemini-standard-projection",
-        "responses",
-        raw,
-    );
+    let (_handle, canonical, pair, current) =
+        sdk_request("gemini-standard-projection", "responses", raw);
     let canonical_before = canonical.clone();
     let pair_before = pair.clone();
     let current_before = current.clone();
@@ -164,7 +160,10 @@ fn chat_canonical_projects_to_actual_gemini_wire_with_complete_tool_identity() {
         canonical, canonical_before,
         "projection must not mutate the request canonical"
     );
-    assert_eq!(pair, pair_before, "projection must not mutate original pair");
+    assert_eq!(
+        pair, pair_before,
+        "projection must not mutate original pair"
+    );
     assert_eq!(
         current, current_before,
         "projection must not mutate current associations"
@@ -255,10 +254,17 @@ fn chat_canonical_projects_to_actual_gemini_wire_with_complete_tool_identity() {
         .as_array()
         .expect("Gemini tools")
         .iter()
-        .flat_map(|tool| tool["functionDeclarations"].as_array().into_iter().flatten())
+        .flat_map(|tool| {
+            tool["functionDeclarations"]
+                .as_array()
+                .into_iter()
+                .flatten()
+        })
         .collect::<Vec<_>>();
     assert_eq!(declarations.len(), 3);
-    assert!(declarations.iter().any(|declaration| declaration["name"] == "exec"));
+    assert!(declarations
+        .iter()
+        .any(|declaration| declaration["name"] == "exec"));
     assert!(declarations
         .iter()
         .any(|declaration| declaration["name"] == "functions__apply_patch"));
@@ -292,7 +298,9 @@ fn chat_canonical_projects_to_actual_gemini_wire_with_complete_tool_identity() {
             .find(|mapping| mapping.declaration_record_id == original.record_id)
             .unwrap_or_else(|| panic!("missing emitted mapping for {source_path}"));
         assert_eq!(mapping.source_path, source_path);
-        assert!(mapping.destination_path.starts_with("tools[0].functionDeclarations["));
+        assert!(mapping
+            .destination_path
+            .starts_with("tools[0].functionDeclarations["));
     }
 }
 
@@ -308,30 +316,60 @@ fn native_gemini_uses_current_canonical_values_in_the_same_standard_producer() {
         "tools":[{"functionDeclarations":[{"name":"exec","parameters":{"type":"object","properties":{"cmd":{"type":"string"}}}}]}],
         "generationConfig":{"maxOutputTokens":20,"topP":0.8}
     });
-    let (_handle, mut canonical, pair, current) = sdk_request("native-gemini-standard", "gemini", raw);
+    let (_handle, mut canonical, pair, current) =
+        sdk_request("native-gemini-standard", "gemini", raw);
     let messages = canonical["messages"].as_array_mut().unwrap();
-    let user = messages.iter_mut().find(|message| message.pointer("/content/0/text") == Some(&json!("old"))).unwrap();
+    let user = messages
+        .iter_mut()
+        .find(|message| message.pointer("/content/0/text") == Some(&json!("old")))
+        .unwrap();
     user["content"][0]["text"] = json!("current text");
-    let call = messages.iter_mut().find_map(|message| message["tool_calls"].as_array_mut().and_then(|calls| calls.first_mut())).unwrap();
+    let call = messages
+        .iter_mut()
+        .find_map(|message| {
+            message["tool_calls"]
+                .as_array_mut()
+                .and_then(|calls| calls.first_mut())
+        })
+        .unwrap();
     call["function"]["arguments"] = json!({"cmd":"printf 'literal $() and `bytes`'\nprintf tail"});
     canonical["max_completion_tokens"] = json!(40);
     canonical["tools"][0]["function"]["parameters"]["properties"]["cwd"] = json!({"type":"string"});
     let before = canonical.clone();
     let projected = project_canonical_request(
-        &canonical, &pair.inverse_context, &current, &pair.explicit_history_pairing,
-        V3HubExecutionMode::Relay, V3HubProviderWireProtocol::Gemini, &target(false), "native-gemini-attempt",
-    ).unwrap();
+        &canonical,
+        &pair.inverse_context,
+        &current,
+        &pair.explicit_history_pairing,
+        V3HubExecutionMode::Relay,
+        V3HubProviderWireProtocol::Gemini,
+        &target(false),
+        "native-gemini-attempt",
+    )
+    .unwrap();
     assert_eq!(canonical, before);
     assert!(projected.payload.get("model").is_none());
     assert_eq!(projected.payload["generationConfig"]["maxOutputTokens"], 40);
-    assert_eq!(projected.payload["tools"][0]["functionDeclarations"][0]["parameters"]["properties"]["cwd"], json!({"type":"string"}));
-    let parts = projected.payload["contents"].as_array().unwrap().iter()
-        .flat_map(|content| content["parts"].as_array().unwrap()).collect::<Vec<_>>();
+    assert_eq!(
+        projected.payload["tools"][0]["functionDeclarations"][0]["parameters"]["properties"]["cwd"],
+        json!({"type":"string"})
+    );
+    let parts = projected.payload["contents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|content| content["parts"].as_array().unwrap())
+        .collect::<Vec<_>>();
     assert!(parts.iter().any(|part| part["text"] == "current text"));
-    assert!(parts.iter().any(|part| part["functionCall"]["args"]["cmd"] == "printf 'literal $() and `bytes`'\nprintf tail"));
-    assert!(parts.iter().any(|part| part["functionResponse"] == json!({"id":"native-call","name":"exec","response":{"output":"old"}})));
+    assert!(parts.iter().any(|part| part["functionCall"]["args"]["cmd"]
+        == "printf 'literal $() and `bytes`'\nprintf tail"));
+    assert!(parts.iter().any(|part| part["functionResponse"]
+        == json!({"id":"native-call","name":"exec","response":{"output":"old"}})));
     let mapping = &projected.attempt.declarations.tool_mappings[0];
-    assert_eq!(mapping.source_path, "request.tools[0].functionDeclarations[0]");
+    assert_eq!(
+        mapping.source_path,
+        "request.tools[0].functionDeclarations[0]"
+    );
     assert_eq!(mapping.destination_path, "tools[0].functionDeclarations[0]");
 }
 
@@ -346,12 +384,23 @@ fn native_gemini_relay_preserves_representable_opaque_siblings() {
         "tools":[{"functionDeclarations":[{"name":"exec","parameters":{"type":"object"},"vendor":{"keep":true}}]}],
         "generationConfig":{"maxOutputTokens":20,"vendor":{"keep":[null,2]}}
     });
-    let (_handle, canonical, pair, current) = sdk_request("native-gemini-opaque-standard", "gemini", raw.clone());
+    let (_handle, canonical, pair, current) =
+        sdk_request("native-gemini-opaque-standard", "gemini", raw.clone());
     let projected = project_canonical_request(
-        &canonical, &pair.inverse_context, &current, &pair.explicit_history_pairing,
-        V3HubExecutionMode::Relay, V3HubProviderWireProtocol::Gemini, &target(false), "native-gemini-opaque-attempt",
-    ).unwrap();
-    assert_eq!(projected.payload, raw, "same-protocol Relay must preserve representable opaque business siblings");
+        &canonical,
+        &pair.inverse_context,
+        &current,
+        &pair.explicit_history_pairing,
+        V3HubExecutionMode::Relay,
+        V3HubProviderWireProtocol::Gemini,
+        &target(false),
+        "native-gemini-opaque-attempt",
+    )
+    .unwrap();
+    assert_eq!(
+        projected.payload, raw,
+        "same-protocol Relay must preserve representable opaque business siblings"
+    );
 }
 
 #[test]
@@ -360,30 +409,58 @@ fn native_gemini_opaque_siblings_follow_current_positions_and_deletions() {
         {"text":"same","thoughtSignature":"first","vendorPartMetadata":{"index":0}},
         {"text":"same","thoughtSignature":"second","vendorPartMetadata":{"index":1}}
     ]}]});
-    let (_handle, mut canonical, pair, mut current) = sdk_request("native-gemini-current-opaque", "gemini", raw);
+    let (_handle, mut canonical, pair, mut current) =
+        sdk_request("native-gemini-current-opaque", "gemini", raw);
     let pair_before = pair.clone();
-    let records = canonical["routecodex_chat_extension"]["chat_extension_opaque_record"].as_array_mut().unwrap();
-    let vendor = records.iter_mut().find(|record|
-        record["path"] == "request.contents[0].parts[1].vendorPartMetadata").unwrap();
+    let records = canonical["routecodex_chat_extension"]["chat_extension_opaque_record"]
+        .as_array_mut()
+        .unwrap();
+    let vendor = records
+        .iter_mut()
+        .find(|record| record["path"] == "request.contents[0].parts[1].vendorPartMetadata")
+        .unwrap();
     vendor["value"]["index"] = json!(42);
     records.retain(|record| record["path"] != "request.contents[0].parts[0].thoughtSignature");
-    (canonical, current) = apply_canonical_field_edit(&canonical, &current, &CanonicalFieldEdit::MoveArray {
-        array_path:"chat.messages[0].content".into(), from:1, to:0,
-    }).unwrap();
-    (canonical, current) = apply_canonical_field_edit(&canonical, &current, &CanonicalFieldEdit::InsertArray {
-        array_path:"chat.messages[0].content".into(), index:1,
-        value:json!({"type":"text","text":"new current part"}),
-    }).unwrap();
+    (canonical, current) = apply_canonical_field_edit(
+        &canonical,
+        &current,
+        &CanonicalFieldEdit::MoveArray {
+            array_path: "chat.messages[0].content".into(),
+            from: 1,
+            to: 0,
+        },
+    )
+    .unwrap();
+    (canonical, current) = apply_canonical_field_edit(
+        &canonical,
+        &current,
+        &CanonicalFieldEdit::InsertArray {
+            array_path: "chat.messages[0].content".into(),
+            index: 1,
+            value: json!({"type":"text","text":"new current part"}),
+        },
+    )
+    .unwrap();
     let before = canonical.clone();
     let projected = project_canonical_request(
-        &canonical, &pair.inverse_context, &current, &pair.explicit_history_pairing,
-        V3HubExecutionMode::Relay, V3HubProviderWireProtocol::Gemini, &target(false), "native-gemini-current-opaque-attempt",
-    ).unwrap();
-    assert_eq!(projected.payload["contents"][0]["parts"], json!([
-        {"text":"same","thoughtSignature":"second","vendorPartMetadata":{"index":42}},
-        {"text":"new current part"},
-        {"text":"same","vendorPartMetadata":{"index":0}}
-    ]));
+        &canonical,
+        &pair.inverse_context,
+        &current,
+        &pair.explicit_history_pairing,
+        V3HubExecutionMode::Relay,
+        V3HubProviderWireProtocol::Gemini,
+        &target(false),
+        "native-gemini-current-opaque-attempt",
+    )
+    .unwrap();
+    assert_eq!(
+        projected.payload["contents"][0]["parts"],
+        json!([
+            {"text":"same","thoughtSignature":"second","vendorPartMetadata":{"index":42}},
+            {"text":"new current part"},
+            {"text":"same","vendorPartMetadata":{"index":0}}
+        ])
+    );
     assert_eq!(canonical, before);
     assert_eq!(pair, pair_before);
 }
@@ -401,15 +478,34 @@ fn native_gemini_preserves_builtin_declarations_and_multiple_instruction_parts()
             {"functionDeclarations":[{"name":"exec","parameters":{"type":"object"}}],"vendor":{"keep":true}}
         ]
     });
-    let (_handle, canonical, pair, current) = sdk_request("native-gemini-builtin-standard", "gemini", raw.clone());
+    let (_handle, canonical, pair, current) =
+        sdk_request("native-gemini-builtin-standard", "gemini", raw.clone());
     let projection = project_canonical_request(
-        &canonical, &pair.inverse_context, &current, &pair.explicit_history_pairing,
-        V3HubExecutionMode::Relay, V3HubProviderWireProtocol::Gemini, &target(false), "native-gemini-builtin-attempt",
-    ).unwrap();
-    assert_eq!(projection.payload, raw, "all native declaration and instruction domains must retain their meaning");
+        &canonical,
+        &pair.inverse_context,
+        &current,
+        &pair.explicit_history_pairing,
+        V3HubExecutionMode::Relay,
+        V3HubProviderWireProtocol::Gemini,
+        &target(false),
+        "native-gemini-builtin-attempt",
+    )
+    .unwrap();
+    assert_eq!(
+        projection.payload, raw,
+        "all native declaration and instruction domains must retain their meaning"
+    );
     for original in &pair.inverse_context.tool_declarations {
-        assert!(projection.attempt.declarations.tool_mappings.iter().any(|mapping|
-            mapping.declaration_record_id == original.record_id), "missing actually emitted declaration for {}", original.source_path);
+        assert!(
+            projection
+                .attempt
+                .declarations
+                .tool_mappings
+                .iter()
+                .any(|mapping| mapping.declaration_record_id == original.record_id),
+            "missing actually emitted declaration for {}",
+            original.source_path
+        );
     }
 }
 
@@ -422,33 +518,78 @@ fn native_gemini_builtin_declarations_use_current_values_and_actual_emission() {
             {"functionDeclarations":[{"name":"exec","parametersJsonSchema":{"type":"object"}}],"vendor":{"keep":true}}
         ]
     });
-    let (_handle, mut canonical, pair, mut current) = sdk_request("native-gemini-builtin-current", "gemini", raw);
-    let builtin_mapping_index = pair.inverse_context.field_mappings.iter().position(|mapping|
-        mapping.source_path == "request.tools[0]" && mapping.operator == "routecodex.v3.field.tool_declaration_transform@1").unwrap();
-    let builtin_path = current.destination_for_original_mapping(builtin_mapping_index).unwrap().to_string();
-    assert!(builtin_path.starts_with("chat.routecodex_chat_extension.chat_extension_opaque_record["));
-    (canonical, current) = apply_canonical_field_edit(&canonical, &current, &CanonicalFieldEdit::Replace {
-        path:builtin_path, value:json!({"googleSearch":{"excludeDomains":["current.invalid"]}}),
-    }).unwrap();
+    let (_handle, mut canonical, pair, mut current) =
+        sdk_request("native-gemini-builtin-current", "gemini", raw);
+    let builtin_mapping_index = pair
+        .inverse_context
+        .field_mappings
+        .iter()
+        .position(|mapping| {
+            mapping.source_path == "request.tools[0]"
+                && mapping.operator == "routecodex.v3.field.tool_declaration_transform@1"
+        })
+        .unwrap();
+    let builtin_path = current
+        .destination_for_original_mapping(builtin_mapping_index)
+        .unwrap()
+        .to_string();
+    assert!(
+        builtin_path.starts_with("chat.routecodex_chat_extension.chat_extension_opaque_record[")
+    );
+    (canonical, current) = apply_canonical_field_edit(
+        &canonical,
+        &current,
+        &CanonicalFieldEdit::Replace {
+            path: builtin_path,
+            value: json!({"googleSearch":{"excludeDomains":["current.invalid"]}}),
+        },
+    )
+    .unwrap();
     assert_eq!(canonical["tools"].as_array().unwrap().len(), 1);
     canonical["tools"][0]["function"]["name"] = json!("current_exec");
-    let record_index = canonical["routecodex_chat_extension"]["chat_extension_opaque_record"].as_array().unwrap()
-        .iter().position(|record| record["path"] == "request.tools[0]").unwrap();
-    (canonical, current) = apply_canonical_field_edit(&canonical, &current, &CanonicalFieldEdit::MoveArray {
-        array_path:"chat.routecodex_chat_extension.chat_extension_opaque_record".into(), from:record_index, to:0,
-    }).unwrap();
+    let record_index = canonical["routecodex_chat_extension"]["chat_extension_opaque_record"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|record| record["path"] == "request.tools[0]")
+        .unwrap();
+    (canonical, current) = apply_canonical_field_edit(
+        &canonical,
+        &current,
+        &CanonicalFieldEdit::MoveArray {
+            array_path: "chat.routecodex_chat_extension.chat_extension_opaque_record".into(),
+            from: record_index,
+            to: 0,
+        },
+    )
+    .unwrap();
     let before = canonical.clone();
     let projected = project_canonical_request(
-        &canonical, &pair.inverse_context, &current, &pair.explicit_history_pairing,
-        V3HubExecutionMode::Relay, V3HubProviderWireProtocol::Gemini, &target(false), "native-gemini-builtin-current-attempt",
-    ).unwrap();
-    assert_eq!(projected.payload["tools"], json!([
-        {"googleSearch":{"excludeDomains":["current.invalid"]}},
-        {"functionDeclarations":[{"name":"current_exec","parametersJsonSchema":{"type":"object"}}],"vendor":{"keep":true}}
-    ]));
+        &canonical,
+        &pair.inverse_context,
+        &current,
+        &pair.explicit_history_pairing,
+        V3HubExecutionMode::Relay,
+        V3HubProviderWireProtocol::Gemini,
+        &target(false),
+        "native-gemini-builtin-current-attempt",
+    )
+    .unwrap();
+    assert_eq!(
+        projected.payload["tools"],
+        json!([
+            {"googleSearch":{"excludeDomains":["current.invalid"]}},
+            {"functionDeclarations":[{"name":"current_exec","parametersJsonSchema":{"type":"object"}}],"vendor":{"keep":true}}
+        ])
+    );
     for original in &pair.inverse_context.tool_declarations {
-        let mapping = projected.attempt.declarations.tool_mappings.iter().find(|mapping|
-            mapping.declaration_record_id == original.record_id).unwrap();
+        let mapping = projected
+            .attempt
+            .declarations
+            .tool_mappings
+            .iter()
+            .find(|mapping| mapping.declaration_record_id == original.record_id)
+            .unwrap();
         assert_eq!(mapping.source_path, original.source_path);
         if original.kind == "googleSearch" {
             assert_eq!(mapping.destination_path, "tools[0]");
@@ -460,16 +601,36 @@ fn native_gemini_builtin_declarations_use_current_values_and_actual_emission() {
         }
     }
     assert_eq!(canonical, before);
-    (canonical, current) = apply_canonical_field_edit(&canonical, &current, &CanonicalFieldEdit::Remove {
-        path:current.destination_for_original_mapping(builtin_mapping_index).unwrap().to_string(),
-    }).unwrap();
+    (canonical, current) = apply_canonical_field_edit(
+        &canonical,
+        &current,
+        &CanonicalFieldEdit::Remove {
+            path: current
+                .destination_for_original_mapping(builtin_mapping_index)
+                .unwrap()
+                .to_string(),
+        },
+    )
+    .unwrap();
     let projected = project_canonical_request(
-        &canonical, &pair.inverse_context, &current, &pair.explicit_history_pairing,
-        V3HubExecutionMode::Relay, V3HubProviderWireProtocol::Gemini, &target(false), "native-gemini-builtin-deleted-attempt",
-    ).unwrap();
+        &canonical,
+        &pair.inverse_context,
+        &current,
+        &pair.explicit_history_pairing,
+        V3HubExecutionMode::Relay,
+        V3HubProviderWireProtocol::Gemini,
+        &target(false),
+        "native-gemini-builtin-deleted-attempt",
+    )
+    .unwrap();
     assert_eq!(projected.payload["tools"].as_array().unwrap().len(), 1);
     assert_eq!(projected.attempt.declarations.tool_mappings.len(), 1);
-    assert_eq!(projected.attempt.declarations.tool_mappings[0].emitted_name.as_deref(), Some("current_exec"));
+    assert_eq!(
+        projected.attempt.declarations.tool_mappings[0]
+            .emitted_name
+            .as_deref(),
+        Some("current_exec")
+    );
 }
 
 #[test]
@@ -478,11 +639,19 @@ fn native_instruction_inverse_distinguishes_original_and_generated_newlines() {
         "systemInstruction":{"parts":[{"text":"same"},{"text":"\n"},{"text":"same"}]},
         "contents":[{"role":"user","parts":[{"text":"question"}]}]
     });
-    let (_handle, canonical, pair, current) = sdk_request("native-instruction-newlines", "gemini", raw.clone());
+    let (_handle, canonical, pair, current) =
+        sdk_request("native-instruction-newlines", "gemini", raw.clone());
     let projected = project_canonical_request(
-        &canonical, &pair.inverse_context, &current, &pair.explicit_history_pairing,
-        V3HubExecutionMode::Relay, V3HubProviderWireProtocol::Gemini, &target(false), "native-instruction-newlines-attempt",
-    ).unwrap();
+        &canonical,
+        &pair.inverse_context,
+        &current,
+        &pair.explicit_history_pairing,
+        V3HubExecutionMode::Relay,
+        V3HubProviderWireProtocol::Gemini,
+        &target(false),
+        "native-instruction-newlines-attempt",
+    )
+    .unwrap();
     assert_eq!(projected.payload, raw);
 }
 
@@ -495,41 +664,85 @@ fn native_instruction_current_edits_keep_order_insertions_and_modified_generated
         ]},
         "contents":[{"role":"user","parts":[{"text":"question"}]}]
     });
-    let (_handle, mut canonical, pair, mut current) = sdk_request("native-instruction-edits", "gemini", raw);
+    let (_handle, mut canonical, pair, mut current) =
+        sdk_request("native-instruction-edits", "gemini", raw);
     let pair_before = pair.clone();
-    (canonical, current) = apply_canonical_field_edit(&canonical, &current, &CanonicalFieldEdit::Replace {
-        path:"chat.messages[0].content[1]".into(),
-        value:json!({"type":"text","text":"modified generated contribution"}),
-    }).unwrap();
-    (canonical, current) = apply_canonical_field_edit(&canonical, &current, &CanonicalFieldEdit::MoveArray {
-        array_path:"chat.messages[0].content".into(), from:2, to:0,
-    }).unwrap();
-    (canonical, current) = apply_canonical_field_edit(&canonical, &current, &CanonicalFieldEdit::InsertArray {
-        array_path:"chat.messages[0].content".into(), index:1,
-        value:json!({"type":"text","text":"\n"}),
-    }).unwrap();
+    (canonical, current) = apply_canonical_field_edit(
+        &canonical,
+        &current,
+        &CanonicalFieldEdit::Replace {
+            path: "chat.messages[0].content[1]".into(),
+            value: json!({"type":"text","text":"modified generated contribution"}),
+        },
+    )
+    .unwrap();
+    (canonical, current) = apply_canonical_field_edit(
+        &canonical,
+        &current,
+        &CanonicalFieldEdit::MoveArray {
+            array_path: "chat.messages[0].content".into(),
+            from: 2,
+            to: 0,
+        },
+    )
+    .unwrap();
+    (canonical, current) = apply_canonical_field_edit(
+        &canonical,
+        &current,
+        &CanonicalFieldEdit::InsertArray {
+            array_path: "chat.messages[0].content".into(),
+            index: 1,
+            value: json!({"type":"text","text":"\n"}),
+        },
+    )
+    .unwrap();
     let projected = project_canonical_request(
-        &canonical, &pair.inverse_context, &current, &pair.explicit_history_pairing,
-        V3HubExecutionMode::Relay, V3HubProviderWireProtocol::Gemini, &target(false), "native-instruction-edits-attempt",
-    ).unwrap();
-    assert_eq!(projected.payload["systemInstruction"]["parts"], json!([
-        {"text":"same","vendorPartMetadata":{"source":1}},
-        {"text":"\n"},
-        {"text":"same","vendorPartMetadata":{"source":0}},
-        {"text":"modified generated contribution"}
-    ]));
-    (canonical, current) = apply_canonical_field_edit(&canonical, &current, &CanonicalFieldEdit::Remove {
-        path:"chat.messages[0].content[2]".into(),
-    }).unwrap();
+        &canonical,
+        &pair.inverse_context,
+        &current,
+        &pair.explicit_history_pairing,
+        V3HubExecutionMode::Relay,
+        V3HubProviderWireProtocol::Gemini,
+        &target(false),
+        "native-instruction-edits-attempt",
+    )
+    .unwrap();
+    assert_eq!(
+        projected.payload["systemInstruction"]["parts"],
+        json!([
+            {"text":"same","vendorPartMetadata":{"source":1}},
+            {"text":"\n"},
+            {"text":"same","vendorPartMetadata":{"source":0}},
+            {"text":"modified generated contribution"}
+        ])
+    );
+    (canonical, current) = apply_canonical_field_edit(
+        &canonical,
+        &current,
+        &CanonicalFieldEdit::Remove {
+            path: "chat.messages[0].content[2]".into(),
+        },
+    )
+    .unwrap();
     let projected = project_canonical_request(
-        &canonical, &pair.inverse_context, &current, &pair.explicit_history_pairing,
-        V3HubExecutionMode::Relay, V3HubProviderWireProtocol::Gemini, &target(false), "native-instruction-edits-deleted-attempt",
-    ).unwrap();
-    assert_eq!(projected.payload["systemInstruction"]["parts"], json!([
-        {"text":"same","vendorPartMetadata":{"source":1}},
-        {"text":"\n"},
-        {"text":"modified generated contribution"}
-    ]));
+        &canonical,
+        &pair.inverse_context,
+        &current,
+        &pair.explicit_history_pairing,
+        V3HubExecutionMode::Relay,
+        V3HubProviderWireProtocol::Gemini,
+        &target(false),
+        "native-instruction-edits-deleted-attempt",
+    )
+    .unwrap();
+    assert_eq!(
+        projected.payload["systemInstruction"]["parts"],
+        json!([
+            {"text":"same","vendorPartMetadata":{"source":1}},
+            {"text":"\n"},
+            {"text":"modified generated contribution"}
+        ])
+    );
     assert_eq!(pair, pair_before);
 }
 
@@ -545,11 +758,19 @@ fn native_gemini_preserves_instruction_and_content_container_siblings() {
             "vendorContent":{"nested":[null,{"keep":true}]}
         }]
     });
-    let (_handle, canonical, pair, current) = sdk_request("native-gemini-containers", "gemini", raw.clone());
+    let (_handle, canonical, pair, current) =
+        sdk_request("native-gemini-containers", "gemini", raw.clone());
     let projected = project_canonical_request(
-        &canonical, &pair.inverse_context, &current, &pair.explicit_history_pairing,
-        V3HubExecutionMode::Relay, V3HubProviderWireProtocol::Gemini, &target(false), "native-gemini-containers-attempt",
-    ).unwrap();
+        &canonical,
+        &pair.inverse_context,
+        &current,
+        &pair.explicit_history_pairing,
+        V3HubExecutionMode::Relay,
+        V3HubProviderWireProtocol::Gemini,
+        &target(false),
+        "native-gemini-containers-attempt",
+    )
+    .unwrap();
     assert_eq!(projected.payload, raw);
 }
 
@@ -562,7 +783,8 @@ fn native_hosted_tools_never_become_invalid_cross_protocol_declarations() {
             {"functionDeclarations":[{"name":"exec","parameters":{"type":"object"}}]}
         ]
     });
-    let (_handle, canonical, pair, current) = sdk_request("native-builtin-cross-protocol", "gemini", raw);
+    let (_handle, canonical, pair, current) =
+        sdk_request("native-builtin-cross-protocol", "gemini", raw);
     let before = canonical.clone();
     for (protocol, provider_type) in [
         (V3HubProviderWireProtocol::OpenAiChat, "openai_chat"),
@@ -572,17 +794,36 @@ fn native_hosted_tools_never_become_invalid_cross_protocol_declarations() {
         let mut selected = target(false);
         selected.provider_type = provider_type.into();
         let projected = project_canonical_request(
-            &canonical, &pair.inverse_context, &current, &pair.explicit_history_pairing,
-            V3HubExecutionMode::Relay, protocol, &selected, "native-builtin-cross-protocol-attempt",
-        ).unwrap();
+            &canonical,
+            &pair.inverse_context,
+            &current,
+            &pair.explicit_history_pairing,
+            V3HubExecutionMode::Relay,
+            protocol,
+            &selected,
+            "native-builtin-cross-protocol-attempt",
+        )
+        .unwrap();
         let declarations = projected.payload["tools"].as_array().unwrap();
-        assert_eq!(declarations.len(), 1, "native-only tools must stay outside {provider_type} standard tools");
+        assert_eq!(
+            declarations.len(),
+            1,
+            "native-only tools must stay outside {provider_type} standard tools"
+        );
         let declaration = &declarations[0];
         assert!(declaration.get("googleSearch").is_none());
         assert!(declaration.get("codeExecution").is_none());
-        assert_eq!(declaration.get("function").unwrap_or(declaration)["name"], "exec");
+        assert_eq!(
+            declaration.get("function").unwrap_or(declaration)["name"],
+            "exec"
+        );
         assert_eq!(projected.attempt.declarations.tool_mappings.len(), 1);
-        assert_eq!(projected.attempt.declarations.tool_mappings[0].emitted_name.as_deref(), Some("exec"));
+        assert_eq!(
+            projected.attempt.declarations.tool_mappings[0]
+                .emitted_name
+                .as_deref(),
+            Some("exec")
+        );
         assert_eq!(canonical, before);
     }
 }

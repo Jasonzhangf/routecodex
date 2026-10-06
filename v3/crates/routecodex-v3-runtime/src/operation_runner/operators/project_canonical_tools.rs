@@ -19,8 +19,11 @@ pub(crate) fn project_registered_native_gemini_tools(
     inverse: &crate::operation_runner::RequestInverseContext,
     current: &crate::operation_runner::CurrentFieldAssociations,
 ) -> Result<Option<(Value, Vec<ToolMappingReference>)>, String> {
-    if !inverse.field_mappings.iter().any(|mapping|
-        mapping.transform_id.as_deref() == Some(GEMINI_TOOLS_TRANSFORM)) {
+    if !inverse
+        .field_mappings
+        .iter()
+        .any(|mapping| mapping.transform_id.as_deref() == Some(GEMINI_TOOLS_TRANSFORM))
+    {
         return Ok(None);
     }
     let view = CurrentProjectionView::new(canonical, inverse, current);
@@ -151,13 +154,21 @@ fn gemini_tools(
         if let Some(mapping_index) = view.mapping_index_for_source(&container_path) {
             let mapping = &view.inverse().field_mappings[mapping_index];
             if mapping.operator == TOOL_DECLARATION_OPERATOR {
-                let Some(destination) = view.current_destination(mapping_index) else { continue; };
-                let Some(current_item) = view.read_mapping(mapping_index)? else { continue; };
+                let Some(destination) = view.current_destination(mapping_index) else {
+                    continue;
+                };
+                let Some(current_item) = view.read_mapping(mapping_index)? else {
+                    continue;
+                };
                 claimed_destinations.insert(destination.to_string());
                 native.push(current_item.clone());
                 if let Some(declaration) = declaration_for_source(view, &container_path) {
                     declarations.push(declaration_reference(
-                        view, declaration, mapping, &format!("tools[{container_index}]"), current_item,
+                        view,
+                        declaration,
+                        mapping,
+                        &format!("tools[{container_index}]"),
+                        current_item,
                     )?);
                 }
                 continue;
@@ -166,7 +177,9 @@ fn gemini_tools(
         let original_container = original_value_for_source(view, &container_path)?;
         let mut container = if original_container.is_some_and(|value| !value.is_object()) {
             original_container.cloned().unwrap_or(Value::Null)
-        } else { json!({}) };
+        } else {
+            json!({})
+        };
         let Some(container_object) = container.as_object_mut() else {
             native.push(container);
             continue;
@@ -208,7 +221,12 @@ fn gemini_tools(
         if original_has_declarations || !emitted.is_empty() {
             container_object.insert("functionDeclarations".to_string(), Value::Array(emitted));
         }
-        restore_current_source_siblings(&mut container, view, &container_path, &["functionDeclarations"])?;
+        restore_current_source_siblings(
+            &mut container,
+            view,
+            &container_path,
+            &["functionDeclarations"],
+        )?;
         native.push(container);
     }
 
@@ -592,8 +610,14 @@ mod tests {
             assert_eq!(mapping.destination_path, destination);
             assert!(mapping.emitted_name.is_none());
             assert!(mapping.emitted_namespace.is_none());
-            assert!(pair.inverse_context.tool_declarations.iter().any(|declaration|
-                declaration.record_id == mapping.declaration_record_id && declaration.kind == kind));
+            assert!(pair
+                .inverse_context
+                .tool_declarations
+                .iter()
+                .any(
+                    |declaration| declaration.record_id == mapping.declaration_record_id
+                        && declaration.kind == kind
+                ));
         }
     }
 

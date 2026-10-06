@@ -80,9 +80,7 @@ fn paired_output_records_real_mappings_for_identity_status_and_unknown_siblings(
     );
     assert_eq!(
         destinations(&pair, "request.input[0].status"),
-        vec![
-            "chat.messages[0].routecodex_chat_extension.responses_tool_output_status".to_string()
-        ]
+        vec!["chat.messages[0].routecodex_chat_extension.responses_tool_output_status".to_string()]
     );
     // A dotted/bracketed key uses the escaped structural path, never string
     // concatenation.
@@ -112,7 +110,10 @@ fn direct_inverse_restores_paired_and_named_outputs_exactly() {
     });
     let (canonical, pair) = normalize("responses", json!({"model":"m","input":[paired.clone()]}));
     let associations = CurrentFieldAssociations::from_normalization(&pair.inverse_context);
-    assert_eq!(project(&canonical, &pair, &associations)["input"][0], paired);
+    assert_eq!(
+        project(&canonical, &pair, &associations)["input"][0],
+        paired
+    );
 
     let named = json!({
         "type":"custom_tool_call_output",

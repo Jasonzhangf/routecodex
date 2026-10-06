@@ -269,13 +269,9 @@ fn chat_client_body() -> Value {
 async fn responses_direct_real_kernel_normalizes_once_and_preserves_tool_identity() {
     let manifest = manifest();
     let execution_id = "exec-direct-responses";
-    let control = V3RequestExecutionControl::new(
-        &manifest,
-        "responses",
-        "req-direct-responses",
-        "responses",
-    )
-    .expect("request control");
+    let control =
+        V3RequestExecutionControl::new(&manifest, "responses", "req-direct-responses", "responses")
+            .expect("request control");
     let handle = control.request_context().clone();
     let transport = RecordingTransport::new(json!({
         "id": "resp_direct_test",
@@ -404,25 +400,26 @@ async fn chat_direct_real_kernel_normalizes_once_and_preserves_tool_round_trip()
             "finish_reason": "stop"
         }]
     }));
-    let output = execute_v3_direct_runtime_kernel_core_with_request_control::<V3ChatDirectCodec, _>(
-        (),
-        &manifest,
-        raw(
-            "chat",
-            "req-direct-chat",
-            execution_id,
-            "/v1/chat/completions",
-            chat_client_body(),
-        ),
-        &transport,
-        V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest),
-        0,
-        true,
-        None,
-        None,
-        control,
-    )
-    .await;
+    let output =
+        execute_v3_direct_runtime_kernel_core_with_request_control::<V3ChatDirectCodec, _>(
+            (),
+            &manifest,
+            raw(
+                "chat",
+                "req-direct-chat",
+                execution_id,
+                "/v1/chat/completions",
+                chat_client_body(),
+            ),
+            &transport,
+            V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest),
+            0,
+            true,
+            None,
+            None,
+            control,
+        )
+        .await;
 
     assert_eq!(output.client_payload.status, 200, "{output:?}");
     assert!(matches!(output.client_payload.body, V3ClientBody::Json(_)));
@@ -485,22 +482,12 @@ async fn direct_handoff_keeps_the_same_request_pair_for_responses_and_chat() {
         ),
     ] {
         let request_id = format!("req-handoff-{entry_protocol}");
-        let control = V3RequestExecutionControl::new(
-            &manifest,
-            server_id,
-            &request_id,
-            entry_protocol,
-        )
-        .expect("request control");
+        let control =
+            V3RequestExecutionControl::new(&manifest, server_id, &request_id, entry_protocol)
+                .expect("request control");
         let handle = control.request_context().clone();
         let transport = RecordingTransport::new(json!({"unused": true}));
-        let raw = raw(
-            server_id,
-            &request_id,
-            execution_id,
-            path,
-            body,
-        );
+        let raw = raw(server_id, &request_id, execution_id, path, body);
         let output = if entry_protocol == "responses" {
             execute_v3_responses_direct_runtime_kernel_with_transport_and_request_control(
                 &manifest,

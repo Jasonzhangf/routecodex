@@ -31,8 +31,10 @@ fn destinations(pair: &RequestScopedContextPair, source_path: &str) -> Vec<Strin
     pair.inverse_context
         .field_mappings
         .iter()
-        .filter(|mapping| mapping.source_path == source_path
-            && mapping.semantics.as_deref() != Some("normalization_instruction_separator"))
+        .filter(|mapping| {
+            mapping.source_path == source_path
+                && mapping.semantics.as_deref() != Some("normalization_instruction_separator")
+        })
         .map(|mapping| mapping.destination.clone())
         .collect()
 }
@@ -222,12 +224,21 @@ fn responses_instructions_append_to_existing_system_with_distinct_leaf_paths() {
         destinations(&pair, "request.input[1].content"),
         vec!["chat.messages[1].content[2].text"]
     );
-    let generated = pair.inverse_context.field_mappings.iter().filter(|mapping|
-        mapping.semantics.as_deref() == Some("normalization_instruction_separator")).collect::<Vec<_>>();
+    let generated = pair
+        .inverse_context
+        .field_mappings
+        .iter()
+        .filter(|mapping| {
+            mapping.semantics.as_deref() == Some("normalization_instruction_separator")
+        })
+        .collect::<Vec<_>>();
     assert_eq!(generated.len(), 1);
     assert_eq!(generated[0].source_path, "request.instructions");
     assert_eq!(generated[0].destination, "chat.messages[1].content[1]");
-    assert_eq!(generated[0].transform_id.as_deref(), Some("v3.responses.instructions_to_chat_system.v1"));
+    assert_eq!(
+        generated[0].transform_id.as_deref(),
+        Some("v3.responses.instructions_to_chat_system.v1")
+    );
     assert_no_wildcard_history_destinations(&pair);
 }
 

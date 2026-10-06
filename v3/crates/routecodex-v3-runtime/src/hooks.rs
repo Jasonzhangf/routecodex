@@ -69,11 +69,12 @@ type RouteHook = fn(
     V3Target10ConcreteProviderSelected,
     &V3Req04StandardizedResponses,
 ) -> V3ResponsesDirect11Policy;
-type RequestProjectionHook = fn(
-    &V3ResponsesDirect11Policy,
-    &V3DirectRequestKeyHookCatalog,
-    &crate::kernel::V3DirectRequestProjectionView,
-) -> Result<(V3Provider12ResponsesWirePayload, AttemptContext), V3Error01SourceRaised>;
+type RequestProjectionHook =
+    fn(
+        &V3ResponsesDirect11Policy,
+        &V3DirectRequestKeyHookCatalog,
+        &crate::kernel::V3DirectRequestProjectionView,
+    ) -> Result<(V3Provider12ResponsesWirePayload, AttemptContext), V3Error01SourceRaised>;
 type ProviderTransportHook = fn(
     V3Provider12ResponsesWirePayload,
 )
@@ -284,8 +285,10 @@ pub(crate) fn register_responses_direct_hooks_with_key_catalog(
         direct_sse_typed_hooks,
         provider_transport: responses_direct_provider_transport_hook,
         contextual_response_projection: responses_direct_response_projection_hook_with_context,
-        successful_json_response_projection: crate::direct_response_hooks::apply_v3_direct_json_successful_attempt_hook,
-        successful_sse_response_projection: crate::direct_response_hooks::apply_v3_direct_sse_successful_attempt_hook,
+        successful_json_response_projection:
+            crate::direct_response_hooks::apply_v3_direct_json_successful_attempt_hook,
+        successful_sse_response_projection:
+            crate::direct_response_hooks::apply_v3_direct_sse_successful_attempt_hook,
         error: responses_direct_error_hook,
     }
 }
@@ -421,13 +424,15 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_view
         if request_body.get("input").is_none() {
             if let Some(messages) = request_body.get("messages").and_then(Value::as_array) {
                 let input = crate::hub_v1::build_responses_input_from_chat_messages(messages)
-                    .map_err(|error| build_v3_error_01_source_raised_internal(
-                        V3ErrorSourceKind::RuntimeFailure,
-                        "V3DirectRequestRepresentation",
-                        "responses_messages_alias_projection_failed",
-                        error,
-                        V3InternalErrorCode::V3Provider12ResponsesWirePayload,
-                    ))?;
+                    .map_err(|error| {
+                        build_v3_error_01_source_raised_internal(
+                            V3ErrorSourceKind::RuntimeFailure,
+                            "V3DirectRequestRepresentation",
+                            "responses_messages_alias_projection_failed",
+                            error,
+                            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+                        )
+                    })?;
                 let fields = request_body.as_object_mut().expect("messages object");
                 fields.remove("messages");
                 fields.insert("input".to_string(), input);
@@ -711,7 +716,10 @@ pub(crate) fn chat_direct_request_projection_hook_with_key_catalog_and_view(
     let mut wire_body = request_view.payload.clone();
     crate::hub_v1::project_openai_responses_hosted_web_search_for_selected_target(
         &mut wire_body,
-        candidate.model_capabilities.iter().any(|capability| capability == "web_search"),
+        candidate
+            .model_capabilities
+            .iter()
+            .any(|capability| capability == "web_search"),
     );
     wire_body = apply_v3_direct_request_key_hook_with_catalog(
         wire_body,
@@ -746,23 +754,22 @@ pub(crate) fn chat_direct_request_projection_hook_with_key_catalog_and_view(
     // Chat Direct shares the same registered request projection owner for
     // actual declaration emission; the emitted leaf names and their typed
     // attempt mappings come from one traversal.
-    let (wire_body, actual_attempt) =
-        crate::hub_v1::project_direct_provider_request_declarations(
-            &wire_body,
-            &request_view.inverse,
-            &request_view.current,
-            "openai-chat",
-            &request_view.attempt,
+    let (wire_body, actual_attempt) = crate::hub_v1::project_direct_provider_request_declarations(
+        &wire_body,
+        &request_view.inverse,
+        &request_view.current,
+        "openai-chat",
+        &request_view.attempt,
+    )
+    .map_err(|error| {
+        build_v3_error_01_source_raised_internal(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3ChatDirect11Policy",
+            "chat_direct_declaration_emission_failed",
+            error,
+            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
         )
-        .map_err(|error| {
-            build_v3_error_01_source_raised_internal(
-                V3ErrorSourceKind::RuntimeFailure,
-                "V3ChatDirect11Policy",
-                "chat_direct_declaration_emission_failed",
-                error,
-                V3InternalErrorCode::V3Provider12ResponsesWirePayload,
-            )
-        })?;
+    })?;
     let secret = match (
         &candidate.env_name,
         &candidate.token_file,

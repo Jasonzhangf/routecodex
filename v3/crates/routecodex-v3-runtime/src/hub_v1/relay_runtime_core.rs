@@ -12,6 +12,7 @@
 
 use super::*;
 use crate::nodes::{V3AttemptStoreError, V3CommittedClientSseBuilder, V3RequestExecutionControl};
+use crate::operation_runner::RequestOriginKind;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key;
 use crate::provider_failure_runtime_policy::{
@@ -23,7 +24,6 @@ use crate::provider_failure_runtime_policy::{
     V3RuntimeProviderAdmission,
 };
 use crate::runtime_timing::V3RuntimeObservabilityAccumulator;
-use crate::operation_runner::RequestOriginKind;
 use futures_util::StreamExt;
 use routecodex_v3_config::{V3Config05ManifestPublished, V3WebSearchExecutionMode};
 use routecodex_v3_error::V3ProviderFailureSessionScope;
@@ -552,10 +552,9 @@ where
         format!("{request_id}:entry"),
         entry_origin.request_origin_kind(),
     );
-    let req02 = build_v3_hub_req_inbound_02_from_request_invocation(req01, &invocation)
-        .map_err(|reason| {
-            V3RelayCoreError::Request(V3HubRelayRequestError::ReqInboundInvalid { reason })
-        })?;
+    let req02 = build_v3_hub_req_inbound_02_from_request_invocation(req01, &invocation).map_err(
+        |reason| V3RelayCoreError::Request(V3HubRelayRequestError::ReqInboundInvalid { reason }),
+    )?;
     trace.push("V3HubReqInbound02Normalized");
     let request_outcome = compile_v3_hub_relay_request_hooks()
         .run_from_normalized(req02, &request_hook_profile)
@@ -566,8 +565,8 @@ where
     let req04 = request_outcome.into_governed();
     govern_v3_operation_runner_current_request_fields(req04.governed_payload(), &invocation, &[])
         .map_err(|reason| {
-            V3RelayCoreError::Request(V3HubRelayRequestError::ReqInboundInvalid { reason })
-        })?;
+        V3RelayCoreError::Request(V3HubRelayRequestError::ReqInboundInvalid { reason })
+    })?;
     if execution_mode != V3HubExecutionMode::Relay {
         return Err(V3RelayCoreError::Target(format!(
             "relay runtime received non-relay execution mode: {execution_mode:?}"

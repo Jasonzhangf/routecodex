@@ -296,7 +296,9 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
             Err(error) => project_v3_openai_chat_relay_runtime_failure(error),
         };
         if !direct_handoff_events.is_empty() {
-            let observability = relay_output.observability.get_or_insert_with(Default::default);
+            let observability = relay_output
+                .observability
+                .get_or_insert_with(Default::default);
             let mut merged = direct_handoff_events;
             merged.append(&mut observability.provider_failure_events);
             observability.provider_failure_events = merged;

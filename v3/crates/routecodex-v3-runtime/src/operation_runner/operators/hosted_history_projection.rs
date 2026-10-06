@@ -41,8 +41,8 @@ pub struct HostedHistoryEmission {
     pub anthropic_blocks: Vec<Value>,
 }
 
-fn registered_cases() -> Result<Vec<(&'static str, &'static str, &'static HostedHistoryCase)>, String>
-{
+fn registered_cases(
+) -> Result<Vec<(&'static str, &'static str, &'static HostedHistoryCase)>, String> {
     Ok(profile_index()?.hosted_history_cases().collect())
 }
 
@@ -138,9 +138,7 @@ pub fn project_hosted_history_emissions(
             event,
         ));
     }
-    emissions.sort_by_key(|emission| {
-        (emission.canonical_message_index, emission.source_index)
-    });
+    emissions.sort_by_key(|emission| (emission.canonical_message_index, emission.source_index));
     Ok(emissions)
 }
 
@@ -205,8 +203,7 @@ fn chat_pair(
     identity: &str,
     arguments: &Value,
 ) -> (Value, Value) {
-    let arguments_json =
-        serde_json::to_string(arguments).unwrap_or_else(|_| "{}".to_string());
+    let arguments_json = serde_json::to_string(arguments).unwrap_or_else(|_| "{}".to_string());
     let result_json = serde_json::to_string(event).unwrap_or_else(|_| "null".to_string());
     let assistant = json!({
         "role": "assistant",

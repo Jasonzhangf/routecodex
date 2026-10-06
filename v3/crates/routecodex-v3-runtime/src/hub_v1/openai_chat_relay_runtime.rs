@@ -1232,10 +1232,10 @@ fn openai_chat_sse_payload_has_terminal_finish_reason(payload: &Value) -> Result
 
 #[path = "openai_chat_relay_failure_output.rs"]
 mod openai_chat_relay_failure_output;
+pub use openai_chat_relay_failure_output::project_v3_openai_chat_relay_runtime_failure;
 use openai_chat_relay_failure_output::{
     error_output, openai_chat_provider_http_failure, provider_failure_output,
 };
-pub use openai_chat_relay_failure_output::project_v3_openai_chat_relay_runtime_failure;
 
 /// OpenAI Chat relay 协议 codec：协议差异的唯一收敛面（骨架驱动）。
 pub struct V3OpenAiChatRelayCodec;

@@ -180,8 +180,7 @@ fn project_responses_input(
         // event through the recorded source/current association. The original
         // opaque source value is never replayed, and a removed anchor emits no
         // event because its current mapping no longer resolves.
-        if let Some(mapping_index) =
-            hosted_anchor_mapping_index(view.inverse(), &item.source_path)?
+        if let Some(mapping_index) = hosted_anchor_mapping_index(view.inverse(), &item.source_path)?
         {
             if let Some(event) = view.read_mapping(mapping_index)? {
                 input.push(event.clone());
@@ -328,7 +327,13 @@ const OUTPUT_EXTRA_FIELDS_CARRIER: &str =
     ".routecodex_chat_extension.responses_tool_output_extra_fields";
 
 const OUTPUT_ITEM_KNOWN_KEYS: [&str; 7] = [
-    "type", "output", "call_id", "name", "namespace", "id", "status",
+    "type",
+    "output",
+    "call_id",
+    "name",
+    "namespace",
+    "id",
+    "status",
 ];
 
 /// Resolve one unmapped output sibling's key through its registered current

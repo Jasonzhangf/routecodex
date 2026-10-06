@@ -91,12 +91,8 @@ fn configured_case_normalizes_to_one_native_anchor_and_roundtrips_exactly() {
         "unchanged roundtrip must reproduce the exact original native event"
     );
 
-    let emissions = project_hosted_history_emissions(
-        &canonical,
-        &pair.inverse_context,
-        &associations,
-    )
-    .unwrap();
+    let emissions =
+        project_hosted_history_emissions(&canonical, &pair.inverse_context, &associations).unwrap();
     assert_eq!(emissions.len(), 1);
     assert_eq!(emissions[0].event, item);
     assert_eq!(emissions[0].identity, "ws_1");
@@ -116,12 +112,9 @@ fn absent_empty_and_nonstring_identity_use_generated_stable_identity() {
     ] {
         let raw = json!({"model": "m", "input": [item.clone()]});
         let (canonical, pair, associations) = normalize(raw);
-        let emissions = project_hosted_history_emissions(
-            &canonical,
-            &pair.inverse_context,
-            &associations,
-        )
-        .unwrap();
+        let emissions =
+            project_hosted_history_emissions(&canonical, &pair.inverse_context, &associations)
+                .unwrap();
         assert_eq!(
             emissions[0].identity, "call_routecodex_web_search_0",
             "absent/empty/nonstring identity must use the generated representation identity"
@@ -148,27 +141,38 @@ fn failed_and_unknown_status_and_values_are_preserved_without_rejection() {
     let raw = json!({"model": "m", "input": [item.clone()]});
     let (canonical, pair, associations) = normalize(raw);
     assert_eq!(native_event(&canonical, 0), item);
-    assert_eq!(project(&canonical, &pair, &associations).payload["input"], json!([item]));
+    assert_eq!(
+        project(&canonical, &pair, &associations).payload["input"],
+        json!([item])
+    );
 
-    let emissions = project_hosted_history_emissions(
-        &canonical,
-        &pair.inverse_context,
-        &associations,
-    )
-    .unwrap();
+    let emissions =
+        project_hosted_history_emissions(&canonical, &pair.inverse_context, &associations).unwrap();
     let result_block = &emissions[0].anthropic_blocks[1];
     assert_eq!(result_block["type"], json!("web_search_tool_result"));
     assert_eq!(result_block["content"]["status"], json!("failed"));
-    assert_eq!(result_block["content"]["error"]["code"], json!("upstream_error"));
-    assert_eq!(result_block["content"]["status_detail"]["retryable"], json!(true));
-    assert_eq!(result_block["content"]["future_member"][2]["nested"], Value::Null);
+    assert_eq!(
+        result_block["content"]["error"]["code"],
+        json!("upstream_error")
+    );
+    assert_eq!(
+        result_block["content"]["status_detail"]["retryable"],
+        json!(true)
+    );
+    assert_eq!(
+        result_block["content"]["future_member"][2]["nested"],
+        Value::Null
+    );
 
     // An unregistered status string is business data, never a rejection.
     let unknown_status = json!({"type": "web_search_call", "id": "ws_x",
         "status": "quarantined", "action": {"type": "search", "query": "q"}});
     let raw = json!({"model": "m", "input": [unknown_status.clone()]});
     let (canonical, pair, associations) = normalize(raw);
-    assert_eq!(project(&canonical, &pair, &associations).payload["input"], json!([unknown_status]));
+    assert_eq!(
+        project(&canonical, &pair, &associations).payload["input"],
+        json!([unknown_status])
+    );
 }
 
 #[test]
@@ -184,7 +188,10 @@ fn long_strings_crlf_and_nested_dotted_keys_roundtrip() {
     let raw = json!({"model": "m", "input": [item.clone()]});
     let (canonical, pair, associations) = normalize(raw);
     assert_eq!(native_event(&canonical, 0), item);
-    assert_eq!(project(&canonical, &pair, &associations).payload["input"], json!([item]));
+    assert_eq!(
+        project(&canonical, &pair, &associations).payload["input"],
+        json!([item])
+    );
 }
 
 #[test]
@@ -249,12 +256,8 @@ fn current_replace_remove_and_move_govern_the_single_event() {
         "typed edits must govern the one native event; the removed source value never refills"
     );
 
-    let emissions = project_hosted_history_emissions(
-        &canonical,
-        &pair.inverse_context,
-        &associations,
-    )
-    .unwrap();
+    let emissions =
+        project_hosted_history_emissions(&canonical, &pair.inverse_context, &associations).unwrap();
     assert_eq!(emissions.len(), 1);
     assert_eq!(emissions[0].event, expected);
     let call_arguments: Value = serde_json::from_str(
@@ -268,16 +271,16 @@ fn current_replace_remove_and_move_govern_the_single_event() {
         json!({"type": "search", "query": "after"}),
         "the Chat call half derives its arguments from the same current event"
     );
-    let result_content: Value = serde_json::from_str(
-        emissions[0].chat_tool_result["content"].as_str().unwrap(),
-    )
-    .unwrap();
+    let result_content: Value =
+        serde_json::from_str(emissions[0].chat_tool_result["content"].as_str().unwrap()).unwrap();
     assert_eq!(
         result_content, expected,
         "the Chat result half is the JSON encoding of the same current event"
     );
     assert!(
-        emissions[0].anthropic_blocks[1]["content"].get("result").is_none(),
+        emissions[0].anthropic_blocks[1]["content"]
+            .get("result")
+            .is_none(),
         "the removed field must not reappear in the native outcome"
     );
     assert_eq!(
@@ -324,12 +327,8 @@ fn anthropic_native_blocks_carry_current_outcome_and_exclude_only_identity() {
     });
     let raw = json!({"model": "m", "input": [item]});
     let (canonical, pair, associations) = normalize(raw);
-    let emissions = project_hosted_history_emissions(
-        &canonical,
-        &pair.inverse_context,
-        &associations,
-    )
-    .unwrap();
+    let emissions =
+        project_hosted_history_emissions(&canonical, &pair.inverse_context, &associations).unwrap();
     let blocks = &emissions[0].anthropic_blocks;
     assert_eq!(blocks.len(), 2);
     assert_eq!(blocks[0]["type"], json!("server_tool_use"));
@@ -357,12 +356,8 @@ fn absent_and_nonobject_arguments_follow_the_configured_encoding() {
     // Absent action -> empty object call arguments.
     let raw = json!({"model": "m", "input": [{"type": "web_search_call", "id": "ws_absent"}]});
     let (canonical, pair, associations) = normalize(raw);
-    let emissions = project_hosted_history_emissions(
-        &canonical,
-        &pair.inverse_context,
-        &associations,
-    )
-    .unwrap();
+    let emissions =
+        project_hosted_history_emissions(&canonical, &pair.inverse_context, &associations).unwrap();
     assert_eq!(emissions[0].arguments, json!({}));
     assert_eq!(emissions[0].anthropic_blocks[0]["input"], json!({}));
 
@@ -370,11 +365,7 @@ fn absent_and_nonobject_arguments_follow_the_configured_encoding() {
     let raw = json!({"model": "m", "input": [{"type": "web_search_call", "id": "ws_scalar",
         "action": "just-a-query"}]});
     let (canonical, pair, associations) = normalize(raw);
-    let emissions = project_hosted_history_emissions(
-        &canonical,
-        &pair.inverse_context,
-        &associations,
-    )
-    .unwrap();
+    let emissions =
+        project_hosted_history_emissions(&canonical, &pair.inverse_context, &associations).unwrap();
     assert_eq!(emissions[0].arguments, json!({"value": "just-a-query"}));
 }

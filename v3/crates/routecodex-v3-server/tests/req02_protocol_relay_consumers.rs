@@ -268,7 +268,10 @@ async fn anthropic_tool_upstream(
         ];
         let mut wire = String::new();
         for event in events {
-            wire.push_str(&format!("event: {}\ndata: {event}\n\n", event["type"].as_str().unwrap()));
+            wire.push_str(&format!(
+                "event: {}\ndata: {event}\n\n",
+                event["type"].as_str().unwrap()
+            ));
         }
         sse_response(wire)
     } else {
@@ -827,10 +830,7 @@ async fn req02_anthropic_json_relay_recovers_declared_tools_from_successful_atte
     );
     assert_eq!(names[2]["name"], "mcp__search.find");
     assert_eq!(names[2]["id"], "mcp-call");
-    assert_eq!(
-        names[2]["input"]["arguments"]["query"],
-        "find nested json"
-    );
+    assert_eq!(names[2]["input"]["arguments"]["query"], "find nested json");
     assert_provider_tool_names_changed(&capture.provider_body);
 }
 
@@ -865,15 +865,10 @@ async fn req02_anthropic_sse_relay_recovers_declared_tools_from_successful_attem
     assert_eq!(blocks[2]["type"], "tool_use");
     assert_eq!(blocks[2]["name"], "mcp__search.find");
     assert_eq!(blocks[2]["id"], "mcp-call");
-    assert_eq!(
-        blocks[2]["input"]["arguments"]["query"],
-        "find nested json"
-    );
-    assert!(
-        events.iter().any(|event| {
-            event["type"] == "message_delta" && event["delta"]["stop_reason"] == "tool_use"
-        })
-    );
+    assert_eq!(blocks[2]["input"]["arguments"]["query"], "find nested json");
+    assert!(events.iter().any(|event| {
+        event["type"] == "message_delta" && event["delta"]["stop_reason"] == "tool_use"
+    }));
     assert_provider_tool_names_changed(&capture.provider_body);
 }
 
@@ -901,12 +896,10 @@ async fn anthropic_tool_relay_capture(stream: bool) -> AnthropicToolCapture {
             captures: captures_tx,
         }));
     let (upstream_addr, upstream) = spawn_upstream(app).await;
-    let handle = spawn_v3_server_aggregate(anthropic_tools_manifest(
-        free_port(),
-        upstream_addr.port(),
-    ))
-        .await
-        .unwrap();
+    let handle =
+        spawn_v3_server_aggregate(anthropic_tools_manifest(free_port(), upstream_addr.port()))
+            .await
+            .unwrap();
     let endpoint = format!("http://{}/v1/messages", handle.listeners[0].addr);
     let response = reqwest::Client::new()
         .post(endpoint)

@@ -449,14 +449,16 @@ fn seal_direct_sse_attempt_with_success_scope(
             attempt,
         )?;
     }
-    committed.seal_after_validated_terminal().map_err(|message| {
-        build_v3_error_01_source_raised(
-            V3ErrorSourceKind::RuntimeFailure,
-            "V3ExecutionAttemptPayloadStore",
-            "direct_sse_terminal_seal_rejected",
-            message.to_string(),
-        )
-    })
+    committed
+        .seal_after_validated_terminal()
+        .map_err(|message| {
+            build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3ExecutionAttemptPayloadStore",
+                "direct_sse_terminal_seal_rejected",
+                message.to_string(),
+            )
+        })
 }
 
 fn rewrite_direct_sse_memory(
@@ -615,7 +617,10 @@ pub(crate) fn parse_direct_sse_json_segment(segment: &str) -> Option<(serde_json
 pub(crate) fn rewrite_direct_sse_frame_with_writer(
     frame: &[u8],
     writer: &mut dyn std::io::Write,
-    mut rewrite: impl FnMut(serde_json::Value) -> Result<serde_json::Value, crate::execution_control::V3AttemptStoreError>,
+    mut rewrite: impl FnMut(
+        serde_json::Value,
+    )
+        -> Result<serde_json::Value, crate::execution_control::V3AttemptStoreError>,
 ) -> Result<(), crate::execution_control::V3AttemptStoreError> {
     let Ok(text) = std::str::from_utf8(frame) else {
         return write_all_or_attempt_error(writer, frame);
@@ -635,8 +640,9 @@ pub(crate) fn rewrite_direct_sse_frame_with_writer(
             }
             write_all_or_attempt_error(writer, prefix.as_bytes())?;
             write_all_or_attempt_error(writer, b"data: ")?;
-            serde_json::to_writer(&mut *writer, &value)
-                .map_err(|error| attempt_write_error("serialize rewritten SSE data", error.into()))?;
+            serde_json::to_writer(&mut *writer, &value).map_err(|error| {
+                attempt_write_error("serialize rewritten SSE data", error.into())
+            })?;
             write_all_or_attempt_error(writer, b"\n\n")?;
         } else {
             write_all_or_attempt_error(writer, segment.as_bytes())?;
@@ -741,23 +747,27 @@ pub(crate) async fn project_and_collect_direct_sse_attempt(
         true,
     );
     match success_scope {
-        Some(success_scope) => collect_direct_sse_attempt_after_terminal_with_memory_and_success_scope(
-            projected,
-            compat_plan.provider_protocol,
-            attempt_budget,
-            Some(manifest),
-            Some(request_id),
-            Some(success_scope),
-        )
-        .await,
-        None => collect_direct_sse_attempt_after_terminal_with_memory(
-            projected,
-            compat_plan.provider_protocol,
-            attempt_budget,
-            Some(manifest),
-            Some(request_id),
-        )
-        .await,
+        Some(success_scope) => {
+            collect_direct_sse_attempt_after_terminal_with_memory_and_success_scope(
+                projected,
+                compat_plan.provider_protocol,
+                attempt_budget,
+                Some(manifest),
+                Some(request_id),
+                Some(success_scope),
+            )
+            .await
+        }
+        None => {
+            collect_direct_sse_attempt_after_terminal_with_memory(
+                projected,
+                compat_plan.provider_protocol,
+                attempt_budget,
+                Some(manifest),
+                Some(request_id),
+            )
+            .await
+        }
     }
 }
 
@@ -1266,7 +1276,8 @@ pub(crate) fn relay_handoff_output(
         node_trace: node_trace.clone(),
         error_chain: None,
         protocol_relay_handoff: Some(V3ResponsesProtocolRelayHandoff {
-            request_entry_origin: crate::kernel::V3DirectRelayHandoffRequestOrigin::AlreadyCanonical,
+            request_entry_origin:
+                crate::kernel::V3DirectRelayHandoffRequestOrigin::AlreadyCanonical,
             canonical_request,
             target,
             expanded,

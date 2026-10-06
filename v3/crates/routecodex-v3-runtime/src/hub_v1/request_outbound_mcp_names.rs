@@ -433,9 +433,8 @@ pub(super) fn openai_chat_namespace_wire_aliases(
     // that key as well.
     let mut resolved = aliases.clone();
     for provider_name in identities.keys() {
-        let wire = provider_compat_core::namespace_tools::openai_chat_namespace_wire_name(
-            provider_name,
-        );
+        let wire =
+            provider_compat_core::namespace_tools::openai_chat_namespace_wire_name(provider_name);
         if let Some(alias) = aliases.get(&wire) {
             resolved.insert(provider_name.clone(), alias.clone());
         }

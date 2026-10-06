@@ -123,8 +123,7 @@ fn final_input_item<'a>(payload: &'a Value, item_type: &str, call_id: &str) -> &
         .expect("projected input is an array")
         .iter()
         .find(|item| {
-            item["type"].as_str() == Some(item_type)
-                && item["call_id"].as_str() == Some(call_id)
+            item["type"].as_str() == Some(item_type) && item["call_id"].as_str() == Some(call_id)
         })
         .unwrap_or_else(|| {
             panic!("missing projected item type={item_type} call_id={call_id}: {payload}")
@@ -240,8 +239,11 @@ fn function_call_with_custom_output_keeps_cross_kind_current_fields() {
     );
 
     let direct_replaced = direct(&state.0, &pair, &state.1);
-    let direct_output =
-        final_input_item(&direct_replaced, "custom_tool_call_output", "call_cross_function");
+    let direct_output = final_input_item(
+        &direct_replaced,
+        "custom_tool_call_output",
+        "call_cross_function",
+    );
     assert_eq!(direct_output["id"], "ctco_current");
     assert_eq!(direct_output["status"], "current-status");
     assert_eq!(direct_output["vendor.key[0]"], json!({"edited": true}));
@@ -251,8 +253,11 @@ fn function_call_with_custom_output_keeps_cross_kind_current_fields() {
     assert!(direct_output.get("nested").is_none());
 
     let relay_replaced = relay_responses(&state.0, &pair, &state.1);
-    let relay_output =
-        final_input_item(&relay_replaced, "custom_tool_call_output", "call_cross_function");
+    let relay_output = final_input_item(
+        &relay_replaced,
+        "custom_tool_call_output",
+        "call_cross_function",
+    );
     assert_eq!(relay_output["id"], "ctco_current");
     assert_eq!(relay_output["status"], "current-status");
     assert_eq!(relay_output["vendor.key[0]"], json!({"edited": true}));
@@ -261,11 +266,7 @@ fn function_call_with_custom_output_keeps_cross_kind_current_fields() {
     assert!(relay_output.get("vendor").is_none());
     assert!(relay_output.get("nested").is_none());
 
-    state = remove(
-        &state.0,
-        &state.1,
-        format!("{carrier}.responses_item_id"),
-    );
+    state = remove(&state.0, &state.1, format!("{carrier}.responses_item_id"));
     state = remove(
         &state.0,
         &state.1,
@@ -278,8 +279,11 @@ fn function_call_with_custom_output_keeps_cross_kind_current_fields() {
     );
 
     let direct_removed = direct(&state.0, &pair, &state.1);
-    let direct_output =
-        final_input_item(&direct_removed, "custom_tool_call_output", "call_cross_function");
+    let direct_output = final_input_item(
+        &direct_removed,
+        "custom_tool_call_output",
+        "call_cross_function",
+    );
     assert!(direct_output.get("id").is_none());
     assert!(direct_output.get("status").is_none());
     assert_eq!(
@@ -291,8 +295,11 @@ fn function_call_with_custom_output_keeps_cross_kind_current_fields() {
     assert_eq!(direct_output["output"], output);
 
     let relay_removed = relay_responses(&state.0, &pair, &state.1);
-    let relay_output =
-        final_input_item(&relay_removed, "custom_tool_call_output", "call_cross_function");
+    let relay_output = final_input_item(
+        &relay_removed,
+        "custom_tool_call_output",
+        "call_cross_function",
+    );
     assert_ne!(relay_output["id"], "ctco_cross");
     assert_ne!(relay_output["id"], "ctco_current");
     assert!(relay_output.get("status").is_none());
@@ -373,8 +380,11 @@ fn custom_call_with_function_output_keeps_cross_kind_current_fields() {
     );
 
     let direct_replaced = direct(&state.0, &pair, &state.1);
-    let direct_output =
-        final_input_item(&direct_replaced, "function_call_output", "call_cross_custom");
+    let direct_output = final_input_item(
+        &direct_replaced,
+        "function_call_output",
+        "call_cross_custom",
+    );
     assert_eq!(direct_output["id"], "fco_current");
     assert_eq!(direct_output["status"], "current-status");
     assert_eq!(direct_output["vendor.key[0]"], "current-vendor");
@@ -394,11 +404,7 @@ fn custom_call_with_function_output_keeps_cross_kind_current_fields() {
     assert!(relay_output.get("vendor").is_none());
     assert!(relay_output.get("nested").is_none());
 
-    state = remove(
-        &state.0,
-        &state.1,
-        format!("{carrier}.responses_item_id"),
-    );
+    state = remove(&state.0, &state.1, format!("{carrier}.responses_item_id"));
     state = remove(
         &state.0,
         &state.1,

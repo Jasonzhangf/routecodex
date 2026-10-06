@@ -148,7 +148,10 @@ mod tests {
             normalized.previous.payload.0.get("input").is_none(),
             "raw Responses input must not cross ReqInbound after normalization"
         );
-        assert_eq!(normalized.previous.payload.0["messages"][0]["role"], "assistant");
+        assert_eq!(
+            normalized.previous.payload.0["messages"][0]["role"],
+            "assistant"
+        );
         assert_eq!(
             normalized.previous.payload.0["messages"][0]["routecodex_chat_extension"]
                 ["responses_hosted_history_event"],

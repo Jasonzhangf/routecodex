@@ -84,7 +84,8 @@ pub(super) fn chat_messages_as_anthropic_messages_with_hosted(
             .ok_or(V3AnthropicCodecError::MalformedField { field: "message" })?;
         let role = object.get("role").and_then(Value::as_str).unwrap_or("user");
         if let Some(item_type) = object.get("type").and_then(Value::as_str) {
-            if let Some(message) = chat_tool_search_history_as_anthropic_message(item_type, object) {
+            if let Some(message) = chat_tool_search_history_as_anthropic_message(item_type, object)
+            {
                 output.push(message);
                 continue;
             }
@@ -139,24 +140,24 @@ pub(super) fn chat_messages_as_anthropic_messages_with_hosted(
         }
         if let Some(emissions) = hosted_by_message.get(&message_index) {
             let absorbed_by_ordinary_tool_use = role == "assistant"
-                && output.last().and_then(Value::as_object).is_some_and(|last| {
-                    last.get("role").and_then(Value::as_str) == Some("assistant")
-                        && last
-                            .get("content")
-                            .and_then(Value::as_array)
-                            .is_some_and(|blocks| {
-                                blocks.iter().any(|block| {
-                                    block.get("type").and_then(Value::as_str)
-                                        == Some("tool_use")
+                && output
+                    .last()
+                    .and_then(Value::as_object)
+                    .is_some_and(|last| {
+                        last.get("role").and_then(Value::as_str) == Some("assistant")
+                            && last
+                                .get("content")
+                                .and_then(Value::as_array)
+                                .is_some_and(|blocks| {
+                                    blocks.iter().any(|block| {
+                                        block.get("type").and_then(Value::as_str)
+                                            == Some("tool_use")
+                                    })
                                 })
-                            })
-                });
+                    });
             if absorbed_by_ordinary_tool_use {
                 if let Some(last) = output.last_mut().and_then(Value::as_object_mut) {
-                    if let Some(blocks) = last
-                        .get_mut("content")
-                        .and_then(Value::as_array_mut)
-                    {
+                    if let Some(blocks) = last.get_mut("content").and_then(Value::as_array_mut) {
                         for emission in emissions {
                             blocks.extend(emission.anthropic_blocks.iter().cloned());
                         }

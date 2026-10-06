@@ -376,7 +376,7 @@ fn request_governance_rejects_orphan_output_and_preserves_missing_call_id() {
     let preserved = hooks
         .run(
             raw_request(
-                json!({"input":[{"type":"custom_tool_call_output","output":"missing id"}]})
+                json!({"input":[{"type":"custom_tool_call_output","output":"missing id"}]}),
             ),
             &V3HubServertoolRequestProfile::disabled(),
             &invocation_for("missing-call-id", V3HubEntryProtocol::Responses),
@@ -430,8 +430,7 @@ fn attachment_history_bytes_survive_while_req04_cleans_the_canonical_wire() {
     assert!(
         records.iter().any(|record| {
             record["path"] == "request.input[0]"
-                && record["value"]["content"][0]["image_url"]
-                    == "data:image/png;base64,HISTORY"
+                && record["value"]["content"][0]["image_url"] == "data:image/png;base64,HISTORY"
         }),
         "original client image bytes must stay recoverable in the inverse record"
     );

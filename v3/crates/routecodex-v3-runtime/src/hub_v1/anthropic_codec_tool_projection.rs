@@ -69,23 +69,33 @@ pub(super) fn anthropic_tool_use_as_responses_call(
         context.successful_attempt_tool_identity(name)
     {
         if original_kind == "tool_search" {
-            return Ok(super::responses_relay_runtime::project_v3_responses_tool_search_call(call_id, input.clone()));
+            return Ok(
+                super::responses_relay_runtime::project_v3_responses_tool_search_call(
+                    call_id,
+                    input.clone(),
+                ),
+            );
         }
         if let Some(original_name) = original_name {
-        match original_kind {
-            "custom" => {
-                return custom_tool_call_from_input(
-                    call_id,
-                    original_name,
-                    original_namespace,
-                    input,
-                )
+            match original_kind {
+                "custom" => {
+                    return custom_tool_call_from_input(
+                        call_id,
+                        original_name,
+                        original_namespace,
+                        input,
+                    )
+                }
+                "function" => {
+                    return function_call_from_input(
+                        call_id,
+                        original_name,
+                        original_namespace,
+                        input,
+                    )
+                }
+                _ => {}
             }
-            "function" => {
-                return function_call_from_input(call_id, original_name, original_namespace, input)
-            }
-            _ => {}
-        }
         }
     }
     if let Some(client_name) = context.governed_custom_tool_client_name(name) {

@@ -4,12 +4,12 @@ use std::sync::OnceLock;
 use super::field_operator_helpers::{
     map_gemini_tool_choice, map_role_for_transform, map_tool_choice_scalar, map_tool_choice_value,
 };
-use super::field_operator_instructions::{InstructionSource, SystemInstructionBuilder};
 use super::field_operator_history::canonical_tool_call_name;
+use super::field_operator_instructions::{InstructionSource, SystemInstructionBuilder};
 use super::field_operator_profiles::{
     array_item_lookup_path, canonical_child_key_for_row, canonical_key_for_row, child_lookup_path,
-    lookup_path, normalize_protocol, FieldOperatorKind, FoldRegistration,
-    ProfileIndex, ProfileRow, CLIENT_REQUEST_DIRECTION,
+    lookup_path, normalize_protocol, FieldOperatorKind, FoldRegistration, ProfileIndex, ProfileRow,
+    CLIENT_REQUEST_DIRECTION,
 };
 use super::field_operator_records::{append_history_relative, MessageSourceRange};
 use super::project_canonical_paths::{field_path, write_path};

@@ -10,7 +10,11 @@ use super::project_canonical_paths::field_path;
 const RESPONSES_TOOL_RESULT_STATUS_ERROR: &str =
     "Responses function_call_output.status must be completed or incomplete before Chat canonicalization";
 
-pub(super) fn canonical_tool_call_name(kind: &str, name: &str, namespace: Option<&Value>) -> String {
+pub(super) fn canonical_tool_call_name(
+    kind: &str,
+    name: &str,
+    namespace: Option<&Value>,
+) -> String {
     let Some(namespace) = namespace.and_then(Value::as_str) else {
         return name.to_string();
     };

@@ -571,8 +571,8 @@ mod tests {
         execute_v3_operation_runner_request_capture_client_json,
         execute_v3_operation_runner_request_normalize_losslessly, AttemptContext,
         AttemptDeclarationMap, AttemptProjectionContext, RequestInvocationContext,
-        RequestNormalizationEntry, RequestOriginKind, ResponseProjectionView,
-        ToolMappingReference, V3RequestContextHandle,
+        RequestNormalizationEntry, RequestOriginKind, ResponseProjectionView, ToolMappingReference,
+        V3RequestContextHandle,
     };
 
     #[test]

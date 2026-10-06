@@ -174,13 +174,26 @@ fn unnamed_builtin_declaration_returns_its_declared_native_call_shape() {
     canonical["tools"][0] = json!({
         "type": "function", "name": "tool_search", "parameters": {"type": "object"}
     });
-    for protocol in [V3HubProviderWireProtocol::Anthropic, V3HubProviderWireProtocol::OpenAiChat] {
+    for protocol in [
+        V3HubProviderWireProtocol::Anthropic,
+        V3HubProviderWireProtocol::OpenAiChat,
+    ] {
         let projected = project_canonical_request(
-            &canonical, &pair.inverse_context, &current, &pair.explicit_history_pairing,
-            V3HubExecutionMode::Relay, protocol, &target(protocol, false), "builtin-attempt",
-        ).unwrap();
-        handle.publish_successful_attempt(projected.attempt.clone()).unwrap();
-        let view = ResponseProjectionView::from_successful_attempt(&handle, &projected.attempt).unwrap();
+            &canonical,
+            &pair.inverse_context,
+            &current,
+            &pair.explicit_history_pairing,
+            V3HubExecutionMode::Relay,
+            protocol,
+            &target(protocol, false),
+            "builtin-attempt",
+        )
+        .unwrap();
+        handle
+            .publish_successful_attempt(projected.attempt.clone())
+            .unwrap();
+        let view =
+            ResponseProjectionView::from_successful_attempt(&handle, &projected.attempt).unwrap();
         let restored = match protocol {
             V3HubProviderWireProtocol::Anthropic => {
                 let context = V3AnthropicResponsesProjectionContext::from_successful_attempt(&view)
@@ -191,15 +204,19 @@ fn unnamed_builtin_declaration_returns_its_declared_native_call_shape() {
                     "stop_reason": "tool_use", "usage": {"input_tokens": 1, "output_tokens": 1}
                 }), &context).unwrap()
             }
-            _ => project_v3_openai_chat_response_as_responses_with_successful_attempt(&json!({
-                "id": "builtin", "object": "chat.completion", "model": "provider-wire-model",
-                "choices": [{"index": 0, "finish_reason": "tool_calls", "message": {
-                    "role": "assistant", "content": null,
-                    "tool_calls": [{"id": "builtin-call", "type": "function", "function": {
-                        "name": "tool_search", "arguments": "{\"query\":\"echo\"}"
+            _ => project_v3_openai_chat_response_as_responses_with_successful_attempt(
+                &json!({
+                    "id": "builtin", "object": "chat.completion", "model": "provider-wire-model",
+                    "choices": [{"index": 0, "finish_reason": "tool_calls", "message": {
+                        "role": "assistant", "content": null,
+                        "tool_calls": [{"id": "builtin-call", "type": "function", "function": {
+                            "name": "tool_search", "arguments": "{\"query\":\"echo\"}"
+                        }}]
                     }}]
-                }}]
-            }), &view).unwrap(),
+                }),
+                &view,
+            )
+            .unwrap(),
         };
         assert_eq!(restored["output"][0]["type"], "tool_search_call");
         assert_eq!(restored["output"][0]["call_id"], "builtin-call");
@@ -654,7 +671,10 @@ fn gemini_native_and_chat_relay_preserve_content_and_typed_model_binding() {
     )
     .expect("native Gemini relay projection");
     assert_eq!(projected.payload, gemini);
-    assert_eq!(projected.attempt.projection.provider_model, "provider-model");
+    assert_eq!(
+        projected.attempt.projection.provider_model,
+        "provider-model"
+    );
 
     let (canonical, pair, current) = sdk_request(
         "openai-chat",
@@ -677,5 +697,8 @@ fn gemini_native_and_chat_relay_preserve_content_and_typed_model_binding() {
     );
     assert!(projected.payload.get("model").is_none());
     assert!(projected.payload.get("messages").is_none());
-    assert_eq!(projected.attempt.projection.provider_model, "provider-model");
+    assert_eq!(
+        projected.attempt.projection.provider_model,
+        "provider-model"
+    );
 }

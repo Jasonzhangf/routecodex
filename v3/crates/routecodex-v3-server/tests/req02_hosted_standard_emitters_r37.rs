@@ -12,8 +12,8 @@ use routecodex_v3_runtime::operation_runner::{
     apply_canonical_field_edit, execute_v3_operation_runner_request_capture_client_json,
     execute_v3_operation_runner_request_normalize_losslessly, project_canonical_request,
     CanonicalFieldEdit, CanonicalRequestProjection, CurrentFieldAssociations,
-    RequestInvocationContext, RequestNormalizationEntry, RequestOriginKind, RequestScopedContextPair,
-    V3RequestContextHandle, V3TargetCandidate,
+    RequestInvocationContext, RequestNormalizationEntry, RequestOriginKind,
+    RequestScopedContextPair, V3RequestContextHandle, V3TargetCandidate,
 };
 use serde_json::{json, Value};
 
@@ -28,23 +28,42 @@ fn opaque_text_part_fields_survive_chat_standard_projection() {
             "vendorPartMetadata":{"dotted.key":[1,null,{"keep":true}]}
         }]}]
     }));
-    let chat = project(&canonical, &pair, &current, V3HubProviderWireProtocol::OpenAiChat);
-    assert_eq!(chat.payload["messages"][0]["content"], json!([{
-        "type":"text","text":"opaque text",
-        "vendorPartMetadata":{"dotted.key":[1,null,{"keep":true}]}
-    }]), "standard message projection must preserve opaque content siblings");
+    let chat = project(
+        &canonical,
+        &pair,
+        &current,
+        V3HubProviderWireProtocol::OpenAiChat,
+    );
+    assert_eq!(
+        chat.payload["messages"][0]["content"],
+        json!([{
+            "type":"text","text":"opaque text",
+            "vendorPartMetadata":{"dotted.key":[1,null,{"keep":true}]}
+        }]),
+        "standard message projection must preserve opaque content siblings"
+    );
 }
 
 #[test]
 fn chat_source_message_type_remains_opaque_on_standard_projection() {
-    let (canonical, pair, current) = normalize_entry("openai_chat", json!({
-        "model":"client-model", "messages":[{
-            "role":"user", "type":"message", "content":"opaque original discriminator"
-        }]
-    }));
-    let chat = project(&canonical, &pair, &current, V3HubProviderWireProtocol::OpenAiChat);
-    assert_eq!(chat.payload["messages"][0]["type"], "message",
-        "Chat source extension must not be confused with a Responses discriminator");
+    let (canonical, pair, current) = normalize_entry(
+        "openai_chat",
+        json!({
+            "model":"client-model", "messages":[{
+                "role":"user", "type":"message", "content":"opaque original discriminator"
+            }]
+        }),
+    );
+    let chat = project(
+        &canonical,
+        &pair,
+        &current,
+        V3HubProviderWireProtocol::OpenAiChat,
+    );
+    assert_eq!(
+        chat.payload["messages"][0]["type"], "message",
+        "Chat source extension must not be confused with a Responses discriminator"
+    );
 }
 
 fn target(protocol: V3HubProviderWireProtocol) -> V3TargetCandidate {
@@ -95,7 +114,10 @@ fn normalize(raw: Value) -> (Value, RequestScopedContextPair, CurrentFieldAssoci
     normalize_entry("responses", raw)
 }
 
-fn normalize_entry(entry: &str, raw: Value) -> (Value, RequestScopedContextPair, CurrentFieldAssociations) {
+fn normalize_entry(
+    entry: &str,
+    raw: Value,
+) -> (Value, RequestScopedContextPair, CurrentFieldAssociations) {
     let handle = V3RequestContextHandle::new("hosted-standard".into(), entry.into());
     let invocation = RequestInvocationContext::new(
         handle.clone(),
@@ -177,7 +199,12 @@ fn chat_anthropic_gemini_emit_the_complete_current_hosted_event() {
         "unknown_field": {"replaced": true},
     });
 
-    let chat = project(&canonical, &pair, &current, V3HubProviderWireProtocol::OpenAiChat);
+    let chat = project(
+        &canonical,
+        &pair,
+        &current,
+        V3HubProviderWireProtocol::OpenAiChat,
+    );
     let chat_messages = chat.payload["messages"].as_array().unwrap();
     let pair_start = chat_messages
         .iter()
@@ -208,13 +235,16 @@ fn chat_anthropic_gemini_emit_the_complete_current_hosted_event() {
         chat_messages[pair_start + 1]["tool_call_id"],
         json!("ws_edit")
     );
-    let chat_result: Value = serde_json::from_str(
-        chat_messages[pair_start + 1]["content"].as_str().unwrap(),
-    )
-    .unwrap();
+    let chat_result: Value =
+        serde_json::from_str(chat_messages[pair_start + 1]["content"].as_str().unwrap()).unwrap();
     assert_eq!(chat_result, expected);
 
-    let anthropic = project(&canonical, &pair, &current, V3HubProviderWireProtocol::Anthropic);
+    let anthropic = project(
+        &canonical,
+        &pair,
+        &current,
+        V3HubProviderWireProtocol::Anthropic,
+    );
     let anthropic_messages = anthropic.payload["messages"].as_array().unwrap();
     let assistant = anthropic_messages
         .iter()
@@ -230,11 +260,19 @@ fn chat_anthropic_gemini_emit_the_complete_current_hosted_event() {
     assert_eq!(blocks[1]["content"]["status"], json!("failed"));
     assert_eq!(blocks[1]["content"]["action"], expected["action"]);
     assert_eq!(blocks[1]["content"]["result"], expected["result"]);
-    assert_eq!(blocks[1]["content"]["unknown_field"], json!({"replaced": true}));
+    assert_eq!(
+        blocks[1]["content"]["unknown_field"],
+        json!({"replaced": true})
+    );
     assert!(blocks[1]["content"].get("id").is_none());
     assert!(blocks[1]["content"].get("type").is_none());
 
-    let gemini = project(&canonical, &pair, &current, V3HubProviderWireProtocol::Gemini);
+    let gemini = project(
+        &canonical,
+        &pair,
+        &current,
+        V3HubProviderWireProtocol::Gemini,
+    );
     let contents = gemini.payload["contents"].as_array().unwrap();
     let model_call = contents
         .iter()
@@ -250,12 +288,17 @@ fn chat_anthropic_gemini_emit_the_complete_current_hosted_event() {
     let user_response = contents
         .iter()
         .find_map(|message| {
-            message["parts"]
-                .as_array()
-                .and_then(|parts| parts.iter().find(|part| part.get("functionResponse").is_some()))
+            message["parts"].as_array().and_then(|parts| {
+                parts
+                    .iter()
+                    .find(|part| part.get("functionResponse").is_some())
+            })
         })
         .expect("Gemini user functionResponse");
-    assert_eq!(user_response["functionResponse"]["name"], json!("web_search"));
+    assert_eq!(
+        user_response["functionResponse"]["name"],
+        json!("web_search")
+    );
     assert_eq!(user_response["functionResponse"]["id"], json!("ws_edit"));
     assert_eq!(user_response["functionResponse"]["response"], expected);
 }
@@ -273,7 +316,12 @@ fn failed_and_unknown_status_are_not_rejected_and_crlf_long_bytes_are_kept() {
     });
     let raw = json!({"model": "client-model", "input": [item]});
     let (canonical, pair, current) = normalize(raw);
-    let chat = project(&canonical, &pair, &current, V3HubProviderWireProtocol::OpenAiChat);
+    let chat = project(
+        &canonical,
+        &pair,
+        &current,
+        V3HubProviderWireProtocol::OpenAiChat,
+    );
     let result: Value = serde_json::from_str(
         chat.payload["messages"]
             .as_array()
@@ -286,7 +334,12 @@ fn failed_and_unknown_status_are_not_rejected_and_crlf_long_bytes_are_kept() {
     )
     .unwrap();
     assert_eq!(result, item);
-    let anthropic = project(&canonical, &pair, &current, V3HubProviderWireProtocol::Anthropic);
+    let anthropic = project(
+        &canonical,
+        &pair,
+        &current,
+        V3HubProviderWireProtocol::Anthropic,
+    );
     let blocks = anthropic.payload["messages"]
         .as_array()
         .unwrap()
@@ -296,8 +349,14 @@ fn failed_and_unknown_status_are_not_rejected_and_crlf_long_bytes_are_kept() {
         .as_array()
         .unwrap();
     assert_eq!(blocks[1]["content"]["status"], json!("quarantined"));
-    assert_eq!(blocks[1]["content"]["error"]["code"], json!("upstream_error"));
-    assert_eq!(blocks[1]["content"]["result"]["nested"]["deep.key"]["inner.key"], json!("leaf"));
+    assert_eq!(
+        blocks[1]["content"]["error"]["code"],
+        json!("upstream_error")
+    );
+    assert_eq!(
+        blocks[1]["content"]["result"]["nested"]["deep.key"]["inner.key"],
+        json!("leaf")
+    );
 }
 
 #[test]
@@ -312,7 +371,12 @@ fn instructions_before_hosted_anchor_keep_both_on_the_chat_wire() {
         ]
     });
     let (canonical, pair, current) = normalize(raw);
-    let chat = project(&canonical, &pair, &current, V3HubProviderWireProtocol::OpenAiChat);
+    let chat = project(
+        &canonical,
+        &pair,
+        &current,
+        V3HubProviderWireProtocol::OpenAiChat,
+    );
     let messages = chat.payload["messages"].as_array().unwrap();
     assert!(
         messages.iter().any(|message| message["content"]
@@ -329,7 +393,10 @@ fn instructions_before_hosted_anchor_keep_both_on_the_chat_wire() {
                 == Some("web_search")
         })
         .expect("hosted assistant call must emit after instructions");
-    assert_eq!(messages[pair_start]["tool_calls"][0]["id"], json!("ws_instr"));
+    assert_eq!(
+        messages[pair_start]["tool_calls"][0]["id"],
+        json!("ws_instr")
+    );
     assert_eq!(messages[pair_start + 1]["role"], json!("tool"));
     assert_eq!(messages[pair_start + 1]["tool_call_id"], json!("ws_instr"));
     assert_eq!(
@@ -361,7 +428,10 @@ fn whole_anchor_removal_emits_no_hosted_pair() {
     ] {
         let projected = project(&canonical, &pair, &current, protocol);
         let text = serde_json::to_string(&projected.payload).unwrap();
-        assert!(!text.contains("web_search"), "removed event must not emit: {projected:?}");
+        assert!(
+            !text.contains("web_search"),
+            "removed event must not emit: {projected:?}"
+        );
     }
 }
 
@@ -383,7 +453,12 @@ fn move_preserves_hosted_event_order() {
         },
     )
     .unwrap();
-    let chat = project(&canonical, &pair, &current, V3HubProviderWireProtocol::OpenAiChat);
+    let chat = project(
+        &canonical,
+        &pair,
+        &current,
+        V3HubProviderWireProtocol::OpenAiChat,
+    );
     let messages = chat.payload["messages"].as_array().unwrap();
     let pair_start = messages
         .iter()
@@ -396,10 +471,7 @@ fn move_preserves_hosted_event_order() {
         .expect("moved hosted event must still emit");
     assert_eq!(messages[pair_start - 1]["role"], json!("user"));
     assert_eq!(messages[pair_start + 1]["role"], json!("tool"));
-    assert_eq!(
-        messages[pair_start + 1]["tool_call_id"],
-        json!("ws_move")
-    );
+    assert_eq!(messages[pair_start + 1]["tool_call_id"], json!("ws_move"));
 }
 
 #[test]
@@ -412,7 +484,12 @@ fn ordinary_tool_and_hosted_interleave_in_one_anthropic_assistant() {
         {"type": "function_call_output", "call_id": "call_exec", "output": "/tmp"}
     ]});
     let (canonical, pair, current) = normalize(raw);
-    let anthropic = project(&canonical, &pair, &current, V3HubProviderWireProtocol::Anthropic);
+    let anthropic = project(
+        &canonical,
+        &pair,
+        &current,
+        V3HubProviderWireProtocol::Anthropic,
+    );
     let messages = anthropic.payload["messages"].as_array().unwrap();
     assert_eq!(messages.len(), 3);
     let assistant = &messages[1];
@@ -425,14 +502,16 @@ fn ordinary_tool_and_hosted_interleave_in_one_anthropic_assistant() {
         assistant["content"][2]["type"],
         json!("web_search_tool_result")
     );
-    assert_eq!(
-        assistant["content"][2]["tool_use_id"],
-        json!("ws_search_2")
-    );
+    assert_eq!(assistant["content"][2]["tool_use_id"], json!("ws_search_2"));
     assert_eq!(messages[2]["content"][0]["type"], json!("tool_result"));
     assert_eq!(messages[2]["content"][0]["tool_use_id"], json!("call_exec"));
 
-    let chat = project(&canonical, &pair, &current, V3HubProviderWireProtocol::OpenAiChat);
+    let chat = project(
+        &canonical,
+        &pair,
+        &current,
+        V3HubProviderWireProtocol::OpenAiChat,
+    );
     let chat_messages = chat.payload["messages"].as_array().unwrap();
     let web = chat_messages
         .iter()
@@ -444,10 +523,7 @@ fn ordinary_tool_and_hosted_interleave_in_one_anthropic_assistant() {
         })
         .unwrap();
     assert_eq!(chat_messages[web + 1]["role"], json!("tool"));
-    assert_eq!(
-        chat_messages[web + 1]["tool_call_id"],
-        json!("ws_search_2")
-    );
+    assert_eq!(chat_messages[web + 1]["tool_call_id"], json!("ws_search_2"));
     let exec = chat_messages
         .iter()
         .position(|message| {
@@ -492,7 +568,12 @@ fn hosted_before_discovered_declaration_keeps_original_source_identity() {
         .iter()
         .find(|declaration| declaration.source_path == "request.input[2].tools[0].tools[0]")
         .expect("discovered declaration must retain its original request identity");
-    let chat = project(&canonical, &pair, &current, V3HubProviderWireProtocol::OpenAiChat);
+    let chat = project(
+        &canonical,
+        &pair,
+        &current,
+        V3HubProviderWireProtocol::OpenAiChat,
+    );
     assert!(
         chat.attempt
             .declarations

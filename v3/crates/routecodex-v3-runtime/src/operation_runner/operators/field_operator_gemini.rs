@@ -89,12 +89,16 @@ impl<'a> RequestNormalizer<'a> {
         // Native hosted tools have no standard Chat declaration. Their current
         // data stays in the existing lossless extension; the typed association
         // lets the native emitter consume it without rereading a raw request.
-        let record_index = self.opaque_records.iter().position(|record|
-            record.get("path").and_then(Value::as_str) == Some(item_path))
+        let record_index = self
+            .opaque_records
+            .iter()
+            .position(|record| record.get("path").and_then(Value::as_str) == Some(item_path))
             .expect("native tool record was emitted above");
-        self.record_mapping_by_path(item_path,
+        self.record_mapping_by_path(
+            item_path,
             &format!("chat.{ROOT_CARRIER_KEY}.chat_extension_opaque_record[{record_index}].value"),
-            "routecodex.v3.field.tool_declaration_transform@1");
+            "routecodex.v3.field.tool_declaration_transform@1",
+        );
     }
 
     pub(super) fn process_gemini_tool_config(

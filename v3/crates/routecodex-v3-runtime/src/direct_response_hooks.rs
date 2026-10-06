@@ -31,13 +31,15 @@ pub(crate) fn apply_v3_direct_json_successful_attempt_hook(
             _ => Ok(()),
         }.map_err(|error| format!("{error:?}"))
     };
-    inverse().map_err(|error| routecodex_v3_error::build_v3_error_01_source_raised_internal(
-        routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
-        "V3DirectResp15ClientPayloadReady",
-        "direct_successful_attempt_inverse_failed",
-        error,
-        routecodex_v3_error::V3InternalErrorCode::V3DirectResp15ClientPayloadReady,
-    ))
+    inverse().map_err(|error| {
+        routecodex_v3_error::build_v3_error_01_source_raised_internal(
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+            "V3DirectResp15ClientPayloadReady",
+            "direct_successful_attempt_inverse_failed",
+            error,
+            routecodex_v3_error::V3InternalErrorCode::V3DirectResp15ClientPayloadReady,
+        )
+    })
 }
 
 /// SSE admission has already buffered the complete provider terminal. Publish
@@ -61,13 +63,15 @@ pub(crate) fn apply_v3_direct_sse_successful_attempt_hook(
             })
             .map_err(|error| error.to_string())
     };
-    inverse().map_err(|error| routecodex_v3_error::build_v3_error_01_source_raised_internal(
-        routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
-        "V3DirectResp15ClientPayloadReady",
-        "direct_sse_successful_attempt_inverse_failed",
-        error,
-        routecodex_v3_error::V3InternalErrorCode::V3DirectResp15ClientPayloadReady,
-    ))
+    inverse().map_err(|error| {
+        routecodex_v3_error::build_v3_error_01_source_raised_internal(
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+            "V3DirectResp15ClientPayloadReady",
+            "direct_sse_successful_attempt_inverse_failed",
+            error,
+            routecodex_v3_error::V3InternalErrorCode::V3DirectResp15ClientPayloadReady,
+        )
+    })
 }
 
 fn rewrite_direct_sse_success_frame(
@@ -235,7 +239,8 @@ impl DirectSseResponsesItemIdentities {
             return;
         };
         if let Some(item_id) = item.get("id").and_then(serde_json::Value::as_str) {
-            self.by_item_id.insert(item_id.to_string(), name.to_string());
+            self.by_item_id
+                .insert(item_id.to_string(), name.to_string());
         }
     }
 
@@ -244,11 +249,12 @@ impl DirectSseResponsesItemIdentities {
             return;
         };
         if let (Some(output_index), Some(name)) = (
-            value.get("output_index").and_then(serde_json::Value::as_u64),
+            value
+                .get("output_index")
+                .and_then(serde_json::Value::as_u64),
             item.get("name").and_then(serde_json::Value::as_str),
         ) {
-            self.by_output_index
-                .insert(output_index, name.to_string());
+            self.by_output_index.insert(output_index, name.to_string());
         }
         self.observe_item(item);
     }
@@ -374,13 +380,11 @@ fn restore_direct_responses_sse_argument_identity(
     match kind {
         crate::hub_v1::V3DeclaredToolKind::Function => {
             if complete {
-                value["type"] = serde_json::Value::String(
-                    "response.function_call_arguments.done".to_string(),
-                );
+                value["type"] =
+                    serde_json::Value::String("response.function_call_arguments.done".to_string());
             } else if event_type == "response.function_call_arguments.delta" {
-                value["type"] = serde_json::Value::String(
-                    "response.function_call_arguments.delta".to_string(),
-                );
+                value["type"] =
+                    serde_json::Value::String("response.function_call_arguments.delta".to_string());
             }
             value["name"] = serde_json::Value::String(original_name);
         }
@@ -397,7 +401,8 @@ fn restore_direct_responses_sse_argument_identity(
                     .unwrap_or_default()
                     .to_string();
                 let input = crate::hub_v1::parse_v3_openai_chat_custom_tool_input(
-                    &emitted_name, &arguments,
+                    &emitted_name,
+                    &arguments,
                 )
                 .map_err(|error| {
                     crate::execution_control::V3AttemptStoreError::InvalidAttemptState(
@@ -523,7 +528,10 @@ fn rewrite_direct_sse_chat_success_event(
     view: &crate::operation_runner::ResponseProjectionView,
     identities: &mut DirectSseResponsesItemIdentities,
 ) -> Result<(), crate::execution_control::V3AttemptStoreError> {
-    let Some(choices) = value.get_mut("choices").and_then(serde_json::Value::as_array_mut) else {
+    let Some(choices) = value
+        .get_mut("choices")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
         return Ok(());
     };
     for choice in choices {
@@ -552,11 +560,10 @@ fn rewrite_direct_sse_chat_success_event(
                     });
                 let emitted_name = match observed_name {
                     Some(name)
-                        if crate::hub_v1::declared_tool_kind_for_emitted_name(view, name).is_some() =>
+                        if crate::hub_v1::declared_tool_kind_for_emitted_name(view, name)
+                            .is_some() =>
                     {
-                        identities
-                            .by_output_index
-                            .insert(index, name.to_string());
+                        identities.by_output_index.insert(index, name.to_string());
                         name.to_string()
                     }
                     _ => match identities.by_output_index.get(&index) {
@@ -934,9 +941,10 @@ event: response.output_item.done\ndata: {{\"type\":\"response.output_item.done\"
 event: response.output_item.done\ndata: {{\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{{\"id\":\"call_function\",\"type\":\"function_call\",\"name\":\"{function_emitted}\",\"call_id\":\"call_function\",\"arguments\":{function_arguments_json}}}}}\n\n\
 event: response.completed\ndata: {{\"type\":\"response.completed\",\"response\":{{\"id\":\"resp-direct-sse-inverse\",\"status\":\"completed\",\"output\":[]}}}}\n\n"
         );
-        let mut builder =
-            crate::execution_control::V3CommittedClientSseBuilder::new();
-        builder.push(frames.into_bytes()).expect("buffer the admitted frames");
+        let mut builder = crate::execution_control::V3CommittedClientSseBuilder::new();
+        builder
+            .push(frames.into_bytes())
+            .expect("buffer the admitted frames");
         builder
             .mark_last_frame_as_terminal()
             .expect("mark the buffered terminal");
@@ -961,14 +969,23 @@ event: response.completed\ndata: {{\"type\":\"response.completed\",\"response\":
             rewritten.extend_from_slice(&frame);
         }
         let rewritten = String::from_utf8(rewritten).expect("rewritten SSE is UTF-8");
-        assert!(rewritten.contains(r#""type":"custom_tool_call""#), "{rewritten}");
+        assert!(
+            rewritten.contains(r#""type":"custom_tool_call""#),
+            "{rewritten}"
+        );
         assert!(rewritten.contains(r#""name":"apply_patch""#), "{rewritten}");
-        assert!(rewritten.contains(r#""namespace":"functions""#), "{rewritten}");
+        assert!(
+            rewritten.contains(r#""namespace":"functions""#),
+            "{rewritten}"
+        );
         assert!(
             rewritten.contains(r#""type":"response.custom_tool_call_input.done""#),
             "custom argument event must use the declared kind: {rewritten}"
         );
-        assert!(rewritten.contains(r#""name":"exec_command""#), "{rewritten}");
+        assert!(
+            rewritten.contains(r#""name":"exec_command""#),
+            "{rewritten}"
+        );
         let function_frame = rewritten
             .split("\n\n")
             .find(|segment| segment.contains(r#""name":"exec_command""#))

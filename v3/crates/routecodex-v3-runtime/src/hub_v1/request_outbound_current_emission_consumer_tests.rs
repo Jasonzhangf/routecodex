@@ -456,7 +456,10 @@ fn surviving_exec_maps_on_chat_and_responses_and_reverses_to_original_identity()
         "request.tools[0].tools[1]"
     );
     assert_eq!(responses_mappings[0].declaration_record_id, exec.record_id);
-    assert_eq!(responses_mappings[0].emitted_name.as_deref(), Some("functions__exec"));
+    assert_eq!(
+        responses_mappings[0].emitted_name.as_deref(),
+        Some("functions__exec")
+    );
     assert_eq!(responses_mappings[0].emitted_namespace, None);
 
     // Bind the real emitted Chat name + actual mapping into a real successful attempt.

@@ -23,8 +23,8 @@ pub use crate::execution_control::{
     V3AttemptSuccessReceipt, V3CommittedClientSseStream, V3CommittedSseTerminal,
     V3RequestExecutionControl,
 };
-pub use crate::operation_runner::{V3RequestContextHandle, V3RequestFinalizerGuard};
 pub use crate::kernel::V3DirectRelayHandoffRequestOrigin;
+pub use crate::operation_runner::{V3RequestContextHandle, V3RequestFinalizerGuard};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3Server03HttpRequestRaw {

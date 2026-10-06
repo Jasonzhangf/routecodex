@@ -319,36 +319,42 @@ async fn chat_upstream(
         );
     }
     if chat_has_tool_result(&body) {
-        return json_response(chat_completion(json!({
-            "role": "assistant",
-            "content": FINAL_TEXT
-        }), "stop"));
+        return json_response(chat_completion(
+            json!({
+                "role": "assistant",
+                "content": FINAL_TEXT
+            }),
+            "stop",
+        ));
     }
     let tools = body["tools"].as_array().cloned().unwrap_or_default();
     let exec_name = chat_wire_tool_name(&tools, "exec");
     let patch_name = chat_wire_tool_name(&tools, "apply_patch");
     let mcp_name = chat_wire_tool_name(&tools, "opaque_leaf");
-    json_response(chat_completion(json!({
-        "role": "assistant",
-        "content": null,
-        "tool_calls": [
-            {
-                "id": "exec-call",
-                "type": "function",
-                "function": {"name": exec_name, "arguments": exec_arguments()}
-            },
-            {
-                "id": "patch-call",
-                "type": "function",
-                "function": {"name": patch_name, "arguments": patch_wire_arguments()}
-            },
-            {
-                "id": "mcp-call",
-                "type": "function",
-                "function": {"name": mcp_name, "arguments": mcp_arguments()}
-            }
-        ]
-    }), "tool_calls"))
+    json_response(chat_completion(
+        json!({
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+                {
+                    "id": "exec-call",
+                    "type": "function",
+                    "function": {"name": exec_name, "arguments": exec_arguments()}
+                },
+                {
+                    "id": "patch-call",
+                    "type": "function",
+                    "function": {"name": patch_name, "arguments": patch_wire_arguments()}
+                },
+                {
+                    "id": "mcp-call",
+                    "type": "function",
+                    "function": {"name": mcp_name, "arguments": mcp_arguments()}
+                }
+            ]
+        }),
+        "tool_calls",
+    ))
 }
 
 fn chat_completion(message: Value, finish_reason: &str) -> Value {

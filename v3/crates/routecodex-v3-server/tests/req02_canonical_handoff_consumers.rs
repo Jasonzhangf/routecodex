@@ -10,12 +10,7 @@
 //! is not republished, and the client receives a success frame.
 
 use axum::{
-    body::Body,
-    extract::State,
-    http::StatusCode,
-    response::Response,
-    routing::post,
-    Json, Router,
+    body::Body, extract::State, http::StatusCode, response::Response, routing::post, Json, Router,
 };
 use routecodex_v3_config::{
     compile_v3_config_05_manifest, parse_v3_config_02_authoring, V3Config05ManifestPublished,
@@ -103,7 +98,11 @@ async fn controlled_responses_upstream(
 
 async fn start_upstream(
     reply: UpstreamReply,
-) -> (std::net::SocketAddr, Arc<UpstreamControl>, oneshot::Sender<()>) {
+) -> (
+    std::net::SocketAddr,
+    Arc<UpstreamControl>,
+    oneshot::Sender<()>,
+) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let control = Arc::new(UpstreamControl {
@@ -136,10 +135,7 @@ fn free_port() -> u16 {
 /// Chat entry (`/v1/chat/completions`) routed to a Responses provider. The
 /// entry protocol differs from the target protocol, so the Direct phase selects
 /// Relay and produces the canonical handoff the tests exercise.
-fn chat_to_responses_manifest(
-    server_port: u16,
-    upstream_port: u16,
-) -> V3Config05ManifestPublished {
+fn chat_to_responses_manifest(server_port: u16, upstream_port: u16) -> V3Config05ManifestPublished {
     let source = format!(
         r#"
 version = 3
@@ -245,7 +241,11 @@ async fn controlled_chat_upstream(
     }))
 }
 
-async fn start_chat_upstream() -> (std::net::SocketAddr, Arc<UpstreamControl>, oneshot::Sender<()>) {
+async fn start_chat_upstream() -> (
+    std::net::SocketAddr,
+    Arc<UpstreamControl>,
+    oneshot::Sender<()>,
+) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let control = Arc::new(UpstreamControl {
@@ -271,10 +271,7 @@ async fn start_chat_upstream() -> (std::net::SocketAddr, Arc<UpstreamControl>, o
 /// Direct phase again selects Relay and produces the canonical handoff; the
 /// Responses Relay entry consumes the moved canonical Value and captured
 /// target without a second normalization.
-fn responses_to_chat_manifest(
-    server_port: u16,
-    upstream_port: u16,
-) -> V3Config05ManifestPublished {
+fn responses_to_chat_manifest(server_port: u16, upstream_port: u16) -> V3Config05ManifestPublished {
     let source = format!(
         r#"
 version = 3
@@ -446,7 +443,11 @@ async fn req02_chat_canonical_handoff_sse_reaches_selected_target_via_real_http(
     );
 
     let captures = upstream.captures();
-    assert_eq!(captures.len(), 1, "SSE handoff must reach the provider once");
+    assert_eq!(
+        captures.len(),
+        1,
+        "SSE handoff must reach the provider once"
+    );
     assert!(
         serialized_contains(&captures[0], USER_TEXT_SENTINEL),
         "SSE handoff must forward the canonical request: {}",

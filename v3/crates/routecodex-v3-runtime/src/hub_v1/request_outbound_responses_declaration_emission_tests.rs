@@ -131,7 +131,10 @@ fn responses_emission_uses_actual_sdk_sources_and_nested_destinations() {
         .expect("nested custom child must be recorded");
     assert_eq!(patch.destination_path, "tools[0]");
     assert_eq!(patch.emitted_kind, "function");
-    assert_eq!(patch.emitted_name.as_deref(), Some("outer__inner__apply_patch"));
+    assert_eq!(
+        patch.emitted_name.as_deref(),
+        Some("outer__inner__apply_patch")
+    );
     assert_eq!(patch.emitted_namespace, None);
 
     let lookup = mappings
@@ -331,7 +334,10 @@ fn responses_emission_records_apply_patch_projection_from_actual_emitted_tool() 
         )
         .expect("apply_patch custom declaration must project through Responses");
 
-    assert_eq!(wire["tools"], payload["tools"], "native custom declaration must be preserved completely");
+    assert_eq!(
+        wire["tools"], payload["tools"],
+        "native custom declaration must be preserved completely"
+    );
     assert_eq!(mappings.len(), 1);
     assert_eq!(mappings[0].declaration_record_id, "r-patch");
     assert_eq!(mappings[0].destination_path, "tools[0]");

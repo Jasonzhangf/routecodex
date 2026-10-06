@@ -1,5 +1,5 @@
-use super::super::request_outbound_declaration_emission::StandardOutboundDeclarationObserver;
 use super::super::request_outbound_builtin_tool_projection::provider_tool_declaration_sources;
+use super::super::request_outbound_declaration_emission::StandardOutboundDeclarationObserver;
 use super::responses_to_anthropic::responses_tool_as_anthropic_tool;
 use super::*;
 
@@ -256,9 +256,8 @@ pub(super) fn responses_tools_for_anthropic_wire_with_declarations(
     // the actual Anthropic emission and the observer stay on one traversal.
     // Top-level `chat.tools[i]` is already emitted above; only the non-array
     // message sources are appended to avoid double emission.
-    for (source_path, tool) in
-        provider_tool_declaration_sources(&Value::Object(object.clone()))
-            .map_err(|paths| V3AnthropicCodecError::UnmappedOutboundFields { paths })?
+    for (source_path, tool) in provider_tool_declaration_sources(&Value::Object(object.clone()))
+        .map_err(|paths| V3AnthropicCodecError::UnmappedOutboundFields { paths })?
     {
         if !source_path.starts_with("chat.messages") {
             continue;

@@ -6,34 +6,32 @@ use crate::hub_v1::{
     build_v3_hub_resp_inbound_02_from_provider_resp_compat_02,
     build_v3_provider_resp_inbound_01_raw_with_compat_profile, record_v3_provider_sse_json_frame,
     V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource, V3HubProviderWireProtocol,
-    V3HubRelayResponseHookProfile, V3HubTransportIntent,
-    V3ProviderRespInbound01RawContext, V3RuntimeObservability, V3RuntimeProviderFailureEventSink,
-    V3RuntimeProviderFailureObservation, V3RuntimeRouteSelectionEventSink,
-    V3RuntimeStreamObservation, V3ServerToolCenterWriteOrigin,
+    V3HubRelayResponseHookProfile, V3HubTransportIntent, V3ProviderRespInbound01RawContext,
+    V3RuntimeObservability, V3RuntimeProviderFailureEventSink, V3RuntimeProviderFailureObservation,
+    V3RuntimeRouteSelectionEventSink, V3RuntimeStreamObservation, V3ServerToolCenterWriteOrigin,
 };
 use crate::nodes::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
     admit_v3_selected_target_after_recovery, select_v3_expanded_target_with_admission_rescue,
     select_v3_target_with_session_then_global, try_admit_v3_selected_target,
-    v3_relay_provider_candidate_key, V3AdmitAfterRecovery,
-    V3AdmittedTargetSelectionAfterRescue, V3ProviderFailureRuntimeHealth,
-    V3RuntimeProviderAdmission,
+    v3_relay_provider_candidate_key, V3AdmitAfterRecovery, V3AdmittedTargetSelectionAfterRescue,
+    V3ProviderFailureRuntimeHealth, V3RuntimeProviderAdmission,
 };
 use crate::runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingState};
 use crate::shared::V3ProviderAttemptBody;
 use crate::sse_object_pipeline::process_sse_object_frame;
-use futures_util::{stream, StreamExt};
 use async_trait::async_trait;
+use futures_util::{stream, StreamExt};
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_debug::{V3DebugError, V3DebugRuntime, V3DryRunFixture};
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
-    V3Error01SourceRaised, V3Error05ExecutionAction,
-    V3Error05ExecutionDecision, V3Error06ClientProjected,
-    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
-    V3ExternalErrorKind, V3ExternalErrorLink, V3ExternalHttpWitness, V3ProviderFailureSessionScope,
-    V3ProviderTerminalDisposition, V3_ERROR_CHAIN_NODE_IDS, V3_TRANSIENT_TRANSPORT_HANG_CODE,
+    V3Error01SourceRaised, V3Error05ExecutionAction, V3Error05ExecutionDecision,
+    V3Error06ClientProjected, V3ErrorActionScope, V3ErrorHandlingCenter,
+    V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
+    V3ExternalHttpWitness, V3ProviderFailureSessionScope, V3ProviderTerminalDisposition,
+    V3_ERROR_CHAIN_NODE_IDS, V3_TRANSIENT_TRANSPORT_HANG_CODE,
 };
 use routecodex_v3_provider_responses::{
     ReqwestResponsesTransport, V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader,
@@ -289,9 +287,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     let standardized_request_id = standardized.request_id.clone();
     let standardized_server_id = standardized.server_id.clone();
     let commit_route_policy = |_receipt: &V3AttemptSuccessReceipt| -> Result<(), String> {
-        route_policy_pending
-            .as_ref()
-            .map_or(Ok(()), |pending| pending.commit(&route_policy_policies, now_epoch_ms))
+        route_policy_pending.as_ref().map_or(Ok(()), |pending| {
+            pending.commit(&route_policy_policies, now_epoch_ms)
+        })
     };
     let mut failed_candidates = initial_request_local_excluded_candidates;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
@@ -1137,7 +1135,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             .unwrap_or(false);
         // Admission only: this load keeps the typed
         // V3DirectWebSearchResp01Intercepted error path for the request scope.
-        if let (Some(control), Some(scope)) = (server_tool_state.as_deref(), server_tool_scope.as_ref())
+        if let (Some(control), Some(scope)) =
+            (server_tool_state.as_deref(), server_tool_scope.as_ref())
         {
             if let Err(error) = control.web_search_load_for_scope(scope) {
                 return error_output(

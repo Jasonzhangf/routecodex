@@ -49,9 +49,9 @@ impl RequestNormalizationEntry {
             (RequestOriginKind::Retry | RequestOriginKind::InternalFollowup, Self::RawEntry(_)) => {
                 Err("retry and internal followup require an already-canonical entry".to_string())
             }
-            (RequestOriginKind::DirectRelayHandoff, Self::RawEntry(_)) => Err(
-                "direct relay handoff requires an already-canonical entry".to_string(),
-            ),
+            (RequestOriginKind::DirectRelayHandoff, Self::RawEntry(_)) => {
+                Err("direct relay handoff requires an already-canonical entry".to_string())
+            }
         }
     }
 }

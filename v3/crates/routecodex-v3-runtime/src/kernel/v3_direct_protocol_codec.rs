@@ -93,8 +93,7 @@ pub trait V3DirectProtocolCodec {
         selected: &V3Target10ConcreteProviderSelected,
         request_execution_control: &crate::nodes::V3RequestExecutionControl,
         attempt_id: &str,
-    ) -> Result<crate::kernel::V3DirectRequestProjectionView, V3Error01SourceRaised>
-    {
+    ) -> Result<crate::kernel::V3DirectRequestProjectionView, V3Error01SourceRaised> {
         let invocation = crate::operation_runner::RequestInvocationContext::new(
             request_execution_control.request_context().clone(),
             format!("{}:direct-entry", Self::request_id(standardized)),
@@ -102,7 +101,10 @@ pub trait V3DirectProtocolCodec {
             crate::operation_runner::RequestOriginKind::ClientEntry,
         );
         crate::kernel::build_v3_direct_request_projection_view(
-            Self::body(standardized), selected, &invocation, attempt_id,
+            Self::body(standardized),
+            selected,
+            &invocation,
+            attempt_id,
         )
     }
 

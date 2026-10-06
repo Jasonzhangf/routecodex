@@ -214,18 +214,34 @@ impl<'a> RequestNormalizer<'a> {
             for separator_index in 1..contributions.len()
                 + usize::from(self.system_instructions.existing_leaf().is_some())
             {
-                let next_source = contributions.get(separator_index)
+                let next_source = contributions
+                    .get(separator_index)
                     .unwrap_or_else(|| contributions.last().expect("nonempty instruction builder"))
-                    .source.path.as_str();
-                let owner = field_sources.iter().filter(|source|
-                    next_source == source.as_str() || next_source.strip_prefix(source.as_str())
-                        .is_some_and(|suffix| suffix.starts_with('.') || suffix.starts_with('[')))
+                    .source
+                    .path
+                    .as_str();
+                let owner = field_sources
+                    .iter()
+                    .filter(|source| {
+                        next_source == source.as_str()
+                            || next_source
+                                .strip_prefix(source.as_str())
+                                .is_some_and(|suffix| {
+                                    suffix.starts_with('.') || suffix.starts_with('[')
+                                })
+                    })
                     .max_by_key(|source| source.len());
-                if let Some(mapping) = owner.and_then(|owner| self.provenance.iter().find(|mapping|
-                    mapping.get("source_path").and_then(Value::as_str) == Some(owner.as_str()))) {
+                if let Some(mapping) = owner.and_then(|owner| {
+                    self.provenance.iter().find(|mapping| {
+                        mapping.get("source_path").and_then(Value::as_str) == Some(owner.as_str())
+                    })
+                }) {
                     let mut generated = mapping.clone();
-                    generated["destination"] = json!(format!("{container}[{}]", separator_index * 2 - 1));
-                    generated["semantics"] = json!(super::project_canonical_instructions::GENERATED_INSTRUCTION_SEPARATOR);
+                    generated["destination"] =
+                        json!(format!("{container}[{}]", separator_index * 2 - 1));
+                    generated["semantics"] = json!(
+                        super::project_canonical_instructions::GENERATED_INSTRUCTION_SEPARATOR
+                    );
                     self.provenance.push(generated);
                 }
             }

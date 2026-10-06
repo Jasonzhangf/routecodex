@@ -9,15 +9,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 mod operators;
-pub(crate) use operators::project_canonical_standard_view;
-pub(crate) use operators::{restore_standard_projection_siblings, restore_standard_transform_siblings};
-pub(crate) use operators::project_registered_native_gemini_tools;
 pub(crate) use operators::is_unchanged_native_instruction_separator;
+pub(crate) use operators::project_canonical_standard_view;
+pub(crate) use operators::project_registered_native_gemini_tools;
 pub use operators::{
     apply_canonical_field_edit, project_canonical_direct_request, project_canonical_request,
     project_hosted_history_emissions, CanonicalFieldEdit, CanonicalRequestProjection,
     CurrentFieldAssociation, CurrentFieldAssociations, DirectRequestProjection,
     HostedHistoryEmission,
+};
+pub(crate) use operators::{
+    restore_standard_projection_siblings, restore_standard_transform_siblings,
 };
 pub use routecodex_v3_target::V3TargetCandidate;
 mod request_context_store;

@@ -14,11 +14,16 @@ pub(crate) fn is_unchanged_native_instruction_separator(
     current_path: &str,
     current_part: &Value,
 ) -> bool {
-    current.original_mapping_indices_for_destination(current_path).into_iter().any(|index| {
-        let mapping = &inverse.field_mappings[index];
-        mapping.semantics.as_deref() == Some(GENERATED_INSTRUCTION_SEPARATOR)
-            && mapping.transform_id.as_deref() == Some("v3.gemini_system_instruction_to_chat_system.v1")
-    }) && *current_part == json!({"type":"text","text":"\n"})
+    current
+        .original_mapping_indices_for_destination(current_path)
+        .into_iter()
+        .any(|index| {
+            let mapping = &inverse.field_mappings[index];
+            mapping.semantics.as_deref() == Some(GENERATED_INSTRUCTION_SEPARATOR)
+                && mapping.transform_id.as_deref()
+                    == Some("v3.gemini_system_instruction_to_chat_system.v1")
+        })
+        && *current_part == json!({"type":"text","text":"\n"})
 }
 
 /// Restore an instruction source through its emitted leaf associations. Native

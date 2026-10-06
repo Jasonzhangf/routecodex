@@ -6,24 +6,24 @@
 //! its position among ordinary history, current edits, and non-deduplication
 //! of distinct events sharing an ID.
 
+use axum::{extract::State, routing::post, Json, Router};
+use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_config::{
     V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind, V3WebSearchExecutionMode,
 };
-use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_error::V3ProviderFailureSessionScope;
 use routecodex_v3_runtime::hub_v1::{V3HubExecutionMode, V3HubProviderWireProtocol};
 use routecodex_v3_runtime::operation_runner::{
     apply_canonical_field_edit, execute_v3_operation_runner_request_capture_client_json,
     execute_v3_operation_runner_request_normalize_losslessly, project_canonical_request,
     CanonicalFieldEdit, CurrentFieldAssociations, RequestInvocationContext,
-    RequestNormalizationEntry, RequestOriginKind, RequestScopedContextPair,
-    V3RequestContextHandle, V3TargetCandidate,
+    RequestNormalizationEntry, RequestOriginKind, RequestScopedContextPair, V3RequestContextHandle,
+    V3TargetCandidate,
 };
 use routecodex_v3_runtime::{
     execute_v3_responses_relay_runtime_with_default_transport, V3ResponsesRelayClientBody,
     V3ResponsesRelayRuntimeInput,
 };
-use axum::{extract::State, routing::post, Json, Router};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::{
@@ -128,16 +128,12 @@ fn hosted_index(canonical: &Value) -> usize {
         .as_array()
         .expect("canonical messages")
         .iter()
-        .position(|message| {
-            message["routecodex_chat_extension"][EXTENSION_KEY].is_object()
-        })
+        .position(|message| message["routecodex_chat_extension"][EXTENSION_KEY].is_object())
         .unwrap_or_else(|| panic!("missing hosted anchor: {canonical}"))
 }
 
 fn event_path(message_index: usize) -> String {
-    format!(
-        "chat.messages[{message_index}].routecodex_chat_extension.{EXTENSION_KEY}"
-    )
+    format!("chat.messages[{message_index}].routecodex_chat_extension.{EXTENSION_KEY}")
 }
 
 fn input_descriptors(payload: &Value) -> Vec<(String, Option<String>)> {
@@ -146,10 +142,7 @@ fn input_descriptors(payload: &Value) -> Vec<(String, Option<String>)> {
         .expect("provider input")
         .iter()
         .map(|item| {
-            let kind = item["type"]
-                .as_str()
-                .unwrap_or("message")
-                .to_string();
+            let kind = item["type"].as_str().unwrap_or("message").to_string();
             let id = item["call_id"]
                 .as_str()
                 .or_else(|| item["id"].as_str())
@@ -216,11 +209,23 @@ fn relay_responses_emits_current_event_once_in_full_history_order() {
             ("message".to_string(), None),
             ("web_search_call".to_string(), Some("ws_full".to_string())),
             ("function_call".to_string(), Some("exec-call".to_string())),
-            ("function_call_output".to_string(), Some("exec-call".to_string())),
-            ("custom_tool_call".to_string(), Some("patch-call".to_string())),
-            ("custom_tool_call_output".to_string(), Some("patch-call".to_string())),
+            (
+                "function_call_output".to_string(),
+                Some("exec-call".to_string())
+            ),
+            (
+                "custom_tool_call".to_string(),
+                Some("patch-call".to_string())
+            ),
+            (
+                "custom_tool_call_output".to_string(),
+                Some("patch-call".to_string())
+            ),
             ("function_call".to_string(), Some("mcp-call".to_string())),
-            ("function_call_output".to_string(), Some("mcp-call".to_string())),
+            (
+                "function_call_output".to_string(),
+                Some("mcp-call".to_string())
+            ),
             ("message".to_string(), None),
         ],
         "hosted and ordinary history must keep full input order"
@@ -242,8 +247,10 @@ fn current_replace_and_field_remove_govern_the_emitted_event() {
         "result_items": [{"rank": 1}, {"rank": 2}],
         "unknown_field": "keep"
     });
-    let (canonical, pair, current) =
-        sdk_request("req02-r40-current-edit", json!({"model":"m","input":[item]}));
+    let (canonical, pair, current) = sdk_request(
+        "req02-r40-current-edit",
+        json!({"model":"m","input":[item]}),
+    );
     let index = hosted_index(&canonical);
     let base = event_path(index);
 
@@ -371,10 +378,7 @@ fn whole_anchor_removal_emits_no_event() {
     let payload = relay_responses(&canonical, &pair, &current);
     assert_eq!(
         input_descriptors(&payload),
-        vec![
-            ("message".to_string(), None),
-            ("message".to_string(), None),
-        ],
+        vec![("message".to_string(), None), ("message".to_string(), None),],
         "a removed hosted anchor must leave only ordinary history"
     );
 }
@@ -389,8 +393,10 @@ fn absent_original_id_is_preserved_and_no_current_declaration_is_needed() {
         "error": {"code": "upstream"},
         "unknown_member": {"x": 1}
     });
-    let (canonical, pair, current) =
-        sdk_request("req02-r40-no-id", json!({"model":"m","input":[item.clone()]}));
+    let (canonical, pair, current) = sdk_request(
+        "req02-r40-no-id",
+        json!({"model":"m","input":[item.clone()]}),
+    );
     let payload = relay_responses(&canonical, &pair, &current);
     assert_eq!(
         payload["input"],
@@ -429,7 +435,11 @@ fn distinct_events_with_the_same_id_are_not_deduplicated() {
         .iter()
         .filter(|entry| entry["type"] == "web_search_call" && entry["id"] == "same-id")
         .collect::<Vec<_>>();
-    assert_eq!(events.len(), 2, "shared call ids must not deduplicate events");
+    assert_eq!(
+        events.len(),
+        2,
+        "shared call ids must not deduplicate events"
+    );
     assert_eq!(events[0]["action"]["query"], "one");
     assert_eq!(events[1]["action"]["query"], "two");
 }

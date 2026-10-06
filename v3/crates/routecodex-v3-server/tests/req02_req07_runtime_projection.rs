@@ -435,13 +435,19 @@ fn req02_anthropic_response_context_accepts_unnamed_native_tool_declarations() {
         ]
     });
     let (handle, req07) = build_req07(
-        "req07-native-tool-identity", request,
-        "req07-native-tool-identity-attempt", V3HubProviderWireProtocol::Anthropic,
+        "req07-native-tool-identity",
+        request,
+        "req07-native-tool-identity-attempt",
+        V3HubProviderWireProtocol::Anthropic,
     );
     let view = publish_and_view(&handle, &req07);
-    assert!(view.request_inverse_context().tool_declarations.iter().any(|declaration| {
-        declaration.kind == "tool_search" && declaration.name.is_none()
-    }), "the native tool must retain its actual unnamed declaration");
+    assert!(
+        view.request_inverse_context()
+            .tool_declarations
+            .iter()
+            .any(|declaration| { declaration.kind == "tool_search" && declaration.name.is_none() }),
+        "the native tool must retain its actual unnamed declaration"
+    );
     let context = V3AnthropicResponsesProjectionContext::from_successful_attempt(&view)
         .expect("native declarations must not be mistaken for named callable declarations");
     let provider = json!({
@@ -450,11 +456,16 @@ fn req02_anthropic_response_context_accepts_unnamed_native_tool_declarations() {
         "content": [{"type": "tool_use", "id": "exec-call", "name": emitted_name_for_original(&view, "exec"), "input": {"cmd": "printf complete-tail"}}],
         "usage": {"input_tokens": 1, "output_tokens": 1}
     });
-    let restored = project_v3_anthropic_message_as_responses_response_with_context(&provider, &context).unwrap();
+    let restored =
+        project_v3_anthropic_message_as_responses_response_with_context(&provider, &context)
+            .unwrap();
     assert_eq!(restored["output"][0]["type"], "function_call");
     assert_eq!(restored["output"][0]["namespace"], "functions");
     assert_eq!(restored["output"][0]["name"], "exec");
-    assert_eq!(restored["output"][0]["arguments"], "{\"cmd\":\"printf complete-tail\"}");
+    assert_eq!(
+        restored["output"][0]["arguments"],
+        "{\"cmd\":\"printf complete-tail\"}"
+    );
 }
 
 #[tokio::test]
@@ -709,7 +720,8 @@ fn req02_anthropic_custom_input_that_looks_like_json_stays_a_raw_string() {
 fn req02_declared_client_metadata_maps_to_extension_and_remains_reversible() {
     let mut raw = raw_request();
     raw["client_metadata"] = json!({"user_id":"opaque-client-user", "session_id":"local-session"});
-    let (handle, canonical) = request_handle_and_canonical("req07-client-metadata-source", raw.clone());
+    let (handle, canonical) =
+        request_handle_and_canonical("req07-client-metadata-source", raw.clone());
     assert_eq!(
         canonical["routecodex_chat_extension"]["responses_request"]["client_metadata"],
         raw["client_metadata"]
@@ -717,13 +729,26 @@ fn req02_declared_client_metadata_maps_to_extension_and_remains_reversible() {
     assert!(canonical.get("client_metadata").is_none());
     let pair = handle.original_pair().unwrap();
     let current = handle.current_field_associations().unwrap();
-    assert_eq!(routecodex_v3_runtime::operation_runner::project_canonical_direct_request(
-        &canonical, &pair.inverse_context, &current, &pair.explicit_history_pairing,
-    ).unwrap().payload, raw);
+    assert_eq!(
+        routecodex_v3_runtime::operation_runner::project_canonical_direct_request(
+            &canonical,
+            &pair.inverse_context,
+            &current,
+            &pair.explicit_history_pairing,
+        )
+        .unwrap()
+        .payload,
+        raw
+    );
     let (_, req07) = build_req07(
-        "req07-client-metadata-target", raw, "req07-client-metadata-target-attempt",
+        "req07-client-metadata-target",
+        raw,
+        "req07-client-metadata-target-attempt",
         V3HubProviderWireProtocol::Anthropic,
     );
-    assert_eq!(req07.standard_payload()["metadata"]["user_id"], "opaque-client-user");
+    assert_eq!(
+        req07.standard_payload()["metadata"]["user_id"],
+        "opaque-client-user"
+    );
     assert!(req07.standard_payload().get("client_metadata").is_none());
 }

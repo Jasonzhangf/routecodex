@@ -218,7 +218,10 @@ fn lifecycle_manifest(
     server_port: u16,
     providers: &[ProviderSpec],
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
-    assert!(!providers.is_empty(), "lifecycle manifest needs at least one provider");
+    assert!(
+        !providers.is_empty(),
+        "lifecycle manifest needs at least one provider"
+    );
     let server_id = "req02_lifecycle";
 
     let provider_blocks = providers
@@ -504,31 +507,34 @@ fn held_sse_response(
         completed: Arc::clone(&completed),
     };
     let state = (0u8, first_event, final_event, release, Some(started), guard);
-    let body_stream = stream::unfold(state, move |(step, first, final_event, release, started, guard)| {
-        let completed = Arc::clone(&completed);
-        async move {
-            match step {
-                0 => {
-                    if let Some(started) = started {
-                        let _ = started.send(());
+    let body_stream = stream::unfold(
+        state,
+        move |(step, first, final_event, release, started, guard)| {
+            let completed = Arc::clone(&completed);
+            async move {
+                match step {
+                    0 => {
+                        if let Some(started) = started {
+                            let _ = started.send(());
+                        }
+                        Some((
+                            Ok::<_, Infallible>(first.clone()),
+                            (1, first, final_event, release, None, guard),
+                        ))
                     }
-                    Some((
-                        Ok::<_, Infallible>(first.clone()),
-                        (1, first, final_event, release, None, guard),
-                    ))
+                    1 => {
+                        release.notified().await;
+                        completed.store(true, Ordering::SeqCst);
+                        Some((
+                            Ok::<_, Infallible>(final_event.clone()),
+                            (2, first, final_event, release, None, guard),
+                        ))
+                    }
+                    _ => None,
                 }
-                1 => {
-                    release.notified().await;
-                    completed.store(true, Ordering::SeqCst);
-                    Some((
-                        Ok::<_, Infallible>(final_event.clone()),
-                        (2, first, final_event, release, None, guard),
-                    ))
-                }
-                _ => None,
             }
-        }
-    });
+        },
+    );
     sse_body_response(Body::from_stream(body_stream))
 }
 
@@ -619,8 +625,9 @@ fn client_tool_blocks_from_sse(body: &str) -> Vec<Value> {
         .into_values()
         .map(|mut block| {
             if let Some(raw) = block.get("_input_json").and_then(Value::as_str) {
-                block["input"] = serde_json::from_str(raw)
-                    .unwrap_or_else(|error| panic!("client SSE tool input must be valid JSON: {error}; raw={raw}"));
+                block["input"] = serde_json::from_str(raw).unwrap_or_else(|error| {
+                    panic!("client SSE tool input must be valid JSON: {error}; raw={raw}")
+                });
                 block.as_object_mut().unwrap().remove("_input_json");
             }
             block
@@ -632,7 +639,9 @@ fn tool_block<'a>(blocks: &'a [Value], name: &str) -> &'a Value {
     blocks
         .iter()
         .find(|block| block["name"] == name)
-        .unwrap_or_else(|| panic!("client output must contain restored tool block `{name}`: {blocks:?}"))
+        .unwrap_or_else(|| {
+            panic!("client output must contain restored tool block `{name}`: {blocks:?}")
+        })
 }
 
 fn assert_restored_tool_blocks(blocks: &[Value]) {
@@ -734,7 +743,10 @@ async fn req02_anthropic_failover_json_uses_successful_attempt_inverse() {
 
     let manifest = lifecycle_manifest(
         free_port(),
-        &[first_provider_spec(first_addr.port(), true), second_provider_spec(second_addr.port())],
+        &[
+            first_provider_spec(first_addr.port(), true),
+            second_provider_spec(second_addr.port()),
+        ],
     );
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let endpoint = format!("http://{}/v1/messages", handle.listeners[0].addr);
@@ -749,7 +761,10 @@ async fn req02_anthropic_failover_json_uses_successful_attempt_inverse() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["content-type"], "application/json");
     let body: Value = response.json().await.unwrap();
-    assert!(body.get("error").is_none(), "client must not receive the first error: {body}");
+    assert!(
+        body.get("error").is_none(),
+        "client must not receive the first error: {body}"
+    );
     assert_restored_tool_blocks(&client_tool_blocks_from_json(&body));
 
     let first_capture = recv_capture(&mut first_rx).await;
@@ -789,7 +804,10 @@ async fn req02_anthropic_failover_sse_uses_successful_attempt_inverse() {
 
     let manifest = lifecycle_manifest(
         free_port(),
-        &[first_provider_spec(first_addr.port(), true), second_provider_spec(second_addr.port())],
+        &[
+            first_provider_spec(first_addr.port(), true),
+            second_provider_spec(second_addr.port()),
+        ],
     );
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let endpoint = format!("http://{}/v1/messages", handle.listeners[0].addr);
@@ -830,9 +848,7 @@ async fn req02_anthropic_incomplete_provider_sse_reselects_without_partial_tools
     let (first_tx, mut first_rx) = mpsc::unbounded_channel();
     let first_app = Router::new()
         .route("/v1/messages", post(anthropic_incomplete_sse_upstream))
-        .with_state(Arc::new(IncompleteProviderState {
-            captures: first_tx,
-        }));
+        .with_state(Arc::new(IncompleteProviderState { captures: first_tx }));
     let (first_addr, first_upstream) = spawn_upstream(first_app).await;
 
     let (second_tx, mut second_rx) = mpsc::unbounded_channel();
@@ -845,7 +861,10 @@ async fn req02_anthropic_incomplete_provider_sse_reselects_without_partial_tools
 
     let manifest = lifecycle_manifest(
         free_port(),
-        &[first_provider_spec(first_addr.port(), true), second_provider_spec(second_addr.port())],
+        &[
+            first_provider_spec(first_addr.port(), true),
+            second_provider_spec(second_addr.port()),
+        ],
     );
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let endpoint = format!("http://{}/v1/messages", handle.listeners[0].addr);
@@ -888,11 +907,12 @@ async fn req02_anthropic_incomplete_provider_sse_exhaustion_does_not_fabricate_s
     let (first_tx, mut first_rx) = mpsc::unbounded_channel();
     let first_app = Router::new()
         .route("/v1/messages", post(anthropic_incomplete_sse_upstream))
-        .with_state(Arc::new(IncompleteProviderState {
-            captures: first_tx,
-        }));
+        .with_state(Arc::new(IncompleteProviderState { captures: first_tx }));
     let (first_addr, first_upstream) = spawn_upstream(first_app).await;
-    let manifest = lifecycle_manifest(free_port(), &[first_provider_spec(first_addr.port(), false)]);
+    let manifest = lifecycle_manifest(
+        free_port(),
+        &[first_provider_spec(first_addr.port(), false)],
+    );
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let endpoint = format!("http://{}/v1/messages", handle.listeners[0].addr);
 
@@ -912,7 +932,9 @@ async fn req02_anthropic_incomplete_provider_sse_exhaustion_does_not_fabricate_s
                 match response.chunk().await {
                     Ok(Some(chunk)) => wire.extend_from_slice(&chunk),
                     Err(_) => break,
-                    Ok(None) => panic!("exhausted incomplete provider must not complete the client SSE transfer"),
+                    Ok(None) => panic!(
+                        "exhausted incomplete provider must not complete the client SSE transfer"
+                    ),
                 }
             }
             let text = String::from_utf8_lossy(&wire);
@@ -956,7 +978,10 @@ async fn req02_anthropic_client_disconnect_cancels_pending_provider_and_survivor
         .route("/v1/messages", post(anthropic_cancellation_upstream))
         .with_state(state);
     let (upstream_addr, upstream) = spawn_upstream(app).await;
-    let manifest = lifecycle_manifest(free_port(), &[first_provider_spec(upstream_addr.port(), false)]);
+    let manifest = lifecycle_manifest(
+        free_port(),
+        &[first_provider_spec(upstream_addr.port(), false)],
+    );
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let addr = handle.listeners[0].addr;
     let endpoint = format!("http://{addr}/v1/messages");
@@ -1000,7 +1025,10 @@ async fn req02_anthropic_client_disconnect_cancels_pending_provider_and_survivor
     let survivor_body: Value = survivor.json().await.unwrap();
     assert_restored_tool_blocks(&client_tool_blocks_from_json(&survivor_body));
     let survivor_capture = recv_capture(&mut captures_rx).await;
-    assert_eq!(survivor_capture.authorization.as_deref(), Some("Bearer req02-anthropic-lifecycle-first-secret"));
+    assert_eq!(
+        survivor_capture.authorization.as_deref(),
+        Some("Bearer req02-anthropic-lifecycle-first-secret")
+    );
     assert_eq!(survivor_capture.body["stream"], false);
     assert_eq!(
         survivor_capture.body["messages"][0]["content"],

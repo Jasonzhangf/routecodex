@@ -44,16 +44,16 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[path = "responses_openai_chat_conversion.rs"]
 mod responses_openai_chat_conversion;
+pub(crate) use responses_openai_chat_conversion::declared_custom_tool_emitted_as_function_envelope;
+pub(crate) use responses_openai_chat_conversion::declared_tool_kind_for_emitted_name;
+pub(crate) use responses_openai_chat_conversion::parse_v3_openai_chat_custom_tool_input;
 pub use responses_openai_chat_conversion::project_v3_openai_chat_response_as_responses_with_successful_attempt;
 pub(crate) use responses_openai_chat_conversion::project_v3_responses_tool_search_call;
-pub(crate) use responses_openai_chat_conversion::restore_v3_responses_normalized_tool_identities_with_successful_attempt;
-pub(crate) use responses_openai_chat_conversion::restore_v3_chat_tool_identities_with_successful_attempt;
-pub(crate) use responses_openai_chat_conversion::declared_tool_kind_for_emitted_name;
-pub(crate) use responses_openai_chat_conversion::declared_custom_tool_emitted_as_function_envelope;
 pub(crate) use responses_openai_chat_conversion::restore_v3_chat_streamed_tool_call_identity_with_successful_attempt;
+pub(crate) use responses_openai_chat_conversion::restore_v3_chat_tool_identities_with_successful_attempt;
+pub(crate) use responses_openai_chat_conversion::restore_v3_responses_normalized_tool_identities_with_successful_attempt;
 pub(crate) use responses_openai_chat_conversion::restore_v3_responses_output_item_identity_with_successful_attempt;
 pub(crate) use responses_openai_chat_conversion::V3DeclaredToolKind;
-pub(crate) use responses_openai_chat_conversion::parse_v3_openai_chat_custom_tool_input;
 #[path = "responses_relay_diagnostics.rs"]
 mod responses_relay_diagnostics;
 #[path = "responses_relay_dry_run.rs"]

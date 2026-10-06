@@ -5,8 +5,8 @@
 //! registered Direct request view, the canonical/original pair published on
 //! the same request handle, and the typed Direct-to-Relay handoff origin.
 
-use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use futures_util::StreamExt;
+use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_error::V3ProviderFailureSessionScope;
 use routecodex_v3_runtime::kernel::{
     execute_v3_direct_runtime_kernel_core_with_request_control,
@@ -128,9 +128,8 @@ targets = [{ kind = "forwarder", id = "chat", priority = 1 }]
 async fn direct_request_view_failure_keeps_the_scope_terminal_without_a_provider_attempt() {
     let manifest = manifest();
     let request_id = "req-direct-request-view-typed-failure";
-    let control =
-        V3RequestExecutionControl::new(&manifest, "responses", request_id, "responses")
-            .expect("request control");
+    let control = V3RequestExecutionControl::new(&manifest, "responses", request_id, "responses")
+        .expect("request control");
     let handle = control.request_context().clone();
     let transport = RecordingTransport::new(json!({"unused": true}));
     let mut output = execute_v3_responses_direct_runtime_kernel_with_transport_and_request_control(
@@ -152,7 +151,10 @@ async fn direct_request_view_failure_keeps_the_scope_terminal_without_a_provider
         output.node_trace.contains(&"V3Config05ManifestPublished"),
         "the typed failure must keep its node trace"
     );
-    assert!(output.error_chain.is_some(), "a non-object request cannot form provider wire");
+    assert!(
+        output.error_chain.is_some(),
+        "a non-object request cannot form provider wire"
+    );
     assert!(
         output.protocol_relay_handoff.is_none(),
         "a pre-transport failure must not fabricate a handoff"
@@ -173,16 +175,27 @@ async fn direct_request_view_failure_keeps_the_scope_terminal_without_a_provider
         handle.current_field_associations().is_ok(),
         "the failure must not drop the current canonical associations"
     );
-    if let routecodex_v3_runtime::V3ClientBody::CommittedSse(stream) = &mut output.client_payload.body {
+    if let routecodex_v3_runtime::V3ClientBody::CommittedSse(stream) =
+        &mut output.client_payload.body
+    {
         while let Some(frame) = stream.next().await {
             assert!(!frame.is_empty(), "terminal error is explicitly framed");
         }
-        assert!(handle.original_pair().is_err(), "terminal SSE EOF must release the same scope");
+        assert!(
+            handle.original_pair().is_err(),
+            "terminal SSE EOF must release the same scope"
+        );
     } else {
-        assert!(output.request_finalizer.is_some(), "terminal non-SSE output must carry its guard");
+        assert!(
+            output.request_finalizer.is_some(),
+            "terminal non-SSE output must carry its guard"
+        );
     }
     drop(output);
-    assert!(handle.original_pair().is_err(), "terminal consumption must release the request scope");
+    assert!(
+        handle.original_pair().is_err(),
+        "terminal consumption must release the request scope"
+    );
 }
 
 fn failure_session_scope(server_id: &str) -> V3ProviderFailureSessionScope {
@@ -356,9 +369,8 @@ async fn responses_direct_request_view_consumes_canonical_and_preserves_tool_byt
     let manifest = manifest();
     let execution_id = "exec-direct-request-view-responses";
     let request_id = "req-direct-request-view-responses";
-    let control =
-        V3RequestExecutionControl::new(&manifest, "responses", request_id, "responses")
-            .expect("request control");
+    let control = V3RequestExecutionControl::new(&manifest, "responses", request_id, "responses")
+        .expect("request control");
     let handle = control.request_context().clone();
     let transport = RecordingTransport::new(responses_provider_response());
     let output = execute_v3_responses_direct_runtime_kernel_with_transport_and_request_control(
@@ -455,30 +467,30 @@ async fn chat_direct_request_view_consumes_canonical_and_preserves_tool_bytes() 
     let manifest = manifest();
     let execution_id = "exec-direct-request-view-chat";
     let request_id = "req-direct-request-view-chat";
-    let control =
-        V3RequestExecutionControl::new(&manifest, "chat", request_id, "openai_chat")
-            .expect("request control");
+    let control = V3RequestExecutionControl::new(&manifest, "chat", request_id, "openai_chat")
+        .expect("request control");
     let handle = control.request_context().clone();
     let transport = RecordingTransport::new(chat_provider_response());
-    let output = execute_v3_direct_runtime_kernel_core_with_request_control::<V3ChatDirectCodec, _>(
-        (),
-        &manifest,
-        raw(
-            "chat",
-            request_id,
-            execution_id,
-            "/v1/chat/completions",
-            chat_client_body(),
-        ),
-        &transport,
-        V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest),
-        0,
-        true,
-        None,
-        None,
-        control,
-    )
-    .await;
+    let output =
+        execute_v3_direct_runtime_kernel_core_with_request_control::<V3ChatDirectCodec, _>(
+            (),
+            &manifest,
+            raw(
+                "chat",
+                request_id,
+                execution_id,
+                "/v1/chat/completions",
+                chat_client_body(),
+            ),
+            &transport,
+            V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest),
+            0,
+            true,
+            None,
+            None,
+            control,
+        )
+        .await;
 
     let pair = handle
         .original_pair()

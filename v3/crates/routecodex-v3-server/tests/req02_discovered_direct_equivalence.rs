@@ -1,26 +1,36 @@
 use routecodex_v3_runtime::operation_runner::{
     execute_v3_operation_runner_request_capture_client_json,
     execute_v3_operation_runner_request_normalize_losslessly, project_canonical_direct_request,
-    CurrentFieldAssociations, RequestInvocationContext, RequestNormalizationEntry, RequestOriginKind,
-    V3RequestContextHandle,
+    CurrentFieldAssociations, RequestInvocationContext, RequestNormalizationEntry,
+    RequestOriginKind, V3RequestContextHandle,
 };
 use serde_json::{json, Value};
 
 fn direct_roundtrip(raw: Value) -> Value {
     let handle = V3RequestContextHandle::new("discovery-direct".into(), "responses".into());
     let invocation = RequestInvocationContext::new(
-        handle.clone(), "direct-invocation".into(), "direct-attempt".into(),
+        handle.clone(),
+        "direct-invocation".into(),
+        "direct-attempt".into(),
         RequestOriginKind::ClientEntry,
     );
     let captured = execute_v3_operation_runner_request_capture_client_json(raw).unwrap();
     let canonical = execute_v3_operation_runner_request_normalize_losslessly(
-        &handle, &invocation, RequestNormalizationEntry::RawEntry(captured),
-    ).unwrap();
+        &handle,
+        &invocation,
+        RequestNormalizationEntry::RawEntry(captured),
+    )
+    .unwrap();
     let pair = handle.original_pair().unwrap();
     let current = CurrentFieldAssociations::from_normalization(&pair.inverse_context);
     project_canonical_direct_request(
-        &canonical, &pair.inverse_context, &current, &pair.explicit_history_pairing,
-    ).unwrap().payload
+        &canonical,
+        &pair.inverse_context,
+        &current,
+        &pair.explicit_history_pairing,
+    )
+    .unwrap()
+    .payload
 }
 
 #[test]

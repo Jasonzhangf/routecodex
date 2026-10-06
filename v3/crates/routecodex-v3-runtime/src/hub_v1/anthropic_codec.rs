@@ -12,7 +12,9 @@ use super::anthropic_request_field_projection::{
     validate_responses_cache_and_store_for_anthropic,
 };
 use super::client_metadata_projection::unsupported_client_metadata_paths;
-use crate::operation_runner::{CurrentFieldAssociations, RequestInverseContext, ToolMappingReference};
+use crate::operation_runner::{
+    CurrentFieldAssociations, RequestInverseContext, ToolMappingReference,
+};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::OnceLock;
 
@@ -447,11 +449,7 @@ fn encode_v3_responses_semantic_as_anthropic_request_inner(
     input: Value,
     mut declarations: Option<&mut AnthropicToolSourceDeclarations<'_>>,
 ) -> Result<Value, V3AnthropicCodecError> {
-    encode_v3_responses_semantic_as_anthropic_request_inner_with_hosted(
-        input,
-        declarations,
-        &[],
-    )
+    encode_v3_responses_semantic_as_anthropic_request_inner_with_hosted(input, declarations, &[])
 }
 
 fn encode_v3_responses_semantic_as_anthropic_request_inner_with_hosted(

@@ -10,10 +10,7 @@ pub(super) async fn closeout_anthropic_relay_sse_response<F>(
     attempt_context: &crate::operation_runner::AttemptContext,
 ) -> Result<(Value, bool, V3RuntimeStreamObservation), V3AnthropicRelayRuntimeError>
 where
-    F: FnOnce(
-        &Value,
-        &ResponseProjectionView,
-    ) -> Result<Value, V3AnthropicRelayRuntimeError>,
+    F: FnOnce(&Value, &ResponseProjectionView) -> Result<Value, V3AnthropicRelayRuntimeError>,
 {
     trace.push("V3ProviderRespInbound01Raw");
     let compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01_sse(resp01).await?;
@@ -40,10 +37,7 @@ pub(super) fn closeout_anthropic_relay_response<F>(
     attempt_context: &crate::operation_runner::AttemptContext,
 ) -> Result<(Value, bool, V3RuntimeStreamObservation), V3AnthropicRelayRuntimeError>
 where
-    F: FnOnce(
-        &Value,
-        &ResponseProjectionView,
-    ) -> Result<Value, V3AnthropicRelayRuntimeError>,
+    F: FnOnce(&Value, &ResponseProjectionView) -> Result<Value, V3AnthropicRelayRuntimeError>,
 {
     trace.push("V3ProviderRespInbound01Raw");
     let hooks = compile_v3_hub_relay_response_hooks();
@@ -69,10 +63,7 @@ fn closeout_anthropic_relay_normalized_response<F>(
     attempt_context: &crate::operation_runner::AttemptContext,
 ) -> Result<(Value, bool, V3RuntimeStreamObservation), V3AnthropicRelayRuntimeError>
 where
-    F: FnOnce(
-        &Value,
-        &ResponseProjectionView,
-    ) -> Result<Value, V3AnthropicRelayRuntimeError>,
+    F: FnOnce(&Value, &ResponseProjectionView) -> Result<Value, V3AnthropicRelayRuntimeError>,
 {
     let hooks = compile_v3_hub_relay_response_hooks();
     // 在 resp02 被 govern move 前克隆归一化 payload（含原始 tool_use——

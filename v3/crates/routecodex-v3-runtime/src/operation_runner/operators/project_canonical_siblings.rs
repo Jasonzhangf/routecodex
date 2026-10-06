@@ -17,11 +17,18 @@ pub(crate) fn restore_standard_transform_siblings(
     let view = CurrentProjectionView::new(canonical, inverse, current);
     for (index, mapping) in inverse.field_mappings.iter().enumerate() {
         if mapping.transform_id.as_deref() != Some(transform_id)
-            || mapping.semantics.as_deref() == Some(super::project_canonical_instructions::GENERATED_INSTRUCTION_SEPARATOR)
-            || view.read_mapping(index)?.is_none() {
+            || mapping.semantics.as_deref()
+                == Some(super::project_canonical_instructions::GENERATED_INSTRUCTION_SEPARATOR)
+            || view.read_mapping(index)?.is_none()
+        {
             continue;
         }
-        restore_current_source_siblings(emitted, &view, &mapping.source_path, consumed_native_paths)?;
+        restore_current_source_siblings(
+            emitted,
+            &view,
+            &mapping.source_path,
+            consumed_native_paths,
+        )?;
     }
     Ok(())
 }
@@ -45,23 +52,40 @@ pub(crate) fn restore_standard_projection_siblings(
     for (index, mapping) in inverse.field_mappings.iter().enumerate() {
         // Generated contributions have an instruction owner but no original
         // native element whose siblings could be restored onto this part.
-        if mapping.semantics.as_deref() == Some(super::project_canonical_instructions::GENERATED_INSTRUCTION_SEPARATOR) {
+        if mapping.semantics.as_deref()
+            == Some(super::project_canonical_instructions::GENERATED_INSTRUCTION_SEPARATOR)
+        {
             continue;
         }
-        let Some(destination) = current.destination_for_original_mapping(index) else { continue; };
+        let Some(destination) = current.destination_for_original_mapping(index) else {
+            continue;
+        };
         let destination = parse_path(destination)?;
-        if !destination.starts_with(&canonical_prefix) { continue; }
+        if !destination.starts_with(&canonical_prefix) {
+            continue;
+        }
         let mut source = parse_path(&mapping.source_path)?;
-        let suffix_depth = destination.len() - canonical_prefix.len() + additional_source_parent_levels;
-        if source.len() < suffix_depth { continue; }
+        let suffix_depth =
+            destination.len() - canonical_prefix.len() + additional_source_parent_levels;
+        if source.len() < suffix_depth {
+            continue;
+        }
         source.truncate(source.len() - suffix_depth);
         sources.insert(render_path(Some("request"), &source));
     }
     // A whole-field contribution may share the current address of its scalar
     // leaf. The concrete leaf association owns this emitted element.
-    let concrete_sources = sources.iter().filter(|source| !sources.iter().any(|child|
-        child.strip_prefix(source.as_str()).is_some_and(|suffix|
-            suffix.starts_with('.') || suffix.starts_with('[')))).cloned().collect::<Vec<_>>();
+    let concrete_sources = sources
+        .iter()
+        .filter(|source| {
+            !sources.iter().any(|child| {
+                child
+                    .strip_prefix(source.as_str())
+                    .is_some_and(|suffix| suffix.starts_with('.') || suffix.starts_with('['))
+            })
+        })
+        .cloned()
+        .collect::<Vec<_>>();
     for source in concrete_sources {
         restore_current_source_siblings(emitted, &view, &source, consumed_native_paths)?;
     }
@@ -74,15 +98,29 @@ pub(super) fn restore_current_source_siblings(
     source: &str,
     consumed_native_paths: &[&str],
 ) -> Result<(), String> {
-        if let Some(value) = view.source_value(source)? {
-            restore_current_siblings(emitted, view, source, "", value, consumed_native_paths)?;
-        }
-        for reference in &view.inverse().opaque_record_references {
-            let Some(relative) = reference.path.strip_prefix(source)
-                .and_then(|suffix| suffix.strip_prefix('.').or_else(|| suffix.starts_with('[').then_some(suffix))) else { continue; };
-            let Some(value) = view.opaque_value(reference)? else { continue; };
-            restore_current_siblings(emitted, view, &reference.path, relative, value, consumed_native_paths)?;
-        }
+    if let Some(value) = view.source_value(source)? {
+        restore_current_siblings(emitted, view, source, "", value, consumed_native_paths)?;
+    }
+    for reference in &view.inverse().opaque_record_references {
+        let Some(relative) = reference.path.strip_prefix(source).and_then(|suffix| {
+            suffix
+                .strip_prefix('.')
+                .or_else(|| suffix.starts_with('[').then_some(suffix))
+        }) else {
+            continue;
+        };
+        let Some(value) = view.opaque_value(reference)? else {
+            continue;
+        };
+        restore_current_siblings(
+            emitted,
+            view,
+            &reference.path,
+            relative,
+            value,
+            consumed_native_paths,
+        )?;
+    }
     Ok(())
 }
 
@@ -94,15 +132,28 @@ fn restore_current_siblings(
     shape: &Value,
     consumed: &[&str],
 ) -> Result<(), String> {
-    if consumed.iter().any(|path| relative == *path || relative.strip_prefix(path)
-        .is_some_and(|suffix| suffix.starts_with('.') || suffix.starts_with('['))) {
+    if consumed.iter().any(|path| {
+        relative == *path
+            || relative
+                .strip_prefix(path)
+                .is_some_and(|suffix| suffix.starts_with('.') || suffix.starts_with('['))
+    }) {
         return Ok(());
     }
     if let Some(fields) = shape.as_object() {
         for key in fields.keys() {
             let child = field_path(source_path, key);
-            let Some(value) = view.source_value(&child)? else { continue; };
-            restore_current_siblings(emitted, view, &child, &field_path(relative, key), value, consumed)?;
+            let Some(value) = view.source_value(&child)? else {
+                continue;
+            };
+            restore_current_siblings(
+                emitted,
+                view,
+                &child,
+                &field_path(relative, key),
+                value,
+                consumed,
+            )?;
         }
     } else if !relative.is_empty() && read_path(emitted, relative)?.is_none() {
         if let Some(value) = view.source_value(source_path)? {

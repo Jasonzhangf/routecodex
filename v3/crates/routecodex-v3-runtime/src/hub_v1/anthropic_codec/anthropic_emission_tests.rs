@@ -526,13 +526,7 @@ fn anthropic_emission_tracks_consecutive_sdk_removals_and_reverses_survivor() {
     );
 
     let (responses_wire, source_mappings) = emit_responses(&canonical, &sdk.pair, &current);
-    assert_eq!(
-        responses_wire["tools"]
-            .as_array()
-            .unwrap()
-            .len(),
-        1
-    );
+    assert_eq!(responses_wire["tools"].as_array().unwrap().len(), 1);
     assert_eq!(responses_wire["tools"][0]["name"], "functions__survivor");
     assert_eq!(source_mappings.len(), 1);
     let source_survivor = mapping_at(&source_mappings, "tools[0]");
@@ -632,8 +626,14 @@ fn anthropic_emission_tracks_nested_namespace_shift_and_reverses_custom_tool() {
 
     assert_eq!(responses_wire["tools"].as_array().unwrap().len(), 1);
     assert_eq!(responses_wire["tools"][0]["type"], "function");
-    assert_eq!(responses_wire["tools"][0]["parameters"]["properties"]["input"]["type"], "string");
-    assert_eq!(responses_wire["tools"][0]["name"], "outer__inner__apply_patch");
+    assert_eq!(
+        responses_wire["tools"][0]["parameters"]["properties"]["input"]["type"],
+        "string"
+    );
+    assert_eq!(
+        responses_wire["tools"][0]["name"],
+        "outer__inner__apply_patch"
+    );
     assert_eq!(source_mappings.len(), 1);
     let source_patch = mapping_at(&source_mappings, "tools[0]");
     assert_eq!(source_patch.declaration_record_id, patch_id);
@@ -641,7 +641,10 @@ fn anthropic_emission_tracks_nested_namespace_shift_and_reverses_custom_tool() {
 
     let (anthropic_wire, mappings) = emit_anthropic(responses_wire, &source_mappings);
     assert_eq!(anthropic_wire["tools"].as_array().unwrap().len(), 1);
-    assert_eq!(anthropic_wire["tools"][0]["name"], "outer__inner__apply_patch");
+    assert_eq!(
+        anthropic_wire["tools"][0]["name"],
+        "outer__inner__apply_patch"
+    );
     assert_eq!(mappings.len(), 1);
     assert_eq!(mappings[0].declaration_record_id, patch_id);
     assert_eq!(mappings[0].source_path, patch_source);

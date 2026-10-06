@@ -766,13 +766,40 @@ fn responses_success_sse(body: &Value) -> String {
             "item": responses_reasoning_item(REASONING_TEXT, "completed")
         }),
     );
-    push_responses_tool(&mut out, 2, "item-exec", "exec-call", &exec_name, &exec_arguments);
-    push_responses_tool(&mut out, 3, "item-patch", "patch-call", &patch_name, &patch_arguments);
-    push_responses_tool(&mut out, 4, "item-mcp", "mcp-call", &mcp_name, &mcp_arguments);
+    push_responses_tool(
+        &mut out,
+        2,
+        "item-exec",
+        "exec-call",
+        &exec_name,
+        &exec_arguments,
+    );
+    push_responses_tool(
+        &mut out,
+        3,
+        "item-patch",
+        "patch-call",
+        &patch_name,
+        &patch_arguments,
+    );
+    push_responses_tool(
+        &mut out,
+        4,
+        "item-mcp",
+        "mcp-call",
+        &mcp_name,
+        &mcp_arguments,
+    );
     let output = vec![
         responses_message_item(UNRELATED_TEXT, "completed"),
         responses_reasoning_item(REASONING_TEXT, "completed"),
-        responses_function_item("item-exec", "exec-call", &exec_name, &exec_arguments, "completed"),
+        responses_function_item(
+            "item-exec",
+            "exec-call",
+            &exec_name,
+            &exec_arguments,
+            "completed",
+        ),
         responses_function_item(
             "item-patch",
             "patch-call",
@@ -780,7 +807,13 @@ fn responses_success_sse(body: &Value) -> String {
             &patch_arguments,
             "completed",
         ),
-        responses_function_item("item-mcp", "mcp-call", &mcp_name, &mcp_arguments, "completed"),
+        responses_function_item(
+            "item-mcp",
+            "mcp-call",
+            &mcp_name,
+            &mcp_arguments,
+            "completed",
+        ),
     ];
     push_sse_event(
         &mut out,
@@ -953,7 +986,11 @@ fn chat_success_sse(body: &Value) -> String {
     }
     let tools = body["tools"].as_array().cloned().unwrap_or_default();
     let calls = [
-        ("exec-call", wire_tool_name(&tools, "exec"), exec_arguments()),
+        (
+            "exec-call",
+            wire_tool_name(&tools, "exec"),
+            exec_arguments(),
+        ),
         (
             "patch-call",
             wire_tool_name(&tools, "apply_patch"),
@@ -1075,9 +1112,7 @@ fn responses_completed<'a>(events: &'a [Value]) -> &'a Value {
 fn responses_item_event<'a>(events: &'a [Value], event_type: &str, item_id: &str) -> &'a Value {
     events
         .iter()
-        .find(|event| {
-            event["type"] == event_type && event["item"]["id"].as_str() == Some(item_id)
-        })
+        .find(|event| event["type"] == event_type && event["item"]["id"].as_str() == Some(item_id))
         .unwrap_or_else(|| {
             panic!("client SSE must contain {event_type} for item {item_id}: {events:?}")
         })
@@ -1130,7 +1165,10 @@ fn assert_responses_tool(
     let terminal_item = responses_terminal_item(terminal, item_id);
     for item in [&added["item"], &done["item"], terminal_item] {
         assert_eq!(item["type"], expected_type, "item identity changed: {item}");
-        assert_eq!(item["namespace"], namespace, "item namespace changed: {item}");
+        assert_eq!(
+            item["namespace"], namespace,
+            "item namespace changed: {item}"
+        );
         assert_eq!(item["name"], name, "item name changed: {item}");
         assert_eq!(item["call_id"], call_id, "item call_id changed: {item}");
     }
@@ -1152,17 +1190,13 @@ fn assert_responses_tool(
     };
     let delta = events
         .iter()
-        .filter(|event| {
-            event["type"] == delta_event && event["item_id"].as_str() == Some(item_id)
-        })
+        .filter(|event| event["type"] == delta_event && event["item_id"].as_str() == Some(item_id))
         .filter_map(|event| event["delta"].as_str())
         .collect::<String>();
     assert_eq!(delta, expected_payload, "aggregated deltas changed: {body}");
     let done_event = events
         .iter()
-        .find(|event| {
-            event["type"] == done_event && event["item_id"].as_str() == Some(item_id)
-        })
+        .find(|event| event["type"] == done_event && event["item_id"].as_str() == Some(item_id))
         .unwrap_or_else(|| panic!("client SSE must contain {done_event} for {item_id}: {body}"));
     assert_eq!(
         done_event[payload_field], expected_payload,
@@ -1179,10 +1213,7 @@ fn assert_responses_unrelated(events: &[Value]) {
         json!({"keep": "message"})
     );
     let reasoning = responses_item_event(events, "response.output_item.done", "reason-r47");
-    assert_eq!(
-        reasoning["item"]["summary"][0]["text"],
-        REASONING_TEXT
-    );
+    assert_eq!(reasoning["item"]["summary"][0]["text"], REASONING_TEXT);
     assert_eq!(
         reasoning["item"]["vendor_reasoning_sibling"],
         json!({"keep": "reasoning"})
@@ -1239,7 +1270,10 @@ fn assert_responses_followup_wire(first: &Value, followup: &Value) {
     assert_eq!(patch["name"], "functions__apply_patch");
     assert_eq!(patch["arguments"], patch_wire_arguments());
     let mcp = responses_input_item(followup, "mcp-call");
-    assert_eq!(mcp["name"], wire_tool_name(&first["tools"].as_array().unwrap(), "opaque_leaf"));
+    assert_eq!(
+        mcp["name"],
+        wire_tool_name(&first["tools"].as_array().unwrap(), "opaque_leaf")
+    );
     assert_eq!(mcp["arguments"], mcp_arguments());
     for (call_id, expected_output) in [
         ("exec-call", "exec output"),
@@ -1252,7 +1286,9 @@ fn assert_responses_followup_wire(first: &Value, followup: &Value) {
             .iter()
             .find(|item| {
                 item["call_id"].as_str() == Some(call_id)
-                    && item["type"].as_str().is_some_and(|kind| kind.ends_with("_output"))
+                    && item["type"]
+                        .as_str()
+                        .is_some_and(|kind| kind.ends_with("_output"))
             })
             .unwrap_or_else(|| panic!("follow-up wire must contain {call_id} output: {followup}"));
         assert_eq!(output["output"], expected_output);
@@ -1287,7 +1323,11 @@ fn materialize_chat_tool(body: &str, call_id: &str) -> Value {
             if tool.get("name").is_some() {
                 result["name"] = tool["name"].clone();
             }
-            let argument_field = if kind == "custom" { "input" } else { "arguments" };
+            let argument_field = if kind == "custom" {
+                "input"
+            } else {
+                "arguments"
+            };
             if let Some(part) = tool[argument_field].as_str() {
                 let current = result["arguments"].as_str().unwrap_or_default();
                 result["arguments"] = json!(format!("{current}{part}"));
@@ -1310,7 +1350,9 @@ fn chat_tool_result_text<'a>(body: &'a Value, call_id: &str) -> String {
             message["role"].as_str() == Some("tool")
                 && message["tool_call_id"].as_str() == Some(call_id)
         })
-        .unwrap_or_else(|| panic!("Chat provider request must carry tool result {call_id}: {body}"));
+        .unwrap_or_else(|| {
+            panic!("Chat provider request must carry tool result {call_id}: {body}")
+        });
     match &message["content"] {
         Value::String(text) => text.clone(),
         Value::Array(parts) => parts
@@ -1334,9 +1376,15 @@ fn assert_chat_client_tool(
         events.iter().all(|event| event.get("error").is_none()),
         "Chat SSE must not carry error chunks: {body}"
     );
-    assert!(body.contains("data: [DONE]"), "Chat SSE must close with [DONE]");
+    assert!(
+        body.contains("data: [DONE]"),
+        "Chat SSE must close with [DONE]"
+    );
     let call = materialize_chat_tool(body, call_id);
-    assert_eq!(call["type"], expected_type, "client Chat type changed: {call}");
+    assert_eq!(
+        call["type"], expected_type,
+        "client Chat type changed: {call}"
+    );
     assert_eq!(
         call["namespace"], namespace,
         "client Chat namespace changed: {call}"
@@ -1370,7 +1418,10 @@ fn assert_chat_client_tool(
 }
 
 fn assert_chat_wire_acceptable(body: &Value) {
-    assert_eq!(body["stream"], true, "Chat provider request must stream: {body}");
+    assert_eq!(
+        body["stream"], true,
+        "Chat provider request must stream: {body}"
+    );
     let tools = body["tools"]
         .as_array()
         .unwrap_or_else(|| panic!("Chat provider wire must carry tools: {body}"));
@@ -1404,7 +1455,11 @@ fn assert_chat_followup_wire(first: &Value, followup: &Value) {
     let mcp_wire_name = wire_tool_name(&first["tools"].as_array().unwrap(), "opaque_leaf");
     for (call_id, expected_name, expected_arguments) in [
         ("exec-call", "functions__exec", exec_arguments()),
-        ("patch-call", "functions__apply_patch", patch_wire_arguments()),
+        (
+            "patch-call",
+            "functions__apply_patch",
+            patch_wire_arguments(),
+        ),
         ("mcp-call", mcp_wire_name.as_str(), mcp_arguments()),
     ] {
         let call = assistant["tool_calls"]
@@ -1723,9 +1778,9 @@ async fn req02_direct_sse_r47_chat_inverse_and_followup() {
     .await;
     let followup_events = sse_data_events(&followup_body);
     assert!(
-        followup_events.iter().any(|event| {
-            event["choices"][0]["delta"]["content"].as_str() == Some(FINAL_TEXT)
-        }),
+        followup_events
+            .iter()
+            .any(|event| { event["choices"][0]["delta"]["content"].as_str() == Some(FINAL_TEXT) }),
         "Chat follow-up must deliver the final text: {followup_body}"
     );
     let followup_wire = recv_capture(&mut captures_rx).await;

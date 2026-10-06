@@ -498,18 +498,20 @@ impl std::io::Write for V3GrowthRewriteSink<'_> {
         let next_total = match self.total.checked_add(bytes.len()) {
             Some(next_total) => next_total,
             None => {
-                return Err(self.record_failure(V3AttemptStoreError::LocalResourceExhausted(
-                    "provider SSE attempt byte count overflowed".to_string(),
-                )))
+                return Err(
+                    self.record_failure(V3AttemptStoreError::LocalResourceExhausted(
+                        "provider SSE attempt byte count overflowed".to_string(),
+                    )),
+                )
             }
         };
         if next_total > self.attempt_max_bytes {
-            return Err(self.record_failure(V3AttemptStoreError::LocalResourceExhausted(
-                format!(
+            return Err(
+                self.record_failure(V3AttemptStoreError::LocalResourceExhausted(format!(
                     "provider SSE attempt exceeded the committed replay byte limit ({})",
                     self.attempt_max_bytes
-                ),
-            )));
+                ))),
+            );
         }
         if let Err(error) = self.reservation.reserve(bytes.len()) {
             return Err(self.record_failure(error));

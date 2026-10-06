@@ -436,8 +436,7 @@ fn growth_rewrite_limit_failure_commits_nothing_and_leaks_nothing() {
 #[test]
 fn growth_rewrite_callback_error_keeps_its_classification() {
     let process_bytes = Arc::new(AtomicUsize::new(0));
-    let budget =
-        V3AttemptBudget::new_isolated(test_limits(64, 64, 64), Arc::clone(&process_bytes));
+    let budget = V3AttemptBudget::new_isolated(test_limits(64, 64, 64), Arc::clone(&process_bytes));
     let mut builder = V3CommittedClientSseBuilder::with_budget(budget.clone()).unwrap();
     builder.push(vec![1, 2, 3]).unwrap();
     builder.mark_last_frame_as_terminal().unwrap();
@@ -467,8 +466,7 @@ fn growth_rewrite_callback_error_keeps_its_classification() {
 #[test]
 fn growth_rewrite_does_not_commit_when_callback_ignores_write_failure() {
     let process_bytes = Arc::new(AtomicUsize::new(0));
-    let budget =
-        V3AttemptBudget::new_isolated(test_limits(4, 64, 64), Arc::clone(&process_bytes));
+    let budget = V3AttemptBudget::new_isolated(test_limits(4, 64, 64), Arc::clone(&process_bytes));
     let mut builder = V3CommittedClientSseBuilder::with_budget(budget.clone()).unwrap();
     builder.push(vec![1, 2, 3, 4]).unwrap();
     builder.mark_last_frame_as_terminal().unwrap();

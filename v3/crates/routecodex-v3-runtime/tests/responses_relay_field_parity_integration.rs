@@ -253,12 +253,10 @@ async fn responses_openai_chat_field_parity_normalization_preserves_failure_boun
     // failing it; `non_array_tools_is_dropped_recorded_and_request_continues` pins
     // that path. The remaining entries are genuine request contradictions whose
     // boundary must stay visible.
-    for (payload, expected) in [
-        (
-            serde_json::json!({"messages":[{"role":"assistant","tool_calls":[{"id":"call_known","type":"function","function":{"name":"lookup","arguments":"{}"}}]}],"input":[{"type":"function_call_output","call_id":"call_orphan","output":"unpaired"}]}),
-            "orphan tool output",
-        ),
-    ] {
+    for (payload, expected) in [(
+        serde_json::json!({"messages":[{"role":"assistant","tool_calls":[{"id":"call_known","type":"function","function":{"name":"lookup","arguments":"{}"}}]}],"input":[{"type":"function_call_output","call_id":"call_orphan","output":"unpaired"}]}),
+        "orphan tool output",
+    )] {
         let transport = normalization_transport();
         let result = execute_v3_responses_relay_runtime(
             &manifest_openai_chat_wire(),
@@ -653,11 +651,11 @@ async fn responses_openai_chat_field_parity_rejects_malformed_client_metadata_be
         panic!("request-stage internal failure must carry a JSON error resource");
     };
     assert!(
-        body["error"]["message"]
-            .as_str()
-            .is_some_and(|message| {
-                message.contains("MalformedOutboundField target_protocol=openai_chat path=$.client_metadata")
-            }),
+        body["error"]["message"].as_str().is_some_and(|message| {
+            message.contains(
+                "MalformedOutboundField target_protocol=openai_chat path=$.client_metadata",
+            )
+        }),
         "the typed error must preserve its precise cause: {body}"
     );
     assert_eq!(

@@ -154,7 +154,8 @@ async fn responses_tool_search_output_anthropic_json_relay_preserves_tool_roundt
     .expect("Anthropic JSON response must traverse the full Relay runtime");
 
     assert_eq!(
-        output.status, 200,
+        output.status,
+        200,
         "{}",
         match &output.client_body {
             V3ResponsesRelayClientBody::Json(value) => value.to_string(),

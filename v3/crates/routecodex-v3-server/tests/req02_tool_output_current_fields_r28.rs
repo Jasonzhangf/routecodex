@@ -12,8 +12,8 @@ use routecodex_v3_runtime::operation_runner::{
     apply_canonical_field_edit, execute_v3_operation_runner_request_capture_client_json,
     execute_v3_operation_runner_request_normalize_losslessly, project_canonical_direct_request,
     project_canonical_request, CanonicalFieldEdit, CurrentFieldAssociations,
-    RequestInvocationContext, RequestNormalizationEntry, RequestOriginKind, RequestScopedContextPair,
-    V3RequestContextHandle, V3TargetCandidate,
+    RequestInvocationContext, RequestNormalizationEntry, RequestOriginKind,
+    RequestScopedContextPair, V3RequestContextHandle, V3TargetCandidate,
 };
 use serde_json::{json, Value};
 
@@ -128,7 +128,8 @@ fn relay_item<'a>(payload: &'a Value, id: &str) -> &'a Value {
 fn paired_and_named_outputs_preserve_identity_status_siblings_and_long_bytes() {
     let command = format!("{}\r\nCOMMAND_TAIL", "cmd;$()`bytes`".repeat(6_000));
     let arguments = json!({"cmd": command}).to_string();
-    let patch = "*** Begin Patch\n*** Update File: a.rs\n+literal bytes\n*** End Patch\n".repeat(1_500);
+    let patch =
+        "*** Begin Patch\n*** Update File: a.rs\n+literal bytes\n*** End Patch\n".repeat(1_500);
     let mcp = json!({
         "content":[{"type":"text","text":"ok\r\nMCP_TAIL"}],
         "isError":false,

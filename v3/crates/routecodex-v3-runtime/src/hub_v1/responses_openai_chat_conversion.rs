@@ -547,7 +547,10 @@ fn project_v3_openai_chat_tool_call_with_legacy_identity(
     }
     if call.name == "tool_search" {
         let arguments = parse_v3_openai_chat_tool_call_arguments_object(call.name, call.arguments)?;
-        return Ok(project_v3_responses_tool_search_call(call.call_id, arguments));
+        return Ok(project_v3_responses_tool_search_call(
+            call.call_id,
+            arguments,
+        ));
     }
     if let Some(client_name) = custom_tool_names.get(call.name) {
         // 请求侧 custom -> function 扁平化后，provider 返回 function tool_call；
@@ -615,12 +618,21 @@ fn project_v3_openai_chat_tool_call_with_successful_attempt(
         })?;
     if declaration.kind == "tool_search" {
         let arguments = parse_v3_openai_chat_tool_call_arguments_object(call.name, call.arguments)?;
-        return Ok(project_v3_responses_tool_search_call(call.call_id, arguments));
+        return Ok(project_v3_responses_tool_search_call(
+            call.call_id,
+            arguments,
+        ));
     }
     let Some(original_name) = declaration.name.as_deref() else {
         return Ok(current_representable_openai_chat_tool_call(
-            call.call_id, call.name, call.arguments, call.namespace,
-            matches!(call.representation, V3OpenAIChatToolCallRepresentation::Custom),
+            call.call_id,
+            call.name,
+            call.arguments,
+            call.namespace,
+            matches!(
+                call.representation,
+                V3OpenAIChatToolCallRepresentation::Custom
+            ),
         ));
     };
 
@@ -842,12 +854,7 @@ pub(crate) fn restore_v3_responses_output_item_identity_with_successful_attempt(
         return Ok(());
     }
     if !complete {
-        restore_v3_responses_partial_item_identity(
-            object,
-            view,
-            &emitted_name,
-            representation,
-        )?;
+        restore_v3_responses_partial_item_identity(object, view, &emitted_name, representation)?;
         return Ok(());
     }
     let call = V3OpenAIChatToolCall {
@@ -938,39 +945,60 @@ pub(crate) fn restore_v3_chat_tool_identities_with_successful_attempt(
     provider_value: &mut Value,
     view: &ResponseProjectionView,
 ) -> Result<(), V3ResponsesRelayRuntimeError> {
-    let Some(choices) = provider_value.get_mut("choices").and_then(Value::as_array_mut) else {
+    let Some(choices) = provider_value
+        .get_mut("choices")
+        .and_then(Value::as_array_mut)
+    else {
         return Ok(());
     };
     for choice in choices {
-        let Some(calls) = choice.get_mut("message")
+        let Some(calls) = choice
+            .get_mut("message")
             .and_then(|message| message.get_mut("tool_calls"))
-            .and_then(Value::as_array_mut) else {
+            .and_then(Value::as_array_mut)
+        else {
             continue;
         };
         for call in calls {
             // A native partial or invalid model call still passes through.
             // Only a complete representable call enters identity inversion.
             let tool = call.get("function").or_else(|| call.get("custom"));
-            let call_id = call.get("id").or_else(|| call.get("call_id"))
+            let call_id = call
+                .get("id")
+                .or_else(|| call.get("call_id"))
                 .or_else(|| call.get("tool_call_id"));
             let argument_field = if call.get("type").and_then(Value::as_str) == Some("custom") {
                 "input"
             } else {
                 "arguments"
             };
-            if !call_id.and_then(Value::as_str).is_some_and(|id| !id.trim().is_empty())
-                || tool.and_then(|tool| tool.get(argument_field)).and_then(Value::as_str).is_none()
+            if !call_id
+                .and_then(Value::as_str)
+                .is_some_and(|id| !id.trim().is_empty())
+                || tool
+                    .and_then(|tool| tool.get(argument_field))
+                    .and_then(Value::as_str)
+                    .is_none()
             {
                 continue;
             }
-            let name = call.get("function").or_else(|| call.get("custom"))
-                .and_then(|tool| tool.get("name")).and_then(Value::as_str);
-            if !view.attempt().declarations.tool_mappings.iter()
-                .any(|mapping| mapping.emitted_name.as_deref() == name && name.is_some()) {
+            let name = call
+                .get("function")
+                .or_else(|| call.get("custom"))
+                .and_then(|tool| tool.get("name"))
+                .and_then(Value::as_str);
+            if !view
+                .attempt()
+                .declarations
+                .tool_mappings
+                .iter()
+                .any(|mapping| mapping.emitted_name.as_deref() == name && name.is_some())
+            {
                 continue;
             }
             let restored = project_v3_openai_chat_tool_call_with_successful_attempt(
-                &parse_v3_openai_chat_tool_call(call)?, view,
+                &parse_v3_openai_chat_tool_call(call)?,
+                view,
             )?;
             let is_custom = restored["type"] == "custom_tool_call";
             let (kind, other, arguments) = if is_custom {

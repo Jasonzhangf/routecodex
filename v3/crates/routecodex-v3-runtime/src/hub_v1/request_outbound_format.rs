@@ -12,10 +12,10 @@ use super::request_outbound_builtin_tool_projection::project_openai_chat_provide
 use super::request_outbound_builtin_tool_projection::project_openai_responses_hosted_web_search_options_for_selected_target;
 use super::request_outbound_builtin_tool_projection::promote_tool_search_output_tools_to_provider_tools;
 use super::request_outbound_builtin_tool_projection::provider_tool_declaration_sources;
+use super::request_outbound_declaration_emission::StandardOutboundDeclarationObserver;
 use super::request_outbound_declaration_emission::{
     emitted_declaration_kinds, rewrite_direct_history_call_names,
 };
-use super::request_outbound_declaration_emission::StandardOutboundDeclarationObserver;
 use super::request_outbound_metadata::{
     project_openai_chat_reasoning_context_policy,
     project_openai_chat_reasoning_effort_from_reasoning,
@@ -410,7 +410,7 @@ fn build_v3_openai_responses_request_from_chat_canonical_with_drops_and_emission
     ] {
         if key != "tools" {
             if let Some(value) = projected_source.get(key) {
-            responses_payload.insert(key.to_string(), value.clone());
+                responses_payload.insert(key.to_string(), value.clone());
             }
         }
     }
@@ -469,24 +469,35 @@ fn project_openai_responses_tools_with_emission(
             flatten_namespace_tool_for_provider_with_sources("openai-responses", tool)?
         {
             for (emission, flattened) in projection.sources.iter().zip(projection.tools) {
-                let source_path =
-                    namespace_child_canonical_path(canonical_source_path, &emission.source_child_indices);
+                let source_path = namespace_child_canonical_path(
+                    canonical_source_path,
+                    &emission.source_child_indices,
+                );
                 let destination_index = emitted.len();
                 emitted.push(flattened);
                 if let Some(observer) = observer.as_mut() {
-                    observer.note_emitted(destination_index, &source_path, &emitted[destination_index]);
+                    observer.note_emitted(
+                        destination_index,
+                        &source_path,
+                        &emitted[destination_index],
+                    );
                 }
             }
         } else {
-            let projected = provider_compat_core::namespace_tools::provider_function_tool_from_canonical(
-                "openai-responses",
-                tool,
-            );
+            let projected =
+                provider_compat_core::namespace_tools::provider_function_tool_from_canonical(
+                    "openai-responses",
+                    tool,
+                );
             let destination_index = emitted.len();
             emitted.push(projected.unwrap_or_else(|| tool.clone()));
             if let Some(observer) = observer.as_mut() {
                 if !is_openai_responses_hosted_web_search_tool(tool) {
-                    observer.note_emitted(destination_index, canonical_source_path, &emitted[destination_index]);
+                    observer.note_emitted(
+                        destination_index,
+                        canonical_source_path,
+                        &emitted[destination_index],
+                    );
                 }
             }
         }
@@ -533,14 +544,16 @@ pub(crate) fn normalize_responses_input_content_parts(payload: &mut Value) {
         return;
     };
     for item in items {
-        let role = item.get("role").and_then(Value::as_str).unwrap_or("").to_string();
-        let is_non_assistant_message =
-            Some(role.as_str())
-                .is_some_and(|role| {
-                    role.eq_ignore_ascii_case("user")
-                        || role.eq_ignore_ascii_case("system")
-                        || role.eq_ignore_ascii_case("developer")
-                });
+        let role = item
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let is_non_assistant_message = Some(role.as_str()).is_some_and(|role| {
+            role.eq_ignore_ascii_case("user")
+                || role.eq_ignore_ascii_case("system")
+                || role.eq_ignore_ascii_case("developer")
+        });
         if !is_non_assistant_message {
             continue;
         }
@@ -549,7 +562,8 @@ pub(crate) fn normalize_responses_input_content_parts(payload: &mut Value) {
         };
         for part in parts {
             *part = request_outbound_responses_items::project_responses_part_representation(
-                part.clone(), &role,
+                part.clone(),
+                &role,
             );
         }
     }
@@ -680,9 +694,7 @@ fn build_v3_anthropic_provider_request_source_from_chat_canonical_inner(
 ) -> Result<Value, String> {
     let drop_context = V3ProjectionDropContext::disabled();
     let (value, mut drops) =
-        build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops(
-            payload,
-        )?;
+        build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops(payload)?;
     drop_context.restamp_and_emit(&mut drops);
     Ok(value)
 }
@@ -696,7 +708,10 @@ pub(crate) fn build_v3_anthropic_provider_request_source_from_chat_canonical_wit
     if payload.get("messages").and_then(Value::as_array).is_none() {
         return Err("Anthropic provider wire requires governed Chat messages".to_string());
     }
-    project_outbound_payload_for_target_protocol_with_drops(payload, V3OutboundTargetProtocol::Anthropic)
+    project_outbound_payload_for_target_protocol_with_drops(
+        payload,
+        V3OutboundTargetProtocol::Anthropic,
+    )
 }
 
 pub(crate) fn build_v3_anthropic_provider_request_source_from_chat_canonical(
@@ -1446,7 +1461,6 @@ fn allowed_top_level_outbound_fields(
     crate::protocol_tables::whitelisted_fields(protocol)
         .unwrap_or_else(|error| panic!("request_field_map lookup failed for {protocol}: {error}"))
 }
-
 
 /// 返回 (投影值, 丢弃记录) 的 non-error carrier 版本；丢弃记录同时来自
 /// stage-3 顶层白名单投影与 openai_chat provider tools 投影。

@@ -409,7 +409,9 @@ fn client_tool_block_by_name<'a>(blocks: &'a [Value], name: &str) -> &'a Value {
     blocks
         .iter()
         .find(|block| block["name"] == name)
-        .unwrap_or_else(|| panic!("client output must contain restored tool block `{name}`: {blocks:?}"))
+        .unwrap_or_else(|| {
+            panic!("client output must contain restored tool block `{name}`: {blocks:?}")
+        })
 }
 
 fn assert_client_tool_blocks_restored(blocks: &[Value]) {
@@ -571,12 +573,9 @@ async fn req02_anthropic_successful_inverse_json_restores_original_identity() {
             captures: captures_tx,
         }));
     let (upstream_addr, upstream) = spawn_upstream(app).await;
-    let handle = spawn_v3_server_aggregate(anthropic_manifest(
-        free_port(),
-        upstream_addr.port(),
-    ))
-    .await
-    .unwrap();
+    let handle = spawn_v3_server_aggregate(anthropic_manifest(free_port(), upstream_addr.port()))
+        .await
+        .unwrap();
     let endpoint = format!("http://{}/v1/messages", handle.listeners[0].addr);
     let response = reqwest::Client::new()
         .post(endpoint)
@@ -611,12 +610,9 @@ async fn req02_anthropic_successful_inverse_sse_restores_original_identity() {
             captures: captures_tx,
         }));
     let (upstream_addr, upstream) = spawn_upstream(app).await;
-    let handle = spawn_v3_server_aggregate(anthropic_manifest(
-        free_port(),
-        upstream_addr.port(),
-    ))
-    .await
-    .unwrap();
+    let handle = spawn_v3_server_aggregate(anthropic_manifest(free_port(), upstream_addr.port()))
+        .await
+        .unwrap();
     let endpoint = format!("http://{}/v1/messages", handle.listeners[0].addr);
     let response = reqwest::Client::new()
         .post(endpoint)

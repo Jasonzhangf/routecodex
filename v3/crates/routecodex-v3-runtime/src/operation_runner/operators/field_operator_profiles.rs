@@ -590,11 +590,7 @@ fn raw_path_for_error(protocol: &str, lookup_path: &str) -> String {
     format!("{protocol}:request.{lookup_path}")
 }
 
-fn ensure_hosted_encoding(
-    value: &str,
-    allowed: &[&str],
-    label: &str,
-) -> Result<(), String> {
+fn ensure_hosted_encoding(value: &str, allowed: &[&str], label: &str) -> Result<(), String> {
     if allowed.contains(&value) {
         Ok(())
     } else {

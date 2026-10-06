@@ -34,8 +34,10 @@ fn destinations(pair: &RequestScopedContextPair, source_path: &str) -> Vec<Strin
     pair.inverse_context
         .field_mappings
         .iter()
-        .filter(|mapping| mapping.source_path == source_path
-            && mapping.semantics.as_deref() != Some("normalization_instruction_separator"))
+        .filter(|mapping| {
+            mapping.source_path == source_path
+                && mapping.semantics.as_deref() != Some("normalization_instruction_separator")
+        })
         .map(|mapping| mapping.destination.clone())
         .collect()
 }
@@ -100,10 +102,20 @@ fn req02_instruction_source_association_existing_system_uses_nonzero_index() {
         destinations(&pair, "request.instructions"),
         vec!["chat.messages[1].content[0].text"]
     );
-    assert_eq!(destinations(&pair, "request.input[1].content"), vec!["chat.messages[1].content[2].text"]);
-    let text = canonical["messages"][1]["content"].as_array().unwrap().iter()
-        .map(|part| part["text"].as_str().unwrap()).collect::<String>();
-    assert_eq!(text, format!("{MULTILINE_INSTRUCTIONS}\nexisting system message"));
+    assert_eq!(
+        destinations(&pair, "request.input[1].content"),
+        vec!["chat.messages[1].content[2].text"]
+    );
+    let text = canonical["messages"][1]["content"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|part| part["text"].as_str().unwrap())
+        .collect::<String>();
+    assert_eq!(
+        text,
+        format!("{MULTILINE_INSTRUCTIONS}\nexisting system message")
+    );
 }
 
 #[test]

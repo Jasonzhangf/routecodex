@@ -77,11 +77,7 @@ fn failure_session_scope(server_id: &str) -> V3ProviderFailureSessionScope {
         .expect("test transport handoff scope")
 }
 
-fn raw(
-    request_id: &str,
-    execution_id: &str,
-    client_body: Value,
-) -> V3Server03HttpRequestRaw {
+fn raw(request_id: &str, execution_id: &str, client_body: Value) -> V3Server03HttpRequestRaw {
     let captured =
         execute_v3_operation_runner_request_capture_client_json(client_body).expect("capture");
     build_v3_server_03_http_request_raw_with_purpose_and_scope(
@@ -399,7 +395,10 @@ async fn registered_direct_request_hook_http_emission_matches_returned_attempt_c
     assert_eq!(actual_attempt.declarations.tool_mappings.len(), 4);
     assert_eq!(patch.destination_path, "tools[0]");
     assert_eq!(patch.emitted_kind, "function");
-    assert_eq!(patch.emitted_name.as_deref(), Some("functions__apply_patch"));
+    assert_eq!(
+        patch.emitted_name.as_deref(),
+        Some("functions__apply_patch")
+    );
     assert_eq!(
         patch.declaration_record_id,
         declaration_for_source(&pair, "request.tools[1].tools[1]").record_id

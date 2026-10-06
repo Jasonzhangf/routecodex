@@ -37,7 +37,10 @@ fn responses_wire_preserves_representable_custom_tool_and_grammar() {
 
     let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
         .expect("Responses wire preserves its native custom declaration");
-    assert_eq!(request["tools"], payload["tools"], "full declaration and grammar must stay equivalent");
+    assert_eq!(
+        request["tools"], payload["tools"],
+        "full declaration and grammar must stay equivalent"
+    );
 }
 
 #[test]

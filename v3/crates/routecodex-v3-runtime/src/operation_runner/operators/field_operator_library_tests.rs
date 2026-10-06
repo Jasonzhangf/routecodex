@@ -851,11 +851,17 @@ fn gemini_hosted_tools_do_not_become_fabricated_functions() {
     let normalized = normalize_client_request("gemini", &raw).expect("gemini maps");
     assert_eq!(normalized.canonical_request["tools"], json!([]));
     for source in ["request.tools[0]", "request.tools[1]"] {
-        assert!(normalized.inverse_context["field_mappings"].as_array().unwrap().iter().any(|mapping|
-            mapping["source_path"] == source && mapping["operator"] == "routecodex.v3.field.tool_declaration_transform@1"
-                && mapping["destination"].as_str().is_some_and(|destination|
-                    destination.starts_with("chat.routecodex_chat_extension.chat_extension_opaque_record[")
-                        && destination.ends_with(".value"))));
+        assert!(normalized.inverse_context["field_mappings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|mapping| mapping["source_path"] == source
+                && mapping["operator"] == "routecodex.v3.field.tool_declaration_transform@1"
+                && mapping["destination"]
+                    .as_str()
+                    .is_some_and(|destination| destination.starts_with(
+                        "chat.routecodex_chat_extension.chat_extension_opaque_record["
+                    ) && destination.ends_with(".value"))));
     }
 
     let records = opaque_records(&normalized.canonical_request);

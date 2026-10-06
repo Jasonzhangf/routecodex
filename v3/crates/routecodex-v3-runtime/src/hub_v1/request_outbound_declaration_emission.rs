@@ -195,7 +195,9 @@ pub(crate) fn project_direct_provider_request_declarations(
             if let Some(mapping) = namespace_tool_name_map(tool)? {
                 namespace_names.extend(mapping.into_iter().map(|(source, name)| {
                     let wire = if protocol == "openai-chat" {
-                        provider_compat_core::namespace_tools::openai_chat_namespace_wire_name(&name)
+                        provider_compat_core::namespace_tools::openai_chat_namespace_wire_name(
+                            &name,
+                        )
                     } else {
                         name
                     };
@@ -330,7 +332,11 @@ pub(super) fn rewrite_direct_history_call_names(
         object: &mut Map<String, Value>,
         names: &std::collections::HashMap<String, String>,
     ) {
-        let Some(name) = object.get("name").and_then(Value::as_str).map(str::to_string) else {
+        let Some(name) = object
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+        else {
             return;
         };
         let namespace = object
@@ -354,7 +360,11 @@ pub(super) fn rewrite_direct_history_call_names(
         emitted_kinds: &std::collections::HashMap<String, String>,
         paired_result: bool,
     ) {
-        let Some(name) = object.get("name").and_then(Value::as_str).map(str::to_string) else {
+        let Some(name) = object
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+        else {
             return;
         };
         let namespace = object
@@ -396,7 +406,11 @@ pub(super) fn rewrite_direct_history_call_names(
         let Some(custom) = tool_call.get("custom").and_then(Value::as_object) else {
             return;
         };
-        let Some(name) = custom.get("name").and_then(Value::as_str).map(str::to_string) else {
+        let Some(name) = custom
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+        else {
             return;
         };
         let namespace = custom
@@ -478,9 +492,8 @@ pub(super) fn rewrite_direct_history_call_names(
                 for tool_call in tool_calls {
                     match tool_call.get("type").and_then(Value::as_str) {
                         Some("function") => {
-                            if let Some(function) = tool_call
-                                .get_mut("function")
-                                .and_then(Value::as_object_mut)
+                            if let Some(function) =
+                                tool_call.get_mut("function").and_then(Value::as_object_mut)
                             {
                                 rewrite_name(function, names);
                             }

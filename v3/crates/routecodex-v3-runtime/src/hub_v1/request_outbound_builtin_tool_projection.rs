@@ -149,19 +149,29 @@ pub(super) fn promote_tool_search_output_tools_to_provider_tools(
 /// Structural declaration sources consumed by the standard declaration
 /// producer. History keeps its declaration domain; only actual provider
 /// emission creates a target declaration and records this source address.
-pub(super) fn provider_tool_declaration_sources(payload: &Value) -> Result<Vec<(String, Value)>, String> {
+pub(super) fn provider_tool_declaration_sources(
+    payload: &Value,
+) -> Result<Vec<(String, Value)>, String> {
     let mut sources = Vec::new();
     if let Some(tools) = payload.get("tools").and_then(Value::as_array) {
-        sources.extend(tools.iter().enumerate().map(|(index, tool)| {
-            (format!("chat.tools[{index}]"), tool.clone())
-        }));
+        sources.extend(
+            tools
+                .iter()
+                .enumerate()
+                .map(|(index, tool)| (format!("chat.tools[{index}]"), tool.clone())),
+        );
     }
     if let Some(messages) = payload.get("messages").and_then(Value::as_array) {
         for (message_index, message) in messages.iter().enumerate() {
-            if !matches!(message.get("type").and_then(Value::as_str),
-                Some("tool_search_output" | "additional_tools")) {
-                if message.pointer("/routecodex_chat_extension/responses_tool_output_type")
-                    .and_then(Value::as_str) == Some("tool_search_output") {
+            if !matches!(
+                message.get("type").and_then(Value::as_str),
+                Some("tool_search_output" | "additional_tools")
+            ) {
+                if message
+                    .pointer("/routecodex_chat_extension/responses_tool_output_type")
+                    .and_then(Value::as_str)
+                    == Some("tool_search_output")
+                {
                     if let Some(content) = message.get("content") {
                         let declarations = match content {
                             Value::String(text) => serde_json::from_str::<Value>(text)
@@ -170,7 +180,10 @@ pub(super) fn provider_tool_declaration_sources(payload: &Value) -> Result<Vec<(
                         };
                         if let Some(tools) = declarations.as_array() {
                             sources.extend(tools.iter().enumerate().map(|(index, tool)| {
-                                (format!("chat.messages[{message_index}].content[{index}]"), tool.clone())
+                                (
+                                    format!("chat.messages[{message_index}].content[{index}]"),
+                                    tool.clone(),
+                                )
                             }));
                         }
                     }
@@ -179,7 +192,10 @@ pub(super) fn provider_tool_declaration_sources(payload: &Value) -> Result<Vec<(
             }
             if let Some(tools) = message.get("tools").and_then(Value::as_array) {
                 sources.extend(tools.iter().enumerate().map(|(index, tool)| {
-                    (format!("chat.messages[{message_index}].tools[{index}]"), tool.clone())
+                    (
+                        format!("chat.messages[{message_index}].tools[{index}]"),
+                        tool.clone(),
+                    )
                 }));
             }
         }
@@ -278,8 +294,10 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode_recording(
                 .ok_or_else(|| format!("$.tools[{index}]: namespace tool was not flattened"))?;
             for (emission, flattened) in projection.sources.iter().zip(projection.tools) {
                 let flattened = apply_namespace_wire_alias(flattened, &namespace_wire_aliases);
-                let source_path =
-                    namespace_child_canonical_path(canonical_source_path, &emission.source_child_indices);
+                let source_path = namespace_child_canonical_path(
+                    canonical_source_path,
+                    &emission.source_child_indices,
+                );
                 push_provider_tool_with_emission(
                     &mut normalized_tools,
                     &mut normalized_tool_indexes,
@@ -382,7 +400,10 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode_recording(
 /// genuinely new declaration records the push index.
 /// Replace the emitted namespace child name with its collision-free wire alias
 /// when the allocator had to disambiguate it against another declaration.
-pub(super) fn apply_namespace_wire_alias(mut tool: Value, aliases: &HashMap<String, String>) -> Value {
+pub(super) fn apply_namespace_wire_alias(
+    mut tool: Value,
+    aliases: &HashMap<String, String>,
+) -> Value {
     let name = tool
         .get("function")
         .and_then(Value::as_object)

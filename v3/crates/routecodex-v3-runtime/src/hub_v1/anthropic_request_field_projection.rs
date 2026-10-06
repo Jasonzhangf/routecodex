@@ -223,9 +223,7 @@ fn responses_public_metadata_user_id(
     };
     let metadata = metadata
         .as_object()
-        .ok_or(V3AnthropicCodecError::MalformedField {
-            field: "metadata",
-        })?;
+        .ok_or(V3AnthropicCodecError::MalformedField { field: "metadata" })?;
     // Arbitrary public Responses metadata is not provider-wire metadata for Anthropic.
     // V3AnthropicResponsesProjectionContext carries it on the adjacent response projection;
     // this helper extracts only the exact Anthropic metadata.user_id intersection.
