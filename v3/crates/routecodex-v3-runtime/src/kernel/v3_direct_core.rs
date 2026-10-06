@@ -1141,12 +1141,17 @@ where
                     Some(C::policy_target(&policy).candidate.model_id.clone()),
                     true,
                 );
-                let committed = match crate::kernel::direct_runtime_helpers_stream::collect_direct_sse_attempt_after_terminal_with_memory(
+                let committed = match crate::kernel::direct_runtime_helpers_stream::collect_direct_sse_attempt_after_terminal_with_memory_and_success_scope(
                     projected,
                     response_projection.compat_plan.provider_protocol,
                     attempt_budget.clone(),
                     Some(manifest),
                     Some(C::request_id(&standardized)),
+                    Some((
+                        &crate::hooks::register_responses_direct_hooks(),
+                        request_execution_control.request_context(),
+                        &actual_attempt,
+                    )),
                 )
                 .await
                 {

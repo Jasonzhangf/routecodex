@@ -89,6 +89,12 @@ type SuccessfulJsonResponseProjectionHook = fn(
     &crate::operation_runner::V3RequestContextHandle,
     &AttemptContext,
 ) -> Result<(), V3Error01SourceRaised>;
+type SuccessfulSseResponseProjectionHook = fn(
+    &mut crate::execution_control::V3CommittedClientSseBuilder,
+    crate::hub_v1::V3HubProviderWireProtocol,
+    &crate::operation_runner::V3RequestContextHandle,
+    &AttemptContext,
+) -> Result<(), V3Error01SourceRaised>;
 type ErrorHook = fn(
     V3Error01SourceRaised,
     V3ErrorActionScope,
@@ -108,6 +114,7 @@ pub struct V3HookRegistry {
     provider_transport: ProviderTransportHook,
     contextual_response_projection: ContextualResponseProjectionHook,
     successful_json_response_projection: SuccessfulJsonResponseProjectionHook,
+    successful_sse_response_projection: SuccessfulSseResponseProjectionHook,
     error: ErrorHook,
 }
 
@@ -176,6 +183,16 @@ impl V3HookRegistry {
         attempt: &AttemptContext,
     ) -> Result<(), V3Error01SourceRaised> {
         (self.successful_json_response_projection)(payload, protocol, request, attempt)
+    }
+
+    pub(crate) fn run_successful_sse_response_projection(
+        &self,
+        builder: &mut crate::execution_control::V3CommittedClientSseBuilder,
+        protocol: crate::hub_v1::V3HubProviderWireProtocol,
+        request: &crate::operation_runner::V3RequestContextHandle,
+        attempt: &AttemptContext,
+    ) -> Result<(), V3Error01SourceRaised> {
+        (self.successful_sse_response_projection)(builder, protocol, request, attempt)
     }
 
     pub fn run_error(
@@ -268,6 +285,7 @@ pub(crate) fn register_responses_direct_hooks_with_key_catalog(
         provider_transport: responses_direct_provider_transport_hook,
         contextual_response_projection: responses_direct_response_projection_hook_with_context,
         successful_json_response_projection: crate::direct_response_hooks::apply_v3_direct_json_successful_attempt_hook,
+        successful_sse_response_projection: crate::direct_response_hooks::apply_v3_direct_sse_successful_attempt_hook,
         error: responses_direct_error_hook,
     }
 }

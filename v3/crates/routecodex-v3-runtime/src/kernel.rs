@@ -53,7 +53,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 include!("kernel/direct_web_search.rs");
 
 pub mod direct_request_key_hooks;
-mod direct_runtime_helpers_stream;
+pub(crate) mod direct_runtime_helpers_stream;
 pub(crate) use direct_runtime_helpers_stream::wrap_direct_sse_provider_event_json_observation_stream_with_compat as wrap_direct_sse_provider_event_json_observation_stream_with_compat_hook;
 mod direct_execution_control;
 mod direct_runtime_timing;
@@ -1261,6 +1261,11 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             V3ProviderAttemptBody::Bytes(Vec::new()),
         );
         let committed_client_sse = matches!(&attempt_body, V3ProviderAttemptBody::Sse(_));
+        let direct_sse_success_scope = (
+            &hook_registry,
+            request_execution_control.request_context(),
+            &actual_attempt,
+        );
         let (client_body, attempt_success_receipt) = match attempt_body {
             V3ProviderAttemptBody::Sse(stream) => {
                 let stream_observation = response_projection
@@ -1281,6 +1286,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         &hook_registry,
                         &direct_failure_session_scope,
                         attempt_budget.clone(),
+                        Some(direct_sse_success_scope),
                     )
                     .await
                     {

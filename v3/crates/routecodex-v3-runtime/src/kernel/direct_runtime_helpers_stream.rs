@@ -289,6 +289,29 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
     manifest: Option<&V3Config05ManifestPublished>,
     request_id: Option<&str>,
 ) -> Result<crate::nodes::V3CommittedClientSseStream, V3Error01SourceRaised> {
+    collect_direct_sse_attempt_after_terminal_with_memory_and_success_scope(
+        stream,
+        provider_protocol,
+        attempt_budget,
+        manifest,
+        request_id,
+        None,
+    )
+    .await
+}
+
+pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory_and_success_scope(
+    mut stream: V3SseAttemptStream,
+    provider_protocol: V3HubProviderWireProtocol,
+    attempt_budget: crate::nodes::V3AttemptBudget,
+    manifest: Option<&V3Config05ManifestPublished>,
+    request_id: Option<&str>,
+    success_scope: Option<(
+        &crate::hooks::V3HookRegistry,
+        &crate::operation_runner::V3RequestContextHandle,
+        &crate::operation_runner::AttemptContext,
+    )>,
+) -> Result<crate::nodes::V3CommittedClientSseStream, V3Error01SourceRaised> {
     let mut committed = crate::nodes::V3CommittedClientSseBuilder::with_budget(attempt_budget)
         .map_err(|message| {
             build_v3_error_01_source_raised(
@@ -360,16 +383,11 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
                         )
                     },
                 )?;
-                let sealed = committed.seal_after_validated_terminal();
-                let sealed = sealed.map_err(|message| {
-                    build_v3_error_01_source_raised(
-                        V3ErrorSourceKind::RuntimeFailure,
-                        "V3ExecutionAttemptPayloadStore",
-                        "direct_sse_terminal_seal_rejected",
-                        message.to_string(),
-                    )
-                });
-                return sealed;
+                return seal_direct_sse_attempt_with_success_scope(
+                    committed,
+                    provider_protocol,
+                    success_scope,
+                );
             }
         }
     }
@@ -400,16 +418,11 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
                 message.to_string(),
             )
         })?;
-        let sealed = committed.seal_after_validated_terminal();
-        let sealed = sealed.map_err(|message| {
-            build_v3_error_01_source_raised(
-                V3ErrorSourceKind::RuntimeFailure,
-                "V3ExecutionAttemptPayloadStore",
-                "direct_sse_terminal_seal_rejected",
-                message.to_string(),
-            )
-        });
-        return sealed;
+        return seal_direct_sse_attempt_with_success_scope(
+            committed,
+            provider_protocol,
+            success_scope,
+        );
     }
     Err(build_v3_error_01_source_raised(
         V3ErrorSourceKind::ProviderFailure,
@@ -417,6 +430,33 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
         "provider_response_sse_stream",
         "provider SSE ended without a protocol terminal",
     ))
+}
+
+fn seal_direct_sse_attempt_with_success_scope(
+    mut committed: crate::execution_control::V3CommittedClientSseBuilder,
+    provider_protocol: V3HubProviderWireProtocol,
+    success_scope: Option<(
+        &crate::hooks::V3HookRegistry,
+        &crate::operation_runner::V3RequestContextHandle,
+        &crate::operation_runner::AttemptContext,
+    )>,
+) -> Result<crate::nodes::V3CommittedClientSseStream, V3Error01SourceRaised> {
+    if let Some((hook_registry, request, attempt)) = success_scope {
+        hook_registry.run_successful_sse_response_projection(
+            &mut committed,
+            provider_protocol,
+            request,
+            attempt,
+        )?;
+    }
+    committed.seal_after_validated_terminal().map_err(|message| {
+        build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3ExecutionAttemptPayloadStore",
+            "direct_sse_terminal_seal_rejected",
+            message.to_string(),
+        )
+    })
 }
 
 fn rewrite_direct_sse_memory(
@@ -531,7 +571,7 @@ fn direct_sse_output_text_key(event: &serde_json::Value) -> (usize, usize) {
     )
 }
 
-fn parse_direct_sse_json_frames(frame: &[u8]) -> Vec<serde_json::Value> {
+pub(crate) fn parse_direct_sse_json_frames(frame: &[u8]) -> Vec<serde_json::Value> {
     let Ok(text) = std::str::from_utf8(frame) else {
         return Vec::new();
     };
@@ -558,7 +598,7 @@ fn rewrite_direct_sse_frame(
     output.into_bytes()
 }
 
-fn parse_direct_sse_json_segment(segment: &str) -> Option<(serde_json::Value, String)> {
+pub(crate) fn parse_direct_sse_json_segment(segment: &str) -> Option<(serde_json::Value, String)> {
     let data_start = segment.find("data:")?;
     let data_line_end = segment[data_start..]
         .find('\n')
@@ -567,6 +607,50 @@ fn parse_direct_sse_json_segment(segment: &str) -> Option<(serde_json::Value, St
     let raw = segment[data_start + "data:".len()..data_line_end].trim();
     let value = serde_json::from_str(raw).ok()?;
     Some((value, segment[..data_start].to_owned()))
+}
+
+/// Rewrite a buffered client SSE frame through the growth-admitting writer.
+/// Each JSON `data:` segment is parsed once, mutated by `rewrite`, and written
+/// to `writer` incrementally so reservation happens before bytes are copied.
+pub(crate) fn rewrite_direct_sse_frame_with_writer(
+    frame: &[u8],
+    writer: &mut dyn std::io::Write,
+    mut rewrite: impl FnMut(serde_json::Value) -> Result<serde_json::Value, crate::execution_control::V3AttemptStoreError>,
+) -> Result<(), crate::execution_control::V3AttemptStoreError> {
+    let Ok(text) = std::str::from_utf8(frame) else {
+        return write_all_or_attempt_error(writer, frame);
+    };
+    for segment in text.split_inclusive("\n\n") {
+        if let Some((value, prefix)) = parse_direct_sse_json_segment(segment) {
+            let value = rewrite(value)?;
+            write_all_or_attempt_error(writer, prefix.as_bytes())?;
+            write_all_or_attempt_error(writer, b"data: ")?;
+            serde_json::to_writer(&mut *writer, &value)
+                .map_err(|error| attempt_write_error("serialize rewritten SSE data", error.into()))?;
+            write_all_or_attempt_error(writer, b"\n\n")?;
+        } else {
+            write_all_or_attempt_error(writer, segment.as_bytes())?;
+        }
+    }
+    Ok(())
+}
+
+fn write_all_or_attempt_error(
+    writer: &mut dyn std::io::Write,
+    bytes: &[u8],
+) -> Result<(), crate::execution_control::V3AttemptStoreError> {
+    writer
+        .write_all(bytes)
+        .map_err(|error| attempt_write_error("write rewritten SSE frame", error))
+}
+
+fn attempt_write_error(
+    context: &str,
+    error: std::io::Error,
+) -> crate::execution_control::V3AttemptStoreError {
+    crate::execution_control::V3AttemptStoreError::InvalidAttemptState(format!(
+        "{context}: {error}"
+    ))
 }
 
 fn materialize_direct_responses_terminal_usage(frame: &[u8]) -> Vec<u8> {
@@ -617,6 +701,11 @@ pub(crate) async fn project_and_collect_direct_sse_attempt(
     hook_registry: &V3HookRegistry,
     failure_session_scope: &V3ProviderFailureSessionScope,
     attempt_budget: V3AttemptBudget,
+    success_scope: Option<(
+        &V3HookRegistry,
+        &crate::operation_runner::V3RequestContextHandle,
+        &crate::operation_runner::AttemptContext,
+    )>,
 ) -> Result<crate::nodes::V3CommittedClientSseStream, V3Error01SourceRaised> {
     let projected = wrap_direct_sse_provider_event_json_observation_stream_with_compat(
         stream,
@@ -641,14 +730,25 @@ pub(crate) async fn project_and_collect_direct_sse_attempt(
         Some(compat_plan.canonical_model_id.clone()),
         true,
     );
-    collect_direct_sse_attempt_after_terminal_with_memory(
-        projected,
-        compat_plan.provider_protocol,
-        attempt_budget,
-        Some(manifest),
-        Some(request_id),
-    )
-    .await
+    match success_scope {
+        Some(success_scope) => collect_direct_sse_attempt_after_terminal_with_memory_and_success_scope(
+            projected,
+            compat_plan.provider_protocol,
+            attempt_budget,
+            Some(manifest),
+            Some(request_id),
+            Some(success_scope),
+        )
+        .await,
+        None => collect_direct_sse_attempt_after_terminal_with_memory(
+            projected,
+            compat_plan.provider_protocol,
+            attempt_budget,
+            Some(manifest),
+            Some(request_id),
+        )
+        .await,
+    }
 }
 
 #[cfg(test)]

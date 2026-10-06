@@ -735,6 +735,153 @@ pub(crate) fn restore_v3_responses_normalized_tool_identities_with_successful_at
     Ok(())
 }
 
+/// Original declaration kind recorded for one emitted tool name by the same
+/// successful attempt traversal that produced the emission.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum V3DeclaredToolKind {
+    Function,
+    Custom,
+}
+
+/// Resolve the declared kind for an emitted tool name from the successful
+/// attempt. The declaration record association is authoritative; the emitted
+/// name, model and schema never participate in identity inference.
+pub(crate) fn declared_tool_kind_for_emitted_name(
+    view: &ResponseProjectionView,
+    emitted_name: &str,
+) -> Option<V3DeclaredToolKind> {
+    let mapping = view
+        .attempt()
+        .declarations
+        .tool_mappings
+        .iter()
+        .find(|mapping| mapping.emitted_name.as_deref() == Some(emitted_name))?;
+    let declaration = view
+        .request_inverse_context()
+        .tool_declarations
+        .iter()
+        .find(|declaration| declaration.record_id == mapping.declaration_record_id)?;
+    Some(if declaration.kind == "custom" {
+        V3DeclaredToolKind::Custom
+    } else {
+        V3DeclaredToolKind::Function
+    })
+}
+
+/// Invert one already-normalized Responses `output[]` item from the successful
+/// attempt view. Only identity (`type`/`name`/`namespace`) and the declared
+/// argument envelope change; `call_id`/`id` and all other siblings stay intact.
+///
+/// `complete` marks an item carrying the terminal `arguments`/`input`. A
+/// partial streamed item restores identity only and never parses a partial
+/// envelope as a complete declared input.
+pub(crate) fn restore_v3_responses_output_item_identity_with_successful_attempt(
+    item: &mut Value,
+    view: &ResponseProjectionView,
+    complete: bool,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    let Some(object) = item.as_object_mut() else {
+        return Ok(());
+    };
+    let Some(call) = parse_v3_responses_output_tool_call(object) else {
+        return Ok(());
+    };
+    let call_id = call.call_id.to_string();
+    let emitted_name = call.name.to_string();
+    let arguments = call.arguments.to_string();
+    let representation = call.representation;
+    let known = view
+        .attempt()
+        .declarations
+        .tool_mappings
+        .iter()
+        .any(|mapping| mapping.emitted_name.as_deref() == Some(emitted_name.as_str()));
+    if !known {
+        return Ok(());
+    }
+    if !complete {
+        restore_v3_responses_partial_item_identity(
+            object,
+            view,
+            &emitted_name,
+            representation,
+        )?;
+        return Ok(());
+    }
+    let call = V3OpenAIChatToolCall {
+        call_id: &call_id,
+        name: &emitted_name,
+        arguments: &arguments,
+        namespace: None,
+        representation,
+    };
+    let restored = project_v3_openai_chat_tool_call_with_successful_attempt(&call, view)?;
+    merge_v3_responses_tool_call_identity(object, &restored)?;
+    Ok(())
+}
+
+fn restore_v3_responses_partial_item_identity(
+    object: &mut Map<String, Value>,
+    view: &ResponseProjectionView,
+    emitted_name: &str,
+    representation: V3OpenAIChatToolCallRepresentation,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    let Some(mapping) = view
+        .attempt()
+        .declarations
+        .tool_mappings
+        .iter()
+        .find(|mapping| mapping.emitted_name.as_deref() == Some(emitted_name))
+    else {
+        return Ok(());
+    };
+    let declaration = view
+        .request_inverse_context()
+        .tool_declarations
+        .iter()
+        .find(|declaration| declaration.record_id == mapping.declaration_record_id)
+        .ok_or_else(|| {
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
+                "successful attempt tool mapping references missing declaration record `{}`",
+                mapping.declaration_record_id
+            ))
+        })?;
+    let original_name = declaration
+        .name
+        .clone()
+        .unwrap_or_else(|| emitted_name.to_string());
+    object.insert("name".to_string(), Value::String(original_name));
+    match declaration.namespace.clone() {
+        Some(namespace) => {
+            object.insert("namespace".to_string(), namespace);
+        }
+        None => {
+            object.remove("namespace");
+        }
+    }
+    if matches!(
+        representation,
+        V3OpenAIChatToolCallRepresentation::Custom
+    ) {
+        object.insert(
+            "type".to_string(),
+            Value::String("custom_tool_call".to_string()),
+        );
+        if let Some(arguments) = object.remove("arguments") {
+            object.insert("input".to_string(), arguments);
+        }
+    } else {
+        object.insert(
+            "type".to_string(),
+            Value::String("function_call".to_string()),
+        );
+        if let Some(input) = object.remove("input") {
+            object.insert("arguments".to_string(), input);
+        }
+    }
+    Ok(())
+}
+
 /// Restore native Chat calls with the same declaration resolver used by
 /// Responses. Only the identity and its declared argument envelope change.
 pub(crate) fn restore_v3_chat_tool_identities_with_successful_attempt(
@@ -791,6 +938,72 @@ pub(crate) fn restore_v3_chat_tool_identities_with_successful_attempt(
                 tool["namespace"] = namespace.clone();
             } else if let Some(tool) = tool.as_object_mut() {
                 tool.remove("namespace");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Invert one already-projected OpenAI Chat tool call from the successful
+/// attempt view. `custom_input` is the already-decoded declared free-form input
+/// for a custom call; function calls keep their exact argument bytes.
+pub(crate) fn restore_v3_chat_streamed_tool_call_identity_with_successful_attempt(
+    call: &mut Value,
+    view: &ResponseProjectionView,
+    emitted_name: &str,
+    custom_input: Option<&str>,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    let Some(object) = call.as_object_mut() else {
+        return Ok(());
+    };
+    let Some(mapping) = view
+        .attempt()
+        .declarations
+        .tool_mappings
+        .iter()
+        .find(|mapping| mapping.emitted_name.as_deref() == Some(emitted_name))
+    else {
+        return Ok(());
+    };
+    let declaration = view
+        .request_inverse_context()
+        .tool_declarations
+        .iter()
+        .find(|declaration| declaration.record_id == mapping.declaration_record_id)
+        .ok_or_else(|| {
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
+                "successful attempt tool mapping references missing declaration record `{}`",
+                mapping.declaration_record_id
+            ))
+        })?;
+    let original_name = declaration
+        .name
+        .clone()
+        .unwrap_or_else(|| emitted_name.to_string());
+    if declaration.kind == "custom" {
+        let mut custom = Map::new();
+        custom.insert("name".to_string(), Value::String(original_name));
+        if let Some(namespace) = declaration.namespace.clone() {
+            custom.insert("namespace".to_string(), namespace);
+        }
+        custom.insert(
+            "input".to_string(),
+            Value::String(custom_input.unwrap_or_default().to_string()),
+        );
+        object.insert("type".to_string(), Value::String("custom".to_string()));
+        object.remove("function");
+        object.insert("custom".to_string(), Value::Object(custom));
+    } else {
+        object.insert("type".to_string(), Value::String("function".to_string()));
+        if let Some(function) = object.get_mut("function").and_then(Value::as_object_mut) {
+            function.insert("name".to_string(), Value::String(original_name));
+            match declaration.namespace.clone() {
+                Some(namespace) => {
+                    function.insert("namespace".to_string(), namespace);
+                }
+                None => {
+                    function.remove("namespace");
+                }
             }
         }
     }
@@ -905,7 +1118,7 @@ fn current_representable_openai_chat_tool_call(
     item
 }
 
-fn parse_v3_openai_chat_custom_tool_input(
+pub(crate) fn parse_v3_openai_chat_custom_tool_input(
     name: &str,
     arguments: &str,
 ) -> Result<String, V3ResponsesRelayRuntimeError> {
