@@ -622,7 +622,17 @@ pub(crate) fn rewrite_direct_sse_frame_with_writer(
     };
     for segment in text.split_inclusive("\n\n") {
         if let Some((value, prefix)) = parse_direct_sse_json_segment(segment) {
+            let original = value.clone();
             let value = rewrite(value)?;
+            if value == original {
+                // The registered hook left this event unchanged. Forward the
+                // provider's original bytes verbatim: re-serializing an
+                // untouched event would reorder its JSON keys (serde_json does
+                // not preserve insertion order) and break byte-faithful
+                // pass-through of the admitted client stream.
+                write_all_or_attempt_error(writer, segment.as_bytes())?;
+                continue;
+            }
             write_all_or_attempt_error(writer, prefix.as_bytes())?;
             write_all_or_attempt_error(writer, b"data: ")?;
             serde_json::to_writer(&mut *writer, &value)
