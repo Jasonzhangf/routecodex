@@ -1,0 +1,40 @@
+lifecycle_id: v3.client_sse_head_commit
+owner_feature_id: v3.client_sse_head_commit
+entrypoint:
+  node_id: V3ServerSseHeadCommit01ClientHead
+  call_map_chain_id: v3.client_sse_head_commit
+nodes:
+  - V3ServerSseHeadCommit01ClientHead
+  - V3ServerRespOutbound06ClientFrame
+edges:
+  - step_id: v3-client-sse-head-commit-01
+    from_node: V3ServerSseHeadCommit01ClientHead
+    to_node: V3ServerRespOutbound06ClientFrame
+    owner_feature_id: v3.client_sse_head_commit
+    status: anchored
+return_path:
+  success: The runtime outcome arrives inside one keepalive interval and the exact runtime status, headers, and body return unchanged.
+  committed: The committed channel carries the projected client payload with SSE transport framing only; the transport module reads the HTTP status and content type and never parses, reclassifies, or rewrites the payload.
+  failure: The runtime outcome has no successful client payload, so the committed channel closes the transport without projecting a provider status, error payload, or fabricated success.
+  stalled: The provider attempt outlives one keepalive interval, so the channel commits transport-only keepalives until the runtime outcome or an explicit transport break.
+resource_reads:
+  - resource_id: v3.config.http_sse_keepalive_interval
+    owner_node: V3Config05ManifestPublished
+    consumer: accept_v3_client_sse_transport
+  - resource_id: v3.sse.direct.accept_skeleton
+    owner_node: V3DirectSseAccept01ClientChannel
+    consumer: accept_v3_client_sse_transport
+  - resource_id: v3.front.request_activity_gate
+    owner_node: V3ServerRequestActivityGate
+    consumer: V3ServerAggregateHandle::prepare_for_exec
+canonical_docs:
+  - docs/architecture/wiki/v3-client-sse-head-commit.md
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/v3-verification-map.yml
+verification_gates:
+  - npm run test:v3-client-sse-head-commit
+  - npm run test:v3-client-transport-boundary
+  - npm run verify:v3-client-sse-head-commit
+  - npm run verify:v3-architecture-docs
+  - npm run verify:architecture-wiki-html-sync
+  - git diff --check

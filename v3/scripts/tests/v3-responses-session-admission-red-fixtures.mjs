@@ -77,7 +77,10 @@ const cases = [
     name: "admission waiter is not registered before predicate check",
     path: "v3/crates/routecodex-v3-server/src/session_admission.rs",
     mutate: (source) =>
-      source.replace("            notified.as_mut().enable();\n", ""),
+      source.replace(
+        "            notified.as_mut().enable();\n            match self.try_admit(scope.clone()) {",
+        "            match self.try_admit(scope.clone()) {",
+      ),
     diagnostic: /lost-wakeup-safe notification ordering/u,
   },
   {
