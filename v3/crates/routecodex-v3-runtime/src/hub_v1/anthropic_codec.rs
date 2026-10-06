@@ -25,6 +25,7 @@ mod namespace_tool_names;
 mod projection_context;
 mod response_projection;
 mod responses_to_anthropic;
+mod responses_tool_projection;
 mod tool_declaration_projection;
 use super::usage_normalization::project_v3_responses_usage_from_canonical;
 use message_encoding::non_empty_string;
@@ -35,15 +36,13 @@ use response_projection::{
     project_v3_anthropic_terminal_as_responses_terminal, V3AnthropicResponseContentBlockKind,
     V3AnthropicTerminalKind,
 };
+pub(crate) use responses_to_anthropic::project_v3_responses_reasoning_item_as_anthropic_content;
 use responses_to_anthropic::{
     chat_messages_as_anthropic_messages, chat_messages_as_anthropic_messages_with_hosted,
     responses_input_as_anthropic_messages, responses_system_as_anthropic_system,
-    responses_tool_choice_as_anthropic_tool_choice,
 };
-pub(crate) use responses_to_anthropic::{
-    project_v3_responses_reasoning_item_as_anthropic_content,
-    responses_web_search_tool_as_anthropic_tool,
-};
+use responses_tool_projection::responses_tool_choice_as_anthropic_tool_choice;
+pub(crate) use responses_tool_projection::responses_web_search_tool_as_anthropic_tool;
 use tool_declaration_projection::{
     responses_tools_for_anthropic_wire_with_declarations, AnthropicToolSourceDeclarations,
 };

@@ -1,6 +1,6 @@
 use super::super::request_outbound_builtin_tool_projection::provider_tool_declaration_sources;
 use super::super::request_outbound_declaration_emission::StandardOutboundDeclarationObserver;
-use super::responses_to_anthropic::responses_tool_as_anthropic_tool;
+use super::responses_tool_projection::responses_tool_as_anthropic_tool;
 use super::*;
 
 /// Encode a Chat-canonical Anthropic request while recording declaration
