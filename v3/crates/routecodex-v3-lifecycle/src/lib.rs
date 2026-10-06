@@ -45,6 +45,7 @@ const DEFAULT_START_FORCE_KILL_TIMEOUT: Duration = Duration::from_secs(3);
 const RESTART_PLAN_FILE: &str = "restart.plan.json";
 const FRONT_HANDOFF_FILE: &str = "front-handoff.json";
 const PROVIDER_HANDOFF_FILE: &str = "provider-handoff.json";
+const MANAGED_EPHEMERAL_CONFIG_ENV: &str = "ROUTECODEX_V3_MANAGED_CHILD_EPHEMERAL_CONFIG";
 
 #[derive(Debug, Error)]
 pub enum V3LifecycleError {
@@ -514,6 +515,9 @@ impl V3ManagedLifecycle {
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::from(stderr))
             .process_group(0);
+        if managed_config_is_ephemeral(Path::new(&declaration.config_path)) {
+            command.env(MANAGED_EPHEMERAL_CONFIG_ENV, &declaration.config_path);
+        }
         let child = command.spawn()?;
         let deadline = tokio::time::Instant::now() + timeout;
         loop {
@@ -1118,6 +1122,25 @@ impl V3ManagedLifecycle {
             detail,
         })
     }
+}
+
+fn managed_config_is_ephemeral(config_path: &Path) -> bool {
+    let canonical_config =
+        fs::canonicalize(config_path).unwrap_or_else(|_| config_path.to_path_buf());
+    // A managed child config is ephemeral when it lives under a process temp
+    // root. Check the caller's TMPDIR (std::env::temp_dir) plus the fixed
+    // system temp roots, because Codex-managed orphans were observed under
+    // both `/private/var/folders/.../T/...` and `/private/tmp/...`.
+    let mut temp_roots = vec![std::env::temp_dir()];
+    temp_roots.push(PathBuf::from("/tmp"));
+    temp_roots.push(PathBuf::from("/var/tmp"));
+    temp_roots.into_iter().any(|temp_dir| {
+        let canonical_temp = fs::canonicalize(&temp_dir).unwrap_or_else(|_| temp_dir.clone());
+        config_path.starts_with(&temp_dir)
+            || canonical_config.starts_with(&temp_dir)
+            || config_path.starts_with(&canonical_temp)
+            || canonical_config.starts_with(&canonical_temp)
+    })
 }
 fn control_release_ports(
     request: &ControlRequest,

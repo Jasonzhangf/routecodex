@@ -341,10 +341,51 @@ pub(crate) async fn run_managed_control_loop(
         };
     #[cfg(not(unix))]
     let mut ctrl_c = Box::pin(tokio::signal::ctrl_c());
+    #[cfg(unix)]
+    let ephemeral_config_path = std::env::var("ROUTECODEX_V3_MANAGED_CHILD_EPHEMERAL_CONFIG")
+        .ok()
+        .map(PathBuf::from);
+    #[cfg(unix)]
+    let orphan_watchdog = async {
+        let Some(config_path) = ephemeral_config_path else {
+            std::future::pending::<()>().await;
+            return;
+        };
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            if !config_path.exists() {
+                return;
+            }
+        }
+    };
+    #[cfg(unix)]
+    tokio::pin!(orphan_watchdog);
     let mut handle = handle;
     loop {
         #[cfg(unix)]
         let accepted = match tokio::select! {
+            _ = &mut orphan_watchdog => {
+                let Some(handle) = handle.take() else {
+                    return fail_managed_runtime_with_hooks_cleanup(
+                        instance_dir,
+                        &declaration.instance_id,
+                        None,
+                        hooks_sidecar,
+                        V3LifecycleError::Validation(
+                            "managed runtime handle was already consumed".to_string(),
+                        ),
+                    )
+                    .await;
+                };
+                return shutdown_managed_runtime(
+                    instance_dir,
+                    &declaration.instance_id,
+                    socket_path,
+                    handle,
+                    hooks_sidecar,
+                )
+                .await;
+            }
             _ = interrupt_signal.recv() => {
                 let Some(handle) = handle.take() else {
                     return fail_managed_runtime_with_hooks_cleanup(
