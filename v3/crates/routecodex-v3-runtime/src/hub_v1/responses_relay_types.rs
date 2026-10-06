@@ -809,6 +809,10 @@ impl V3LiveSnapProviderSnapshotRecorder {
             | V3ProviderError::ClientDisconnect {
                 request_id,
                 provider_id,
+            }
+            | V3ProviderError::ConcurrencyBusy {
+                request_id,
+                provider_id,
             } => self.record_transport_provider_error(attempt, request_id, provider_id, error),
             V3ProviderError::ProviderModelBindingMismatch {
                 request_id,

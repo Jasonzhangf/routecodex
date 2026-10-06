@@ -100,7 +100,6 @@ pub(crate) enum V3Transport13ResponsesRequestKind {
         stream_intent: V3ResponsesStreamIntent,
         event: Value,
         initial_concurrency_budget: u32,
-        concurrency_acquire_timeout_ms: u64,
         cancellation: Option<V3ProviderCancellation>,
         compatibility_profile: Option<String>,
     },
@@ -201,15 +200,6 @@ impl V3Transport13ResponsesRequest {
             V3Transport13ResponsesRequestKind::Http { auth, .. }
             | V3Transport13ResponsesRequestKind::WebSocketV2 { auth, .. } => {
                 format!("{}:{}", self.provider_id(), auth.alias)
-            }
-        }
-    }
-
-    fn cancellation(&self) -> Option<V3ProviderCancellation> {
-        match &self.kind {
-            V3Transport13ResponsesRequestKind::Http { cancellation, .. }
-            | V3Transport13ResponsesRequestKind::WebSocketV2 { cancellation, .. } => {
-                cancellation.clone()
             }
         }
     }
@@ -527,7 +517,6 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
                     stream_intent,
                     event: body,
                     initial_concurrency_budget,
-                    concurrency_acquire_timeout_ms,
                     cancellation: None,
                     compatibility_profile,
                 },
@@ -739,7 +728,6 @@ impl ResponsesTransport for ProviderResponsesTransport {
         mut request: V3Transport13ResponsesRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
         let provider_key = request.provider_key();
-        let cancellation = request.cancellation();
         let request_id = request.request_id().to_string();
         let provider_id = request.provider_id().to_string();
         let attempt_key = request
@@ -777,16 +765,6 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 reason,
             });
         }
-        let acquire_timeout_ms = match &request.kind {
-            V3Transport13ResponsesRequestKind::Http {
-                concurrency_acquire_timeout_ms,
-                ..
-            }
-            | V3Transport13ResponsesRequestKind::WebSocketV2 {
-                concurrency_acquire_timeout_ms,
-                ..
-            } => *concurrency_acquire_timeout_ms,
-        };
         let (permit_guard, was_probe, websocket_connection) =
             websocket::acquire_admission_and_connection_slot(
                 &self.websocket_sessions,
@@ -795,8 +773,6 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 attempt_key.as_ref(),
                 controller.clone(),
                 provider_key.clone(),
-                acquire_timeout_ms,
-                cancellation.clone(),
             )
             .await?;
         let result = match request.kind {
@@ -839,7 +815,6 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 stream_intent,
                 event,
                 initial_concurrency_budget: _,
-                concurrency_acquire_timeout_ms: _,
                 cancellation,
                 compatibility_profile,
             } => {

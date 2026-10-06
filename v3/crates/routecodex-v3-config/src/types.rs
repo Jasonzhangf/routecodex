@@ -781,6 +781,8 @@ pub enum V3StreamingPolicy {
 #[serde(deny_unknown_fields)]
 pub struct V3ProviderConcurrencyAuthoringConfig {
     pub max_in_flight: u32,
+    /// Retained for compatibility with existing provider config files. Business request
+    /// admission never waits for provider capacity, so this value does not control it.
     pub acquire_timeout_ms: u64,
     pub stale_lease_ms: u64,
 }

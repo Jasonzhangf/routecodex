@@ -18,6 +18,11 @@ pub struct V3ProviderHttpFailure {
 
 #[derive(Debug, thiserror::Error)]
 pub enum V3ProviderError {
+    #[error("provider {provider_id} concurrency is full for request {request_id}")]
+    ConcurrencyBusy {
+        request_id: String,
+        provider_id: String,
+    },
     #[error("Responses wire body for request {request_id} must be a JSON object")]
     InvalidWireBody { request_id: String },
     #[error(

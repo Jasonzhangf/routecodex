@@ -510,12 +510,12 @@ resources:
     owner_node: V3Config05ManifestPublished
     identity: [providerId, transportKind, websocketEndpoint, maxInFlight, acquireTimeoutMs, staleLeaseMs]
     semantic_contract:
-      source: provider concurrency maxInFlight is a soft adaptive signal, while acquireTimeoutMs bounds background probe admission only
+      source: provider concurrency maxInFlight bounds business admission; acquireTimeoutMs bounds background probe admission only
       propagation: Target carries the configured provider concurrency signal into the selected Provider transport target
-      admission: Runtime always selects the highest-priority health-eligible candidate and immediately records an in-flight lease, even when current in-flight work meets or exceeds the adaptive budget
-      hard_limit: maxInFlight is not a business request ceiling; scheduled probes remain bounded independently
-      selection: concurrency state never excludes a business candidate or advances routing tiers; only typed provider failures such as HTTP 429 enter Error recovery and may select the next eligible provider
-      timeout: business request selection and transport never wait for concurrency capacity; acquireTimeoutMs cannot delay a client request or change its selected provider
+      admission: Runtime atomically acquires capacity for each selected provider+authAlias before transport; a full candidate is immediately excluded for this request and the next eligible candidate is selected
+      hard_limit: business admission cannot exceed the current adaptive budget or hard maximum; scheduled probes remain independently bounded
+      selection: capacity exclusions are request-local and health-neutral; all full candidates exhaust the selected target immediately without Router reentry or provider transport
+      timeout: business request selection and transport never wait for concurrency capacity; acquireTimeoutMs cannot delay a client request
       boundary: this control resource never enters request, provider, client, MetadataCenter, or Debug payloads
     allowed_writers: [V3Config05ManifestPublished]
     allowed_readers: [routecodex-v3-target, routecodex-v3-provider-responses, build_v3_provider_global_probe_target]
@@ -530,13 +530,13 @@ resources:
     owner_node: V3AdaptiveConcurrencyController
     identity: [providerId, authAlias, lease]
     semantic_contract:
-      capacity: configured maxInFlight is a soft adaptive signal for business traffic; leases track all in-flight business requests even above that budget, while scheduled probes remain independently bounded
-      acquisition: Runtime acquires a selected provider+authAlias tracking lease immediately before Provider transport and never reselects or waits because of concurrency state
-      websocket_order: For WebSocketV2, Provider transport releases Runtime's pre-acquired lease before waiting for the shared session connection slot, then acquires provider admission only after it owns that slot; if admission loses a race, it releases the slot before retrying
+      capacity: business leases are bounded by the provider+authAlias adaptive budget and hard maximum; scheduled probes remain independently bounded
+      acquisition: Runtime immediately skips a full provider+authAlias and selects the next eligible candidate without waiting or changing provider health
+      websocket_order: WebSocketV2 preserves a granted lease for an immediately available session slot and releases it before an actual slot wait; readmission after that wait is immediate and a losing capacity race returns typed ConcurrencyBusy to Runtime for reselect
       handoff: Provider consumes a matching Runtime lease exactly once; a mismatched lease is released and rejected
       release: Runtime admission drop, pre-acquired transport request drop, and Provider permit-guard drop release the lease exactly once on early exit, cancellation, transport failure, response completion, or stream drop
       boundary: lease and capacity state remain typed process-local control state and never enter request, provider, client, MetadataCenter, or Debug payloads
-    allowed_writers: [V3AdaptiveConcurrencyController::ensure_initial_budget, V3AdaptiveConcurrencyController::try_acquire_business_soft, V3AdaptiveConcurrencyController::try_acquire_scheduled_probe, V3AdaptiveConcurrencyController::release, V3AdaptiveConcurrencyController::complete_probe, V3RuntimeProviderAdmission::drop, V3PreAcquiredProviderAdmission::release, V3AdaptiveConcurrencyPermitGuard::drop]
+    allowed_writers: [V3AdaptiveConcurrencyController::ensure_initial_budget, V3AdaptiveConcurrencyController::try_acquire_business, V3AdaptiveConcurrencyController::try_acquire_scheduled_probe, V3AdaptiveConcurrencyController::release, V3AdaptiveConcurrencyController::complete_probe, V3RuntimeProviderAdmission::drop, V3PreAcquiredProviderAdmission::release, V3AdaptiveConcurrencyPermitGuard::drop]
     allowed_readers: [V3AdaptiveConcurrencyController::snapshot, select_v3_expanded_target_with_admission_rescue, V3ProviderResponsesTransport::send]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-virtual-router, routecodex-v3-error, request.normal_payload, provider.wire_payload, response.client_payload, MetadataCenter.payload, Debug.payload]
     may_enter_provider_body: false
@@ -552,7 +552,7 @@ resources:
     identity: [providerId, modelId, authAlias, websocketEndpoint]
     semantic_contract:
       serialization: A shared session slot serializes WebSocketV2 request/response use for the provider, model, auth alias, and endpoint identity
-      admission_order: A request waiting for the slot holds no provider concurrency lease; after taking the slot it acquires a provider lease, and releases the slot before retrying if that lease cannot be acquired
+      admission_order: An immediately available slot preserves a granted lease; a request waiting for the slot holds no provider lease, and failed immediate readmission releases the slot and returns typed ConcurrencyBusy for Runtime reselect
       release: Cancellation, provider errors, and failed admission release the request's owned slot and any provider lease exactly once
     allowed_writers: [ProviderResponsesTransport]
     allowed_readers: [ProviderResponsesTransport]
@@ -2054,6 +2054,7 @@ resources:
     allowed_writers:
       - V3ProviderActionGate::abandon_admission
       - V3ProviderActionGate::commit_terminal_admission
+      - V3ProviderActionGate::record_failure_and_commit_terminal_projection
     allowed_readers:
       - V3ProviderFailureRuntimeHealth
       - V3ProviderActionGate

@@ -1,4 +1,5 @@
 use super::*;
+use crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key;
 mod response_closeout;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
@@ -733,6 +734,13 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         V3AdmitAfterRecovery::Admitted(admission) => {
                             selected_admission = Some(admission)
                         }
+                        V3AdmitAfterRecovery::Busy => {
+                            failed_candidates
+                                .insert(v3_relay_provider_candidate_key(&selected.candidate));
+                            drop(_provider_action_permit.take());
+                            provider_action_permit_target = None;
+                            continue;
+                        }
                         V3AdmitAfterRecovery::Failed(reason) => {
                             return Err(V3AnthropicRelayRuntimeError::Target(reason))
                         }
@@ -795,6 +803,15 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         };
         let provider_raw = match transport_result {
             Ok(raw) => raw,
+            Err(V3ProviderError::ConcurrencyBusy { .. }) => {
+                runtime_timing
+                    .finish_external()
+                    .map_err(V3AnthropicRelayRuntimeError::Target)?;
+                failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
+                drop(_provider_action_permit.take());
+                provider_action_permit_target = None;
+                continue;
+            }
             Err(V3ProviderError::HttpStatus { response }) => {
                 last_external_http = Some(
                     crate::hub_v1::relay_runtime_shared::external_http_witness(&response),

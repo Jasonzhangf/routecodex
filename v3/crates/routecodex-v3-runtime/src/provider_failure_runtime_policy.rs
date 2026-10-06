@@ -906,7 +906,7 @@ impl V3ProviderFailureRuntimeHealth {
         )
     }
 
-    pub(crate) async fn wait_for_terminal_provider_projection_in_scope(
+    pub(crate) fn record_terminal_provider_projection_in_scope(
         &self,
         failure_session_scope: &V3ProviderFailureSessionScope,
         provider_id: &str,
@@ -915,29 +915,11 @@ impl V3ProviderFailureRuntimeHealth {
         error_family: &str,
     ) -> Result<V3ProviderActionAdmission, String> {
         self.action_gate
-            .record_failure_and_wait(V3ProviderActionGateKey::new(
+            .record_failure_and_commit_terminal_projection(V3ProviderActionGateKey::new(
                 failure_session_scope,
                 v3_relay_provider_candidate_key_parts(provider_id, auth_alias, model_id),
                 error_family,
             )?)
-            .await
-    }
-
-    pub(crate) async fn wait_for_provider_action_failure_in_scope(
-        &self,
-        failure_session_scope: &V3ProviderFailureSessionScope,
-        provider_id: &str,
-        auth_alias: Option<&str>,
-        model_id: Option<&str>,
-        error_family: &str,
-    ) -> Result<V3ProviderActionAdmission, String> {
-        self.action_gate
-            .record_failure_and_wait(V3ProviderActionGateKey::new(
-                failure_session_scope,
-                v3_relay_provider_candidate_key_parts(provider_id, auth_alias, model_id),
-                error_family,
-            )?)
-            .await
     }
 
     pub(crate) fn record_post_commit_provider_stream_failure(
@@ -1453,14 +1435,13 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     );
     let admission = context
         .provider_health
-        .wait_for_terminal_provider_projection_in_scope(
+        .record_terminal_provider_projection_in_scope(
             &context.failure_session_scope,
             &selected.candidate.provider_id,
             Some(&selected.candidate.auth_alias),
             Some(&selected.candidate.model_id),
             error_type.as_deref().unwrap_or("provider_failure"),
-        )
-        .await?;
+        )?;
     Ok(V3RelayProviderFailurePolicyResult {
         terminal_projection: terminal_projection_for(&decision, matched_policy),
         terminal_disposition: terminal_disposition_for(&decision, state),

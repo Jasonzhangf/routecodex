@@ -5,6 +5,7 @@ use routecodex_v3_runtime::{
     V3_PROVIDER_ACTION_ISOLATED_DELAY_MS, V3_PROVIDER_ACTION_MEDIUM_DELAY_MS,
     V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS,
 };
+use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};
 
 fn key(error_family: &str) -> V3ProviderActionGateKey {
@@ -82,47 +83,133 @@ async fn isolated_failure_blocks_one_action_for_at_least_one_second() {
 }
 
 #[tokio::test]
-async fn isolated_terminal_projection_waits_for_the_same_one_second_gate() {
+async fn isolated_terminal_projection_commits_without_waiting_for_provider_action_admission() {
     let gate = V3ProviderActionGate::default();
     let started = Instant::now();
     let admission = gate
-        .record_failure_and_wait_for_terminal_projection(key("provider_http_401"))
-        .await
+        .record_failure_and_commit_terminal_projection(key("provider_http_401"))
         .expect("isolated terminal projection admission");
 
     assert_eq!(admission.mode, V3ProviderActionGateMode::Isolated);
     assert!(
-        started.elapsed() >= Duration::from_millis(V3_PROVIDER_ACTION_ISOLATED_DELAY_MS),
-        "terminal Error06 projection bypassed the one-second provider failure floor"
+        started.elapsed() < Duration::from_millis(100),
+        "terminal Error06 projection must not wait for a provider action that will not run"
     );
 }
 
 #[tokio::test]
-async fn unrelated_success_cannot_release_a_stale_terminal_projection() {
+async fn terminal_projection_does_not_revoke_an_active_sibling_action_permit() {
+    let gate = V3ProviderActionGate::default();
+    let active_key = scoped_key(
+        "server-a",
+        "group-a",
+        "provider-a:key-a:model-a",
+        "provider_transport",
+    );
+    gate.record_failure(&active_key)
+        .expect("record active action failure");
+    let active = gate
+        .wait_for_provider_action(&provider_scope("provider-a:key-a:model-a"))
+        .await
+        .expect("active provider action admission")
+        .expect("active provider action permit");
+
+    let started = Instant::now();
+    gate.record_failure_and_commit_terminal_projection(scoped_key(
+        "server-a",
+        "group-a",
+        "provider-b:key-b:model-b",
+        "provider_http_401",
+    ))
+    .expect("terminal projection commits without waiting");
+
+    assert!(
+        started.elapsed() < Duration::from_millis(100),
+        "terminal projection must not wait for the active sibling action"
+    );
+    assert!(
+        gate.abandon_admission(&active_key, active.generation)
+            .expect("active permit release"),
+        "terminal projection must leave the active sibling permit owned until release"
+    );
+}
+
+#[tokio::test]
+async fn terminal_projection_advances_an_active_exact_key_and_preserves_its_permit() {
+    let gate = V3ProviderActionGate::default();
+    let active_key = key("provider_http_401");
+    gate.record_failure(&active_key)
+        .expect("record active exact-key failure");
+    let active = gate
+        .wait_for_provider_action(&provider_scope("provider-a:key-a:model-a"))
+        .await
+        .expect("active exact-key action admission")
+        .expect("active exact-key permit");
+
+    let waiter = {
+        let gate = gate.clone();
+        let key = active_key.clone();
+        tokio::spawn(async move { gate.wait_for_active_failure(key).await })
+    };
+    tokio::time::sleep(Duration::from_millis(25)).await;
+
+    let terminal = gate
+        .record_failure_and_commit_terminal_projection(active_key.clone())
+        .expect("terminal projection advances the active exact-key lane");
+    let wake = waiter
+        .await
+        .expect("terminal waiter task")
+        .expect("terminal waiter transition");
+    assert!(wake.reevaluate_after_terminal);
+    assert_eq!(wake.generation, terminal.generation + 1);
+    assert!(
+        gate.abandon_admission(&active_key, active.generation)
+            .expect("active exact-key permit release"),
+        "terminal generation advancement must retain the prior permit until release"
+    );
+}
+
+#[test]
+fn terminal_projection_commits_atomically_with_concurrent_provider_success() {
     let gate = V3ProviderActionGate::default();
     let scope = key("provider_http_401");
-    let pending = {
-        let gate = gate.clone();
-        let scope = scope.clone();
-        tokio::spawn(async move {
-            gate.record_failure_and_wait_for_terminal_projection(scope)
-                .await
-        })
-    };
+    let barrier = Arc::new(Barrier::new(5));
 
-    tokio::time::sleep(Duration::from_millis(25)).await;
+    std::thread::scope(|threads| {
+        for _ in 0..4 {
+            let gate = gate.clone();
+            let scope = scope.clone();
+            let barrier = Arc::clone(&barrier);
+            threads.spawn(move || {
+                barrier.wait();
+                for _ in 0..1_000 {
+                    gate.record_failure_and_commit_terminal_projection(scope.clone())
+                        .expect("terminal record and commit share one generation");
+                }
+            });
+        }
+
+        let success_gate = gate.clone();
+        threads.spawn(move || {
+            barrier.wait();
+            for _ in 0..4_000 {
+                success_gate
+                    .record_success(&scope)
+                    .expect("concurrent provider success updates its gate state");
+            }
+        });
+    });
+}
+
+#[tokio::test]
+async fn unrelated_success_cannot_delay_a_terminal_projection() {
+    let gate = V3ProviderActionGate::default();
+    let scope = key("provider_http_401");
+    let admission = gate
+        .record_failure_and_commit_terminal_projection(scope.clone())
+        .expect("terminal projection must commit immediately");
     gate.record_success(&scope)
         .expect("unrelated success resets active lane");
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    assert!(
-        !pending.is_finished(),
-        "routing-group success released a stale provider error directly to Error06"
-    );
-
-    let admission = pending
-        .await
-        .expect("terminal projection waiter task")
-        .expect("terminal projection admission");
     assert!(!admission.released_by_success);
     assert_eq!(admission.mode, V3ProviderActionGateMode::Isolated);
 }
@@ -682,8 +769,7 @@ async fn admitted_action_failure_advances_the_group_before_reselecting() {
         "provider-a:key:model",
         "provider_http_429",
     );
-    gate.record_failure_and_wait_for_terminal_projection(terminal.clone())
-        .await
+    gate.record_failure_and_commit_terminal_projection(terminal.clone())
         .expect("terminal projection admission");
 
     let primary = scoped_provider_scope("server-outcome", "group-outcome", "provider-a:key:model");

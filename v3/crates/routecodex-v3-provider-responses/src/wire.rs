@@ -51,6 +51,7 @@ pub struct V3ResponsesProviderTarget {
     /// provider SSE 首帧/帧间隔超时（毫秒）；None = 默认 30s。
     pub sse_first_frame_timeout_ms: Option<u64>,
     pub initial_concurrency_budget: u32,
+    /// Retained for config compatibility only; business requests do not wait on concurrency.
     pub concurrency_acquire_timeout_ms: u64,
 }
 
