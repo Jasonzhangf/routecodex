@@ -201,27 +201,21 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
     //    `content:[{type:"reasoning_text",text}]` 形态（否则上游 400
     //    `reasoning_text must be passed back`）；该重写只在已证明需要的协议契约上
     //    执行，避免未经证实的其他非 gpt responses provider 被改写 reasoning 形态。
-    if !is_v3_gpt_family_model(&target.canonical_model_id) {
+    let shared_deepseek_profile =
+        target.compatibility_profile.as_deref() == Some("responses:deepseek-console-go");
+    if !is_v3_gpt_family_model(&target.canonical_model_id) && !shared_deepseek_profile {
         let deepseek_compat = target.canonical_model_id == "deepseek-v4-flash"
             || target.wire_model == "deepseek-v4-flash";
         strip_v3_request_encrypted_reasoning(&mut body, deepseek_compat);
-        // junction 合成 reasoning 只属于已证实的 opencode-go/Console Go 网关：
-        // compatibility profile（responses:deepseek-console-go）锁网关契约
-        // （请求侧 custom->function 工具映射 + 响应侧回射也按同一 profile
-        // 门控），deepseek-v4-flash 额外锁 400 的已证实载体——该失败只在
-        // deepseek thinking 模式下被证实，其他模型即使走同一网关也不追加
-        // 未经证明的条目。
-        if deepseek_compat
-            && target.compatibility_profile.as_deref() == Some("responses:deepseek-console-go")
-        {
-            // 先做 call/output 配对归一（Console Go Chat 降级契约），再做
-            // junction reasoning 合成；两者同属已证实的 opencode-go/Console Go
-            // 网关契约。call/output 配对约束与 reasoning effort 无关；reasoning
-            // junction 仍只在 thinking 模式开启。
-            normalize_v3_deepseek_console_go_tool_output_pairing(&mut body);
-            if v3_wire_payload_is_thinking_mode(&body) {
-                insert_v3_deepseek_interleaved_tool_segment_reasoning(&mut body);
-            }
+    }
+    // Provider 配置选择完整的共用 DeepSeek 契约。不能按客户端 canonical 模型
+    // 或某一个 wire 名再次门控：gpt 路由别名、官方模型和 v4.1 都会漏掉历史
+    // 工具段 reasoning，导致官方 `reasoning_text must be passed back` 400。
+    if shared_deepseek_profile {
+        strip_v3_request_encrypted_reasoning(&mut body, true);
+        normalize_v3_deepseek_console_go_tool_output_pairing(&mut body);
+        if v3_wire_payload_is_thinking_mode(&body) {
+            insert_v3_deepseek_interleaved_tool_segment_reasoning(&mut body);
         }
     }
     // 独立的 provider 私契约：DeepSeek 官方 Responses（`responses:deepseek-official`）
