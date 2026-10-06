@@ -1,0 +1,18 @@
+{
+  "id": "v3.ci.no_fallback_source_scope",
+  "version": "1",
+  "inputs": [{"id": "repository-source-and-scope-config", "schema": "Object"}],
+  "nodes": [{
+    "id": "scan-declared-product-source",
+    "operator": "routecodex.ci.verify_no_fallback_all",
+    "operator_version": "1",
+    "inputs": ["repository-source-and-scope-config"],
+    "output": {"id": "gate-verdict", "schema": "Object"},
+    "input_selector": {"include": [], "exclude": [], "predicate": null},
+    "output_selector": {"include": [], "exclude": [], "predicate": null},
+    "iterator": "Whole",
+    "resources": {"reads": [], "writes": []}
+  }],
+  "edges": [],
+  "outputs": ["gate-verdict"]
+}
