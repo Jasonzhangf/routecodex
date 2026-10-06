@@ -770,6 +770,10 @@ async fn start_configured_hooks_sidecar_with_timeout_and_cancel(
     };
     let mut sidecar_command = if let Some(binary) = internal_hooksd.as_deref() {
         let mut command = TokioCommand::new(binary);
+        command.env(
+            "ROUTECODEX_HOOKSD_PARENT_PID",
+            std::process::id().to_string(),
+        );
         command.arg("--socket").arg(&control_socket);
         if let Some(socket) = appserver_socket.as_deref() {
             command.arg("--appserver-socket").arg(socket);
