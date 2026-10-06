@@ -1,6 +1,13 @@
 # V3 Module Decomposition SOP（巨型文件拆解标准作业程序）
 
 Status: partial execution; scoped changes recorded below.
+Scoped split (2026-10-06): `hub_v1/responses_relay_runtime_inner.rs` keeps the relay
+request/attempt phase and splices `hub_v1/responses_relay_runtime_inner_response_interpretation.rs`
+with `include!`. The companion owns the provider-response interpretation match
+(`match provider_raw.into_body()`: success, failure and retry closeout). The main file was
+1504 lines after the REQ02 Relay-to-Direct origin field and is now 646; the companion is
+861. The moved block stays byte-verbatim inside one block expression of the same module,
+so function bodies, visibility and every caller path are preserved.
 Scoped split (2026-10-06): `hub_v1/anthropic_relay_runtime_helpers.rs` also owns the four
 post-response helpers moved out of `hub_v1/anthropic_relay_runtime.rs`
 (`anthropic_relay_client_headers_as_provider_request_headers`,
