@@ -109,6 +109,17 @@ pub(crate) struct V3HooksSidecarSupervisor {
     task: tokio::task::JoinHandle<()>,
 }
 
+/// Detail published when the supervisor task ends before it observes readiness.
+///
+/// Hooks are an optional integration, so this is a degraded capability detail
+/// and never a managed-runtime failure.
+fn hooks_sidecar_supervisor_exit_detail() -> String {
+    format!(
+        "hooks sidecar unavailable: {}: hooks sidecar supervisor exited before publishing readiness",
+        hooks_unavailable(HooksUnavailableReason::Crashed)
+    )
+}
+
 impl V3HooksSidecarSupervisor {
     pub(crate) fn spawn(instance_dir: PathBuf, instance_id: String) -> Self {
         let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
@@ -212,9 +223,16 @@ impl V3HooksSidecarSupervisor {
             readiness = readiness_rx.as_mut() => match readiness {
                 Ok(detail) => Some(detail),
                 Err(_) => {
-                    return Err(V3LifecycleError::Validation(
-                        "hooks sidecar supervisor exited before publishing readiness".to_string(),
-                    ));
+                    // Dropping the readiness sender without a value means the
+                    // supervisor task itself ended before it could publish.
+                    // Hooks are optional, so an abnormal supervisor exit
+                    // degrades the sidecar detail instead of tearing down the
+                    // managed runtime; an error the supervisor actually
+                    // reported keeps its fatal path.
+                    if let Ok(Err(error)) = (&mut self.done_rx).await {
+                        return Err(error);
+                    }
+                    return Ok(Some(Some(hooks_sidecar_supervisor_exit_detail())));
                 }
             },
             _ = tokio::time::sleep(timeout) => None,
@@ -243,10 +261,7 @@ impl V3HooksSidecarSupervisor {
             let expected_detail = append_status_detail(startup_detail.as_deref(), pending);
             let readiness_detail = match readiness_rx.as_mut().await {
                 Ok(detail) => detail,
-                Err(_) => Some(format!(
-                    "hooks sidecar unavailable: {}: hooks sidecar supervisor exited before publishing readiness",
-                    hooks_unavailable(HooksUnavailableReason::Crashed)
-                )),
+                Err(_) => Some(hooks_sidecar_supervisor_exit_detail()),
             };
             let detail = match readiness_detail {
                 Some(readiness_detail) => Some(append_status_detail(

@@ -2,11 +2,13 @@ mod client_sse_transport;
 mod client_transport_observation;
 mod compaction_request;
 mod console;
+mod debug_runtime_degradation;
 mod endpoint_handlers;
 mod executors;
 mod frame_builders;
 mod live_snapshot;
 mod live_snapshot_projections;
+mod listener_accept;
 mod metadata_center;
 mod models_catalog;
 mod request_id;
@@ -55,10 +57,12 @@ use axum::http::{
     HeaderMap, HeaderValue, Response, StatusCode,
 };
 use axum::routing::{get, post};
-use axum::{Json, Router};
+use axum::Router;
 use client_sse_transport::accept_v3_client_sse_transport;
+use debug_runtime_degradation::build_v3_debug_runtime_degrading_optional_log_sink;
 use futures_util::{stream, StreamExt};
 use libc::EINTR;
+use listener_accept::{run_v3_listener_accept_loop, V3ListenerAcceptState};
 use responses_direct_server_outcome::{
     execute_responses_direct_server_outcome, V3ResponsesDirectServerOutcome,
 };
@@ -135,8 +139,9 @@ use routecodex_v3_sse::{
 use serde_json::{json, Map, Value};
 use session_admission::{
     hold_response_body_admission_permit, hold_response_body_request_activity_permit,
-    V3ResponsesSessionAdmissionGate, V3ResponsesSessionAdmissionPermit,
-    V3ResponsesSessionAdmissionScope, V3ServerRequestActivityGate,
+    V3ResponsesSessionAdmissionError, V3ResponsesSessionAdmissionGate,
+    V3ResponsesSessionAdmissionPermit, V3ResponsesSessionAdmissionScope,
+    V3ServerRequestActivityGate,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
@@ -149,6 +154,7 @@ use std::io::Write as _;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -157,7 +163,7 @@ use tokio::sync::oneshot;
 
 // feature_id: v3.codex_sample_retention_snap_scope
 // sample persistence is owned solely by routecodex-v3-debug::V3CodexSampleStore.
-fn v3_io_error_is_eintr(error: &io::Error) -> bool {
+pub(crate) fn v3_io_error_is_eintr(error: &io::Error) -> bool {
     error.kind() == io::ErrorKind::Interrupted || error.raw_os_error() == Some(EINTR)
 }
 
@@ -243,6 +249,7 @@ pub struct V3ListenerHandle {
     pub server_id: String,
     pub addr: SocketAddr,
     shutdown: Option<oneshot::Sender<()>>,
+    accept_state: Arc<V3ListenerAcceptState>,
 }
 
 #[derive(Debug)]
@@ -393,7 +400,26 @@ impl V3ServerAggregateHandle {
     pub fn has_active_listener(&self) -> bool {
         self.listeners
             .iter()
-            .any(|listener| listener.shutdown.is_some())
+            .any(|listener| listener.shutdown.is_some() && listener.accept_state.is_accepting())
+    }
+
+    /// Total `accept()` failures observed by the listener tasks.
+    ///
+    /// A listener keeps its port across a transient accept failure, so this
+    /// counter is the record that the failure happened instead of being silent.
+    pub fn listener_accept_failure_count(&self) -> u64 {
+        self.listeners
+            .iter()
+            .map(|listener| listener.accept_state.accept_failures())
+            .sum()
+    }
+
+    /// The last `accept()` failure observed by a listener task, if any.
+    pub fn listener_last_accept_error(&self) -> Option<String> {
+        self.listeners
+            .iter()
+            .filter_map(|listener| listener.accept_state.last_accept_error())
+            .next_back()
     }
 }
 
@@ -442,15 +468,19 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
     let debug_manifest = manifest.debug.clone();
     let manifest = Arc::new(manifest);
     let preflight = build_v3_server_startup_01_listener_set_from_config_05(&manifest);
-    let debug =
-        build_v3_debug_runtime_from_manifest(&debug_manifest).map_err(std::io::Error::other)?;
+    let debug = build_v3_debug_runtime_degrading_optional_log_sink(&debug_manifest)?;
     // 独立的 stage-3 投影丢弃日志 wiring：启动时确保父目录与 append-only 文件
     // 就位。丢弃证据刻意与 debug 日志物理分离，不写入 debug runtime。
     if let Some(projection_drop_log_file) = debug_manifest.projection_drop_log_file.as_deref() {
-        routecodex_v3_runtime::projection_drop_log::ensure_v3_projection_drop_log_file(
+        if let Err(error) = routecodex_v3_runtime::projection_drop_log::ensure_v3_projection_drop_log_file(
             projection_drop_log_file,
-        )
-        .map_err(std::io::Error::other)?;
+        ) {
+            // 投影丢弃证据是 Debug 观测，不是业务真相：路径不可写时记录原因并
+            // 继续，让声明的 listener 能力保持可用。
+            eprintln!(
+                "V3 projection drop log {projection_drop_log_file} unavailable: {error}; continuing without startup preparation"
+            );
+        }
     }
     let responses_direct_server_tool_state = Arc::new(
         V3ResponsesDirectServerToolState::default()
@@ -470,9 +500,16 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
             && !manifest.debug.codex_samples,
     ));
     for server in &preflight.listeners {
-        codex_sample_store
-            .enforce_listener_retention(server.port)
-            .map_err(std::io::Error::other)?;
+        if let Err(error) = codex_sample_store.enforce_listener_retention(server.port) {
+            // Debug sample retention is housekeeping, never business truth: an
+            // unreadable or vanished sample directory must not stop the
+            // aggregate server. The failure is recorded and the listener keeps
+            // its declared capability.
+            eprintln!(
+                "V3 codex sample retention unavailable for listener {} port {}: {error}",
+                server.id, server.port
+            );
+        }
     }
     let mut bound = Vec::with_capacity(preflight.listeners.len());
     for server in preflight.listeners {
@@ -582,18 +619,35 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let connection_broker = front_transport_broker.clone();
         let app_for_serve = app.clone();
-        pending_listener_tasks.push((listener, app_for_serve, shutdown_rx, connection_broker));
+        let accept_state = Arc::new(V3ListenerAcceptState::accepting());
+        pending_listener_tasks.push((
+            listener,
+            app_for_serve,
+            shutdown_rx,
+            connection_broker,
+            Arc::clone(&accept_state),
+        ));
         listeners.push(V3ListenerHandle {
             server_id,
             addr,
             shutdown: Some(shutdown_tx),
+            accept_state,
         });
     }
     for listener in &listeners {
-        let scope = debug
-            .start_trace(&listener.server_id, "startup", "listener")
-            .map_err(std::io::Error::other)?;
-        debug
+        // Debug evidence is not business truth: a failing debug sink must not
+        // stop listener startup. The failure is announced and startup continues.
+        let scope = match debug.start_trace(&listener.server_id, "startup", "listener") {
+            Ok(scope) => scope,
+            Err(error) => {
+                eprintln!(
+                    "V3 debug listener startup trace {} unavailable: {error}",
+                    listener.server_id
+                );
+                continue;
+            }
+        };
+        let startup_event = debug
             .record_node_event(
                 &scope,
                 "V3ServerStartup01ListenerSetPreflight",
@@ -602,38 +656,36 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
                     "server_id": listener.server_id,
                     "address": listener.addr.to_string()
                 })),
-            )
-            .map_err(std::io::Error::other)?;
+            );
+        if let Err(error) = startup_event {
+            eprintln!(
+                "V3 debug listener startup event {} unavailable: {error}",
+                listener.server_id
+            );
+        }
     }
-    let codex_sample_persist_worker = codex_sample_store
-        .start_persist_worker()
-        .map_err(std::io::Error::other)?;
-    for (listener, app_for_serve, shutdown_rx, connection_broker) in pending_listener_tasks {
-        tokio::spawn(async move {
-            let mut shutdown_rx = shutdown_rx;
-            loop {
-                tokio::select! {
-                    _ = &mut shutdown_rx => break,
-                    accepted = listener.accept() => {
-                        let Ok((stream, remote_addr)) = accepted else { break };
-                        let connection_identity = connection_broker.allocate_connection_identity();
-                        let service = app_for_serve.clone().into_service();
-                        let request_connection_broker = connection_broker.clone();
-                        tokio::spawn(async move {
-                            if let Err(error) = serve_v3_front_http_connection(
-                                stream,
-                                remote_addr,
-                                connection_identity,
-                                request_connection_broker,
-                                service,
-                            ).await {
-                                eprintln!("V3 Front HTTP connection failed: {error:?}");
-                            }
-                        });
-                    }
-                }
-            }
-        });
+    // Codex sample persistence is optional debug capture, never business truth:
+    // a persistence worker that cannot start must not stop the aggregate server.
+    // The failure is recorded and the store simply keeps no persist worker.
+    let codex_sample_persist_worker = match codex_sample_store.start_persist_worker() {
+        Ok(worker) => Some(worker),
+        Err(error) => {
+            eprintln!(
+                "V3 codex sample persistence worker unavailable: {error}; continuing without sample persistence"
+            );
+            None
+        }
+    };
+    for (listener, app_for_serve, shutdown_rx, connection_broker, accept_state) in
+        pending_listener_tasks
+    {
+        tokio::spawn(run_v3_listener_accept_loop(
+            listener,
+            app_for_serve,
+            shutdown_rx,
+            connection_broker,
+            accept_state,
+        ));
     }
     if console_enabled {
         emit_v3_startup_console_line(&listeners);
@@ -712,7 +764,7 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
         front_transport_broker,
         provider_health,
         observability_writers,
-        codex_sample_persist_worker: Some(codex_sample_persist_worker),
+        codex_sample_persist_worker,
     })
 }
 
@@ -796,20 +848,47 @@ fn build_v3_listener_router(state: V3ListenerState) -> Router {
         .with_state(state)
 }
 
-async fn health(State(state): State<Arc<V3ListenerState>>) -> Json<serde_json::Value> {
+/// Build-version truth for `/health`.
+///
+/// A status probe must report an unavailable build version instead of turning a
+/// failed syscall into a panic: the handler's owner returns the typed error and
+/// the caller projects it through the server error channel.
+fn resolve_v3_health_build_version() -> Result<String, String> {
     let executable_path = std::env::current_exe()
-        .expect("V3 health requires current executable path for build_version truth");
-    let build_version = resolve_routecodex_package_version_from_executable(&executable_path)
-        .expect("V3 health requires installed package.json build_version truth");
-    Json(json!({
-        "status": "ok",
-        "version": 3,
-        "build_version": build_version,
-        "manifest_version": state.manifest_version,
-        "server_id": state.server.id,
-        "bind": state.server.bind,
-        "port": state.server.port,
-    }))
+        .map_err(|error| format!("current executable path is unavailable: {error}"))?;
+    resolve_routecodex_package_version_from_executable(&executable_path).ok_or_else(|| {
+        format!(
+            "installed package build_version is unavailable for {}",
+            executable_path.display()
+        )
+    })
+}
+
+async fn health(State(state): State<Arc<V3ListenerState>>) -> Response<Body> {
+    let build_version = match resolve_v3_health_build_version() {
+        Ok(build_version) => build_version,
+        Err(detail) => {
+            let projected = project_v3_server_runtime_failure(
+                "V3ServerHealth",
+                "health_build_version_unavailable",
+                detail,
+                500,
+            );
+            return json_response(projected.status, projected.body);
+        }
+    };
+    json_response(
+        200,
+        json!({
+            "status": "ok",
+            "version": 3,
+            "build_version": build_version,
+            "manifest_version": state.manifest_version,
+            "server_id": state.server.id,
+            "bind": state.server.bind,
+            "port": state.server.port,
+        }),
+    )
 }
 
 async fn models_endpoint(State(state): State<Arc<V3ListenerState>>) -> Response<Body> {
@@ -964,14 +1043,42 @@ async fn admit_v3_responses_session_after_json_parse(
                 );
             }
         };
-    let permit = state
+    let permit = match state
         .responses_session_admission
         .admit(V3ResponsesSessionAdmissionScope {
             endpoint: path.to_string(),
             session_id,
             conversation_id,
         })
-        .await;
+        .await
+    {
+        Ok(permit) => permit,
+        Err(error @ V3ResponsesSessionAdmissionError::TokenSpaceExhausted) => {
+            // The gate cannot hand out a unique admission token any more. The
+            // failure belongs to this request only: every later request gets
+            // its own attempt instead of inheriting a poisoned hot path.
+            let request_id = match allocate_v3_console_request_id(state, path, Some(payload)) {
+                Ok(request_id) => request_id,
+                Err(response) => return Err(*response),
+            };
+            return Err(
+                error_output_response_for_responses_request_with_project_path(
+                    &state.server,
+                    path,
+                    &request_id,
+                    project_v3_server_runtime_failure(
+                        "V3ServerResponsesSessionAdmission",
+                        "responses_session_admission_unavailable",
+                        error.to_string(),
+                        598,
+                    ),
+                    request_headers,
+                    Some(payload),
+                    resolve_v3_console_project_path(request_headers, payload).as_deref(),
+                ),
+            );
+        }
+    };
     Ok(permit)
 }
 
