@@ -410,8 +410,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:78d79632e9ad17d590ec3c2f631ba01361706cea83a84914532e3e367c72531b
-    last_manual_authorization_id: auth-20260915-v3-remove-continuation-provider-action
+    fingerprint: sha256:10acfd36a3dd8f2c41e5fc1cca7ca16c7b6714631f741a07335b321f3e2bb81c
+    last_manual_authorization_id: auth-20261005-provider-no-wait-action-gate
   - item_id: chain:v3.build_test_artifact_budget
     chain_id: v3.build_test_artifact_budget
     status: audited_locked
@@ -1258,3 +1258,10 @@ manual_authorizations:
     reason: "Jason's explicit all-model-entry prohibition covers every cause, including failures before application admission. Real raw TCP reproduces Hyper-generated HTTP400/431 bypassing the application no-response consumer. This scoped repair binds the Server/Front typed HTTP parse-error policy to a narrow native Hyper builder/Conn API as srv07/srv08. The native producer is disabled without changing protocol acceptance, business payloads, lifecycle topology, or unrelated routing. These edges remain design-only until authored and verified. This records the existing authorized error-boundary repair, not a new authorization or a claimed manual implementation review."
     fingerprint_before: sha256:66e47a57a103d5eaebe5c275e3bf6a438cd4cec8d153083d6c6c1e43d88090d4
     fingerprint_after: sha256:e09b3524db5510c71781bc145a257d1283eebeac736120b4f8f5a69f06c04adf
+  - authorization_id: auth-20261005-provider-no-wait-action-gate
+    item_id: chain:v3.provider_action_gate.mainline
+    approved_by: Jason
+    approved_at: '2026-10-05T09:43:05-07:00'
+    reason: "Jason explicitly required that provider concurrency must not block business requests, provider errors must not cause meaningless waits, provider switching must retain storm control, and only cooldown may wait. Terminal provider-error projection commits the action-gate generation without waiting for provider-action admission, and now records and commits under one lock so a concurrent success cannot invalidate that disposition. Retry/reselect action admission and its rate limit remain in place. Provider cooldown semantics, chain owner, nodes, and resources remain unchanged."
+    fingerprint_before: sha256:78d79632e9ad17d590ec3c2f631ba01361706cea83a84914532e3e367c72531b
+    fingerprint_after: sha256:10acfd36a3dd8f2c41e5fc1cca7ca16c7b6714631f741a07335b321f3e2bb81c

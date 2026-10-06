@@ -75,7 +75,9 @@ impl ResponsesTransport for DirectProviderCompatTerminalTransport {
                 provider_id: request.provider_id().to_string(),
                 status: 400,
                 headers: Vec::new(),
-                body: br#"{"error":{"type":"invalid_request_error","message":"prompt is too long"}}"#.to_vec(),
+                body:
+                    br#"{"error":{"type":"invalid_request_error","message":"prompt is too long"}}"#
+                        .to_vec(),
                 body_read_failure: None,
             }),
         })
@@ -108,10 +110,7 @@ async fn direct_generic_provider_http_400_exhausts_provider_family() {
         0,
     )
     .expect("protocol plan");
-    assert_eq!(
-        plan.decision.target.candidate.provider_id,
-        "first"
-    );
+    assert_eq!(plan.decision.target.candidate.provider_id, "first");
     assert_eq!(plan.decision.target.candidate.model_id, "test");
 
     let output = execute_v3_responses_direct_runtime_kernel_core(

@@ -244,7 +244,7 @@ fn target(url: &str) -> V3ResponsesProviderTarget {
 
 fn target_with_env(url: &str, env: &str) -> V3ResponsesProviderTarget {
     V3ResponsesProviderTarget {
-        provider_id: "ws-provider".into(),
+        provider_id: format!("ws-provider-{env}-{url}"),
         provider_type: "responses".into(),
         base_url: "https://http-endpoint.invalid/v1".into(),
         canonical_model_id: "model".into(),
@@ -1356,7 +1356,7 @@ async fn websocket_v2_waiting_for_shared_connection_releases_pre_acquired_admiss
 }
 
 #[tokio::test]
-async fn websocket_v2_waiting_admission_does_not_block_pre_acquired_session_owner() {
+async fn websocket_v2_full_concurrency_does_not_block_pre_acquired_session_owner() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let (accepted_tx, accepted_rx) = oneshot::channel();
@@ -1366,10 +1366,7 @@ async fn websocket_v2_waiting_admission_does_not_block_pre_acquired_session_owne
             .await
             .unwrap();
         let _ = accepted_tx.send(());
-        for (response_id, text) in [
-            ("resp-ws-admission-order-first", "first"),
-            ("resp-ws-admission-order-second", "second"),
-        ] {
+        for (response_id, text) in [("resp-ws-admission-order-first", "first")] {
             assert!(matches!(
                 socket.next().await.unwrap().unwrap(),
                 Message::Text(_) | Message::Binary(_)
@@ -1427,8 +1424,15 @@ async fn websocket_v2_waiting_admission_does_not_block_pre_acquired_session_owne
     let waiting_opened_session = tokio::time::timeout(Duration::from_millis(150), accepted_rx)
         .await
         .is_ok();
-    assert!(!waiting_send.is_finished());
-    assert_eq!(controller.snapshot(provider_key).unwrap().in_flight, 2);
+    assert!(
+        waiting_send.is_finished(),
+        "a request without capacity must fail immediately"
+    );
+    assert_eq!(
+        controller.snapshot(provider_key).unwrap().in_flight,
+        2,
+        "full concurrency must not create another lease"
+    );
     let mut ready_send = tokio::spawn({
         let transport = transport.clone();
         async move { transport.send(ready_request).await }
@@ -1450,7 +1454,10 @@ async fn websocket_v2_waiting_admission_does_not_block_pre_acquired_session_owne
         "waiting admission must not hold the shared WebSocket session ahead of a request that already owns capacity; waiting_opened_session={waiting_opened_session}"
     );
     ready_result.unwrap();
-    waiting_result.unwrap();
+    assert!(matches!(
+        waiting_result,
+        Err(routecodex_v3_provider_responses::V3ProviderError::ConcurrencyBusy { .. })
+    ));
     assert_eq!(controller.snapshot(provider_key).unwrap().in_flight, 0);
 }
 
