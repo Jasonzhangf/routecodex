@@ -68,6 +68,7 @@ pub struct V3GeminiRelayRuntimeOutput {
     pub observability: Option<V3RuntimeObservability>,
     pub stream_observation: Option<V3RuntimeStreamObservation>,
     pub provider_snapshots: Option<V3RelayProviderSnapshots>,
+    pub request_finalizer: Option<crate::operation_runner::V3RequestFinalizerGuard>,
 }
 
 impl V3GeminiRelayRuntimeOutput {
@@ -210,6 +211,7 @@ async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(
         retry_policy,
         Vec::new(),
         true,
+        V3RelayRuntimeEntry::client_entry(),
         None,
         None,
     )
@@ -223,6 +225,7 @@ async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(
 /// 投影据此进入 Error 链。其余分支保持原有消息语义（不叠加 core Display 前缀）。
 fn v3_gemini_relay_runtime_error_from_core(error: V3RelayCoreError) -> V3GeminiRelayRuntimeError {
     match error {
+        V3RelayCoreError::Request(error) => V3GeminiRelayRuntimeError::Request(error),
         V3RelayCoreError::EndpointPath(message) => V3GeminiRelayRuntimeError::EndpointPath(message),
         V3RelayCoreError::ProviderPoolExhausted {
             attempted_candidates,
@@ -391,6 +394,7 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
             observability: Some(observability),
             stream_observation: None,
             provider_snapshots: Some(provider_snapshots),
+            request_finalizer: None,
         }
     }
 
@@ -410,6 +414,7 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
             observability: Some(observability),
             stream_observation: Some(stream_observation),
             provider_snapshots: Some(provider_snapshots),
+            request_finalizer: None,
         }
     }
 
@@ -418,6 +423,22 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
         trace: Vec<&'static str>,
     ) -> V3GeminiRelayRuntimeOutput {
         provider_failure_output(failure, trace)
+    }
+
+    fn finish_request_scope(
+        mut output: V3GeminiRelayRuntimeOutput,
+        finalizer: crate::operation_runner::V3RequestFinalizerGuard,
+    ) -> V3GeminiRelayRuntimeOutput {
+        output.client_body = match output.client_body {
+            V3GeminiRelayClientBody::Sse(stream) => {
+                V3GeminiRelayClientBody::Sse(stream.with_request_finalizer(Some(finalizer)))
+            }
+            body => {
+                output.request_finalizer = Some(finalizer);
+                body
+            }
+        };
+        output
     }
 }
 
@@ -547,6 +568,7 @@ pub fn project_v3_gemini_relay_runtime_failure(
         observability: None,
         stream_observation: None,
         provider_snapshots: None,
+        request_finalizer: None,
     }
 }
 
@@ -842,6 +864,7 @@ fn provider_failure_output(
         observability: None,
         stream_observation: None,
         provider_snapshots: None,
+        request_finalizer: None,
     }
 }
 

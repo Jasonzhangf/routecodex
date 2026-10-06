@@ -273,13 +273,18 @@ pub(super) fn rewrite_anthropic_declared_tool_history(request: &mut Value) {
             .into_iter()
             .flatten()
         {
-            if let Some(function) = call.get_mut("function").and_then(Value::as_object_mut) {
-                if let Some(name) = function
+            let shape = if call.get("type").and_then(Value::as_str) == Some("custom") {
+                "custom"
+            } else {
+                "function"
+            };
+            if let Some(declaration) = call.get_mut(shape).and_then(Value::as_object_mut) {
+                if let Some(name) = declaration
                     .get("name")
                     .and_then(Value::as_str)
                     .and_then(|name| names.get(name))
                 {
-                    function.insert("name".to_string(), Value::String(name.clone()));
+                    declaration.insert("name".to_string(), Value::String(name.clone()));
                 }
             }
         }

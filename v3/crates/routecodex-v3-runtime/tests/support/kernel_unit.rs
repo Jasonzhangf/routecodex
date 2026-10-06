@@ -2104,8 +2104,13 @@ targets = [{{ kind = "forwarder", id = "tcp", priority = 1 }}]
         json!({"model":"client-model","input":"hello","stream":true}),
     );
     let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
-    let request_execution_control =
-        V3RequestExecutionControl::from_manifest(&manifest, "test").expect("request control");
+    let request_execution_control = V3RequestExecutionControl::new(
+        &manifest,
+        "test",
+        "req-real-tcp-sse",
+        "responses",
+    )
+    .expect("request control");
     let attempt_budget = request_execution_control.attempt_budget();
     let output = execute_v3_responses_direct_runtime_kernel_core(
         V3ResponsesDirectRuntimeCoreState::new()

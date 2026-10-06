@@ -1,6 +1,7 @@
 use crate::*;
 use axum::body::Body;
 use axum::http::{HeaderMap, Response};
+use futures_util::FutureExt;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -257,10 +258,12 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     &state.debug,
                     plan,
                 )
+                .boxed()
                 .await
             }
             None => {
                 execute_v3_responses_direct_dry_run_runtime(fixture, &state.manifest, &state.debug)
+                    .boxed()
                     .await
             }
         };
@@ -371,6 +374,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 &state.responses_relay_server_tool_state,
                 server_tool_scope,
             )
+            .boxed()
             .await
             {
                 V3ResponsesRelayDryRunOutcome::Foundation(output) => output,
@@ -395,6 +399,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                             &state.debug,
                             &handoff.plan,
                         )
+                        .boxed()
                         .await;
                     prepend_v3_protocol_plan_trace_to_foundation_output(
                         &mut output,
@@ -473,6 +478,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             },
             client_headers,
         )
+        .boxed()
         .await;
         if let Some(response) = record_v3_live_snapshot_projection(
             &state,
@@ -498,7 +504,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         return foundation_output_response(output);
     }
     if entry_protocol == "openai_chat" && execution_mode == V3EntryProtocolExecutionMode::Direct {
-        return execute_v3_openai_chat_direct_server_outcome(
+        return Box::pin(execute_v3_openai_chat_direct_server_outcome(
             &state,
             front_connection_identity,
             method,
@@ -512,7 +518,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             started_at,
             request_console_project_path.as_deref(),
             request_purpose,
-        )
+        ))
         .await;
     }
     if entry_protocol == "openai_chat" && execution_mode == V3EntryProtocolExecutionMode::Relay {
@@ -526,7 +532,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             &console_payload,
         );
         let output =
-            match execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_execution_mode(
+            match Box::pin(execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_execution_mode(
                 &state.manifest,
                 V3OpenAiChatRelayRuntimeInput {
                     server_id: state.server.id.clone(),
@@ -536,7 +542,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 },
                 state.provider_health.runtime_health(),
                 V3HubExecutionMode::Relay,
-            )
+            ))
             .await
             {
                 Ok(output) => output,
@@ -645,7 +651,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 );
             }
         };
-        let output = match execute_v3_anthropic_relay_runtime_with_default_transport_client_headers_provider_health(
+        let output = match Box::pin(execute_v3_anthropic_relay_runtime_with_default_transport_client_headers_provider_health(
             &state.manifest,
             V3AnthropicRelayRuntimeInput {
                 server_id: state.server.id.clone(),
@@ -658,7 +664,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             },
             client_headers,
             state.provider_health.runtime_health(),
-        )
+        ))
         .await
         {
             Ok(output) => output,
@@ -790,6 +796,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             },
             state.provider_health.runtime_health(),
         )
+        .boxed()
         .await
         {
             Ok(output) => output,
@@ -934,7 +941,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     Some(plan.decision.target.clone()),
                     Some(plan.expanded.clone()),
                     BTreeSet::new(),
+                    None,
+                    None,
                     plan.relay_runtime_seeds(),
+                    V3RelayEntryOrigin::ClientEntry,
                 )
                 .await
                 {
@@ -962,7 +972,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     None,
                     None,
                     BTreeSet::new(),
+                    None,
+                    None,
                     V3ResponsesRelayRuntimeSeeds::default(),
+                    V3RelayEntryOrigin::ClientEntry,
                 )
                 .await
                 {
@@ -984,7 +997,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     Some(plan.decision.target.clone()),
                     Some(plan.expanded.clone()),
                     BTreeSet::new(),
+                    None,
+                    None,
                     plan.relay_runtime_seeds(),
+                    V3RelayEntryOrigin::ClientEntry,
                 )
                 .await
                 {
@@ -1009,7 +1025,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     None,
                     None,
                     BTreeSet::new(),
+                    None,
+                    None,
                     V3ResponsesRelayRuntimeSeeds::default(),
+                    V3RelayEntryOrigin::ClientEntry,
                 )
                 .await
                 {
@@ -1063,7 +1082,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             }
         }
         if let Some(handoff) = output.protocol_direct_handoff.take() {
-            let outcome = execute_responses_direct_server_outcome(
+            let outcome = Box::pin(execute_responses_direct_server_outcome(
                 &state,
                 &request_headers,
                 method,
@@ -1072,13 +1091,13 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 Some(request_identity.pipeline_id.clone()),
                 execution_id,
                 handoff.request_payload.clone(),
-                Some(&handoff.plan),
+                Some(relay_entry(&handoff.plan, handoff.request_entry_origin)),
                 Some(handoff.observability_accumulator),
                 Some(handoff.request_execution_control),
                 Some(provider_failure_event_sink.clone()),
                 Some(route_selection_event_sink.clone()),
                 request_purpose,
-            )
+            ))
             .await;
             match outcome {
                 V3ResponsesDirectServerOutcome::ProviderTerminal(disposition) => {
@@ -1244,7 +1263,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         );
         let provider_failure_event_sink = build_v3_provider_failure_event_sink(&console_context);
         let route_selection_event_sink = build_v3_route_selection_event_sink(&console_context);
-        let outcome = execute_responses_direct_server_outcome(
+        let outcome = Box::pin(execute_responses_direct_server_outcome(
             &state,
             &request_headers,
             method,
@@ -1255,13 +1274,13 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             payload,
             responses_protocol_plan
                 .as_ref()
-                .map(V3MetadataCenterExecutionPlan::protocol_plan),
+                .map(|plan| client_entry(plan.protocol_plan())),
             None,
             None,
             Some(provider_failure_event_sink.clone()),
             Some(route_selection_event_sink.clone()),
             request_purpose,
-        )
+        ))
         .await;
         match outcome {
             V3ResponsesDirectServerOutcome::ProviderTerminal(disposition) => {
@@ -1477,18 +1496,3 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         )
     }
 }
-
-#[path = "endpoint_trace.rs"]
-mod endpoint_trace;
-use endpoint_trace::resolve_v3_dry_run_target_label;
-pub(crate) use endpoint_trace::{
-    is_provider_request_dry_run, merge_v3_direct_handoff_provider_failure_events,
-    merge_v3_protocol_plan_trace, merge_v3_relay_handoff_provider_failure_events_into_direct_frame,
-    prepend_v3_protocol_plan_trace_to_foundation_output,
-    prepend_v3_protocol_plan_trace_to_responses_relay_output,
-    prepend_v3_relay_handoff_trace_to_direct_frame,
-};
-
-#[path = "request_identity.rs"]
-mod request_identity;
-pub(crate) use request_identity::*;

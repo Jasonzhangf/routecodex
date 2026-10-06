@@ -573,6 +573,7 @@ pub(crate) fn provider_failure_output_with_observation(
         finalized_response: None,
         provider_snapshots: None,
         protocol_direct_handoff: None,
+        request_finalizer: None,
     }
 }
 
@@ -613,6 +614,7 @@ pub(crate) fn error_output(
         finalized_response: None,
         provider_snapshots: None,
         protocol_direct_handoff: None,
+        request_finalizer: None,
     }
 }
 

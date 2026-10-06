@@ -33,6 +33,7 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_defaul
     initial_plan: &V3ResponsesProtocolExecutionPlan,
     observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
     request_execution_control: Option<V3RequestExecutionControl>,
+    request_entry_origin: V3DirectEntryOrigin,
 ) -> V3ResponsesDirectRuntimeOutput {
     execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
         V3ResponsesDirectRuntimeCoreState::new()
@@ -43,7 +44,8 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_defaul
         .with_route_selection_event_sink(shared_state.route_selection_event_sink.clone())
         .with_initial_plan(initial_plan)
         .with_observability_accumulator(observability_accumulator)
-        .with_request_execution_control(request_execution_control),
+        .with_request_execution_control(request_execution_control)
+        .with_request_entry_origin(request_entry_origin),
         manifest,
         raw,
         hook_registry,

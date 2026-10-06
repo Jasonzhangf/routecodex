@@ -563,7 +563,7 @@ pub(crate) fn consume_v3_direct_provider_failure_policy_result(
     provider_failure_events: &mut Vec<V3RuntimeProviderFailureObservation>,
     attempts: usize,
     retry_selected: &mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
-    pending_provider_action_recovery: &mut Option<V3Error05RecoveryAdmissionWitness>,
+    pending_provider_action_recovery: &mut Option<routecodex_v3_error::V3Error05RecoveryAdmissionWitness>,
     trace: &mut Vec<&'static str>,
     hook_registry: &V3HookRegistry,
 ) -> V3DirectProviderFailureConsumption {

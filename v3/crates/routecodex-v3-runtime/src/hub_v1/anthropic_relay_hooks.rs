@@ -1,14 +1,13 @@
 use super::{
-    anthropic_codec::encode_v3_anthropic_request_as_responses_semantic,
-    build_v3_hub_req_inbound_01_client_raw, build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01,
-    build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03,
+    build_v3_hub_req_inbound_02_from_request_invocation,
+    build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03, find_v3_hub_side_channel_key,
     validate_v3_anthropic_hub_response_payload_for_client_projection, V3AnthropicCodecError,
-    V3HubEntryProtocol, V3HubExecutionMode, V3HubOpaquePayload, V3HubProviderWireProtocol,
-    V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized, V3HubRespChatProcess03Governed,
-    V3HubRespOutbound05ClientSemantic, V3HubTransportIntent,
+    V3HubEntryProtocol, V3HubExecutionMode, V3HubProviderWireProtocol, V3HubReqInbound01ClientRaw,
+    V3HubReqInbound02Normalized, V3HubRespChatProcess03Governed, V3HubRespOutbound05ClientSemantic,
+    V3HubTransportIntent,
 };
+use crate::operation_runner::RequestInvocationContext;
 use serde_json::Value;
-use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum V3AnthropicRelayProtocolHookError {
@@ -18,6 +17,8 @@ pub enum V3AnthropicRelayProtocolHookError {
     ExecutionModeNotRelay,
     #[error("Anthropic Relay hook keeps Responses as the provider wire protocol")]
     ProviderWireProtocolNotResponses,
+    #[error("Anthropic Relay req_inbound normalization failed: {0}")]
+    ReqInbound(String),
     #[error(transparent)]
     Codec(#[from] V3AnthropicCodecError),
 }
@@ -66,31 +67,26 @@ impl V3HubRespOutbound05ClientSemantic {
     }
 }
 
+/// Consume the captured Anthropic request through the registered REQ02 SDK
+/// graph. The raw Anthropic wire enters the same lossless normalization owner
+/// as every other entry protocol; there is no intermediate Anthropic -> Responses
+/// inbound bridge or second normalizer.
 pub fn run_v3_anthropic_relay_runtime_req_inbound(
     raw: V3HubReqInbound01ClientRaw,
+    invocation: &RequestInvocationContext,
 ) -> Result<V3HubReqInbound02Normalized, V3AnthropicRelayProtocolHookError> {
     assert_anthropic_relay_responses_axes(
         raw.entry_protocol,
         V3HubExecutionMode::Relay,
         V3HubProviderWireProtocol::Responses,
     )?;
-    let V3HubReqInbound01ClientRaw {
-        payload,
-        entry_protocol,
-        invocation_source,
-        transport_intent,
-    } = raw;
-    let V3HubOpaquePayload(payload) = payload;
-    let payload = Arc::try_unwrap(payload).unwrap_or_else(|arc| (*arc).clone());
-    let payload = encode_v3_anthropic_request_as_responses_semantic(payload)?;
-    Ok(build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(
-        build_v3_hub_req_inbound_01_client_raw(
-            payload,
-            entry_protocol,
-            invocation_source,
-            transport_intent,
-        ),
-    ))
+    if let Some(field) = find_v3_hub_side_channel_key(&raw.payload.0) {
+        return Err(V3AnthropicRelayProtocolHookError::Codec(
+            V3AnthropicCodecError::SideChannelLeaked { field },
+        ));
+    }
+    build_v3_hub_req_inbound_02_from_request_invocation(raw, invocation)
+        .map_err(V3AnthropicRelayProtocolHookError::ReqInbound)
 }
 
 /// Anthropic relay 05 构建的受控路径：校验 Anthropic/Relay/Responses 轴 +

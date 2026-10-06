@@ -83,9 +83,18 @@ pub(crate) fn apply_v3_responses_direct_web_search_control_completion(
     let Some(call_id) = state.original_call_id() else {
         return Ok(());
     };
-    let tool_output_ids = crate::hub_v1::find_responses_tool_output_ids(payload)
-        .map_err(|error| runtime_source("V3DirectWebSearchReq02PairVerified", error))?;
-    if !tool_output_ids.consumed_ids.contains(&call_id.to_string()) {
+    // REQ02 has already normalized the current request into Chat. Observe the
+    // canonical tool-result identity at this hook, not the original wire shape.
+    let paired_output_present = payload
+        .get("messages")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|message| {
+            message.get("role").and_then(Value::as_str) == Some("tool")
+                && message.get("tool_call_id").and_then(Value::as_str) == Some(call_id)
+        });
+    if !paired_output_present {
         return Ok(());
     }
     let completed = state

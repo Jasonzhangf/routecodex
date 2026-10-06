@@ -93,6 +93,20 @@ pub async fn materialize_v3_provider_sse_as_canonical_response(
     .await
 }
 
+pub async fn materialize_v3_provider_sse_as_canonical_response_with_context(
+    provider_protocol: V3HubProviderWireProtocol,
+    provider: routecodex_v3_provider_responses::V3ProviderSseStream,
+    anthropic_context: &V3AnthropicResponsesProjectionContext,
+) -> Result<Value, V3ResponsesRelayRuntimeError> {
+    build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
+        provider_protocol,
+        provider,
+        &V3RuntimeStreamObservation::default(),
+        anthropic_context,
+    )
+    .await
+}
+
 pub(super) async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
     provider_protocol: V3HubProviderWireProtocol,
     provider: routecodex_v3_provider_responses::V3ProviderSseStream,

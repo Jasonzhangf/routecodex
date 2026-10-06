@@ -249,7 +249,7 @@ for (const fixture of [
   },
   {
     name: 'Hub Req04 bypass into execution plan',
-    code: 'use routecodex_v3_runtime::{build_v3_hub_req_inbound_01_client_raw, build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01, build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04, V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource, V3HubTransportIntent};\nfn main() { let req01 = build_v3_hub_req_inbound_01_client_raw(serde_json::json!({}), V3HubEntryProtocol::Responses, V3HubInvocationSource::Client, V3HubTransportIntent::Json); let req02 = build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(req01); let _ = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(req02, V3HubExecutionMode::Relay); }\n',
+    code: 'use routecodex_v3_runtime::{build_v3_hub_req_inbound_01_client_raw, build_v3_hub_req_inbound_02_from_canonical, build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04, V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource, V3HubTransportIntent};\nfn main() { let req01 = build_v3_hub_req_inbound_01_client_raw(serde_json::json!({}), V3HubEntryProtocol::Responses, V3HubInvocationSource::Client, V3HubTransportIntent::Json); let req02 = build_v3_hub_req_inbound_02_from_canonical(req01, serde_json::json!({"messages":[]})); let _ = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(req02, V3HubExecutionMode::Relay); }\n',
     diagnostic: /mismatched types|expected `V3HubReqChatProcess04Governed`/,
   },
   {

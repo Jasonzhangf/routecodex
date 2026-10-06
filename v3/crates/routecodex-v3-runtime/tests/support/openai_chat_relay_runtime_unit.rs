@@ -440,9 +440,13 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
     ) {
         std::env::set_var("ROUTECODEX_V3_TEST_KEY", "test-secret");
         let manifest = test_relay_manifest();
-        let request_execution_control =
-            crate::nodes::V3RequestExecutionControl::from_manifest(&manifest, "test")
-                .expect("request execution control");
+        let request_execution_control = crate::nodes::V3RequestExecutionControl::new(
+            &manifest,
+            "test",
+            "req-openai-chat-relay-handoff",
+            "openai_chat",
+        )
+        .expect("request execution control");
         request_execution_control
             .attempt_budget()
             .admit_transport_attempt()
@@ -472,6 +476,7 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
             V3RelayProviderFailureRetryPolicy::default(),
             V3HubExecutionMode::Relay,
+            V3RelayRuntimeEntry::client_entry(),
             Some(request_execution_control),
             None,
         )
