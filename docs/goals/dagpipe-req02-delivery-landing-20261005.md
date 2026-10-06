@@ -358,14 +358,20 @@ live 样本；独立架构 review PASS；clean-main merge + push + 远端回执�
 
 | 红项 | 归属（基线对照证据） | 处置 |
 | --- | --- | --- |
-| `multi_listener_server` 4 FAILED + 1 HANG | R43 回归（`ec8048b6a` 全绿） | task-4（custom-tool 身份，1 项 + R47 剩余 3 红）、task-6（handoff 重归一，4 项） |
+| `multi_listener_server` 4 FAILED + 1 HANG | R43 回归（`ec8048b6a` 全绿） | **已修**：task-6（`bc7d1b8d8`）+ task-4（`0cdf41884`）⇒ 93/93 全绿 |
 | `anthropic_relay_runtime_integration` 2 FAILED | R43 回归（`ec8048b6a` 18/0，`dbdf06181` 16/2） | task-7 |
-| `anthropic_relay_anthropic_provider_wire_integration` 1 FAILED | R43 回归（同 crate 同区域） | task-7 判定是否同根因 |
-| `cli h2_p6_controlled_replay` 1 FAILED（缺 `response.created` 帧） | 待 task-8 在 `ec8048b6a` 上归因 | task-8 |
+| `anthropic_relay_anthropic_provider_wire_integration` 1 FAILED | R43 回归（同 crate 同区域） | task-7 |
+| `cli h2_p6_controlled_replay` 1 FAILED（缺 `response.created` 帧） | R43/R47 hook 回归（`ec8048b6a` 与 `dbdf06181` 均 7/0） | **已修**：task-8（`9af5766a8`）⇒ 7/0 |
+| `gemini_relay_runtime_integration` 4 FAILED | R43 回归（`ec8048b6a` 21/0） | task-10 |
+| `hub_relay_runtime_closeout` 4 FAILED | R43 回归（`ec8048b6a` 28/0） | task-11 |
+| `responses_relay_mode_b_web_search_integration` 1 FAILED + HANG | R43 回归（`ec8048b6a` 4/0） | task-12 |
+| `responses_relay_anthropic_provider_wire_integration` 3 FAILED | R43 回归（`ec8048b6a` 17/0） | task-13 |
+| `req02_direct_request_view` 1 FAILED | REQ02 自建红测（基线无此文件） | task-14 |
 | `req02_scope_runtime_consumer::req02_attempt_buffer_boundary_direct` | ~~父候选已知红~~ **实测 7/7 全绿** | 已关闭，记账删除 |
 | `verify:v3-file-size` `anthropic_relay_runtime.rs` 1506 | 组合引入 | R51d 已修（`d38a5d3cd`，1414 行） |
-| `verify:v3-file-size` `responses_relay_runtime_inner.rs` 1503 | 组合引入 | R51d 待 task-6 落地后拆解 |
-| `chain:v3.provider_action_gate.mainline` 指纹第三状态 | 组合引入 | 需 Jason 人工授权，未授权前不动锁 |
+| `verify:v3-file-size` `responses_relay_runtime_inner.rs` 1504 | 组合引入 | **已修**：task-9（`579409616`，646 行）⇒ 门禁 EXIT 0 |
+| `chain:v3.provider_action_gate.mainline` 指纹第三状态 | 组合引入 | **已授权刷新**（`3ebcc381b`，562460de…，auth-20261006-…）；caller-flow EXIT 0 |
+| `v3-mainline-caller-flow.html` 陈旧（495 vs 499 边） | 组合引入 | **已重渲染**并 commit；caller-flow EXIT 0 |
 
 扫描口径：逐 crate `npm --prefix v3 run test`（`--test-threads=1`，skip 已知挂起用例）；
 **cargo 在首个失败 target 后停止**，故另跑逐 target 重扫补全（`/tmp/v3-target-sweep.txt`）。
