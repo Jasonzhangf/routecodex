@@ -253,3 +253,41 @@ of the main363 candidate above. They are reused for this verifier-only delta;
 no second build or restart is claimed. Independent delta review and a new
 remote CI run are required before PR367 can merge. This correction does not
 claim REQ02 or another operation node delivered.
+
+## PR367 Gemini exhaustion fixture correction (2026-10-06)
+
+CI run `37532692294` on exact head
+`b229ba58201b4aa063629e6b275d9061bda3bac0` failed in
+`uncommitted_sse_failure_enters_error_chain_and_provider_cooldown` after
+20 other Gemini integration cases passed. Its old assertion required an
+exhausted request to wait for recovery. The current contract terminates that
+request and allows independent recovery to serve a later request.
+
+- RUN/provider-ci-r125-failure.log retains the exact CI failure. The host
+  single-case reproduction in provider-ci-r125-host-red.log/.exit repeats
+  the same obsolete hold assertion, exit 101.
+- A fresh GCM worker supplied a single test-file patch. Its compile and
+  formatting checks passed; its runtime test stopped at sandbox loopback
+  EPERM. That is not host behavior evidence.
+- The first host run of the patch found a mistaken `expect_err` in the
+  new fixture. This public runtime API already returns a classified internal
+  terminal output. The author corrected the consumer to check its complete
+  Error chain and typed `NoResponse` disposition. The failed host run is
+  retained as provider-gemini-exhaustion-host-r127/host-full-green.log/.exit;
+  its filename does not make the failed result green.
+- The corrected fixture checks immediate termination, no success-transport
+  consumption, no failed-attempt byte revival, exact provider cooldown,
+  an actual HTTP Gemini semantic recovery probe and its endpoint, then an
+  independent successful request with unchanged contents, tools, function
+  call/result history and generation settings.
+- RUN/provider-gemini-exhaustion-host-r127/host-focused-r2.log/.exit: 1 PASS,
+  exit 0. host-full-r3.log/.exit: all 21 Gemini integration cases PASS,
+  exit 0. Formatting and diff checks pass.
+
+This correction changes only the integration fixture and this evidence
+document. Runtime Rust source, graph, profile, configuration and transport
+implementation remain unchanged from b229. Existing author Server HTTP/WS,
+installed-runtime and actual GCM evidence above retains its original source
+binding; no new build or restart is claimed for this test-only correction.
+Independent delta architecture review and exact new-head CI remain required
+before PR367 can merge. REQ02 remains incomplete.
