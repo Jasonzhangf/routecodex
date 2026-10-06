@@ -252,15 +252,25 @@ fn provider_terminal_admission_failure(
 }
 
 fn provider_runtime_failure(error: V3ProviderError, provider_id: &str) -> V3RelayProviderFailure {
-    if let V3ProviderError::InternalTransport { lane, .. } = &error {
-        let source_stage = match lane {
+    let internal_source_stage = match &error {
+        V3ProviderError::InternalTransport { lane, .. } => Some(match lane {
             routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Request => {
                 "V3ProviderReqOutbound09TransportRequest"
             }
             routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Response => {
                 "V3ProviderRespInbound01Raw"
             }
-        };
+        }),
+        // Local transport construction failures (invalid base URL, missing or
+        // unreadable auth secret) originate in the request-lane transport owner
+        // and have no upstream HTTP response. Classify them through the existing
+        // typed mapper instead of the generic 502 provider_error default.
+        V3ProviderError::InvalidBaseUrl { .. }
+        | V3ProviderError::MissingAuthSecret { .. }
+        | V3ProviderError::AuthSecretRead { .. } => Some("V3Transport13ResponsesHttpRequest"),
+        _ => None,
+    };
+    if let Some(source_stage) = internal_source_stage {
         let source = crate::hooks::build_v3_provider_error_source(source_stage, error);
         let projected = V3ErrorHandlingCenter::project_terminal(
             V3ErrorHandlingCenter::decide_provider(
@@ -593,4 +603,98 @@ async fn collect_v3_anthropic_relay_provider_sse_chunks(
         chunks.push(chunk?);
     }
     Ok(chunks)
+}
+
+#[cfg(test)]
+mod anthropic_provider_runtime_failure_tests {
+    use super::*;
+
+    #[test]
+    fn local_transport_constructor_failures_use_request_lane_typed_source() {
+        for error in [
+            V3ProviderError::InvalidBaseUrl {
+                request_id: "req-local-constructor".to_string(),
+                provider_id: "provider-local".to_string(),
+                reason: "base url is not absolute".to_string(),
+            },
+            V3ProviderError::MissingAuthSecret {
+                request_id: "req-local-constructor".to_string(),
+                provider_id: "provider-local".to_string(),
+                auth_alias: "primary".to_string(),
+            },
+            V3ProviderError::AuthSecretRead {
+                request_id: "req-local-constructor".to_string(),
+                provider_id: "provider-local".to_string(),
+                auth_alias: "primary".to_string(),
+                reason: "secret store unavailable".to_string(),
+            },
+        ] {
+            let failure = provider_runtime_failure(error, "provider-local");
+            assert_eq!(
+                failure.status, 598,
+                "local constructor failure is request lane"
+            );
+            assert_eq!(failure.source_stage, "V3Transport13ResponsesHttpRequest");
+            // No upstream HTTP response exists, so no external witness is faked.
+            assert_eq!(failure.provider_status, None);
+            let projected = failure
+                .terminal_projection
+                .as_ref()
+                .expect("local constructor failure carries typed Error06 projection");
+            assert_eq!(projected.status, 598);
+            assert_eq!(
+                projected
+                    .body
+                    .pointer("/error/code")
+                    .and_then(Value::as_str),
+                Some("provider_local_runtime_error")
+            );
+        }
+    }
+
+    #[test]
+    fn internal_transport_lanes_keep_request_598_and_response_599() {
+        let request = provider_runtime_failure(
+            V3ProviderError::InternalTransport {
+                request_id: "req-internal".to_string(),
+                provider_id: "provider-internal".to_string(),
+                lane: routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Request,
+                reason: "handoff closed".to_string(),
+            },
+            "provider-internal",
+        );
+        assert_eq!(request.status, 598);
+        assert_eq!(request.provider_status, None);
+        assert_eq!(
+            request.source_stage,
+            "V3ProviderReqOutbound09TransportRequest"
+        );
+
+        let response = provider_runtime_failure(
+            V3ProviderError::InternalTransport {
+                request_id: "req-internal".to_string(),
+                provider_id: "provider-internal".to_string(),
+                lane: routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Response,
+                reason: "handoff closed".to_string(),
+            },
+            "provider-internal",
+        );
+        assert_eq!(response.status, 599);
+        assert_eq!(response.provider_status, None);
+        assert_eq!(response.source_stage, "V3ProviderRespInbound01Raw");
+    }
+
+    #[test]
+    fn client_disconnect_semantics_stay_499() {
+        let failure = provider_runtime_failure(
+            V3ProviderError::ClientDisconnect {
+                request_id: "req-cancel".to_string(),
+                provider_id: "provider-cancel".to_string(),
+            },
+            "provider-cancel",
+        );
+        assert_eq!(failure.status, 499);
+        assert_eq!(failure.provider_status, None);
+        assert!(failure.terminal_projection.is_some());
+    }
 }

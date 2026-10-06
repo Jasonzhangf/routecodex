@@ -609,12 +609,12 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             selected.candidate.clone(),
         );
         trace.push("V3HubReqTarget06Resolved");
-        macro_rules! handle_provider_request_failure {
-            ($stage:expr, $kind:expr, $error:expr) => {{
+        macro_rules! handle_provider_failure_core {
+            ($failure:expr) => {{
                 let terminal_failure = handle_provider_failure(
                     &failure_context,
                     selected,
-                    provider_request_failure($stage, $kind, $error),
+                    $failure,
                     &mut V3RelayProviderFailurePolicyState {
                         failed_candidates: &mut failed_candidates,
                         same_candidate_retries: &mut same_candidate_retries,
@@ -630,6 +630,19 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 }
                 continue;
             }};
+        }
+        macro_rules! handle_provider_request_failure {
+            ($stage:expr, $kind:expr, $error:expr) => {
+                handle_provider_failure_core!(provider_request_failure($stage, $kind, $error))
+            };
+        }
+        macro_rules! handle_provider_runtime_failure {
+            ($error:expr) => {
+                handle_provider_failure_core!(provider_runtime_failure(
+                    $error,
+                    &selected_target_provider_id
+                ))
+            };
         }
         let provider_wire_protocol = match provider_wire_protocol_for_provider_type(
             &selected.candidate.provider_id,
@@ -666,22 +679,14 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             provider_semantic,
         ) {
             Ok(wire) => wire,
-            Err(error) => handle_provider_request_failure!(
-                "V3ProviderReqOutbound08WirePayload",
-                "provider_request_wire_error",
-                error
-            ),
+            Err(error) => handle_provider_runtime_failure!(error),
         };
         trace.push("V3ProviderReqOutbound08WirePayload");
         let transport_request = match provider_wire_protocol {
             V3HubProviderWireProtocol::Responses => {
                 match build_v3_transport_13_responses_http_request_from_v3_provider_12(wire) {
                     Ok(request) => request,
-                    Err(error) => handle_provider_request_failure!(
-                        "V3ProviderReqOutbound09TransportRequest",
-                        "provider_transport_request_error",
-                        error
-                    ),
+                    Err(error) => handle_provider_runtime_failure!(error),
                 }
             }
             V3HubProviderWireProtocol::Anthropic => {
@@ -690,11 +695,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     provider_header_overrides.clone(),
                 ) {
                     Ok(request) => request,
-                    Err(error) => handle_provider_request_failure!(
-                        "V3ProviderReqOutbound09TransportRequest",
-                        "provider_transport_request_error",
-                        error
-                    ),
+                    Err(error) => handle_provider_runtime_failure!(error),
                 }
             }
             V3HubProviderWireProtocol::OpenAiChat => {
@@ -703,11 +704,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     wire,
                 ) {
                     Ok(request) => request,
-                    Err(error) => handle_provider_request_failure!(
-                        "V3ProviderReqOutbound09TransportRequest",
-                        "provider_transport_request_error",
-                        error
-                    ),
+                    Err(error) => handle_provider_runtime_failure!(error),
                 }
             }
             other => handle_provider_request_failure!(

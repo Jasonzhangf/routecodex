@@ -268,7 +268,12 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
         route_policy_pending,
     )
     .await
-    .map_err(|error| match error {
+    .map_err(v3_openai_chat_relay_runtime_error_from_core)
+}
+fn v3_openai_chat_relay_runtime_error_from_core(
+    error: V3RelayCoreError,
+) -> V3OpenAiChatRelayRuntimeError {
+    match error {
         // 治理层拦截（Mode B web-search）必须保留原变体：fail-fast 投影语义
         // 由 server 端 `project_v3_openai_chat_relay_runtime_failure` 区分。
         V3RelayCoreError::WebSearchIntercepted(_) => {
@@ -279,13 +284,13 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
         } => V3OpenAiChatRelayRuntimeError::ProviderPoolExhausted {
             attempted_candidates,
         },
+        V3RelayCoreError::Provider(error) => V3OpenAiChatRelayRuntimeError::Provider(error),
         // 直接取内部消息，不叠加 V3RelayCoreError 的 Display 前缀（与原实现消息一致）。
         V3RelayCoreError::Target(message)
         | V3RelayCoreError::StaticRegistry(message)
         | V3RelayCoreError::EndpointPath(message) => V3OpenAiChatRelayRuntimeError::Target(message),
-    })
+    }
 }
-
 pub fn project_v3_openai_chat_relay_runtime_failure(
     error: V3OpenAiChatRelayRuntimeError,
 ) -> V3OpenAiChatRelayRuntimeOutput {
@@ -319,6 +324,9 @@ pub fn project_v3_openai_chat_relay_runtime_failure(
                 error.to_string(),
             ),
         },
+        V3OpenAiChatRelayRuntimeError::Provider(error) => {
+            crate::hooks::build_v3_provider_error_source("V3Transport13ResponsesHttpRequest", error)
+        }
         error => build_v3_error_01_source_raised(
             V3ErrorSourceKind::RuntimeFailure,
             "V3HubRuntime",
@@ -1399,7 +1407,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         let wire = build_v3_provider_12_responses_wire_payload(request_id, target, body)
             .map_err(|error| V3RelayCoreError::Target(error.to_string()))?;
         build_v3_provider_transport_request_for_protocol(wire_protocol, wire)
-            .map_err(|error| V3RelayCoreError::Target(error.to_string()))
+            .map_err(V3RelayCoreError::Provider)
     }
 
     fn project_json_response(
@@ -1575,5 +1583,4 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         provider_failure_output(failure, trace)
     }
 }
-
 include!("../../tests/support/openai_chat_relay_runtime_unit.rs");

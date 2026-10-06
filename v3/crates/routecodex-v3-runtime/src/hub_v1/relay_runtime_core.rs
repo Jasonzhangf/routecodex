@@ -352,11 +352,12 @@ mod response_header_timeout_contract_tests {
 use std::fmt;
 
 /// 骨架内部错误（协议入口负责映射到自身错误类型）。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 pub enum V3RelayCoreError {
     StaticRegistry(String),
     EndpointPath(String),
     Target(String),
+    Provider(V3ProviderError),
     ProviderPoolExhausted {
         attempted_candidates: Vec<String>,
     },
@@ -371,6 +372,7 @@ impl fmt::Display for V3RelayCoreError {
             V3RelayCoreError::StaticRegistry(message) => write!(f, "static registry: {message}"),
             V3RelayCoreError::EndpointPath(message) => write!(f, "endpoint path: {message}"),
             V3RelayCoreError::Target(message) => write!(f, "target: {message}"),
+            V3RelayCoreError::Provider(error) => write!(f, "provider: {error}"),
             V3RelayCoreError::ProviderPoolExhausted {
                 attempted_candidates,
             } => write!(f, "provider pool exhausted after {attempted_candidates:?}"),

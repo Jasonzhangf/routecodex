@@ -401,7 +401,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
             match build_v3_provider_transport_request_for_protocol(provider_wire_protocol, wire) {
                 Ok(transport_request) => transport_request,
                 Err(error) => {
-                    handle_provider_request_failure!(V3ResponsesRelayRuntimeError::Target(error));
+                    handle_provider_request_failure!(V3ResponsesRelayRuntimeError::Provider(error));
                 }
             };
         if let Err(error) = validate_v3_responses_relay_provider_request_transport_intent(
