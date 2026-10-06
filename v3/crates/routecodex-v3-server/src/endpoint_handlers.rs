@@ -1083,7 +1083,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 Some(request_identity.pipeline_id.clone()),
                 execution_id,
                 handoff.request_payload.clone(),
-                Some(&handoff.plan),
+                Some(relay_entry(&handoff.plan, handoff.request_entry_origin)),
                 Some(handoff.observability_accumulator),
                 Some(handoff.request_execution_control),
                 Some(provider_failure_event_sink.clone()),
@@ -1271,7 +1271,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             payload,
             responses_protocol_plan
                 .as_ref()
-                .map(V3MetadataCenterExecutionPlan::protocol_plan),
+                .map(|plan| client_entry(plan.protocol_plan())),
             None,
             None,
             Some(provider_failure_event_sink.clone()),

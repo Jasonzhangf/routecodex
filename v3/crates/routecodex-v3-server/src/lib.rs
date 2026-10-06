@@ -63,7 +63,8 @@ use axum::{Json, Router};
 use futures_util::{stream, StreamExt};
 use libc::EINTR;
 use responses_direct_server_outcome::{
-    execute_responses_direct_server_outcome, V3ResponsesDirectServerOutcome,
+    client_entry, execute_responses_direct_server_outcome, relay_entry, V3DirectEntry,
+    V3ResponsesDirectServerOutcome,
 };
 use routecodex_v3_config::{
     collect_v3_route_group_catalog_model_refs, resolve_routecodex_package_version_from_executable,

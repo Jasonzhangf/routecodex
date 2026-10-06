@@ -11,21 +11,27 @@ use routecodex_v3_target::V3Target10ConcreteProviderSelected;
 pub(crate) fn canonical_body_from_captured(
     standardized: &crate::nodes::V3Req04StandardizedResponses,
     control: &crate::nodes::V3RequestExecutionControl,
+    request_entry_origin: V3DirectEntryOrigin,
 ) -> Result<serde_json::Value, V3Error01SourceRaised> {
     build_v3_direct_request_canonical_from_captured(
         control,
         &standardized.request_id,
         standardized.body.clone(),
+        request_entry_origin,
     )
 }
 
 /// Build the canonical request from the already-captured client JSON through
 /// the REQ02 registered SDK entry, then seed the current field associations
-/// exactly once on the same request handle.
+/// exactly once on the same request handle. `request_entry_origin` is the
+/// explicit entry origin supplied by the caller: ordinary client entry
+/// normalizes the raw wire, a Relay->Direct handoff consumes the pair the Relay
+/// phase already published on this request scope.
 pub(crate) fn build_v3_direct_request_canonical_from_captured(
     control: &crate::nodes::V3RequestExecutionControl,
     request_id: &str,
     raw: serde_json::Value,
+    request_entry_origin: V3DirectEntryOrigin,
 ) -> Result<serde_json::Value, V3Error01SourceRaised> {
     let handle = control.request_context();
     let entry_protocol = match handle.entry_protocol() {
@@ -43,7 +49,7 @@ pub(crate) fn build_v3_direct_request_canonical_from_captured(
         handle.clone(),
         format!("{request_id}:direct-entry"),
         format!("{request_id}:direct-entry-attempt"),
-        crate::operation_runner::RequestOriginKind::ClientEntry,
+        request_entry_origin.request_origin_kind(),
     );
     let req01 = crate::hub_v1::build_v3_hub_req_inbound_01_client_raw(
         raw,

@@ -1,9 +1,38 @@
 use super::*;
+use routecodex_v3_runtime::V3DirectEntryOrigin;
 
 pub(super) enum V3ResponsesDirectServerOutcome {
     DirectFrame(V3Server16HttpFrame),
     RelayOutput(V3ResponsesRelayRuntimeOutput),
     ProviderTerminal(routecodex_v3_error::V3ProviderTerminalDisposition),
+}
+
+/// Server-side Direct entry selector: the routing plan plus the REQ02 entry
+/// origin the Server adapter explicitly selected. Both travel as one value so a
+/// Server Direct caller cannot pass a plan without its typed entry origin.
+#[derive(Clone, Copy)]
+pub(super) struct V3DirectEntry<'a> {
+    plan: &'a V3ResponsesProtocolExecutionPlan,
+    request_entry_origin: V3DirectEntryOrigin,
+}
+
+/// Ordinary client entry: the Direct kernel normalizes the captured client wire.
+pub(super) fn client_entry(plan: &V3ResponsesProtocolExecutionPlan) -> V3DirectEntry<'_> {
+    V3DirectEntry {
+        plan,
+        request_entry_origin: V3DirectEntryOrigin::ClientEntry,
+    }
+}
+
+/// Relay->Direct handoff: consume the entry origin the Relay phase selected.
+pub(super) fn relay_entry<'a>(
+    plan: &'a V3ResponsesProtocolExecutionPlan,
+    request_entry_origin: V3DirectEntryOrigin,
+) -> V3DirectEntry<'a> {
+    V3DirectEntry {
+        plan,
+        request_entry_origin,
+    }
 }
 
 pub(super) async fn execute_responses_direct_server_outcome(
@@ -15,7 +44,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
     pipeline_id: Option<String>,
     execution_id: String,
     payload: serde_json::Value,
-    responses_protocol_plan: Option<&V3ResponsesProtocolExecutionPlan>,
+    direct_entry: Option<V3DirectEntry<'_>>,
     observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
     request_execution_control: Option<V3RequestExecutionControl>,
     provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
@@ -138,8 +167,8 @@ pub(super) async fn execute_responses_direct_server_outcome(
         Some(pipeline_id.clone()),
         payload.clone(),
     );
-    let mut output = match responses_protocol_plan {
-        Some(plan) => {
+    let mut output = match direct_entry {
+        Some(entry) => {
             execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target(
                 V3ResponsesDirectRuntimeSharedState::new(
                     &state.responses_direct_server_tool_state,
@@ -161,9 +190,10 @@ pub(super) async fn execute_responses_direct_server_outcome(
                 register_responses_direct_hooks(),
                 &state.debug,
                 now_epoch_ms,
-                plan,
+                entry.plan,
                 observability_accumulator,
                 request_execution_control,
+                entry.request_entry_origin,
             )
             .await
         }
@@ -194,6 +224,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
         }
     };
     if let Some(handoff) = output.protocol_relay_handoff {
+        let relay_entry_origin = handoff.request_entry_origin.relay_entry_origin();
         let relay_runtime_seeds = handoff.relay_runtime_seeds();
         let runtime_input = V3ResponsesRelayRuntimeInput {
             server_id: state.server.id.clone(),
@@ -255,7 +286,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
                 Some(handoff.observability_accumulator),
                 Some(handoff.request_execution_control),
                 relay_runtime_seeds,
-                V3RelayEntryOrigin::DirectRelayHandoff,
+                relay_entry_origin,
             )
             .await
         } else {
@@ -278,7 +309,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
                 Some(handoff.observability_accumulator),
                 Some(handoff.request_execution_control),
                 relay_runtime_seeds,
-                V3RelayEntryOrigin::DirectRelayHandoff,
+                relay_entry_origin,
             )
             .await
         };
@@ -315,7 +346,10 @@ pub(super) async fn execute_responses_direct_server_outcome(
                 Some(pipeline_id.clone()),
                 execution_id,
                 next_handoff.request_payload.clone(),
-                Some(&next_handoff.plan),
+                Some(relay_entry(
+                    &next_handoff.plan,
+                    next_handoff.request_entry_origin,
+                )),
                 Some(next_handoff.observability_accumulator),
                 Some(request_execution_control),
                 provider_failure_event_sink,

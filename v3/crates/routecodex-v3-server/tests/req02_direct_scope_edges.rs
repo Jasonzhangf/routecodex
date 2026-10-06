@@ -185,6 +185,7 @@ async fn direct(
         V3ResponsesDirectRuntimeSharedState::new(&state, health), manifest, raw,
         V3ResponsesDirectServerToolScope::new("/v1/responses", format!("{id}-session"), format!("{id}-conversation"), 45444, server),
         register_responses_direct_hooks(), &debug, 1000, &plan, None, Some(control),
+        routecodex_v3_runtime::V3DirectEntryOrigin::ClientEntry,
     ).await
 }
 

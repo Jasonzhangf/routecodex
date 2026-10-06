@@ -208,6 +208,7 @@ where
         &request_execution_control,
         C::request_id(&standardized),
         captured,
+        V3DirectEntryOrigin::ClientEntry,
     ) {
         Ok(canonical) => canonical,
         Err(source) => return error_output(source, trace, &crate::hooks::register_responses_direct_hooks()),

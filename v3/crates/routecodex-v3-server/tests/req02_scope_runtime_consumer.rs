@@ -527,6 +527,7 @@ async fn call_direct_runtime(
         &plan,
         None,
         Some(control),
+        routecodex_v3_runtime::V3DirectEntryOrigin::ClientEntry,
     )
     .await
 }

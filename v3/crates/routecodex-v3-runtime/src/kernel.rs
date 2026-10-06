@@ -94,6 +94,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     let runtime_timing = accumulator.timing();
     let mut trace = vec!["V3Config05ManifestPublished", "V3Server03HttpRequestRaw"];
     require_static_hooks(&hook_registry);
+    // Typed entry origin for REQ02; never inferred from payload shape or pair existence.
+    let (entry_control, origin) = (&request_execution_control, state.request_entry_origin);
     let V3ResponsesDirectRuntimeCoreState {
         server_tool_state,
         server_tool_scope,
@@ -110,8 +112,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         allow_exhaustion_rescue_probe,
         provider_failure_event_sink,
         route_selection_event_sink,
-        observability_accumulator: _,
-        request_execution_control: _,
+        ..
     } = state;
 
     // stage-3 丢弃记录要写「客户端原始值」，必须在 Req04 归一化之前取句柄：
@@ -129,7 +130,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     };
     // Consume the already-captured client JSON through the REQ02 registered
     // SDK entry exactly once; the raw body is replaced, not kept as a parallel truth.
-    let canonical = match canonical_body_from_captured(&standardized, &request_execution_control) {
+    let canonical = match canonical_body_from_captured(&standardized, entry_control, origin) {
         Ok(canonical) => canonical,
         Err(source) => return error_output(source, trace, &hook_registry),
     };

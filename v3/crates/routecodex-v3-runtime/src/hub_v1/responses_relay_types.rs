@@ -47,6 +47,11 @@ pub struct V3ResponsesProtocolDirectHandoff {
     pub provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
     pub observability_accumulator: V3RuntimeObservabilityAccumulator,
     pub request_execution_control: crate::nodes::V3RequestExecutionControl,
+    /// Control half of this Relay->Direct handoff: the Direct entry origin the
+    /// Relay phase explicitly selected. The Direct kernel consumes the request
+    /// scope's already-published pair for `DirectRelayHandoff`; it never infers
+    /// this from payload shape, model, published-pair existence, or logs.
+    pub request_entry_origin: crate::kernel::V3DirectEntryOrigin,
 }
 
 /// Route-policy carry-over that seeds a Relay run from an upstream

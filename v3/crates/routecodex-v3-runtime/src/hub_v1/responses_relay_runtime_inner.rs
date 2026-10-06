@@ -312,6 +312,7 @@ pub(super) async fn execute_v3_responses_relay_runtime_resident<T: ResponsesTran
                     observability_accumulator: observability_accumulator
                         .with_additional_attempts(provider_send_attempts),
                     request_execution_control,
+                    request_entry_origin: crate::kernel::V3DirectEntryOrigin::DirectRelayHandoff,
                 }),
                 request_finalizer: None,
             });
