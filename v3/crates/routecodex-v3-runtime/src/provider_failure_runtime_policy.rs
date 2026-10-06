@@ -6,11 +6,12 @@ use routecodex_v3_config::{
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
     build_v3_error_02_classified_from_v3_error_01,
-    build_v3_provider_failure_action_from_v3_error_02, build_v3_provider_global_failure_policy,
-    is_v3_provider_pool_exhausted, V3Error01SourceRaised, V3Error05ExecutionDecision,
-    V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected, V3ErrorActionScope,
-    V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3ExternalErrorKind,
-    V3ExternalErrorLink, V3ProviderFailureSessionScope, V3ProviderHealthScope,
+    build_v3_provider_failure_action_from_v3_error_02,
+    build_v3_provider_global_error_fingerprint_from_classified,
+    build_v3_provider_global_failure_policy, is_v3_provider_pool_exhausted, V3Error01SourceRaised,
+    V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected,
+    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
+    V3ExternalErrorKind, V3ExternalErrorLink, V3ProviderFailureSessionScope, V3ProviderHealthScope,
 };
 use routecodex_v3_provider_responses::{
     adaptive_concurrency::{V3AdaptiveConcurrencyController, V3AdaptiveConcurrencyLease},
@@ -110,12 +111,9 @@ pub async fn probe_v3_provider_global_target(
     probe_v3_provider_global_target_impl(target).await
 }
 
-/// internal.toml 全局错误策略表的落地点。可恢复类 provider failure 必须连续
-/// 三次同类失败才进入 provider/key/model 冷却：单次可恢复错误不得排除一个
-/// provider（单 provider 配置下那正是路由池耗尽的根因）。typed irrecoverable
-/// 账户/计费类仍首次即冷却。阈值取自 `internal.toml` `[error_handling]` 的
-/// 声明值，不在代码内硬编码；冷却与探测时长由 provider health 的共享动态阶梯
-/// 决定；真实成功或成功 probe 清零，失败 probe 继续推进阶梯。
+/// internal.toml 全局错误策略表的落地点：可恢复类必须连续三次同样失败才冷却
+/// （单次可恢复错误不得排除 provider），typed irrecoverable 账户/计费类首次即
+/// 冷却；阈值取自 `[error_handling]` 声明值，不在代码内硬编码。
 pub(crate) fn apply_v3_internal_provider_failure_policy(
     mut action: V3ProviderFailureAction,
     source_stage: &str,
@@ -714,6 +712,7 @@ impl V3ProviderFailureRuntimeHealth {
                 auth_alias,
                 model_id,
                 reason,
+                None,
                 now_ms,
                 Some(V3ProviderFailurePolicy {
                     failure_threshold: u32::MAX,
@@ -773,6 +772,9 @@ impl V3ProviderFailureRuntimeHealth {
                     auth_alias,
                     model_id,
                     reason,
+                    build_v3_provider_global_error_fingerprint_from_classified(&classified)
+                        .ok()
+                        .flatten(),
                     now_ms,
                     Some(policy),
                 )

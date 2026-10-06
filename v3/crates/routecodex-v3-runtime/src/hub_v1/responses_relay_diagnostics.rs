@@ -213,10 +213,13 @@ fn provider_terminal_without_visible_output_error(
     let projected_reason = choices
         .iter()
         .find_map(|choice| choice.get("finish_reason").and_then(Value::as_str));
-    // 输出上限截断是合法的部分输出：上游 Responses 参考以 status=incomplete +
-    // incomplete_details.reason=max_output_tokens 表示，客户端投影已按此实现。
-    // 因此截断响应必须走 incomplete 投影，不得进入 provider 失败/冷却/切换路径。
-    if projected_reason.is_some_and(openai_chat_finish_reason_is_output_cap)
+    // 合法终态豁免必须与 responses_openai_chat_conversion 的投影共用唯一 owner：
+    // 输出上限截断（上游 Responses 参考以 status=incomplete +
+    // incomplete_details.reason=max_output_tokens 表示）与 provider 自己的
+    // content_filter 都是合法终态，客户端投影已按此实现。两者都必须走 incomplete
+    // 投影，不得进入 provider 失败/冷却/切换路径；content_filter 的空内容响应
+    // 由 provider 过滤器决定，不是 RouteCodex 可裁决的 provider 失败。
+    if projected_reason.is_some_and(openai_chat_finish_reason_is_admitted_terminal)
         || provider_payload_has_valid_model_output(payload)
     {
         return None;

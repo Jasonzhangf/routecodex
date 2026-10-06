@@ -259,6 +259,7 @@ fn model_success_resets_auth_key_consecutive_failures() {
                 Some("key-a"),
                 Some("model-a"),
                 Some("provider_error"),
+                None,
                 now_ms,
                 Some(policy),
             )
@@ -274,6 +275,7 @@ fn model_success_resets_auth_key_consecutive_failures() {
             Some("key-a"),
             Some("model-a"),
             Some("provider_error"),
+            None,
             4,
             Some(policy),
         )
@@ -339,6 +341,7 @@ fn long_policy_probe_is_capped_at_thirty_minutes() {
     let store = V3ProviderHealthStore::default();
     let action = V3ProviderFailureAction {
         class_code: "provider_http_503".to_string(),
+        failure_fingerprint: None,
         recovery: V3ProviderRecoveryKind::RecoverableCounted,
         scope: V3ProviderHealthScope::GlobalProviderKey,
         score_delta_milli: -5,

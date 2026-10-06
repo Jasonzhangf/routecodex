@@ -21,6 +21,12 @@ pub enum V3ProviderHealthScope {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct V3ProviderFailureAction {
     pub class_code: String,
+    /// Typed identity of this failure. Provider health counts a consecutive
+    /// failure streak only for repeated failures of the same fingerprint, so
+    /// three *different* recoverable errors never add up to a cooldown.
+    /// `None` means the failure carries no typed fingerprint and only
+    /// `class_code` identifies it.
+    pub failure_fingerprint: Option<V3ProviderErrorFingerprint>,
     pub recovery: V3ProviderRecoveryKind,
     pub scope: V3ProviderHealthScope,
     pub score_delta_milli: i32,
@@ -35,6 +41,7 @@ impl V3ProviderFailureAction {
     pub fn recoverable(class_code: &str) -> Self {
         Self {
             class_code: class_code.to_string(),
+            failure_fingerprint: None,
             recovery: V3ProviderRecoveryKind::RecoverableCounted,
             scope: V3ProviderHealthScope::GlobalProviderKey,
             score_delta_milli: -5,
@@ -57,6 +64,7 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
     if classified.source.source_kind != V3ErrorSourceKind::ProviderFailure {
         return V3ProviderFailureAction {
             class_code: classified.class.to_string(),
+            failure_fingerprint: None,
             recovery: V3ProviderRecoveryKind::NotProviderHealth,
             scope: V3ProviderHealthScope::None,
             score_delta_milli: 0,
@@ -70,6 +78,10 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
         .external_error
         .as_ref()
         .and_then(|error| error.status);
+    let failure_fingerprint =
+        build_v3_provider_global_error_fingerprint_from_classified(classified)
+            .ok()
+            .flatten();
     // 统一错误模型：不再按状态码豁免——瞬态重试来源与 400/4xx 同样计入
     // 全局健康。可恢复类必须连续三次同类失败才进入共享冷却，避免单个 provider
     // 因一次可恢复错误被排除而耗尽路由池；账户/计费类仍按 typed irrecoverable
@@ -80,6 +92,7 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
         let cooldown_ms = 5_000;
         return V3ProviderFailureAction {
             class_code: classified.source.code.clone(),
+            failure_fingerprint,
             recovery: V3ProviderRecoveryKind::IrrecoverableGlobalCooldown,
             scope: V3ProviderHealthScope::GlobalProviderKey,
             score_delta_milli: -20,
@@ -89,6 +102,7 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
         };
     }
     let mut action = V3ProviderFailureAction::recoverable(&classified.source.code);
+    action.failure_fingerprint = failure_fingerprint;
     if let Some(status) = status {
         if let Some(policy) = build_v3_provider_global_failure_policy(status) {
             action.failure_threshold = policy.failure_threshold;
@@ -114,7 +128,7 @@ fn is_irrecoverable_provider_failure_code(code: &str) -> bool {
     .any(|marker| normalized == *marker || normalized.contains(marker))
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct V3ProviderErrorFingerprint {
     pub reason_code: String,
     pub provider_code: String,

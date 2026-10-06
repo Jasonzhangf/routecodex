@@ -1090,6 +1090,7 @@ fn direct_protocol_plan_uses_session_bound_cooldown_before_initial_target() {
                 Some("key"),
                 Some("test"),
                 Some("controlled protocol plan cooldown"),
+                None,
                 now + offset,
                 Some(V3ProviderFailurePolicy {
                     failure_threshold: 3,

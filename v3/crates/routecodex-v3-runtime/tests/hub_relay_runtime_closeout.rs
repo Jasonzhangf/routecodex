@@ -131,6 +131,65 @@ impl ResponsesTransport for SingleJsonCaptureTransport {
     }
 }
 
+/// A Chat-wire provider that reports its own `content_filter` terminal with no
+/// visible model output at all. `content_filter` is the provider's own filter
+/// having done its job, so the terminal is business data: the Responses relay
+/// must forward it as `incomplete` instead of judging an empty-visible-output
+/// provider failure and switching away.
+struct OpenAiChatContentFilterTransport {
+    provider_ids: Mutex<Vec<String>>,
+    stream: bool,
+}
+
+#[async_trait]
+impl ResponsesTransport for OpenAiChatContentFilterTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let provider_id = request.provider_id().to_string();
+        self.provider_ids.lock().unwrap().push(provider_id.clone());
+        if self.stream {
+            let stream = futures_util::stream::iter([
+                Ok(b"data: {\"id\":\"chatcmpl_content_filter\",\"object\":\"chat.completion.chunk\",\"model\":\"chat-wire-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n".to_vec()),
+                Ok(b"data: {\"id\":\"chatcmpl_content_filter\",\"object\":\"chat.completion.chunk\",\"model\":\"chat-wire-model\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"content_filter\"}]}\n\n".to_vec()),
+                Ok(b"data: [DONE]\n\n".to_vec()),
+            ]);
+            return Ok(V3ProviderResp14Raw::from_sse(
+                request.request_id().to_string(),
+                provider_id,
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"text/event-stream".to_vec(),
+                }],
+                Box::pin(stream),
+            ));
+        }
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            provider_id,
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            serde_json::to_vec(&json!({
+                "id":"chatcmpl_content_filter",
+                "object":"chat.completion",
+                "model":"chat-wire-model",
+                "choices":[{
+                    "index":0,
+                    "message":{"role":"assistant","content":""},
+                    "finish_reason":"content_filter"
+                }],
+                "usage":{"prompt_tokens":10,"completion_tokens":0,"total_tokens":10}
+            }))
+            .unwrap(),
+        ))
+    }
+}
+
 #[tokio::test]
 async fn controlled_json_and_sse_e2e_use_fixed_topology_and_one_response_exit() {
     let transport = JsonThenSseTransport {
@@ -1785,6 +1844,128 @@ async fn responses_relay_output_cap_incomplete_commits_partial_output_without_re
         body.to_string().contains("capped-partial-output"),
         "truncated partial output must reach the client: {body}"
     );
+}
+
+#[tokio::test]
+async fn responses_relay_openai_chat_empty_content_filter_json_terminal_is_forwarded_without_reselect(
+) {
+    let transport = OpenAiChatContentFilterTransport {
+        provider_ids: Mutex::new(Vec::new()),
+        stream: false,
+    };
+    let output = execute_v3_responses_relay_runtime(
+        &openai_chat_target_manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-openai-chat-empty-content-filter-json".into(),
+            payload: json!({
+                "model":"gpt-5.5",
+                "stream":false,
+                "input":[{
+                    "type":"message",
+                    "role":"user",
+                    "content":[{"type":"input_text","text":"provider content filter terminal"}]
+                }]
+            }),
+        },
+        &transport,
+    )
+    .await
+    .expect("a content_filter terminal without visible output is legal provider business data");
+
+    // The provider's own content filter produced an empty terminal on purpose.
+    // RouteCodex must not judge that empty visible output as a provider failure:
+    // exactly one candidate is attempted and the terminal is forwarded.
+    assert_eq!(
+        transport.provider_ids.lock().unwrap().as_slice(),
+        ["chat"],
+        "an admitted empty-content content_filter terminal must not reselect"
+    );
+    assert_eq!(output.status, 200, "{output:?}");
+    assert!(output.error_chain.is_none(), "{output:?}");
+    assert!(
+        !output.node_trace.contains(&"V3TargetLocalReselected"),
+        "content_filter terminal must not reselect: {:?}",
+        output.node_trace
+    );
+    let body = match output.client_body {
+        V3ResponsesRelayClientBody::Json(value) => value,
+        V3ResponsesRelayClientBody::Sse(_) => panic!("expected JSON client body"),
+    };
+    assert_eq!(body["status"], "incomplete", "{body}");
+    assert_eq!(
+        body["incomplete_details"]["reason"], "content_filter",
+        "{body}"
+    );
+    assert_eq!(
+        body["output"].as_array().map(Vec::len),
+        Some(0),
+        "the provider's empty output is forwarded as-is: {body}"
+    );
+}
+
+#[tokio::test]
+async fn responses_relay_openai_chat_empty_content_filter_sse_terminal_is_forwarded_without_reselect(
+) {
+    let transport = OpenAiChatContentFilterTransport {
+        provider_ids: Mutex::new(Vec::new()),
+        stream: true,
+    };
+    let output = execute_v3_responses_relay_runtime(
+        &openai_chat_target_manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-openai-chat-empty-content-filter-sse".into(),
+            payload: json!({
+                "model":"gpt-5.5",
+                "stream":true,
+                "input":[{
+                    "type":"message",
+                    "role":"user",
+                    "content":[{"type":"input_text","text":"provider content filter terminal"}]
+                }]
+            }),
+        },
+        &transport,
+    )
+    .await
+    .expect("a streamed content_filter terminal without visible output is legal business data");
+
+    assert_eq!(
+        transport.provider_ids.lock().unwrap().as_slice(),
+        ["chat"],
+        "an admitted empty-content content_filter stream must not reselect"
+    );
+    assert_eq!(output.status, 200, "{output:?}");
+    assert!(output.error_chain.is_none(), "{output:?}");
+    assert!(
+        !output.node_trace.contains(&"V3TargetLocalReselected"),
+        "content_filter terminal must not reselect: {:?}",
+        output.node_trace
+    );
+    let V3ResponsesRelayClientBody::Sse(mut stream) = output.client_body else {
+        panic!("expected Responses SSE client body");
+    };
+    let mut forwarded = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        forwarded.extend(chunk);
+    }
+    let text = String::from_utf8(forwarded).unwrap();
+    assert!(text.contains("event: response.incomplete"), "{text}");
+    assert!(text.contains("\"reason\":\"content_filter\""), "{text}");
+    assert!(!text.contains("provider_empty_visible_output"), "{text}");
 }
 
 #[tokio::test]
