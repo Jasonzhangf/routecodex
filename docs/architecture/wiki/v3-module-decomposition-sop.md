@@ -1,6 +1,15 @@
 # V3 Module Decomposition SOP（巨型文件拆解标准作业程序）
 
 Status: partial execution; scoped changes recorded below.
+Scoped split (2026-10-06): `hub_v1/anthropic_relay_runtime_helpers.rs` also owns the four
+post-response helpers moved out of `hub_v1/anthropic_relay_runtime.rs`
+(`anthropic_relay_client_headers_as_provider_request_headers`,
+`publish_anthropic_successful_attempt_view`,
+`record_provider_success_after_response_governance`,
+`anthropic_provider_stream_failure_from_closeout_error`). The main file was 1506 lines
+after the REQ02 branch combined with main PR #349 and is now 1414; the companion is 692.
+The helpers stay private to the same module because the companion is spliced with
+`include!`, so function bodies, visibility and every caller path are preserved verbatim.
 Scoped split (2026-10-05): `kernel/direct_request_scope.rs` also owns
 `canonical_body_from_captured`, the single call that replaces the raw standardized
 body with the REQ02 canonical request. Kernel keeps request lifecycle orchestration
