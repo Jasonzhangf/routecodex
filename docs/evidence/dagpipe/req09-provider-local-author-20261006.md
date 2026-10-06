@@ -5,6 +5,65 @@ Scope: the transport construction and typed failure handoff prerequisite in
 REQ09 Operator registration or full pipeline cutover. REQ02/REQ06 remain owned
 by their separate leads; the request node sequence is unchanged.
 
+## Current author acceptance: 2026-10-06
+
+This section supersedes the older artifact and runtime receipt below. The
+behavioral code candidate is `41696142610b76d365bc73c9c89653d04c105a97`, composed
+with latest `origin/main d8a609335ad35e0913bace2b4409037b09ad3573`. This subsequent
+receipt edit changes documentation only; compare it to that candidate before
+reusing its tests and installed artifact.
+
+- The Relay attempt witness fix, common terminal diagnostic calls, removal of
+  obsolete `Option<Response>` diagnostic coupling and physical owner split are
+  integrated in the behavioral candidate. The common evidence owner is
+  `terminal_error_evidence.rs`; the boxed dispatch adapter is in `executors.rs`.
+  Neither owns Provider selection, health, client response or disposition.
+- `RUN/parent-diagnostic-split-host-r50.log/.exit`: Server lib188 plus three real
+  HTTP targets4, all192 PASS, exit0. These cover the four Relay protocols,
+  received-HTTP-to-local-failure transitions, same-request Error01-Error06
+  evidence, no-response closeout and a real optional Debug filesystem failure.
+- `RUN/parent-diagnostic-split-ws-r51.log/.exit`:2 public WebSocket cases PASS.
+  `RUN/parent-diagnostic-split-ws-r52.log/.exit`: standard inbound WebSocket
+  target13 PASS. All207 author cases used the behavioral candidate's unchanged
+  Rust source; subsequent changes before checkpoint were map/lock/view metadata.
+- The existing source-only reverse diagnostic test remains
+  `RUN/parent-relay-diagnostic-reverse-r43.log/.exit`: the fixed consumer failed
+  when only the diagnostic source increment was reversed, then source restore
+  succeeded. The public fixture asserts the actual `error_chain` field in order,
+  rather than mistaking execution `node_trace` for the independent Error chain.
+- `RUN/parent-diagnostic-architecture-r55.log/.exit` has42/43 passing sub-gates.
+  Its sole failure was the affected raw-evidence audit lock/view. The scoped
+  already-authorized refresh was rendered and recompiled; the affected umbrella
+  gate then passed in `RUN/parent-diagnostic-architecture-docs-r61.log/.exit`.
+  The original r55 exit1 is retained, not rewritten as a full-CI exit0.
+- All three existing operation graphs validate. This proves topology, not
+  Operator registration or downstream migration.
+- `RUN/parent-candidate416-build-r63.log/.exit`: canonical full V3 build PASS.
+  `RUN/candidate416-install-r64.sha256`: build/installed CLI both
+  `69f1fb8066a27c116fb7a965f4729c592d130f3344362c8e43d94095bc9fc3e2`;
+  build/installed hooks both
+  `375167ecbe05175ea9ebe8cbb0b61cb9238ab13fda3179444dd6c4fafa4668dd`.
+- `RUN/candidate416-restart-r65.log/.exit`: one official restart of45559/admin45560,
+  accepted through running/completed, exit0. Status is running and health200.
+  Managed exec retains PID49587; its executable inode411283715/device0x1000018
+  matches the newly installed binary. PID continuity is not a stale-image claim.
+- `RUN/gcm-candidate416-gpt55-r2/*.summary.json` and
+  `RUN/gcm-candidate416-gpt56-r2/*.summary.json`: both PASS, child exit0, all eight
+  checks true, bound to the exact behavioral SHA and installed digest above.
+  Each has its own clean same-SHA worktree. Exec, Add/Update patch execution,
+  exact MCP `environment_read` arguments/results, model consumption, complete
+  follow-up history and same-thread raw samples are verified. Preserve each
+  client's actually declared tool identity; do not force a custom declaration
+  when the client executes its patch through its declared executor.
+- The first parallel harness attempts remain FAIL: both had all seven tool and
+  history checks true, but shared a worktree and detected the other run's marker.
+  Separate worktrees fixed the test isolation without modifying the harness,
+  weakening its side-effect assertion, changing source, or restarting again.
+
+Final independent architecture review, remote integration and production
+acceptance remain pending. This receipt does not mark any additional node
+delivered. Author stage conclusions and exact receipts are in `RUN/notes.md`.
+
 ## Candidate and provenance
 
 - Tested code commit: `10ff3c49e18d33680b08a35d160a2d92c030eade`.
