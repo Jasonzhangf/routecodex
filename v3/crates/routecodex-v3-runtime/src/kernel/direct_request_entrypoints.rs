@@ -1,6 +1,13 @@
 // Request-scope entry and guard transfer for the resident Direct kernel.
 // Included by kernel.rs; no routing, payload projection, or response decision.
 
+// Public kernel facade for the provider transport contract consumed by the
+// Runtime SDK entries below and by the REQ02 Direct integration consumers.
+pub use routecodex_v3_provider_responses::{
+    ResponsesTransport, V3ProviderError, V3ProviderResp14Raw, V3ProviderResponseHeader,
+    V3Transport13ResponsesHttpRequest,
+};
+
 async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport + ?Sized>(
     mut state: V3ResponsesDirectRuntimeCoreState,
     manifest: &V3Config05ManifestPublished,
