@@ -666,7 +666,10 @@ pub fn push_sse_response_chain_trace(trace: &mut Vec<&'static str>) {
 /// Error06 投影输出（共享版；返回 (projected, trace)，runtime 组装自身 Output）。
 pub(crate) fn project_unscoped_provider_failure(
     source: routecodex_v3_error::V3Error01SourceRaised,
-) -> (V3Error06ClientProjected, routecodex_v3_error::V3ProviderTerminalDisposition) {
+) -> (
+    V3Error06ClientProjected,
+    routecodex_v3_error::V3ProviderTerminalDisposition,
+) {
     // Public final-error adapters have no selected attempt or candidates. The
     // attempt loop must consume failures with real availability before this edge.
     let decision = V3ErrorHandlingCenter::decide_provider(
@@ -684,7 +687,10 @@ pub(crate) fn project_unscoped_provider_failure(
         .try_into_terminal()
         .expect("unscoped final failure has no candidate or recovery admission");
     let disposition = V3ErrorHandlingCenter::provider_terminal_disposition(terminal.clone(), None);
-    (V3ErrorHandlingCenter::project_terminal_decision(terminal), disposition)
+    (
+        V3ErrorHandlingCenter::project_terminal_decision(terminal),
+        disposition,
+    )
 }
 
 pub fn error_output(
