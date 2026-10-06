@@ -883,7 +883,7 @@ function functionPatchIdentity(argumentsValue) {
     : null;
 }
 
-function findPatchCalls(historyEntries, rawPatch) {
+function findPatchCalls(historyEntries, rawPatch, allowExecPatch) {
   const expected = normalizePatchText(rawPatch);
   const calls = [];
   for (const entry of historyEntries) {
@@ -922,6 +922,29 @@ function findPatchCalls(historyEntries, rawPatch) {
           argument_form: functionIdentity.form,
           call_id: node.call_id || null,
         });
+        return;
+      }
+      if (allowExecPatch && node.type === "function_call" && node.name === "exec_command") {
+        let args;
+        try {
+          args = typeof node.arguments === "string" ? JSON.parse(node.arguments) : node.arguments;
+        } catch {
+          return;
+        }
+        const heredoc = typeof args?.cmd === "string"
+          ? /^apply_patch <<(['"]?)([A-Za-z0-9_]+)\1\n([\s\S]+)\n\2$/.exec(args.cmd)
+          : null;
+        if (heredoc && normalizePatchText(heredoc[3]) === expected) {
+          calls.push({
+            request_id: entry.request_id,
+            file: entry.file,
+            location,
+            type: node.type,
+            name: node.name,
+            argument_form: "exec_heredoc",
+            call_id: node.call_id || null,
+          });
+        }
       }
     });
   }
@@ -937,7 +960,15 @@ function jsonContainsScalar(value, expected) {
       try {
         return jsonContainsScalar(JSON.parse(value), expected);
       } catch {
-        return false;
+        const envelope = /^Wall time: [^\n]+\nOutput:\n/.exec(value);
+        if (!envelope) {
+          return false;
+        }
+        try {
+          return jsonContainsScalar(JSON.parse(value.slice(envelope[0].length)), expected);
+        } catch {
+          return false;
+        }
       }
     }
   } else if (typeof expected === "number") {
@@ -983,8 +1014,15 @@ function validateBoundHistory(sampleBinding, addPatch, updatePatch, mcpCheck) {
   const responseEntries = history.entries.filter((entry) =>
     RESPONSE_HISTORY_FILES.has(entry.file),
   );
-  const addCalls = findPatchCalls(history.entries, addPatch);
-  const updateCalls = findPatchCalls(history.entries, updatePatch);
+  const firstRequest = requestEntries[0] || null;
+  let declaresNativePatch = false;
+  walkJson(firstRequest?.value.tools ?? [], (node) => {
+    if (node?.name === PATCH_TOOL_NAME && ["function", "custom"].includes(node.type)) {
+      declaresNativePatch = true;
+    }
+  });
+  const addCalls = findPatchCalls(history.entries, addPatch, !declaresNativePatch);
+  const updateCalls = findPatchCalls(history.entries, updatePatch, !declaresNativePatch);
   const addIdentity = addCalls[0]
     ? { type: addCalls[0].type, name: addCalls[0].name }
     : null;
@@ -997,10 +1035,38 @@ function validateBoundHistory(sampleBinding, addPatch, updatePatch, mcpCheck) {
     addIdentity.type === updateIdentity.type &&
     addIdentity.name === updateIdentity.name;
   const observations = mcpCheck.structured_observations || [];
-  const firstRequest = requestEntries[0] || null;
-  const observationRequest = requestEntries.find((entry) =>
-    observations.every((observation) => jsonContainsScalar(entry.value, observation.value)),
-  );
+  const observationRequest = requestEntries.find((entry) => {
+    if (!firstRequest || entry.mtime_ms <= firstRequest.mtime_ms || !Array.isArray(entry.value.input)) {
+      return false;
+    }
+    return entry.value.input.some((call) => {
+      if (call.type !== "function_call") {
+        return false;
+      }
+      const callIdentityMatches =
+        (call.namespace === `mcp__${mcpCheck.server}` && call.name === mcpCheck.tool) ||
+        (!call.namespace && call.name === `mcp__${mcpCheck.server}__${mcpCheck.tool}`);
+      if (!callIdentityMatches) {
+        return false;
+      }
+      let args;
+      try {
+        args = typeof call.arguments === "string" ? JSON.parse(call.arguments) : call.arguments;
+      } catch {
+        return false;
+      }
+      if (!isDeepStrictEqual(args, mcpCheck.arguments)) {
+        return false;
+      }
+      const output = entry.value.input.find(
+        (item) => item.type === "function_call_output" && item.call_id === call.call_id,
+      );
+      return (
+        output &&
+        observations.every((observation) => jsonContainsScalar(output.output, observation.value))
+      );
+    });
+  });
   const subsequentRequest =
     firstRequest &&
     observationRequest &&
