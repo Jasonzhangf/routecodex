@@ -108,9 +108,6 @@ fn normalize_openai_chat_messages_payload_with_hosted_history(
             message_row,
         );
         consume_routecodex_chat_extension_for_openai_chat_provider(message_row);
-        if responses_message_shape {
-            project_openai_chat_provider_message_shape(message_row);
-        }
         // Map `developer` role to `system` for OpenAI Chat provider wire
         // compatibility. Many third-party Chat Completions providers (e.g.
         // xmcc2) reject `developer` role with HTTP 400, accepting only
@@ -123,17 +120,24 @@ fn normalize_openai_chat_messages_payload_with_hosted_history(
         {
             message_row.insert("role".to_string(), Value::String("system".to_string()));
         }
-        let Some(content) = message_row.get_mut("content") else {
-            continue;
-        };
-        if let Value::Array(parts) = content {
-            let normalized_parts = parts
-                .iter()
-                .map(request_outbound_openai_chat_content_part::normalize_openai_chat_message_content_part)
-                .collect::<Result<Vec<_>, String>>()?;
-            *content = Value::Array(normalized_parts);
+        if let Some(content) = message_row.get_mut("content") {
+            if let Value::Array(parts) = content {
+                let normalized_parts = parts
+                    .iter()
+                    .map(request_outbound_openai_chat_content_part::normalize_openai_chat_message_content_part)
+                    .collect::<Result<Vec<_>, String>>()?;
+                *content = Value::Array(normalized_parts);
+            }
+        }
+        // The provider-shape projection runs after content-part normalization:
+        // a source-specific part type (`output_text` on a Responses entry) only
+        // becomes the Chat `text` part here, so collapsing before this point
+        // would keep a text-only part array on the wire for those entries.
+        if responses_message_shape {
+            project_openai_chat_provider_message_shape(message_row);
         }
     }
+    fold_openai_chat_assistant_text_into_pending_tool_turn(messages);
     project_openai_chat_provider_tools_for_web_search_mode_recording(
         &mut normalized,
         model_id,
@@ -189,6 +193,103 @@ fn expand_openai_chat_hosted_history_messages(
         output.push(message);
     }
     *messages = output;
+}
+
+/// Fold the assistant text of a tool-call turn onto the pending assistant
+/// tool-call message.
+///
+/// The canonical Responses history keeps the source item order, so an assistant
+/// text item can sit between a `function_call` item and its
+/// `function_call_output` item. The OpenAI Chat wire keeps one assistant
+/// message per tool-call turn and requires the tool result to follow that
+/// message directly, so that text belongs on the pending assistant tool-call
+/// message. A message that carries any field other than `role` and `content`
+/// stays its own message, so no payload is dropped for an unrepresentable turn.
+fn fold_openai_chat_assistant_text_into_pending_tool_turn(messages: &mut Vec<Value>) {
+    let mut pending_tool_turn: Option<usize> = None;
+    let mut folded = Vec::new();
+    for index in 0..messages.len() {
+        let Some(row) = messages[index].as_object() else {
+            pending_tool_turn = None;
+            continue;
+        };
+        let role = row.get("role").and_then(Value::as_str).unwrap_or_default();
+        if role.eq_ignore_ascii_case("tool") || !role.eq_ignore_ascii_case("assistant") {
+            pending_tool_turn = None;
+            continue;
+        }
+        if row
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .is_some_and(|tool_calls| !tool_calls.is_empty())
+        {
+            pending_tool_turn = Some(index);
+            continue;
+        }
+        let Some(target_index) = pending_tool_turn else {
+            continue;
+        };
+        if row.keys().any(|key| key != "role" && key != "content") {
+            continue;
+        }
+        let source_content = row.get("content").cloned().unwrap_or(Value::Null);
+        if !openai_chat_content_is_empty(&source_content) {
+            if let Some(target) = messages[target_index].as_object_mut() {
+                merge_openai_chat_turn_content(target, &source_content);
+            }
+        }
+        folded.push(index);
+    }
+    for index in folded.into_iter().rev() {
+        messages.remove(index);
+    }
+}
+
+fn merge_openai_chat_turn_content(target: &mut Map<String, Value>, source: &Value) {
+    if openai_chat_content_is_empty(source) {
+        return;
+    }
+    let Some(existing) = target.get_mut("content") else {
+        target.insert("content".to_string(), source.clone());
+        return;
+    };
+    if openai_chat_content_is_empty(existing) {
+        *existing = source.clone();
+        return;
+    }
+    match (existing, source) {
+        (Value::String(existing_text), Value::String(source_text)) => {
+            if !existing_text.trim().is_empty() && !source_text.trim().is_empty() {
+                existing_text.push('\n');
+            }
+            existing_text.push_str(source_text);
+        }
+        (existing_value, source_value) => {
+            let mut parts = openai_chat_content_parts(existing_value);
+            parts.extend(openai_chat_content_parts(source_value));
+            *existing_value = Value::Array(parts);
+        }
+    }
+}
+
+fn openai_chat_content_is_empty(content: &Value) -> bool {
+    match content {
+        Value::Null => true,
+        Value::String(text) => text.trim().is_empty(),
+        Value::Array(parts) => parts.is_empty(),
+        _ => false,
+    }
+}
+
+fn openai_chat_content_parts(content: &Value) -> Vec<Value> {
+    match content {
+        Value::Array(parts) => parts.clone(),
+        Value::String(text) if !text.trim().is_empty() => {
+            vec![json!({"type": "text", "text": text})]
+        }
+        Value::Null => Vec::new(),
+        other => vec![other.clone()],
+    }
 }
 
 /// Project a canonical history message into the OpenAI Chat provider shape.

@@ -118,12 +118,17 @@ pub fn project_canonical_request(
         }
         crate::hub_v1::V3HubExecutionMode::Relay => match provider_protocol {
             V3HubProviderWireProtocol::OpenAiChat => {
+                // The gpt-family decision basis is the client-requested model
+                // name (canonical `model`), not the routed provider manifest
+                // model. Hosted `web_search` keeps its standard
+                // `web_search_options` projection only for that family.
+                let canonical_model = canonical.get("model").and_then(Value::as_str);
                 let (payload, drops, declarations) = crate::hub_v1::
                     build_v3_openai_chat_standard_request_from_chat_canonical_for_selected_with_declarations(
                         canonical,
                         inverse,
                         current,
-                        Some(selected.model_id.as_str()),
+                        canonical_model,
                         selected.web_search_execution_mode,
                         has_web_search,
                     )?;

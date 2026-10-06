@@ -58,13 +58,15 @@ impl V3AnthropicResponsesProjectionContext {
         let mut successful_attempt_tool_identities = BTreeMap::new();
 
         for mapping in &view.attempt().declarations.tool_mappings {
-            let emitted_name =
-                mapping
-                    .emitted_name
-                    .as_deref()
-                    .ok_or(V3AnthropicCodecError::MalformedField {
-                        field: "attempt_declaration.emitted_name",
-                    })?;
+            // This map is keyed by the emitted declaration name, so it indexes
+            // only nameable declarations. A hosted/builtin declaration (a
+            // Responses `tool_search` or `web_search`, a Gemini `googleSearch`)
+            // is emitted without a function name and can never be named by a
+            // provider tool call; it stays in the attempt declaration map for
+            // its own consumers.
+            let Some(emitted_name) = mapping.emitted_name.as_deref() else {
+                continue;
+            };
             let declaration = inverse
                 .tool_declarations
                 .iter()
