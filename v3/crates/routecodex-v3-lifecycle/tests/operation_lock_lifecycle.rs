@@ -192,7 +192,8 @@ fn wait_for_process_group_exit(pid: u32) {
         // A timed-out public start drops its Child handle on the S12 baseline.
         // Reap only this fixture's exact direct child after the final group signal.
         // Orphaned fixture children belong to the OS reaper (ECHILD).
-        let reaped = unsafe { libc::waitpid(pid as libc::pid_t, std::ptr::null_mut(), libc::WNOHANG) };
+        let reaped =
+            unsafe { libc::waitpid(pid as libc::pid_t, std::ptr::null_mut(), libc::WNOHANG) };
         if reaped == pid as libc::pid_t {
             return;
         }
