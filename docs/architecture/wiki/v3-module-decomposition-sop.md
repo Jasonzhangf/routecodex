@@ -1,6 +1,22 @@
 # V3 Module Decomposition SOP（巨型文件拆解标准作业程序）
 
 Status: partial execution; scoped changes recorded below.
+Scoped split (2026-10-06): `hub_v1/anthropic_codec/responses_tool_projection.rs` owns the
+Responses tool-declaration and tool-choice projection cluster moved out of
+`hub_v1/anthropic_codec/responses_to_anthropic.rs`
+(`responses_tools_for_anthropic_wire`, `responses_tool_as_anthropic_tool`,
+`responses_custom_tool_as_anthropic_compatibility_tool`,
+`responses_web_search_tool_as_anthropic_tool`,
+`responses_tool_choice_as_anthropic_tool_choice`). The main file sat exactly on the 1500-line
+gate, and the rustfmt normalization pass pushed it to 1501; it is now 1217 and the companion is
+290. The companion is a real module declared with `mod responses_tool_projection;` plus
+`use responses_tool_projection::{...}` from `anthropic_codec.rs`, the same pattern the sibling
+companions in that directory use, so the moved body needs only `use super::*;` and the
+`pub(crate) use` re-export keeps `request_outbound_format.rs` and
+`tool_declaration_projection.rs` on their existing paths. The move is region-verbatim apart from
+the companion header, a `#[cfg(test)]` import for the two names only the main file's test module
+uses, and one redundant blank separator at EOF; function bodies, visibility, node order and
+protocol behavior are unchanged.
 Scoped split (2026-10-06): `operation_runner/operators/field_operator_records.rs` also owns
 `RequestNormalizer::extension_value`, moved verbatim out of
 `operation_runner/operators/field_operator_library.rs`, which is the one production file
