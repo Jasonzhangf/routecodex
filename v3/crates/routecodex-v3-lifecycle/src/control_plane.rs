@@ -342,9 +342,8 @@ pub(crate) async fn run_managed_control_loop(
     #[cfg(not(unix))]
     let mut ctrl_c = Box::pin(tokio::signal::ctrl_c());
     #[cfg(unix)]
-    let ephemeral_config_path = std::env::var("ROUTECODEX_V3_MANAGED_CHILD_EPHEMERAL_CONFIG")
-        .ok()
-        .map(PathBuf::from);
+    let ephemeral_config_path = managed_config_is_ephemeral(Path::new(&declaration.config_path))
+        .then(|| PathBuf::from(&declaration.config_path));
     #[cfg(unix)]
     let orphan_watchdog = async {
         let Some(config_path) = ephemeral_config_path else {

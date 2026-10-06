@@ -45,7 +45,6 @@ const DEFAULT_START_FORCE_KILL_TIMEOUT: Duration = Duration::from_secs(3);
 const RESTART_PLAN_FILE: &str = "restart.plan.json";
 const FRONT_HANDOFF_FILE: &str = "front-handoff.json";
 const PROVIDER_HANDOFF_FILE: &str = "provider-handoff.json";
-const MANAGED_EPHEMERAL_CONFIG_ENV: &str = "ROUTECODEX_V3_MANAGED_CHILD_EPHEMERAL_CONFIG";
 
 #[derive(Debug, Error)]
 pub enum V3LifecycleError {
@@ -515,9 +514,6 @@ impl V3ManagedLifecycle {
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::from(stderr))
             .process_group(0);
-        if managed_config_is_ephemeral(Path::new(&declaration.config_path)) {
-            command.env(MANAGED_EPHEMERAL_CONFIG_ENV, &declaration.config_path);
-        }
         let child = command.spawn()?;
         let deadline = tokio::time::Instant::now() + timeout;
         loop {
