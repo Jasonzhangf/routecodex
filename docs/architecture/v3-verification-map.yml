@@ -1188,10 +1188,10 @@ features:
   - Provider HTTP transport rejects text/event-stream raw responses for JSON-intent requests instead of silently switching provider response kind
   - Provider transport dispatches by selected provider_type; Anthropic targets use /v1/messages, x-api-key, anthropic-version, Anthropic wire, and Responses client projection
   - Provider errors stay typed for missing auth, HTTP status, transport failure, malformed SSE, and client disconnect
-  - 'Adaptive provider concurrency is keyed by providerId plus authAlias: every health-selected business candidate gets an immediate tracking lease and is sent even when in-flight work meets or exceeds the adaptive budget'
-  - 'Configured maxInFlight is a soft adaptive signal for business requests and never blocks, skips, or switches candidates; scheduled probes remain separately bounded'
-  - 'Direct and Relay do not exclude candidates because of concurrency; only an actual typed provider response such as HTTP 429 may enter Error recovery and select another provider'
-  - 'A WebSocketV2 request waiting for a shared provider session slot holds no provider concurrency lease; it reacquires the lease after slot ownership and releases the slot before retrying a losing admission race'
+  - 'Adaptive provider concurrency is keyed by providerId plus authAlias: admission is atomic and a full candidate is skipped immediately for this request'
+  - 'Configured maxInFlight bounds business admission without queuing; Direct and Relay select the next eligible candidate and all-full pools exhaust immediately'
+  - 'Concurrency exclusions remain request-local and never mutate provider failure health or cooldown; scheduled probes remain separately bounded'
+  - 'WebSocketV2 preserves a granted lease for an available session slot, releases it before an actual slot wait, and returns typed ConcurrencyBusy on a losing readmission race for Runtime reselect'
   - 'When a cooled preceding-tier candidate already has a rescue probe in flight, selection skips it without waiting and continues to an eligible later tier; probe success can restore it for subsequent requests'
   - 'Direct and global-probe builders for Responses, OpenAI Chat, Anthropic, and Gemini preserve the target-specific acquireTimeoutMs; they do not fall back to the builder default when a typed target is available'
   - A successful ten-minute probe increases the budget, a 429 probe decreases it, and SSE leases release only when the raw stream is dropped or exhausted
@@ -1200,9 +1200,9 @@ features:
   - A Responses selection-time pool exhaustion (every candidate excluded by the context window before any provider attempt) breaks the client transport for both the streaming and the nonstreaming boundary instead of projecting the synthesized 502 `network_error` body, which stays provider-private Error06 evidence
   - A provider terminal disposition records provider-private evidence before the client transport breaks: the real external upstream status, headers, and body are persisted for the failed request, and a terminal with no provider response records that instead of a fabricated status
   required_contract:
-  - Provider concurrency policy is Config-owned: maxInFlight is a soft adaptive signal and acquireTimeoutMs bounds only scheduled probe admission; neither is reconstructed from payload, MetadataCenter, or Debug
-  - Reaching the adaptive concurrency budget never blocks a business request, excludes its selected provider, or advances a route tier
-  - An explicit provider.model request remains pinned; concurrency state cannot exhaust or redirect the pinned request
+  - Provider concurrency policy is Config-owned; maxInFlight bounds business admission and acquireTimeoutMs bounds only scheduled probe admission; neither is reconstructed from payload, MetadataCenter, or Debug
+  - Reaching the adaptive concurrency budget immediately selects another request-eligible candidate without a capacity wait or Router reentry
+  - An explicit provider.model request remains pinned; a full pinned candidate exhausts immediately and cannot escape its pin
   - Only an actual typed provider failure such as HTTP 429 may enter Error recovery and select another provider after transport
   - routecodex-v3-provider-responses remains generic across provider IDs and may branch only by provider_type/protocol, never by deployment provider ID
   - Provider consumes an already selected target and never reads config, Virtual Router, Target interpreter, route groups, or Forwarder resources; only the probe-only Runtime target builder reads the published manifest to construct that target
@@ -2819,8 +2819,10 @@ features:
   - v3-provider-action-gate-51
   required_positive:
   - Responses Relay provider-bound request compatibility and wire encoding failures enter the shared provider failure policy and typed Error05 action lane before retry or reselect.
+  - Terminal provider HTTP errors reach the public `/v1/responses` failure boundary without waiting for provider action admission.
   required_gates:
   - npm run test:v3-provider-action-gate
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test provider_action_gate_contract isolated_terminal_projection_commits_without_waiting_for_provider_action_admission -- --exact --nocapture
   - npm run verify:v3-provider-action-gate
   - npm run test:v3-provider-action-gate-red-fixtures
   - npm run test:v3-provider-session-cooldown
@@ -3101,9 +3103,10 @@ features:
   - matched HTTP 401 and HTTP 403 provider error policies with scope=auth_key record provider+auth_alias failures without model identity and cool the key after the first failure
   - a 401 auth-key cooldown blocks scheduling and session availability for another model under the same provider/auth_alias while sibling keys remain available
   - 401 auth-key business cooldown remains until semantic probe success, while its first recovery probe is due after 5 seconds and later failures advance the shared 5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s ladder
-  - Direct and Relay select the highest-priority health-eligible provider and send it even when its provider+authAlias in-flight count meets or exceeds the adaptive budget
-  - Concurrency state never waits, excludes a candidate, or advances a route tier; a real HTTP 429 response enters Error recovery and can select the next eligible provider without Router reentry
-  - Business tracking leases remain balanced above the adaptive budget and release after completion, error, cancellation, or stream drop; due scheduled probes retain their separate bounded admission
+  - Direct and Relay atomically admit the highest-priority health-and-capacity-eligible provider, immediately skipping full candidates without a capacity wait
+  - Public `/v1/responses` switches to a spare provider while the first provider remains held; all-full pools terminate promptly without an extra upstream request
+  - Concurrency exclusions are request-local and health-neutral; reselect stays inside the captured Target09 candidate set without Router reentry
+  - Business leases remain bounded and release after completion, error, cancellation, or stream drop; due scheduled probes retain their separate bounded admission
   required_negative:
   - stale successful or failed probe generations cannot mutate newer provider health state
   - HTTP 2xx with an error object, malformed JSON, nonterminal status, or missing protocol terminal shape cannot recover a provider
@@ -3111,7 +3114,7 @@ features:
   - zero or greater-than-30-minute provider health probe_interval_ms values fail config compilation
   - model-less auth-key cooldown state never enters provider or client payload or MetadataCenter
   - Crossing the adaptive budget cannot record provider failure health, auth-key cooldown, model cooldown, MetadataCenter state, or provider/client payload truth
-  - A client request cannot exhaust or change its selected provider solely because the adaptive budget is reached; only the actual typed provider response may trigger provider recovery
+  - Capacity saturation cannot trigger health rescue probes, provider-action waits, oversubscription, or escape from an explicit provider.model pin
   - WebSocketV2 session-slot contention cannot retain provider capacity, starve another request that owns the session, or leak its session slot or provider lease on cancellation
   required_gates:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --lib
@@ -3120,9 +3123,11 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --lib -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime runtime_policy_maps_account_and_recoverable_http_classes_to_global_health -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime cooldown_exhaustion --lib -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_provider_concurrency_ -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_direct_provider_http_error_never_reaches_the_client -- --exact --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime provider_concurrency --lib -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test responses_websocket_v2 websocket_v2_waiting_for_shared_connection_releases_pre_acquired_admission -- --nocapture
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test responses_websocket_v2 websocket_v2_waiting_admission_does_not_block_pre_acquired_session_owner -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test responses_websocket_v2 websocket_v2_full_concurrency_does_not_block_pre_acquired_session_owner -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --nocapture
   - npm run test:v3-provider-health-contract
   - npm run test:v3-provider-session-cooldown-red-fixtures

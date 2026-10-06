@@ -5996,7 +5996,7 @@ chains:
       to_node: V3ProviderActionGateTerminalAdmission
       caller_symbol: run_v3_relay_provider_failure_policy
       caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-      callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_terminal_provider_projection_in_scope
+      callee_symbol: V3ProviderFailureRuntimeHealth::record_terminal_provider_projection_in_scope
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
@@ -6014,9 +6014,9 @@ chains:
     - step_id: v3-provider-action-gate-06
       from_node: V3ProviderActionGateTerminalAdmission
       to_node: V3ProviderActionGateTerminalCommitted
-      caller_symbol: V3ProviderActionGate::record_failure_and_wait_for_terminal_projection
+      caller_symbol: V3ProviderActionGate::record_failure_and_commit_terminal_projection
       caller_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-      callee_symbol: V3ProviderActionGate::commit_terminal_admission
+      callee_symbol: V3ProviderActionGate::commit_terminal_generation_locked
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
@@ -7026,7 +7026,7 @@ chains:
       side_channel_writes: []
 - chain_id: v3.provider_admission_rescue_entrypoints
   owner_feature_id: v3.provider_global_subscription_probe
-  summary: Direct and Relay Runtime entry points use one pre-transport selection boundary where health and request-local Error exclusions determine the candidate; concurrency is an observational soft signal and never alters provider or tier selection.
+  summary: Direct and Relay use one pre-transport selection boundary with atomic provider+authAlias capacity admission; full candidates are skipped request-locally without waiting, health mutation or Router reentry.
   edges:
   - step_id: v3-rd-target-select-direct-admission-rescue
     from_node: V3Target09CandidateSetExpanded
@@ -7039,9 +7039,9 @@ chains:
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
       - Direct runtime selects from the captured Target09 candidate set through the admission-aware rescue wrapper before provider transport.
-      - Provider+authAlias concurrency is an observational soft signal; Direct keeps the highest-priority health-eligible candidate selected and sends it without waiting or skipping.
+      - Direct atomically admits provider+authAlias capacity and immediately selects the next eligible candidate when full.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
-      - Concurrency state never exhausts Direct selection or advances a route tier; only an actual typed provider failure such as HTTP 429 enters Error recovery and may select a later candidate.
+      - All-full candidates exhaust immediately without a provider send or health mutation; concurrency never waits or enters Error recovery admission.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
       produces: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
@@ -7058,7 +7058,7 @@ chains:
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
       - Responses Direct runtime uses the same admission-aware selection wrapper for initial selection and request-local reselection.
-      - Concurrency state never excludes a Responses Direct candidate or advances tiers; it only tracks in-flight request leases.
+      - Responses Direct immediately skips full provider+authAlias candidates and exhausts an all-full target without waiting or mutating health.
       - The acquired provider admission lease is consumed by Provider transport or released by Runtime if selection does not reach transport.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
@@ -7076,7 +7076,7 @@ chains:
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
       - Generic Relay runtime resolves Target09 through the admission-aware relay wrapper before provider transport.
-      - Relay selects the highest-priority health-eligible candidate; concurrency is an observational soft signal and cannot exclude candidates or advance tiers.
+      - Relay uses the same atomic capacity admission, immediately skipping full candidates without waiting or changing health.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
       - Concurrency state cannot exhaust Relay selection; only an actual typed provider failure such as HTTP 429 enters Error recovery and may select a later candidate.
     resource_flow:
@@ -7095,7 +7095,7 @@ chains:
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
       - Responses Relay runtime uses the admission-aware relay wrapper for selected Target10 resolution after its route facts are captured.
-      - Concurrency state stays outside provider failure policy and does not alter the selected provider, auth key, model, or cooldown state.
+      - Full candidates are excluded only for this request and immediately reselected inside Target; capacity does not mutate failure policy or cooldown state.
       - The selected admission lease is handed to Relay Provider transport exactly once; otherwise Runtime releases it before terminal projection.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
@@ -7113,7 +7113,7 @@ chains:
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
       - Anthropic Relay resolves Target09 through admission-aware selection before Provider transport.
-      - Concurrency is an observational soft signal; Anthropic Relay sends the highest-priority health-eligible provider without waiting or switching early.
+      - Anthropic Relay uses shared admission to switch immediately from full providers to the next eligible candidate.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
       - Concurrency state cannot exhaust Anthropic Relay selection; only an actual typed provider failure such as HTTP 429 may enter Error recovery and select a later candidate.
     resource_flow:
@@ -7206,8 +7206,8 @@ chains:
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
-      - WebSocketV2 releases any Runtime pre-acquired provider lease before it waits for the shared session slot.
-      - After it owns the session slot, transport acquires provider admission; a losing admission race releases the slot and retries without holding provider capacity while queued.
+      - WebSocketV2 preserves a granted lease when the session slot is immediately available and releases it before an actual slot wait.
+      - After a slot wait, transport immediately reacquires provider admission; a losing capacity race releases the slot and returns typed ConcurrencyBusy for Runtime reselect.
       - Cancellation or admission failure releases the resources already owned by this request and cannot retain a provider lease while waiting for another request's WebSocket session.
     resource_flow:
       consumes: [v3.provider.adaptive_concurrency_admission, v3.provider.responses_websocket_connection]

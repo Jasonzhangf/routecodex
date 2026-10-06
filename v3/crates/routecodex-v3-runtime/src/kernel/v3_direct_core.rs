@@ -461,6 +461,12 @@ where
                     provider_action_permit_target = Some(selected.candidate.clone());
                     selected_admission = match admit_v3_selected_target_after_recovery(&selected) {
                         V3AdmitAfterRecovery::Admitted(admission) => Some(admission),
+                        V3AdmitAfterRecovery::Busy => {
+                            failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
+                            drop(provider_action_permit.take());
+                            provider_action_permit_target = None;
+                            continue;
+                        }
                         V3AdmitAfterRecovery::Failed(reason) => {
                             return error_output(
                                 runtime_source("V3Target10ConcreteProviderSelected", reason),
@@ -541,6 +547,15 @@ where
         };
         let provider_raw = match transport.send(transport_request).await {
             Ok(raw) => raw,
+            Err(V3ProviderError::ConcurrencyBusy { .. }) => {
+                if let Err(error) = runtime_timing.finish_external() {
+                    return error_output(runtime_source("V3RuntimeTimingExternal", error), trace, &crate::hooks::register_responses_direct_hooks());
+                }
+                failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
+                drop(provider_action_permit.take());
+                provider_action_permit_target = None;
+                continue;
+            }
             Err(error) => {
                 if let Some(witness) = crate::hub_v1::external_http_witness_from_provider_error(&error) {
                     last_external_http = Some(witness);

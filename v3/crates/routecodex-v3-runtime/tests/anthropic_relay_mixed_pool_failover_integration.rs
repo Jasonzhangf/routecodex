@@ -306,7 +306,7 @@ async fn anthropic_relay_mixed_openai_chat_pool_is_served_without_abort() {
 }
 
 #[tokio::test]
-async fn anthropic_relay_provider_concurrency_budget_does_not_reselect() {
+async fn anthropic_relay_provider_concurrency_full_switches_without_waiting() {
     let server_id = "mixed_pool_concurrency_failover";
     let manifest = manifest(
         server_id,
@@ -331,10 +331,10 @@ async fn anthropic_relay_provider_concurrency_budget_does_not_reselect() {
     controller
         .release(held.into_permit())
         .expect("held test capacity must be released");
-    let output = output.expect("the highest-priority provider is sent while over budget");
+    let output = output.expect("the available provider must be selected immediately");
 
     assert_eq!(output.status, 200, "{output:?}");
-    assert_eq!(transport.provider_ids(), vec!["kdns"]);
+    assert_eq!(transport.provider_ids(), vec!["idle"]);
 }
 
 #[tokio::test]

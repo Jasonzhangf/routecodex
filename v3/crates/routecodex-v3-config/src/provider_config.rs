@@ -489,6 +489,7 @@ pub struct V2ProviderResponsesConfig {
 #[serde(rename_all = "camelCase")]
 pub struct V2ProviderConcurrencyConfig {
     pub max_in_flight: Option<u32>,
+    /// Legacy compatibility field. Business request admission does not wait on concurrency.
     pub acquire_timeout_ms: Option<u64>,
     pub stale_lease_ms: Option<u64>,
 }

@@ -13,6 +13,7 @@ use crate::hub_v1::{
 };
 use crate::nodes::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
+use crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key;
 use crate::provider_failure_runtime_policy::{
     admit_v3_selected_target_after_recovery, select_v3_expanded_target_with_admission_rescue,
     select_v3_target_with_session_then_global, try_admit_v3_selected_target, V3AdmitAfterRecovery,
@@ -90,7 +91,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
     )
     .await
 }
-
 async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     T: ResponsesTransport + ?Sized,
 >(
@@ -152,24 +152,11 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     };
     let attempt_budget = request_execution_control.attempt_budget();
     if let Some(plan_trace) = initial_plan_trace {
-        // Router05..Target09 already ran in the Server-side protocol plan;
-        // splice those nodes so the client-visible trace stays identical to
-        // the unplanned path without re-entering the Router.
+        // Reuse the Server's Router05..Target09 trace without re-entering the Router.
         trace.extend(plan_trace);
     }
-    let previous_response_id = standardized
-        .body
-        .get("previous_response_id")
-        .is_some_and(|value| !value.is_null());
-    if previous_response_id {
-        return error_output(
-            runtime_source(
-                "V3HubReqInbound02Normalized",
-                "Responses continuation is retired: previous_response_id is unsupported",
-            ),
-            trace,
-            &hook_registry,
-        );
+    if let Some(source) = v3_direct_retired_continuation_error(&standardized.body) {
+        return error_output(source, trace, &hook_registry);
     }
     if let Err(message) = validate_initial_direct_plan(
         initial_selected_target.is_some(),
@@ -396,15 +383,14 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     }
                 }
             } else if let Some(selected) = preferred {
-                match try_admit_v3_selected_target(&selected) {
-                    Ok(admission) => (selected, Some(admission)),
-                    Err(reason) => {
-                        return error_output(
-                            runtime_source("V3Target10ConcreteProviderSelected", reason),
-                            trace,
-                            &hook_registry,
-                        )
-                    }
+                match v3_direct_admit_pinned_target(
+                    selected,
+                    &last_external_http,
+                    &trace,
+                    &hook_registry,
+                ) {
+                    Ok(value) => value,
+                    Err(output) => return output,
                 }
             } else {
                 return error_output(
@@ -465,6 +451,13 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     provider_action_permit_target = Some(selected.candidate.clone());
                     selected_admission = match admit_v3_selected_target_after_recovery(&selected) {
                         V3AdmitAfterRecovery::Admitted(admission) => Some(admission),
+                        V3AdmitAfterRecovery::Busy => {
+                            failed_candidates
+                                .insert(v3_relay_provider_candidate_key(&selected.candidate));
+                            drop(provider_action_permit.take());
+                            provider_action_permit_target = None;
+                            continue;
+                        }
                         V3AdmitAfterRecovery::Failed(reason) => {
                             return error_output(
                                 runtime_source("V3Target10ConcreteProviderSelected", reason),
@@ -814,6 +807,19 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             })
         }) {
             Ok(raw) => raw,
+            Err(V3ProviderError::ConcurrencyBusy { .. }) => {
+                if let Err(error) = runtime_timing.finish_external() {
+                    return error_output(
+                        runtime_source("V3RuntimeTimingExternal", error),
+                        trace,
+                        &hook_registry,
+                    );
+                }
+                failed_candidates.insert(v3_relay_provider_candidate_key(&policy.target.candidate));
+                drop(provider_action_permit.take());
+                provider_action_permit_target = None;
+                continue;
+            }
             Err(error) => {
                 if let Some(witness) =
                     crate::hub_v1::external_http_witness_from_provider_error(&error)

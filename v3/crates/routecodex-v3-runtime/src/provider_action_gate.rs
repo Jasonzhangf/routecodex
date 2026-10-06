@@ -260,22 +260,32 @@ impl V3ProviderActionGate {
         self.wait_for_active_failure(key).await
     }
 
-    pub async fn record_failure_and_wait_for_terminal_projection(
+    pub fn record_failure_and_commit_terminal_projection(
         &self,
         key: V3ProviderActionGateKey,
     ) -> Result<V3ProviderActionAdmission, String> {
-        self.record_failure(&key)?;
-        loop {
-            let admission = self.wait_for_active_failure(key.clone()).await?;
-            if admission.released_by_success {
-                self.record_failure(&key)?;
-                continue;
-            }
-            if self.commit_terminal_admission(&key, &admission)? {
-                return Ok(admission);
-            }
-            self.record_failure(&key)?;
+        let now = Instant::now();
+        let mut states = self.lock_states()?;
+        let failure = Self::record_failure_with_minimum_delay_locked(&mut states, &key, 0, now)?;
+        let admission = V3ProviderActionAdmission {
+            generation: failure.generation,
+            mode: failure.mode,
+            minimum_delay_ms: failure.minimum_delay_ms,
+            released_by_success: false,
+            reevaluate_after_terminal: false,
+            refreshed_recovery_witness: None,
+            permit: None,
+        };
+        if !Self::commit_terminal_generation_locked(
+            &mut states,
+            &key,
+            failure.generation,
+            false,
+            now,
+        )? {
+            return Err("provider action terminal generation changed before commit".to_string());
         }
+        Ok(admission)
     }
 
     pub async fn wait_for_active_failure(
@@ -491,16 +501,27 @@ impl V3ProviderActionGate {
         let Some(state) = states.get(key) else {
             return Ok(false);
         };
-        if state.generation != generation || state.admitted_generation != Some(generation) {
+        if state.admitted_generation != Some(generation) {
             return Ok(false);
         }
         let server_id = key.provider_scope.server_id.clone();
         let routing_group = key.provider_scope.routing_group.clone();
-        for (_active_key, state) in states.iter_mut().filter(|(active_key, _)| {
+        for (active_key, state) in states.iter_mut().filter(|(active_key, _)| {
             active_key.provider_scope.server_id == server_id
                 && active_key.provider_scope.routing_group == routing_group
                 && active_key.provider_scope.session_id == key.provider_scope.session_id
         }) {
+            if active_key == key
+                && state.generation != generation
+                && state.terminal_transition_generation == Some(state.generation)
+            {
+                state.admitted_generation = None;
+                state.admitted_action_scope = None;
+                state.success_transition_generation = None;
+                state.updated_at = now;
+                let _ = state.change_tx.send(state.generation);
+                continue;
+            }
             state.generation = state.generation.saturating_add(1);
             state.mode = V3ProviderActionGateMode::Sustained;
             state.next_admission_at = now + Duration::from_millis(sustained_delay_ms());
@@ -519,29 +540,64 @@ impl V3ProviderActionGate {
         key: &V3ProviderActionGateKey,
         admission: &V3ProviderActionAdmission,
     ) -> Result<bool, String> {
+        self.commit_terminal_generation(key, admission.generation, true)
+    }
+
+    fn commit_terminal_generation(
+        &self,
+        key: &V3ProviderActionGateKey,
+        generation: u64,
+        require_admission: bool,
+    ) -> Result<bool, String> {
         let now = Instant::now();
         let mut states = self.lock_states()?;
+        Self::commit_terminal_generation_locked(
+            &mut states,
+            key,
+            generation,
+            require_admission,
+            now,
+        )
+    }
+
+    fn commit_terminal_generation_locked(
+        states: &mut HashMap<V3ProviderActionGateKey, V3ProviderActionGateState>,
+        key: &V3ProviderActionGateKey,
+        generation: u64,
+        require_admission: bool,
+        now: Instant,
+    ) -> Result<bool, String> {
         let Some(state) = states.get(key) else {
             return Ok(false);
         };
-        if state.generation != admission.generation
-            || state.admitted_generation != Some(admission.generation)
+        if state.generation != generation
+            || (require_admission && state.admitted_generation != Some(generation))
         {
             return Ok(false);
         }
         let server_id = key.provider_scope.server_id.clone();
         let routing_group = key.provider_scope.routing_group.clone();
         let session_id = key.provider_scope.session_id.clone();
-        for (_key, state) in states.iter_mut().filter(|(key, _)| {
+        for (active_key, state) in states.iter_mut().filter(|(key, _)| {
             key.provider_scope.server_id == server_id
                 && key.provider_scope.routing_group == routing_group
                 && key.provider_scope.session_id == session_id
         }) {
+            let preserve_exact_key_permit =
+                !require_admission && *active_key == *key && state.admitted_generation.is_some();
+            if !require_admission
+                && state.admitted_generation.is_some()
+                && !preserve_exact_key_permit
+            {
+                continue;
+            }
             state.generation = state.generation.saturating_add(1);
             state.mode = V3ProviderActionGateMode::Sustained;
             state.next_admission_at = now + Duration::from_millis(sustained_delay_ms());
-            state.admitted_generation = None;
-            state.admitted_action_scope = None;
+            if !preserve_exact_key_permit {
+                state.admitted_generation = None;
+                state.admitted_action_scope = None;
+            }
             state.success_transition_generation = None;
             state.terminal_transition_generation = Some(state.generation);
             state.updated_at = now;
@@ -564,7 +620,21 @@ impl V3ProviderActionGate {
     ) -> Result<V3ProviderActionFailureRecorded, String> {
         let now = Instant::now();
         let mut states = self.lock_states()?;
-        prune_idle_states(&mut states);
+        Self::record_failure_with_minimum_delay_locked(
+            &mut states,
+            key,
+            configured_minimum_delay_ms,
+            now,
+        )
+    }
+
+    fn record_failure_with_minimum_delay_locked(
+        states: &mut HashMap<V3ProviderActionGateKey, V3ProviderActionGateState>,
+        key: &V3ProviderActionGateKey,
+        configured_minimum_delay_ms: u64,
+        now: Instant,
+    ) -> Result<V3ProviderActionFailureRecorded, String> {
+        prune_idle_states(states);
         let consumed_success_transition = states.get(key).is_some_and(|state| {
             state.success_transition_generation == Some(state.generation)
                 && state.waiter_queue.is_empty()
@@ -587,7 +657,7 @@ impl V3ProviderActionGate {
             active_key.provider_scope.server_id == key.provider_scope.server_id
                 && active_key.provider_scope.routing_group == key.provider_scope.routing_group
                 && active_key.provider_scope.session_id == key.provider_scope.session_id
-                && state.admitted_generation == Some(state.generation)
+                && state.admitted_generation.is_some()
         });
         if active_sibling_lane_generation.is_some() {
             for (_active_key, state) in states.iter_mut().filter(|(active_key, _)| {
@@ -768,7 +838,7 @@ impl V3ProviderActionWaiter {
                     key.provider_scope.server_id == self.key.provider_scope.server_id
                         && key.provider_scope.routing_group == self.key.provider_scope.routing_group
                         && key.provider_scope.session_id == self.key.provider_scope.session_id
-                        && state.admitted_generation == Some(state.generation)
+                        && state.admitted_generation.is_some()
                 });
                 let Some(state) = states.get_mut(&self.key) else {
                     self.registered = false;
