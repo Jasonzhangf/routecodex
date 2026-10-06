@@ -737,6 +737,7 @@ fn incomplete_key_identity_fails_before_provider_cooldown_write() {
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let action = V3ProviderFailureAction {
         class_code: "provider_auth_failure".to_string(),
+        failure_fingerprint: None,
         recovery: V3ProviderRecoveryKind::IrrecoverableGlobalCooldown,
         scope: V3ProviderHealthScope::GlobalProviderKey,
         score_delta_milli: -400,

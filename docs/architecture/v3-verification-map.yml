@@ -3178,6 +3178,8 @@ features:
   - matched HTTP 401 and HTTP 403 provider error policies with scope=auth_key record provider+auth_alias failures without model identity and cool the key after the first failure
   - a 401 auth-key cooldown blocks scheduling and session availability for another model under the same provider/auth_alias while sibling keys remain available
   - 401 auth-key business cooldown remains until semantic probe success, while its first recovery probe is due after 5 seconds and later failures advance the shared 5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s ladder
+  - a recoverable typed provider failure cools its identity only after three consecutive failures carrying the same typed fingerprint; a different fingerprint restarts the consecutive streak and mixed fingerprints never add up to one cooldown
+  - a provider-declared terminal with no visible output is forwarded as-is and never becomes a provider failure: Responses incomplete max_output_tokens/content_filter, Anthropic max_tokens/refusal, and the OpenAI Chat wire terminal including an empty-content content_filter finish
   - Direct and Relay atomically admit the highest-priority health-and-capacity-eligible provider, immediately skipping full candidates without a capacity wait
   - Public `/v1/responses` switches to a spare provider while the first provider remains held; all-full pools terminate promptly without an extra upstream request
   - Concurrency exclusions are request-local and health-neutral; reselect stays inside the captured Target09 candidate set without Router reentry

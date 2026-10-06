@@ -454,6 +454,37 @@ mod tests {
         );
     }
 
+    // 503（upstream unavailable）是单一可恢复类：声明表与 provider action 阈值必须
+    // 一致（连续三次同样失败才冷却），只有 401..403 账户/计费类首次即冷却。503 曾
+    // 同时出现在 unrecoverable_http_statuses 与可恢复阈值路径，形成两套冲突声明。
+    #[test]
+    fn upstream_unavailable_status_is_recoverable_with_the_declared_threshold() {
+        let policy = v3_internal_error_handling();
+        assert!(!policy.unrecoverable_http_statuses.contains(&503));
+        assert!(policy.recoverable_http_statuses.contains(&503));
+        assert_eq!(
+            classify_v3_internal_provider_error(
+                "V3ProviderReqOutbound09TransportRequest",
+                503,
+                "provider_http_503"
+            ),
+            V3InternalErrorCategory::Recoverable
+        );
+        assert_eq!(policy.recoverable_failure_threshold, 3);
+        assert_eq!(policy.unrecoverable_failure_threshold, 1);
+        for status in [401_u16, 402, 403] {
+            assert_eq!(
+                classify_v3_internal_provider_error(
+                    "V3ProviderReqOutbound09TransportRequest",
+                    status,
+                    "provider_auth_failure"
+                ),
+                V3InternalErrorCategory::Unrecoverable,
+                "status={status}"
+            );
+        }
+    }
+
     #[test]
     fn invalid_internal_assets_fail_fast() {
         fn parse(raw: &str) -> InternalConfig {

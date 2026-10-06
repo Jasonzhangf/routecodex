@@ -80,6 +80,19 @@ pub(crate) fn openai_chat_finish_reason_is_output_cap(reason: &str) -> bool {
     matches!(reason, "length" | "max_tokens" | "max_output_tokens")
 }
 
+/// Chat `finish_reason` values a provider may legitimately report on its own
+/// terminal response. `content_filter` is the provider's own content filter
+/// having done its job, exactly like the Responses reason above: it is terminal
+/// response semantics, so RouteCodex must not judge it a provider failure.
+///
+/// The Chat wire terminal itself is admitted unconditionally; this owner exists
+/// for the downstream guards that would otherwise turn an admitted terminal into
+/// a proxy-generated provider failure (an empty-content `content_filter`
+/// response carries no visible model output by design).
+pub(crate) fn openai_chat_finish_reason_is_admitted_terminal(reason: &str) -> bool {
+    openai_chat_finish_reason_is_output_cap(reason) || reason == "content_filter"
+}
+
 fn anthropic_incomplete_reason(payload: &Value) -> Option<&str> {
     let stop_reason = payload
         .get("stop_reason")

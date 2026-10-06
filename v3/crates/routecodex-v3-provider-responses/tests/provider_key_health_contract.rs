@@ -1,5 +1,5 @@
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
-use routecodex_v3_error::V3ProviderFailureSessionScope;
+use routecodex_v3_error::{V3ProviderErrorFingerprint, V3ProviderFailureSessionScope};
 use routecodex_v3_provider_responses::{
     V3ProviderFailureAction, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
     V3ProviderHealthStore, V3ProviderKeyHealthStore, V3ProviderRecoveryKind,
@@ -137,6 +137,7 @@ fn dynamic_probe_ladder_starts_at_5s_after_the_first_cooldown() {
                 Some("key-a"),
                 Some("model-a"),
                 Some("transport"),
+                None,
                 now_ms,
                 Some(policy),
             )
@@ -538,6 +539,7 @@ fn recoverable_key_probe_is_single_flight_and_global_probe_is_not_duplicated() {
         cooldown_ms: 60_000,
         long_probe_backoff: false,
         class_code: "invalid_api_key".to_string(),
+        failure_fingerprint: None,
     };
     store
         .record_provider_failure_action("provider-b", "key-b", "model-b", &irrecoverable, 100)
@@ -661,6 +663,7 @@ fn account_error_reaches_cooldown_at_zero() {
         cooldown_ms: 60_000,
         long_probe_backoff: false,
         class_code: "invalid_api_key".to_string(),
+        failure_fingerprint: None,
     };
     for now_ms in 100..105 {
         store
@@ -699,4 +702,60 @@ fn score_and_cooldown_are_isolated_per_provider_key_and_model() {
     assert!(same_key_different_model.available);
     assert_eq!(same_key_different_model.score_milli, 1);
     assert!(!cooled_key.available);
+}
+
+fn typed_failure_fingerprint(status: u16) -> V3ProviderErrorFingerprint {
+    V3ProviderErrorFingerprint::new(
+        "recoverable_upstream",
+        "recoverable_upstream",
+        status,
+        "recoverable_upstream",
+    )
+    .expect("typed fingerprint")
+}
+
+#[test]
+fn different_recoverable_fingerprints_do_not_add_up_to_one_cooldown() {
+    // Three *same* errors are required: recoverable failures with different typed
+    // fingerprints each start their own consecutive-failure streak and must never
+    // be summed into one cooldown.
+    let store = V3ProviderKeyHealthStore::default();
+    let mut action = V3ProviderFailureAction::recoverable("provider_http_error");
+    action.failure_threshold = 3;
+
+    for (offset, status) in [429_u16, 500, 502].into_iter().enumerate() {
+        action.failure_fingerprint = Some(typed_failure_fingerprint(status));
+        let projection = store
+            .record_provider_failure_action(
+                "provider-a",
+                "key-a",
+                "model-a",
+                &action,
+                100 + offset as u64,
+            )
+            .expect("recoverable failure");
+        assert_eq!(projection.failure_streak, 1, "status={status}");
+        assert!(
+            !projection.cooldown,
+            "a different fingerprint must not extend the streak: status={status}"
+        );
+        assert!(projection.cooldown_until_ms.is_none(), "status={status}");
+        assert!(projection.available, "status={status}");
+    }
+
+    // The same fingerprint three times in a row still cools the exact identity.
+    action.failure_fingerprint = Some(typed_failure_fingerprint(503));
+    for now_ms in 200..202 {
+        let projection = store
+            .record_provider_failure_action("provider-a", "key-a", "model-a", &action, now_ms)
+            .expect("same-fingerprint failure");
+        assert!(!projection.cooldown, "now_ms={now_ms}");
+        assert!(projection.available, "now_ms={now_ms}");
+    }
+    let third = store
+        .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 202)
+        .expect("third same-fingerprint failure");
+    assert_eq!(third.failure_streak, 3);
+    assert!(third.cooldown, "three same-fingerprint failures must cool");
+    assert!(!third.available);
 }

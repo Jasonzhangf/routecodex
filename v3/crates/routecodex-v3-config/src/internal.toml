@@ -231,7 +231,10 @@ port = 8777
 [error_handling]
   transient_stages = ["provider.sse_decode", "provider.sse_stream", "provider.transport_transient", "V3ProviderResp14Raw", "V3ProviderRespInbound01Raw", "V3ProviderReqOutbound09TransportRequest", "V3Transport13ResponsesHttpRequest"]
   transient_wait_ms = [1000, 3000, 5000]
-  recoverable_http_statuses = [429, 500, 502]
+  # 503（upstream unavailable）是可恢复类：与 429/5xx 一样必须连续三次同类失败
+  # 才进入冷却，并共用 provider health 的长探活阶梯。它不属于 typed
+  # irrecoverable 账户/计费组（401..403）。
+  recoverable_http_statuses = [429, 500, 502, 503]
   # 可恢复类必须连续三次同类失败才进入冷却：单次可恢复错误不得排除一个
   # provider（单 provider 配置下那正是路由池耗尽的根因）。
   recoverable_failure_threshold = 3
@@ -239,7 +242,8 @@ port = 8777
   # Legacy provider-specific health caps remain separate from the shared
   # aggressive ladder; the typed provider action starts at 5s.
   recoverable_probe_interval_ms = 900000
-  unrecoverable_http_statuses = [401, 402, 403, 503]
+  # 只有 typed irrecoverable 账户/计费类首次即冷却。
+  unrecoverable_http_statuses = [401, 402, 403]
   unrecoverable_failure_threshold = 1
   unrecoverable_cooldown_ms = 5000
   unrecoverable_probe_interval_ms = 1800000
