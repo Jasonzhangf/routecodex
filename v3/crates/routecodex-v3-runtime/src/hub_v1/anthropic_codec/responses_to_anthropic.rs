@@ -83,6 +83,12 @@ pub(super) fn chat_messages_as_anthropic_messages_with_hosted(
             .as_object()
             .ok_or(V3AnthropicCodecError::MalformedField { field: "message" })?;
         let role = object.get("role").and_then(Value::as_str).unwrap_or("user");
+        if let Some(item_type) = object.get("type").and_then(Value::as_str) {
+            if let Some(message) = chat_tool_search_history_as_anthropic_message(item_type, object) {
+                output.push(message);
+                continue;
+            }
+        }
         if role == "system" || role == "developer" {
             append_responses_instruction_part(system_parts, object.get("content"));
             continue;
@@ -171,6 +177,46 @@ pub(super) fn chat_messages_as_anthropic_messages_with_hosted(
         }));
     }
     Ok(output)
+}
+
+/// Responses hosted `tool_search` history stays in the canonical Chat as its raw
+/// item shape. Anthropic has no hosted tool-search block, so the call and its
+/// discovered-tool output project onto the adjacent ordinary tool blocks.
+fn chat_tool_search_history_as_anthropic_message(
+    item_type: &str,
+    object: &Map<String, Value>,
+) -> Option<Value> {
+    let call_id = object.get("call_id").cloned().unwrap_or(Value::Null);
+    match item_type {
+        "tool_search_call" => Some(json!({
+            "role":"assistant",
+            "content":[{
+                "type":"tool_use",
+                "id":call_id,
+                "name":anthropic_tool_call_wire_name("tool_search", false),
+                "input":match object.get("arguments") {
+                    Some(Value::String(raw)) => serde_json::from_str(raw).unwrap_or(Value::Null),
+                    Some(value) => value.clone(),
+                    None => json!({}),
+                }
+            }]
+        })),
+        "tool_search_output" => {
+            let mut block = json!({
+                "type":"tool_result",
+                "tool_use_id":call_id,
+                "content":object
+                    .get("tools")
+                    .map(|tools| serde_json::to_string(tools).unwrap_or_default())
+                    .unwrap_or_default()
+            });
+            if object.get("status").and_then(Value::as_str) == Some("incomplete") {
+                block["is_error"] = Value::Bool(true);
+            }
+            Some(json!({"role":"user","content":[block]}))
+        }
+        _ => None,
+    }
 }
 
 pub(super) fn openai_chat_tool_call_as_anthropic_tool_use(

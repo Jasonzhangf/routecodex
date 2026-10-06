@@ -4,6 +4,12 @@ use super::field_operator_library::{RequestNormalizer, ROOT_CARRIER_KEY};
 use super::field_operator_profiles::HostedHistoryCase;
 use super::project_canonical_paths::field_path;
 
+/// Responses tool results declare a closed terminal status domain. A
+/// non-terminal status has no Chat canonical meaning, so it is rejected here
+/// instead of being carried forward as if it were a finished result.
+const RESPONSES_TOOL_RESULT_STATUS_ERROR: &str =
+    "Responses function_call_output.status must be completed or incomplete before Chat canonicalization";
+
 pub(super) fn canonical_tool_call_name(kind: &str, name: &str, namespace: Option<&Value>) -> String {
     let Some(namespace) = namespace.and_then(Value::as_str) else {
         return name.to_string();
@@ -62,7 +68,7 @@ impl<'a> RequestNormalizer<'a> {
         item_path: &str,
         message_index: usize,
         extension: &mut Map<String, Value>,
-    ) {
+    ) -> Result<(), String> {
         if object.contains_key("output") {
             self.record_part_mapping(
                 "input[].output",
@@ -81,6 +87,9 @@ impl<'a> RequestNormalizer<'a> {
             );
         }
         if let Some(status) = object.get("status") {
+            if !matches!(status.as_str(), Some("completed" | "incomplete")) {
+                return Err(RESPONSES_TOOL_RESULT_STATUS_ERROR.to_string());
+            }
             extension.insert("responses_tool_output_status".to_string(), status.clone());
             self.record_part_mapping(
                 "input[].status",
@@ -116,6 +125,111 @@ impl<'a> RequestNormalizer<'a> {
                 Value::Object(extra_fields),
             );
         }
+        Ok(())
+    }
+
+    /// Responses tool-result items project onto a Chat tool message. The
+    /// terminal status domain is validated while the item is normalized, so an
+    /// unregistered status fails the request instead of being carried as a
+    /// finished result.
+    pub(super) fn record_responses_tool_result_item(
+        &mut self,
+        object: &Map<String, Value>,
+        item_type: &str,
+        item_path: &str,
+        message_index: usize,
+    ) -> Result<(), String> {
+        let call_id = object
+            .get("call_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty());
+        let name = object.get("name").and_then(Value::as_str);
+        let payload = object.get("output").cloned().unwrap_or(Value::Null);
+        let mut consumed = vec!["type", "output"];
+        let mut extension = Map::new();
+        extension.insert(
+            "responses_tool_output_type".to_string(),
+            Value::String(item_type.to_string()),
+        );
+        self.record_part_mapping(
+            "input[].type",
+            &format!("{item_path}.type"),
+            &format!(
+                "chat.messages[{message_index}].routecodex_chat_extension.responses_tool_output_type"
+            ),
+        );
+        if let Some(call_id) = call_id {
+            consumed.push("call_id");
+            self.record_part_mapping(
+                "input[].call_id",
+                &format!("{item_path}.call_id"),
+                &format!("chat.messages[{message_index}].tool_call_id"),
+            );
+        }
+        self.record_responses_output_fields(object, item_path, message_index, &mut extension)?;
+        let role = if call_id.is_some() { "tool" } else { "user" };
+        if let Some(call_id) = call_id {
+            self.record_part_siblings(object, item_path, &consumed);
+            self.record_history_pairing_at_message(
+                item_path,
+                Some(call_id),
+                name,
+                item_type,
+                None,
+                Some(&payload),
+                message_index,
+            );
+            self.messages.push(json!({
+                "role": role,
+                "tool_call_id": call_id,
+                "content": payload,
+                "routecodex_chat_extension": Value::Object(extension),
+            }));
+        } else {
+            if let Some(name) = name {
+                consumed.push("name");
+                let extension_destination = format!(
+                    "chat.messages[{message_index}].routecodex_chat_extension.responses_tool_output_name"
+                );
+                self.record_part_mapping(
+                    "input[].name",
+                    &format!("{item_path}.name"),
+                    &extension_destination,
+                );
+                extension.insert(
+                    "responses_tool_output_name".to_string(),
+                    Value::String(name.to_string()),
+                );
+            }
+            if object.contains_key("namespace") {
+                consumed.push("namespace");
+                let namespace = object.get("namespace").cloned().unwrap_or(Value::Null);
+                self.record_part_mapping(
+                    "input[].namespace",
+                    &format!("{item_path}.namespace"),
+                    &format!(
+                        "chat.messages[{message_index}].routecodex_chat_extension.responses_tool_output_namespace"
+                    ),
+                );
+                extension.insert("responses_tool_output_namespace".to_string(), namespace);
+            }
+            self.record_part_siblings(object, item_path, &consumed);
+            self.record_history_pairing_at_message(
+                item_path,
+                None,
+                name,
+                item_type,
+                object.get("namespace"),
+                Some(&payload),
+                message_index,
+            );
+            let mut message = Map::new();
+            message.insert("role".to_string(), Value::String(role.to_string()));
+            message.insert("content".to_string(), payload);
+            message.insert(ROOT_CARRIER_KEY.to_string(), Value::Object(extension));
+            self.messages.push(Value::Object(message));
+        }
+        Ok(())
     }
 
     pub(super) fn normalize_openai_tool_calls(

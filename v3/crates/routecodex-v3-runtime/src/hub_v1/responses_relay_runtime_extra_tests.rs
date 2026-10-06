@@ -962,11 +962,7 @@ async fn anthropic_provider_sse_uses_responses_projection_context_for_metadata_a
             "name":"apply_patch",
             "description":"apply a patch"
         }],
-        "routecodex_chat_extension":{
-            "responses_request":{
-                "metadata":{"trace_id":"sse-context-kept"}
-            }
-        }
+        "metadata":{"trace_id":"sse-context-kept"}
     }))
     .expect("projection context");
     let provider = Box::pin(stream::iter(vec![

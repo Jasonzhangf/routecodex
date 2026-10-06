@@ -46,9 +46,7 @@ impl V3AnthropicResponsesProjectionContext {
         reasoning_summary_policy: Option<&str>,
     ) -> Result<Self, V3AnthropicCodecError> {
         if metadata.as_ref().is_some_and(|value| !value.is_object()) {
-            return Err(V3AnthropicCodecError::MalformedField {
-                field: "routecodex_chat_extension.responses_request.metadata",
-            });
+            return Err(V3AnthropicCodecError::MalformedField { field: "metadata" });
         }
         let reasoning_summary_policy = reasoning_summary_policy
             .map(valid_responses_reasoning_summary_policy_text)
@@ -167,13 +165,9 @@ impl V3AnthropicResponsesProjectionContext {
 fn chat_canonical_business_context(
     request: &Value,
 ) -> Result<(Option<Value>, Option<String>), V3AnthropicCodecError> {
-    let metadata = request
-        .pointer("/routecodex_chat_extension/responses_request/metadata")
-        .cloned();
+    let metadata = request.get("metadata").cloned();
     if metadata.as_ref().is_some_and(|value| !value.is_object()) {
-        return Err(V3AnthropicCodecError::MalformedField {
-            field: "routecodex_chat_extension.responses_request.metadata",
-        });
+        return Err(V3AnthropicCodecError::MalformedField { field: "metadata" });
     }
     let reasoning_summary_policy = request
         .get("reasoning_summary_policy")

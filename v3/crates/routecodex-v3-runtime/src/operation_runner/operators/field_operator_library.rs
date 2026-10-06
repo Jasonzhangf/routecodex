@@ -282,7 +282,7 @@ impl<'a> RequestNormalizer<'a> {
                 self.process_tool_choice(value, row, &raw_path);
             }
             FieldOperatorKind::RequestInputShapeBranch => {
-                self.process_responses_input(value, row, &raw_path);
+                self.process_responses_input(value, row, &raw_path)?;
             }
             FieldOperatorKind::ArrayContainerShape => {
                 self.process_array_container(value, row, &raw_path)?;
@@ -663,7 +663,12 @@ impl<'a> RequestNormalizer<'a> {
         }
     }
 
-    fn process_responses_input(&mut self, value: &Value, row: &ProfileRow, raw_path: &str) {
+    fn process_responses_input(
+        &mut self,
+        value: &Value,
+        row: &ProfileRow,
+        raw_path: &str,
+    ) -> Result<(), String> {
         self.record_mapping(row, raw_path, "chat.messages", "json");
         match value {
             Value::String(text) => {
@@ -680,7 +685,7 @@ impl<'a> RequestNormalizer<'a> {
                     // for shape/presence. It is not history-fold comparison data.
                     self.record_opaque_once(&item_path, item);
                     let opaque_start = self.opaque_records.len();
-                    self.process_responses_item(item, &item_path, row);
+                    self.process_responses_item(item, &item_path, row)?;
                     self.record_message_span(raw_path, &item_path, start, opaque_start);
                 }
             }
@@ -693,14 +698,20 @@ impl<'a> RequestNormalizer<'a> {
                 self.record_message_span(raw_path, raw_path, start, opaque_start);
             }
         }
+        Ok(())
     }
 
-    fn process_responses_item(&mut self, item: &Value, item_path: &str, row: &ProfileRow) {
+    fn process_responses_item(
+        &mut self,
+        item: &Value,
+        item_path: &str,
+        row: &ProfileRow,
+    ) -> Result<(), String> {
         let Some(object) = item.as_object() else {
             self.record_opaque(item_path, item);
             self.messages
                 .push(json!({"role": "user", "content": item.clone()}));
-            return;
+            return Ok(());
         };
         let message_index = self.messages.len();
         let item_type = object
@@ -719,7 +730,7 @@ impl<'a> RequestNormalizer<'a> {
             .cloned();
         if let Some(case) = hosted_case {
             self.emit_hosted_history_anchor(object, item, item_path, message_index, &case);
-            return;
+            return Ok(());
         }
         match item_type {
             // `input[]` hosted web_search declaration: a canonical `tools[]` declaration, not history.
@@ -809,103 +820,12 @@ impl<'a> RequestNormalizer<'a> {
                 }));
             }
             "function_call_output" | "custom_tool_call_output" => {
-                let call_id = object
-                    .get("call_id")
-                    .and_then(Value::as_str)
-                    .filter(|value| !value.is_empty());
-                let name = object.get("name").and_then(Value::as_str);
-                let payload = object.get("output").cloned().unwrap_or(Value::Null);
-                let mut consumed = vec!["type", "output"];
-                let mut extension = Map::new();
-                extension.insert(
-                    "responses_tool_output_type".to_string(),
-                    Value::String(item_type.to_string()),
-                );
-                self.record_part_mapping(
-                    "input[].type",
-                    &format!("{item_path}.type"),
-                    &format!(
-                        "chat.messages[{message_index}].routecodex_chat_extension.responses_tool_output_type"
-                    ),
-                );
-                if let Some(call_id) = call_id {
-                    consumed.push("call_id");
-                    self.record_part_mapping(
-                        "input[].call_id",
-                        &format!("{item_path}.call_id"),
-                        &format!("chat.messages[{message_index}].tool_call_id"),
-                    );
-                }
-                self.record_responses_output_fields(
+                self.record_responses_tool_result_item(
                     object,
+                    item_type,
                     item_path,
                     message_index,
-                    &mut extension,
-                );
-                let role = if call_id.is_some() { "tool" } else { "user" };
-                if let Some(call_id) = call_id {
-                    self.record_part_siblings(object, item_path, &consumed);
-                    self.record_history_pairing_at_message(
-                        item_path,
-                        Some(call_id),
-                        name,
-                        item_type,
-                        None,
-                        Some(&payload),
-                        message_index,
-                    );
-                    self.messages.push(json!({
-                        "role": role,
-                        "tool_call_id": call_id,
-                        "content": payload,
-                        "routecodex_chat_extension": Value::Object(extension),
-                    }));
-                    return;
-                } else {
-                    if let Some(name) = name {
-                        consumed.push("name");
-                        let extension_destination = format!(
-                            "chat.messages[{message_index}].routecodex_chat_extension.responses_tool_output_name"
-                        );
-                        self.record_part_mapping(
-                            "input[].name",
-                            &format!("{item_path}.name"),
-                            &extension_destination,
-                        );
-                        extension.insert(
-                            "responses_tool_output_name".to_string(),
-                            Value::String(name.to_string()),
-                        );
-                    }
-                    if object.contains_key("namespace") {
-                        consumed.push("namespace");
-                        let namespace = object.get("namespace").cloned().unwrap_or(Value::Null);
-                        self.record_part_mapping(
-                            "input[].namespace",
-                            &format!("{item_path}.namespace"),
-                            &format!(
-                                "chat.messages[{message_index}].routecodex_chat_extension.responses_tool_output_namespace"
-                            ),
-                        );
-                        extension.insert("responses_tool_output_namespace".to_string(), namespace);
-                    }
-                    self.record_part_siblings(object, item_path, &consumed);
-                    self.record_history_pairing_at_message(
-                        item_path,
-                        None,
-                        name,
-                        item_type,
-                        object.get("namespace"),
-                        Some(&payload),
-                        message_index,
-                    );
-                    let mut message = Map::new();
-                    message.insert("role".to_string(), Value::String(role.to_string()));
-                    message.insert("content".to_string(), payload);
-                    message.insert(ROOT_CARRIER_KEY.to_string(), Value::Object(extension));
-                    self.messages.push(Value::Object(message));
-                    return;
-                }
+                )?;
             }
             _ => {
                 let mut message = Map::new();
@@ -968,6 +888,7 @@ impl<'a> RequestNormalizer<'a> {
                 self.messages.push(Value::Object(message));
             }
         }
+        Ok(())
     }
 
     fn normalize_responses_content(

@@ -17,6 +17,17 @@ with `include!`. The companion owns the provider-response interpretation match
 1504 lines after the REQ02 Relay-to-Direct origin field and is now 646; the companion is
 861. The moved block stays byte-verbatim inside one block expression of the same module,
 so function bodies, visibility and every caller path are preserved.
+Scoped split (2026-10-06): `operation_runner/operators/field_operator_history.rs` also owns
+`RequestNormalizer::record_responses_tool_result_item`, moved out of
+`operation_runner/operators/field_operator_library.rs`, which sat exactly on the 1500-line
+gate before the R53 work. The method joins the Responses output recording helper already in
+that module (`record_responses_output_fields`, which keeps the R53 tool-result status domain
+check) and stays `pub(super)`, so the caller path in
+`field_operator_library::process_responses_item` is preserved. The library file was 1494
+lines on this tip and is now 1415 (100 lines moved out, 21 added for the R53 fallible item
+path); `field_operator_history.rs` was 538 and is now 652. The moved construction is
+unchanged apart from the two early `return`s becoming the single function tail, so function
+semantics and every caller path are preserved.
 Scoped split (2026-10-06): `hub_v1/anthropic_relay_runtime_helpers.rs` also owns the four
 post-response helpers moved out of `hub_v1/anthropic_relay_runtime.rs`
 (`anthropic_relay_client_headers_as_provider_request_headers`,
