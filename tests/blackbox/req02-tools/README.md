@@ -27,13 +27,49 @@ the child CLI JSONL and from the actual marker file:
    `request.json:client_metadata.thread_id` under the exact endpoint port in
    `<RCC_HOME|$HOME/.rcc>/codex-samples/openai-responses/ports/<port>`.
 7. Bound history: within those exact bound sample directories, the raw Add and
-   Update patch text is present under a consistent `custom_tool_call` or
-   `function_call` identity named `apply_patch`, and the MCP scalar results
-   appear in a subsequent request. CLI `file_change` alone does not prove the
-   freeform grammar text.
+   Update patch text is present under a consistent identity — a
+   `custom_tool_call`/`function_call` named `apply_patch`, or, only when the
+   first request declares no native `apply_patch` tool, an `exec_command`
+   heredoc `apply_patch <<'PATCH' …` whose body matches the expected patch byte
+   for byte — and the MCP scalar results appear in a subsequent request matched
+   by exact `function_call` identity, deep-equal arguments, and the paired
+   `function_call_output`. CLI `file_change` alone does not prove the freeform
+   grammar text.
 
 Exit code `0` is only possible when all layers pass. Exit code `0`, HTTP 200,
 or `requires_action` alone is not a pass.
+
+## Client-side limits (measured)
+
+The bound-history proof re-parses the tool result that Codex echoes into the
+next request. Codex wraps every tool result as `Wall time: …\nOutput:\n<json>`
+and truncates oversized results. An MCP tool whose structured content exceeds
+the client's tool-output limit therefore cannot satisfy the proof even though
+the call itself succeeded and the model consumed the values:
+
+- `mcpx.runtime_read {"view":"capabilities"}` returns 23 234 bytes of
+  structured content; the echoed `function_call_output.output` is 9 398 bytes,
+  and the body after the envelope is 9 364 bytes, which is not valid JSON
+  (`Expected ',' or '}' after property value in JSON at position 9364`). Both
+  observed values sit inside the retained prefix, but no observation-pointer
+  choice can prove consumption, because the check requires a successful parse
+  of the whole body.
+- `runtime_read`'s `project` and `instructions` views fail with
+  `remote session id required` on the current server, so they cannot be used
+  instead.
+
+Pick an MCP target whose structured content survives that limit. The measured
+working target is:
+
+```text
+--mcp-server mcpx \
+--mcp-tool environment_read \
+--mcp-arguments '{"view":"current","workspace":"routecodex","sections":["runtime","os"]}' \
+--mcp-observation-pointers '["/data/runtime/mcpx_version","/data/os/type"]'
+```
+
+Do not make the harness accept a JSON document the client truncated mid-object;
+that would weaken the byte-level proof. Change the target instead.
 
 ## Required arguments
 
@@ -48,13 +84,15 @@ or `requires_action` alone is not a pass.
                           candidate SHA
 --evidence-dir <path>     absolute evidence output directory
 --mcp-server <name>       exact MCP server name; current recommendation: mcpx
---mcp-tool <name>         exact MCP tool name; current recommendation:
-                          runtime_read
---mcp-arguments <json>    exact JSON object arguments; current recommendation:
-                          '{"view":"capabilities"}'
+--mcp-tool <name>         exact MCP tool name; see **Client-side limits** for
+                          the measured target that can pass the bound-history
+                          proof (runtime_read's capabilities payload is
+                          truncated by the client)
+--mcp-arguments <json>    exact JSON object arguments; see **Client-side
+                          limits**
 --mcp-observation-pointers <json>
-                          result fields the model must consume; recommendation:
-                          '["/data/runtime/version","/data/capability_version"]'
+                          result fields the model must consume; see
+                          **Client-side limits**
 ```
 
 Optional:
@@ -94,7 +132,9 @@ request/response history.
 ## Exact commands
 
 Run each model separately. Replace the placeholders with the parent-provided
-candidate values.
+candidate values. The `runtime_read` target below is the original shape; read
+**Client-side limits** first and prefer the measured `environment_read` target
+if you need the bound-history proof to pass.
 
 GPT-5.5:
 
@@ -161,9 +201,19 @@ node tests/blackbox/req02-tools/run-gcm-consumer.mjs
 
 The last command must exit non-zero before any child request is attempted.
 
-## Current gap
+## Measured status
 
-There is no wired candidate endpoint or candidate binary in this task. The
-actual two-model consumer runs are therefore `UNVERIFIED` here. The parent
-must provide the exact isolated endpoint, candidate SHA, binary path/hash,
-and tested worktree, then run the two commands above.
+The two-model round has now been run against an isolated candidate endpoint.
+`gpt-5.6` passes all eight layers (process exit `0`, `"status": "PASS"`,
+`sample-binding.json` `history.ok: true`, marker exactly
+`REQ02_GCM_PATCH_UPDATED\n`) with the `environment_read` target from
+**Client-side limits** above; with `runtime_read {"view":"capabilities"}` the
+same run reaches `mcp.ok: true` and `model_consumption.ok: true` but cannot pass
+the bound-history proof, for the truncation reason recorded there. `gpt-5.5`
+stays blocked by the child's own model catalog: its Codex CLI entry declares 13
+tools with no MCP tool and no discovery tool, so the model cannot call
+`mcp__mcpx__*` at all. That is a client-catalog limitation, not a candidate
+defect.
+
+The parent still provides the exact isolated endpoint, candidate SHA, binary
+path/hash, and tested worktree for each run.
