@@ -7078,7 +7078,7 @@ chains:
       - Generic Relay runtime resolves Target09 through the admission-aware relay wrapper before provider transport.
       - Relay uses the same atomic capacity admission, immediately skipping full candidates without waiting or changing health.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
-      - Concurrency state cannot exhaust Relay selection; only an actual typed provider failure such as HTTP 429 enters Error recovery and may select a later candidate.
+      - When every candidate is capacity-full, Relay exhausts the selected Target immediately without waiting, changing health, or reentering Router.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
       produces: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
@@ -7115,7 +7115,7 @@ chains:
       - Anthropic Relay resolves Target09 through admission-aware selection before Provider transport.
       - Anthropic Relay uses shared admission to switch immediately from full providers to the next eligible candidate.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
-      - Concurrency state cannot exhaust Anthropic Relay selection; only an actual typed provider failure such as HTTP 429 may enter Error recovery and select a later candidate.
+      - When every candidate is capacity-full, Anthropic Relay exhausts the selected Target immediately without waiting, changing health, or reentering Router.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
       produces: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
