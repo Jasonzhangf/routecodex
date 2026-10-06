@@ -131,10 +131,30 @@ if (!(pushStart >= 0 && frameLimit > pushStart && byteLimit > frameLimit && rese
   failures.push('attempt store: byte/frame/request/process admission must precede frame append');
 }
 
-const collectStart = runtime.indexOf('pub(crate) async fn collect_direct_sse_attempt_after_terminal');
+// The ordered owner is the real collect implementation, not the delegating
+// wrappers that only forward to it.
+const collectStart = runtime.lastIndexOf('pub(crate) async fn collect_direct_sse_attempt_after_terminal');
+const collectEnd = collectStart >= 0 ? runtime.indexOf('\n}\n', collectStart) : -1;
 const collectPush = runtime.indexOf('committed.push(frame)', collectStart);
 const terminalMark = runtime.indexOf('committed.mark_last_frame_as_terminal()', collectStart);
-const seal = runtime.indexOf('committed.seal_after_validated_terminal()', collectStart);
+// The validated-terminal seal is either performed inline in the collect
+// implementation or extracted into the dedicated seal owner that the collect
+// implementation calls. In the extracted layout the ordering anchor is that
+// call site, and the owner itself must still perform the literal
+// validated-terminal seal, so the same order and the same seal stay enforced.
+function resolveValidatedTerminalSeal() {
+  const inlineSeal = runtime.indexOf('committed.seal_after_validated_terminal()', collectStart);
+  if (inlineSeal >= 0 && (collectEnd < 0 || inlineSeal < collectEnd)) return inlineSeal;
+  const sealOwnerCall = runtime.indexOf('seal_direct_sse_attempt_with_success_scope(', collectStart);
+  if (sealOwnerCall < 0 || (collectEnd >= 0 && sealOwnerCall > collectEnd)) return -1;
+  const sealOwnerStart = runtime.indexOf('fn seal_direct_sse_attempt_with_success_scope(');
+  if (sealOwnerStart < 0) return -1;
+  const sealOwnerEnd = runtime.indexOf('\n}\n', sealOwnerStart);
+  const ownerSeal = runtime.indexOf('committed.seal_after_validated_terminal()', sealOwnerStart);
+  if (ownerSeal < 0 || (sealOwnerEnd >= 0 && ownerSeal > sealOwnerEnd)) return -1;
+  return sealOwnerCall;
+}
+const seal = resolveValidatedTerminalSeal();
 const incomplete = runtime.indexOf('provider SSE ended without a protocol terminal', collectStart);
 if (!(collectStart >= 0 && collectPush > collectStart && terminalMark > collectPush && seal > terminalMark && incomplete > seal)) {
   failures.push('runtime: bounded append, protocol terminal mark, seal, and incomplete-stream failure order is invalid');
