@@ -44,7 +44,7 @@
     "verify:no-fallback-all": "node scripts/architecture/verify-no-fallback-diff.mjs --all",
     "verify:architecture-fallback-denylist": "node scripts/architecture/verify-architecture-fallback-denylist.mjs",
     "verify:internal-policy-hardcode": "node scripts/architecture/verify-internal-policy-hardcode.mjs",
-    "verify:fallback-hardcode": "npm run verify:no-fallback-all && npm run verify:internal-policy-hardcode",
+    "verify:fallback-hardcode": "node --test tests/scripts/no-fallback-rust-test-scope.test.mjs && npm run verify:no-fallback-all && npm run verify:internal-policy-hardcode",
     "verify:mempalace-scan-artifacts": "node scripts/ci/mempalace-scan-artifact-audit.mjs",
     "verify:provider-response-errorerr-bypass-closeout": "node scripts/architecture/verify-provider-response-errorerr-bypass-closeout.mjs",
     "test:provider-response-errorerr-bypass-closeout-red-fixtures": "node scripts/tests/provider-response-errorerr-bypass-closeout-red-fixtures.mjs",
