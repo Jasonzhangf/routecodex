@@ -144,6 +144,7 @@ mod servertool_hooks;
 pub use servertool_hooks::*;
 mod anthropic_codec;
 pub use anthropic_codec::*;
+pub(crate) use anthropic_codec::ANTHROPIC_REQUEST_EXTENSION;
 mod openai_chat_codec;
 pub use openai_chat_codec::*;
 mod gemini_codec;

@@ -23,6 +23,11 @@ const FIELD_PROFILES_YAML: &str = include_str!(
 /// data always owns the canonical root value.
 pub(super) const ROOT_CARRIER_KEY: &str = "routecodex_chat_extension";
 
+/// The registered client-request transform for Anthropic `system`. The scalar
+/// form is plain text; the block form also carries block-level fields such as
+/// `cache_control` that the canonical Chat shape cannot represent.
+const ANTHROPIC_SYSTEM_TO_CHAT_SYSTEM_TRANSFORM: &str = "v3.anthropic_system_to_chat_system.v1";
+
 #[derive(Debug, PartialEq)]
 pub(super) struct ClientRequestNormalization {
     pub canonical_request: Value,
@@ -419,6 +424,7 @@ impl<'a> RequestNormalizer<'a> {
         self.record_opaque_once(raw_path, value);
         if !value.is_string() {
             self.record_opaque_once(raw_path, value);
+            self.publish_anthropic_request_system(value, row);
         }
         let start = self.system_instructions.len();
         let mut leaf_sources: Vec<String> = Vec::new();
@@ -467,6 +473,22 @@ impl<'a> RequestNormalizer<'a> {
                 );
             }
         }
+    }
+
+    /// Keep the original Anthropic `system` block value in its declared
+    /// request extension. The block form carries per-block fields the canonical
+    /// Chat shape cannot represent, so the canonical request retains it
+    /// verbatim: the Anthropic outbound emits it unchanged, and every other
+    /// target reports it as unmapped instead of silently flattening it.
+    fn publish_anthropic_request_system(&mut self, value: &Value, row: &ProfileRow) {
+        if row.transform_id() != Some(ANTHROPIC_SYSTEM_TO_CHAT_SYSTEM_TRANSFORM) {
+            return;
+        }
+        self.insert_extension_value(
+            crate::hub_v1::ANTHROPIC_REQUEST_EXTENSION,
+            "system",
+            value.clone(),
+        );
     }
 
     fn process_system_instruction(&mut self, value: &Value, row: &ProfileRow, raw_path: &str) {

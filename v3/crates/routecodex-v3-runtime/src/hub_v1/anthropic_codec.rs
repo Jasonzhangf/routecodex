@@ -47,7 +47,7 @@ use tool_declaration_projection::{
 };
 
 const CLAUDE_CODE_SYSTEM_PROMPT_MD: &str = include_str!("claude_code_system_prompt.md");
-const ANTHROPIC_REQUEST_EXTENSION: &str = "anthropic_request";
+pub(crate) const ANTHROPIC_REQUEST_EXTENSION: &str = "anthropic_request";
 const ANTHROPIC_ENTRY_PASSTHROUGH_EXTENSION_KEYS: &[&str] = &["context_management"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
