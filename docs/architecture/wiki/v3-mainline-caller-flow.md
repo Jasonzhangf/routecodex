@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 86 functional paths, 496 caller edges.
+Generated view: 86 functional paths, 498 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -77,7 +77,7 @@ flowchart TD
   module_v3_server -->|3 edges / 2 paths| module_v3_error
   module_v3_server -->|4 edges / 3 paths| module_v3_runtime
   module_v3_server -->|6 edges / 5 paths| module_v3_runtime__hub_v1
-  module_v3_server -->|35 edges / 19 paths| module_v3_server
+  module_v3_server -->|37 edges / 19 paths| module_v3_server
   module_v3_server -->|1 edges / 1 paths| module_v3_vendor
   module_v3_target -->|1 edges / 1 paths| module_v3_provider_responses
   module_v3_scripts -->|2 edges / 1 paths| module_docs
@@ -129,7 +129,7 @@ flowchart TD
 | v3-server | v3-error | 3 | `v3.debug_error_foundation.mainline`<br/>`v3.server.startup` |
 | v3-server | v3-runtime | 4 | `v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline` |
 | v3-server | v3-runtime::hub_v1 | 6 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.runtime_timing_observability.mainline` |
-| v3-server | v3-server | 35 | `v3.client_sse_head_commit`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_restart_handoff_skeleton`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
+| v3-server | v3-server | 37 | `v3.client_sse_head_commit`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_restart_handoff_skeleton`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
 | v3-server | v3/vendor | 1 | `v3.server.startup` |
 | v3-target | v3-provider-responses | 1 | `v3.provider_key_health_model_granularity` |
 | v3/scripts | docs | 2 | `v3.live_provider_compat.parity` |
@@ -1802,7 +1802,7 @@ flowchart TD
 
 ## v3.error.raw_wire_evidence
 
-Terminal Responses Relay failure enqueues verbatim request, Error chain, and provider wire evidence through the Server-owned failure diagnostic side channel; the shared Debug sample worker writes it to the declared filesystem resource.
+All four Relay terminal branches observe typed Error facts before the original provider transport closeout. Terminal and ordinary Responses paths enqueue the verbatim request and Error chain through one Server-owned evidence pair; the shared Debug sample worker remains the sole filesystem writer. Optional diagnostic failures are explicit and never replace the terminal disposition with a client response.
 
 Owner feature: `v3.error.raw_wire_evidence`
 
@@ -1815,18 +1815,25 @@ flowchart TD
   end
   subgraph c_43_v3_error_raw_wire_evidence_m_v3_server["v3-server"]
     c_43_v3_error_raw_wire_evidence_0["v3-server<br/>finalize_v3_responses_relay_server_output<br/><small>routecodex-v3-server/src/live_snapshot.rs</small>"]
-    c_43_v3_error_raw_wire_evidence_1["v3-server<br/>persist_v3_error_evidence_payload<br/><small>routecodex-v3-server/src/live_snapshot.rs</small>"]
+    c_43_v3_error_raw_wire_evidence_1["v3-server<br/>persist_v3_responses_relay_terminal_error_evidence<br/><small>routecodex-v3-server/src/terminal_error_evidence.rs</small>"]
+    c_43_v3_error_raw_wire_evidence_5["v3-server<br/>pending_endpoint_after_responses_admission_inner<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small>"]
+    c_43_v3_error_raw_wire_evidence_6["v3-server<br/>project_v3_relay_terminal_diagnostics<br/><small>routecodex-v3-server/src/terminal_error_evidence.rs</small>"]
+    c_43_v3_error_raw_wire_evidence_7["v3-server<br/>persist_v3_projected_terminal_error_evidence<br/><small>routecodex-v3-server/src/terminal_error_evidence.rs</small>"]
   end
   c_43_v3_error_raw_wire_evidence_0 -->|v3-responses-relay-error-evidence-01<br/>V3Error06ClientProjected → V3ErrorEvidencePersistQueued| c_43_v3_error_raw_wire_evidence_1
   c_43_v3_error_raw_wire_evidence_2 -->|v3-responses-relay-error-evidence-02<br/>V3ErrorEvidencePersistQueued → V3ErrorEvidenceFlushOnTerminalFailure| c_43_v3_error_raw_wire_evidence_3
   c_43_v3_error_raw_wire_evidence_3 -->|v3-responses-relay-error-evidence-03<br/>V3ErrorEvidencePersistFailed → V3ErrorEvidencePersistFailureReported| c_43_v3_error_raw_wire_evidence_4
+  c_43_v3_error_raw_wire_evidence_5 -->|v3-relay-terminal-error-evidence-04<br/>V3Error06ClientProjected → V3ErrorEvidencePersistQueued| c_43_v3_error_raw_wire_evidence_6
+  c_43_v3_error_raw_wire_evidence_5 -->|v3-projected-terminal-error-evidence-05<br/>V3Error06ClientProjected → V3ErrorEvidencePersistQueued| c_43_v3_error_raw_wire_evidence_7
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-responses-relay-error-evidence-01` | `V3Error06ClientProjected` → `V3ErrorEvidencePersistQueued` | anchored | finalize_v3_responses_relay_server_output<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | persist_v3_error_evidence_payload<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | `v3.error.raw_wire_evidence` |
+| `v3-responses-relay-error-evidence-01` | `V3Error06ClientProjected` → `V3ErrorEvidencePersistQueued` | anchored | finalize_v3_responses_relay_server_output<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | persist_v3_responses_relay_terminal_error_evidence<br/><small>routecodex-v3-server/src/terminal_error_evidence.rs</small> | `v3.error.raw_wire_evidence` |
 | `v3-responses-relay-error-evidence-02` | `V3ErrorEvidencePersistQueued` → `V3ErrorEvidenceFlushOnTerminalFailure` | anchored | run_v3_codex_sample_persist_worker<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | persist_v3_codex_sample_persist_job<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.error.raw_wire_evidence` |
 | `v3-responses-relay-error-evidence-03` | `V3ErrorEvidencePersistFailed` → `V3ErrorEvidencePersistFailureReported` | anchored | persist_v3_codex_sample_persist_job<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | record_v3_codex_sample_persist_failure<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.error.raw_wire_evidence` |
+| `v3-relay-terminal-error-evidence-04` | `V3Error06ClientProjected` → `V3ErrorEvidencePersistQueued` | anchored | pending_endpoint_after_responses_admission_inner<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | project_v3_relay_terminal_diagnostics<br/><small>routecodex-v3-server/src/terminal_error_evidence.rs</small> | `v3.error.raw_wire_evidence` |
+| `v3-projected-terminal-error-evidence-05` | `V3Error06ClientProjected` → `V3ErrorEvidencePersistQueued` | anchored | pending_endpoint_after_responses_admission_inner<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | persist_v3_projected_terminal_error_evidence<br/><small>routecodex-v3-server/src/terminal_error_evidence.rs</small> | `v3.error.raw_wire_evidence` |
 
 ## v3.servertool_center.skeleton
 
@@ -3035,7 +3042,7 @@ flowchart TD
     c_73_v3_direct_sse_accept_skeleton_4["v3-runtime<br/>V3HookRegistry::direct_sse_typed_hooks<br/><small>routecodex-v3-runtime/src/hooks.rs</small>"]
   end
   subgraph c_73_v3_direct_sse_accept_skeleton_m_v3_server["v3-server"]
-    c_73_v3_direct_sse_accept_skeleton_0["v3-server<br/>pending_endpoint_after_responses_admission<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small>"]
+    c_73_v3_direct_sse_accept_skeleton_0["v3-server<br/>pending_endpoint_after_responses_admission<br/><small>routecodex-v3-server/src/executors.rs</small>"]
     c_73_v3_direct_sse_accept_skeleton_1["v3-server<br/>pending_endpoint_after_responses_admission_inner<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small>"]
     c_73_v3_direct_sse_accept_skeleton_2["v3-server<br/>v3_io_sse_body<br/><small>routecodex-v3-server/src/frame_builders.rs</small>"]
   end
@@ -3046,7 +3053,7 @@ flowchart TD
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-direct-sse-accept-skeleton-01` | `V3DirectSseAccept01ClientChannel` → `V3DirectSseAccept02RuntimeWorker` | anchored | pending_endpoint_after_responses_admission<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | pending_endpoint_after_responses_admission_inner<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | `v3.direct_sse_accept_skeleton` |
+| `v3-direct-sse-accept-skeleton-01` | `V3DirectSseAccept01ClientChannel` → `V3DirectSseAccept02RuntimeWorker` | anchored | pending_endpoint_after_responses_admission<br/><small>routecodex-v3-server/src/executors.rs</small> | pending_endpoint_after_responses_admission_inner<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | `v3.direct_sse_accept_skeleton` |
 | `v3-direct-sse-accept-skeleton-02` | `V3DirectSseAccept02RuntimeWorker` → `V3DirectSseAccept03ProjectedClientFrame` | anchored | pending_endpoint_after_responses_admission_inner<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | v3_io_sse_body<br/><small>routecodex-v3-server/src/frame_builders.rs</small> | `v3.direct_sse_accept_skeleton` |
 | `v3-direct-typed-hook-catalog-02` | `V3DirectResp14ProviderProjectionPrepared` → `V3DirectResp14TypedHookCatalog` | anchored | execute_v3_responses_direct_runtime_kernel<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | V3HookRegistry::direct_sse_typed_hooks<br/><small>routecodex-v3-runtime/src/hooks.rs</small> | `v3.responses_chat_sse_typed_tree_refactor` |
 

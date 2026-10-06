@@ -17,6 +17,7 @@ mod restart_closeout;
 mod restart_handoff;
 mod scope_metadata;
 mod session_admission;
+mod terminal_error_evidence;
 mod websocket;
 mod webui_observability;
 mod webui_observability_endpoints;
@@ -28,8 +29,7 @@ use endpoint_handlers::{
     format_v3_request_id_entry, format_v3_request_id_token,
     merge_v3_direct_handoff_provider_failure_events, merge_v3_protocol_plan_trace,
     merge_v3_relay_handoff_provider_failure_events_into_direct_frame,
-    next_v3_console_request_identity, pending_endpoint_after_responses_admission,
-    prepend_v3_protocol_plan_trace_to_responses_relay_output,
+    next_v3_console_request_identity, prepend_v3_protocol_plan_trace_to_responses_relay_output,
     prepend_v3_relay_handoff_trace_to_direct_frame,
 };
 pub use executors::*;
@@ -44,6 +44,7 @@ use request_id::{
 pub use restart_handoff::*;
 pub(crate) use routecodex_v3_runtime::V3RequestPurpose;
 pub(crate) use scope_metadata::*;
+pub(crate) use terminal_error_evidence::*;
 use websocket::{responses_websocket_endpoint, responses_websocket_session};
 use webui_observability::V3WebuiObservability;
 
@@ -1189,7 +1190,7 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
             let error06_error_class = projected.error_class;
             let error06_health_action = projected.health_action.clone();
             let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
-            if let Some(response) = record_and_emit_v3_error_projection(
+            record_and_emit_v3_error_projection(
                 &state,
                 &trace_scope,
                 V3ErrorProjectionConsoleInput {
@@ -1214,9 +1215,7 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
                     // external link, so this lane records "not exposed".
                     upstream_request_id: None,
                 },
-            ) {
-                return response;
-            }
+            );
             let frame = if entry_protocol == "responses" {
                 project_v3_responses_error_frame_for_request_if_sse(frame, &request_headers, None)
             } else {
@@ -1331,8 +1330,10 @@ fn emit_relay_error_chain_if_any(
     error_chain: Option<&[&'static str]>,
     body: Option<&Value>,
     request_console_project_path: Option<&str>,
-) -> Option<Response<Body>> {
-    let error_chain = error_chain?;
+) {
+    let Some(error_chain) = error_chain else {
+        return;
+    };
     record_and_emit_v3_error_projection(
         state,
         trace_scope,
@@ -1350,14 +1351,14 @@ fn emit_relay_error_chain_if_any(
             health_action: None,
             upstream_request_id: None,
         },
-    )
+    );
 }
 
 fn record_and_emit_v3_error_projection(
     state: &V3ListenerState,
     trace_scope: &routecodex_v3_debug::V3DebugTraceScope,
     input: V3ErrorProjectionConsoleInput<'_>,
-) -> Option<Response<Body>> {
+) {
     if let Err(error) = state.debug.record_node_event(
         trace_scope,
         "V3Error06ClientProjected",
@@ -1368,10 +1369,20 @@ fn record_and_emit_v3_error_projection(
             "body": input.body
         })),
     ) {
-        return Some(foundation_output_response(project_v3_debug_failure(
-            "V3Error06ClientProjected",
-            error,
-        )));
+        // The node-event sink is an optional Debug side channel. A rejected
+        // write must never replace the caller's typed terminal with a client
+        // Error06 response, so it is reported out of band with the original
+        // cause and request identity, then the existing console/WebUI
+        // projection still runs. The Debug sample store owns persistence
+        // failures; no second failure store is created here.
+        let line = format_v3_console_timed_content(
+            "[error-projection]",
+            &format!(
+                "req={} endpoint={} node=V3Error06ClientProjected error={error}",
+                input.request_id, input.endpoint
+            ),
+        );
+        append_v3_human_console_line(state, &line);
     }
     emit_v3_error_console_line_for_state(
         state,
@@ -1406,7 +1417,6 @@ fn record_and_emit_v3_error_projection(
         );
         append_v3_human_console_line(state, &line);
     }
-    None
 }
 
 fn request_accepts_sse(headers: &HeaderMap) -> bool {

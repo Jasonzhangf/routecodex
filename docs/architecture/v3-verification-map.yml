@@ -2939,6 +2939,9 @@ features:
   owner_scope: Server persists verbatim request, Error chain, and provider wire snapshots only after terminal failure; artifacts remain outside MetadataCenter and normal payload.
   owner_modules:
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/live_snapshot.rs
+  - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+  - v3/crates/routecodex-v3-server/src/terminal_error_evidence.rs
   contract:
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-resource-operation-map.yml
@@ -2946,14 +2949,17 @@ features:
   required_positive:
   - Terminal Relay failure enqueues verbatim request and Error chain evidence through the declared side-channel edge, and the shared sample worker persists it.
   - Worker filesystem failures for error evidence are logged immediately and retained as request/file-qualified barrier errors.
+  - Each Relay protocol terminal keeps same-request Error01-Error06 evidence before prompt transport closeout; an independent healthy request still completes.
   required_negative:
   - Success responses do not force failure evidence persistence.
   - Failure evidence never enters MetadataCenter, provider payload, or client payload.
+  - Optional Debug sink failure cannot replace the original Provider terminal with a client error response.
   required_gates:
   - npm run verify:v3-resource-relation-edge-lock
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib -- --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test req09_relay_terminal_diagnostics_blackbox --test req09_relay_mixed_failure_blackbox
   completion_rule:
     source: Resource, function, mainline, module, and Server unit gates pass.
     runtime: Live failed request evidence capture remains required before production closeout.
@@ -3220,12 +3226,15 @@ features:
   - Configured backoff is a minimum combined with provider-action-gate delay by max rather than addition.
   - Only a non-matching successful response records provider success and reaches Resp03 client commit.
   - Responses, OpenAI Chat, and Anthropic genuinely rejected provider terminals, including an Anthropic `refusal` stop reason and a Responses `response.incomplete` carrying `content_filter`, enter Error01-06 and reselect before any client commit, except on the OpenAI Chat SSE entry, where the Chat codec owns `response.incomplete` and projects both legal reasons as terminal Chat frames (`finish_reason=content_filter` for `content_filter`); an output-cap terminal on the OpenAI Chat wire (`length`/`max_tokens`/`max_output_tokens`), an Anthropic `max_tokens` stop reason, and a Responses `response.incomplete` carrying `max_output_tokens` are all the same valid-partial-output semantic and never enter that path, on any entry.
+  - req09_relay_mixed_external_401_then_local_failure_exhausts_all_four_protocols_blackbox drives Responses, OpenAI Chat, Anthropic, and Gemini Relay entries: each first candidate records a real upstream HTTP 401 witness, the following missing-auth candidate fails locally without sending, and the terminal stays `no_response` without inheriting the earlier 401 status or body; each entry terminates the client transport incomplete with no error status or provider error payload, and an independent healthy request still completes.
+  - req09_relay_external_401_then_missing_auth_keeps_local_terminal_witness_blackbox covers the narrow Chat-to-Responses Relay entry with the same witness isolation: one real upstream 401 request, zero missing-auth sends, a request-bound `no_response` provider terminal without the earlier 401 status or body, no client error response, and an independent healthy 200 on the same aggregate.
   required_negative:
   - Id model and metadata strings cannot trigger content matching.
   - Error policy directive cannot enter normal provider/client payload MetadataCenter or SSE/Server ownership.
   - Error05 cannot re-match a response-content policy from compressed error message.
   - Retry exhaustion cannot project before route/default exhaustion and cannot project more than once.
   - A failed incomplete attempt cannot project partial output or record provider success.
+  - A post-admission local failure must not inherit the previous attempt's external HTTP witness; the attempt-local witness is cleared on admission and replaced wholesale by the send error, and it never enters the client payload.
   required_gates:
   - npm run test:v3-provider-action-gate
   - npm run verify:v3-provider-action-gate
@@ -3233,6 +3242,8 @@ features:
   - npm run test:v3-hub-relay-runtime-closeout
   - npm run verify:v3-hub-relay-runtime-closeout
   - npm run test:v3-hub-relay-runtime-closeout-red-fixtures
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test req09_relay_witness_owner_blackbox -- --nocapture
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test req09_relay_mixed_failure_blackbox -- --nocapture
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-architecture-docs
@@ -3370,6 +3381,7 @@ features:
   owner_scope: Fixed protocol-typed SSE Front client channel shared by Direct and Relay, transport heartbeat, background execution-plan runtime, and projected-frame-only return edge.
   owner_modules:
   - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+  - v3/crates/routecodex-v3-server/src/executors.rs
   - v3/crates/routecodex-v3-server/src/frame_builders.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs

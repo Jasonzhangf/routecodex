@@ -4530,15 +4530,15 @@ chains:
       - v3.debug.dry_run_execution
 - chain_id: v3.error.raw_wire_evidence
   owner_feature_id: v3.error.raw_wire_evidence
-  summary: Terminal Responses Relay failure enqueues verbatim request, Error chain, and provider wire evidence through the Server-owned failure diagnostic side channel; the shared Debug sample worker writes it to the declared filesystem resource.
+  summary: All four Relay terminal branches observe typed Error facts before the original provider transport closeout. Terminal and ordinary Responses paths enqueue the verbatim request and Error chain through one Server-owned evidence pair; the shared Debug sample worker remains the sole filesystem writer. Optional diagnostic failures are explicit and never replace the terminal disposition with a client response.
   edges:
   - step_id: v3-responses-relay-error-evidence-01
     from_node: V3Error06ClientProjected
     to_node: V3ErrorEvidencePersistQueued
     caller_symbol: finalize_v3_responses_relay_server_output
     caller_file: v3/crates/routecodex-v3-server/src/live_snapshot.rs
-    callee_symbol: persist_v3_error_evidence_payload
-    callee_file: v3/crates/routecodex-v3-server/src/live_snapshot.rs
+    callee_symbol: persist_v3_responses_relay_terminal_error_evidence
+    callee_file: v3/crates/routecodex-v3-server/src/terminal_error_evidence.rs
     status: anchored
     edge_kind: failure_side_channel_edge
     owner_feature_id: v3.error.raw_wire_evidence
@@ -4580,6 +4580,42 @@ chains:
       produces: [v3.debug.codex_sample_persist_failure]
       side_channel_reads: [v3.debug.codex_sample_persist_queue]
       side_channel_writes: [v3.debug.codex_sample_persist_failure]
+  - step_id: v3-relay-terminal-error-evidence-04
+    from_node: V3Error06ClientProjected
+    to_node: V3ErrorEvidencePersistQueued
+    caller_symbol: pending_endpoint_after_responses_admission_inner
+    caller_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+    callee_symbol: project_v3_relay_terminal_diagnostics
+    callee_file: v3/crates/routecodex-v3-server/src/terminal_error_evidence.rs
+    status: anchored
+    edge_kind: failure_side_channel_edge
+    owner_feature_id: v3.error.raw_wire_evidence
+    semantic_contract:
+      - Chat, Anthropic, Gemini and all three Responses terminal handoff sites share this caller edge before provider_terminal_response.
+      - The helper observes supplied typed facts only; Provider selection, health and transport disposition retain their existing owners.
+      - Debug node-event or evidence persistence failure is reported out of band and never returns a replacement client response.
+    resource_flow:
+      consumes: [v3.error.chain]
+      produces: [v3.debug.codex_sample_persist_queue]
+      side_channel_reads: [v3.error.chain]
+      side_channel_writes: [v3.debug.codex_sample_persist_queue]
+  - step_id: v3-projected-terminal-error-evidence-05
+    from_node: V3Error06ClientProjected
+    to_node: V3ErrorEvidencePersistQueued
+    caller_symbol: pending_endpoint_after_responses_admission_inner
+    caller_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+    callee_symbol: persist_v3_projected_terminal_error_evidence
+    callee_file: v3/crates/routecodex-v3-server/src/terminal_error_evidence.rs
+    status: anchored
+    edge_kind: failure_side_channel_edge
+    owner_feature_id: v3.error.raw_wire_evidence
+    semantic_contract:
+      - Selection-time Responses exhaustion has no Relay output; it persists the actual typed Error06 chain through the same evidence-pair owner before the original transport closeout.
+    resource_flow:
+      consumes: [v3.error.chain]
+      produces: [v3.debug.codex_sample_persist_queue]
+      side_channel_reads: [v3.error.chain]
+      side_channel_writes: [v3.debug.codex_sample_persist_queue]
 - chain_id: v3.servertool_center.skeleton
   owner_feature_id: v3.servertool_center_skeleton
   summary: Unified ServertoolCenter (MetadataCenter) skeleton. Tools (web_search and servertool CLI) are identified, state-loaded, and projected only through fixed Req04/Resp03 governance hooks; data plane stays logic-free.
@@ -7111,7 +7147,9 @@ chains:
       - Relay uses the same atomic capacity admission, immediately skipping full candidates without waiting or changing health.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
       - Complete eligible-pool exhaustion returns terminal immediately; the current request never waits for or resumes from a future recovery generation.
-      - Concurrency state cannot exhaust Relay selection; only an actual typed provider failure such as HTTP 429 enters Error recovery and may select a later candidate.
+      - All-full candidate sets exhaust this request without a provider send or health mutation; an actual typed provider failure such as HTTP 429 independently enters Error recovery and may select a later candidate.
+      - After admission the selected candidate owns this attempt's external HTTP witness: the Relay attempt loop clears the attempt-local witness, and the send-error branch replaces it wholesale, so a post-admission local failure cannot inherit an earlier attempt's received response.
+      - If selection exhausts before admitting a new candidate, the terminal retains the previous received HTTP witness; after admission only the new attempt's witness may be used, and neither witness enters the client payload.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
       produces: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
@@ -7131,6 +7169,8 @@ chains:
       - Full candidates are excluded only for this request and immediately reselected inside Target; capacity does not mutate failure policy or cooldown state.
       - Complete eligible-pool exhaustion returns terminal immediately; the current request never waits for or resumes from a future recovery generation.
       - The selected admission lease is handed to Relay Provider transport exactly once; otherwise Runtime releases it before terminal projection.
+      - After admission the selected candidate owns this attempt's external HTTP witness: the Relay attempt loop clears the attempt-local witness, and the send-error branch replaces it wholesale, so a post-admission local failure cannot inherit an earlier attempt's received response.
+      - If selection exhausts before admitting a new candidate, the terminal retains the previous received HTTP witness; after admission only the new attempt's witness may be used, and neither witness enters the client payload.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
       produces: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
@@ -7150,7 +7190,9 @@ chains:
       - Anthropic Relay uses shared admission to switch immediately from full providers to the next eligible candidate.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
       - Complete eligible-pool exhaustion returns terminal immediately; the current request never waits for or resumes from a future recovery generation.
-      - Concurrency state cannot exhaust Anthropic Relay selection; only an actual typed provider failure such as HTTP 429 may enter Error recovery and select a later candidate.
+      - All-full candidate sets exhaust this request without a provider send or health mutation; an actual typed provider failure such as HTTP 429 independently enters Error recovery and may select a later candidate.
+      - After admission the selected candidate owns this attempt's external HTTP witness: the Relay attempt loop clears the attempt-local witness, and the send-error branch replaces it wholesale, so a post-admission local failure cannot inherit an earlier attempt's received response.
+      - If selection exhausts before admitting a new candidate, the terminal retains the previous received HTTP witness; after admission only the new attempt's witness may be used, and neither witness enters the client payload.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
       produces: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
@@ -8104,7 +8146,7 @@ chains:
     from_node: V3DirectSseAccept01ClientChannel
     to_node: V3DirectSseAccept02RuntimeWorker
     caller_symbol: pending_endpoint_after_responses_admission
-    caller_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+    caller_file: v3/crates/routecodex-v3-server/src/executors.rs
     callee_symbol: pending_endpoint_after_responses_admission_inner
     callee_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
     status: anchored
@@ -8148,7 +8190,7 @@ chains:
   - step_id: v3-direct-sse-accept-skeleton-intent-01
     from_node: V3DirectSseAccept01ClientChannel
     to_node: V3DirectSseAccept01ClientChannel
-    caller_symbol: pending_endpoint_after_responses_admission
+    caller_symbol: pending_endpoint_after_responses_admission_inner
     caller_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
     callee_symbol: v3_request_wants_sse
     callee_file: v3/crates/routecodex-v3-server/src/lib.rs
