@@ -5,11 +5,14 @@ use routecodex_v3_provider_responses::{
     V3ProviderResp14Raw, V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
-    execute_v3_gemini_relay_runtime, execute_v3_gemini_relay_runtime_with_provider_health,
+    build_v3_provider_global_probe_target, execute_v3_gemini_relay_runtime,
+    execute_v3_gemini_relay_runtime_with_default_transport,
+    execute_v3_gemini_relay_runtime_with_provider_health, probe_v3_provider_global_target,
     V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput, V3ResponsesRelayProviderHealthHandle,
 };
 use serde_json::{json, Value};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -68,6 +71,301 @@ async fn serve_one_gemini_probe(
         .await
         .expect("provider probe response must be writable");
     String::from_utf8_lossy(&request).into_owned()
+}
+
+#[derive(Clone, Debug)]
+struct CapturedHttpRequest {
+    method: String,
+    path: String,
+    authorization: Option<String>,
+    content_type: Option<String>,
+    body: Vec<u8>,
+}
+
+async fn read_keepalive_request(socket: &mut tokio::net::TcpStream) -> Option<Vec<u8>> {
+    let mut request = Vec::new();
+    let mut chunk = [0_u8; 4096];
+    loop {
+        let read = tokio::time::timeout(Duration::from_secs(5), socket.read(&mut chunk))
+            .await
+            .ok()?
+            .ok()?;
+        if read == 0 {
+            return None;
+        }
+        request.extend_from_slice(&chunk[..read]);
+        let Some(header_end) = request.windows(4).position(|window| window == b"\r\n\r\n") else {
+            continue;
+        };
+        let header_text = String::from_utf8_lossy(&request[..header_end]);
+        let content_length = header_text
+            .split("\r\n")
+            .skip(1)
+            .filter_map(|line| line.split_once(':'))
+            .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+            .and_then(|(_, value)| value.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+        let request_len = header_end + 4 + content_length;
+        if request.len() >= request_len {
+            request.truncate(request_len);
+            return Some(request);
+        }
+    }
+}
+
+fn parse_keepalive_request(raw: &[u8]) -> CapturedHttpRequest {
+    let header_end = raw
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .expect("captured HTTP request must contain a header terminator");
+    let header_text = String::from_utf8_lossy(&raw[..header_end]);
+    let mut lines = header_text.split("\r\n");
+    let mut request_line = lines
+        .next()
+        .expect("captured HTTP request must contain a request line")
+        .split_whitespace();
+    let method = request_line
+        .next()
+        .expect("captured HTTP request must contain a method")
+        .to_string();
+    let path = request_line
+        .next()
+        .expect("captured HTTP request must contain a path")
+        .to_string();
+    let mut authorization = None;
+    let mut content_type = None;
+    for line in lines {
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        if name.eq_ignore_ascii_case("authorization") {
+            authorization = Some(value.trim().to_string());
+        } else if name.eq_ignore_ascii_case("content-type") {
+            content_type = Some(value.trim().to_string());
+        }
+    }
+    CapturedHttpRequest {
+        method,
+        path,
+        authorization,
+        content_type,
+        body: raw[header_end + 4..].to_vec(),
+    }
+}
+
+async fn serve_keepalive_requests(
+    listener: TcpListener,
+    expected_requests: usize,
+    response_body: &'static str,
+) -> (usize, Vec<CapturedHttpRequest>) {
+    let accepts = Arc::new(AtomicUsize::new(0));
+    let completed = Arc::new(AtomicUsize::new(0));
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let (done_tx, mut done_rx) = tokio::sync::mpsc::channel::<()>(1);
+
+    loop {
+        tokio::select! {
+            accepted = listener.accept() => {
+                let (mut socket, _) = accepted.expect("keepalive peer must accept a connection");
+                accepts.fetch_add(1, Ordering::SeqCst);
+                let completed = Arc::clone(&completed);
+                let captured = Arc::clone(&captured);
+                let done_tx = done_tx.clone();
+                tokio::spawn(async move {
+                    while let Some(raw) = read_keepalive_request(&mut socket).await {
+                        captured
+                            .lock()
+                            .unwrap()
+                            .push(parse_keepalive_request(&raw));
+                        let response = format!(
+                            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{response_body}",
+                            response_body.len()
+                        );
+                        if socket.write_all(response.as_bytes()).await.is_err() {
+                            break;
+                        }
+                        let completed_now = completed.fetch_add(1, Ordering::SeqCst) + 1;
+                        if completed_now == expected_requests {
+                            let _ = done_tx.send(()).await;
+                            break;
+                        }
+                    }
+                });
+            }
+            Some(()) = done_rx.recv() => break,
+        }
+    }
+
+    let accept_count = accepts.load(Ordering::SeqCst);
+    let captured_requests = captured.lock().unwrap().clone();
+    (accept_count, captured_requests)
+}
+
+fn assert_keepalive_headers(
+    request: &CapturedHttpRequest,
+    expected_path: &str,
+    expected_auth: &str,
+) {
+    assert_eq!(request.method, "POST");
+    assert_eq!(request.path, expected_path);
+    assert_eq!(
+        request.authorization.as_deref(),
+        Some(expected_auth),
+        "provider auth header must stay per request"
+    );
+    assert_eq!(
+        request.content_type.as_deref(),
+        Some("application/json"),
+        "provider JSON content type must stay intact"
+    );
+}
+
+#[tokio::test]
+async fn s16_gemini_default_transport_reuses_keepalive_connection() {
+    const RESPONSE_BODY: &str = r#"{"candidates":[{"index":0,"finishReason":"STOP","content":{"role":"model","parts":[{"text":"keepalive"}]}}]}"#;
+    const AUTH_ENV: &str = "V3_S16_GEMINI_KEEPALIVE_KEY";
+    const AUTH_VALUE: &str = "routecodex-s16-key";
+
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("S16 Gemini keepalive peer must bind");
+    let address = listener
+        .local_addr()
+        .expect("S16 Gemini keepalive peer address");
+    let server = tokio::spawn(serve_keepalive_requests(listener, 2, RESPONSE_BODY));
+
+    let mut manifest = manifest_with_provider_type("gemini");
+    let provider = manifest
+        .providers
+        .get_mut("controlled")
+        .expect("S16 Gemini provider must exist");
+    provider.base_url = format!("http://{address}/v1beta");
+    provider.auth.entries[0].env = Some(AUTH_ENV.to_string());
+    std::env::set_var(AUTH_ENV, AUTH_VALUE);
+
+    for call in 0..2 {
+        let output = tokio::time::timeout(
+            Duration::from_secs(5),
+            execute_v3_gemini_relay_runtime_with_default_transport(
+                &manifest,
+                V3GeminiRelayRuntimeInput {
+                    server_id: "controlled".into(),
+                    failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                        "test-server",
+                        "test-group",
+                        format!("{}:s16-gemini-{call}", module_path!()),
+                    )
+                    .expect("S16 Gemini provider failure session scope"),
+                    request_id: format!("req-s16-gemini-keepalive-{call}"),
+                    endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
+                    payload: json!({
+                        "contents":[{"role":"user","parts":[{"text":"keepalive"}]}],
+                        "stream":false
+                    }),
+                },
+            ),
+        )
+        .await
+        .expect("S16 Gemini keepalive call must complete")
+        .expect("S16 Gemini keepalive call must succeed");
+        assert_eq!(output.status, 200);
+        let body = match output.client_body {
+            V3GeminiRelayClientBody::Json(value) => value,
+            V3GeminiRelayClientBody::Sse(_) => panic!("expected JSON Gemini output"),
+        };
+        assert_eq!(
+            body["candidates"][0]["content"]["parts"][0]["text"],
+            "keepalive"
+        );
+    }
+
+    let (accepts, requests) = tokio::time::timeout(Duration::from_secs(10), server)
+        .await
+        .expect("S16 Gemini keepalive peer must finish")
+        .expect("S16 Gemini keepalive peer task must not panic");
+    assert_eq!(
+        accepts, 1,
+        "Gemini default transport must reuse one keepalive connection"
+    );
+    assert_eq!(requests.len(), 2);
+    for request in requests {
+        assert_keepalive_headers(
+            &request,
+            "/v1beta/models/gemini-wire:generateContent",
+            "Bearer routecodex-s16-key",
+        );
+        assert_eq!(
+            serde_json::from_slice::<Value>(&request.body).expect("Gemini JSON request body"),
+            json!({
+                "contents":[{"role":"user","parts":[{"text":"keepalive"}]}]
+            })
+        );
+    }
+}
+
+#[tokio::test]
+async fn s16_provider_global_probe_reuses_keepalive_connection() {
+    const RESPONSE_BODY: &str = r#"{"candidates":[{"index":0,"finishReason":"STOP","content":{"role":"model","parts":[{"text":"probe"}]}}]}"#;
+    const AUTH_ENV: &str = "V3_S16_PROBE_KEEPALIVE_KEY";
+    const AUTH_VALUE: &str = "routecodex-s16-probe-key";
+
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("S16 provider probe keepalive peer must bind");
+    let address = listener
+        .local_addr()
+        .expect("S16 provider probe keepalive peer address");
+    let server = tokio::spawn(serve_keepalive_requests(listener, 2, RESPONSE_BODY));
+
+    let mut manifest = manifest_with_provider_type("gemini");
+    let provider = manifest
+        .providers
+        .get_mut("controlled")
+        .expect("S16 provider probe provider must exist");
+    provider.base_url = format!("http://{address}/v1beta");
+    provider.auth.entries[0].env = Some(AUTH_ENV.to_string());
+    std::env::set_var(AUTH_ENV, AUTH_VALUE);
+    let target = build_v3_provider_global_probe_target(
+        &manifest,
+        "controlled",
+        Some("controlled"),
+        Some("gemini-wire"),
+    )
+    .expect("S16 provider probe target must build");
+
+    for _ in 0..2 {
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            probe_v3_provider_global_target(target.clone()),
+        )
+        .await
+        .expect("S16 provider probe must complete")
+        .expect("S16 provider probe must succeed");
+    }
+
+    let (accepts, requests) = tokio::time::timeout(Duration::from_secs(10), server)
+        .await
+        .expect("S16 provider probe keepalive peer must finish")
+        .expect("S16 provider probe keepalive peer task must not panic");
+    assert_eq!(
+        accepts, 1,
+        "provider-global probe must reuse one keepalive connection"
+    );
+    assert_eq!(requests.len(), 2);
+    for request in requests {
+        assert_keepalive_headers(
+            &request,
+            "/v1beta/models/gemini-wire:generateContent",
+            "Bearer routecodex-s16-probe-key",
+        );
+        assert_eq!(
+            serde_json::from_slice::<Value>(&request.body).expect("provider probe JSON body"),
+            json!({
+                "contents":[{"role":"user","parts":[{"text":"routecodex health probe"}]}],
+                "generationConfig":{"maxOutputTokens":1}
+            })
+        );
+    }
 }
 
 #[path = "support/hub_v1_fixture.rs"]

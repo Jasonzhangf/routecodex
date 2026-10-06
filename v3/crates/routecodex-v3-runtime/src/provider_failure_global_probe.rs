@@ -9,8 +9,8 @@ use routecodex_v3_error::{
 };
 use routecodex_v3_provider_responses::{
     adaptive_concurrency::V3AdaptiveConcurrencyController, build_v3_provider_global_probe_request,
-    ReqwestResponsesTransport, ResponsesTransport, V3ProviderAuthHandle,
-    V3ProviderAuthSecretHandle, V3ProviderError, V3ResponsesProviderTarget,
+    ResponsesTransport, V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError,
+    V3ResponsesProviderTarget,
 };
 
 use crate::provider_failure_runtime_policy::{
@@ -162,7 +162,7 @@ pub(crate) async fn probe_v3_provider_global_target_impl(
     let admission = concurrency
         .try_acquire(&provider_key, now_ms)
         .ok_or(V3ProviderHealthProbeFailure::ConcurrencyBusy)?;
-    let response = ReqwestResponsesTransport::default()
+    let response = crate::default_responses_transport()
         .send(request.with_pre_acquired_admission(admission))
         .await
         .map_err(provider_probe_error)?;
