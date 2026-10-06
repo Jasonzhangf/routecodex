@@ -733,8 +733,9 @@ impl<'a> RequestNormalizer<'a> {
             return Ok(());
         }
         match item_type {
-            // `input[]` hosted web_search declaration: a canonical `tools[]` declaration, not history.
+            // `input[]` hosted declarations: canonical `tools[]` declarations, not history.
             "web_search" => self.absorb_responses_web_search_declaration(object, item_path),
+            "additional_tools" => self.absorb_additional_tools_declaration(object, item_path),
             "function_call" | "custom_tool_call" => {
                 let call_id = object.get("call_id").and_then(Value::as_str);
                 let name = object.get("name").and_then(Value::as_str);
