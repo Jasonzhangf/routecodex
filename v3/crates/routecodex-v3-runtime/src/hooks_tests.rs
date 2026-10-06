@@ -697,11 +697,63 @@ fn provider_local_auth_secret_failure_is_internal_runtime_identity() {
         },
     );
 
-    assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
+    assert_eq!(source.source_kind, V3ErrorSourceKind::ProviderLocalFailure);
+    assert_eq!(source.code, "provider_local_runtime_error");
     assert!(source.external_error.is_none());
-    let internal = source.internal_error.expect("internal auth/runtime code");
+    let internal = source
+        .internal_error
+        .as_ref()
+        .expect("internal auth/runtime code");
     assert_eq!(internal.internal_code, "500-160");
     assert_eq!(internal.node_id, "V3Transport13ResponsesHttpRequest");
+    let decision = V3ErrorHandlingCenter::decide_provider(
+        V3ErrorHandlingCenterInput {
+            source,
+            action_scope: V3ErrorActionScope::None,
+            candidates_remaining: 0,
+            source_status: None,
+        },
+        false,
+        false,
+        None,
+    );
+    let projected = V3ErrorHandlingCenter::project_terminal(decision);
+    assert_eq!(projected.status, 598);
+}
+
+#[test]
+fn provider_local_auth_secret_read_failure_is_internal_runtime_identity() {
+    let source = provider_error_source("V3Transport13ResponsesHttpRequest")(
+        V3ProviderError::AuthSecretRead {
+            request_id: "req".to_string(),
+            provider_id: "cc".to_string(),
+            auth_alias: "key1".to_string(),
+            reason: "secret file unreadable".to_string(),
+        },
+    );
+
+    assert_eq!(source.source_kind, V3ErrorSourceKind::ProviderLocalFailure);
+    assert_eq!(source.code, "provider_local_runtime_error");
+    assert!(source.external_error.is_none());
+    let internal = source
+        .internal_error
+        .as_ref()
+        .expect("internal auth/runtime code");
+    assert_eq!(internal.internal_code, "500-160");
+    assert_eq!(internal.node_id, "V3Transport13ResponsesHttpRequest");
+    let decision = V3ErrorHandlingCenter::decide_provider(
+        V3ErrorHandlingCenterInput {
+            source,
+            action_scope: V3ErrorActionScope::None,
+            candidates_remaining: 0,
+            source_status: None,
+        },
+        false,
+        false,
+        None,
+    );
+    let projected = V3ErrorHandlingCenter::project_terminal(decision);
+    assert_eq!(projected.status, 598);
 }
 
 #[test]

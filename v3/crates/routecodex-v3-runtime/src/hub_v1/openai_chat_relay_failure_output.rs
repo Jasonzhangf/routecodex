@@ -30,12 +30,24 @@ pub(super) fn error_output(
     provider_id: &str,
     mut trace: Vec<&'static str>,
 ) -> V3OpenAiChatRelayRuntimeOutput {
-    let (projected, trace) = crate::hub_v1::error_output(source, status, provider_id, trace);
+    let (projected, trace, terminal_disposition) = if matches!(
+        &source.source_kind,
+        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure
+            | routecodex_v3_error::V3ErrorSourceKind::ProviderLocalFailure
+    ) {
+        let (projected, disposition) =
+            crate::hub_v1::relay_runtime_shared::project_unscoped_provider_failure(source);
+        trace.extend(routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS);
+        (projected, trace, Some(disposition))
+    } else {
+        let (projected, trace) = crate::hub_v1::error_output(source, status, provider_id, trace);
+        (projected, trace, None)
+    };
     let error_class = projected.error_class;
     let error_detail = projected.error_detail.clone();
     V3OpenAiChatRelayRuntimeOutput {
         status: projected.status,
-        terminal_disposition: None,
+        terminal_disposition,
         client_body: V3OpenAiChatRelayClientBody::Json(projected.body),
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),

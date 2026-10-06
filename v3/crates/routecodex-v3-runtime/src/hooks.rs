@@ -939,7 +939,7 @@ pub(crate) fn build_v3_provider_error_source(
         V3ProviderError::InvalidBaseUrl { .. }
         | V3ProviderError::MissingAuthSecret { .. }
         | V3ProviderError::AuthSecretRead { .. } => build_v3_error_01_source_raised_internal(
-            V3ErrorSourceKind::RuntimeFailure,
+            V3ErrorSourceKind::ProviderLocalFailure,
             stage,
             "provider_local_runtime_error",
             message,
@@ -1253,7 +1253,7 @@ mod direct_provider_transport_tests {
     }
 
     fn assert_local_invalid_url_source(source: V3Error01SourceRaised) {
-        assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
+        assert_eq!(source.source_kind, V3ErrorSourceKind::ProviderLocalFailure);
         assert_eq!(source.source_stage, "V3Transport13ResponsesHttpRequest");
         assert_eq!(source.code, "provider_local_runtime_error");
         assert!(
@@ -1268,12 +1268,18 @@ mod direct_provider_transport_tests {
         assert_eq!(internal.lane, V3InternalErrorLane::Request);
         assert_eq!(internal.node_id, "V3Transport13ResponsesHttpRequest");
 
-        let projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
-            source,
-            action_scope: V3ErrorActionScope::None,
-            candidates_remaining: 0,
-            source_status: None,
-        });
+        let decision = V3ErrorHandlingCenter::decide_provider(
+            V3ErrorHandlingCenterInput {
+                source,
+                action_scope: V3ErrorActionScope::None,
+                candidates_remaining: 0,
+                source_status: None,
+            },
+            false,
+            false,
+            None,
+        );
+        let projected = V3ErrorHandlingCenter::project_terminal(decision);
         assert_eq!(projected.status, 598);
         assert!(projected.body.pointer("/error/external_error").is_none());
     }

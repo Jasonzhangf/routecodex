@@ -195,118 +195,16 @@ async fn guard_relay_sse_first_frame(
     }
 }
 
-/// Relay SSE idle guard: a configured window applies between every two frames.
-pub(crate) fn guard_v3_provider_sse_attempt_deadline(
-    request_id: &str,
-    provider_id: &str,
-    stream: routecodex_v3_provider_responses::V3ProviderSseStream,
-    deadline: std::time::Instant,
-) -> routecodex_v3_provider_responses::V3ProviderSseStream {
-    let request_id = request_id.to_string();
-    let provider_id = provider_id.to_string();
-    Box::pin(futures_util::stream::unfold(
-        (stream, false),
-        move |(mut stream, timed_out)| {
-            let request_id = request_id.clone();
-            let provider_id = provider_id.clone();
-            async move {
-                if timed_out {
-                    return None;
-                }
-                if std::time::Instant::now() >= deadline {
-                    return Some((
-                        Err(V3ProviderError::Transport {
-                            request_id,
-                            provider_id,
-                            reason: "provider SSE attempt exceeded the request residence deadline before a semantic terminal".to_string(),
-                        }),
-                        (stream, true),
-                    ));
-                }
-                match tokio::time::timeout_at(
-                    tokio::time::Instant::from_std(deadline),
-                    stream.next(),
-                )
-                .await
-                {
-                    Ok(Some(chunk)) => Some((chunk, (stream, false))),
-                    Ok(None) => None,
-                    Err(_) => Some((
-                        Err(V3ProviderError::Transport {
-                            request_id,
-                            provider_id,
-                            reason: "provider SSE attempt exceeded the request residence deadline before a semantic terminal".to_string(),
-                        }),
-                        (stream, true),
-                    )),
-                }
-            }
-        },
-    ))
-}
-
-pub(crate) fn guard_v3_provider_sse_idle(
-    request_id: &str,
-    provider_id: &str,
-    stream: routecodex_v3_provider_responses::V3ProviderSseStream,
-    idle_timeout: std::time::Duration,
-) -> routecodex_v3_provider_responses::V3ProviderSseStream {
-    use futures_util::StreamExt;
-    let request_id = request_id.to_string();
-    let provider_id = provider_id.to_string();
-    Box::pin(futures_util::stream::unfold(
-        (stream, false),
-        move |(mut stream, timed_out)| {
-            let request_id = request_id.clone();
-            let provider_id = provider_id.clone();
-            async move {
-                if timed_out {
-                    return None;
-                }
-                match tokio::time::timeout(idle_timeout, stream.next()).await {
-                    Ok(Some(Ok(chunk))) => Some((Ok(chunk), (stream, false))),
-                    Ok(Some(Err(error))) => Some((Err(error), (stream, false))),
-                    Ok(None) => None,
-                    Err(_) => Some((
-                        Err(V3ProviderError::Transport {
-                            request_id: request_id.clone(),
-                            provider_id: provider_id.clone(),
-                            reason: format!(
-                                "provider SSE stream idle timeout (no frame within {}ms)",
-                                idle_timeout.as_millis()
-                            ),
-                        }),
-                        (stream, true),
-                    )),
-                }
-            }
-        },
-    ))
-}
-
-fn observe_v3_provider_sse(
-    stream: routecodex_v3_provider_responses::V3ProviderSseStream,
-    observation: V3RuntimeStreamObservation,
-) -> routecodex_v3_provider_responses::V3ProviderSseStream {
-    use futures_util::StreamExt;
-    Box::pin(stream.map(move |item| {
-        if let Ok(chunk) = &item {
-            if let Err(error) = observation.record_provider_raw_sse_chunk(chunk) {
-                // This is runtime observation state, not provider health. Keep
-                // the failure on the typed side-channel while preserving the
-                // provider/client bytes and their protocol semantics.
-                if let Err(receipt_error) = observation.record_observation_error(&format!(
-                    "provider_raw_sse_observation_failed: {error}"
-                )) {
-                    eprintln!(
-                        "V3 runtime observation failure could not be recorded: {receipt_error}; original: {error}"
-                    );
-                }
-            }
-        }
-        item
-    }))
-}
+// SSE guard helpers moved to a physical child module (owner-preserving split);
+// bodies, signatures, typed arguments and effective visibility are unchanged.
+// `guard_relay_sse_first_frame` stays in this core because its callee source
+// path is anchored in `v3.config.provider_sse_timeout_projection.mainline`.
+#[path = "relay_runtime_core_sse_guards.rs"]
+mod relay_runtime_core_sse_guards;
+use relay_runtime_core_sse_guards::observe_v3_provider_sse;
+pub(crate) use relay_runtime_core_sse_guards::{
+    guard_v3_provider_sse_attempt_deadline, guard_v3_provider_sse_idle,
+};
 
 pub(crate) use super::relay_runtime_shared::{
     v3_provider_sse_idle_timeout, v3_relay_transport_response_timeout_from_ms,
@@ -739,12 +637,16 @@ where
         trace.push("V3HubReqOutbound07ProviderSemantic");
         let target = provider_target(manifest, req07.selected_target(), C::EXPECTED_PROVIDER_TYPE)
             .map_err(V3RelayCoreError::Target)?;
-        macro_rules! handle_provider_request_failure {
-            ($stage:expr, $kind:expr, $error:expr) => {{
+        // 单一 `handle_provider_failure` 调用链：typed 入口直接接收已构造的
+        // `V3RelayProviderFailure`（构造期 Provider 错误经 shared
+        // `provider_runtime_failure` 保留真实 `V3ProviderError` 变体），通用 wrapper
+        // 仅为非 Provider 核心错误保留原 `request_failure_builder` 的 Display 形状。
+        macro_rules! handle_provider_failure_with_failure {
+            ($failure:expr) => {{
                 let terminal_failure = handle_provider_failure(
                     &failure_context,
                     selected,
-                    C::request_failure_builder($stage, $kind, $error),
+                    $failure,
                     &mut V3RelayProviderFailurePolicyState {
                         failed_candidates: &mut failed_candidates,
                         same_candidate_retries: &mut same_candidate_retries,
@@ -761,6 +663,13 @@ where
                 }
                 continue;
             }};
+        }
+        macro_rules! handle_provider_request_failure {
+            ($stage:expr, $kind:expr, $error:expr) => {
+                handle_provider_failure_with_failure!(C::request_failure_builder(
+                    $stage, $kind, $error
+                ))
+            };
         }
         let req_compat = match build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07) {
             Ok(projected) => record_projected_drops(&drop_ctx, projected),
@@ -783,6 +692,16 @@ where
             provider_header_overrides.clone(),
         ) {
             Ok(request) => request,
+            // 协议 codec 的构造失败已收敛为 typed `V3ProviderError`：交给 shared
+            // `provider_runtime_failure`，保留 InvalidBaseUrl / MissingAuthSecret /
+            // AuthSecretRead / InternalTransport 等真实来源，再走原失败策略与重选。
+            Err(V3RelayCoreError::Provider(error)) => {
+                handle_provider_failure_with_failure!(provider_runtime_failure(
+                    error,
+                    &selected_target_provider_id,
+                ))
+            }
+            // 非 Provider 核心错误保持原行为：Display 形状的 request 构造失败。
             Err(error) => handle_provider_request_failure!(
                 "V3ProviderReqOutbound09TransportRequest",
                 "provider_transport_request_error",
@@ -1498,3 +1417,7 @@ where
 #[cfg(test)]
 #[path = "relay_runtime_core_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "relay_runtime_core_transport_tests.rs"]
+mod transport_tests;

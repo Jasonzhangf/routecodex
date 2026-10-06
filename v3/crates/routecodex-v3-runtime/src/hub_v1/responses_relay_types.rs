@@ -262,6 +262,10 @@ pub(crate) struct V3ResponsesRelayProviderFailure {
     /// received (network/transport failure or an internally synthesized failure).
     /// Never the client-facing projection status.
     pub(crate) provider_status: Option<u16>,
+    /// The typed local source raised before the shared failure policy runs. It is
+    /// preserved only for already-classified local provider failures; legacy
+    /// wire-only callers keep this `None`.
+    pub(crate) original_source: Option<routecodex_v3_error::V3Error01SourceRaised>,
     pub(crate) policy_error_type: String,
     pub(crate) policy_error_message: String,
     pub(crate) provider_id: String,

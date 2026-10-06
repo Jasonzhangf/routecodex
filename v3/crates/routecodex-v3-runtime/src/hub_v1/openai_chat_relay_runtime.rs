@@ -1285,6 +1285,7 @@ fn openai_chat_provider_http_failure(
     V3RelayProviderFailure {
         status,
         provider_status: Some(status),
+        original_source: None,
         client_response: body,
         source_stage: "V3ProviderReqOutbound09TransportRequest",
         terminal_projection: None,
@@ -1360,12 +1361,11 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         error_type: &'static str,
         error: impl std::fmt::Display,
     ) -> V3RelayProviderFailure {
-        // openai_chat wire 用 error.type（与 provider_http_failure 的 type-style 一致；
-        // 默认共享版是 gemini/responses 的 error.code 风格）。
+        // OpenAI Chat 使用 error.type；该构造失败没有上游响应。
         V3RelayProviderFailure {
             status: 502,
-            // Request-construction failure: no upstream HTTP response exists.
             provider_status: None,
+            original_source: None,
             client_response: json!({"error":{"type":error_type,"message":error.to_string()}}),
             source_stage,
             terminal_projection: None,

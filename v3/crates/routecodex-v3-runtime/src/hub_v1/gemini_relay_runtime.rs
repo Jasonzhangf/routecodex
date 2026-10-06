@@ -514,16 +514,33 @@ pub fn project_v3_gemini_relay_runtime_failure(
             error.to_string(),
         ),
     };
-    let (projected, trace) = error_output(
-        source,
-        if request_payload_invalid { 400 } else { 500 },
-        "none",
-        Vec::new(),
+    let provider_source = matches!(
+        &source.source_kind,
+        V3ErrorSourceKind::ProviderFailure | V3ErrorSourceKind::ProviderLocalFailure
     );
+    let (projected, trace, terminal_disposition) = if provider_source {
+        let (projected, disposition) =
+            super::relay_runtime_shared::project_unscoped_provider_failure(source);
+        let mut trace = Vec::new();
+        trace.extend(routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS);
+        (projected, trace, Some(disposition))
+    } else {
+        let (projected, trace) = error_output(
+            source,
+            if request_payload_invalid { 400 } else { 500 },
+            "none",
+            Vec::new(),
+        );
+        (
+            projected,
+            trace,
+            provider_pool_exhausted
+                .then_some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
+        )
+    };
     V3GeminiRelayRuntimeOutput {
         status: projected.status,
-        terminal_disposition: provider_pool_exhausted
-            .then_some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
+        terminal_disposition,
         client_body: V3GeminiRelayClientBody::Json(projected.body),
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
@@ -935,6 +952,10 @@ mod typed_provider_transport_source_tests {
         assert_eq!(
             output.error_chain.as_deref(),
             Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
+        );
+        assert_eq!(
+            output.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
         );
 
         // stage 由公共投影内部的同一 shared mapper 决定；这里用同一 stage 常量核对

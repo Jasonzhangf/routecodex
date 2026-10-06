@@ -38,6 +38,8 @@ use crate::provider_error_policy_matching::provider_error_policy_matches_source_
 pub use crate::provider_failure_global_probe::build_v3_provider_global_probe_target;
 pub(crate) use crate::provider_failure_global_probe::probe_v3_provider_global_target_impl;
 
+mod health_records;
+
 struct V3ProviderProbeCancellationGuard {
     store: V3ProviderHealthStore,
     provider_id: String,
@@ -751,69 +753,17 @@ impl V3ProviderFailureRuntimeHealth {
                 message: Some(message.to_string()),
             },
         );
-        let classified = build_v3_error_02_classified_from_v3_error_01(source.clone());
-        if let Some(policy) = matched_policy_directive
-            .map(|policy| provider_failure_policy_from_error_policy_directive(policy, status))
-            .transpose()?
-            .flatten()
-        {
-            return self
-                .store
-                .record_provider_failure_in_session_with_policy(
-                    failure_session_scope,
-                    provider_id,
-                    auth_alias,
-                    model_id,
-                    reason,
-                    now_ms,
-                    Some(policy),
-                )
-                .map_err(|error| error.to_string());
-        }
-        // 统一错误模型：任何 provider 失败（含 400/invalid_request）都按
-        // internal 全局策略表盖章阈值后计入全局健康；连续达到阈值即进入
-        // 全局冷却，由后台探活或真实成功恢复，不再按状态码豁免。
-        let action = apply_v3_internal_provider_failure_policy(
-            build_v3_provider_failure_action_from_v3_error_02(&classified),
-            source_stage,
-            status,
-            error_type.unwrap_or("provider_failure"),
-        );
-        let projection = self.record_provider_key_failure_action(
-            provider_id,
-            auth_alias,
-            model_id,
-            &action,
-            now_ms,
-        )?;
-        let session_record = self.record_provider_failure_in_session_without_health_cooldown(
+        self.record_provider_failure_record_for_source_with_policy_status(
+            matched_policy_directive,
+            &source,
             failure_session_scope,
             provider_id,
             auth_alias,
             model_id,
             reason,
+            status,
             now_ms,
-        )?;
-        let Some(projection) = projection else {
-            return Ok(session_record);
-        };
-        let provider_key = v3_relay_provider_candidate_key_parts(
-            &projection.provider_id,
-            Some(&projection.auth_alias),
-            Some(&projection.model_id),
-        );
-        Ok(V3ProviderFailureRecord {
-            scope_label: session_record.scope_label,
-            provider_key,
-            state: if projection.cooldown {
-                "cooldown".to_string()
-            } else {
-                "healthy".to_string()
-            },
-            failure_count: projection.failure_streak,
-            cooldown_until_ms: projection.cooldown_until_ms,
-            reason: session_record.reason,
-        })
+        )
     }
 
     pub(crate) fn record_provider_success_in_failure_scope(
@@ -1138,6 +1088,9 @@ async fn reselect_from_captured_target_plan(
     }
 }
 
+/// The one shared provider failure policy. When `original_source` is present the
+/// already-classified typed source is sent straight to the same Error center;
+/// the legacy wire-only caller keeps building its real external source.
 pub(crate) async fn run_v3_relay_provider_failure_policy(
     context: &V3RelayProviderFailurePolicyContext<'_>,
     selected: V3Target10ConcreteProviderSelected,
@@ -1145,6 +1098,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     status: u16,
     error_type: Option<String>,
     message: String,
+    original_source: Option<V3Error01SourceRaised>,
     matched_policy_directive: Option<&V3ProviderErrorActionPolicyManifest>,
     state: &mut V3RelayProviderFailurePolicyState<'_>,
 ) -> Result<V3RelayProviderFailurePolicyResult, String> {
@@ -1182,6 +1136,20 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
             cooldown_until_ms: None,
             reason: reason.map(str::to_string),
         }
+    } else if let Some(source) = original_source.as_ref() {
+        context
+            .provider_health
+            .record_provider_failure_record_for_source_with_policy(
+                matched_policy,
+                source,
+                &context.failure_session_scope,
+                &selected.candidate.provider_id,
+                Some(&selected.candidate.auth_alias),
+                Some(&selected.candidate.model_id),
+                reason,
+                v3_relay_provider_policy_now_epoch_ms()?,
+            )
+            .map_err(|error| error.to_string())?
     } else {
         context
             .provider_health
@@ -1315,6 +1283,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                     status,
                     error_type.as_deref(),
                     &message,
+                    original_source.as_ref(),
                     usize::from(!alternative.candidate.default_pool_member),
                     alternative.candidate.default_pool_member,
                     false,
@@ -1391,6 +1360,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
             status,
             error_type.as_deref(),
             &message,
+            original_source.as_ref(),
             0,
             false,
             false,
@@ -1428,6 +1398,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         status,
         error_type.as_deref(),
         &message,
+        original_source.as_ref(),
         0,
         false,
         false,
@@ -1585,29 +1556,36 @@ fn build_v3_relay_provider_error_05_decision(
     status: u16,
     error_type: Option<&str>,
     message: &str,
+    original_source: Option<&V3Error01SourceRaised>,
     route_pool_remaining_after_exclusion: usize,
     default_pool_available: bool,
     same_provider_retry_available: bool,
     recovery: Option<V3Error05RecoveryAdmissionWitness>,
 ) -> V3Error05ExecutionDecision {
-    let code = error_type.unwrap_or("provider_failure").to_string();
-    // The numeric policy status also represents synthesized request/transport
-    // failures. Only the separately captured HTTP witness proves an upstream
-    // status, so Error01 must not claim this policy number as external HTTP.
-    let source = build_v3_error_01_source_raised_external(
-        V3ErrorSourceKind::ProviderFailure,
-        source_stage,
-        code.clone(),
-        message,
-        V3ExternalErrorLink {
-            kind: V3ExternalErrorKind::Provider,
-            status: None,
-            code: Some(code),
-            provider_id: Some(selected.candidate.provider_id.clone()),
-            upstream_request_id: None,
-            message: Some(message.to_string()),
-        },
-    );
+    let source = match original_source {
+        Some(source) => source.clone(),
+        None => {
+            let code = error_type.unwrap_or("provider_failure").to_string();
+            // The numeric policy status also represents synthesized
+            // request/transport failures. Only the separately captured HTTP
+            // witness proves an upstream status, so Error01 must not claim this
+            // policy number as external HTTP.
+            build_v3_error_01_source_raised_external(
+                V3ErrorSourceKind::ProviderFailure,
+                source_stage,
+                code.clone(),
+                message,
+                V3ExternalErrorLink {
+                    kind: V3ExternalErrorKind::Provider,
+                    status: None,
+                    code: Some(code),
+                    provider_id: Some(selected.candidate.provider_id.clone()),
+                    upstream_request_id: None,
+                    message: Some(message.to_string()),
+                },
+            )
+        }
+    };
     V3ErrorHandlingCenter::decide_provider(
         V3ErrorHandlingCenterInput {
             source,

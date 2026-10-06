@@ -7703,8 +7703,8 @@ chains:
   - step_id: v3-provider-global-probe-05
     from_node: V3ProviderFailureRuntimeHealth
     to_node: V3ProviderHealthStore
-    caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy
-    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_failure_record_for_source_with_policy_status
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/health_records.rs
     callee_symbol: V3ProviderHealthStore::record_provider_failure_in_session_with_policy
     callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
     status: anchored

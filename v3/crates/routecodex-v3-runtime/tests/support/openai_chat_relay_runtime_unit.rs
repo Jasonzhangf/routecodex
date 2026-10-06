@@ -492,7 +492,7 @@ mod typed_provider_transport_source_tests {
     use routecodex_v3_config::V3ResponsesTransportKind;
     use routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS;
     use routecodex_v3_provider_responses::{
-        V3ProviderAuthHandle, V3ProviderAuthSecretHandle,
+        V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ResponsesStreamIntent,
     };
     use serde_json::json;
 
@@ -519,6 +519,32 @@ mod typed_provider_transport_source_tests {
             initial_concurrency_budget: 8,
             concurrency_acquire_timeout_ms: 60_000,
         }
+    }
+
+    #[test]
+    fn openai_chat_transport_construction_success_keeps_url_auth_stream_and_body() {
+        let request = <V3OpenAiChatRelayCodec as V3RelayProtocolCodec>::build_transport_request(
+            "req-openai-chat-ok",
+            openai_chat_transport_target("https://openai-chat.example.invalid"),
+            V3HubTransportIntent::Sse,
+            json!({
+                "model": "typed-model",
+                "stream": true,
+                "messages": [{"role": "user", "content": "hello"}],
+                "opaque_marker": {"keep": true}
+            }),
+            Vec::new(),
+        )
+        .expect("valid openai chat transport construction");
+
+        assert_eq!(request.request_id(), "req-openai-chat-ok");
+        assert_eq!(request.provider_id(), "openai-chat-typed-provider");
+        assert_eq!(request.provider_key(), "openai-chat-typed-provider:primary");
+        assert!(request.url().ends_with("/chat/completions"));
+        assert_eq!(request.stream_intent(), V3ResponsesStreamIntent::Sse);
+        assert_eq!(request.body()["model"], "typed-model");
+        assert_eq!(request.body()["messages"][0]["content"], "hello");
+        assert_eq!(request.body()["opaque_marker"]["keep"], true);
     }
 
     #[test]
@@ -569,6 +595,10 @@ mod typed_provider_transport_source_tests {
         assert_eq!(
             output.error_chain.as_deref(),
             Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
+        );
+        assert_eq!(
+            output.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
         );
 
         // stage 由公共投影内部的同一 shared mapper 决定；这里用同一 stage 常量核对
