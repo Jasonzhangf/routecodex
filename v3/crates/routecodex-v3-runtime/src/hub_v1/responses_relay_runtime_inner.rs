@@ -209,6 +209,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         status: 502,
                         // Target exhaustion is local: no upstream HTTP response.
                         provider_status: None,
+                        original_source: None,
                         policy_error_type: "selected_target_exhausted".to_string(),
                         policy_error_message: format!(
                             "selected target exhausted after {attempted_candidates:?}"
@@ -231,6 +232,10 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 }
             }
         };
+        // The admitted candidate owns this attempt's witness. The selection
+        // exhaustion branch above may still use the previous attempt's
+        // failure, but no post-admission path may inherit it.
+        last_external_http = None;
         if provider_action_permit_target
             .as_ref()
             .is_some_and(|target| {
@@ -401,7 +406,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
             match build_v3_provider_transport_request_for_protocol(provider_wire_protocol, wire) {
                 Ok(transport_request) => transport_request,
                 Err(error) => {
-                    handle_provider_request_failure!(V3ResponsesRelayRuntimeError::Target(error));
+                    handle_provider_request_failure!(V3ResponsesRelayRuntimeError::Provider(error));
                 }
             };
         if let Err(error) = validate_v3_responses_relay_provider_request_transport_intent(
@@ -563,11 +568,8 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 handle_error_before_resp03!(runtime_timing
                     .finish_external()
                     .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
-                if let Some(witness) =
-                    crate::hub_v1::external_http_witness_from_provider_error(&error)
-                {
-                    last_external_http = Some(witness);
-                }
+                last_external_http =
+                    crate::hub_v1::external_http_witness_from_provider_error(&error);
                 let failure = provider_runtime_failure(
                     error,
                     &selected_target_provider_id,

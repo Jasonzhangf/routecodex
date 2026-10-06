@@ -856,6 +856,7 @@ async fn target_resolution_failure_projects_itself_instead_of_prior_provider_429
         Some("provider_transport_error".to_string()),
         "prior provider returned 429".to_string(),
         None,
+        None,
         &mut state,
     )
     .await
@@ -1116,6 +1117,7 @@ async fn transport_error_switches_provider_family() {
         Some("provider_transport_error".to_string()),
         "error sending request for url".to_string(),
         None,
+        None,
         &mut state,
     )
     .await
@@ -1220,6 +1222,7 @@ message_mode = "code_only"
         429,
         Some("provider_http_429".to_string()),
         "quota exceeded".to_string(),
+        None,
         None,
         &mut state,
     )
@@ -1330,6 +1333,7 @@ targets = [
         200,
         Some("provider_embedded_error".to_string()),
         "compressed message no longer contains configured keyword".to_string(),
+        None,
         Some(matched_policy),
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
@@ -1384,6 +1388,7 @@ async fn provider_response_event_codec_failure_never_retries_same_candidate() {
         Some("provider_response_event_codec_failure".to_string()),
         "provider response event codec failed: Anthropic codec malformed reasoning content"
             .to_string(),
+        None,
         None,
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,

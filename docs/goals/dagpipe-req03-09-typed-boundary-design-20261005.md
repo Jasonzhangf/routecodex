@@ -152,3 +152,117 @@ stateDiagram-v2
 失败typed Error、同attempt成功映射、失败attempt隔离、取消/Drop释放、wire只消费一次。
 串行接线前必须真实HTTP/WS JSON/SSE/Direct/Relay及gpt-5.5/gpt-5.6的exec/native apply_patch/MCP执行和follow-up。
 当前已通过的consumer只是基础能力证据，不替代新节点acceptance。
+
+## 8. REQ09 前置：候选本地构造失败的唯一错误来源
+
+本节设计已通过独立准入：`req09-provider-local-source-design-20261006-r1`，
+`oauth / gpt-6.1-sol`，controller PASS、exit0。实现、黑盒与最终架构审查仍须完成；
+设计准入不代表节点注册、生产接线或交付完成。
+输入：main `ac92527a3a3c2c4974a778e54c1ca2bf81ab1e8c`；已复现的前置候选
+`0f518a56d296e86f2fc152874023ff104a2dddc2` 及其 R1 review 两项 P1。
+
+### 8.1 已确认断边与边界
+
+- shared Relay core 的 transport construction 错误被通用 Display builder 转成字符串。
+  typed Provider variant 没有抵达原 shared failure owner。这条 caller 边由 core worker 修复。
+- Responses/Anthropic 对 InvalidBaseUrl、MissingAuthSecret、AuthSecretRead 提前生成终态，
+  使用没有候选事实的 `None/0`，跳过健康的后续候选。
+- 唯一 mapper `hooks.rs::build_v3_provider_error_source` 将这三个本地变体归为 RuntimeFailure。
+  Error02 将 RuntimeFailure 定为 already_terminal；Error05 不允许其候选恢复。
+- 当前 policy 把错误重建成 external ProviderFailure。不能用这条路径恢复后再交换回
+  RuntimeFailure。那会产生两个错误来源，并且伪造外部来源。
+
+这三个失败发生在已选 provider 候选的本地构造边界。它们不是上游 HTTP 失败，
+也不是任意 Runtime 基础设施失败。InternalTransport、控制字段泄漏、模型绑定错误和
+ClientDisconnect 保持原契约。不能放开全部 RuntimeFailure，也不能按消息文本猜类型。
+
+### 8.2 唯一 typed 表达
+
+在现有 `V3ErrorSourceKind` 增加精确变体 `ProviderLocalFailure`。它只用于上述三个
+`V3ProviderError` 变体，由现有唯一 mapper 产生。source 保留原 code/message、原 stage、
+原 request-lane internal envelope；external link 必须为 None。
+不允许 ProviderFailure 携带 internal envelope，也不改变其现有外部语义。
+
+复用现有 `V3Error01SourceRaised` 和 `v3.error.chain` 控制资源。
+不增加第二 store、额外分类器、错误文本解析、业务 metadata 或 JSON control wrapper。
+同一 source 在分类、health/action、耗尽、恢复决定和终态诊断之间原样传递。
+协议只渲染其表示，不能决定本地错误是否允许切 provider。
+
+选定精确 source kind 的原因：现有 RuntimeFailure 明确代表终态基础设施错误；
+ProviderFailure 明确禁止 internal envelope。只改 scope 或用代码字符串豁免，会将
+本地来源身份与恢复决策分散到第二处。新变体让该区别由 Error owner 一次表达。
+
+### 8.3 按 owner 改动
+
+| owner | 必须操作 | 禁止操作 |
+| --- | --- | --- |
+| Runtime source mapper | 只把三个真实本地 Provider 变体映射为 ProviderLocalFailure；其他变体不变 | 猜消息、伪造 upstream HTTP、改业务 payload |
+| Error source/classification | internal envelope 允许精确新变体；external envelope 禁止新变体；分类为可由候选事实管理的本地 provider 失败 | 放开全部 RuntimeFailure，复用 external ProviderFailure 冒充本地来源 |
+| Error action/health | 新变体使用现有选中身份 scope 与共享 health/action 契约；无 scope 不更新 health | 在 Error crate 选择候选、读取配置或从日志重建身份 |
+| Error exhaustion/decision | 使用真实 remaining/default/recovery witness；有健康候选则返回现有 WaitThenReselect；真实耗尽才允许 typed terminal | 在协议 helper 提前写 None/0；复制第二恢复策略 |
+| Error terminal guard/projection | 新变体的 ProjectTerminal 必须有真实耗尽证明；内部诊断保持原 request lane 598 和原 code；不进入 pool-exhausted network_error 的外部分类 | 换回另一 source、把 598 当上游 status、成功包装错误 |
+| Runtime failure carrier | 在现有 shared/Responses failure 类型中保存 optional original typed source，供尚未迁移的外部 wire failure caller 保持当前契约 | 将新控制来源镜像到 client_response 再读取 |
+| Runtime failure policy | typed source 存在时直接送同一 Error center；旧 wire-only caller 仍由原 source builder 建其真正外部来源；只有一套 exclusion/health/recovery 实现 | 对同一次本地失败再次制造 external source；终点补回原 source |
+| 协议 failure helpers | local variant 不预造 terminal_projection；交同一 handler/policy；typed code/message 直接取 carrier，error_type_fn 只提取旧 wire 形状 | 各协议独立分类或恢复，提取 payload control |
+| shared core | Provider variant 直接交原 typed failure builder，非 Provider variant 保持原通用分支；共用一个 handle_provider_failure caller | 复制 handler、文本分类、跨节点恢复 shortcut |
+| Server/SSE | 消费原 typed disposition；有候选时保持会话直到成功尝试完成；耗尽保持现有 NoResponse，不返回 provider 错误 JSON | 从 debug 或 payload 判路由；新增终态响应伪装成功 |
+
+Error 改动范围：`routecodex-v3-error/src/lib.rs` 中 source enum、envelope guard、
+Error02/03/04/05/06、terminal guard 和现有 center/post-commit 公共边界；
+`src/subscription.rs` 的唯一 provider health action classifier。
+新增 variant 的所有实际 exhaustive consumer 必须明确处理，不能用 wildcard 隐藏缺口。
+对 `handle` 等不携恢复事实的便捷入口，任何已选候选本地失败必须迁移到携带真实事实的
+`decide_provider` 路径。无 provider attempt 的观测入口没有候选可恢复时，明确使用其
+真实无候选上下文完成 internal 诊断；不把它计入 Provider 业务尝试。
+
+Runtime 改动范围：`hooks.rs` 的唯一 mapper；`provider_failure_runtime_policy.rs`
+的原 failure policy/source 决策边；shared/Responses failure types/helpers/handlers；
+Anthropic failure helper 和现有 caller；新增 typed field 的 struct literal 初始化。
+Direct 中所有使用该 mapper 的 caller 必须按真实 selected/availability 交原 Direct policy，
+不能因新 variant 的 exhaustive match 或便捷 projection 入口导致 panic/提前终态。
+只允许修这条 typed 交接；不改 Direct payload hook 或重写其路由策略。
+OpenAI Chat/Gemini shared core 由独立 worker 负责上述 caller 边。Provider、Compat、
+Inbound/Outbound 业务语义、REQ02 scope store、REQ03/04 helper 和注册均不在本切片范围。
+
+### 8.4 DAG 与生命周期
+
+继续使用项目现有 `v3.operation_runner.error.graph.json` 的单源单汇 Error graph。
+该 graph 的 ARC/resource 合同已经承载 typed source 和 execution decision；本切片
+改变 source schema 的精确 variant 与原 owner 实现，不改变拓扑、operator 顺序或资源 owner。
+request graph 失败只产生 typed 来源；Error graph 只产出决定；Runtime 消费决定并启动
+新的 attempt。重选不在 request/error graph 之间增加回边。
+
+```mermaid
+flowchart LR
+  A[收到候选本地构造失败] --> B[保留真实内部错误来源]
+  B --> C[分类并形成健康管理动作]
+  C --> D[结合真实候选事实判定耗尽]
+  D --> E[形成唯一执行决定]
+  E --> F[交由原运行生命周期消费决定]
+```
+
+出口 F 消费同一 typed outcome。重选分支由原 Runtime 接收 recovery witness，
+开始新 attempt；成功分支返回实际 provider 成功业务响应。耗尽分支保留内部诊断并
+交原 NoResponse disposition。客户端取消分支交原 ClientDisconnected，health neutral。
+各分支复用原 attempt/request scope 释放和取消终点；不新增需要独立回收的状态。
+
+### 8.5 编码前准入与作者验收
+
+设计准入：三链 graph validation；独立 oauth/gpt-6.1-sol 设计 review PASS。
+本节只有设计，无产品测试/安装要求；不能将设计 PASS 当作实现或接线 PASS。
+
+实现后必须提供以下作者证据，再进入实现架构 review：
+
+1. Error crate 公开 consumer：三个 mapper local 变体保留 source/internal/no-external；
+   remaining>0 的真正 witness 返回重选且 source 未交换；真实 0 候选返回 terminal598；
+   RuntimeFailure 与 ClientDisconnect 原行为不变；假的 terminal witness 被原 guard 拒绝。
+2. shared core 实际 caller 红绿，不能仅直接调用 mapper 或断言任意错误 status。
+3. 四协议真实 aggregate HTTP：bad first candidate 的本地构造失败不发网络请求；
+   healthy second candidate 接收实际请求并成功，客户端得到成功业务输出；单候选
+   typed 诊断为598、external status为空、原 NoResponse；Direct/Relay受影响caller均覆盖。
+4. 完整命令/patch/MCP namespace、call ID、结果、follow-up 保真；隔离正式构建、安装、
+   restart 后 GCM gpt-5.5 与 gpt-5.6 真实工具运行和请求样本闭环。
+5. 最新 main 组合、所有受影响 gate、独立实现 review、集成及自有资源回收按原交付流程。
+
+取消和上游 HTTP 错误的控制用例必须保留。没有真实样本时使用上述同入口最小复现，
+不能按最终 502 猜来源。测试只围绕这条断边，不添加源码摘要或私人结构锁死断言。

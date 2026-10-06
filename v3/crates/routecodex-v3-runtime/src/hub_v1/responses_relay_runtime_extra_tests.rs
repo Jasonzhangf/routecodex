@@ -244,6 +244,7 @@ fn provider_failure_output_keeps_real_http_witness_outside_error06_body() {
         V3ResponsesRelayProviderFailure {
             status: 429,
             provider_status: Some(429),
+            original_source: None,
             policy_error_type: "rate_limit_error".to_string(),
             policy_error_message: "controlled rate limit".to_string(),
             provider_id: "controlled".to_string(),

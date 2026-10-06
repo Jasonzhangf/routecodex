@@ -66,6 +66,10 @@ pub struct V3RelayProviderFailure {
     /// The upstream provider's real HTTP status; `None` when no HTTP response was
     /// received. Never the client-facing projection status.
     pub provider_status: Option<u16>,
+    /// The typed local source raised before the shared failure policy runs. It is
+    /// preserved only for already-classified local provider failures; legacy
+    /// wire-only callers keep this `None` and use the existing external builder.
+    pub original_source: Option<routecodex_v3_error::V3Error01SourceRaised>,
     pub client_response: Value,
     pub source_stage: &'static str,
     pub terminal_projection: Option<V3Error06ClientProjected>,
@@ -238,6 +242,7 @@ pub async fn handle_provider_failure(
         failure.status,
         failure_error_type(&failure),
         provider_failure_message(&failure),
+        failure.original_source.clone(),
         None,
         state,
     )
@@ -300,6 +305,7 @@ pub fn provider_http_failure(
     V3RelayProviderFailure {
         status,
         provider_status: Some(status),
+        original_source: None,
         client_response: body,
         source_stage: "V3ProviderReqOutbound09TransportRequest",
         terminal_projection: None,
@@ -439,6 +445,7 @@ pub fn provider_request_failure(
         status: 502,
         // Request-construction failure: no upstream HTTP response exists.
         provider_status: None,
+        original_source: None,
         client_response: json!({"error":{"code":error_type,"message":error.to_string()}}),
         source_stage,
         terminal_projection: None,
@@ -457,6 +464,7 @@ pub fn provider_terminal_admission_failure(
         // Callers pass the raw status of the HTTP response whose body was
         // inadmissible, so this IS a real upstream HTTP status.
         provider_status: Some(status),
+        original_source: None,
         client_response: json!({
             "error": {
                 "code": failure.code,
@@ -477,6 +485,31 @@ pub fn provider_runtime_failure(
     error: V3ProviderError,
     provider_id: &str,
 ) -> V3RelayProviderFailure {
+    if matches!(
+        error,
+        V3ProviderError::InvalidBaseUrl { .. }
+            | V3ProviderError::MissingAuthSecret { .. }
+            | V3ProviderError::AuthSecretRead { .. }
+    ) {
+        let source_stage = "V3Transport13ResponsesHttpRequest";
+        let source = crate::hooks::build_v3_provider_error_source(source_stage, error);
+        return V3RelayProviderFailure {
+            // The local typed policy owns the terminal status only after real
+            // candidate exhaustion; until then this is an internal diagnostic
+            // marker with no upstream HTTP response. The typed source is the
+            // only truth: the legacy wire body stays unused so no control fact
+            // is mirrored into a business payload.
+            status: 598,
+            provider_status: None,
+            original_source: Some(source),
+            client_response: Value::Null,
+            source_stage,
+            terminal_projection: None,
+            terminal_disposition: None,
+            error_type_fn: extract_error_code_style,
+            error_message_fn: extract_message_code_style,
+        };
+    }
     if let V3ProviderError::InternalTransport { lane, .. } = &error {
         let source_stage = match lane {
             routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Request => {
@@ -503,6 +536,7 @@ pub fn provider_runtime_failure(
             status: projected.status,
             // Internal transport handoff failure: no upstream HTTP response exists.
             provider_status: None,
+            original_source: None,
             client_response: json!({
                 "error": {
                     "code": "provider_internal_transport_error",
@@ -548,6 +582,7 @@ pub fn provider_runtime_failure(
             V3ProviderError::HttpStatus { response } => Some(response.status),
             _ => None,
         },
+        original_source: None,
         client_response: json!({"error":{"code":error_code,"message":error.to_string()}}),
         source_stage: provider_runtime_failure_stage(&error),
         terminal_projection,
@@ -557,14 +592,22 @@ pub fn provider_runtime_failure(
     }
 }
 
-/// 从 failure 提取 error type（共享版；走协议提取函数字段）。
+/// 从 failure 提取 error type（共享版）。已分类的 typed 本地来源是唯一真源；
+/// 只有旧 wire-only caller（original_source 为 None）才走协议提取函数字段。
 pub fn failure_error_type(failure: &V3RelayProviderFailure) -> Option<String> {
-    (failure.error_type_fn)(&failure.client_response)
+    match failure.original_source.as_ref() {
+        Some(source) => Some(source.code.clone()),
+        None => (failure.error_type_fn)(&failure.client_response),
+    }
 }
 
-/// 从 failure 提取错误消息（共享版；走协议提取函数字段）。
+/// 从 failure 提取错误消息（共享版）。已分类的 typed 本地来源是唯一真源；
+/// 只有旧 wire-only caller（original_source 为 None）才走协议提取函数字段。
 pub fn provider_failure_message(failure: &V3RelayProviderFailure) -> String {
-    (failure.error_message_fn)(&failure.client_response)
+    match failure.original_source.as_ref() {
+        Some(source) => source.message.clone(),
+        None => (failure.error_message_fn)(&failure.client_response),
+    }
 }
 
 /// Provider failure that consumed the request residence budget must still be
@@ -576,14 +619,17 @@ pub fn terminalize_provider_failure(
     if failure.terminal_projection.is_some() {
         return failure;
     }
-    let source = build_v3_error_01_source_raised(
-        V3ErrorSourceKind::ProviderFailure,
-        failure.source_stage,
-        failure_error_type(&failure)
-            .as_deref()
-            .unwrap_or("provider_error"),
-        provider_failure_message(&failure),
-    );
+    let source = match failure.original_source.clone() {
+        Some(source) => source,
+        None => build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ProviderFailure,
+            failure.source_stage,
+            failure_error_type(&failure)
+                .as_deref()
+                .unwrap_or("provider_error"),
+            provider_failure_message(&failure),
+        ),
+    };
     let terminal = V3ErrorHandlingCenter::decide_provider(
         V3ErrorHandlingCenterInput {
             source,
@@ -618,6 +664,29 @@ pub fn push_sse_response_chain_trace(trace: &mut Vec<&'static str>) {
 }
 
 /// Error06 投影输出（共享版；返回 (projected, trace)，runtime 组装自身 Output）。
+pub(crate) fn project_unscoped_provider_failure(
+    source: routecodex_v3_error::V3Error01SourceRaised,
+) -> (V3Error06ClientProjected, routecodex_v3_error::V3ProviderTerminalDisposition) {
+    // Public final-error adapters have no selected attempt or candidates. The
+    // attempt loop must consume failures with real availability before this edge.
+    let decision = V3ErrorHandlingCenter::decide_provider(
+        V3ErrorHandlingCenterInput {
+            source,
+            action_scope: V3ErrorActionScope::None,
+            candidates_remaining: 0,
+            source_status: None,
+        },
+        false,
+        false,
+        None,
+    );
+    let terminal = decision
+        .try_into_terminal()
+        .expect("unscoped final failure has no candidate or recovery admission");
+    let disposition = V3ErrorHandlingCenter::provider_terminal_disposition(terminal.clone(), None);
+    (V3ErrorHandlingCenter::project_terminal_decision(terminal), disposition)
+}
+
 pub fn error_output(
     source: routecodex_v3_error::V3Error01SourceRaised,
     status: u16,

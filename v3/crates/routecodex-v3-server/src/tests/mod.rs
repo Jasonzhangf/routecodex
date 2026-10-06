@@ -3978,7 +3978,7 @@ fn error_projection_appends_human_console_failure_line() {
         .start_trace("server", "req-error-console", "exec-error-console")
         .unwrap();
 
-    let response = record_and_emit_v3_error_projection(
+    record_and_emit_v3_error_projection(
         &state,
         &trace_scope,
         V3ErrorProjectionConsoleInput {
@@ -4002,7 +4002,6 @@ fn error_projection_appends_human_console_failure_line() {
         },
     );
 
-    assert!(response.is_none());
     let rows = state.webui_observability.rows().unwrap();
     let row = rows
         .get(&format!("{}:req-error-console", state.server.port))

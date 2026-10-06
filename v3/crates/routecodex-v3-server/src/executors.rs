@@ -5,6 +5,37 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+pub(crate) fn pending_endpoint_after_responses_admission(
+    state: Arc<V3ListenerState>,
+    front_connection_identity: Option<V3FrontConnectionIdentity>,
+    request_headers: HeaderMap,
+    method: String,
+    path: String,
+    started_at: Instant,
+    entry_protocol: String,
+    execution_mode: V3EntryProtocolExecutionMode,
+    pending_owner_symbol: Option<String>,
+    request_purpose: V3RequestPurpose,
+    payload: Value,
+) -> std::pin::Pin<Box<impl std::future::Future<Output = Response<Body>> + Send>> {
+    // Avoid a second poll frame for the large protocol-dispatch future.
+    Box::pin(
+        crate::endpoint_handlers::pending_endpoint_after_responses_admission_inner(
+            state,
+            front_connection_identity,
+            request_headers,
+            method,
+            path,
+            started_at,
+            entry_protocol,
+            execution_mode,
+            pending_owner_symbol,
+            request_purpose,
+            payload,
+        ),
+    )
+}
+
 pub(crate) fn collect_anthropic_relay_client_headers(
     headers: &HeaderMap,
 ) -> Result<Vec<V3AnthropicRelayClientHeader>, String> {
@@ -530,4 +561,40 @@ pub(crate) fn anthropic_relay_output_response(
     builder
         .body(body)
         .expect("typed V3 Anthropic Relay response")
+}
+
+impl V3ServerAggregateHandle {
+    pub async fn prepare_exec_attempt(&self) -> Result<V3ServerExecPreparation, String> {
+        self.flush_runtime_persistence();
+        let codex_sample_exec_guard = match self.codex_sample_persist_worker.as_ref() {
+            Some(worker) => match tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                worker.quiesce_for_exec(),
+            )
+            .await
+            {
+                Ok(Ok(guard)) => Some(guard),
+                Ok(Err(error)) => {
+                    return Err(format!(
+                        "codex sample persistence preparation failed: {error}"
+                    ))
+                }
+                Err(_) => {
+                    return Err(
+                        "codex sample persistence preparation timed out; worker retained".into(),
+                    )
+                }
+            },
+            None => None,
+        };
+        let codex_sample_persist_failures = codex_sample_exec_guard
+            .as_ref()
+            .map(|guard| guard.persist_failures())
+            .unwrap_or_default();
+        Ok(V3ServerExecPreparation {
+            front_checkpoints: self.front_transport_broker.freeze(Instant::now()),
+            codex_sample_persist_failures,
+            _codex_sample_exec_guard: codex_sample_exec_guard,
+        })
+    }
 }

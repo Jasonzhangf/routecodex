@@ -403,6 +403,10 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 );
             }
         };
+        // The admitted candidate owns this attempt's witness. The selection
+        // exhaustion branches above may still use the previous attempt's
+        // failure, but no post-admission path may inherit it.
+        last_external_http = None;
         if provider_action_permit_target
             .as_ref()
             .is_some_and(|target| {
@@ -716,7 +720,54 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         let transport_request = match hook_registry.run_provider_transport(wire) {
             Ok(value) => value,
             Err(source) => {
-                return error_output(source, trace, &hook_registry);
+                if !matches!(source.source_kind, V3ErrorSourceKind::ProviderLocalFailure) {
+                    return error_output(source, trace, &hook_registry);
+                }
+                drop(selected_admission.take());
+                drop(provider_action_permit.take());
+                provider_action_permit_target = None;
+                let policy_result = match run_v3_direct_provider_failure_policy(
+                    &V3DirectProviderFailurePolicyContext {
+                        failure_session_scope: &direct_failure_session_scope,
+                        provider_health: &provider_health,
+                        run_error: crate::hooks::responses_direct_error_hook,
+                        availability: &availability,
+                        expanded: expanded.as_ref(),
+                        provider_pinned: false,
+                        now_epoch_ms,
+                    },
+                    &policy.target,
+                    source,
+                    0,
+                    &mut V3DirectProviderFailurePolicyState {
+                        failed_candidates: &mut failed_candidates,
+                        same_candidate_retries: &mut same_candidate_retries,
+                        trace: &mut trace,
+                    },
+                )
+                .await
+                {
+                    Ok(result) => result,
+                    Err(source) => return error_output(source, trace, &hook_registry),
+                };
+                match consume_v3_direct_provider_failure_policy_result(
+                    policy_result,
+                    &policy.target,
+                    "json",
+                    None,
+                    None,
+                    None,
+                    provider_failure_event_sink.as_ref(),
+                    &mut provider_failure_events,
+                    total_attempts(&accumulator, send_attempts),
+                    &mut retry_selected,
+                    &mut pending_provider_action_recovery,
+                    &mut trace,
+                    &hook_registry,
+                ) {
+                    V3DirectProviderFailureConsumption::Continue => continue,
+                    V3DirectProviderFailureConsumption::Terminal(output) => return output,
+                }
             }
         };
         let handoff_scope = match (
@@ -821,11 +872,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 continue;
             }
             Err(error) => {
-                if let Some(witness) =
-                    crate::hub_v1::external_http_witness_from_provider_error(&error)
-                {
-                    last_external_http = Some(witness);
-                }
+                last_external_http =
+                    crate::hub_v1::external_http_witness_from_provider_error(&error);
                 if let Err(timing_error) = runtime_timing.finish_external() {
                     return error_output(
                         runtime_source("V3RuntimeTimingExternal", timing_error),
@@ -843,7 +891,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 );
                 let source =
                     build_v3_provider_error_source("V3Transport13ResponsesHttpRequest", error);
-                if source.source_kind != V3ErrorSourceKind::ProviderFailure {
+                if !is_direct_recoverable_provider_failure_source(&source) {
                     drop(provider_action_permit.take());
                     return error_output(source, trace, &hook_registry);
                 }
@@ -881,74 +929,24 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     Ok(result) => result,
                     Err(source) => return error_output(source, trace, &hook_registry),
                 };
-                if let Some(event) = policy_result.event.clone() {
-                    provider_failure_events.push(event.clone());
-                    publish_v3_direct_provider_failure_event(
-                        provider_failure_event_sink.as_ref(),
-                        &policy.target,
-                        "responses",
-                        "json",
-                        event.external_error_status,
-                        &provider_failure_events,
-                        &event,
-                        total_attempts(&accumulator, send_attempts),
-                    );
-                }
-                match &policy_result.decision.action {
-                    V3Error05ExecutionAction::WaitThenReselect { recovery } => {
-                        if policy_result.retryable_transient {
-                            // 瞬态失败切走：不经过 provider action gate，立即重选。
-                            continue;
-                        }
-                        pending_provider_action_recovery = Some(recovery.clone());
-                        continue;
-                    }
-                    V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
-                        retry_selected = policy_result.retry_selected.map(|selected| *selected);
-                        if policy_result.retryable_transient {
-                            // 瞬态失败重试同一 provider：不经过 provider action
-                            // gate（无 health 记录可等），立即重发。
-                            continue;
-                        }
-                        pending_provider_action_recovery = Some(recovery.clone());
-                        continue;
-                    }
-                    V3Error05ExecutionAction::ProjectTerminal => {
-                        let mut observability = build_v3_direct_runtime_observability(
-                            &policy.target,
-                            "responses",
-                            "json",
-                            policy_result.event.as_ref().map(|event| event.status),
-                            "failed",
-                            provider_failure_events.clone(),
-                        );
-                        observability.attempts = Some(total_attempts(&accumulator, send_attempts));
-                        return direct_runtime_helpers_stream::provider_terminal_output(
-                            policy_result.decision,
-                            last_external_http,
-                            trace,
-                            Some(observability),
-                            provider_request_snapshot,
-                            None,
-                        );
-                    }
-                    V3Error05ExecutionAction::ClientDisconnected => {
-                        return projected_error_output_with_observability(
-                            V3ErrorHandlingCenter::project_terminal(policy_result.decision),
-                            trace,
-                            None,
-                        );
-                    }
-                    V3Error05ExecutionAction::RejectNonProviderError => {
-                        return error_output(
-                            runtime_source(
-                                "V3Error05ExecutionDecision",
-                                "provider failure entered a non-provider Error05 lane",
-                            ),
-                            trace,
-                            &hook_registry,
-                        )
-                    }
+                let terminal_status = policy_result.event.as_ref().map(|event| event.status);
+                match consume_v3_direct_provider_failure_policy_result(
+                    policy_result,
+                    &policy.target,
+                    "json",
+                    terminal_status,
+                    last_external_http.as_ref(),
+                    provider_request_snapshot.as_ref(),
+                    provider_failure_event_sink.as_ref(),
+                    &mut provider_failure_events,
+                    total_attempts(&accumulator, send_attempts),
+                    &mut retry_selected,
+                    &mut pending_provider_action_recovery,
+                    &mut trace,
+                    &hook_registry,
+                ) {
+                    V3DirectProviderFailureConsumption::Continue => continue,
+                    V3DirectProviderFailureConsumption::Terminal(output) => return output,
                 }
             }
         };
@@ -1027,7 +1025,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         );
                     }
                 }
-                if !matches!(source.source_kind, V3ErrorSourceKind::ProviderFailure) {
+                if !is_direct_recoverable_provider_failure_source(&source) {
                     return error_output(source, trace, &hook_registry);
                 }
                 drop(provider_action_permit.take());
@@ -1055,82 +1053,28 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     Ok(result) => result,
                     Err(source) => return error_output(source, trace, &hook_registry),
                 };
-                if let Some(event) = policy_result.event.clone() {
-                    provider_failure_events.push(event.clone());
-                    publish_v3_direct_provider_failure_event(
-                        provider_failure_event_sink.as_ref(),
-                        &policy.target,
-                        "responses",
-                        if provider_response_is_stream {
-                            "sse"
-                        } else {
-                            "json"
-                        },
-                        event.external_error_status,
-                        &provider_failure_events,
-                        &event,
-                        total_attempts(&accumulator, send_attempts),
-                    );
-                }
-                match &policy_result.decision.action {
-                    V3Error05ExecutionAction::WaitThenReselect { recovery } => {
-                        if policy_result.retryable_transient {
-                            // 瞬态失败切走：不经过 provider action gate，立即重选。
-                            continue;
-                        }
-                        pending_provider_action_recovery = Some(recovery.clone());
-                        continue;
-                    }
-                    V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
-                        retry_selected = policy_result.retry_selected.map(|selected| *selected);
-                        if policy_result.retryable_transient {
-                            // 瞬态失败重试同一 provider：不经过 provider action
-                            // gate（无 health 记录可等），立即重发。
-                            continue;
-                        }
-                        pending_provider_action_recovery = Some(recovery.clone());
-                        continue;
-                    }
-                    V3Error05ExecutionAction::ProjectTerminal => {
-                        let mut observability = build_v3_direct_runtime_observability(
-                            &policy.target,
-                            "responses",
-                            if provider_response_is_stream {
-                                "sse"
-                            } else {
-                                "json"
-                            },
-                            policy_result.event.as_ref().map(|event| event.status),
-                            "failed",
-                            provider_failure_events.clone(),
-                        );
-                        observability.attempts = Some(total_attempts(&accumulator, send_attempts));
-                        return direct_runtime_helpers_stream::provider_terminal_output(
-                            policy_result.decision,
-                            last_external_http,
-                            trace,
-                            Some(observability),
-                            provider_request_snapshot,
-                            None,
-                        );
-                    }
-                    V3Error05ExecutionAction::ClientDisconnected => {
-                        return projected_error_output_with_observability(
-                            V3ErrorHandlingCenter::project_terminal(policy_result.decision),
-                            trace,
-                            None,
-                        );
-                    }
-                    V3Error05ExecutionAction::RejectNonProviderError => {
-                        return error_output(
-                            runtime_source(
-                                "V3Error05ExecutionDecision",
-                                "provider failure entered a non-provider Error05 lane",
-                            ),
-                            trace,
-                            &hook_registry,
-                        )
-                    }
+                let terminal_status = policy_result.event.as_ref().map(|event| event.status);
+                match consume_v3_direct_provider_failure_policy_result(
+                    policy_result,
+                    &policy.target,
+                    if provider_response_is_stream {
+                        "sse"
+                    } else {
+                        "json"
+                    },
+                    terminal_status,
+                    last_external_http.as_ref(),
+                    provider_request_snapshot.as_ref(),
+                    provider_failure_event_sink.as_ref(),
+                    &mut provider_failure_events,
+                    total_attempts(&accumulator, send_attempts),
+                    &mut retry_selected,
+                    &mut pending_provider_action_recovery,
+                    &mut trace,
+                    &hook_registry,
+                ) {
+                    V3DirectProviderFailureConsumption::Continue => continue,
+                    V3DirectProviderFailureConsumption::Terminal(output) => return output,
                 }
             }
         };
@@ -1301,7 +1245,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     .await
                     {
                         Ok(committed) => committed,
-                        Err(source) if source.source_kind != V3ErrorSourceKind::ProviderFailure => {
+                        Err(source)
+                            if !is_direct_recoverable_provider_failure_source(&source) =>
+                        {
                             if let Err(error) = runtime_timing.finish_external_if_active() {
                                 return error_output(
                                     runtime_source("V3RuntimeTimingExternal", error),
@@ -1345,72 +1291,26 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                 Ok(result) => result,
                                 Err(source) => return error_output(source, trace, &hook_registry),
                             };
-                            if let Some(event) = policy_result.event.clone() {
-                                provider_failure_events.push(event.clone());
-                                publish_v3_direct_provider_failure_event(
-                                    provider_failure_event_sink.as_ref(),
-                                    &policy.target,
-                                    "responses",
-                                    "sse",
-                                    event.external_error_status,
-                                    &provider_failure_events,
-                                    &event,
-                                    total_attempts(&accumulator, send_attempts),
-                                );
-                            }
-                            match &policy_result.decision.action {
-                                V3Error05ExecutionAction::WaitThenReselect { recovery } => {
-                                    if !policy_result.retryable_transient {
-                                        pending_provider_action_recovery = Some(recovery.clone());
-                                    }
-                                    continue;
-                                }
-                                V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
-                                    retry_selected =
-                                        policy_result.retry_selected.map(|selected| *selected);
-                                    if !policy_result.retryable_transient {
-                                        pending_provider_action_recovery = Some(recovery.clone());
-                                    }
-                                    continue;
-                                }
-                                V3Error05ExecutionAction::ProjectTerminal => {
-                                    let mut observability = build_v3_direct_runtime_observability(
-                                        &policy.target,
-                                        "responses",
-                                        "sse",
-                                        policy_result.event.as_ref().map(|event| event.status),
-                                        "failed",
-                                        provider_failure_events.clone(),
-                                    );
-                                    observability.attempts =
-                                        Some(total_attempts(&accumulator, send_attempts));
-                                    return direct_runtime_helpers_stream::provider_terminal_output(
-                                        policy_result.decision,
-                                        last_external_http,
-                                        trace,
-                                        Some(observability),
-                                        provider_request_snapshot,
-                                        None,
-                                    );
-                                }
-                                V3Error05ExecutionAction::ClientDisconnected => {
-                                    return projected_error_output_with_observability(
-                                        V3ErrorHandlingCenter::project_terminal(
-                                            policy_result.decision,
-                                        ),
-                                        trace,
-                                        None,
-                                    );
-                                }
-                                V3Error05ExecutionAction::RejectNonProviderError => {
-                                    return error_output(
-                                        runtime_source(
-                                            "V3Error05ExecutionDecision",
-                                            "provider failure entered a non-provider Error05 lane",
-                                        ),
-                                        trace,
-                                        &hook_registry,
-                                    )
+                            let terminal_status =
+                                policy_result.event.as_ref().map(|event| event.status);
+                            match consume_v3_direct_provider_failure_policy_result(
+                                policy_result,
+                                &policy.target,
+                                "sse",
+                                terminal_status,
+                                last_external_http.as_ref(),
+                                provider_request_snapshot.as_ref(),
+                                provider_failure_event_sink.as_ref(),
+                                &mut provider_failure_events,
+                                total_attempts(&accumulator, send_attempts),
+                                &mut retry_selected,
+                                &mut pending_provider_action_recovery,
+                                &mut trace,
+                                &hook_registry,
+                            ) {
+                                V3DirectProviderFailureConsumption::Continue => continue,
+                                V3DirectProviderFailureConsumption::Terminal(output) => {
+                                    return output
                                 }
                             }
                         }
@@ -1495,3 +1395,6 @@ include!("kernel/direct_runtime_helpers.rs");
 include!("kernel/v3_direct_core.rs");
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+#[path = "kernel/local_source_handoff_tests.rs"]
+mod local_source_handoff_tests;

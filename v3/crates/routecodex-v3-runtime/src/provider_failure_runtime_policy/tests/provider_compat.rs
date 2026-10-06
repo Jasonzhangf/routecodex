@@ -75,6 +75,7 @@ async fn request_local_provider_compat_default_floor_exhausts_without_wait_or_he
         Some("provider_request_compat_error".to_string()),
         "arguments must be valid JSON".to_string(),
         None,
+        None,
         &mut state,
     )
     .await
@@ -136,6 +137,7 @@ async fn relay_provider_compat_failure_keeps_same_provider_sibling_health_neutra
         400,
         Some("provider_request_compat_error".to_string()),
         "prompt is too long".to_string(),
+        None,
         None,
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
@@ -235,6 +237,7 @@ async fn relay_generic_provider_http_400_excludes_provider_family_and_records_he
         Some("provider_http_error".to_string()),
         "upstream rejected request".to_string(),
         None,
+        None,
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
@@ -303,6 +306,7 @@ async fn relay_upstream_invalid_request_error_keeps_same_provider_sibling_health
         502,
         Some("invalid_request_error".to_string()),
         "DeepSeek chat completion failed with 403: request illegal (code 11140)".to_string(),
+        None,
         None,
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
@@ -375,6 +379,7 @@ async fn relay_provider_failure_projects_target_expansion_error() {
         502,
         Some("provider_transport_error".to_string()),
         "transport failed".to_string(),
+        None,
         None,
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,

@@ -293,10 +293,21 @@ async fn handle_v3_responses_relay_provider_failure(
         selected,
         failure.source_stage,
         failure.status,
-        Some(failure.policy_error_type.clone()),
-        v3_responses_relay_provider_failure_reason(&failure)
-            .unwrap_or("provider failure")
-            .to_string(),
+        // An already-classified source owns its code and cause. Legacy
+        // failures retain their existing policy inputs.
+        Some(failure.original_source.as_ref().map_or_else(
+            || failure.policy_error_type.clone(),
+            |source| source.code.clone(),
+        )),
+        failure.original_source.as_ref().map_or_else(
+            || {
+                v3_responses_relay_provider_failure_reason(&failure)
+                    .unwrap_or("provider failure")
+                    .to_string()
+            },
+            |source| source.message.clone(),
+        ),
+        failure.original_source.clone(),
         failure
             .matched_policy
             .as_ref()
