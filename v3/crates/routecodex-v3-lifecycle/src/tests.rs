@@ -13,6 +13,7 @@ pub(crate) const TEST_HOOKS_INSTALL_RECORD_ENV: &str = "ROUTECODEX_HOOKS_INSTALL
 
 #[cfg(unix)]
 mod codex_sample_persistence;
+mod control_plane_accept;
 mod hooks_lifecycle;
 mod runtime_fd_limit;
 
