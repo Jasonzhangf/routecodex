@@ -2869,6 +2869,7 @@ features:
   - npm run verify:v3-debug-payload-budget
   - npm run test:v3-debug-payload-budget-red-fixtures
   - npm run verify:v3-resource-map
+  - CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-debug --test sample_store_atomic_persistence -- --test-threads=1 --nocapture
   - cargo test -p routecodex-v3-debug persist_async_worker_records_explicit_failure_terminal
   - npm run test:v3-shared-sample-retention-blackbox
   - cargo test -p routecodex-v3-debug persist_async_worker_keeps_every_sample_under_burst

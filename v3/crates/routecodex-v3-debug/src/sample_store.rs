@@ -3,6 +3,7 @@ use std::fs;
 use std::io::{BufWriter, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 /// Error snapshots are retained by request-id directory.  A request may have
@@ -15,6 +16,7 @@ const V3_CODEX_SAMPLE_PERSIST_QUEUE_BYTE_BUDGET: u32 = 64 * 1024 * 1024;
 /// total queued memory bounded even when every payload serializes to a few bytes.
 const V3_CODEX_SAMPLE_PERSIST_JOB_OVERHEAD_BYTES: u32 = 4096;
 const V3_CODEX_SAMPLE_PERSIST_FAILURE_LIMIT: usize = 256;
+static V3_CODEX_SAMPLE_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 enum V3CodexSamplePersistQueueMessage {
     Persist {
@@ -211,12 +213,7 @@ impl V3CodexSampleStore {
         let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));
         let path = dir.join(file_name);
         let payload = merge_provider_snapshot_attempts(&path, file_name, payload)?;
-        let file = fs::File::create(&path).map_err(|error| error.to_string())?;
-        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
-        let mut file = BufWriter::new(file);
-        serde_json::to_writer_pretty(&mut file, &payload).map_err(|error| error.to_string())?;
-        file.write_all(b"\n").map_err(|error| error.to_string())?;
-        file.flush().map_err(|error| error.to_string())?;
+        write_v3_codex_sample_atomically(&path, &payload)?;
         // Retention counts request directories, so the full-tree sweep only needs
         // to run when this write created one. Re-scanning the whole samples root
         // for every file of a request multiplied the Debug worker cost by the
@@ -373,6 +370,56 @@ impl V3CodexSampleStore {
     }
 }
 
+fn write_v3_codex_sample_atomically(target: &Path, payload: &Value) -> Result<(), String> {
+    let parent = target.parent().ok_or("sample target has no parent")?;
+    let target_name = target
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or("sample target has no file name")?;
+    let sequence = V3_CODEX_SAMPLE_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let temp_path = parent.join(format!(
+        ".{target_name}.tmp-{}-{sequence}",
+        std::process::id()
+    ));
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&temp_path)
+        .map_err(|error| format!("create sample temp: {error}"))?;
+    let result = (|| -> Result<(), String> {
+        let mut writer = BufWriter::new(file);
+        serde_json::to_writer_pretty(&mut writer, payload)
+            .map_err(|error| format!("write {}: {error}", temp_path.display()))?;
+        writer
+            .write_all(b"\n")
+            .map_err(|error| format!("write {}: {error}", temp_path.display()))?;
+        writer
+            .flush()
+            .map_err(|error| format!("flush {}: {error}", temp_path.display()))?;
+        drop(writer);
+        fs::rename(&temp_path, target).map_err(|error| {
+            format!(
+                "publish {} to {}: {error}",
+                temp_path.display(),
+                target.display()
+            )
+        })
+    })();
+    match result {
+        Ok(()) => Ok(()),
+        Err(error) => match fs::remove_file(&temp_path) {
+            Ok(()) => Err(error),
+            Err(cleanup_error) if cleanup_error.kind() == std::io::ErrorKind::NotFound => {
+                Err(error)
+            }
+            Err(cleanup_error) => Err(format!(
+                "{error}; cleanup sample temp {} failed: {cleanup_error}",
+                temp_path.display()
+            )),
+        },
+    }
+}
 fn serialized_v3_codex_sample_payload_size(payload: &Value) -> serde_json::Result<u64> {
     struct CountingWriter(u64);
 
