@@ -36,6 +36,7 @@ const responsesRuntime = readFileSync(responsesRuntimePath, 'utf8')
   + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs', 'utf8')
   + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs', 'utf8')
   + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs', 'utf8')
+  + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner_response_interpretation.rs', 'utf8')
   + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs', 'utf8');
 const responsesRelayJsonHooks = readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs', 'utf8');
 const responsesProviderEventCodec = readFileSync(responsesProviderEventCodecPath, 'utf8');
@@ -292,9 +293,12 @@ requireCount(
   'let (mut finalized_provider_value, response_web_search_state) =',
   2,
 );
+// R53-F moved the ordered provider-response SSE path verbatim out of
+// responses_relay_runtime_inner.rs into the response-interpretation companion;
+// the ordered anchor follows the file that now owns that path.
 requireOrderedSequence(
-  readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs', 'utf8'),
-  responsesRuntimePath + '::inner',
+  readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner_response_interpretation.rs', 'utf8'),
+  responsesRuntimePath + '::inner_response_interpretation',
   [
     'V3ProviderResponseBody::Sse(stream) => {',
     'build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context',
