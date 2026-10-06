@@ -184,6 +184,13 @@ live 样本；独立架构 review PASS；clean-main merge + push + 远端回执�
   rustfmt / clippy / isolation / admission / distribution / install-cleanup / architecture-ci /
   artifact-budget），把红项逐个归因（R43 引入 / 上游既有 / 组合引入）并清零或记录授权差异；
   push 前该集合必须无 R43 引入项。
+- 52e 审计裁决落地（R52a/R52b 已提前完成，审计 SHA `c534cd3bf`）：
+  1. A0 命名漂移 → 更新 REQ06 交接文档签名段（以代码为真源），不改公开类型名。
+  2. A4 协议锁重复（`direct_request_scope.rs:86` / `hooks.rs:403`）→ 收敛到唯一 owner，
+     落地后重跑四协议无损恒等回归 + namespace 套件。
+  3. B1.3 两个 continuation 守卫（`direct_protocol_plan.rs:20-31` / `kernel.rs:152-166`）→
+     核实是否同条件同后果：是则收敛，否则记录为不同入口的不同可见错误。
+  4. B3 legacy `tables/*.json` → 既有分工，manifest 已声明 `production_baseline_authority`，仅 advisory。
 - 退出条件：三路结论落盘；绑定准确；admission compile exit0；完整 `architecture-ci` PASS
   （R49b 已实测 40/40 全绿，优于 R45 基线 39/40；R50/R51/R51c 改动后须重跑维持）；
   52d 清单落盘且无 R43 引入的未授权红项。
