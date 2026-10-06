@@ -2733,12 +2733,12 @@ resources:
     lifecycle: v3.client.sse.front.accept_and_project
     owner_feature_id: v3.direct_sse_accept_skeleton
     owner_crate: routecodex-v3-server
-    owner_module: endpoint_handlers
+    owner_module: client_sse_transport
     owner_node: V3DirectSseAccept01ClientChannel
-    implementation_handles: [V3FrontSseAcceptSkeleton, v3_request_wants_sse]
+    implementation_handles: [accept_v3_client_sse_transport, V3ClientSseChannelStream, build_v3_client_sse_data_frame, v3_request_wants_sse]
     identity: [requestId, serverId, entryProtocol, clientStreamIntent]
-    allowed_writers: [pending_endpoint_after_responses_admission, V3DirectSseAccept01ClientChannel]
-    allowed_readers: [v3_request_wants_sse, pending_endpoint_after_responses_admission, execute_responses_direct_server_outcome, v3_io_sse_body, V3DirectSseAccept02RuntimeWorker]
+    allowed_writers: [pending_endpoint_after_responses_admission, pending_model_request, V3DirectSseAccept01ClientChannel]
+    allowed_readers: [v3_request_wants_sse, pending_endpoint_after_responses_admission, pending_model_request, execute_responses_direct_server_outcome, v3_io_sse_body, V3DirectSseAccept02RuntimeWorker, accept_v3_client_sse_transport]
     forbidden_writers: [routecodex-v3-runtime, routecodex-v3-sse, MetadataCenter, routing, retry, health, provider.wire_payload, response.raw_provider_sse, response.http_json_reparse]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -3159,6 +3159,26 @@ resources:
     may_enter_metadata_center: false
     binding_status: design_pending
 
+  - resource_id: v3.operation_runner.request_local_exclusions
+    resource_kind: typed_control_resource
+    lifecycle: v3.operation_runner.request
+    owner_feature_id: v3.unified_operation_runner_design
+    owner_crate: routecodex-v3-runtime
+    owner_node: RuntimeErrorActionConsumed
+    identity: [requestId, invocationId, attemptId]
+    semantic_contract:
+      storage_owner: reference to the existing request-local excluded-candidate set consumed by Target; not a second exclusion store
+      mutation_owner: the existing typed Error action consumer updates exclusions before a new attempt
+      request_boundary: exclusions never enter request, response, provider, or client bodies
+    allowed_writers: [RuntimeErrorActionConsumed]
+    allowed_readers: [V3OperationRunnerPlanExecution]
+    forbidden_writers: [V3OperationRunnerResolveTarget, routecodex-v3-server, routecodex-v3-debug]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    release_point: runtime_request_finalizer
+    binding_status: design_pending
+
   - resource_id: v3.operation_runner.execution_mode
     resource_kind: side_channel
     lifecycle: v3.operation_runner.request
@@ -3167,7 +3187,7 @@ resources:
     owner_node: V3OperationRunnerExecutionPlan
     identity: [requestId, attemptId, selectedTargetIdentity]
     allowed_writers: [plan_v3_operation_runner_execution]
-    allowed_readers: [govern_v3_operation_runner_chat_request, project_v3_operation_runner_provider_semantic, govern_v3_operation_runner_chat_response]
+    allowed_readers: [govern_v3_operation_runner_chat_request, project_v3_operation_runner_provider_semantic, govern_v3_operation_runner_chat_response, V3OperationRunnerCompatRequest, V3OperationRunnerConstructTransport]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug]
     may_enter_provider_body: false
     may_enter_client_body: false

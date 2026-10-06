@@ -9928,15 +9928,18 @@ operator_registry:
     - operator: routecodex.v3.operation.resolve_target
       operator_version: "1"
       params:
+        published_manifest: resource
         route_target: resource
-        provider_health: resource
-        request_local_exclusions: resource
+        opaque_target: resource
     - operator: routecodex.v3.operation.plan_execution
       operator_version: "1"
       params:
         published_manifest: resource
         allowed_modes: set
         invocation_source: enum
+        opaque_target: resource
+        provider_health: resource
+        request_local_exclusions: resource
         selected_target: resource
     - operator: routecodex.v3.operation.govern_chat_request
       operator_version: "1"
@@ -9957,15 +9960,21 @@ operator_registry:
       operator_version: "1"
       params:
         selected_provider_compat_profile: resource
+        selected_target: resource
+        execution_mode: resource
     - operator: routecodex.v3.operation.encode_provider_wire
       operator_version: "1"
       params:
         wire_codec: string
         wire_shape: string
+        selected_target: resource
+        provider_wire: resource
     - operator: routecodex.v3.operation.construct_transport_request
       operator_version: "1"
       params:
         selected_target: resource
+        provider_wire: resource
+        transport_request: resource
         auth_handle: resource
         transport_kind: enum
     - operator: routecodex.v3.operation.adjust_provider_private_response

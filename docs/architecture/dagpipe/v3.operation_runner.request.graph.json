@@ -43,8 +43,8 @@
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": [],
-        "writes": ["v3.hub.resolved_target"]
+        "reads": ["v3.request.normal_payload", "v3.config.published_manifest"],
+        "writes": ["v3.route.opaque_target"]
       }
     },
     {
@@ -57,8 +57,8 @@
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": ["v3.hub.resolved_target"],
-        "writes": ["v3.operation_runner.execution_mode"]
+        "reads": ["v3.route.opaque_target", "v3.config.published_manifest", "v3.provider.health_state", "v3.provider.key_health_state", "v3.provider.availability_projection", "v3.operation_runner.request_local_exclusions"],
+        "writes": ["v3.hub.resolved_target", "v3.operation_runner.execution_mode"]
       }
     },
     {
@@ -85,7 +85,7 @@
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": ["v3.operation_runner.execution_mode", "v3.operation_runner.request_inverse_context", "v3.operation_runner.explicit_history_pairing", "v3.operation_runner.current_field_associations"],
+        "reads": ["v3.request.normal_payload", "v3.config.published_manifest", "v3.hub.resolved_target", "v3.operation_runner.execution_mode", "v3.operation_runner.request_inverse_context", "v3.operation_runner.explicit_history_pairing", "v3.operation_runner.current_field_associations"],
         "writes": ["v3.request.provider_semantic", "v3.operation_runner.attempt_projection_context", "v3.operation_runner.attempt_declaration_map"]
       }
     },
@@ -99,7 +99,7 @@
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": ["v3.hub.provider_wire_payload"],
+        "reads": ["v3.request.provider_semantic", "v3.hub.resolved_target", "v3.operation_runner.execution_mode"],
         "writes": ["v3.hub.provider_wire_payload"]
       }
     },
@@ -113,8 +113,8 @@
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": ["v3.hub.provider_wire_payload"],
-        "writes": []
+        "reads": ["v3.hub.provider_wire_payload", "v3.hub.resolved_target"],
+        "writes": ["v3.provider.responses_wire_payload"]
       }
     },
     {
@@ -127,7 +127,7 @@
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": ["v3.hub.provider_wire_payload"],
+        "reads": ["v3.provider.responses_wire_payload", "v3.hub.resolved_target", "v3.operation_runner.execution_mode"],
         "writes": ["v3.provider.transport_request"]
       }
     }

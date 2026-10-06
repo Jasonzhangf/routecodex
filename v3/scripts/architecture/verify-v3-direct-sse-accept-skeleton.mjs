@@ -26,6 +26,7 @@ function readFirst(relativePaths, { required = true } = {}) {
 
 const endpoint = read('crates/routecodex-v3-server/src/endpoint_handlers.rs');
 const serverLib = read('crates/routecodex-v3-server/src/lib.rs');
+const clientSseTransport = read('crates/routecodex-v3-server/src/client_sse_transport.rs');
 const directServerOutcome = read('crates/routecodex-v3-server/src/responses_direct_server_outcome.rs');
 const frameBuilders = read('crates/routecodex-v3-server/src/frame_builders.rs');
 const manifest = readFirst(admissionWorkspace
@@ -69,6 +70,28 @@ for (const forbidden of [
 if (!serverLib.includes('fn v3_request_wants_sse(')) {
   failures.push('lib.rs: canonical SSE intent helper owner is missing');
 }
+if (!serverLib.includes('accept_v3_client_sse_transport')) {
+  failures.push('lib.rs: the declared client SSE accept channel must be entered through its transport module');
+}
+
+// The declared client accept channel is implemented by the independent SSE
+// transport module, not by pre-runtime front code inside endpoint_handlers.rs.
+// The channel owns transport framing and transport-only keepalives; it must not
+// inspect business payloads and must not reach provider or Runtime code.
+for (const marker of [
+  'V3DirectSseAccept01ClientChannel',
+  'V3DirectSseAccept03ProjectedClientFrame',
+  'build_v3_sse_transport_out_04_keepalive_comment',
+]) {
+  if (!clientSseTransport.includes(marker)) {
+    failures.push(`client_sse_transport.rs: declared client accept channel missing ${marker}`);
+  }
+}
+for (const line of clientSseTransport.split('\n')) {
+  if (/^\s*use\s+(serde_json|routecodex_v3_runtime|routecodex_v3_provider)/.test(line)) {
+    failures.push(`client_sse_transport.rs: client accept channel must not import business-payload or provider/runtime code: ${line.trim()}`);
+  }
+}
 if (!directServerOutcome.includes('v3_request_wants_sse(request_headers, &payload)')) {
   failures.push('responses_direct_server_outcome.rs: direct runtime caller is missing');
 }
@@ -79,7 +102,7 @@ if (!frameBuilders.includes('v3_io_sse_body')) {
 
 const canonicalMapMarkers = [
   ['manifest', manifest, ['v3.direct_sse_accept_skeleton', 'V3DirectSseAccept01ClientChannel', 'V3DirectSseAccept02RuntimeWorker', 'V3DirectSseAccept03ProjectedClientFrame', 'v3-direct-sse-accept-skeleton-01', 'v3-direct-sse-accept-skeleton-02']],
-  ['resource map', resourceMap, ['v3.sse.direct.accept_skeleton', 'V3DirectSseAccept01ClientChannel', 'v3_request_wants_sse']],
+  ['resource map', resourceMap, ['v3.sse.direct.accept_skeleton', 'V3DirectSseAccept01ClientChannel', 'v3_request_wants_sse', 'accept_v3_client_sse_transport']],
   ['function map', functionMap, ['v3.direct_sse_accept_skeleton', 'V3DirectSseAccept01ClientChannel', 'V3DirectSseAccept02RuntimeWorker', 'V3DirectSseAccept03ProjectedClientFrame', 'v3_request_wants_sse']],
   ['verification map', verificationMap, ['v3.direct_sse_accept_skeleton']],
   ['mainline map', mainlineMap, ['v3.direct_sse_accept_skeleton', 'V3DirectSseAccept01ClientChannel', 'V3DirectSseAccept02RuntimeWorker', 'V3DirectSseAccept03ProjectedClientFrame', 'v3_request_wants_sse', 'execute_responses_direct_server_outcome', 'v3-direct-sse-accept-skeleton-01', 'v3-direct-sse-accept-skeleton-02', 'v3-direct-sse-accept-skeleton-intent-01', 'v3-direct-sse-accept-skeleton-intent-02']],
@@ -112,5 +135,6 @@ if (failures.length > 0) {
 }
 
 console.log('[verify:v3-direct-sse-accept-skeleton] ok');
-console.log('- Direct and Relay SSE requests stay buffered until runtime projection completes');
-console.log('- obsolete pre-runtime client commit paths remain absent');
+console.log('- Client SSE semantic commit stays buffered until runtime projection completes');
+console.log('- the declared client accept channel is the independent SSE transport module');
+console.log('- obsolete pre-runtime front commit paths remain absent');
