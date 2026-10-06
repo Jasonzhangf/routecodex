@@ -46,6 +46,7 @@ const paths = {
   anthropicProjectionContext: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs',
   anthropicCodecToolProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs',
   responsesToAnthropicCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs',
+  responsesToolProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_tool_projection.rs',
   anthropicRequestFieldProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs',
   anthropicProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs',
   geminiCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs',
@@ -512,7 +513,7 @@ for (const phrase of [
   'v3.custom_tool.anthropic_string_input_wrapper.v1',
   'input_schema',
   '"additionalProperties":false',
-]) requireText(text.responsesToAnthropicCodec, `${paths.responsesToAnthropicCodec}::anthropic_custom_declaration_projection`, phrase);
+]) requireText(text.responsesToolProjection, `${paths.responsesToolProjection}::anthropic_custom_declaration_projection`, phrase);
 requireText(text.anthropicCodecTests, `${paths.anthropicCodecTests}::malformed_chat_tool_arguments`, 'chat_malformed_tool_call_arguments_keep_pair_with_reversible_anthropic_input');
 requireText(text.anthropicCodecTests, `${paths.anthropicCodecTests}::malformed_responses_function_arguments`, 'responses_malformed_function_call_arguments_keep_pair_with_reversible_anthropic_input');
 for (const phrase of [

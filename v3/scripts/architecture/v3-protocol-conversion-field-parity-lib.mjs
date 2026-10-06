@@ -1208,8 +1208,23 @@ function classificationBucketForField(matrix, protocol, field) {
   return 'unclassified';
 }
 
+// rustfmt reflows calls, breaks method chains, and adds a trailing comma when it
+// splits an argument list. Compare the same tokens with layout ignored instead
+// of one literal layout: whitespace runs collapse to a single space, whitespace
+// around punctuation is dropped, and a trailing comma before a closing delimiter
+// is removed (in Rust it carries no meaning). Whitespace between two word
+// characters is never removed, so different token sequences cannot compare
+// equal and the anchor still enforces the same tokens in the same order.
+function collapseLayout(value) {
+  return value
+    .replace(/\s+/gu, ' ')
+    .replace(/\s*([()\[\]{},;:.?])\s*/gu, '$1')
+    .replace(/,([)}\]])/gu, '$1');
+}
 function requireText(source, owner, phrase) {
-  if (!source.includes(phrase)) failures.push(`${owner}: missing ${phrase}`);
+  if (!source.includes(phrase) && !collapseLayout(source).includes(collapseLayout(phrase))) {
+    failures.push(`${owner}: missing ${phrase}`);
+  }
 }
 function requireNear(source, owner, anchor, phrase, window = 260) {
   const index = source.indexOf(anchor);

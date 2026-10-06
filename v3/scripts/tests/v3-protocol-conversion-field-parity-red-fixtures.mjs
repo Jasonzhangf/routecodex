@@ -59,6 +59,7 @@ const files = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_tool_projection.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
@@ -620,8 +621,12 @@ const cases = [
   {
     name: 'Anthropic provider request source resurrects raw Responses input shortcut',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
-    from: '    project_outbound_payload_for_target_protocol_with_drops(payload, V3OutboundTargetProtocol::Anthropic)',
-    to: '    if payload.get("input").and_then(Value::as_array).is_some() {\n        return Ok(normalize_responses_payload_for_provider_standard(payload));\n    }\n    project_outbound_payload_for_target_protocol_with_drops(payload, V3OutboundTargetProtocol::Anthropic)',
+    // Anchor on the function's unique leading comment instead of the projection
+    // call: rustfmt reflowed that call across lines, while the comment is stable.
+    // The injected shortcut is still the same raw Responses input branch, and it
+    // still lands inside the anthropic provider request source slice.
+    from: '    // Inbound has already normalized every entry to Chat. Standard Outbound',
+    to: '    if payload.get("input").and_then(Value::as_array).is_some() {\n        return Ok(normalize_responses_payload_for_provider_standard(payload));\n    }\n    // Inbound has already normalized every entry to Chat. Standard Outbound',
     diagnostic: /anthropic_provider_request_source_no_raw_input_branch|payload\.get\("input"\)|normalize_responses_payload_for_provider_standard/u,
   },
   {

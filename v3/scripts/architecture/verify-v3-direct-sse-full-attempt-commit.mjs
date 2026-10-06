@@ -140,17 +140,26 @@ const terminalMark = runtime.indexOf('committed.mark_last_frame_as_terminal()', 
 // The validated-terminal seal is either performed inline in the collect
 // implementation or extracted into the dedicated seal owner that the collect
 // implementation calls. In the extracted layout the ordering anchor is that
-// call site, and the owner itself must still perform the literal
-// validated-terminal seal, so the same order and the same seal stay enforced.
+// call site, and the owner itself must still perform the validated-terminal
+// seal, so the same order and the same seal stay enforced.
+// rustfmt may break the receiver of this method chain onto its own line, so the
+// seal is matched with layout-insensitive whitespace instead of one exact line:
+// the committed-attempt receiver and the seal call are both still required.
+const VALIDATED_TERMINAL_SEAL = /committed\s*\.\s*seal_after_validated_terminal\s*\(\s*\)/gu;
+function validatedTerminalSealAt(from) {
+  VALIDATED_TERMINAL_SEAL.lastIndex = Math.max(0, from);
+  const match = VALIDATED_TERMINAL_SEAL.exec(runtime);
+  return match ? match.index : -1;
+}
 function resolveValidatedTerminalSeal() {
-  const inlineSeal = runtime.indexOf('committed.seal_after_validated_terminal()', collectStart);
+  const inlineSeal = validatedTerminalSealAt(collectStart);
   if (inlineSeal >= 0 && (collectEnd < 0 || inlineSeal < collectEnd)) return inlineSeal;
   const sealOwnerCall = runtime.indexOf('seal_direct_sse_attempt_with_success_scope(', collectStart);
   if (sealOwnerCall < 0 || (collectEnd >= 0 && sealOwnerCall > collectEnd)) return -1;
   const sealOwnerStart = runtime.indexOf('fn seal_direct_sse_attempt_with_success_scope(');
   if (sealOwnerStart < 0) return -1;
   const sealOwnerEnd = runtime.indexOf('\n}\n', sealOwnerStart);
-  const ownerSeal = runtime.indexOf('committed.seal_after_validated_terminal()', sealOwnerStart);
+  const ownerSeal = validatedTerminalSealAt(sealOwnerStart);
   if (ownerSeal < 0 || (sealOwnerEnd >= 0 && ownerSeal > sealOwnerEnd)) return -1;
   return sealOwnerCall;
 }
