@@ -8525,10 +8525,10 @@ chains:
     status: binding_pending
     owner_feature_id: v3.unified_operation_runner_design
     resource_flow:
-      consumes: [v3.hub.resolved_target]
-      produces: [v3.operation_runner.execution_mode]
-      side_channel_reads: [v3.hub.resolved_target]
-      side_channel_writes: [v3.operation_runner.execution_mode]
+      consumes: [v3.route.opaque_target, v3.config.published_manifest]
+      produces: [v3.hub.resolved_target, v3.operation_runner.execution_mode]
+      side_channel_reads: [v3.route.opaque_target, v3.provider.health_state, v3.provider.key_health_state, v3.provider.availability_projection, v3.operation_runner.request_local_exclusions]
+      side_channel_writes: [v3.hub.resolved_target, v3.operation_runner.execution_mode]
   - step_id: v3-op-runner-req-04
     from_node: V3OperationRunnerPlanExecution
     to_node: V3OperationRunnerGovernChatRequest
@@ -8555,7 +8555,7 @@ chains:
     resource_flow:
       consumes: [v3.request.normal_payload, v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing]
       produces: [v3.request.provider_semantic, v3.operation_runner.attempt_projection_context, v3.operation_runner.attempt_declaration_map]
-      side_channel_reads: [v3.operation_runner.execution_mode, v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing]
+      side_channel_reads: [v3.config.published_manifest, v3.hub.resolved_target, v3.operation_runner.execution_mode, v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing]
       side_channel_writes: [v3.operation_runner.attempt_projection_context, v3.operation_runner.attempt_declaration_map]
   - step_id: v3-op-runner-req-06
     from_node: V3OperationRunnerProjectProviderSemantic
@@ -8569,7 +8569,7 @@ chains:
     resource_flow:
       consumes: [v3.request.provider_semantic]
       produces: [v3.hub.provider_wire_payload]
-      side_channel_reads: []
+      side_channel_reads: [v3.hub.resolved_target, v3.operation_runner.execution_mode]
       side_channel_writes: []
   - step_id: v3-op-runner-req-07
     from_node: V3OperationRunnerCompatRequest
@@ -8582,8 +8582,8 @@ chains:
     owner_feature_id: v3.unified_operation_runner_design
     resource_flow:
       consumes: [v3.hub.provider_wire_payload]
-      produces: [v3.hub.provider_wire_payload]
-      side_channel_reads: []
+      produces: [v3.provider.responses_wire_payload]
+      side_channel_reads: [v3.hub.resolved_target]
       side_channel_writes: []
   - step_id: v3-op-runner-req-08
     from_node: V3OperationRunnerEncodeWire
@@ -8595,9 +8595,9 @@ chains:
     status: binding_pending
     owner_feature_id: v3.unified_operation_runner_design
     resource_flow:
-      consumes: [v3.hub.provider_wire_payload]
+      consumes: [v3.provider.responses_wire_payload]
       produces: [v3.provider.transport_request]
-      side_channel_reads: []
+      side_channel_reads: [v3.hub.resolved_target, v3.operation_runner.execution_mode]
       side_channel_writes: []
   request_typed_resource_edges:
     request_origin_kind:

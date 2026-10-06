@@ -3159,6 +3159,26 @@ resources:
     may_enter_metadata_center: false
     binding_status: design_pending
 
+  - resource_id: v3.operation_runner.request_local_exclusions
+    resource_kind: typed_control_resource
+    lifecycle: v3.operation_runner.request
+    owner_feature_id: v3.unified_operation_runner_design
+    owner_crate: routecodex-v3-runtime
+    owner_node: RuntimeErrorActionConsumed
+    identity: [requestId, invocationId, attemptId]
+    semantic_contract:
+      storage_owner: reference to the existing request-local excluded-candidate set consumed by Target; not a second exclusion store
+      mutation_owner: the existing typed Error action consumer updates exclusions before a new attempt
+      request_boundary: exclusions never enter request, response, provider, or client bodies
+    allowed_writers: [RuntimeErrorActionConsumed]
+    allowed_readers: [V3OperationRunnerPlanExecution]
+    forbidden_writers: [V3OperationRunnerResolveTarget, routecodex-v3-server, routecodex-v3-debug]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    release_point: runtime_request_finalizer
+    binding_status: design_pending
+
   - resource_id: v3.operation_runner.execution_mode
     resource_kind: side_channel
     lifecycle: v3.operation_runner.request
@@ -3167,7 +3187,7 @@ resources:
     owner_node: V3OperationRunnerExecutionPlan
     identity: [requestId, attemptId, selectedTargetIdentity]
     allowed_writers: [plan_v3_operation_runner_execution]
-    allowed_readers: [govern_v3_operation_runner_chat_request, project_v3_operation_runner_provider_semantic, govern_v3_operation_runner_chat_response]
+    allowed_readers: [govern_v3_operation_runner_chat_request, project_v3_operation_runner_provider_semantic, govern_v3_operation_runner_chat_response, V3OperationRunnerCompatRequest, V3OperationRunnerConstructTransport]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug]
     may_enter_provider_body: false
     may_enter_client_body: false
