@@ -135,7 +135,9 @@ live 样本；独立架构 review PASS；clean-main merge + push + 远端回执�
      上游既有的 `route-classifier`/`agent-memory` 项记录为记账项，不在本轮扩大范围。
      禁止用 `#[allow]` 批量压制代替修复；确需保留的写清理由与 owner。
 - 退出条件：`npm run verify:v3-cargo-fmt` PASS；`v3/scripts/verify.mjs` 的 `rustfmt` 与
-  `clippy` 子门禁 PASS；`git diff -w` 证明无语义差异；受影响套件全绿。
+  `clippy` 子门禁 PASS；`git diff -w` 证明无语义差异；受影响套件全绿；
+  `verify:v3-file-size` 仍 PASS（格式化会重排行数，`endpoint_handlers.rs` 与
+  `field_operator_library.rs` 修后恰好 1500 行、零余量，必须复测）。
 - 停止条件：格式化提交出现非空白差异 → 停止，逐文件回退并归因，禁止整棵回滚。
 
 ### R51｜R47 SSE 闭环（红→绿，红项不放宽）
