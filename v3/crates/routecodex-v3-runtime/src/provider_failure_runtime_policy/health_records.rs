@@ -47,7 +47,9 @@ impl V3ProviderFailureRuntimeHealth {
     ) -> Result<V3ProviderFailureRecord, String> {
         let classified = build_v3_error_02_classified_from_v3_error_01(source.clone());
         if let Some(policy) = matched_policy_directive
-            .map(|policy| provider_failure_policy_from_error_policy_directive(policy, policy_status))
+            .map(|policy| {
+                provider_failure_policy_from_error_policy_directive(policy, policy_status)
+            })
             .transpose()?
             .flatten()
         {

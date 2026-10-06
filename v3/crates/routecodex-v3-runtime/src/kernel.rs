@@ -1235,9 +1235,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     .await
                     {
                         Ok(committed) => committed,
-                        Err(source)
-                            if !is_direct_recoverable_provider_failure_source(&source) =>
-                        {
+                        Err(source) if !is_direct_recoverable_provider_failure_source(&source) => {
                             if let Err(error) = runtime_timing.finish_external_if_active() {
                                 return error_output(
                                     runtime_source("V3RuntimeTimingExternal", error),
@@ -1395,7 +1393,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
 include!("kernel/direct_runtime_helpers.rs");
 include!("kernel/v3_direct_core.rs");
 #[cfg(test)]
-mod tests;
-#[cfg(test)]
 #[path = "kernel/local_source_handoff_tests.rs"]
 mod local_source_handoff_tests;
+#[cfg(test)]
+mod tests;

@@ -152,8 +152,10 @@ fn direct_local_construction_sources_map_to_provider_local_failure() {
         },
     ];
     for error in cases {
-        let source =
-            crate::hooks::build_v3_provider_error_source("V3Transport13ResponsesHttpRequest", error);
+        let source = crate::hooks::build_v3_provider_error_source(
+            "V3Transport13ResponsesHttpRequest",
+            error,
+        );
         assert_eq!(source.source_kind, V3ErrorSourceKind::ProviderLocalFailure);
         assert_eq!(source.code, "provider_local_runtime_error");
         assert!(
