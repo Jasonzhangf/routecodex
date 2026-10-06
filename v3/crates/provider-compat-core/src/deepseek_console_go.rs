@@ -151,6 +151,20 @@ pub(crate) fn apply_request_compat(payload: Value) -> Result<Value, String> {
         }
     }
     if let Some(input) = root.get_mut("input").and_then(Value::as_array_mut) {
+        // Receipt items need not repeat the tool name. Resolve native apply_patch
+        // receipts from their matching call before converting mapped custom outputs.
+        let apply_patch_call_ids: std::collections::HashSet<String> = input
+            .iter()
+            .filter(|item| {
+                item.get("type").and_then(Value::as_str) == Some("custom_tool_call")
+                    && item.get("name").and_then(Value::as_str) == Some("apply_patch")
+            })
+            .filter_map(|item| {
+                item.get("call_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .collect();
         for item in input.iter_mut() {
             let Some(item_obj) = item.as_object_mut() else {
                 continue;
@@ -180,7 +194,12 @@ pub(crate) fn apply_request_compat(payload: Value) -> Result<Value, String> {
                 .and_then(Value::as_str)
                 .map(str::trim)
                 .filter(|name| !name.is_empty());
-            if name == Some("apply_patch") {
+            if name == Some("apply_patch")
+                || item_obj
+                    .get("call_id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| apply_patch_call_ids.contains(id))
+            {
                 continue;
             }
             item_obj.insert(

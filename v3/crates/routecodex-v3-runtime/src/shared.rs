@@ -1171,19 +1171,21 @@ fn apply_deepseek_console_go_sse_chunk(frame: &[u8]) -> Vec<u8> {
             output.push_str(line);
             continue;
         };
-        let Some(item) = payload.get("item").cloned() else {
+        // Some Responses providers send complete tool calls only in the terminal
+        // response, without output_item events. Apply the same registered compat
+        // owner to that full response so the client dispatch shape stays custom.
+        if let Some(response) = payload.get_mut("response") {
+            *response =
+                provider_compat_core::apply_deepseek_console_go_response_compat(response.clone());
+        }
+        if let Some(item) = payload.get("item").cloned() {
+            let compatible = provider_compat_core::apply_deepseek_console_go_response_compat(
+                serde_json::json!({"output": [item]}),
+            );
+            payload["item"] = compatible["output"][0].clone();
+        } else if payload.get("response").is_none() {
             output.push_str(line);
             continue;
-        };
-        let compatible = provider_compat_core::apply_deepseek_console_go_response_compat(
-            serde_json::json!({"output": [item]}),
-        );
-        let Some(item) = compatible.get("output").and_then(|items| items.get(0)) else {
-            output.push_str(line);
-            continue;
-        };
-        if let Some(object) = payload.as_object_mut() {
-            object.insert("item".to_string(), item.clone());
         }
         output.push_str("data:");
         output.push_str(&serde_json::to_string(&payload).unwrap_or_else(|_| value.to_string()));
