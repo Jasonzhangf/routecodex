@@ -3,9 +3,11 @@ use serde_json::{json, Map, Value};
 use super::current_projection_view::CurrentProjectionView;
 use super::field_operator_helpers::map_gemini_tool_choice;
 use super::field_operator_library::profile_index;
-use super::field_operator_profiles::{lookup_path, FieldOperatorKind};
-use super::project_canonical_paths::{read_path, write_path};
+use super::field_operator_profiles::{lookup_path, DirectionBinding, FieldOperatorKind};
+use super::project_canonical_paths::{parse_path, read_path, write_path, PathSegment};
 use crate::operation_runner::FieldMapping;
+
+const STANDARD_REQUEST_PREFIX: &str = "provider.standard.request.";
 
 /// Form an Outbound working view without serializing the canonical opaque
 /// record envelope into the provider protocol. The compiled field profile owns
@@ -20,7 +22,91 @@ pub(crate) fn project_canonical_standard_view(canonical: &Value) -> Result<Value
     {
         extension.remove(profiles.request_only_carrier());
     }
+    for binding in
+        profiles.chat_to_provider_bindings_for_kind(FieldOperatorKind::ResponsesIncludeTransform)
+    {
+        materialize_chat_to_provider_binding(canonical, &mut view, binding)?;
+    }
     Ok(view)
+}
+
+fn materialize_chat_to_provider_binding(
+    canonical: &Value,
+    view: &mut Value,
+    binding: &DirectionBinding,
+) -> Result<(), String> {
+    let source = binding
+        .source
+        .as_deref()
+        .ok_or_else(|| "chat_to_provider binding is missing source".to_string())?;
+    let destination = binding
+        .destination
+        .as_deref()
+        .ok_or_else(|| "chat_to_provider binding is missing destination".to_string())?;
+    let Some(value) = read_path(canonical, source)? else {
+        return Ok(());
+    };
+    let destination = destination
+        .strip_prefix(STANDARD_REQUEST_PREFIX)
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| {
+            format!(
+                "chat_to_provider destination `{destination}` is not under `{STANDARD_REQUEST_PREFIX}`"
+            )
+        })?;
+    write_path(view, destination, value.clone())?;
+    remove_path_and_empty_containers(view, source)
+}
+
+fn remove_path_and_empty_containers(root: &mut Value, path: &str) -> Result<(), String> {
+    let segments = parse_path(path)?;
+    remove_segments_and_empty_containers(root, &segments)
+}
+
+fn remove_segments_and_empty_containers(
+    current: &mut Value,
+    segments: &[PathSegment],
+) -> Result<(), String> {
+    let Some((segment, remaining)) = segments.split_first() else {
+        return Ok(());
+    };
+    match segment {
+        PathSegment::Key(key) => {
+            let Some(object) = current.as_object_mut() else {
+                return Ok(());
+            };
+            if remaining.is_empty() {
+                object.remove(key);
+                return Ok(());
+            }
+            let Some(child) = object.get_mut(key) else {
+                return Ok(());
+            };
+            remove_segments_and_empty_containers(child, remaining)?;
+            if child.as_object().is_some_and(Map::is_empty) {
+                object.remove(key);
+            }
+        }
+        PathSegment::Index(index) => {
+            let Some(array) = current.as_array_mut() else {
+                return Ok(());
+            };
+            if remaining.is_empty() {
+                if *index < array.len() {
+                    array.remove(*index);
+                }
+                return Ok(());
+            }
+            let Some(child) = array.get_mut(*index) else {
+                return Ok(());
+            };
+            remove_segments_and_empty_containers(child, remaining)?;
+            if child.as_array().is_some_and(Vec::is_empty) {
+                array.remove(*index);
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Reverse non-history/non-declaration fields through their registered edges.

@@ -410,7 +410,7 @@ binding_contract:
       chat_to_provider:
         shape: enum(array)
         transform_id: string
-        default_projection: enum(preserve_unrepresentable_as_opaque)
+        default_projection: enum(retain_in_request_canonical_only)
         failure_class: enum(598,599)
     routecodex.v3.field.instructions_to_system_message@1:
       client_request_to_chat:
@@ -1073,7 +1073,7 @@ path_consumers:
           operator: routecodex.v3.field.responses_include_transform@1
           shape: array
           transform_id: v3.chat_extension_include_to_responses_wire.v1
-          default_projection: preserve_unrepresentable_as_opaque
+          default_projection: retain_in_request_canonical_only
           failure_class: enum(598)
       failure_class: enum(598)
     mapping_record: exact

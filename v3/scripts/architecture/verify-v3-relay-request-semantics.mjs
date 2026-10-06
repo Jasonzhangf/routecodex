@@ -48,15 +48,30 @@ function filesBelow(relative) {
   return files;
 }
 
-const req02 = functionBody(reqInbound02, 'pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01');
+const req02Entry = functionBody(reqInbound02, 'pub fn build_v3_hub_req_inbound_02_from_request_invocation');
+const req02Canonical = functionBody(reqInbound02, 'pub fn build_v3_hub_req_inbound_02_from_canonical');
 const req04 = functionBody(request, 'fn run_from_normalized_with_events');
 const servertool = functionBody(request, 'fn run_servertool_profile');
 
-requireAll(req02, 'Req02 lossless Chat normalization', [
+requireAll(req02Entry, 'Req02 registered SDK normalization owner', [
+  'execute_v3_operation_runner_request_normalize_losslessly(',
+  'invocation.request_handle()',
+  'RequestNormalizationEntry::RawEntry',
+  'RequestNormalizationEntry::AlreadyCanonical',
+  'build_v3_hub_req_inbound_02_from_canonical(input, canonical)',
+]);
+forbidAll(req02Entry, 'Req02 registered SDK normalization owner', [
+  /serde_json::(?:to_value|from_value|to_string|from_str|to_vec|from_slice)/,
+  /restore/i,
+  /servertool/i,
+]);
+
+requireAll(req02Canonical, 'Req02 canonical consumer', [
   'V3HubRequestSemanticProtocol::Chat',
   'previous: input',
+  'input.payload.0 = Arc::new(canonical)',
 ]);
-forbidAll(req02, 'Req02 lossless Chat normalization', [
+forbidAll(req02Canonical, 'Req02 canonical consumer', [
   /serde_json::(?:to_value|from_value|to_string|from_str|to_vec|from_slice)/,
   /restore/i,
   /servertool/i,

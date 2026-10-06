@@ -42,7 +42,7 @@
 - Proxy behavior stays transparent: maximize cross-protocol compatibility and connectivity while preserving request, response, history, and observable protocol meaning. Extra semantic validation must not reject a passable request or intercept a compatible response.
 - Every request enters as JSON. Inbound only performs lossless request/response normalization into Chat Process: it preserves every field, maps Chat semantics into the canonical Chat shape, and carries non-Chat semantics as extensions. Inbound never filters or rewrites payload meaning.
 - Relay payload rewriting is owned only by request/response Chat Process. Direct payload rewriting is owned only by registered Direct hooks. No other stage rewrites payloads.
-- Outbound projects canonical Chat plus extensions into the target standard protocol. It forwards business fields without a known compatible mapping as opaque original values, preserving their inverse association; allowlists and denylists may choose a known mapping, but may not discard or locally reject business fields.
+- Outbound projects canonical Chat plus extensions into the target standard protocol while preserving representable meaning. It may omit fields that the target cannot represent only through an explicit registered allowlist/denylist contract. Original values and inverse associations remain complete in the request canonical. Omission of a declared optional response selector from an unsupported target wire is not permission to delete it from Inbound, Chat Process, or the paired request context; other unmatched business fields retain their existing opaque contract.
 - Provider Compat performs only provider-private adjustments after standard outbound projection and before or after provider transport as declared. It is not a second Chat Process or a general Outbound implementation.
 - Request-shape regressions require a real public-entry black-box test that asserts the selected provider accepts the first attempt, preserves tools and paired history, and completes actual client tool execution plus follow-up. A final client 200 after provider switching does not prove shape compatibility. Cover the failing combination of hosted declarations and tool history; a fixture that unconditionally returns 200 cannot lock this regression. Explicit gateway profiles and their required tests are bound in `docs/architecture/v3-verification-map.yml`.
 - No guessed repair, fallback, downgrade, silent drop, hidden history rewrite, or success-wrapped error.
@@ -60,7 +60,7 @@
 - Runtime: complete request lifecycle, fixed skeleton/node/hook order, provider transport relay, and full-attempt buffering.
 - Inbound: lossless request/response normalization only; no filtering or payload rewriting.
 - Chat Process: Relay-only payload rewriting, standard Chat semantic mapping, non-Chat extension governance, tool/history governance, and continuation restore/save boundaries.
-- Outbound: canonical Chat and extension projection to the target standard protocol; declared allowlists/denylists select compatible mappings, never reject or discard unmatched business fields by themselves.
+- Outbound: canonical Chat and extension projection to the target standard protocol; compatibility filtering only through explicit registered allowlists/denylists, with original values and inverse associations retained in the request canonical.
 - Compat: provider-private protocol adjustments only.
 - Virtual Router: classify and select one opaque route target.
 - Target Interpreter: expand candidates and reselect only inside selected target.

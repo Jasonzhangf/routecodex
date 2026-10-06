@@ -3,6 +3,7 @@ use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
 pub(super) const CLIENT_REQUEST_DIRECTION: &str = "client_request_to_chat";
+pub(super) const CHAT_TO_PROVIDER_DIRECTION: &str = "chat_to_provider";
 const FOLD_HISTORY_MERGE_OPERATOR: &str = "routecodex.v3.field.fold_history_merge";
 const FOLD_HISTORY_MERGE_VERSION: &str = "1";
 const FOLD_FINALIZE_OPERATOR: &str = "routecodex.v3.field.fold_finalize@1";
@@ -545,6 +546,23 @@ impl ProfileIndex {
 
     pub(super) fn request_only_carrier(&self) -> &str {
         &self.request_only_carrier
+    }
+
+    /// Read the registered outbound bindings for one executable operator.
+    /// The binding parameters remain the source of the path and transform.
+    pub(super) fn chat_to_provider_bindings_for_kind(
+        &self,
+        kind: FieldOperatorKind,
+    ) -> impl Iterator<Item = &DirectionBinding> {
+        self.rows.values().filter_map(move |row| {
+            let binding = row
+                .params
+                .direction_bindings
+                .as_ref()?
+                .get(CHAT_TO_PROVIDER_DIRECTION)?;
+            let operator = binding.operator.as_deref()?;
+            (resolve_field_operator_kind(operator) == Some(kind)).then_some(binding)
+        })
     }
 
     pub(super) fn has_protocol(&self, protocol: &str) -> bool {

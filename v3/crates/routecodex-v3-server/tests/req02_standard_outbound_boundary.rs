@@ -262,6 +262,50 @@ fn req02_standard_outbound_boundary_public_consumer_covers_standard_shapes() {
 }
 
 #[test]
+fn req02_responses_include_cross_protocol_public_consumer() {
+    let mut failures = Vec::new();
+    for provider_protocol in [
+        V3HubProviderWireProtocol::Responses,
+        V3HubProviderWireProtocol::OpenAiChat,
+        V3HubProviderWireProtocol::Anthropic,
+        V3HubProviderWireProtocol::Gemini,
+    ] {
+        let result = build_req07(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": [{
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "hello"}]
+                }],
+                "include": ["reasoning.encrypted_content"],
+                "stream": false
+            }),
+            provider_protocol,
+            |_selected| {},
+        );
+        let req07 = match result {
+            Ok(req07) => req07,
+            Err(error) => {
+                failures.push(format!("{provider_protocol:?}: {error}"));
+                continue;
+            }
+        };
+        if provider_protocol == V3HubProviderWireProtocol::Responses {
+            if req07.standard_payload()["include"] != json!(["reasoning.encrypted_content"]) {
+                failures.push("Responses: original include value was not preserved".into());
+            }
+        }
+        complete_public_wire_pipeline(req07);
+    }
+    assert!(
+        failures.is_empty(),
+        "Responses include must pass each standard public boundary: {failures:?}"
+    );
+}
+
+#[test]
 fn req02_standard_outbound_boundary_reports_projection_failure_before_compat() {
     let error = build_req07(
         V3HubEntryProtocol::OpenAiChat,

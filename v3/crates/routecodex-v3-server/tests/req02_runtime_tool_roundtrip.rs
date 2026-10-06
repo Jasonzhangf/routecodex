@@ -380,6 +380,7 @@ async fn chat_tool_upstream(
         },
         body.clone(),
     );
+    assert_wire_omits_responses_include("openai_chat", &body);
 
     if let Some(hold) = &state.hold {
         let _hold = hold.lock().await;
@@ -406,6 +407,7 @@ async fn chat_failure_upstream(
     State(state): State<Arc<CaptureState>>,
     Json(body): Json<Value>,
 ) -> Response<Body> {
+    assert_wire_omits_responses_include("openai_chat", &body);
     capture(state.as_ref(), body);
     status_json(
         StatusCode::BAD_REQUEST,
@@ -424,6 +426,7 @@ async fn anthropic_custom_upstream(
     Json(body): Json<Value>,
 ) -> Response<Body> {
     capture(state.as_ref(), body.clone());
+    assert_wire_omits_responses_include("anthropic", &body);
 
     if anthropic_has_tool_result(&body) {
         return json_response(anthropic_final_message(ANTHROPIC_FINAL_TEXT));
@@ -537,6 +540,16 @@ fn anthropic_content_part<'a>(body: &'a Value, call_id: &str, part_type: &str) -
 fn anthropic_tool_result_text(body: &Value, call_id: &str) -> String {
     let part = anthropic_content_part(body, call_id, "tool_result");
     content_text(&part["content"])
+}
+
+/// The Responses `include` selector has no Chat/Anthropic wire equivalent.
+/// The standard outbound projection must drop it before the provider sees the
+/// request instead of leaking an unmapped Responses field into the wire.
+fn assert_wire_omits_responses_include(protocol: &str, body: &Value) {
+    assert!(
+        body.get("include").is_none(),
+        "{protocol} provider wire must not carry the Responses include field: {body}"
+    );
 }
 
 const RESPONSES_DIRECT_BINDING: &str = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" }"#;
@@ -699,6 +712,7 @@ async fn req02_responses_chat_function_round_trip_preserves_identity_and_followu
         .post(&endpoint)
         .json(&json!({
             "model": "client-tool",
+            "include": ["reasoning.encrypted_content"],
             "input": [{"role": "user", "content": "run exec"}],
             "tools": tools,
             "stream": false
@@ -724,6 +738,7 @@ async fn req02_responses_chat_function_round_trip_preserves_identity_and_followu
         .post(&endpoint)
         .json(&json!({
             "model": "client-tool",
+            "include": ["reasoning.encrypted_content"],
             "input": [
                 {"role": "user", "content": "run exec"},
                 call,
@@ -785,6 +800,7 @@ async fn req02_responses_anthropic_custom_round_trip_preserves_patch_and_followu
         .post(&endpoint)
         .json(&json!({
             "model": "client-tool",
+            "include": ["reasoning.encrypted_content"],
             "input": [{"role": "user", "content": "apply the patch"}],
             "tools": tools,
             "stream": false
@@ -816,6 +832,7 @@ async fn req02_responses_anthropic_custom_round_trip_preserves_patch_and_followu
         .post(&endpoint)
         .json(&json!({
             "model": "client-tool",
+            "include": ["reasoning.encrypted_content"],
             "input": [
                 {"role": "user", "content": "apply the patch"},
                 call,
@@ -891,6 +908,7 @@ async fn req02_responses_mcp_kind_isolation_and_failover_round_trip() {
         .post(&endpoint)
         .json(&json!({
             "model": "client-tool",
+            "include": ["reasoning.encrypted_content"],
             "input": [{"role": "user", "content": "mcp function kind"}],
             "tools": function_tools,
             "stream": false
@@ -922,6 +940,7 @@ async fn req02_responses_mcp_kind_isolation_and_failover_round_trip() {
         .post(&endpoint)
         .json(&json!({
             "model": "client-tool",
+            "include": ["reasoning.encrypted_content"],
             "input": [
                 {"role": "user", "content": "mcp function kind"},
                 function_call,
@@ -951,6 +970,7 @@ async fn req02_responses_mcp_kind_isolation_and_failover_round_trip() {
         .post(&endpoint)
         .json(&json!({
             "model": "client-tool",
+            "include": ["reasoning.encrypted_content"],
             "input": [{"role": "user", "content": "mcp custom kind"}],
             "tools": custom_tools,
             "stream": false
@@ -980,6 +1000,7 @@ async fn req02_responses_mcp_kind_isolation_and_failover_round_trip() {
         .post(&endpoint)
         .json(&json!({
             "model": "client-tool",
+            "include": ["reasoning.encrypted_content"],
             "input": [
                 {"role": "user", "content": "mcp custom kind"},
                 custom_call,
@@ -1044,6 +1065,7 @@ async fn req02_responses_sse_function_exec_round_trip_preserves_identity_and_fol
         &endpoint,
         json!({
             "model": "client-tool",
+            "include": ["reasoning.encrypted_content"],
             "input": [{"role": "user", "content": "run exec over sse"}],
             "tools": tools,
             "stream": true
@@ -1071,6 +1093,7 @@ async fn req02_responses_sse_function_exec_round_trip_preserves_identity_and_fol
         &endpoint,
         json!({
             "model": "client-tool",
+            "include": ["reasoning.encrypted_content"],
             "input": [
                 {"role": "user", "content": "run exec over sse"},
                 call,
@@ -1134,6 +1157,7 @@ async fn req02_responses_sse_anthropic_custom_round_trip_preserves_patch_and_fol
         &endpoint,
         json!({
             "model": "client-tool",
+            "include": ["reasoning.encrypted_content"],
             "input": [{"role": "user", "content": "apply the patch over sse"}],
             "tools": tools,
             "stream": true
@@ -1164,6 +1188,7 @@ async fn req02_responses_sse_anthropic_custom_round_trip_preserves_patch_and_fol
         &endpoint,
         json!({
             "model": "client-tool",
+            "include": ["reasoning.encrypted_content"],
             "input": [
                 {"role": "user", "content": "apply the patch over sse"},
                 call,
@@ -1229,6 +1254,7 @@ async fn req02_responses_sse_mcp_kind_isolation_preserves_identity_and_followup(
         &endpoint,
         json!({
             "model": "client-tool",
+            "include": ["reasoning.encrypted_content"],
             "input": [{"role": "user", "content": "mcp function kind over sse"}],
             "tools": function_tools,
             "stream": true
@@ -1253,6 +1279,7 @@ async fn req02_responses_sse_mcp_kind_isolation_preserves_identity_and_followup(
         &endpoint,
         json!({
             "model": "client-tool",
+            "include": ["reasoning.encrypted_content"],
             "input": [
                 {"role": "user", "content": "mcp function kind over sse"},
                 function_call,
@@ -1281,6 +1308,7 @@ async fn req02_responses_sse_mcp_kind_isolation_preserves_identity_and_followup(
         &endpoint,
         json!({
             "model": "client-tool",
+            "include": ["reasoning.encrypted_content"],
             "input": [{"role": "user", "content": "mcp custom kind over sse"}],
             "tools": custom_tools,
             "stream": true
@@ -1305,6 +1333,7 @@ async fn req02_responses_sse_mcp_kind_isolation_preserves_identity_and_followup(
         &endpoint,
         json!({
             "model": "client-tool",
+            "include": ["reasoning.encrypted_content"],
             "input": [
                 {"role": "user", "content": "mcp custom kind over sse"},
                 custom_call,
@@ -1367,6 +1396,7 @@ async fn req02_responses_client_disconnect_does_not_poison_followup_session() {
         .header("session-id", "req02-disconnected-session")
         .json(&json!({
             "model": "client-tool",
+            "include": ["reasoning.encrypted_content"],
             "input": [{"role": "user", "content": "disconnect during exec"}],
             "tools": functions_exec_tools(),
             "stream": true
@@ -1395,6 +1425,7 @@ async fn req02_responses_client_disconnect_does_not_poison_followup_session() {
         &endpoint,
         json!({
             "model": "client-tool",
+            "include": ["reasoning.encrypted_content"],
             "input": [{"role": "user", "content": "survivor session runs exec"}],
             "tools": tools,
             "stream": true
@@ -1420,6 +1451,7 @@ async fn req02_responses_client_disconnect_does_not_poison_followup_session() {
         &endpoint,
         json!({
             "model": "client-tool",
+            "include": ["reasoning.encrypted_content"],
             "input": [
                 {"role": "user", "content": "survivor session runs exec"},
                 survivor_call,

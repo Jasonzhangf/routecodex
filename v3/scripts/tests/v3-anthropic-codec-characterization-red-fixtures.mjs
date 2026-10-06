@@ -13,8 +13,11 @@ const fixtures = [
   ['provider error guard removed', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', 'MalformedProviderError', 'MalformedProviderFailure', /missing MalformedProviderError/],
   ['SSE coverage removed', 'v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs', 'V3HubTransportIntent::Sse', 'V3HubTransportIntent::Json', /missing V3HubTransportIntent::Sse/],
   ['shape branch helper removed', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', 'collect_v3_anthropic_request_shape_branch_semantics', 'collect_v3_anthropic_request_branch_semantics_removed', /missing collect_v3_anthropic_request_shape_branch_semantics/],
-  ['native web search type removed', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs', 'web_search_20250305', 'web_search_generic_removed', /missing web_search_20250305/],
-  ['web search preview mapping removed', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs', 'web_search_preview', 'search_preview_removed', /missing web_search_preview/],
+  ['native web search type removed', [
+    'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_tool_projection.rs',
+    'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs',
+  ], 'web_search_20250305', 'web_search_generic_removed', /missing web_search_20250305/],
+  ['web search preview mapping removed', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_tool_projection.rs', 'web_search_preview', 'search_preview_removed', /missing web_search_preview/],
   ['image url collapses to inline media data', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', `"request.messages[].content[].image.source.url",
                             V3AnthropicChatShapeBranchSemantic::ChatImageUrlUrl,`, `"request.messages[].content[].image.source.url",
                             V3AnthropicChatShapeBranchSemantic::ChatInlineMediaData,`, /image\.source\.url.*must map near ChatImageUrlUrl|image\.source\.url.*must not collapse near ChatInlineMediaData/],
@@ -39,11 +42,13 @@ for (const [name, relative, from, to, diagnostic] of fixtures) {
         filter: (source) => !relativePath(sourceRoot, source).split(sep).some((part) => part === 'target' || part === 'build-control'),
       });
     }
-    const target = join(root, relative);
-    const source = readFileSync(target, 'utf8');
-    const fixtureSource = (Array.isArray(from) ? from : [from]).find((candidate) => source.includes(candidate));
-    if (!fixtureSource) throw new Error(name + ': fixture source missing');
-    writeFileSync(target, source.split(fixtureSource).join(to));
+    for (const targetRelative of Array.isArray(relative) ? relative : [relative]) {
+      const target = join(root, targetRelative);
+      const source = readFileSync(target, 'utf8');
+      const fixtureSource = (Array.isArray(from) ? from : [from]).find((candidate) => source.includes(candidate));
+      if (!fixtureSource) throw new Error(name + ': fixture source missing');
+      writeFileSync(target, source.split(fixtureSource).join(to));
+    }
     const result = spawnSync(process.execPath, [verifier], { cwd: root, encoding: 'utf8' });
     const output = (result.stdout ?? '') + '\n' + (result.stderr ?? '');
     if (result.status === 0) failures.push(name + ': gate unexpectedly passed');
