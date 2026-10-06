@@ -308,10 +308,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     let standardized_request_id = standardized.request_id.clone();
     let standardized_server_id = standardized.server_id.clone();
     let commit_route_policy = |_receipt: &V3AttemptSuccessReceipt| -> Result<(), String> {
-        match route_policy_pending.as_ref() {
-            Some(pending) => pending.commit(&route_policy_policies, now_epoch_ms),
-            None => Ok(()),
-        }
+        route_policy_pending
+            .as_ref()
+            .map_or(Ok(()), |pending| pending.commit(&route_policy_policies, now_epoch_ms))
     };
     let mut failed_candidates = initial_request_local_excluded_candidates;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
@@ -1006,7 +1005,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         {
             Ok(projection) => projection,
             Err(source) => {
-                let transport_source = source.clone();
                 if provider_response_is_stream {
                     if let Err(error) = runtime_timing.finish_external() {
                         return error_output(
@@ -1137,20 +1135,18 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 )
             })
             .unwrap_or(false);
-        let direct_web_search_request_state =
-            match (server_tool_state.as_deref(), server_tool_scope.as_ref()) {
-                (Some(control), Some(scope)) => match control.web_search_load_for_scope(scope) {
-                    Ok(state) => state,
-                    Err(error) => {
-                        return error_output(
-                            runtime_source("V3DirectWebSearchResp01Intercepted", error),
-                            trace,
-                            &hook_registry,
-                        )
-                    }
-                },
-                _ => None,
-            };
+        // Admission only: this load keeps the typed
+        // V3DirectWebSearchResp01Intercepted error path for the request scope.
+        if let (Some(control), Some(scope)) = (server_tool_state.as_deref(), server_tool_scope.as_ref())
+        {
+            if let Err(error) = control.web_search_load_for_scope(scope) {
+                return error_output(
+                    runtime_source("V3DirectWebSearchResp01Intercepted", error),
+                    trace,
+                    &hook_registry,
+                );
+            }
+        }
         if let V3ProviderAttemptBody::Json(body) = &mut response_projection.attempt_payload.body {
             crate::direct_response_hooks::apply_v3_direct_response_projection_hooks(
                 body,
