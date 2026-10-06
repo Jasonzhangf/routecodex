@@ -5,7 +5,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 const CHILD_MODE_ENV: &str = "S21_ATOMIC_PERSIST_CHILD_MODE";
 const CHILD_EXE_ENV: &str = "S21_ATOMIC_PERSIST_CHILD_EXE";
@@ -14,14 +14,19 @@ const FILE_NAME: &str = "request.json";
 const ENDPOINT: &str = "/v1/responses";
 
 static NEXT_HOME_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+static HOME_LOCK: Mutex<()> = Mutex::new(());
 
 struct IsolatedHome {
     base: PathBuf,
     previous_home: Option<std::ffi::OsString>,
+    _home_guard: MutexGuard<'static, ()>,
 }
 
 impl IsolatedHome {
     fn new() -> Self {
+        let home_guard = HOME_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let sequence = NEXT_HOME_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let base = std::env::temp_dir().join(format!(
             "s21-sample-atomic-persistence-{}-{sequence}",
@@ -35,6 +40,7 @@ impl IsolatedHome {
         Self {
             base,
             previous_home,
+            _home_guard: home_guard,
         }
     }
 
