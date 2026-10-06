@@ -89,7 +89,7 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "a", pr
 }
 
 #[test]
-fn recoverable_failure_cools_immediately_without_changing_score_contract() {
+fn recoverable_failure_cools_after_three_same_failures_without_changing_score_contract() {
     let store = V3ProviderKeyHealthStore::default();
     let action = V3ProviderFailureAction::recoverable("transport");
 
@@ -98,9 +98,21 @@ fn recoverable_failure_cools_immediately_without_changing_score_contract() {
         .expect("first failure");
     assert_eq!(first.score_milli, 95);
     assert_eq!(first.success_streak, 0);
-    assert!(!first.available);
-    assert!(first.cooldown);
-    assert_eq!(first.cooldown_until_ms, Some(5_100));
+    // A single recoverable failure is counted into health but must not exclude
+    // the provider: three consecutive same-fingerprint failures are required.
+    assert!(first.available);
+    assert!(!first.cooldown);
+    assert_eq!(first.cooldown_until_ms, None);
+
+    store
+        .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 101)
+        .expect("second failure");
+    let third = store
+        .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 102)
+        .expect("third failure");
+    assert!(!third.available);
+    assert!(third.cooldown);
+    assert_eq!(third.cooldown_until_ms, Some(5_102));
 }
 
 #[test]
@@ -298,21 +310,20 @@ fn health_score_uses_configured_priority_as_its_baseline() {
 }
 
 #[test]
-fn one_502_enters_cooldown_immediately() {
+fn three_502_failures_enter_cooldown() {
     let store = V3ProviderHealthStore::default();
     store
         .scheduling_projection("p", "k", "m", 100, 1, 100)
         .expect("initial projection");
-    let result = store
-        .record_provider_failure_action(
-            "p",
-            "k",
-            "m",
-            &V3ProviderFailureAction::recoverable("provider_502"),
-            101,
-        )
-        .expect("502 failure");
-    assert!(result.cooldown);
+    let action = V3ProviderFailureAction::recoverable("provider_502");
+
+    let first = store
+        .record_provider_failure_action("p", "k", "m", &action, 101)
+        .expect("first 502 failure");
+    assert!(
+        !first.cooldown,
+        "a single recoverable 502 must not cool the provider"
+    );
     assert_eq!(
         store
             .scheduling_projection("p", "k", "m", 100, 1, 102)
@@ -320,6 +331,15 @@ fn one_502_enters_cooldown_immediately() {
             .score_milli,
         95
     );
+
+    store
+        .record_provider_failure_action("p", "k", "m", &action, 102)
+        .expect("second 502 failure");
+    let third = store
+        .record_provider_failure_action("p", "k", "m", &action, 103)
+        .expect("third 502 failure");
+    assert!(third.cooldown);
+    assert_eq!(third.cooldown_until_ms, Some(5_103));
 }
 
 #[test]

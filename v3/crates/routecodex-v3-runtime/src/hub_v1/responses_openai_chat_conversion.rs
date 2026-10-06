@@ -133,6 +133,11 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
     // 等网关别名会被 guard 豁免、却在这里落成 `completed` 的空成功响应。
     let status = match finish_reason.as_deref() {
         Some(reason) if openai_chat_finish_reason_is_output_cap(reason) => "incomplete",
+        // `content_filter` is a legal provider terminal: the provider's own
+        // content filter did its job. It is a non-success terminal, so it must
+        // use the Responses `incomplete` shape instead of becoming a fabricated
+        // empty `completed` response.
+        Some("content_filter") => "incomplete",
         _ => "completed",
     };
     let mut response = Map::new();
@@ -159,10 +164,11 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
         );
     }
     if status == "incomplete" {
-        response.insert(
-            "incomplete_details".to_string(),
-            json!({"reason": "max_output_tokens"}),
-        );
+        let reason = match finish_reason.as_deref() {
+            Some("content_filter") => "content_filter",
+            _ => "max_output_tokens",
+        };
+        response.insert("incomplete_details".to_string(), json!({"reason": reason}));
     }
     if let Some(usage) = payload
         .get("usage")
@@ -424,9 +430,10 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
     if let Some(client_name) = custom_tool_names.get(name) {
         // 请求侧 custom -> function 扁平化后，provider 返回 function tool_call；
         // 按客户端声明的 custom 名归类回 custom_tool_call，保持客户端契约。
-        // Decode the known input wrapper; preserve other model arguments for
-        // client validation and the paired tool-error recovery turn.
-        let input = parse_v3_openai_chat_custom_tool_input(arguments);
+        // provider function arguments 必须是我们发出的对象 schema；只把
+        // schema 的 input 字段恢复成原始 free-form 字符串，三个治理字段
+        // 只在 provider wire 存在，不能泄露到客户端 custom input。
+        let input = parse_v3_openai_chat_custom_tool_input(name, arguments)?;
         return Ok(client_custom_tool_call(call_id, client_name, &input));
     }
     let mut item = Map::from_iter([
@@ -448,15 +455,33 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
     Ok(Value::Object(item))
 }
 
-fn parse_v3_openai_chat_custom_tool_input(arguments: &str) -> String {
-    match serde_json::from_str::<Value>(arguments) {
-        Ok(Value::Object(parsed)) => parsed
+fn parse_v3_openai_chat_custom_tool_input(
+    name: &str,
+    arguments: &str,
+) -> Result<String, V3ResponsesRelayRuntimeError> {
+    // Provider may not honor the `{"input":"..."}` Chat-freeform schema and may
+    // return the raw free-form text directly. For a governed custom tool the
+    // client contract is a raw string, so accept either shape explicitly.
+    let trimmed = arguments.trim();
+    if trimmed.is_empty() {
+        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            format!("OpenAI Chat custom tool {name} function arguments must not be empty"),
+        ));
+    }
+    match serde_json::from_str::<Value>(trimmed) {
+        Ok(Value::Object(parsed)) => Ok(parsed
             .get("input")
             .and_then(Value::as_str)
+            // A provider may return a valid JSON object that does not follow
+            // our preferred free-form wrapper. Do not turn that business
+            // shape into a proxy error. Preserve the complete raw arguments
+            // as the client's custom-tool string input so the client can
+            // inspect or correct the model call on its next turn.
             .map(str::to_string)
-            .unwrap_or_else(|| arguments.to_string()),
-        Ok(Value::String(value)) => value,
-        _ => arguments.to_string(),
+            .unwrap_or_else(|| trimmed.to_string())),
+        Ok(Value::String(value)) => Ok(value),
+        Ok(value) => Ok(value.to_string()),
+        Err(_) => Ok(trimmed.to_string()),
     }
 }
 

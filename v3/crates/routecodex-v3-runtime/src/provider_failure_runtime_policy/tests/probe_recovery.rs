@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Notify;
 
 #[test]
-fn one_post_commit_sse_failure_enters_provider_cooldown_immediately() {
+fn post_commit_sse_failures_enter_provider_cooldown_after_three_same_errors() {
     let manifest = target_resolution_manifest("post_commit_sse_single_retryable");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let session = test_provider_failure_scope(
@@ -21,34 +21,39 @@ fn one_post_commit_sse_failure_enters_provider_cooldown_immediately() {
         "Responses SSE event must be a JSON object",
     );
 
-    health
-        .record_post_commit_provider_stream_failure_from_source(
-            &session,
-            "primary",
-            Some("key1"),
-            Some("gpt-test"),
-            &source,
-        )
-        .expect("one post-commit SSE failure must remain a recoverable observation");
+    for attempt in 0..3 {
+        health
+            .record_post_commit_provider_stream_failure_from_source(
+                &session,
+                "primary",
+                Some("key1"),
+                Some("gpt-test"),
+                &source,
+            )
+            .expect("post-commit SSE failure must remain a recoverable observation");
 
-    let projection =
-        routecodex_v3_provider_responses::V3ProviderSchedulingReader::scheduling_projection(
-            &health,
-            "primary",
-            "key1",
-            "gpt-test",
-            1,
-            1,
-            v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
+        let projection =
+            routecodex_v3_provider_responses::V3ProviderSchedulingReader::scheduling_projection(
+                &health,
+                "primary",
+                "key1",
+                "gpt-test",
+                1,
+                1,
+                v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
+            );
+        assert_eq!(
+            projection.available,
+            attempt < 2,
+            "one recoverable post-commit SSE failure must not exclude the provider; attempt={attempt}"
         );
-    assert!(
-        !projection.available,
-        "one post-commit SSE failure must enter the adaptive provider cooldown"
-    );
-    assert!(projection
-        .blocked_scopes
-        .iter()
-        .any(|scope| scope == "provider_cooldown_probe_pending"));
+        if attempt == 2 {
+            assert!(projection
+                .blocked_scopes
+                .iter()
+                .any(|scope| scope == "provider_cooldown_probe_pending"));
+        }
+    }
 }
 
 #[test]
@@ -109,7 +114,7 @@ fn successful_retry_clears_post_commit_sse_failure_state() {
         "a successful retry must not leave a pending cooldown probe"
     );
 
-    for _ in 0..2 {
+    for _ in 0..3 {
         health
             .record_post_commit_provider_stream_failure_from_source(
                 &session,
@@ -132,7 +137,7 @@ fn successful_retry_clears_post_commit_sse_failure_state() {
         );
     assert!(
         !after_post_success_failures.available,
-        "after recovery, the next provider failure must cool immediately"
+        "after recovery, three same-class provider failures must cool again"
     );
 }
 

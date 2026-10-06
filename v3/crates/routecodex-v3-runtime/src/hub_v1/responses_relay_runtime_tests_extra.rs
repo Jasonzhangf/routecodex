@@ -518,6 +518,28 @@ fn openai_chat_functions_exec_call_restores_shell_namespace_for_responses_client
 }
 
 #[test]
+fn openai_chat_custom_tool_unexpected_object_arguments_are_forwarded_as_raw_input() {
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &json!({
+            "id":"chatcmpl_raw_custom",
+            "choices":[{"message":{"role":"assistant","content":"","tool_calls":[{
+                "id":"call_raw_custom",
+                "type":"function",
+                "function":{"name":"functions__exec","arguments":r#"{"command":"pwd"}"#}
+            }]},"finish_reason":"tool_calls"}]
+        }),
+        &json!({"tools":[{"type":"namespace","name":"functions","tools":[
+            {"type":"custom","name":"exec","format":{"type":"text"}}
+        ]}]}),
+    )
+    .expect("preservable custom tool arguments must not become a proxy error");
+    assert_eq!(response["output"][0]["type"], "custom_tool_call");
+    assert_eq!(response["output"][0]["namespace"], "functions");
+    assert_eq!(response["output"][0]["name"], "exec");
+    assert_eq!(response["output"][0]["input"], r#"{"command":"pwd"}"#);
+}
+
+#[test]
 fn openai_chat_namespace_custom_tool_response_restores_client_name() {
     let response = build_v3_responses_provider_response_from_openai_chat_payload(
         &json!({

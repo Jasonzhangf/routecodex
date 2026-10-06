@@ -149,14 +149,18 @@ async fn responses_output_cap_probe_terminal_clears_provider_cooldown() {
 }
 
 #[tokio::test]
-async fn responses_content_filter_probe_terminal_preserves_provider_cooldown() {
+async fn responses_content_filter_probe_terminal_clears_provider_cooldown() {
+    // `content_filter` is the provider's own content filter doing its job, i.e. a
+    // legal provider terminal. A provider that answers the probe with it is alive,
+    // so the probe must clear cooldown instead of keeping a healthy provider
+    // isolated.
     assert!(
-        !responses_probe_terminal_clears_cooldown(
+        responses_probe_terminal_clears_cooldown(
             "responses_probe_terminal_content_filter",
             r#"{"status":"incomplete","incomplete_details":{"reason":"content_filter"}}"#,
         )
         .await,
-        "a rejected Responses probe terminal must preserve the provider cooldown"
+        "an admitted Responses probe terminal must clear the provider cooldown"
     );
 }
 

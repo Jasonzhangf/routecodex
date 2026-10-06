@@ -224,16 +224,19 @@ fn validate_v3_provider_probe_json(
             // Responses output-cap terminal (`incomplete` + `max_output_tokens`)
             // instead of `completed`. The openai_chat, anthropic and gemini arms
             // already accept their output-cap shapes for the same reason, and the
-            // terminal-admission owner treats that exact reason as valid partial
-            // output. Any other terminal reason is a real provider rejection, so it
-            // must keep the provider cooled and stay a probe failure here.
+            // terminal-admission owner admits both the output-cap reason and
+            // `content_filter` (the provider's own content filter doing its job) as
+            // legal provider terminals. An unrepresentable terminal reason stays a
+            // real provider rejection and must keep the provider cooled.
             status == Some("completed")
                 || (status == Some("incomplete")
                     && object
                         .get("incomplete_details")
                         .and_then(|details| details.get("reason"))
                         .and_then(serde_json::Value::as_str)
-                        .is_some_and(crate::hub_v1::responses_incomplete_reason_is_output_cap))
+                        .is_some_and(
+                            crate::hub_v1::responses_incomplete_reason_is_admitted_terminal,
+                        ))
         }
         "openai_chat" => object
             .get("choices")
@@ -419,16 +422,19 @@ mod tests {
             br#"{"status":"incomplete","incomplete_details":{"reason":" max_output_tokens "}}"#,
         )
         .is_ok());
-        // A rejected terminal must not pass the probe. The terminal-admission
-        // owner sends content_filter and unknown reasons into the provider
-        // failure path, so admitting them here would clear cooldown for a
-        // provider whose real Responses traffic is rejected.
+        // `content_filter` is the provider's own content filter doing its job, so
+        // a provider that answers the probe with it is alive and the probe must
+        // clear cooldown, exactly like the openai_chat/anthropic/gemini arms that
+        // accept any non-empty terminal reason.
         assert!(validate_v3_provider_probe_json(
             "provider-a",
             "responses",
             br#"{"status":"incomplete","incomplete_details":{"reason":"content_filter"}}"#,
         )
-        .is_err());
+        .is_ok());
+        // An unrepresentable terminal reason is a real provider rejection and must
+        // not pass the probe, or cooldown would clear for a provider whose real
+        // Responses traffic is rejected.
         assert!(validate_v3_provider_probe_json(
             "provider-a",
             "responses",
