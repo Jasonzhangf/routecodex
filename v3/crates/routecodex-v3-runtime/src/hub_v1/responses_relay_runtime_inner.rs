@@ -348,7 +348,7 @@ pub(super) async fn execute_v3_responses_relay_runtime_resident<T: ResponsesTran
                     Some(selected_observability.clone()),
                 )?;
                 let terminal_failure = handle_error_before_resp03!(
-                    handle_v3_responses_relay_provider_failure(
+                    Box::pin(handle_v3_responses_relay_provider_failure(
                         &failure_context,
                         selected,
                         failure,
@@ -363,7 +363,7 @@ pub(super) async fn execute_v3_responses_relay_runtime_resident<T: ResponsesTran
                             trace: &mut trace,
                             last_external_http: &mut last_external_http,
                         },
-                    )
+                    ))
                     .await
                 );
                 if let Some(failure) = terminal_failure {
@@ -562,7 +562,7 @@ pub(super) async fn execute_v3_responses_relay_runtime_resident<T: ResponsesTran
                 };
                 drop(_provider_action_permit.take());
                 let terminal_failure = handle_error_before_resp03!(
-                    handle_v3_responses_relay_provider_failure(
+                    Box::pin(handle_v3_responses_relay_provider_failure(
                         &failure_context,
                         selected,
                         failure,
@@ -577,7 +577,7 @@ pub(super) async fn execute_v3_responses_relay_runtime_resident<T: ResponsesTran
                             trace: &mut trace,
                             last_external_http: &mut last_external_http,
                         },
-                    )
+                    ))
                     .await
                 );
                 if let Some(failure) = terminal_failure {
@@ -601,7 +601,7 @@ pub(super) async fn execute_v3_responses_relay_runtime_resident<T: ResponsesTran
                 );
                 drop(_provider_action_permit.take());
                 let terminal_failure = handle_error_before_resp03!(
-                    handle_v3_responses_relay_provider_failure(
+                    Box::pin(handle_v3_responses_relay_provider_failure(
                         &failure_context,
                         selected,
                         failure,
@@ -616,7 +616,7 @@ pub(super) async fn execute_v3_responses_relay_runtime_resident<T: ResponsesTran
                             trace: &mut trace,
                             last_external_http: &mut last_external_http,
                         },
-                    )
+                    ))
                     .await
                 );
                 if let Some(failure) = terminal_failure {
