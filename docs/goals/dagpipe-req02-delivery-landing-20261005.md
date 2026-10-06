@@ -236,20 +236,26 @@ live 样本；独立架构 review PASS；clean-main merge + push + 远端回执�
   `--test-threads=1`，`timeout 150`）得 **88 ok / 4 FAILED / 1 HANG**；
   同 5 项在 R43 前基线 worktree `req02-baseline-ec8048b6a-20261005`（detached `ec8048b6a`）**全部 ok**。
   ⇒ 判定为 **R43/REQ02 引入的回归**，不得记为"既有红"。
-- 聚类（3 个根因）与派单：
+- 聚类（**已修正为 2 个根因**；原 C 类经 task-6 证明并入 B 类）：
   - A｜custom-tool 身份：`responses_relay_apply_patch_feedback_preserves_client_output_two_turns`
     + R47 套件剩余 3 红（`expected custom_tool_call, got function_call`）→ `task-4`
     / worker `req02-r53-tool-identity`。
-  - B｜Direct→Relay handoff 重归一：`responses_relay_anthropic_dsml_failure_reselects_valid_provider`、
+  - B｜**Relay→Direct** handoff 重归一（缺反向 typed origin 边）：
+    `responses_relay_anthropic_dsml_failure_reselects_valid_provider`、
     `responses_relay_websocket_consumes_direct_handoff_instead_of_projecting_null`、
-    `responses_relay_direct_handoff_commits_route_policy_history_for_next_request`（HANG）
-    → `task-5` / worker `req02-r53-handoff`（**只读**根因 + DAG 闭环 + 独立设计 review；
-    合同第 44-51 行明确要求该节编码前先过独立设计审查，故本轮不写产品代码）。
-  - C｜入站 WebSocket 第二个 `previous_response_id` 拒绝：
+    `responses_relay_direct_handoff_commits_route_policy_history_for_next_request`（HANG）、
     `responses_inbound_websocket_rejects_second_previous_response_id_without_provider_send`
-    → `task-6` / worker `req02-r53-ws-continuation`。
-- 退出条件：A、C 两类在各自 worktree 达标并提交，Lead 集成后对应用例转绿且原断言未放宽；
-  B 类产出可复核的根因、DAG 闭环与设计 review PASS，随后另派实现轮。
+    （失败发生在第一回合，第二回合拒绝逻辑按构造即正确）
+    → `task-5`（**只读**设计闭环 + 独立 review）+ `task-6`（实现，**设计 review PASS 前不落地**）。
+    首次偏离：`build_v3_direct_request_canonical_from_captured` 硬编码
+    `RequestOriginKind::ClientEntry`（`kernel/direct_request_scope.rs:46`），
+    而 pair 已由 Relay 入口发布（`hub_v1/responses_relay_runtime_inner.rs:100-105`）
+    并经 typed `protocol_direct_handoff`（同文件 `:260-318`）回灌 Direct kernel
+    （`server/src/websocket.rs:424-452`）。
+    依据：合同 `docs/design/v3-req02-cutover-consumer-contract.md:44-51`
+    明确要求该节编码准入等待独立设计审查。
+- 退出条件：A 类在各自 worktree 达标并提交，Lead 集成后对应用例转绿且原断言未放宽；
+  B 类先出设计 review PASS，再由 task-6 落地实现并给出同等测试证据。
 - 停止条件：任一红项无法定位唯一 owner，或需靠放宽断言/栈大小/绕过守卫过关 → 判 BLOCKED 并上报。
 - 记账：本轮 5 红替代原先"只剩 `req02_attempt_buffer_boundary_direct` 一个父红"的假设；
   `req02_scope_runtime_consumer` 的父红仍需在同一基线上重新核对，避免同类误判。

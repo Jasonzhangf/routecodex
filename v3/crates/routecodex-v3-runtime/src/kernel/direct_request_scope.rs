@@ -95,13 +95,6 @@ pub(crate) fn build_v3_direct_request_projection_view(
     let provider_protocol =
         crate::hub_v1::provider_wire_protocol_for_selected_candidate(&selected.candidate)
             .map_err(direct_request_view_error)?;
-    // A Responses provider entry must always use the Responses wire protocol,
-    // even if a forwarder/compat target initially resolves it to OpenAI Chat.
-    let provider_protocol = if selected.candidate.provider_type.trim() == "responses" {
-        crate::hub_v1::V3HubProviderWireProtocol::Responses
-    } else {
-        provider_protocol
-    };
     let projection = project_canonical_request(
         canonical,
         &pair.inverse_context,

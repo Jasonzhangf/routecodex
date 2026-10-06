@@ -416,14 +416,6 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_view
                 V3InternalErrorCode::V3Provider12ResponsesWirePayload,
             )
         })?;
-    // A Responses provider entry must always use the Responses wire protocol,
-    // even if a forwarder/compat target initially resolves it to OpenAI Chat.
-    // cc-sol returns HTTP 400 for Chat-shaped messages on /v1/responses.
-    let provider_protocol = if candidate.provider_type.trim() == "responses" {
-        crate::hub_v1::V3HubProviderWireProtocol::Responses
-    } else {
-        provider_protocol
-    };
     let mut request_body = request_view.payload.clone();
     if provider_protocol == crate::hub_v1::V3HubProviderWireProtocol::Responses {
         if request_body.get("input").is_none() {
