@@ -214,3 +214,42 @@ RUN/exhaustion-chat-consumer-20261006-r2/parent-chat-public-r1.log/.exit.
 The approved exhaustion design and separate GCM selector/maps workers own
 that fix. This prerequisite does not change that selector and does not
 claim the overall exhaustion defect or any pipeline node complete.
+
+## PR367 provider-action CLI regression correction (2026-10-06)
+
+The full provider candidate at `882c41a3492bd2095afafa255b966f1bf0c73c13`
+has the main363 author evidence and independent PASS recorded above. CI run
+37523821745 reported the provider-action red-fixture step failing. The same
+public CLI command reproduced the failure on that exact source:
+
+`npm run test:v3-provider-action-gate-red-fixtures`
+
+RUN/provider-main363-red-fixtures-r86.log and .exit retain exit 1 with
+`Responses Relay wire encoding failure bypasses typed provider failure handling:
+verifier unexpectedly passed`. The wire gate's broad match crossed the wire
+error arm and accepted the subsequent transport error arm introduced by the
+typed-source fix. The existing mutation actually changed the wire arm, so
+this was a verifier failure, not a missing mutation or a provider failure.
+
+The source checkpoint `692a57a53472ef79d6c3cd20890e3f5cdc637c54` changes only
+that verifier expression. It binds the existing wire match's first success
+and error arms and cannot cross a completed statement into the transport
+match. It changes no runtime source, graph, configuration, tool mapping,
+or declared lifecycle behavior.
+
+Author verification through the real verifier CLI and copied public fixture
+surface passed:
+
+- RUN/provider-action-gate-r87/red-fixtures.log and .exit: exit 0, all 56
+  forbidden mutations rejected; the baseline verifier passes first.
+- RUN/provider-action-gate-r87/admission.log and .exit: exit 0, 526 files.
+- RUN/provider-action-gate-r87/gate.log and .exit: exit 0, 48 machine edges,
+  actual callers and map/manifest/owner bindings agree.
+- Normal checkpoint hook passed; the final diff has one verifier expression.
+
+Runtime build, installed image, HTTP/WebSocket, exhaustion/recovery and both
+real GCM tool consumers remain bound to the unchanged Rust/config/graph inputs
+of the main363 candidate above. They are reused for this verifier-only delta;
+no second build or restart is claimed. Independent delta review and a new
+remote CI run are required before PR367 can merge. This correction does not
+claim REQ02 or another operation node delivered.
