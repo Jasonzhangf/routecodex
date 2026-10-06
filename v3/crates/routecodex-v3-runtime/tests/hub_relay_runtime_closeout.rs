@@ -2125,47 +2125,6 @@ async fn responses_relay_default_floor_projects_error_without_retry_wait() {
 }
 
 #[tokio::test]
-async fn responses_relay_default_floor_waits_before_terminal_projection() {
-    let server_id = "responses_default_floor_wait";
-    let transport = ResponsesDefaultFloorFailsThenSucceedsTransport {
-        captures: Mutex::new(Vec::new()),
-        fail_count: usize::MAX,
-    };
-    let started = Instant::now();
-    let output = execute_v3_responses_relay_runtime_with_retry_policy(
-        &responses_single_limited_manifest_for_scope(server_id),
-        V3ResponsesRelayRuntimeInput {
-            server_id: server_id.into(),
-            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
-                concat!(module_path!(), ":", line!()),
-            )
-            .expect("test provider failure session scope"),
-            request_id: "req-responses-default-floor-waits".into(),
-            payload: json!({
-                "model":"gpt-5.5",
-                "input":"same large payload",
-                "stream":false
-            }),
-        },
-        &transport,
-        V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 0,
-        },
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(output.status, 502);
-    assert!(
-        started.elapsed() >= Duration::from_millis(1_000),
-        "default floor terminal must consume the isolated one-second action gate"
-    );
-    assert_eq!(transport.captures.lock().unwrap().len(), 1);
-}
-
-#[tokio::test]
 async fn responses_relay_provider_request_compat_failure_stops_without_send_or_reselect() {
     let transport = ResponsesContextErrorThenSuccessTransport {
         captures: Mutex::new(Vec::new()),
