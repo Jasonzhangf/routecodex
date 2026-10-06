@@ -56,6 +56,7 @@ use axum::http::{
 };
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use client_sse_transport::accept_v3_client_sse_transport;
 use futures_util::{stream, StreamExt};
 use libc::EINTR;
 use responses_direct_server_outcome::{
@@ -131,7 +132,6 @@ use routecodex_v3_sse::{
     build_v3_sse_transport_out_04_keepalive_comment, SseField, SseIncrementalDecoder,
     SseTransportLimits,
 };
-use client_sse_transport::accept_v3_client_sse_transport;
 use serde_json::{json, Map, Value};
 use session_admission::{
     hold_response_body_admission_permit, hold_response_body_request_activity_permit,
@@ -1161,7 +1161,11 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
             accept_v3_client_sse_transport(
                 runtime_outcome,
                 Box::new(move |outcome| {
-                    commit_model_transport_outcome(&outcome_state, front_connection_identity, outcome)
+                    commit_model_transport_outcome(
+                        &outcome_state,
+                        front_connection_identity,
+                        outcome,
+                    )
                 }),
                 keepalive_interval,
             )

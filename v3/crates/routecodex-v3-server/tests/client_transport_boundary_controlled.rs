@@ -13,6 +13,7 @@
 //! controlled provider. The controlled provider holds its response until the test
 //! releases it, so a client that observes the SSE head before the release proves
 //! the head was committed while the provider attempt was still buffered.
+use axum::body::Body;
 use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
@@ -20,7 +21,6 @@ use axum::{
     routing::post,
     Json, Router,
 };
-use axum::body::Body;
 use futures_util::StreamExt;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::{spawn_v3_server_aggregate, V3ServerAggregateHandle};

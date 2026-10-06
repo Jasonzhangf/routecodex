@@ -26,7 +26,8 @@ use axum::http::{header, StatusCode};
 use axum::response::Response;
 use futures_util::Stream;
 use routecodex_v3_sse::{
-    build_v3_sse_transport_in_02_from_fields, build_v3_sse_transport_in_03_from_v3_sse_transport_in_02,
+    build_v3_sse_transport_in_02_from_fields,
+    build_v3_sse_transport_in_03_from_v3_sse_transport_in_02,
     build_v3_sse_transport_out_04_from_v3_sse_transport_in_03,
     build_v3_sse_transport_out_04_keepalive_comment, SseField,
 };
@@ -218,7 +219,8 @@ impl Stream for V3ClientSseChannelStream {
                         Poll::Pending => return Poll::Pending,
                         Poll::Ready(Ok(response)) => {
                             this.outcome_task = None;
-                            match V3ClientSseChannelStream::committed_channel_disposition(&response) {
+                            match V3ClientSseChannelStream::committed_channel_disposition(&response)
+                            {
                                 V3ClientSseChannelDisposition::Close(error) => {
                                     this.state = V3ClientSseChannelState::Finished;
                                     return Poll::Ready(Some(Err(error)));
@@ -342,10 +344,8 @@ mod tests {
         task: JoinHandle<()>,
         interval: Duration,
     ) -> V3ClientSseChannelStream {
-        let mut interval = tokio::time::interval_at(
-            tokio::time::Instant::now() + interval,
-            interval,
-        );
+        let mut interval =
+            tokio::time::interval_at(tokio::time::Instant::now() + interval, interval);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         V3ClientSseChannelStream {
             outcome,
@@ -440,7 +440,10 @@ mod tests {
             ));
         });
         let chunks = collect(channel(outcome, task, Duration::from_millis(50))).await;
-        let errors: Vec<_> = chunks.iter().filter_map(|chunk| chunk.as_ref().err()).collect();
+        let errors: Vec<_> = chunks
+            .iter()
+            .filter_map(|chunk| chunk.as_ref().err())
+            .collect();
         assert!(
             errors.is_empty(),
             "a successful runtime outcome must never become a client transport failure: {errors:?}"
@@ -485,7 +488,11 @@ mod tests {
             error.to_string().contains("598"),
             "the connection record must keep the runtime status: {error}"
         );
-        assert_eq!(chunks.len(), 2, "keepalive then the explicit close: {chunks:?}");
+        assert_eq!(
+            chunks.len(),
+            2,
+            "keepalive then the explicit close: {chunks:?}"
+        );
     }
 
     #[tokio::test]
