@@ -359,7 +359,7 @@ pub fn encode_v3_anthropic_request_as_responses_semantic(
                 .ok_or(V3AnthropicCodecError::MalformedField {
                     field: "metadata.user_id",
                 })?;
-            responses_request_extension.insert("metadata".to_string(), json!({"user_id": user_id}));
+            output.insert("metadata".to_string(), json!({"user_id": user_id}));
         }
     }
     if let Some(format) = object
@@ -816,18 +816,10 @@ fn reject_unmapped_anthropic_payload_extensions(
         for key in extension.keys() {
             if !matches!(
                 key.as_str(),
-                "metadata" | "client_metadata" | "prompt_cache_key" | "store" | "text"
+                "client_metadata" | "prompt_cache_key" | "store" | "text"
             ) {
                 paths.push(format!("$.request.{key}"));
             }
-        }
-        if extension
-            .get("metadata")
-            .is_some_and(|metadata| !metadata.is_object())
-        {
-            return Err(V3AnthropicCodecError::MalformedField {
-                field: "routecodex_chat_extension.responses_request.metadata",
-            });
         }
         if let Some(client_metadata) = extension.get("client_metadata") {
             let client_metadata =

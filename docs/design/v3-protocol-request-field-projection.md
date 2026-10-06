@@ -63,7 +63,7 @@ Its physical Chat representation is fixed as follows:
 
 | Semantic path | Governed Chat storage | Storage class |
 | --- | --- | --- |
-| `request.metadata` | `routecodex_chat_extension.responses_request.metadata` | registered payload extension |
+| `request.metadata` | `metadata` | Chat request field |
 | `request.client_metadata` | `routecodex_chat_extension.responses_request.client_metadata` | registered payload extension |
 | `request.prompt_cache_key` | `routecodex_chat_extension.responses_request.prompt_cache_key` | registered payload extension |
 | `request.store` | `routecodex_chat_extension.responses_request.store` | registered payload extension |

@@ -173,7 +173,7 @@ if (requestFieldProjectionManifest?.status !== 'design' || requestFieldProjectio
 }
 const projectionSemantics = new Map((requestFieldProjectionManifest?.semantic_registry ?? []).map((entry) => [entry?.semantic_id, entry]));
 for (const [semanticId, chatStorage, projections] of [
-  ['request.metadata', 'routecodex_chat_extension.responses_request.metadata', { responses: 'metadata_openai_limits', openai_chat: 'metadata_openai_limits', anthropic: 'user_id_to_provider_wire_other_keys_to_response_projection_context', gemini: 'unmapped' }],
+  ['request.metadata', 'metadata', { responses: 'metadata_openai_limits', openai_chat: 'metadata_openai_limits', anthropic: 'user_id_to_provider_wire_other_keys_to_response_projection_context', gemini: 'unmapped' }],
   ['request.client_metadata', 'routecodex_chat_extension.responses_request.client_metadata', { responses: 'client_metadata', openai_chat: 'user_id_projection_other_fields_unmapped', anthropic: 'user_id_projection_other_fields_unmapped', gemini: 'unmapped' }],
   ['request.prompt_cache_key', 'routecodex_chat_extension.responses_request.prompt_cache_key', { responses: 'prompt_cache_key', openai_chat: 'prompt_cache_key', anthropic: 'unmapped', gemini: 'unmapped' }],
   ['request.store', 'routecodex_chat_extension.responses_request.store', { responses: 'store', openai_chat: 'store', anthropic: 'false_consumed_true_unsupported', gemini: 'unmapped' }],
@@ -482,7 +482,7 @@ for (const phrase of [
   'anthropic_request_system_extension',
   'project_responses_text_as_anthropic_output_config',
   '$.request.client_metadata',
-  '"metadata" | "client_metadata" | "prompt_cache_key" | "store" | "text"',
+  '"client_metadata" | "prompt_cache_key" | "store" | "text"',
 ]) requireText(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, phrase);
 forbid(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, [/MetadataCenter|metadata_center|debug_snapshot|runtime_control/i, /responses_reasoning_effort_as_anthropic_budget/, /responses_reasoning_policy_as_anthropic_system_marker/, /<routecodex_reasoning_request/, /unwrap_or_else\(\|\|\s*\{?\s*responses_reasoning_effort_as_anthropic_budget/s]);
 const targetReasoningEffortProjection = functionSlice(
