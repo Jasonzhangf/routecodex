@@ -305,7 +305,7 @@ pub fn run_resp_inbound_stage3_compat(
             "openai-chat",
         ) {
             return Ok(CompatResult {
-                payload: harvest_text_tool_calls(payload)?,
+                payload: harvest_text_tool_calls(payload),
                 applied_profile: Some(profile_id.to_string()),
                 native_applied: true,
             });
@@ -365,7 +365,7 @@ pub fn run_resp_inbound_stage3_compat(
             "openai-chat",
         ) {
             return Ok(CompatResult {
-                payload: apply_cc_response_compat(input.payload),
+                payload: input.payload,
                 applied_profile: Some(profile_id.to_string()),
                 native_applied: true,
             });
@@ -1599,111 +1599,22 @@ fn harvest_chat_choices_in_place(root: &mut Map<String, Value>) {
     }
 }
 
-fn harvest_text_tool_calls(payload: Value) -> Result<Value, String> {
+fn harvest_text_tool_calls(payload: Value) -> Value {
     let mut payload = payload;
     let Some(root) = payload.as_object_mut() else {
-        return Ok(payload);
+        return payload;
     };
     let choices_len = root
         .get("choices")
         .and_then(Value::as_array)
         .map(Vec::len)
         .unwrap_or(0);
-    reject_malformed_text_tool_envelope(root)?;
     if choices_len > 0 {
         harvest_chat_choices_in_place(root);
     } else {
         harvest_responses_output_in_place(root);
     }
-    Ok(payload)
-}
-
-fn reject_malformed_text_tool_envelope(root: &Map<String, Value>) -> Result<(), String> {
-    let mut text = String::new();
-    for value in root.values() {
-        collect_response_text(value, &mut text);
-    }
-    let has_tool_marker = text.contains("<invoke")
-        || text.contains("</invoke>")
-        || text.contains("<tool_call")
-        || text.contains("</tool_call>");
-    if has_tool_marker && parse_text_tool_calls(&text).is_empty() {
-        return Err("malformed text tool-call envelope".to_string());
-    }
-    Ok(())
-}
-
-fn collect_response_text(value: &Value, text: &mut String) {
-    match value {
-        Value::String(value) => {
-            text.push_str(value);
-            text.push('\n');
-        }
-        Value::Array(values) => {
-            for value in values {
-                collect_response_text(value, text);
-            }
-        }
-        Value::Object(object) => {
-            for value in object.values() {
-                collect_response_text(value, text);
-            }
-        }
-        _ => {}
-    }
-}
-
-const CC_DIAGNOSTIC_ROUTING_MARKER: &str = "检测到请求较复杂已自动路由到硬推理模型";
-const CC_DIAGNOSTIC_TEMPLATE_MARKERS: [&str; 3] = [
-    "Noticing frequent 'deadlock detected' messages in the logs",
-    "Following the state machine, an order transitions CREATED then PAID then SHIPPED then",
-    "Verifying config.v3.toml provider configurationPlanning removal of inline provider",
-];
-
-fn apply_cc_response_compat(payload: Value) -> Value {
-    if !cc_payload_contains_diagnostic_text(&payload) {
-        return payload;
-    }
-    let id = payload
-        .as_object()
-        .and_then(|root| root.get("id"))
-        .cloned()
-        .unwrap_or_else(|| Value::String("resp_cc_reasoning_stop_noop".to_string()));
-    json!({
-        "id": id,
-        "status": "completed",
-        "finish_reason": "stop",
-        "output": []
-    })
-}
-
-fn cc_payload_contains_diagnostic_text(value: &Value) -> bool {
-    let mut text = String::new();
-    collect_cc_response_text(value, &mut text);
-    text.contains(CC_DIAGNOSTIC_ROUTING_MARKER)
-        || CC_DIAGNOSTIC_TEMPLATE_MARKERS
-            .iter()
-            .all(|marker| text.contains(marker))
-}
-
-fn collect_cc_response_text(value: &Value, text: &mut String) {
-    match value {
-        Value::String(value) => {
-            text.push_str(value);
-            text.push('\n');
-        }
-        Value::Array(items) => {
-            for item in items {
-                collect_cc_response_text(item, text);
-            }
-        }
-        Value::Object(object) => {
-            for value in object.values() {
-                collect_cc_response_text(value, text);
-            }
-        }
-        _ => {}
-    }
+    payload
 }
 
 fn apply_glm_response_compat(payload: Value) -> Value {
