@@ -22,8 +22,8 @@ pub use observability_store::{
 pub use sample_store::{
     encode_v3_codex_sample_path_segment, format_v3_codex_sample_endpoint_dir,
     resolve_v3_codex_samples_root, v3_codex_sample_request_dir, v3_codex_sample_request_dir_in,
-    V3CodexSamplePersistFailure, V3CodexSamplePersistHandle, V3CodexSamplePersistJob,
-    V3CodexSampleStore, V3_CODEX_SAMPLE_REQUEST_RETENTION,
+    V3CodexSampleExecGuard, V3CodexSamplePersistFailure, V3CodexSamplePersistHandle,
+    V3CodexSamplePersistJob, V3CodexSampleStore, V3_CODEX_SAMPLE_REQUEST_RETENTION,
 };
 
 pub const V3_DEFAULT_SNAPSHOT_STAGE_SELECTOR: &str =

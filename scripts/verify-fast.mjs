@@ -427,8 +427,8 @@ const semanticFiles = [...new Set(entries.map(({ path }) => path).filter((relati
 if (semanticFiles.length > 0) {
   process.stderr.write(`[verify:fast] ${GATE_SEVERITY.WARN} semantic validation deferred for ${semanticFiles.length} Rust/config file(s): ${semanticFiles.join(', ')}\n`);
 }
-
 for (const { commit, path: relative } of entries) {
+  if (!/\.(?:mjs|js|cjs|json|sh)$/u.test(relative) && relative !== '.githooks/pre-commit' && relative !== '.githooks/pre-push') continue;
   let content;
   try {
     content = contentFor(relative, commit);

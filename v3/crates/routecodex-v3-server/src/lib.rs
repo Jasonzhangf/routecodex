@@ -148,9 +148,7 @@ use std::env;
 use std::fmt;
 use std::fs;
 use std::future::Future;
-use std::io;
-use std::io::Read as _;
-use std::io::Write as _;
+use std::io::{self, Read as _, Write as _};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -267,6 +265,7 @@ pub struct V3ServerAggregateHandle {
 pub struct V3ServerExecPreparation {
     pub front_checkpoints: Vec<V3RuntimeHandoffCheckpoint>,
     pub codex_sample_persist_failures: Vec<routecodex_v3_debug::V3CodexSamplePersistFailure>,
+    _codex_sample_exec_guard: Option<routecodex_v3_debug::V3CodexSampleExecGuard>,
 }
 
 pub fn build_v3_server_startup_01_listener_set_from_config_05(
@@ -292,6 +291,40 @@ pub fn build_v3_server_startup_01_listener_set_from_config_05(
 const V3_EXEC_INFLIGHT_DRAIN: std::time::Duration = std::time::Duration::from_secs(5);
 
 impl V3ServerAggregateHandle {
+    pub async fn prepare_exec_attempt(&self) -> Result<V3ServerExecPreparation, String> {
+        self.flush_runtime_persistence();
+        let codex_sample_exec_guard = match self.codex_sample_persist_worker.as_ref() {
+            Some(worker) => match tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                worker.quiesce_for_exec(),
+            )
+            .await
+            {
+                Ok(Ok(guard)) => Some(guard),
+                Ok(Err(error)) => {
+                    return Err(format!(
+                        "codex sample persistence preparation failed: {error}"
+                    ))
+                }
+                Err(_) => {
+                    return Err(
+                        "codex sample persistence preparation timed out; worker retained".into(),
+                    )
+                }
+            },
+            None => None,
+        };
+        let codex_sample_persist_failures = codex_sample_exec_guard
+            .as_ref()
+            .map(|guard| guard.persist_failures())
+            .unwrap_or_default();
+        Ok(V3ServerExecPreparation {
+            front_checkpoints: self.front_transport_broker.freeze(Instant::now()),
+            codex_sample_persist_failures,
+            _codex_sample_exec_guard: codex_sample_exec_guard,
+        })
+    }
+
     pub fn front_transport_broker(&self) -> &V3FrontTransportBroker {
         &self.front_transport_broker
     }
@@ -358,6 +391,7 @@ impl V3ServerAggregateHandle {
         V3ServerExecPreparation {
             front_checkpoints: checkpoints,
             codex_sample_persist_failures,
+            _codex_sample_exec_guard: None,
         }
     }
 

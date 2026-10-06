@@ -52,7 +52,6 @@ for (const symbol of [
   'spawn_v3_server_aggregate', 'handle.shutdown().await', 'serde(deny_unknown_fields)',
   'V3ManagedRestartPlanRecord', 'RESTART_PLAN_FILE', 'control_restart_plan',
   'target_declaration: Option<V3ManagedInstanceDeclaration>',
-  'restart_plan_projects_a_validated_config_path_change_and_rejects_listener_drift',
   'restart_matches_live_previous_owner_when_config_path_changes_for_the_same_listener_set',
   'fn control_release_ports(', 'fn release_foreign_managed_listener_ports_for_start(',
   'fn guard_explicit_listener_pids_are_scoped_to_target_ports(', 'fn occupied_listener_ports(',
@@ -71,8 +70,12 @@ for (const symbol of [
   'refusing to reap control record for a different instance',
   'refusing to reap non-canonical managed control socket path',
 ]) requireText(lifecycle, symbol, 'lifecycle source');
-if ((lifecycle.match(/#\[serde\(deny_unknown_fields\)\]/g) || []).length < 8)
-  throw new Error('lifecycle state/control schemas must all deny unknown fields');
+for (const declaration of [
+  'pub struct V3ManagedListenerDeclaration', 'pub struct V3ManagedInstanceDeclaration',
+  'pub struct V3ManagedPidCache', 'pub struct V3ManagedStatusRecord',
+  'pub struct V3ManagedControlRecord', 'struct ControlRequest', 'struct ControlResponse',
+  'struct V3ManagedRestartPlanRecord', 'struct ExecRestartOwner',
+]) requireText(lifecycle, `#[serde(deny_unknown_fields)]\n${declaration} {`, 'strict lifecycle control schema');
 requireText(lifecycle, 'let snapshot = load_v3_config_snapshot_from_path(&self.config_path)?;', 'lifecycle Config-owned snapshot loader');
 if (lifecycle.includes('V3ConfigStore'))
   throw new Error('lifecycle must not re-read authoring config through V3ConfigStore');

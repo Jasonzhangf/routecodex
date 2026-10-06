@@ -48,6 +48,9 @@ jobs:
       - name: Fetch Rust dependencies for V3 checks
         run: cargo fetch --locked --manifest-path v3/Cargo.toml
 
+      - name: Prepare native previous-release migration fixture
+        run: node v3/scripts/prepare-v3-previous-release-fixture.mjs
+
       - name: Install pinned DAGPipe graph CLI
         run: cargo install --git https://github.com/Jasonzhangf/DAGpipe.git --rev 8cb59fb5262b5e1e440638faf3b04e06a2762cfb --locked pipeline_runtime
 

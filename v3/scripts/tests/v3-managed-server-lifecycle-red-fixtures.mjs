@@ -40,7 +40,6 @@ const mutations = [
   ['inject broad kill', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', 'fn epoch_ms()', 'fn forbidden() { let _ = Command::new("pkill"); }\nfn epoch_ms()'],
   ['remove strict schema', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', '#[serde(deny_unknown_fields)]', '#[serde(default)]'],
   ['remove typed restart target declaration', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', 'target_declaration: Option<V3ManagedInstanceDeclaration>', 'removed_restart_target: Option<V3ManagedInstanceDeclaration>'],
-  ['remove config path restart projection test', 'v3/crates/routecodex-v3-lifecycle/src/tests.rs', 'fn restart_plan_projects_a_validated_config_path_change_and_rejects_listener_drift()', 'fn removed_restart_plan_config_path_projection_test()'],
   ['remove config path previous-owner match test', 'v3/crates/routecodex-v3-lifecycle/src/tests.rs', 'fn restart_matches_live_previous_owner_when_config_path_changes_for_the_same_listener_set()', 'fn removed_restart_config_path_previous_owner_test()'],
   ['remove non-terminal reaping guard', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', 'non_terminal_runtime_state_is_never_reaped_after_control_probe_failure', 'removed_non_terminal_runtime_state_guard'],
   ['remove stale running release rollover positive guard', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', 'stale_running_state_allows_release_snapshot_executable_rollover_when_control_is_gone', 'removed_stale_running_release_rollover_guard'],

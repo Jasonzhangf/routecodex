@@ -7093,6 +7093,237 @@ async fn responses_direct_sample_persist_failure_is_reported_after_live_sse_succ
 }
 
 #[tokio::test]
+async fn responses_direct_exec_cutoff_drains_and_resumes_original_sample_worker() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("exec-sample-cutoff");
+    let (base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-key");
+    let mut manifest = p6_manifest(free_port(), free_port(), &base_url);
+    manifest.debug.snapshots = true;
+    manifest.debug.codex_samples = true;
+    manifest.debug.full_codex_sampling = true;
+    manifest.debug.snapshot_direct = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let samples_root = home_guard.codex_samples_root(handle.listeners[0].addr.port());
+    let sample_lock_path = routecodex_v3_debug::resolve_v3_codex_samples_root()
+        .unwrap()
+        .join(".retention.lock");
+    fs::create_dir_all(sample_lock_path.parent().unwrap()).unwrap();
+    let sample_lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(sample_lock_path)
+        .unwrap();
+    sample_lock.lock().unwrap();
+    let client = reqwest::Client::new();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    for marker in ["accepted before cutoff", "second accepted before cutoff"] {
+        let response = client
+            .post(&endpoint)
+            .json(&json!({
+                "model": "client-test", "input": marker, "stream": false
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.json::<Value>().await.unwrap()["id"], "resp_json");
+        assert!(captures.recv().await.is_some());
+    }
+    let mut preparation = Box::pin(handle.prepare_exec_attempt());
+    std::future::poll_fn(|context| {
+        use std::future::Future;
+        assert!(
+            preparation.as_mut().poll(context).is_pending(),
+            "accepted sample writes are blocked by a real filesystem lock"
+        );
+        std::task::Poll::Ready(())
+    })
+    .await;
+    let response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "client-test", "input": "refused while draining accepted jobs", "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.json::<Value>().await.unwrap()["id"], "resp_json");
+    assert!(captures.recv().await.is_some());
+    drop(sample_lock);
+    let preparation = preparation.await.unwrap();
+    for marker in ["accepted before cutoff", "second accepted before cutoff"] {
+        assert_eq!(
+            read_responses_sample_response_by_request_marker(&samples_root, marker)["id"],
+            "resp_json"
+        );
+    }
+    for request in fs::read_dir(&samples_root).unwrap() {
+        for artifact in fs::read_dir(request.unwrap().path()).unwrap() {
+            let path = artifact.unwrap().path();
+            if path
+                .extension()
+                .is_some_and(|extension| extension == "json")
+            {
+                serde_json::from_slice::<Value>(&fs::read(&path).unwrap())
+                    .expect("every accepted sample is complete JSON before exec");
+            }
+        }
+    }
+    let response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "client-test", "input": "refused during cutoff", "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.json::<Value>().await.unwrap()["id"], "resp_json");
+    assert!(captures.recv().await.is_some());
+    drop(preparation);
+    drop(handle.prepare_exec_attempt().await.unwrap());
+    let response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "client-test", "input": "persist after rejected preparation", "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.json::<Value>().await.unwrap()["id"], "resp_json");
+    assert!(captures.recv().await.is_some());
+    drop(handle.prepare_exec_attempt().await.unwrap());
+    assert_eq!(
+        read_responses_sample_response_by_request_marker(
+            &samples_root,
+            "persist after rejected preparation"
+        )["id"],
+        "resp_json"
+    );
+    let failures = handle.shutdown().await;
+    assert!(
+        failures
+            .iter()
+            .any(|failure| failure.reason.contains("exec preparation")),
+        "cutoff must explicitly refuse diagnostics: {failures:?}"
+    );
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_direct_historical_sample_failure_does_not_reject_exec_preparation() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("exec-historical-sample-failure");
+    let (base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-key");
+    let mut manifest = p6_manifest(free_port(), free_port(), &base_url);
+    manifest.debug.snapshots = true;
+    manifest.debug.codex_samples = true;
+    manifest.debug.full_codex_sampling = true;
+    manifest.debug.snapshot_direct = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let samples_root = home_guard.codex_samples_root(handle.listeners[0].addr.port());
+    fs::create_dir_all(samples_root.parent().unwrap()).unwrap();
+    fs::write(&samples_root, b"block diagnostic directory").unwrap();
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .json(&json!({"model":"client-test", "input":"historical write failure", "stream":false}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.json::<Value>().await.unwrap()["id"], "resp_json");
+    assert!(captures.recv().await.is_some());
+    let preparation = handle
+        .prepare_exec_attempt()
+        .await
+        .expect("diagnostic failures do not deny restart");
+    assert!(preparation
+        .codex_sample_persist_failures
+        .iter()
+        .any(|failure| failure.file_name == "request.json"));
+    drop(preparation);
+    fs::remove_file(&samples_root).unwrap();
+    let preparation = handle
+        .prepare_exec_attempt()
+        .await
+        .expect("history must not permanently deny restart");
+    drop(preparation);
+    let failures = handle.shutdown().await;
+    assert!(
+        !failures.is_empty(),
+        "original failure evidence must remain reportable"
+    );
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_direct_exec_sample_drain_timeout_keeps_listener_and_admission() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("exec-sample-timeout");
+    let (base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-key");
+    let mut manifest = p6_manifest(free_port(), free_port(), &base_url);
+    manifest.debug.snapshots = true;
+    manifest.debug.codex_samples = true;
+    manifest.debug.full_codex_sampling = true;
+    manifest.debug.snapshot_direct = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let samples_root = home_guard.codex_samples_root(handle.listeners[0].addr.port());
+    let sample_lock_path = routecodex_v3_debug::resolve_v3_codex_samples_root()
+        .unwrap()
+        .join(".retention.lock");
+    fs::create_dir_all(sample_lock_path.parent().unwrap()).unwrap();
+    let sample_lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(sample_lock_path)
+        .unwrap();
+    sample_lock.lock().unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model":"client-test", "input":"accepted before timeout", "stream":false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.json::<Value>().await.unwrap()["id"], "resp_json");
+    assert!(captures.recv().await.is_some());
+    let error = handle.prepare_exec_attempt().await.unwrap_err();
+    assert!(error.contains("timed out; worker retained"), "{error}");
+    let response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model":"client-test", "input":"accepted after timeout", "stream":false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.json::<Value>().await.unwrap()["id"], "resp_json");
+    assert!(captures.recv().await.is_some());
+    drop(sample_lock);
+    let preparation = handle.prepare_exec_attempt().await.unwrap();
+    assert!(preparation.codex_sample_persist_failures.is_empty());
+    for marker in ["accepted before timeout", "accepted after timeout"] {
+        assert_eq!(
+            read_responses_sample_response_by_request_marker(&samples_root, marker)["id"],
+            "resp_json"
+        );
+    }
+    drop(preparation);
+    assert!(handle.shutdown().await.is_empty());
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
 async fn responses_full_sampling_burst_does_not_drop_sample_writes() {
     let _test_guard = TEST_LOCK.lock().await;
     let home_guard = TestHomeGuard::new("full-sampling-burst-no-drop");
