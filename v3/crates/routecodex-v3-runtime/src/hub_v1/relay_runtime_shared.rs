@@ -34,6 +34,27 @@ use routecodex_v3_target::V3Target10ConcreteProviderSelected;
 use serde_json::{json, Value};
 use std::pin::Pin;
 
+/// Provider attempt timeout, with the published default of five minutes.
+pub(crate) fn v3_relay_transport_response_timeout_from_ms(
+    request_timeout_ms: Option<u64>,
+) -> std::time::Duration {
+    std::time::Duration::from_millis(request_timeout_ms.filter(|&ms| ms > 0).unwrap_or(300_000))
+}
+
+/// The published SSE timeout covers both first frame and inter-frame idle time.
+pub(crate) fn v3_provider_sse_idle_timeout(
+    manifest: &V3Config05ManifestPublished,
+    provider_id: &str,
+) -> Result<std::time::Duration, String> {
+    manifest.providers.get(provider_id).and_then(|provider| provider.sse_first_frame_timeout_ms)
+        .filter(|timeout_ms| *timeout_ms > 0).map(std::time::Duration::from_millis)
+        .ok_or_else(|| {
+            format!(
+                "published provider SSE first-frame/inter-frame timeout is missing for provider {provider_id}"
+            )
+        })
+}
+
 /// 统一的 relay provider 失败结构（替代各协议 `V3*RelayProviderFailure` 副本）。
 ///
 /// 错误 body 形状是协议 wire 差异（gemini `error.code`、anthropic `error.type`），

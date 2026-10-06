@@ -5,6 +5,20 @@ use crate::operation_runner::{
 use routecodex_v3_error::{build_v3_error_01_source_raised_internal, V3InternalErrorCode};
 use routecodex_v3_target::V3Target10ConcreteProviderSelected;
 
+/// Replace the raw standardized body with the canonical request built from the
+/// already-captured client JSON. Planning and projection then read only the
+/// canonical request; the raw body is replaced, not kept as a parallel truth.
+pub(crate) fn canonical_body_from_captured(
+    standardized: &crate::nodes::V3Req04StandardizedResponses,
+    control: &crate::nodes::V3RequestExecutionControl,
+) -> Result<serde_json::Value, V3Error01SourceRaised> {
+    build_v3_direct_request_canonical_from_captured(
+        control,
+        &standardized.request_id,
+        standardized.body.clone(),
+    )
+}
+
 /// Build the canonical request from the already-captured client JSON through
 /// the REQ02 registered SDK entry, then seed the current field associations
 /// exactly once on the same request handle.

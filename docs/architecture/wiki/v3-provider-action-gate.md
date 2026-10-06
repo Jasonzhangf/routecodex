@@ -137,10 +137,9 @@ Review locks:
 - FIFO waiter tickets preserve deterministic order; cancelling one waiter removes only
   that ticket.
 - Only a typed terminal Error05 exhaustion decision may construct Error06.
-- Terminal admission waits through
-  `record_failure_and_wait_for_terminal_projection`, then
-  `commit_terminal_admission` atomically verifies the admitted generation and advances
-  the lane group.
+- Terminal Error06 projection records and commits its failure generation without
+  waiting for provider action admission. The commit advances the lane group so later
+  provider actions retain the storm-control delay.
 - Runtime does not pass that commit result as a typed witness into
   `terminal_projection_for`. The machine map therefore stops at
   `V3ProviderActionGateTerminalCommitted` and does not fabricate a

@@ -2,6 +2,7 @@ use super::responses_relay_failures::V3_RELAY_TRANSPORT_HANG_REASON;
 use super::web_search_hop::store_v3_responses_relay_web_search_state;
 use super::web_search_sidecar::execute_web_search_through_hooks_sidecar;
 use super::*;
+use crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key;
 use crate::provider_failure_runtime_policy::{
     admit_v3_selected_target_after_recovery, V3AdmitAfterRecovery,
 };
@@ -452,6 +453,13 @@ pub(super) async fn execute_v3_responses_relay_runtime_resident<T: ResponsesTran
                         V3AdmitAfterRecovery::Admitted(admission) => {
                             selected_admission = Some(admission)
                         }
+                        V3AdmitAfterRecovery::Busy => {
+                            failed_candidates
+                                .insert(v3_relay_provider_candidate_key(&selected.candidate));
+                            drop(_provider_action_permit.take());
+                            provider_action_permit_target = None;
+                            continue;
+                        }
                         V3AdmitAfterRecovery::Failed(reason) => {
                             return Err(V3ResponsesRelayRuntimeError::Target(reason))
                         }
@@ -509,6 +517,15 @@ pub(super) async fn execute_v3_responses_relay_runtime_resident<T: ResponsesTran
         };
         let provider_raw = match transport_result {
             Ok(raw) => raw,
+            Err(V3ProviderError::ConcurrencyBusy { .. }) => {
+                handle_error_before_resp03!(runtime_timing
+                    .finish_external()
+                    .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
+                failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
+                drop(_provider_action_permit.take());
+                provider_action_permit_target = None;
+                continue;
+            }
             Err(V3ProviderError::HttpStatus { response }) => {
                 last_external_http = Some(
                     crate::hub_v1::relay_runtime_shared::external_http_witness(&response),

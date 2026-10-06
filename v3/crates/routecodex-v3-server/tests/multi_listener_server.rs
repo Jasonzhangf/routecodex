@@ -4560,6 +4560,233 @@ async fn capture_node_preconnection_matches_responses_http_success_and_failure()
     std::env::remove_var("V3_P6_TEST_KEY");
 }
 
+fn p6_manifest_with_isolated_provider_capacity(
+    provider_base_url: &str,
+    max_in_flight: u32,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let mut manifest = p6_manifest(free_port(), free_port(), provider_base_url);
+    let alias = format!("capacity-{}", manifest.servers["a"].port);
+    let provider = manifest.providers.get_mut("test").unwrap();
+    provider.auth.entries[0].alias = alias.clone();
+    provider.concurrency = Some(routecodex_v3_config::V3ProviderConcurrencyAuthoringConfig {
+        max_in_flight,
+        acquire_timeout_ms: 60_000,
+        stale_lease_ms: 300_000,
+    });
+    for pool in manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .values_mut()
+    {
+        for target in &mut pool.targets {
+            target.key = Some(alias.clone());
+        }
+    }
+    manifest
+}
+
+fn concurrency_switch_manifest(
+    first_url: &str,
+    second_url: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let port_a = free_port();
+    let port_b = free_port();
+    let first_id = format!("concurrency_first_{port_a}");
+    let second_id = format!("concurrency_second_{port_a}");
+    let providers = [(&first_id, first_url), (&second_id, second_url)]
+        .into_iter()
+        .map(|(id, url)| {
+            format!(
+                r#"
+[providers.{id}]
+type = "responses"
+base_url = "{url}"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_P6_TEST_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+concurrency = {{ max_in_flight = 1, acquire_timeout_ms = 60000, stale_lease_ms = 120000 }}
+responses = {{ process = "chat", streaming = "always" }}
+[providers.{id}.models.test]
+wire_name = "wire-test"
+capabilities = ["text", "tools", "vision"]
+supports_streaming = true
+max_tokens = 4096
+max_context_tokens = 128000
+"#
+            )
+        })
+        .collect::<String>();
+    let source = format!(
+        r#"
+version = 3
+{HUB_V1_TEST_DECLARATION}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["responses"]
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["responses"]
+{HUB_V1_TEST_SERVER_EXECUTION}
+{providers}
+[forwarders.concurrency]
+model = "client-test"
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "{first_id}", model = "test", key = "key", priority = 2 }}, {{ kind = "provider_model", provider = "{second_id}", model = "test", key = "key", priority = 1 }}]
+[route_groups.default.pools.client_test]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, models = ["client-test"] }}
+targets = [{{ kind = "forwarder", id = "concurrency", priority = 1 }}]
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "forwarder", id = "concurrency", priority = 1 }}]
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
+fn spawn_concurrency_client(
+    endpoint: &str,
+    session: &str,
+) -> tokio::task::JoinHandle<(StatusCode, String)> {
+    let endpoint = endpoint.to_string();
+    let session = session.to_string();
+    tokio::spawn(async move {
+        let response = reqwest::Client::new()
+            .post(endpoint)
+            .header("session-id", &session)
+            .header("thread-id", &session)
+            .json(&json!({"model":"client-test","input":"held","stream":true}))
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        (status, response.text().await.unwrap())
+    })
+}
+
+#[tokio::test]
+async fn responses_provider_concurrency_full_switches_without_queueing() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (first_url, mut first_captures, first_release, first_shutdown) =
+        start_controlled_held_upstream().await;
+    let (second_url, mut second_captures, second_release, second_shutdown) =
+        start_controlled_held_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-concurrency-switch");
+    let handle = spawn_v3_server_aggregate(concurrency_switch_manifest(&first_url, &second_url))
+        .await
+        .unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let first = spawn_concurrency_client(&endpoint, "concurrency-first");
+    timeout(Duration::from_secs(2), first_captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let second = spawn_concurrency_client(&endpoint, "concurrency-second");
+    timeout(Duration::from_millis(500), second_captures.recv())
+        .await
+        .expect("a full first provider must immediately switch to the second provider")
+        .unwrap();
+    assert!(
+        !first.is_finished(),
+        "the first provider must still be held"
+    );
+    assert!(
+        first_captures.try_recv().is_err(),
+        "the full provider must receive no extra request"
+    );
+    first_release.add_permits(1);
+    second_release.add_permits(1);
+    for task in [first, second] {
+        let (status, body) = timeout(Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("response.completed"), "{body}");
+    }
+    let third = spawn_concurrency_client(&endpoint, "concurrency-after-release");
+    timeout(Duration::from_millis(500), first_captures.recv())
+        .await
+        .expect("released capacity must restore the first provider's priority")
+        .unwrap();
+    assert!(second_captures.try_recv().is_err());
+    first_release.add_permits(1);
+    let (status, body) = timeout(Duration::from_secs(2), third)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("response.completed"));
+    handle.shutdown().await;
+    first_shutdown.send(()).unwrap();
+    second_shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_provider_concurrency_all_full_exhausts_without_queueing() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (first_url, mut first_captures, first_release, first_shutdown) =
+        start_controlled_held_upstream().await;
+    let (second_url, mut second_captures, second_release, second_shutdown) =
+        start_controlled_held_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-concurrency-exhaustion");
+    let handle = spawn_v3_server_aggregate(concurrency_switch_manifest(&first_url, &second_url))
+        .await
+        .unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let first = spawn_concurrency_client(&endpoint, "concurrency-held-first");
+    timeout(Duration::from_secs(2), first_captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let second = spawn_concurrency_client(&endpoint, "concurrency-held-second");
+    timeout(Duration::from_millis(500), second_captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let exhausted = timeout(
+        Duration::from_millis(500),
+        reqwest::Client::new()
+            .post(&endpoint)
+            .header("session-id", "concurrency-exhausted")
+            .header("thread-id", "concurrency-exhausted")
+            .json(&json!({"model":"client-test","input":"no-capacity","stream":false}))
+            .send(),
+    )
+    .await
+    .expect("all full must exhaust without waiting for capacity");
+    assert!(
+        exhausted.is_err(),
+        "selection exhaustion must preserve the existing transport-break boundary"
+    );
+    assert!(first_captures.try_recv().is_err());
+    assert!(second_captures.try_recv().is_err());
+    assert!(!first.is_finished() && !second.is_finished());
+    first_release.add_permits(1);
+    second_release.add_permits(1);
+    for task in [first, second] {
+        let (status, body) = timeout(Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("response.completed"), "{body}");
+    }
+    assert!(first_captures.try_recv().is_err());
+    assert!(second_captures.try_recv().is_err());
+    handle.shutdown().await;
+    first_shutdown.send(()).unwrap();
+    second_shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
 #[tokio::test]
 async fn responses_same_listener_same_session_waits_for_release_then_returns_ok() {
     let _test_guard = TEST_LOCK.lock().await;
@@ -4643,10 +4870,12 @@ async fn responses_same_listener_different_session_remains_concurrent() {
     let (provider_base_url, mut captures, release, shutdown) =
         start_controlled_held_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-p6-session-concurrency");
-    let handle =
-        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &provider_base_url))
-            .await
-            .unwrap();
+    let handle = spawn_v3_server_aggregate(p6_manifest_with_isolated_provider_capacity(
+        &provider_base_url,
+        2,
+    ))
+    .await
+    .unwrap();
     let client = reqwest::Client::new();
     let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
     let request = json!({"model":"client-test","input":"held","stream":true});
@@ -6219,14 +6448,22 @@ async fn responses_direct_provider_http_error_never_reaches_the_client() {
     // The last real upstream HTTP error is provider-side evidence only. The
     // client boundary is the transport break, so the direct entry must not
     // forward the provider status or body.
+    let started = std::time::Instant::now();
     let response = client
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
-        .json(&json!({"model":"test","input":"preserve provider HTTP error"}))
+        .header("session-id", "direct-terminal-provider-error-no-wait")
+        .header("thread-id", "direct-terminal-provider-error-no-wait")
+        .json(&json!({"model":"test.test","input":"preserve provider HTTP error"}))
         .send()
         .await;
     assert!(
         response.is_err(),
         "a provider HTTP error must not fabricate a client HTTP response"
+    );
+    assert!(
+        started.elapsed() < Duration::from_millis(750),
+        "a terminal provider error must not wait for recovery admission: {:?}",
+        started.elapsed()
     );
     let capture = captures.recv().await.unwrap();
     assert_eq!(capture.body["model"], "wire-test");
@@ -6860,7 +7097,9 @@ async fn responses_full_sampling_burst_does_not_drop_sample_writes() {
     let home_guard = TestHomeGuard::new("full-sampling-burst-no-drop");
     let (base_url, _captures, shutdown) = start_controlled_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-key");
-    let mut manifest = p6_manifest(free_port(), free_port(), &base_url);
+    // Sampling acceptance needs capacity for all 80 concurrent clients. Use a
+    // distinct auth identity so other tests' adaptive limits cannot affect it.
+    let mut manifest = p6_manifest_with_isolated_provider_capacity(&base_url, 80);
     manifest.debug.snapshots = true;
     manifest.debug.codex_samples = true;
     manifest.debug.full_codex_sampling = true;

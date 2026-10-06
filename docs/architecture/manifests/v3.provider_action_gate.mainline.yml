@@ -91,16 +91,16 @@ edges:
     owner_feature_id: v3.provider_action_gate
     caller_symbol: run_v3_relay_provider_failure_policy
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_terminal_provider_projection_in_scope
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_terminal_provider_projection_in_scope
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - step_id: v3-provider-action-gate-06
     from: V3ProviderActionGateTerminalAdmission
     to: V3ProviderActionGateTerminalCommitted
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: V3ProviderActionGate::record_failure_and_wait_for_terminal_projection
+    caller_symbol: V3ProviderActionGate::record_failure_and_commit_terminal_projection
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-    callee_symbol: V3ProviderActionGate::commit_terminal_admission
+    callee_symbol: V3ProviderActionGate::commit_terminal_generation_locked
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
   - step_id: v3-provider-action-gate-07
     from: V3ProviderActionGateAdmission
@@ -485,9 +485,9 @@ resources:
   - v3.error.provider_action_gate
   - v3.provider.health_state
 terminal_transition:
-  admission_operation: V3ProviderActionGate::record_failure_and_wait_for_terminal_projection
-  atomic_commit_operation: V3ProviderActionGate::commit_terminal_admission
-  waiter_outcome: typed_admitted_superseded_or_released_by_success_with_retained_ticket
+  admission_operation: V3ProviderActionGate::record_failure_and_commit_terminal_projection
+  atomic_commit_operation: V3ProviderActionGate::commit_terminal_generation_locked
+  waiter_outcome: no_wait_terminal_commit_or_generation_superseded
   success_release_rearms_exact_generation: true
   next_generation_delay_ms: 5000
 admission_permit:

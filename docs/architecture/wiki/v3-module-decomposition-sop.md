@@ -1,6 +1,10 @@
 # V3 Module Decomposition SOP（巨型文件拆解标准作业程序）
 
 Status: partial execution; scoped changes recorded below.
+Scoped split (2026-10-05): `kernel/direct_request_scope.rs` also owns
+`canonical_body_from_captured`, the single call that replaces the raw standardized
+body with the REQ02 canonical request. Kernel keeps request lifecycle orchestration
+and stays inside the 1500-line gate. Function bodies and caller paths are preserved.
 Scoped split (2026-10-03): `live_snapshot_projections.rs` holds foundation response
 snapshot capture and runtime observability projections from main PR #325. Snapshot
 session helpers and diagnostic body selectors remain in `live_snapshot.rs`, which

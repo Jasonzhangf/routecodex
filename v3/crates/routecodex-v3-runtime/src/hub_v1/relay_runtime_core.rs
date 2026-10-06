@@ -13,6 +13,7 @@
 use super::*;
 use crate::nodes::{V3AttemptStoreError, V3CommittedClientSseBuilder, V3RequestExecutionControl};
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
+use crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key;
 use crate::provider_failure_runtime_policy::{
     admit_v3_selected_target_after_recovery, resolve_v3_relay_target_outcome_with_admission_rescue,
     v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
@@ -308,9 +309,9 @@ fn observe_v3_provider_sse(
     }))
 }
 
-/// Relay provider attempt 总等待窗口：从 provider manifest 的 `request_timeout_ms` 读取，
-/// 未配置时 serde default 为 300_000ms（5 分钟）。深上下文 provider 可通过
-/// `timeout = 900000` 覆盖为更长窗口。超时后归一化为 Transport 错误进入错误链。
+// Relay provider attempt 总等待窗口：从 provider manifest 的 `request_timeout_ms` 读取，
+// 未配置时 serde default 为 300_000ms（5 分钟）。深上下文 provider 可通过
+// `timeout = 900000` 覆盖为更长窗口。超时后归一化为 Transport 错误进入错误链。
 include!("relay_runtime_core/provider_timeouts.rs");
 use std::fmt;
 
@@ -822,6 +823,13 @@ where
                         V3AdmitAfterRecovery::Admitted(admission) => {
                             selected_admission = Some(admission)
                         }
+                        V3AdmitAfterRecovery::Busy => {
+                            failed_candidates
+                                .insert(v3_relay_provider_candidate_key(&selected.candidate));
+                            drop(provider_action_permit.take());
+                            provider_action_permit_target = None;
+                            continue;
+                        }
                         V3AdmitAfterRecovery::Failed(reason) => {
                             return Err(V3RelayCoreError::Target(reason))
                         }
@@ -887,6 +895,15 @@ where
                     })
                 }) {
                 Ok(raw) => raw,
+                Err(V3ProviderError::ConcurrencyBusy { .. }) => {
+                    runtime_timing
+                        .finish_external()
+                        .map_err(V3RelayCoreError::Target)?;
+                    failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
+                    drop(provider_action_permit.take());
+                    provider_action_permit_target = None;
+                    continue;
+                }
                 Err(V3ProviderError::HttpStatus { response }) => {
                     last_external_http = Some(
                         crate::hub_v1::relay_runtime_shared::external_http_witness(&response),
