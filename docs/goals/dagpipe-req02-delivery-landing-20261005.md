@@ -42,8 +42,8 @@ live 样本；独立架构 review PASS；clean-main merge + push + 远端回执�
 
 | 项 | 值 |
 | --- | --- |
-| 轮次 | R49 已收口；R50（含 R50c）→R55 共 6 轮 |
-| 生产接线 | 严格串行（R50 → R50c → R51 → R52 → R53 → R54 → R55） |
+| 轮次 | R49 已收口；R50/R51/R51c →R55 |
+| 生产接线 | 严格串行（R50 → R51 → R51c → R52 → R53 → R54 → R55；格式化必须晚于 R47 冻结补丁落地） |
 | 并行 | 仅 R50 两个缺陷 worker（各自独占 worktree）；R52 内三路只读审计 |
 | 每轮退出 | 唯一退出条件 + 落盘证据 |
 | 停止 | 冲突 / hook 失败 / push 拒绝 / CI 失败 / 无授权 red assertion / 根因无法唯一归因 |
@@ -88,7 +88,7 @@ live 样本；独立架构 review PASS；clean-main merge + push + 远端回执�
   provider transport `pub use` 移入 `kernel/direct_request_entrypoints.rs` 这个
   `include!` 同模块 owner）。结果 kernel.rs 1497 行、门禁 ok、语义零变更、
   `verify:v3-mainline-caller-flow` PASS、runtime lib 1307/0 failed。
-- 暴露的 BLOCKER（R43 自身遗留，转入 R50c）：CI `verify:ci` 的 `rustfmt` BLOCK 门禁红
+- 暴露的 BLOCKER（R43 自身遗留，转入 R51c）：CI `verify:ci` 的 `rustfmt` BLOCK 门禁红
   （候选 271 处 diff，上游 0、R43 还原树 269）。
 - 记账项（转入 R52）：根 `verify:v3-clippy`（`-D warnings`）红 7 处 / 3 crate；
   CI 实际使用的 v3 变体不带 `-D warnings`，故不阻断 CI，但需消融或记录授权差异。
@@ -121,28 +121,9 @@ live 样本；独立架构 review PASS；clean-main merge + push + 远端回执�
   `multi_listener_server` 全量 → 只剩 `req02_attempt_buffer_boundary_direct` 一个已知父红。
 - 停止条件：任一 worker 无法证明根因、或以栈大小/断言放宽过关 → 该子项判 BLOCKED，不合并。
 
-### R50c｜CI 门禁归零（纯格式化 + 窄消融）
-
-- 入口：R50 两条修复已集成，定向套件绿。
-- 动作（顺序固定）：
-  1. 用仓库固定工具链（1.96.1）做一次**纯格式化提交**：`cd v3 && cargo fmt --all`。
-     该提交只允许格式差异；提交前用 `git diff -w` 与 `git diff --ignore-all-space`
-     核对无非空白语义差异，并逐文件抽查宏体与字符串未被改动。
-  2. 重跑受影响套件（runtime lib、server lib、`multi_listener_server` 全量、
-     R50 两条验收用例），确认行为不变。
-  3. 窄 clippy 消融：只处理本次增量新增的 clippy 项
-     （`provider-compat-core/src/namespace_tools.rs` 的 type_complexity 与 ptr_arg）；
-     上游既有的 `route-classifier`/`agent-memory` 项记录为记账项，不在本轮扩大范围。
-     禁止用 `#[allow]` 批量压制代替修复；确需保留的写清理由与 owner。
-- 退出条件：`npm run verify:v3-cargo-fmt` PASS；`v3/scripts/verify.mjs` 的 `rustfmt` 与
-  `clippy` 子门禁 PASS；`git diff -w` 证明无语义差异；受影响套件全绿；
-  `verify:v3-file-size` 仍 PASS（格式化会重排行数，`endpoint_handlers.rs` 与
-  `field_operator_library.rs` 修后恰好 1500 行、零余量，必须复测）。
-- 停止条件：格式化提交出现非空白差异 → 停止，逐文件回退并归因，禁止整棵回滚。
-
 ### R51｜R47 SSE 闭环（红→绿，红项不放宽）
 
-- 入口：R50c 退出条件满足。
+- 入口：R50 退出条件满足。
 - 顺序（固定）：
   1. 先接 R47 HTTP 测试单文件（只新增
      `v3/crates/routecodex-v3-server/tests/req02_direct_sse_successful_inverse_r47.rs`）。
@@ -159,6 +140,33 @@ live 样本；独立架构 review PASS；clean-main merge + push + 远端回执�
   `execution_control` 全绿。
 - 停止条件：红 → 保留原错误、样本与失败输入，定位首次偏离，在唯一 owner 修复；
   禁止改断言、改成拒绝、silent passthrough 或 fallback。
+
+### R51c｜CI 门禁归零（纯格式化 + 窄消融）
+
+- 入口：R51 退出条件满足，且 R47 冻结 hook 补丁已原样落地（未重建）。
+- **排序理由（实测）**：`cargo fmt --all` 会重排补丁上下文。在 `647b02b73` 的格式化副本上，
+  R47 七文件 hook 补丁对 `direct_response_hooks.rs`、`hooks.rs`、`responses_relay_runtime.rs`
+  的 `git apply --check` 失败；单文件 SSE HTTP 测试补丁仍适用。
+  故格式化必须在 hook 原样落地之后，避免为适配格式重建并重审已冻结补丁。
+- 动作（顺序固定）：
+  1. 用仓库固定工具链（1.96.1）做一次**纯格式化提交**：`cd v3 && cargo fmt --all`。
+     只允许格式差异。证明方式（`git diff -w` 对 rustfmt 重排无效，不作为证据）：
+     在入口提交的 scratch 副本上独立执行同一 `cargo fmt --all`，逐文件比对产物哈希；
+     两次产物逐字节相同，即证明该提交的每个字节都来自 rustfmt，而非人工改动。
+  2. 重跑受影响套件（runtime lib、server lib、`multi_listener_server` 全量、
+     R50 两条验收用例、R51 SSE/scope/execution_control）。
+  3. 窄 clippy 消融：只处理本次增量新增的 clippy 项
+     （`provider-compat-core/src/namespace_tools.rs` 的 type_complexity 与 ptr_arg）；
+     上游既有的 `route-classifier`/`agent-memory` 项记录为记账项，不在本轮扩大范围。
+     禁止用 `#[allow]` 批量压制代替修复；确需保留的写清理由与 owner。
+     注意 CI 实际跑的是 v3 变体（无 `-D warnings`），根脚本更严；差异须落盘。
+- 退出条件：`cd v3 && cargo fmt --all -- --check` = 0 diff；`v3/scripts/verify.mjs` 的
+  `rustfmt` 与 `clippy`（按 v3 变体）子门禁 PASS；scratch 副本产物哈希逐字节一致；
+  受影响套件全绿；`verify:v3-file-size` 仍 PASS。
+- 基线数据：格式化实测使 `kernel.rs` 1497 → 1495，`field_operator_library.rs` 1500 → 1500，
+  `endpoint_handlers.rs` 1493 → 1493，`responses_relay_runtime_inner.rs` 1486 → 1486；
+  格式化副本上 `verify:v3-file-size` 仍 ok。
+- 停止条件：格式化提交出现无法归因于 rustfmt 的差异 → 停止，逐文件回退并归因，禁止整棵回滚。
 
 ### R52｜依赖收敛 + 架构绑定（只读并行轮）
 
@@ -177,7 +185,7 @@ live 样本；独立架构 review PASS；clean-main merge + push + 远端回执�
   artifact-budget），把红项逐个归因（R43 引入 / 上游既有 / 组合引入）并清零或记录授权差异；
   push 前该集合必须无 R43 引入项。
 - 退出条件：三路结论落盘；绑定准确；admission compile exit0；完整 `architecture-ci` PASS
-  （R49b 已实测 40/40 全绿，优于 R45 基线 39/40；R50/R50c 改动后须重跑维持）；
+  （R49b 已实测 40/40 全绿，优于 R45 基线 39/40；R50/R51/R51c 改动后须重跑维持）；
   52d 清单落盘且无 R43 引入的未授权红项。
 - 停止条件：固定锁漂移且无授权 → 保留锁，记录缺口，不修改锁规避。
 
@@ -270,8 +278,8 @@ live 样本；独立架构 review PASS；clean-main merge + push + 远端回执�
 | 同上的 SSE 兄弟用例（原合同误判为绿） | R43 回归（同 owner） | R50 50b 一并修复 |
 | `req02_scope_runtime_consumer::req02_attempt_buffer_boundary_direct` | 父候选（R47 已知红） | R51 随 R47 SSE 闭环修复 |
 | `verify:v3-file-size`（`kernel.rs` 1502>1500） | R49 组合引入 | R49b 已修（`af8e6a9c0`，1497 行） |
-| `rustfmt`（CI BLOCK 门禁，候选 271 处 diff） | R43 引入（上游 0 / R48 269） | R50c 纯格式化归零 |
-| 根 `verify:v3-clippy`（`-D warnings`，7 处 / 3 crate） | `namespace_tools.rs` 属 R43；其余上游既有 | R50c 窄消融增量项；上游项记账 |
+| `rustfmt`（CI BLOCK 门禁，候选 271 处 diff） | R43 引入（上游 0 / R48 269） | R51c 纯格式化归零（须晚于 R47 冻结补丁落地） |
+| 根 `verify:v3-clippy`（`-D warnings`，7 处 / 3 crate） | `namespace_tools.rs` 属 R43；其余上游既有 | R51c 窄消融增量项；上游项记账 |
 | `verify:v3-mainline-caller-flow` audit lock 漂移 | R45 基线 | R49 复测已 PASS；R52 记录 |
 | CI 其余 BLOCK 门禁（isolation/admission/distribution/install-cleanup/artifact-budget） | 待定 | R52 52d 全量归因 |
 
