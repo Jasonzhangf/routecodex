@@ -86,6 +86,23 @@ pub fn project_canonical_request(
     selected: &V3TargetCandidate,
     attempt_id: &str,
 ) -> Result<CanonicalRequestProjection, String> {
+    // The declared provider-wire representation requires an object root. A
+    // root-level opaque record is the lossless carrier of a client root that
+    // was not a JSON object: the canonical Chat request then holds no
+    // representable request semantics, only the preserved original bytes. No
+    // execution mode can form a provider payload from it, so the single
+    // projection facade rejects it here instead of shipping an invented
+    // request. Normalization itself stays lossless.
+    if inverse
+        .opaque_record_references
+        .iter()
+        .any(|reference| reference.path == "$")
+    {
+        return Err(
+            "client request root is not a JSON object; no provider wire payload can be formed"
+                .to_string(),
+        );
+    }
     let has_web_search = selected
         .model_capabilities
         .iter()
