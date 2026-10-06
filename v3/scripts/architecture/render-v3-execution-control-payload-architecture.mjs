@@ -21,6 +21,7 @@ const directKernelRel = `${runtimeSourceRootRel}/kernel.rs`;
 const directCoreRel = `${runtimeSourceRootRel}/kernel/v3_direct_core.rs`;
 const responsesRelayRuntimeRel = `${runtimeSourceRootRel}/hub_v1/responses_relay_runtime.rs`;
 const responsesRelayRuntimeInnerRel = `${runtimeSourceRootRel}/hub_v1/responses_relay_runtime_inner.rs`;
+const responsesRelayRuntimeInnerResponseInterpretationRel = `${runtimeSourceRootRel}/hub_v1/responses_relay_runtime_inner_response_interpretation.rs`;
 const responsesRelayTypesRel = `${runtimeSourceRootRel}/hub_v1/responses_relay_types.rs`;
 const responsesRelayFailuresRel = `${runtimeSourceRootRel}/hub_v1/responses_relay_failures.rs`;
 const responsesRelayDryRunRel = `${runtimeSourceRootRel}/hub_v1/responses_relay_dry_run.rs`;
@@ -226,6 +227,10 @@ function validateRuntimeIsolationSource() {
 
   const responsesRelayRuntime = readText(responsesRelayRuntimeRel);
   const responsesRelayRuntimeInner = readText(responsesRelayRuntimeInnerRel);
+  // The R53-F split moved the Responses provider-stream interpretation tail of
+  // responses_relay_runtime_inner.rs into an included fragment; the production
+  // projection anchors are checked over the surface the compiler sees.
+  const responsesRelayRuntimeInnerSurface = `${responsesRelayRuntimeInner}\n${readText(responsesRelayRuntimeInnerResponseInterpretationRel)}`;
   const responsesRelayTypes = readText(responsesRelayTypesRel);
   const responsesRelayFailures = readText(responsesRelayFailuresRel);
   const responsesRelayDryRun = readText(responsesRelayDryRunRel);
@@ -244,7 +249,7 @@ function validateRuntimeIsolationSource() {
   const responsesBuilderEnd = responsesRelayRuntime.indexOf('fn append_v3_responses_client_reasoning_progress_frames(', responsesBuilderStart);
   const responsesBuilder = responsesRelayRuntime.slice(responsesBuilderStart, responsesBuilderEnd);
   requireValue(responsesBuilder.includes('V3CommittedClientSseBuilder::with_budget(attempt_budget)') && !responsesBuilder.includes('V3AttemptBudget::process_default()'), `${responsesRelayRuntimeRel}: Responses sealed replay builder must consume the supplied request budget`);
-  const responsesProductionProjectionCalls = responsesRelayRuntimeInner.match(/project_v3_responses_relay_client_body\([\s\S]{0,420}attempt_budget\.clone\(\)/gu) ?? [];
+  const responsesProductionProjectionCalls = responsesRelayRuntimeInnerSurface.match(/project_v3_responses_relay_client_body\([\s\S]{0,420}attempt_budget\.clone\(\)/gu) ?? [];
   requireValue(responsesProductionProjectionCalls.length >= 2, `${responsesRelayRuntimeInnerRel}: every Responses production projection must reuse the request attempt budget`);
 
   const anthropicRelayRuntime = readText(anthropicRelayRuntimeRel);

@@ -218,7 +218,7 @@ const cases = [
   },
   {
     name: 'Responses production replay creates an independent default budget',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner_response_interpretation.rs',
     marker: '                    attempt_budget.clone(),\n',
     replacement: '                    crate::nodes::V3AttemptBudget::process_default(),\n',
     diagnostic: /every Responses production projection must reuse the request attempt budget/u,
