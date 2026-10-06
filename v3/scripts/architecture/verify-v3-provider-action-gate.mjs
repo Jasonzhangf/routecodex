@@ -625,7 +625,7 @@ assertRustTest(
 assertRustTest(
   text.responsesRelayTests,
   files.responsesRelayTests,
-  'responses_relay_content_filter_incomplete_exhaustion_keeps_typed_terminal_error',
+  'responses_relay_content_filter_incomplete_commits_partial_output_without_reselect',
 );
 for (const token of [
   'provider_sse_done_without_completed_is_terminal_missing',

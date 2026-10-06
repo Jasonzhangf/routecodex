@@ -38,7 +38,7 @@ impl V3ProviderFailureAction {
             recovery: V3ProviderRecoveryKind::RecoverableCounted,
             scope: V3ProviderHealthScope::GlobalProviderKey,
             score_delta_milli: -5,
-            failure_threshold: 1,
+            failure_threshold: 3,
             cooldown_ms: 5_000,
             long_probe_backoff: false,
         }
@@ -71,7 +71,9 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
         .as_ref()
         .and_then(|error| error.status);
     // 统一错误模型：不再按状态码豁免——瞬态重试来源与 400/4xx 同样计入
-    // 全局健康，首次 provider failure 即进入共享冷却，由后台探活或真实成功恢复。
+    // 全局健康。可恢复类必须连续三次同类失败才进入共享冷却，避免单个 provider
+    // 因一次可恢复错误被排除而耗尽路由池；账户/计费类仍按 typed irrecoverable
+    // 立即冷却，由后台探活或真实成功恢复。
     if matches!(status, Some(401..=403))
         || is_irrecoverable_provider_failure_code(&classified.source.code)
     {
@@ -163,22 +165,24 @@ pub fn build_v3_provider_global_error_fingerprint(
     V3ProviderErrorFingerprint::new(class, class, normalized_status, class).map(Some)
 }
 
+/// Provider health policy per upstream status.
+///
+/// Account/billing classes (`401..=403`) are the typed irrecoverable group and
+/// still cool on their first occurrence. Every recoverable class requires three
+/// consecutive same-fingerprint failures before cooldown: one recoverable error
+/// must not exclude a provider, and with a single provider that exclusion is
+/// what exhausts the route pool.
 pub fn build_v3_provider_global_failure_policy(
     status: u16,
 ) -> Option<V3ProviderGlobalFailurePolicy> {
     match status {
-        401 | 403 | 503 => Some(V3ProviderGlobalFailurePolicy {
+        401..=403 => Some(V3ProviderGlobalFailurePolicy {
             failure_threshold: 1,
             cooldown_ms: 5_000,
             probe_interval_ms: 5_000,
         }),
-        402 => Some(V3ProviderGlobalFailurePolicy {
-            failure_threshold: 1,
-            cooldown_ms: 5_000,
-            probe_interval_ms: 5_000,
-        }),
-        429 | 500..=502 | 504..=599 => Some(V3ProviderGlobalFailurePolicy {
-            failure_threshold: 1,
+        429 | 500..=599 => Some(V3ProviderGlobalFailurePolicy {
+            failure_threshold: 3,
             cooldown_ms: 5_000,
             probe_interval_ms: 5_000,
         }),
@@ -245,7 +249,9 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 1);
+        // 503 is a recoverable class: three consecutive same-fingerprint failures
+        // are required before cooldown, while the probe ladder still backs off.
+        assert_eq!(action.failure_threshold, 3);
         assert_eq!(action.cooldown_ms, 5_000);
         assert!(action.long_probe_backoff);
 
@@ -254,7 +260,7 @@ mod tests {
             "provider_connect_failed",
             500,
         ));
-        assert_eq!(ordinary.failure_threshold, 1);
+        assert_eq!(ordinary.failure_threshold, 3);
         assert_eq!(ordinary.cooldown_ms, 5_000);
         assert!(!ordinary.long_probe_backoff);
 
@@ -307,7 +313,7 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 1);
+        assert_eq!(action.failure_threshold, 3);
         assert_eq!(action.score_delta_milli, -5);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -317,7 +323,7 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 1);
+        assert_eq!(action.failure_threshold, 3);
         assert_eq!(action.score_delta_milli, -5);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -327,7 +333,7 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 1);
+        assert_eq!(action.failure_threshold, 3);
         assert_eq!(action.score_delta_milli, -5);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -336,7 +342,7 @@ mod tests {
             502,
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
-        assert_eq!(action.failure_threshold, 1);
+        assert_eq!(action.failure_threshold, 3);
     }
 
     #[test]

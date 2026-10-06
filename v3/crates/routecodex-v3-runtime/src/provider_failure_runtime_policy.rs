@@ -110,8 +110,11 @@ pub async fn probe_v3_provider_global_target(
     probe_v3_provider_global_target_impl(target).await
 }
 
-/// internal.toml 全局错误策略表的落地点：所有 provider failure 首次即进入
-/// provider/key/model 冷却。冷却和探测时长由 provider health 的共享动态阶梯
+/// internal.toml 全局错误策略表的落地点。可恢复类 provider failure 必须连续
+/// 三次同类失败才进入 provider/key/model 冷却：单次可恢复错误不得排除一个
+/// provider（单 provider 配置下那正是路由池耗尽的根因）。typed irrecoverable
+/// 账户/计费类仍首次即冷却。阈值取自 `internal.toml` `[error_handling]` 的
+/// 声明值，不在代码内硬编码；冷却与探测时长由 provider health 的共享动态阶梯
 /// 决定；真实成功或成功 probe 清零，失败 probe 继续推进阶梯。
 pub(crate) fn apply_v3_internal_provider_failure_policy(
     mut action: V3ProviderFailureAction,
@@ -128,9 +131,14 @@ pub(crate) fn apply_v3_internal_provider_failure_policy(
         return action;
     }
     if action.failure_threshold == 0 {
+        // Thresholds are declared product policy in `internal.toml`
+        // `[error_handling]`; the runtime looks them up instead of hardcoding.
+        let internal = routecodex_v3_config::internal::v3_internal_error_handling();
         action.failure_threshold = match action.recovery {
-            V3ProviderRecoveryKind::IrrecoverableGlobalCooldown => 1,
-            V3ProviderRecoveryKind::RecoverableCounted => 1,
+            V3ProviderRecoveryKind::IrrecoverableGlobalCooldown => {
+                internal.unrecoverable_failure_threshold
+            }
+            V3ProviderRecoveryKind::RecoverableCounted => internal.recoverable_failure_threshold,
             _ => 0,
         };
     }
@@ -1546,10 +1554,18 @@ fn provider_failure_policy_from_error_policy_directive(
     policy: &V3ProviderErrorActionPolicyManifest,
     status: u16,
 ) -> Result<Option<V3ProviderFailurePolicy>, String> {
-    // Retry count controls request-local candidate traversal; it must not
-    // delay provider health isolation. Every matched provider failure enters
-    // the provider health ladder on its first occurrence.
-    let failure_threshold = 1;
+    // Retry count controls request-local candidate traversal. Provider health
+    // must not cool a provider on the first recoverable occurrence: three
+    // consecutive failures of the same provider key are required. Account and
+    // billing classes (`401..=403`) are the typed irrecoverable group and keep
+    // cooling on their first occurrence. Both thresholds are declared product
+    // policy in `internal.toml` `[error_handling]`, not hardcoded here.
+    let internal = routecodex_v3_config::internal::v3_internal_error_handling();
+    let failure_threshold = if matches!(status, 401..=403) {
+        internal.unrecoverable_failure_threshold
+    } else {
+        internal.recoverable_failure_threshold
+    };
     let Some(cooldown) = policy.path.iter().find_map(|step| match step {
         V3ProviderDispositionStepManifest::Cooldown {
             scope,

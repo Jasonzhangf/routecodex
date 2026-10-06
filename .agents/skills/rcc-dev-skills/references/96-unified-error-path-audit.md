@@ -6,11 +6,11 @@ title: V3 unified error-path audit
 
 ## Contract
 
-Every direct and relay failure enters the typed chain in order:
+Every Provider/control-plane failure enters the typed chain in order:
 
-`ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified -> ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision` retains internal failure and recovery truth. The existing `ErrorErr06ClientProjected` symbol does not authorize a model-client error response. Follow AGENTS.md's mandatory all-entry prohibition and `docs/goals/provider-terminal-no-502-dag-20260930.md`: every upstream/internal error remains internal, including full pool exhaustion; only complete real success or an incomplete transport outcome may reach DSH Chat, Codex Responses HTTP/WebSocket, or Claude Code Messages. No HTTP error status, error body/event, or fabricated successful terminal is permitted. The old eligible-upstream-error exception is superseded.
+`ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified -> ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision` retains internal Provider failure and recovery truth. This chain never authorizes a Provider HTTP/error response to cross the client boundary: reselect an eligible Provider; if all are exhausted, terminate only the affected transport without an error payload or fabricated success. Separately, a Provider business response is not semantically judged: preserve model/tool errors and unknown-but-representable values in the target protocol. Do not map a compatibility schema mismatch in such business content to `502 network_error`, cooldown, or client disconnect.
 
-The error chain is a control-plane side channel. It must not be copied into request or response business payloads.
+The error chain is a control-plane side channel. It must not be copied into request or response business payloads. Keep it separate from model/data-plane response errors: a Provider/control-plane failure triggers Error-chain recovery and candidate selection, while a representable model error or invalid tool argument is forwarded as business response data and must not trigger Provider cooldown or proxy-generated 502.
 
 ## Audit procedure
 

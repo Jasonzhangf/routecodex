@@ -128,7 +128,7 @@ fn continuous_failure_ladder_is_isolated_per_provider_key() {
 }
 
 #[test]
-fn successful_recovery_resets_the_next_failure_to_the_five_second_step() {
+fn successful_recovery_resets_the_failure_band_for_the_next_cooldown() {
     let store = V3ProviderHealthStore::default();
     let action = V3ProviderFailureAction::recoverable("transport");
 
@@ -154,22 +154,34 @@ fn successful_recovery_resets_the_next_failure_to_the_five_second_step() {
         .record_provider_key_success("provider-a", "key", "model", 103)
         .expect("successful recovery");
 
+    // A real success resets the streak, so the next cooldown again needs three
+    // consecutive same-fingerprint failures; the first two only count into
+    // health.
+    for now_ms in 104..=105 {
+        let record = store
+            .record_provider_failure_action("provider-a", "key", "model", &action, now_ms)
+            .expect("failure after recovery");
+        assert_eq!(record.cooldown_until_ms, None, "now_ms={now_ms}");
+    }
     let after_recovery = store
-        .record_provider_failure_action("provider-a", "key", "model", &action, 104)
-        .expect("failure after recovery");
+        .record_provider_failure_action("provider-a", "key", "model", &action, 106)
+        .expect("third failure after recovery");
     assert_eq!(
         after_recovery.cooldown_until_ms,
-        Some(5_104),
-        "a fast recovery must not inherit the old failure-rate band"
+        Some(5_106),
+        "the action policy still declares the 5s business cooldown"
     );
+    // The recovered streak is recomputed instead of inherited: three fresh
+    // consecutive failures land on the same 900s ladder rung as the first
+    // three-failure sequence, not on a further-advanced rung.
     assert_eq!(
         store
-            .cooldown_entries(104)
+            .cooldown_entries(106)
             .iter()
             .find(|entry| entry.provider_id == "provider-a")
             .and_then(|entry| entry.until_ms),
-        Some(5_104),
-        "a real success must reset the next business cooldown to 5s"
+        Some(900_106),
+        "a real success must reset the failure band instead of inheriting it"
     );
 }
 

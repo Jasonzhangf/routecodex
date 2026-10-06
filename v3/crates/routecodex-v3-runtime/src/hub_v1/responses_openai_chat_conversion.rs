@@ -133,6 +133,11 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
     // 等网关别名会被 guard 豁免、却在这里落成 `completed` 的空成功响应。
     let status = match finish_reason.as_deref() {
         Some(reason) if openai_chat_finish_reason_is_output_cap(reason) => "incomplete",
+        // `content_filter` is a legal provider terminal: the provider's own
+        // content filter did its job. It is a non-success terminal, so it must
+        // use the Responses `incomplete` shape instead of becoming a fabricated
+        // empty `completed` response.
+        Some("content_filter") => "incomplete",
         _ => "completed",
     };
     let mut response = Map::new();
@@ -159,10 +164,11 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
         );
     }
     if status == "incomplete" {
-        response.insert(
-            "incomplete_details".to_string(),
-            json!({"reason": "max_output_tokens"}),
-        );
+        let reason = match finish_reason.as_deref() {
+            Some("content_filter") => "content_filter",
+            _ => "max_output_tokens",
+        };
+        response.insert("incomplete_details".to_string(), json!({"reason": reason}));
     }
     if let Some(usage) = payload
         .get("usage")
@@ -463,21 +469,18 @@ fn parse_v3_openai_chat_custom_tool_input(
         ));
     }
     match serde_json::from_str::<Value>(trimmed) {
-        Ok(Value::Object(parsed)) => parsed
+        Ok(Value::Object(parsed)) => Ok(parsed
             .get("input")
             .and_then(Value::as_str)
+            // A provider may return a valid JSON object that does not follow
+            // our preferred free-form wrapper. Do not turn that business
+            // shape into a proxy error. Preserve the complete raw arguments
+            // as the client's custom-tool string input so the client can
+            // inspect or correct the model call on its next turn.
             .map(str::to_string)
-            .ok_or_else(|| {
-                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
-                    "OpenAI Chat custom tool {name} function arguments must contain string input"
-                ))
-            }),
+            .unwrap_or_else(|| trimmed.to_string())),
         Ok(Value::String(value)) => Ok(value),
-        Ok(_) => Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-            format!(
-                "OpenAI Chat custom tool {name} function arguments must be an object or string"
-            ),
-        )),
+        Ok(value) => Ok(value.to_string()),
         Err(_) => Ok(trimmed.to_string()),
     }
 }

@@ -26,17 +26,18 @@ rg -n "feature_id: ${rcc_task_feature}" \
 4. Read mapped source, generated review surface, current run notes, project `MEMORY.md`, and relevant history.
 5. For defects, capture one request id and find first semantic divergence. Keep one active hypothesis.
 6. Record red evidence: focused failing test, saved failing shape, or controlled replay.
-7. Patch only mapped owner. For feature development or bug repair, add or update real public-entry black-box behavior tests. A controlled external peer or upstream is acceptable as long as the test enters through a real public entry (HTTP, WebSocket, or CLI); source-string checks, private unit-only tests, or mocks that do not reach the public entry do not satisfy this step. Each such test carries a stable test ID and records the exact command that executes it.
-8. Run positive and negative tests, then run feature `required_gates`, including the public-entry black-box tests by their recorded commands, then project architecture gate:
+7. Keep the two response categories separate. A Provider HTTP/error response is control-plane failure: do not return it to the client; let the Error chain recover/reselect, then terminate only the affected transport if candidates are exhausted. A Provider's business/model response, including model-generated invalid tool arguments, is data-plane content: do not semantically judge it; preserve and forward it when representable so the client can correct the next turn. Add public-entry regressions for both categories.
+8. Patch only mapped owner. For feature development or bug repair, add or update real public-entry black-box behavior tests. A controlled external peer or upstream is acceptable as long as the test enters through a real public entry (HTTP, WebSocket, or CLI); source-string checks, private unit-only tests, or mocks that do not reach the public entry do not satisfy this step. Each such test carries a stable test ID and records the exact command that executes it.
+9. Run positive and negative tests, then run feature `required_gates`, including the public-entry black-box tests by their recorded commands, then project architecture gate:
 
 ```bash
 npm run verify:v3-architecture-ci
 ```
 
-For runtime code changes, passing local gates on the exact candidate immediately triggers steps 9–10. Run GitHub PR CI in parallel; pending remote CI does not delay local candidate runtime acceptance.
+For runtime code changes, passing local gates on the exact candidate immediately triggers steps 10–11. Run GitHub PR CI in parallel; pending remote CI does not delay local candidate runtime acceptance.
 
-9. Runtime-impacting change: load `references/50-rcc-config-ssot.md`; prove build, install, config check, managed restart, all-listener health, and same-entry replay. `rccv3 restart` controls an existing instance and exits non-zero with `NotRunning` when none is live, leaving the service down; a non-zero restart exit or a status that is not `running` is an incomplete step. Stop this lifecycle path and record the blocker. Do not substitute `start` or another lifecycle action unless that action is explicitly authorized by the applicable project contract or user.
-10. If a failing runtime sample exists, include its exact replay or same-entry semantic equivalent in step 9 evidence. For tool/function-call flows, verify the full client round trip: tool identity/namespace, complete arguments, actual client execution receipt/output, and any follow-up request; HTTP 200 or `requires_action` alone is not tool success. Review only after verification; do not repeat an unchanged replay solely for this step.
+10. Runtime-impacting change: load `references/50-rcc-config-ssot.md`; prove build, install, config check, managed restart, all-listener health, and same-entry replay. `rccv3 restart` controls an existing instance and exits non-zero with `NotRunning` when none is live, leaving the service down; a non-zero restart exit or a status that is not `running` is an incomplete step. Stop this lifecycle path and record the blocker. Do not substitute `start` or another lifecycle action unless that action is explicitly authorized by the applicable project contract or user.
+11. If a failing runtime sample exists, include its exact replay or same-entry semantic equivalent in step 10 evidence. For tool/function-call flows, verify the full client round trip: tool identity/namespace, complete arguments, actual client execution receipt/output, and any follow-up request; HTTP 200 or `requires_action` alone is not tool success. Review only after verification; do not repeat an unchanged replay solely for this step.
 
 ## Defect Lifecycle
 

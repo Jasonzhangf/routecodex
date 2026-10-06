@@ -1,6 +1,6 @@
 # V3 Provider Key Health Scoring and Cooldown Implementation Plan
 
-> 2026-09-21 policy amendment: current delivery supersedes the older threshold/fixed-cadence examples below. Every typed provider failure immediately cools the exact provider+auth key+model identity. The provider-owned cooldown/probe ladder is `5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s`; continuous failure and failed probes advance it, meaningful failure-rate bands may advance it, and successful semantic probe resets it to 5s. Probe failure is an expected nonblocking state and never prevents listener startup or affects other sessions.
+> 2026-09-21 policy amendment, revised 2026-10-06: current delivery supersedes the older threshold/fixed-cadence examples below. Three consecutive same-fingerprint recoverable provider failures cool the exact provider+auth key+model identity; a single recoverable failure only counts into health, and the typed irrecoverable account/billing classes still cool on their first occurrence. The provider-owned cooldown/probe ladder is `5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s`; continuous failure and failed probes advance it, meaningful failure-rate bands may advance it, and successful semantic probe resets it to 5s. Probe failure is an expected nonblocking state and never prevents listener startup or affects other sessions.
 
 状态：source-controlled runtime pending live replay
 

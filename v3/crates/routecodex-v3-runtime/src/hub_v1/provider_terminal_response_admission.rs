@@ -13,7 +13,11 @@ pub(crate) fn classify_v3_provider_terminal_admission(
 ) -> Option<V3ProviderTerminalAdmissionFailure> {
     let reason = match provider_protocol {
         V3HubProviderWireProtocol::Responses => responses_incomplete_reason(payload),
-        V3HubProviderWireProtocol::OpenAiChat => openai_chat_incomplete_reason(payload),
+        // A Chat-wire provider terminal carries no reason RouteCodex may judge:
+        // `content_filter` is the provider's own content filter having done its
+        // job, and the client projection owns the Chat -> target mapping. A
+        // provider/transport failure is classified by its own owner, not here.
+        V3HubProviderWireProtocol::OpenAiChat => None,
         V3HubProviderWireProtocol::Anthropic => anthropic_incomplete_reason(payload),
         V3HubProviderWireProtocol::Gemini => None,
     }?;
@@ -39,7 +43,7 @@ fn responses_incomplete_reason(payload: &Value) -> Option<&str> {
         .map(str::trim)
         .filter(|reason| !reason.is_empty())
         .unwrap_or("unknown");
-    if responses_incomplete_reason_is_output_cap(reason) {
+    if responses_incomplete_reason_is_admitted_terminal(reason) {
         return None;
     }
     Some(reason)
@@ -49,11 +53,24 @@ fn responses_incomplete_reason(payload: &Value) -> Option<&str> {
 /// `response.incomplete` + `max_output_tokens` terminal. That is the same
 /// output-cap semantic as the Chat aliases and the Anthropic `max_tokens` stop
 /// reason, i.e. valid partial output, so it must not enter the provider
-/// failure/cooldown path on any entry. This function is the single owner of that
-/// rule; the provider health probe reuses it to admit an output-cap probe
-/// terminal without also admitting a genuine provider rejection.
+/// failure/cooldown path on any entry.
 pub(crate) fn responses_incomplete_reason_is_output_cap(reason: &str) -> bool {
     reason.trim() == "max_output_tokens"
+}
+
+/// Reasons a provider may legitimately report on its own `response.incomplete`
+/// terminal. They are business/terminal semantics, not provider failure:
+/// `max_output_tokens` is the output cap (valid partial output), and
+/// `content_filter` is the provider's own allow/deny content filter having done
+/// its job. RouteCodex must not judge either reason as an unhealthy provider,
+/// cool the provider, or switch away from it; the terminal is forwarded to the
+/// client as-is. Unknown or missing reasons stay provider failures because the
+/// client projection cannot represent them. The provider health probe reuses
+/// this owner so a probe that lands on an admitted terminal still clears
+/// cooldown.
+pub(crate) fn responses_incomplete_reason_is_admitted_terminal(reason: &str) -> bool {
+    let reason = reason.trim();
+    responses_incomplete_reason_is_output_cap(reason) || reason == "content_filter"
 }
 
 /// Chat output-cap terminals, including gateway aliases such as `max_tokens`,
@@ -61,20 +78,6 @@ pub(crate) fn responses_incomplete_reason_is_output_cap(reason: &str) -> bool {
 /// path; the Responses client projection represents them as `incomplete`.
 pub(crate) fn openai_chat_finish_reason_is_output_cap(reason: &str) -> bool {
     matches!(reason, "length" | "max_tokens" | "max_output_tokens")
-}
-
-fn openai_chat_incomplete_reason(payload: &Value) -> Option<&str> {
-    payload
-        .get("choices")
-        .and_then(Value::as_array)?
-        .iter()
-        .find_map(
-            |choice| match choice.get("finish_reason").and_then(Value::as_str) {
-                Some(reason) if openai_chat_finish_reason_is_output_cap(reason) => None,
-                Some("content_filter") => Some("content_filter"),
-                _ => None,
-            },
-        )
 }
 
 fn anthropic_incomplete_reason(payload: &Value) -> Option<&str> {
@@ -89,18 +92,25 @@ fn anthropic_incomplete_reason(payload: &Value) -> Option<&str> {
         // failure/cooldown/switch path and surface a transport error to a
         // client that should have received `incomplete`.
         Some("max_tokens") => return None,
-        Some("refusal") => return Some("content_filter"),
+        // `refusal` is the model declining to answer, i.e. a terminal response
+        // semantic, not a provider failure. The client projection renders it as
+        // `incomplete` + `incomplete_details.reason=content_filter`.
+        Some("refusal") => return None,
         _ => {}
     }
-    let status = payload.get("status").and_then(Value::as_str);
-    (status == Some("incomplete")).then(|| {
-        payload
-            .pointer("/incomplete_details/reason")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|reason| !reason.is_empty())
-            .unwrap_or("unknown")
-    })
+    if payload.get("status").and_then(Value::as_str) != Some("incomplete") {
+        return None;
+    }
+    let reason = payload
+        .pointer("/incomplete_details/reason")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|reason| !reason.is_empty())
+        .unwrap_or("unknown");
+    if responses_incomplete_reason_is_admitted_terminal(reason) {
+        return None;
+    }
+    Some(reason)
 }
 
 #[cfg(test)]
@@ -109,8 +119,46 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn rejects_registered_incomplete_terminal_shapes() {
+    fn rejects_unrepresentable_incomplete_terminal_shapes() {
         for (protocol, payload, reason) in [
+            (
+                V3HubProviderWireProtocol::Responses,
+                json!({
+                    "type": "response.incomplete",
+                    "response": {
+                        "status": "incomplete",
+                        "incomplete_details": {"reason": "mystery"}
+                    }
+                }),
+                "mystery",
+            ),
+            (
+                V3HubProviderWireProtocol::Responses,
+                json!({"type": "response.incomplete", "response": {"status": "incomplete"}}),
+                "unknown",
+            ),
+            (
+                V3HubProviderWireProtocol::Anthropic,
+                json!({"type": "message", "status": "incomplete"}),
+                "unknown",
+            ),
+        ] {
+            let failure = classify_v3_provider_terminal_admission(protocol, &payload)
+                .expect("an unrepresentable incomplete terminal is a provider failure");
+            assert_eq!(
+                failure.message,
+                format!("provider response ended before completion: {reason}")
+            );
+        }
+    }
+
+    #[test]
+    fn admits_content_filter_terminal_as_provider_business_terminal() {
+        // `content_filter` is the provider's own allow/deny content filter having
+        // done its job. It is terminal response semantics, not a provider
+        // failure: cooling the provider or switching away would drop a
+        // representable terminal that the client projection already renders.
+        for (protocol, payload) in [
             (
                 V3HubProviderWireProtocol::Responses,
                 json!({
@@ -120,29 +168,39 @@ mod tests {
                         "incomplete_details": {"reason": "content_filter"}
                     }
                 }),
-                "content_filter",
+            ),
+            (
+                V3HubProviderWireProtocol::Responses,
+                json!({
+                    "status": "incomplete",
+                    "incomplete_details": {"reason": " content_filter "}
+                }),
             ),
             (
                 V3HubProviderWireProtocol::OpenAiChat,
                 json!({"choices": [{"finish_reason": "content_filter"}]}),
-                "content_filter",
             ),
             (
                 V3HubProviderWireProtocol::Anthropic,
                 json!({"type": "message", "stop_reason": "refusal"}),
-                "content_filter",
             ),
             (
                 V3HubProviderWireProtocol::Anthropic,
                 json!({"type": "message_delta", "delta": {"stop_reason": "refusal"}}),
-                "content_filter",
+            ),
+            (
+                V3HubProviderWireProtocol::Anthropic,
+                json!({
+                    "type": "message",
+                    "status": "incomplete",
+                    "incomplete_details": {"reason": "content_filter"}
+                }),
             ),
         ] {
-            let failure = classify_v3_provider_terminal_admission(protocol, &payload)
-                .expect("incomplete terminal must not be admitted as provider success");
             assert_eq!(
-                failure.message,
-                format!("provider response ended before completion: {reason}")
+                classify_v3_provider_terminal_admission(protocol, &payload),
+                None,
+                "content_filter terminal must be admitted for {protocol:?}"
             );
         }
     }

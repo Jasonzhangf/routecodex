@@ -381,19 +381,15 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
     assert_eq!(observed["external_error_code"], "server_error");
     assert_eq!(observed["external_error_status"], 503);
     assert_eq!(observed["failure_count"], 1);
-    assert_eq!(observed["health_state"], "cooldown");
+    // A single recoverable provider failure is counted into health but must not
+    // cool the provider: three consecutive same-fingerprint failures are
+    // required, so one recoverable error never excludes a provider.
+    assert_eq!(observed["health_state"], "healthy");
     assert_eq!(observed["action"], "terminal_route_and_default_exhausted");
     assert_eq!(observed["attempt_index"], 1);
-    let cooldown_until_ms = observed["cooldown_until_ms"]
-        .as_u64()
-        .expect("cooldown_until_ms is a real number");
     assert!(
-        cooldown_until_ms > request_started_ms,
-        "cooldown must be in the future: {cooldown_until_ms} vs {request_started_ms}"
-    );
-    assert!(
-        cooldown_until_ms <= request_started_ms + 30_000,
-        "the first rung of the shared ladder is 5s, not {cooldown_until_ms}"
+        observed["cooldown_until_ms"].is_null(),
+        "one recoverable failure must not start a cooldown: {observed}"
     );
     assert_eq!(
         detail["observed_error_source"],
@@ -512,8 +508,42 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
         "the failure evidence must include error.json"
     );
 
-    // 7. The failure reached real provider health: the cooldown pool moved for
-    //    the exact identity that failed.
+    // 7. One recoverable failure is counted but must not exclude the provider:
+    //    the real cooldown pool must not move yet.
+    let (pool_status, pool) = get_json(
+        &client,
+        &format!("http://{admin_addr}/api/observability/cooldown-pool"),
+    )
+    .await;
+    assert_eq!(pool_status, reqwest::StatusCode::OK);
+    let entries = pool["listeners"][0]["entries"]
+        .as_array()
+        .expect("cooldown pool entries");
+    assert!(
+        !entries.iter().any(|entry| entry["provider_id"] == "mock"),
+        "one recoverable provider failure must not cool the provider: {pool}"
+    );
+
+    // 8. Two more identical failures reach the three-consecutive-failure
+    //    threshold; only then does the exact failed identity really move into
+    //    the cooldown pool.
+    for attempt in 2..=3 {
+        let response = client
+            .post(format!("http://{server_addr}/v1/responses"))
+            .json(&json!({
+                "model": "client-test",
+                "input": "observability replay probe",
+                "stream": false
+            }))
+            .send()
+            .await;
+        assert!(
+            response.is_err(),
+            "provider HTTP failure attempt {attempt} must not fabricate a client HTTP response"
+        );
+    }
+    assert_eq!(upstream_calls.load(Ordering::SeqCst), 3);
+
     let (pool_status, pool) = get_json(
         &client,
         &format!("http://{admin_addr}/api/observability/cooldown-pool"),
@@ -526,7 +556,9 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
     let cooled = entries
         .iter()
         .find(|entry| entry["provider_id"] == "mock")
-        .unwrap_or_else(|| panic!("provider mock must be cooled: {pool}"));
+        .unwrap_or_else(|| {
+            panic!("provider mock must be cooled after three consecutive failures: {pool}")
+        });
     assert_eq!(cooled["auth_alias"], "key");
     assert_eq!(cooled["model_id"], "test");
     assert_eq!(cooled["state"], "blocked");
@@ -537,7 +569,7 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
     );
     assert!(cooled["remaining_ms"].as_i64().unwrap() > 0);
 
-    // 8. Negative control: an unrelated request key is honestly absent.
+    // 9. Negative control: an unrelated request key is honestly absent.
     let (missing_status, missing) = get_json(
         &client,
         &format!("http://{admin_addr}/api/observability/records/{server_port}:not-a-real-request"),
@@ -548,7 +580,7 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
 
     // Real captured values, so the evidence is inspectable without a debugger.
     eprintln!("[replay] request_key={request_key}");
-    eprintln!("[replay] client_status={client_status} upstream_calls=1");
+    eprintln!("[replay] client_status={client_status} upstream_calls=3");
     eprintln!("[replay] error_chain={chain}");
     eprintln!(
         "[replay] observed_error_source={} health_action={} error_class={}",
