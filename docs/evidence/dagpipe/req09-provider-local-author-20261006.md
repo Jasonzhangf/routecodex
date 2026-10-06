@@ -291,3 +291,33 @@ installed-runtime and actual GCM evidence above retains its original source
 binding; no new build or restart is claimed for this test-only correction.
 Independent delta architecture review and exact new-head CI remain required
 before PR367 can merge. REQ02 remains incomplete.
+
+## Chat exhaustion fixture alignment, 2026-10-06 r141
+
+Input HEAD e85e349fae42baa3c2192d9da63382108737e2e7. CI run
+37539962026 reproduced two obsolete held-request recovery expectations in
+openai_chat_relay_runtime_integration.rs. Current exhaustion terminates the
+current request; independent recovery serves a fresh request. Product source
+is unchanged by this fixture correction.
+
+Fresh GCM worker r139 changed only that integration fixture. The frozen
+singlefile-owner.patch SHA256 is
+79ee278937af6ab416b0f00b95659863d357e2c4c5734393a01c1afe77db106f;
+the tested file blob is 04bab34bb4aaadd9cd88dbb8e032e9b614de8147.
+Worker compilation passed; sandbox loopback EPERM did not prove behavior.
+
+The parent host ran the complete public runtime integration consumer:
+CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs
+-p routecodex-v3-runtime --test openai_chat_relay_runtime_integration
+-- --test-threads=1. All 45 cases passed, exit 0. Raw evidence:
+RUN/provider-chat-exhaustion-fixtures-r139/host-full45-r141.log and .exit,
+where RUN is the external dagpipe-parallel-foundation-20261005 worker run.
+The two corrected cases retain typed six-node terminal disposition,
+zero success-transport consumption by the exhausted request, real local HTTP
+failed/successful semantic probes, exact-identity cooldown, and fresh-request
+normal transport after recovery. No case was removed.
+
+This delta changes only the fixture and this evidence document. Existing
+installed-runtime acceptance remains bound to its original product source.
+No new runtime build/install/restart is claimed for this test-only delta.
+Independent architecture delta review and new-head CI are pending.
