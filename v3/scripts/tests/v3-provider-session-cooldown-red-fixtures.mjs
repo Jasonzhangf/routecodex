@@ -329,16 +329,6 @@ const cases = [
     diagnostic: /Anthropic request dry-run must pass the rescue-probe-disabled gate/u,
   },
   {
-    name: "Shared rescue owner ignores dry-run gate",
-    path: "v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs",
-    mutate: (source) =>
-      source.replace(
-        "if !allow_exhaustion_rescue_probe {",
-        "if false {",
-      ),
-    diagnostic: /Shared rescue owner must terminate dry-run exhaustion/u,
-  },
-  {
     name: "Direct dry-run enables provider rescue probe",
     path: "v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs",
     mutate: (source) =>

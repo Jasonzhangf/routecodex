@@ -4752,7 +4752,7 @@ features:
   - V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation
   - V3ProviderHealthStore::cooldown_entries
   - V3ProviderFailureRuntimeHealth::run_due_provider_health_probes
-  - V3ProviderFailureRuntimeHealth::run_exhaustion_rescue_probes
+  - V3ProviderFailureRuntimeHealth::run_cooldown_rescue_probes_for_candidates
   - build_v3_provider_global_probe_target
   - select_v3_expanded_target_with_exhaustion_rescue
   - select_v3_expanded_target_with_admission_rescue
@@ -4822,6 +4822,7 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime runtime_policy_maps_account_and_recoverable_http_classes_to_global_health -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime cooldown_exhaustion --lib -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime later_tier_selection_skips_in_flight_rescue_probes_without_waiting --lib -- --nocapture
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test req09_pool_exhaustion_recovery_blackbox -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime provider_concurrency --lib -- --nocapture
   - npm run test:v3-provider-adaptive-concurrency
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test anthropic_relay_mixed_pool_failover_integration anthropic_relay_provider_concurrency_full_switches_without_waiting -- --exact --nocapture

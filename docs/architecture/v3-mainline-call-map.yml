@@ -7056,7 +7056,7 @@ chains:
       side_channel_writes: []
 - chain_id: v3.provider_admission_rescue_entrypoints
   owner_feature_id: v3.provider_global_subscription_probe
-  summary: Direct and Relay use one pre-transport selection boundary with atomic provider+authAlias capacity admission; full candidates are skipped request-locally without waiting, health mutation or Router reentry.
+  summary: Direct and Relay use one pre-transport selection boundary with atomic provider+authAlias capacity admission; full candidates are skipped request-locally without waiting, health mutation or Router reentry. REQ04 plan_execution owns the concrete zero-candidate terminal; REQ03 resolve_target remains only the opaque route handoff. Complete eligible-pool exhaustion never waits or resumes the current request; the independent server background probe restores later NEW requests.
   edges:
   - step_id: v3-rd-target-select-direct-admission-rescue
     from_node: V3Target09CandidateSetExpanded
@@ -7071,6 +7071,7 @@ chains:
       - Direct runtime selects from the captured Target09 candidate set through the admission-aware rescue wrapper before provider transport.
       - Direct atomically admits provider+authAlias capacity and immediately selects the next eligible candidate when full.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
+      - Complete eligible-pool exhaustion returns terminal immediately; the current request never waits for or resumes from a future recovery generation.
       - All-full candidates exhaust immediately without a provider send or health mutation; concurrency never waits or enters Error recovery admission.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
@@ -7089,6 +7090,7 @@ chains:
     semantic_contract:
       - Responses Direct runtime uses the same admission-aware selection wrapper for initial selection and request-local reselection.
       - Responses Direct immediately skips full provider+authAlias candidates and exhausts an all-full target without waiting or mutating health.
+      - Complete eligible-pool exhaustion returns terminal immediately; the current request never waits for or resumes from a future recovery generation.
       - The acquired provider admission lease is consumed by Provider transport or released by Runtime if selection does not reach transport.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
@@ -7108,6 +7110,7 @@ chains:
       - Generic Relay runtime resolves Target09 through the admission-aware relay wrapper before provider transport.
       - Relay uses the same atomic capacity admission, immediately skipping full candidates without waiting or changing health.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
+      - Complete eligible-pool exhaustion returns terminal immediately; the current request never waits for or resumes from a future recovery generation.
       - Concurrency state cannot exhaust Relay selection; only an actual typed provider failure such as HTTP 429 enters Error recovery and may select a later candidate.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
@@ -7126,6 +7129,7 @@ chains:
     semantic_contract:
       - Responses Relay runtime uses the admission-aware relay wrapper for selected Target10 resolution after its route facts are captured.
       - Full candidates are excluded only for this request and immediately reselected inside Target; capacity does not mutate failure policy or cooldown state.
+      - Complete eligible-pool exhaustion returns terminal immediately; the current request never waits for or resumes from a future recovery generation.
       - The selected admission lease is handed to Relay Provider transport exactly once; otherwise Runtime releases it before terminal projection.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
@@ -7145,6 +7149,7 @@ chains:
       - Anthropic Relay resolves Target09 through admission-aware selection before Provider transport.
       - Anthropic Relay uses shared admission to switch immediately from full providers to the next eligible candidate.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
+      - Complete eligible-pool exhaustion returns terminal immediately; the current request never waits for or resumes from a future recovery generation.
       - Concurrency state cannot exhaust Anthropic Relay selection; only an actual typed provider failure such as HTTP 429 may enter Error recovery and select a later candidate.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]

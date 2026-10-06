@@ -1217,9 +1217,9 @@ resources:
       deltas: { normal_http: 1, recoverable_including_502: -5, account_401_403: -20 }
       cooldown_condition: every typed provider failure blocks the exact providerId+authAlias+model identity immediately; the dynamic cooldown/probe ladder is selected from continuous failure streak and meaningful observed failure rate
       revival_rule: only a successful provider transport probe may remove cooldown state
-      exhaustion_rescue_rule: the complete candidate set may force one single-flight probe per continuous cooldown block; only a successful probe resets that generation
-      generation_state: rescueProbeAttempted remains attached to the providerId+authAlias cooldown block until a successful probe removes the block
-      in_flight_rule: if another request owns a cooldown probe, this request skips the cooled candidate and continues to the selected later tier without waiting
+      exhaustion_rescue_rule: complete eligible-pool exhaustion returns the current request terminal without waiting or resuming; the independent background owner remains the future-request recovery driver, and only a successful semantic probe resets that generation
+      generation_state: rescueProbeAttempted remains attached to the providerId+authAlias cooldown block until a successful probe removes the block; completion is read by later NEW requests from the shared typed store
+      in_flight_rule: if another request owns a cooldown probe, this request skips the cooled candidate and continues to the selected later tier without waiting; complete exhaustion never waits for that probe or for any recovery generation
       dry_run_rule: dry-run never acquires or sends a rescue probe
     allowed_writers: [V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::acquire_provider_cooldown_probe_if_due, V3ProviderHealthStore::acquire_provider_cooldown_rescue_probe, V3ProviderHealthStore::cancel_provider_cooldown_probe_at_generation, V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation]
     allowed_readers: [V3ProviderHealthStore::provider_cooldown_probe_keys, V3ProviderHealthStore::provider_cooldown_probe_keys_due, V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_next_deadline_ms]

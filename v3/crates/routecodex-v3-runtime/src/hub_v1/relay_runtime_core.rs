@@ -573,6 +573,10 @@ where
                 }
             }
         };
+        // The admitted candidate owns this attempt's witness. The selection
+        // exhaustion branch above may still use the previous attempt's
+        // failure, but no post-admission path may inherit it.
+        last_external_http = None;
         if provider_action_permit_target
             .as_ref()
             .is_some_and(|target| {
@@ -872,11 +876,8 @@ where
                     continue;
                 }
                 Err(error) => {
-                    if let Some(witness) =
-                        crate::hub_v1::external_http_witness_from_provider_error(&error)
-                    {
-                        last_external_http = Some(witness);
-                    }
+                    last_external_http =
+                        crate::hub_v1::external_http_witness_from_provider_error(&error);
                     let failure = provider_runtime_failure(error, &selected_target_provider_id);
                     let _ = runtime_timing.finish_external();
                     drop(provider_action_permit.take());

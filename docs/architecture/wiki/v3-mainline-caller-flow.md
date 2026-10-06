@@ -2603,7 +2603,7 @@ flowchart TD
 
 ## v3.provider_admission_rescue_entrypoints
 
-Direct and Relay use one pre-transport selection boundary with atomic provider+authAlias capacity admission; full candidates are skipped request-locally without waiting, health mutation or Router reentry.
+Direct and Relay use one pre-transport selection boundary with atomic provider+authAlias capacity admission; full candidates are skipped request-locally without waiting, health mutation or Router reentry. REQ04 plan_execution owns the concrete zero-candidate terminal; REQ03 resolve_target remains only the opaque route handoff. Complete eligible-pool exhaustion never waits or resumes the current request; the independent server background probe restores later NEW requests.
 
 Owner feature: `v3.provider_global_subscription_probe`
 

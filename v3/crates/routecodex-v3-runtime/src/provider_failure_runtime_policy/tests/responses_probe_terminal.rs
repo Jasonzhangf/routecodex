@@ -108,9 +108,9 @@ async fn responses_probe_terminal_clears_cooldown(scope: &str, body: &'static st
         Arc::clone(&served),
     ));
     health
-        .run_exhaustion_rescue_probes(&manifest, &expanded, 20_001)
+        .run_cooldown_rescue_probes_for_candidates(&manifest, &expanded.candidates, 20_001)
         .await
-        .expect("exhaustion rescue probes must not fail");
+        .expect("cooldown rescue probes must not fail");
     tokio::time::timeout(Duration::from_secs(2), probe_server)
         .await
         .expect("responses probe terminal case must finish its probe server")
