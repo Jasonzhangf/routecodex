@@ -461,8 +461,14 @@ multi-line shell command and preserve its output:
   printf '%s\\n' 'REQ02_GCM_MARKER_END'
 
 5. Call the real read-only MCP server ${mcpServer} tool ${mcpTool} with the
-exact JSON arguments ${mcpArguments}. Do not use tool discovery as a
-substitute. Retain the structured result.
+exact JSON arguments ${mcpArguments}. The callable tool name is
+mcp__${mcpServer}__${mcpTool}; call it directly by that exact name, once, even
+though it is not listed among your declared tools, because the ${mcpServer} MCP
+server is connected to this session and its tools are addressed as
+mcp__<server>__<tool>. If your session exposes a tool-discovery step such as
+tool_search, you may use it first to locate the tool, but discovery is only a
+step and never a substitute: the direct call above is required. Retain the
+structured result.
 
 6. Final response must be plain text and must include these exact observed
 values, not claimed values:
@@ -563,6 +569,7 @@ function validateExec(entries, testedWorktree, sentinel) {
 function validatePatch(
   entries,
   markerRelative,
+  markerAbsolute,
   markerInitial,
   markerUpdated,
   markerSha256,
@@ -571,7 +578,7 @@ function validatePatch(
   const hasOnlyChange = (item, expectedPath, expectedKind) =>
     Array.isArray(item.changes) &&
     item.changes.length === 1 &&
-    item.changes[0]?.path === expectedPath &&
+    (item.changes[0]?.path === expectedPath || item.changes[0]?.path === markerAbsolute) &&
     item.changes[0]?.kind === expectedKind;
   const add = findFileChangeItem(
     entries,
@@ -1236,6 +1243,7 @@ function main() {
   const patchCheck = validatePatch(
     entries,
     markerRelative,
+    markerFile,
     markerInitial,
     markerUpdated,
     markerSha256,
