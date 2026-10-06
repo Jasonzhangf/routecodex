@@ -6,9 +6,9 @@ mod debug_runtime_degradation;
 mod endpoint_handlers;
 mod executors;
 mod frame_builders;
+mod listener_accept;
 mod live_snapshot;
 mod live_snapshot_projections;
-mod listener_accept;
 mod metadata_center;
 mod models_catalog;
 mod request_id;
@@ -400,7 +400,7 @@ impl V3ServerAggregateHandle {
     pub fn has_active_listener(&self) -> bool {
         self.listeners
             .iter()
-            .any(|listener| listener.shutdown.is_some() && listener.accept_state.is_accepting())
+            .any(|listener| listener.shutdown.is_some())
     }
 
     /// Total `accept()` failures observed by the listener tasks.
@@ -472,9 +472,11 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
     // 独立的 stage-3 投影丢弃日志 wiring：启动时确保父目录与 append-only 文件
     // 就位。丢弃证据刻意与 debug 日志物理分离，不写入 debug runtime。
     if let Some(projection_drop_log_file) = debug_manifest.projection_drop_log_file.as_deref() {
-        if let Err(error) = routecodex_v3_runtime::projection_drop_log::ensure_v3_projection_drop_log_file(
-            projection_drop_log_file,
-        ) {
+        if let Err(error) =
+            routecodex_v3_runtime::projection_drop_log::ensure_v3_projection_drop_log_file(
+                projection_drop_log_file,
+            )
+        {
             // 投影丢弃证据是 Debug 观测，不是业务真相：路径不可写时记录原因并
             // 继续，让声明的 listener 能力保持可用。
             eprintln!(
@@ -500,16 +502,13 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
             && !manifest.debug.codex_samples,
     ));
     for server in &preflight.listeners {
-        if let Err(error) = codex_sample_store.enforce_listener_retention(server.port) {
-            // Debug sample retention is housekeeping, never business truth: an
-            // unreadable or vanished sample directory must not stop the
-            // aggregate server. The failure is recorded and the listener keeps
-            // its declared capability.
-            eprintln!(
-                "V3 codex sample retention unavailable for listener {} port {}: {error}",
-                server.id, server.port
-            );
-        }
+        // Retention tolerates per-entry housekeeping failures inside the Debug
+        // owner. The one contract-bound retention failure is the process-shared
+        // sample lock, which must stay an explicit startup error: uncoordinated
+        // retention would prune a tree another process is writing.
+        codex_sample_store
+            .enforce_listener_retention(server.port)
+            .map_err(std::io::Error::other)?;
     }
     let mut bound = Vec::with_capacity(preflight.listeners.len());
     for server in preflight.listeners {
@@ -619,7 +618,7 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let connection_broker = front_transport_broker.clone();
         let app_for_serve = app.clone();
-        let accept_state = Arc::new(V3ListenerAcceptState::accepting());
+        let accept_state = Arc::new(V3ListenerAcceptState::new());
         pending_listener_tasks.push((
             listener,
             app_for_serve,
@@ -647,7 +646,7 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
                 continue;
             }
         };
-        let startup_event = debug
+        let _ = debug
             .record_node_event(
                 &scope,
                 "V3ServerStartup01ListenerSetPreflight",
@@ -656,13 +655,13 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
                     "server_id": listener.server_id,
                     "address": listener.addr.to_string()
                 })),
-            );
-        if let Err(error) = startup_event {
-            eprintln!(
-                "V3 debug listener startup event {} unavailable: {error}",
-                listener.server_id
-            );
-        }
+            )
+            .inspect_err(|error| {
+                eprintln!(
+                    "V3 debug listener startup event {} unavailable: {error}",
+                    listener.server_id
+                );
+            });
     }
     // Codex sample persistence is optional debug capture, never business truth:
     // a persistence worker that cannot start must not stop the aggregate server.
@@ -851,8 +850,8 @@ fn build_v3_listener_router(state: V3ListenerState) -> Router {
 /// Build-version truth for `/health`.
 ///
 /// A status probe must report an unavailable build version instead of turning a
-/// failed syscall into a panic: the handler's owner returns the typed error and
-/// the caller projects it through the server error channel.
+/// failed syscall into a panic: the handler returns the typed internal
+/// request-stage projection (598) through the server error channel.
 fn resolve_v3_health_build_version() -> Result<String, String> {
     let executable_path = std::env::current_exe()
         .map_err(|error| format!("current executable path is unavailable: {error}"))?;
@@ -872,7 +871,7 @@ async fn health(State(state): State<Arc<V3ListenerState>>) -> Response<Body> {
                 "V3ServerHealth",
                 "health_build_version_unavailable",
                 detail,
-                500,
+                598,
             );
             return json_response(projected.status, projected.body);
         }

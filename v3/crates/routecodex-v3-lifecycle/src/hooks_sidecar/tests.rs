@@ -529,24 +529,19 @@ async fn abnormal_supervisor_exit_degrades_hooks_instead_of_failing_the_runtime(
         "degraded detail must record the observed reason: {detail}"
     );
 
-    // Same startup-window projection as `run_managed_child_with_declaration`:
-    // the managed runtime stays Running with the degraded detail, not Failed.
-    write_status(
-        &instance_dir,
-        instance_id,
-        V3ManagedRunState::Running,
-        Some(detail.clone()),
-    )
-    .unwrap();
-    let status: V3ManagedStatusRecord = read_json(&instance_dir.join("status.json")).unwrap();
-    assert_eq!(status.state, V3ManagedRunState::Running);
-    assert_eq!(status.detail.as_deref(), Some(detail.as_str()));
-    assert_eq!(
-        read_live_status_detail(&instance_dir, instance_id).unwrap(),
-        Some(detail)
-    );
+    // The managed startup projection that turns this detail into a `Running`
+    // status is owned and covered by the managed-runtime tests; this case owns
+    // the readiness decision and the shutdown that follows it.
     assert!(instance_dir.join("pid.cache").exists());
     assert!(instance_dir.join("control.json").exists());
+    // Shutdown must still work after a degraded readiness. The readiness path
+    // must not consume the supervisor completion signal, or this later stop
+    // would poll an already-completed channel.
+    let stopped = supervisor.stop().await;
+    assert!(
+        stopped.is_err(),
+        "an abnormally ended supervisor must report a failed stop, got {stopped:?}"
+    );
     std::env::remove_var(HOOKS_INSTALL_RECORD_ENV);
 }
 

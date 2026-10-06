@@ -144,9 +144,7 @@ impl V3ResponsesSessionAdmissionGate {
             notified.as_mut().enable();
             match self.try_admit(scope.clone())? {
                 V3ResponsesSessionAdmissionOutcome::Ungated => return Ok(None),
-                V3ResponsesSessionAdmissionOutcome::Admitted(permit) => {
-                    return Ok(Some(permit))
-                }
+                V3ResponsesSessionAdmissionOutcome::Admitted(permit) => return Ok(Some(permit)),
                 V3ResponsesSessionAdmissionOutcome::Busy => notified.await,
             }
         }

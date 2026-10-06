@@ -12,6 +12,7 @@ use futures_util::{future::join_all, SinkExt, StreamExt};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
+use std::os::unix::fs::PermissionsExt;
 use std::{ffi::OsString, fs, net::TcpListener, path::PathBuf, sync::Arc};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -8437,15 +8438,18 @@ fn v3_test_loopback_sockaddr(addr: std::net::SocketAddr) -> libc::sockaddr_in {
     sockaddr
 }
 
-/// F3: debug sample retention is optional housekeeping, never business truth.
+/// F3: startup sample retention is optional housekeeping, never business truth.
 ///
-/// The samples root is a regular file, so retention preparation fails with a
-/// real filesystem error. The aggregate server must still bind every declared
-/// listener and serve real HTTP on it.
+/// One sample port directory is unreadable (mode `0o000`), so retention's
+/// per-entry scan fails with a real filesystem error while the process-shared
+/// sample lock in the samples root stays usable. The aggregate server must
+/// still bind every declared listener and serve real HTTP on it.
 ///
-/// Before the fix this startup returned `Err` (`enforce_listener_retention(...)
-/// .map_err(std::io::Error::other)?`), so no listener was bound and the
-/// `expect` below failed.
+/// Before the fix the Debug owner propagated that per-entry error
+/// (`fs::read_dir(port_dir.path())...?`), so startup returned `Err` and no
+/// listener was bound. The contract-bound case stays fatal: an invalid
+/// process-shared sample lock must still produce an explicit startup error
+/// (`shared_sample_retention_invalid_lock_is_explicit_blackbox`).
 #[tokio::test]
 async fn codex_sample_retention_failure_keeps_declared_listeners_serving_blackbox() {
     let _test_guard = TEST_LOCK.lock().await;
@@ -8453,15 +8457,19 @@ async fn codex_sample_retention_failure_keeps_declared_listeners_serving_blackbo
     let port_a = free_port();
     let port_b = free_port();
     let samples_root = home_guard.path.join(".rcc").join("codex-samples");
-    fs::create_dir_all(samples_root.parent().unwrap()).unwrap();
-    fs::write(&samples_root, b"not a directory\n").unwrap();
+    let unreadable_port_dir = samples_root
+        .join("openai-responses")
+        .join("ports")
+        .join("65535");
+    fs::create_dir_all(&unreadable_port_dir).unwrap();
+    fs::set_permissions(&unreadable_port_dir, fs::Permissions::from_mode(0o000)).unwrap();
 
     let mut manifest = p6_manifest(port_a, port_b, "http://127.0.0.1:1");
     manifest.debug.codex_samples = true;
 
-    let handle = spawn_v3_server_aggregate(manifest)
-        .await
-        .expect("an unavailable debug sample retention directory must not stop the aggregate server");
+    let handle = spawn_v3_server_aggregate(manifest).await.expect(
+        "an unavailable debug sample retention directory must not stop the aggregate server",
+    );
     assert_eq!(
         handle.listeners.len(),
         2,
@@ -8509,6 +8517,8 @@ async fn codex_sample_retention_failure_keeps_declared_listeners_serving_blackbo
         .as_array()
         .is_some_and(|data| !data.is_empty()));
 
+    // Restore the scan permission so the test home can be removed.
+    fs::set_permissions(&unreadable_port_dir, fs::Permissions::from_mode(0o700)).unwrap();
     handle.shutdown().await;
 }
 
@@ -8598,8 +8608,9 @@ async fn debug_log_sink_failure_degrades_and_is_reported_unavailable_blackbox() 
 /// the server down.
 ///
 /// The case accepts either the 200 projection (build version available) or the
-/// typed 500 projection (`error.code` present), then proves a following request
-/// still works.
+/// typed internal request-stage projection 598 (`error.code` present), then
+/// proves a following request still works. A `RuntimeFailure` projection
+/// resolves its own internal status, so 598 is the observable error status.
 ///
 /// Before the fix the handler used `.expect(...)` on the build-version lookup and
 /// would panic (no complete HTTP response) whenever that lookup failed. In this
@@ -8652,7 +8663,7 @@ async fn health_probe_always_returns_a_complete_http_json_projection_blackbox() 
         );
     } else {
         assert!(
-            head.starts_with("HTTP/1.1 500"),
+            head.starts_with("HTTP/1.1 598"),
             "unexpected health status line: {head}"
         );
         assert!(
@@ -8727,10 +8738,7 @@ fn v3_listener_survives_real_accept_error_blackbox() {
         .split("V3_ACCEPT_FAILURE_COUNT=")
         .nth(1)
         .and_then(|rest| {
-            let digits: String = rest
-                .chars()
-                .take_while(char::is_ascii_digit)
-                .collect();
+            let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
             digits.parse::<u64>().ok()
         })
         .unwrap_or_else(|| {

@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 pub mod observability_store;
+mod sample_retention;
 pub mod sample_store;
 
 pub use observability_store::{
@@ -295,11 +296,6 @@ impl V3DebugRuntime {
     /// is created.
     pub fn mark_log_sink_unavailable(&mut self, reason: impl Into<String>) {
         self.log_sink_failure = Some(Arc::from(reason.into()));
-    }
-
-    /// The recorded reason the optional `log_file` sink is unavailable.
-    pub fn log_sink_unavailable_reason(&self) -> Option<&str> {
-        self.log_sink_failure.as_deref()
     }
 
     pub fn start_trace(

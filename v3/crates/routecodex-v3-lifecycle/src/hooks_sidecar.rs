@@ -224,14 +224,11 @@ impl V3HooksSidecarSupervisor {
                 Ok(detail) => Some(detail),
                 Err(_) => {
                     // Dropping the readiness sender without a value means the
-                    // supervisor task itself ended before it could publish.
+                    // supervisor task ended before it could publish readiness.
                     // Hooks are optional, so an abnormal supervisor exit
                     // degrades the sidecar detail instead of tearing down the
-                    // managed runtime; an error the supervisor actually
-                    // reported keeps its fatal path.
-                    if let Ok(Err(error)) = (&mut self.done_rx).await {
-                        return Err(error);
-                    }
+                    // managed runtime. The completion signal stays unconsumed
+                    // here so the later `stop()` can still await it.
                     return Ok(Some(Some(hooks_sidecar_supervisor_exit_detail())));
                 }
             },

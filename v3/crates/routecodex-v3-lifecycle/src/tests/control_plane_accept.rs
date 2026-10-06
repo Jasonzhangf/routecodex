@@ -13,9 +13,9 @@ fn transient_control_accept_errors_end_only_the_affected_accept() {
     }
     for errno in [libc::EMFILE, libc::ENFILE, libc::EPROTO, libc::ENETDOWN] {
         assert!(
-            control_accept_error_is_transient(&V3LifecycleError::Io(
-                io::Error::from_raw_os_error(errno)
-            )),
+            control_accept_error_is_transient(&V3LifecycleError::Io(io::Error::from_raw_os_error(
+                errno
+            ))),
             "transient accept errno {errno} must be retried"
         );
     }
@@ -52,10 +52,7 @@ fn set_nofile_limit(soft: libc::rlim_t) {
         rlim_cur: soft,
         rlim_max: hard,
     };
-    assert_eq!(
-        unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &limit) },
-        0
-    );
+    assert_eq!(unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &limit) }, 0);
 }
 
 #[cfg(unix)]

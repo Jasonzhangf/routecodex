@@ -1,12 +1,12 @@
-//! Listener accept-loop liveness and transient-failure ownership.
+//! Listener accept-loop failure ownership.
 //!
 //! A listener's accept loop is the boundary that owns accept errors. The loop
-//! keeps its port across a transient failure and records what happened, so a
-//! listener that can no longer accept is observable instead of being reported
-//! as active.
+//! keeps its port across a transient failure and records what happened, so the
+//! failure is observable instead of being lost. Binding and accept share one
+//! EINTR predicate, which the crate root also uses for listener bind retry.
 
 use std::io;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -23,29 +23,22 @@ use crate::{v3_io_error_is_eintr, V3FrontTransportBroker};
 /// starve the runtime. Every other accept errno is a single-connection race.
 const V3_LISTENER_ACCEPT_ERROR_PAUSE: Duration = Duration::from_millis(50);
 
-/// Liveness of one listener's accept loop.
+/// Record of one listener's accept failures.
 ///
-/// The accept task owns this record. It stays `accepting` while the port keeps
-/// accepting, and it records the last accept failure, so a listener that can no
-/// longer accept is visible instead of being reported as active.
-#[derive(Debug, Default)]
+/// The accept task owns this record: it counts accept failures and keeps the
+/// last reason, so a listener that keeps failing to accept is observable.
+#[derive(Debug)]
 pub(crate) struct V3ListenerAcceptState {
-    accepting: AtomicBool,
     accept_failures: AtomicU64,
     last_accept_error: Mutex<Option<String>>,
 }
 
 impl V3ListenerAcceptState {
-    pub(crate) fn accepting() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
-            accepting: AtomicBool::new(true),
             accept_failures: AtomicU64::new(0),
             last_accept_error: Mutex::new(None),
         }
-    }
-
-    pub(crate) fn is_accepting(&self) -> bool {
-        self.accepting.load(Ordering::Acquire)
     }
 
     pub(crate) fn accept_failures(&self) -> u64 {
@@ -70,10 +63,6 @@ impl V3ListenerAcceptState {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         *last = Some(reason);
-    }
-
-    fn stop_accepting(&self) {
-        self.accepting.store(false, Ordering::Release);
     }
 }
 
@@ -125,7 +114,4 @@ pub(crate) async fn run_v3_listener_accept_loop(
             }
         }
     }
-    // The task only leaves the loop on shutdown, so liveness is cleared here to
-    // keep a dead accept task observable instead of reported as active.
-    accept_state.stop_accepting();
 }
