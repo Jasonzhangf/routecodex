@@ -5,7 +5,63 @@ Scope: the transport construction and typed failure handoff prerequisite in
 REQ09 Operator registration or full pipeline cutover. REQ02/REQ06 remain owned
 by their separate leads; the request node sequence is unchanged.
 
-## Current author acceptance: 2026-10-06
+## Current author acceptance after main363: 2026-10-06 19:56 UTC
+
+The behavioral candidate is `58774075b6f3f7d1130f0ef92898516ebdf4eb88`.
+Its merge parents are latest main `459004b113d31f79d818992509c1a1fb17639b66`
+and prior reviewed candidate `dc5f3818fe2689b65c164cdf07674d81f71ef763`.
+This receipt supersedes the historical acceptance below. This receipt edit
+changes only this Markdown file; Rust, configuration, graphs and build inputs
+remain identical to the behavioral candidate.
+
+`RUN` is
+`/Volumes/Intel/playground/routecodex/.worker-runs/dagpipe-parallel-foundation-20261005`.
+
+- Main363 source/maps composed normally. Only the two generated caller views
+  conflicted, and the official renderer regenerated them from the composed maps.
+  The existing `prepare_exec_attempt` method moved unchanged from `lib.rs` to
+  `executors.rs`; its three actual caller bindings moved with it. There is one
+  method definition and no behavior wrapper.
+- `RUN/parent-main363-relocated-host-r73.log/.exit`: 192 PASS, exit0
+  (Server lib188, optional Debug sink failure1, mixed Relay failure2 and
+  terminal diagnostics1). The public cases verify no client Provider error
+  body, complete typed Error evidence and an independent healthy request.
+- `RUN/parent-main363-websocket-r70.log/.exit`: standard inbound WebSocket
+  13 PASS, exit0. `RUN/parent-main363-debug-r69.log/.exit`: Debug30 PASS, exit0.
+- `RUN/parent-main363-architecture-r72.log/.exit`: all43 architecture
+  sub-gates PASS, exit0, after the method migration and official admission.
+- `RUN/parent-main363-recovery-host-r79.log/.exit`: eight public HTTP cases
+  PASS, exit0 (Direct local failures3, pool exhaustion/recovery3, Relay witness1,
+  four-protocol recovery1). Complete exhaustion disconnects this request;
+  recovery admits a later request. It does not wait to resume the exhausted
+  request. Local constructor failures with a healthy remaining candidate
+  reselect internally. Original source and actual attempt witnesses survive
+  terminal evidence collection.
+- `RUN/parent-main363-build-r75.log/.exit`: canonical V3 build PASS, exit0,
+  version0.90.4839. `RUN/main363-install-r76.sha256`: built and installed CLI
+  both `0218005ad9cb5dbfd8f0aa87f4b16bf143affac959fc2aed79e9aa4ed200995c`;
+  hooks both `3e2c9b18c086a94efee55d82aef6c489191eba9d2f1bc97ef01758fa0e5174b1`.
+- `RUN/main363-restart-r77.log/.exit`: one official restart of45559/admin45560,
+  accepted→starting→running→completed, exit0. Health reports version0.90.4839.
+  Managed PID49587 remains; `RUN/main363-loaded-image-r77.sample` records loaded
+  Mach-O UUID `DB472F9B-4343-36CC-B051-13043DE9AFED`, equal to installed
+  binary `dwarfdump --uuid`. This establishes loaded image identity.
+- `RUN/gcm-main363-gpt55-r78` and `RUN/gcm-main363-gpt56-r78`: both real
+  `gcm` consumers exit0 and all8 summary checks true. Inputs bind the exact
+  behavioral SHA, CLI digest, isolated endpoint and separate clean worktrees.
+  Bound raw histories prove complete exec, actual patch Add/Update/readback,
+  real MCP `mcpx.environment_read`, consumed results and subsequent requests.
+  MCP observations are `mcpx_version=0.9.18` and `os.type=darwin`.
+- Actual tool declarations differ: gpt-5.5 uses `custom_tool_call/apply_patch`;
+  gpt-5.6 uses `function_call/exec_command` with patch heredoc. Preserve each
+  original declaration and complete arguments; do not infer type from model.
+
+Author implementation, debug, development tests and public/E2E acceptance are
+complete for this prerequisite candidate. Final independent review of this
+latest-main composition remains pending. No main merge/push or production
+4444 replacement is claimed. REQ02 and REQ07 node delivery remain incomplete.
+
+## Historical author acceptance for candidate416: 2026-10-06
 
 This section supersedes the older artifact and runtime receipt below. The
 behavioral code candidate is `41696142610b76d365bc73c9c89653d04c105a97`, composed
@@ -145,7 +201,7 @@ subsequent request pairing and frozen same-thread raw samples.
 - Current product worktree is clean after exact failed marker receipt removal.
   Old failure evidence and child home are retained for controlled cleanup.
 
-## Review and integration boundary
+## Historical review and integration boundary
 
 Author debug, developer tests, isolated installed artifact and actual HTTP/WS
 and two-model client tool consumption precede final architecture review.
