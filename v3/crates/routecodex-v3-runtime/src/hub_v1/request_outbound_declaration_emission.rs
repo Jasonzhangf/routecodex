@@ -288,11 +288,13 @@ pub(super) fn emitted_declaration_kinds(
 /// child). Only the names actually emitted by the current declaration traversal
 /// are rewritten; no convention or name-shape guessing is performed.
 ///
-/// A declared custom call whose provider declaration was emitted as a flattened
-/// function must reach the provider in that function form: the free-form text
-/// moves into the `{"input": ...}` arguments envelope, which is the exact
-/// inverse of restoring the client's `custom_tool_call` identity on the response
-/// side.
+/// A declared custom call whose emitted provider declaration is a flattened
+/// function must reach the provider in that function form when the same request
+/// also carries that call's tool result: the provider pairs the result with a
+/// call it declares, so the free-form text moves into the `{"input": ...}`
+/// arguments envelope, which is the exact inverse of restoring the client's
+/// `custom_tool_call` identity on the response side. A call whose result is not
+/// part of the request is plain history and keeps the client's representation.
 pub(super) fn rewrite_direct_history_call_names(
     body: &mut Value,
     names: &std::collections::HashMap<String, String>,
@@ -341,10 +343,16 @@ pub(super) fn rewrite_direct_history_call_names(
         }
     }
 
+    /// A Responses custom call that is part of a completed tool round trip is
+    /// emitted in the emitted declaration's own form, because the provider pairs
+    /// the result with a call it declares. A call that carries no result in this
+    /// request is plain history: the Direct request view keeps the client's
+    /// representation and only reconciles the call name.
     fn rewrite_custom_call(
         object: &mut Map<String, Value>,
         names: &std::collections::HashMap<String, String>,
         emitted_kinds: &std::collections::HashMap<String, String>,
+        paired_result: bool,
     ) {
         let Some(name) = object.get("name").and_then(Value::as_str).map(str::to_string) else {
             return;
@@ -354,14 +362,16 @@ pub(super) fn rewrite_direct_history_call_names(
             .and_then(Value::as_str)
             .map(str::to_string);
         let emitted = emitted_name(&name, namespace.as_deref(), names);
-        if let Some(input) = object.get("input").cloned() {
-            if let Some(arguments) = flattened_arguments(&emitted, &input, emitted_kinds) {
-                object.remove("input");
-                object.insert(
-                    "type".to_string(),
-                    Value::String("function_call".to_string()),
-                );
-                object.insert("arguments".to_string(), Value::String(arguments));
+        if paired_result {
+            if let Some(input) = object.get("input").cloned() {
+                if let Some(arguments) = flattened_arguments(&emitted, &input, emitted_kinds) {
+                    object.remove("input");
+                    object.insert(
+                        "type".to_string(),
+                        Value::String("function_call".to_string()),
+                    );
+                    object.insert("arguments".to_string(), Value::String(arguments));
+                }
             }
         }
         if emitted != name {
@@ -370,14 +380,19 @@ pub(super) fn rewrite_direct_history_call_names(
     }
 
     /// A canonical Chat custom call is `{id, type: "custom", custom: {name,
-    /// namespace?, input}}`. When its emitted declaration is a flattened
-    /// function, the call becomes the provider's function call carrying the
-    /// envelope; otherwise the name is still reconciled with the emission.
+    /// namespace?, input}}`. When the request also carries that call's tool
+    /// result and its emitted declaration is a flattened function, the call
+    /// becomes the provider's function call carrying the envelope; otherwise the
+    /// call stays exactly as the client sent it.
     fn rewrite_chat_custom_call(
         tool_call: &mut Value,
         names: &std::collections::HashMap<String, String>,
         emitted_kinds: &std::collections::HashMap<String, String>,
+        paired_result: bool,
     ) {
+        if !paired_result {
+            return;
+        }
         let Some(custom) = tool_call.get("custom").and_then(Value::as_object) else {
             return;
         };
@@ -409,6 +424,33 @@ pub(super) fn rewrite_direct_history_call_names(
         object.insert("function".to_string(), Value::Object(function));
     }
 
+    // A call whose result is part of the same request is a completed tool round
+    // trip. The provider pairs that result with a call it declares, so the call
+    // is emitted in the emitted declaration's own form. A call without its
+    // result is plain history and keeps the client's representation; only its
+    // name is reconciled with the emission.
+    let paired_result_call_ids: std::collections::HashSet<String> = body
+        .get("input")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| {
+            item.get("type")
+                .and_then(Value::as_str)
+                .is_some_and(|kind| kind.ends_with("_output"))
+        })
+        .filter_map(|item| item.get("call_id").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect();
+    let paired_result_tool_call_ids: std::collections::HashSet<String> = body
+        .get("messages")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|message| message.get("role").and_then(Value::as_str) == Some("tool"))
+        .filter_map(|message| message.get("tool_call_id").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect();
     if let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) {
         for item in input {
             match item.get("type").and_then(Value::as_str) {
@@ -418,8 +460,12 @@ pub(super) fn rewrite_direct_history_call_names(
                     }
                 }
                 Some("custom_tool_call") => {
+                    let paired_result = item
+                        .get("call_id")
+                        .and_then(Value::as_str)
+                        .is_some_and(|call_id| paired_result_call_ids.contains(call_id));
                     if let Some(object) = item.as_object_mut() {
-                        rewrite_custom_call(object, names, emitted_kinds);
+                        rewrite_custom_call(object, names, emitted_kinds, paired_result);
                     }
                 }
                 _ => {}
@@ -440,7 +486,16 @@ pub(super) fn rewrite_direct_history_call_names(
                             }
                         }
                         Some("custom") => {
-                            rewrite_chat_custom_call(tool_call, names, emitted_kinds);
+                            let paired_result = tool_call
+                                .get("id")
+                                .and_then(Value::as_str)
+                                .is_some_and(|id| paired_result_tool_call_ids.contains(id));
+                            rewrite_chat_custom_call(
+                                tool_call,
+                                names,
+                                emitted_kinds,
+                                paired_result,
+                            );
                         }
                         _ => {}
                     }
