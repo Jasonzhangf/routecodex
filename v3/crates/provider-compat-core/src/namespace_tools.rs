@@ -794,6 +794,13 @@ fn build_provider_function_tool(
         function.insert("strict".to_string(), strict);
     }
 
+    provider_function_tool_envelope(protocol, function)
+}
+
+/// The single owner of the flat-vs-nested provider function-tool rule: the
+/// Responses wire declares a function tool flat, every other protocol nests the
+/// function members under `function`.
+fn provider_function_tool_envelope(protocol: &str, function: Map<String, Value>) -> Value {
     let mut output = Map::new();
     output.insert("type".to_string(), Value::String("function".to_string()));
     if protocol == "openai-responses" {
@@ -802,6 +809,29 @@ fn build_provider_function_tool(
         output.insert("function".to_string(), Value::Object(function));
     }
     Value::Object(output)
+}
+
+/// Projects a canonical Chat function tool (`{"type":"function","function":{...}}`)
+/// into the target protocol's declared function-tool shape. The canonical
+/// extension slot and any function member that is not a declared function-tool
+/// field stay out of the provider declaration. Returns `None` when the value is
+/// not a canonical Chat function tool, so hosted and custom declarations keep
+/// their own representation and a repeated call is a no-op.
+pub fn provider_function_tool_from_canonical(protocol: &str, tool: &Value) -> Option<Value> {
+    let function = tool.get("function").and_then(Value::as_object)?;
+    let name = function
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|name| !name.is_empty())?;
+    let mut declared = Map::new();
+    declared.insert("name".to_string(), Value::String(name.to_string()));
+    for key in ["description", "parameters", "strict"] {
+        if let Some(value) = function.get(key) {
+            declared.insert(key.to_string(), value.clone());
+        }
+    }
+    Some(provider_function_tool_envelope(protocol, declared))
 }
 
 #[cfg(test)]
@@ -878,6 +908,48 @@ mod tests {
             flattened[1]["function"]["name"],
             "multi_agent_v1__wait_agent"
         );
+    }
+
+    #[test]
+    fn projects_canonical_function_tool_into_the_provider_envelope() {
+        let canonical = json!({
+            "type": "function",
+            "function": {
+                "name": "lookup",
+                "description": "Lookup docs",
+                "parameters": {"type": "object"}
+            },
+            "extension": {"raw_declaration": {"name": "lookup"}}
+        });
+
+        let responses =
+            provider_function_tool_from_canonical("openai-responses", &canonical).unwrap();
+        assert_eq!(responses["type"], "function");
+        assert_eq!(responses["name"], "lookup");
+        assert_eq!(responses["description"], "Lookup docs");
+        assert_eq!(responses["parameters"]["type"], "object");
+        assert!(responses.get("function").is_none());
+        assert!(responses.get("extension").is_none());
+
+        let chat = provider_function_tool_from_canonical("openai-chat", &canonical).unwrap();
+        assert_eq!(chat["type"], "function");
+        assert_eq!(chat["function"]["name"], "lookup");
+        assert!(chat.get("name").is_none());
+    }
+
+    #[test]
+    fn canonical_function_tool_projection_leaves_other_declarations_untouched() {
+        // Hosted and custom declarations keep their own provider representation,
+        // and an already projected tool is not a canonical Chat function tool.
+        // The projection therefore cannot run twice on the same wire value.
+        let hosted = json!({"type": "web_search"});
+        assert!(provider_function_tool_from_canonical("openai-responses", &hosted).is_none());
+
+        let custom = json!({"type": "custom", "name": "apply_patch", "format": {"type": "text"}});
+        assert!(provider_function_tool_from_canonical("openai-responses", &custom).is_none());
+
+        let flat = json!({"type": "function", "name": "lookup", "parameters": {"type": "object"}});
+        assert!(provider_function_tool_from_canonical("openai-responses", &flat).is_none());
     }
 
     #[test]

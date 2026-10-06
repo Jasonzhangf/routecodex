@@ -478,8 +478,12 @@ fn project_openai_responses_tools_with_emission(
                 }
             }
         } else {
+            let projected = provider_compat_core::namespace_tools::provider_function_tool_from_canonical(
+                "openai-responses",
+                tool,
+            );
             let destination_index = emitted.len();
-            emitted.push(tool.clone());
+            emitted.push(projected.unwrap_or_else(|| tool.clone()));
             if let Some(observer) = observer.as_mut() {
                 if !is_openai_responses_hosted_web_search_tool(tool) {
                     observer.note_emitted(destination_index, canonical_source_path, &emitted[destination_index]);
@@ -881,6 +885,7 @@ fn apply_outbound_projection_transforms(
     match target_protocol {
         V3OutboundTargetProtocol::OpenAiResponses => {
             project_responses_request_chat_extension_to_openai_responses(projected)?;
+            project_chat_canonical_tool_choice_to_responses_wire(projected);
             validate_openai_metadata(projected, "responses")?;
             project_openai_responses_reasoning_extensions_to_reasoning(projected)?;
         }
@@ -900,6 +905,26 @@ fn apply_outbound_projection_transforms(
         }
     }
     Ok(())
+}
+
+/// chat canonical -> Responses wire `tool_choice` projection.
+///
+/// `tables/tool_choice_map.json` declares hub `tool` -> responses `function` and
+/// states that the object transform (name extraction) belongs to the transform.
+/// Canonical names one specific tool as
+/// `{"type":"function","function":{"name":..}}`, and the Responses wire names it
+/// with the same function-tool shape as `tools[]`, so this reuses the single
+/// owner of that shape instead of writing a second rule.
+fn project_chat_canonical_tool_choice_to_responses_wire(projected: &mut Value) {
+    let Some(tool_choice) = projected.get_mut("tool_choice") else {
+        return;
+    };
+    if let Some(flat) = provider_compat_core::namespace_tools::provider_function_tool_from_canonical(
+        "openai-responses",
+        tool_choice,
+    ) {
+        *tool_choice = flat;
+    }
 }
 
 /// chat canonical → Anthropic wire 的 web_search 工具投影：

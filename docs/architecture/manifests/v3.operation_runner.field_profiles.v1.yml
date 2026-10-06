@@ -4117,6 +4117,14 @@ path_consumers:
       chat_to_provider: routecodex.v3.field.value_domain_transform@1
     params:
       shape: leaf
+      direction_bindings:
+        client_request_to_chat:
+          source: request.stop_sequences
+          destination: chat.stop
+          operator: routecodex.v3.field.value_domain_transform@1
+          shape: leaf
+          semantics: enum(value_domain_transform)
+          failure_class: enum(598)
       semantics: enum(value_domain_transform)
       failure_class: enum(598)
     mapping_record: exact
