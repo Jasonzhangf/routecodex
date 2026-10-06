@@ -124,6 +124,11 @@ requireMatch(
   "The session admission gate must uniquely own an async predicate wait with lost-wakeup-safe notification ordering",
 );
 requireMatch(
+  admission,
+  /pub\(crate\) async fn wait_for_quiescence\(&self\)[\s\S]*let notified = self\.notify\.notified\(\);[\s\S]*tokio::pin!\(notified\);[\s\S]*notified\.as_mut\(\)\.enable\(\);[\s\S]*self\.active\.load\(Ordering::Acquire\) == 0[\s\S]*notified\.await/,
+  "The exec drain gate must register its predicate waiter before the quiescence check",
+);
+requireMatch(
   server,
   /\.responses_session_admission\s*\.admit\(V3ResponsesSessionAdmissionScope\s*\{[\s\S]*?\}\)\s*\.await/,
   "The V3 Server caller must await the gate owner instead of projecting overlap",
