@@ -32,11 +32,33 @@ const copied = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core/request_scope.rs',
   'v3/crates/routecodex-v3-server/src/console/impl_bulk.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs',
+  // Split include! fragment owners. The verifier expands include!(...) as
+  // rustc does, so this surface must also carry every reachable fragment.
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner_response_interpretation.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime_sse.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core/provider_timeouts.rs',
+  'v3/crates/routecodex-v3-runtime/tests/support/kernel_unit.rs',
+  'v3/crates/routecodex-v3-runtime/tests/support/openai_chat_relay_runtime_unit.rs',
+  'v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs',
+  'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_events.rs',
+  'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_configured.rs',
+  'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/provider_action_gate_tests.rs',
+  'v3/crates/routecodex-v3-runtime/src/kernel/direct_web_search.rs',
+  'v3/crates/routecodex-v3-runtime/src/kernel/direct_request_scope.rs',
+  'v3/crates/routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs',
+  'v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs',
+  'v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs',
+  'v3/crates/routecodex-v3-runtime/src/kernel/direct_request_entrypoints.rs',
+  'v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs',
+  'v3/crates/routecodex-v3-runtime/src/kernel/direct_response_thinking_compat.rs',
+  'v3/crates/routecodex-v3-runtime/src/kernel/direct_response_thinking_compat_tests.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs',
@@ -224,6 +246,91 @@ const cases = [
     diagnostic: /Responses Relay must re-arm the exact retained recovery ticket/u,
   },
   {
+    name: 'Responses resident provider failure call is bypassed while the wrapper fakes it',
+    // The Responses resident body spans responses_relay_runtime_inner.rs plus
+    // its include! fragment responses_relay_runtime_inner_response_interpretation.rs.
+    // Both owners must drop the real call while the outer wrapper only fakes one.
+    targets: [
+      {
+        path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
+        transform: (source) => source.replaceAll(
+          'handle_v3_responses_relay_provider_failure(',
+          'bypass_v3_responses_relay_provider_failure(',
+        ),
+      },
+      {
+        path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner_response_interpretation.rs',
+        transform: (source) => source.replaceAll(
+          'handle_v3_responses_relay_provider_failure(',
+          'bypass_v3_responses_relay_provider_failure(',
+        ),
+      },
+      {
+        path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+        transform: (source) => source.replace(
+          '    let mut output = execute_v3_responses_relay_runtime_resident(',
+          '    handle_v3_responses_relay_provider_failure(\n'
+            + '        &failure_context,\n'
+            + '        selected,\n'
+            + '        failure,\n'
+            + '        &mut V3ResponsesRelayProviderRetryState {\n'
+            + '            failed_candidates: &mut failed_candidates,\n'
+            + '            same_candidate_retries: &mut same_candidate_retries,\n'
+            + '            retry_selected: &mut retry_selected,\n'
+            + '            pending_recovery: &mut pending_provider_action_recovery,\n'
+            + '            provider_failure_events: &mut provider_failure_events,\n'
+            + '            provider_failure_event_sink: provider_failure_event_sink.as_ref(),\n'
+            + '            selected_observability: &selected_observability,\n'
+            + '            trace: &mut trace,\n'
+            + '            last_eligible_external_http: &mut last_eligible_external_http,\n'
+            + '        },\n'
+            + '    );\n'
+            + '    let mut output = execute_v3_responses_relay_runtime_resident(',
+        ),
+      },
+    ],
+    diagnostic: /does not call handle_v3_responses_relay_provider_failure/u,
+  },
+  {
+    name: 'Responses resident recovery wait is bypassed while the wrapper fakes it',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
+    mutate: (source) => source
+      .replace(
+        'provider_health\n                .wait_for_error05_recovery(&recovery, &selected)',
+        'provider_health\n                .bypass_error05_recovery(&recovery, &selected)',
+      )
+      .replace(
+        '    let mut output = execute_v3_responses_relay_runtime_resident(',
+        '    provider_health.wait_for_error05_recovery(&recovery, &selected);\n'
+          + '    let mut output = execute_v3_responses_relay_runtime_resident(',
+      ),
+    diagnostic: /does not call V3ProviderFailureRuntimeHealth::wait_for_error05_recovery/u,
+  },
+  {
+    name: 'Responses resident permit acquisition is bypassed while the wrapper fakes it',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
+    mutate: (source) => source
+      .replace(
+        '_provider_action_permit = admission.take_permit();',
+        '_provider_action_permit = admission.bypass_permit();',
+      )
+      .replace(
+        '    let mut output = execute_v3_responses_relay_runtime_resident(',
+        '    let _fake_permit = admission.take_permit();\n'
+          + '    let mut output = execute_v3_responses_relay_runtime_resident(',
+      ),
+    diagnostic: /does not call V3ProviderActionAdmission::take_permit/u,
+  },
+  {
+    name: 'Shared Relay lifecycle wrapper stops delegating to its resident',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core/request_scope.rs',
+    mutate: (source) => source.replace(
+      'execute_v3_relay_runtime_resident::<C, T>(',
+      'execute_v3_relay_runtime_core::<C, T>(',
+    ),
+    diagnostic: /does not call execute_v3_relay_runtime_resident/u,
+  },
+  {
     name: 'V3 unrelated failure revokes an already-owned group permit',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
     mutate: (source) => source.replace(
@@ -313,9 +420,9 @@ const cases = [
     name: 'V3 map declares a fake caller symbol',
     path: 'docs/architecture/v3-mainline-call-map.yml',
     mutate: (source) => mutateYaml(source, (document) => {
-      edge(document, 'v3-provider-action-gate-01').caller_symbol = 'fake_execute_v3_responses_relay_runtime_inner';
+      edge(document, 'v3-provider-action-gate-01').caller_symbol = 'fake_execute_v3_responses_relay_runtime_resident';
     }),
-    diagnostic: /caller_symbol must equal execute_v3_responses_relay_runtime_inner/u,
+    diagnostic: /caller_symbol must equal execute_v3_responses_relay_runtime_resident/u,
   },
   {
     name: 'V3 terminal admission caller stops invoking atomic commit',
@@ -608,14 +715,22 @@ for (const testCase of cases) {
   const root = mkdtempSync(join(tmpdir(), 'v3-provider-action-gate-red-'));
   try {
     copyFixtureSurface(root);
-    const target = resolve(root, testCase.path);
-    const original = readFileSync(target, 'utf8');
-    const mutated = testCase.mutate(original);
-    if (mutated === original) {
-      failures.push(`${testCase.name}: mutation did not change ${testCase.path}`);
-      continue;
+    const edits = testCase.targets
+      ? testCase.targets.map((entry) => ({ path: entry.path, mutate: entry.transform }))
+      : [{ path: testCase.path, mutate: testCase.mutate }];
+    let mutatedAny = false;
+    for (const edit of edits) {
+      const target = resolve(root, edit.path);
+      const original = readFileSync(target, 'utf8');
+      const mutated = edit.mutate(original);
+      if (mutated === original) {
+        failures.push(`${testCase.name}: mutation did not change ${edit.path}`);
+        continue;
+      }
+      writeFileSync(target, mutated);
+      mutatedAny = true;
     }
-    writeFileSync(target, mutated);
+    if (!mutatedAny) continue;
     const result = spawnSync(process.execPath, [verifier], { cwd: root, encoding: 'utf8' });
     const output = `${result.stdout || ''}\n${result.stderr || ''}`;
     if (result.status === 0) failures.push(`${testCase.name}: verifier unexpectedly passed`);

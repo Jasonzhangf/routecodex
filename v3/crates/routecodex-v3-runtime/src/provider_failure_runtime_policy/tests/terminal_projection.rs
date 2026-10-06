@@ -37,6 +37,7 @@ async fn transient_terminal_projection_releases_action_admission() {
             Some("wrapped_provider_error".to_string()),
             "provider returned an embedded error".to_string(),
             None,
+            None,
             &mut V3RelayProviderFailurePolicyState {
                 failed_candidates: &mut failed_candidates,
                 same_candidate_retries: &mut same_candidate_retries,
@@ -139,6 +140,7 @@ targets = [
         429,
         Some("provider_http_429".to_string()),
         "provider rate limited and no alternative remains".to_string(),
+        None,
         Some(matched_policy),
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
@@ -249,6 +251,7 @@ targets = [
         502,
         Some("provider_request_compat_error".to_string()),
         "arguments must be valid JSON".to_string(),
+        None,
         Some(matched_policy),
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,

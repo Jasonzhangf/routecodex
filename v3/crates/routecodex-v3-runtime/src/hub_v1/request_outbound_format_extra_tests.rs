@@ -32,24 +32,15 @@ fn responses_openai_chat_field_parity_responses_wire_projects_fc_item_ids() {
 }
 
 #[test]
-fn responses_wire_wraps_apply_patch_custom_tool_with_toolreason_schema() {
+fn responses_wire_preserves_representable_custom_tool_and_grammar() {
     let payload = json!({"model": "gpt-test", "messages": [{"role": "user", "content": "patch"}], "tools": [{"type": "custom", "name": "apply_patch", "description": "Apply a patch", "format": {"type":"grammar","syntax":"lark","definition":"start: patch"}}]});
 
     let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
-        .expect("Responses wire must wrap custom apply_patch as a function schema");
-    let tool = &request["tools"][0];
-    assert_eq!(tool["type"], "function");
-    assert_eq!(tool["function"]["name"], "apply_patch");
-    assert_eq!(tool["function"]["parameters"]["required"], json!(["input"]));
-    assert!(tool["function"]["parameters"]["properties"]
-        .get("reason")
-        .is_none());
-    assert!(tool["function"]["parameters"]["properties"]
-        .get("goal_alignment_confidence")
-        .is_none());
-    assert!(tool["function"]["parameters"]["properties"]
-        .get("model_id")
-        .is_none());
+        .expect("Responses wire preserves its native custom declaration");
+    assert_eq!(
+        request["tools"], payload["tools"],
+        "full declaration and grammar must stay equivalent"
+    );
 }
 
 #[test]

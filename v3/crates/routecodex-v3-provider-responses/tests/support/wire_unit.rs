@@ -423,7 +423,7 @@ mod tests {
     }
 
     #[test]
-    fn wire_maps_historical_namespace_tool_use_name_in_anthropic_messages() {
+    fn wire_preserves_historical_tool_use_name_for_request_projection_owner() {
         let mut anthropic_target = target();
         anthropic_target.provider_type = "anthropic".into();
         let body = json!({
@@ -432,15 +432,18 @@ mod tests {
                 {"type": "tool_use", "name": "mcp__codex_review.review_start", "input": {}}
             ]}]
         });
+        // Historical call-name conversion is owned by the request projection
+        // stage. The provider wire forwards the already-projected name verbatim
+        // and must not run a convention mapper of its own.
         let wire = build_v3_provider_12_responses_wire_payload(
             "req-anthropic-tool-use-name",
             anthropic_target,
             body,
         )
-        .expect("Anthropic tool-use history names must be normalized before provider transport");
+        .expect("Anthropic tool-use history must reach provider transport");
         assert_eq!(
             wire.body()["messages"][0]["content"][0]["name"],
-            "mcp__codex_review__review_start"
+            "mcp__codex_review.review_start"
         );
     }
 
@@ -478,7 +481,7 @@ mod tests {
     }
 
     #[test]
-    fn wire_maps_legacy_functions_mcp_names_before_provider_validation() {
+    fn wire_preserves_legacy_functions_mcp_names_for_request_projection_owner() {
         let mut anthropic_target = target();
         anthropic_target.provider_type = "anthropic".into();
         let body = json!({
@@ -493,14 +496,14 @@ mod tests {
             anthropic_target,
             body,
         )
-        .expect("legacy MCP names must be normalized before provider wire validation");
+        .expect("legacy MCP history must reach provider transport");
         assert_eq!(
             wire.body()["messages"][0]["content"][0]["name"],
-            "mcp__codex_review__review_start"
+            "functions.mcp__codex_review.review_start"
         );
         assert_eq!(
             wire.body()["input"][0]["name"],
-            "mcp__codex_review__review_start"
+            "functions.mcp__codex_review__review_start"
         );
     }
 
@@ -541,7 +544,7 @@ mod tests {
     }
 
     #[test]
-    fn wire_flattens_namespace_tool_children_into_function_tools() {
+    fn wire_preserves_namespace_container_for_request_projection_owner() {
         let body = json!({
             "model": "upstream-model", "input": "hello", "tools": [
                 {"type": "function", "name": "plain_tool", "description": "d", "parameters": {"type": "object"}},
@@ -551,32 +554,27 @@ mod tests {
                 ]}
             ]
         });
+        // Namespace flattening is owned by the request projection stage. The
+        // transport-only wire forwards the already-projected declarations and
+        // must not flatten a container of its own.
         let wire =
-            build_v3_provider_12_responses_wire_payload("req-namespace", target(), body).unwrap();
+            build_v3_provider_12_responses_wire_payload("req-namespace", target(), body.clone())
+                .unwrap();
         let tools = wire.body()["tools"].as_array().expect("tools array");
-        assert_eq!(
-            tools.len(),
-            3,
-            "namespace container must be replaced by its children: {tools:?}"
-        );
+        assert_eq!(tools.len(), 2, "wire must not flatten declarations: {tools:?}");
         assert_eq!(tools[0]["type"], json!("function"));
+        assert_eq!(tools[0]["name"], json!("plain_tool"));
+        assert_eq!(tools[1]["type"], json!("namespace"));
+        assert_eq!(tools[1]["name"], json!("mcp__node_repl"));
         assert_eq!(
-            tools[1],
-            json!({
-                "type": "function", "name": "mcp__node_repl__js", "description": "run js",
-                "parameters": {"type": "object", "properties": {}}, "strict": false
-            })
-        );
-        assert_eq!(tools[2]["type"], json!("function"));
-        assert_eq!(tools[2]["name"], json!("mcp__node_repl__npm"));
-        assert!(
-            tools.iter().all(|tool| tool["type"] != json!("namespace")),
-            "no namespace container may cross provider wire payload: {tools:?}"
+            tools[1]["tools"],
+            body["tools"][1]["tools"],
+            "namespace children must be forwarded verbatim: {tools:?}"
         );
     }
 
     #[test]
-    fn wire_deduplicates_identical_flattened_provider_tool_declarations() {
+    fn wire_forwards_identical_namespace_declarations_without_flattening() {
         let body = json!({
             "model": "upstream-model", "input": "hello", "tools": [
                 {"type": "namespace", "name": "mcp__mcpx", "tools": [
@@ -590,16 +588,16 @@ mod tests {
         let wire = build_v3_provider_12_responses_wire_payload(
             "req-identical-provider-tools",
             target(),
-            body,
+            body.clone(),
         )
-        .expect("identical provider declarations must collapse to one wire tool");
+        .expect("namespace declarations are forwarded to the request projection owner");
         let tools = wire.body()["tools"].as_array().expect("tools array");
         assert_eq!(
             tools.len(),
-            1,
-            "duplicate provider tools must be removed: {tools:?}"
+            2,
+            "the wire must not flatten or merge namespace declarations: {tools:?}"
         );
-        assert_eq!(tools[0]["name"], "mcp__mcpx__workspace");
+        assert_eq!(tools, body["tools"].as_array().unwrap());
     }
 
     #[test]
@@ -650,7 +648,7 @@ mod tests {
     }
 
     #[test]
-    fn wire_rejects_conflicting_flattened_provider_tool_declarations() {
+    fn wire_forwards_conflicting_namespace_declarations_without_guessing() {
         let body = json!({
             "model": "upstream-model", "input": "hello", "tools": [
                 {"type": "namespace", "name": "mcp__mcpx", "tools": [
@@ -661,20 +659,13 @@ mod tests {
                 ]}
             ]
         });
-        let error = build_v3_provider_12_responses_wire_payload(
+        let wire = build_v3_provider_12_responses_wire_payload(
             "req-conflicting-provider-tools",
             target(),
-            body,
+            body.clone(),
         )
-        .expect_err("conflicting provider declarations must fail explicitly");
-        assert!(
-            error.to_string().contains("ConflictingOutboundFields"),
-            "{error}"
-        );
-        assert!(
-            error.to_string().contains("mcp__mcpx__workspace"),
-            "{error}"
-        );
+        .expect("namespace declarations are forwarded to the request projection owner");
+        assert_eq!(wire.body()["tools"], body["tools"]);
     }
 
     #[test]
@@ -704,22 +695,22 @@ mod tests {
     }
 
     #[test]
-    fn wire_namespace_tool_empty_children_fails_explicitly() {
+    fn wire_forwards_namespace_container_with_empty_children() {
         let body = json!({
             "model": "upstream-model", "input": "hello", "tools": [
                 {"type": "namespace", "name": "mcp__node_repl", "tools": []}
             ]
         });
-        let error = build_v3_provider_12_responses_wire_payload("req-empty-ns", target(), body)
-            .expect_err("empty namespace container must fail explicitly, not reach provider");
-        assert!(matches!(
-            error,
-            V3ProviderError::NamespaceToolFlattenFailed { request_id, .. } if request_id == "req-empty-ns"
-        ));
+        // Namespace validation belongs to the request projection owner. The
+        // transport-only wire must not invent a new admission boundary.
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-empty-ns", target(), body.clone())
+                .expect("wire is transport-only and must not reject a passable body");
+        assert_eq!(wire.body()["tools"], body["tools"]);
     }
 
     #[test]
-    fn wire_maps_namespace_qualified_tool_names_consistently_for_calls() {
+    fn wire_preserves_namespace_qualified_call_and_declaration_for_request_projection_owner() {
         let body = json!({
             "model": "upstream-model", "input": [
                 {"type": "function_call", "call_id": "call-review", "name": "mcp__codex_review.review_start", "arguments": "{}"},
@@ -730,23 +721,22 @@ mod tests {
                 ]}
             ]
         });
+        // Namespace-qualified call and declaration conversion is owned by the
+        // request projection stage; the wire forwards both verbatim.
         let wire =
-            build_v3_provider_12_responses_wire_payload("req-qualified-tool", target(), body)
-                .expect("namespace-qualified names must be mapped before provider transport");
-        assert_eq!(
-            wire.body()["tools"][0]["name"],
-            "mcp__codex_review__review_start"
-        );
+            build_v3_provider_12_responses_wire_payload("req-qualified-tool", target(), body.clone())
+                .expect("already-projected declarations must reach provider transport");
+        assert_eq!(wire.body()["tools"], body["tools"]);
         assert_eq!(
             wire.body()["input"][0]["name"],
-            "mcp__codex_review__review_start"
+            "mcp__codex_review.review_start"
         );
         assert_eq!(wire.body()["input"][0]["call_id"], "call-review");
         assert_eq!(wire.body()["input"][1]["call_id"], "call-review");
     }
 
     #[test]
-    fn wire_maps_nested_mcpx_namespace_calls_reversibly() {
+    fn wire_preserves_nested_namespace_declaration_and_call() {
         let body = json!({
             "model": "upstream-model", "input": [
                 {"type": "function_call", "call_id": "call-workspace", "name": "mcp__mcpx.workspace.read", "arguments": "{}"}
@@ -758,20 +748,18 @@ mod tests {
                 ]}
             ]
         });
-        let wire = build_v3_provider_12_responses_wire_payload("req-nested-mcpx", target(), body)
-            .expect("nested MCPX namespace must flatten");
-        assert_eq!(
-            wire.body()["tools"][0]["name"],
-            "mcp__mcpx__workspace__read"
-        );
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-nested-mcpx", target(), body.clone())
+                .expect("nested declarations are forwarded to the request projection owner");
+        assert_eq!(wire.body()["tools"], body["tools"]);
         assert_eq!(
             wire.body()["input"][0]["name"],
-            "mcp__mcpx__workspace__read"
+            "mcp__mcpx.workspace.read"
         );
     }
 
     #[test]
-    fn wire_maps_namespace_qualified_openai_chat_tool_call_names_when_declared() {
+    fn wire_preserves_openai_chat_declared_namespace_call_name() {
         let mut chat_target = target();
         chat_target.provider_type = "openai_chat".into();
         let body = json!({
@@ -783,22 +771,25 @@ mod tests {
                 }}
             ]}],
             "tools": [
-                {"type": "namespace", "name": "mcp__node_repl", "tools": [
-                    {"type": "function", "name": "js", "parameters": {"type": "object"}}
-                ]}
+                {"type": "function", "function": {"name": "mcp__node_repl__js", "parameters": {"type": "object"}}}
             ]
         });
         let wire =
             build_v3_provider_12_responses_wire_payload("req-qualified-chat", chat_target, body)
-                .expect("declared namespace call names must be mapped before provider transport");
+                .expect("already-projected declarations must reach provider transport");
+        assert_eq!(wire.body()["tools"][0]["name"], "mcp__node_repl__js");
+        assert_eq!(
+            wire.body()["tools"][0]["function"]["name"],
+            "mcp__node_repl__js"
+        );
         assert_eq!(
             wire.body()["messages"][0]["tool_calls"][0]["function"]["name"],
-            "mcp__node_repl__js"
+            "mcp__node_repl.js"
         );
     }
 
     #[test]
-    fn wire_maps_namespace_qualified_openai_chat_tool_call_names_by_convention() {
+    fn wire_does_not_guess_openai_chat_convention_namespace_call_name() {
         let mut chat_target = target();
         chat_target.provider_type = "openai_chat".into();
         let body = json!({
@@ -815,15 +806,15 @@ mod tests {
             chat_target,
             body,
         )
-        .expect("convention namespace call names must be mapped before provider transport");
+        .expect("history must reach provider transport without convention guessing");
         assert_eq!(
             wire.body()["messages"][0]["tool_calls"][0]["function"]["name"],
-            "mcp__node_repl__js"
+            "mcp__node_repl.js"
         );
     }
 
     #[test]
-    fn wire_maps_multi_agent_tool_names_in_chat_history_before_provider_validation() {
+    fn wire_preserves_multi_agent_history_names() {
         let mut chat_target = target();
         chat_target.provider_type = "openai_chat".into();
         let body = json!({
@@ -850,14 +841,14 @@ mod tests {
             chat_target,
             body,
         )
-        .expect("multi-agent history names must be normalized before provider validation");
+        .expect("history must reach provider transport without convention guessing");
         assert_eq!(
             wire.body()["messages"][0]["content"][0]["name"],
-            "multi_agent_v1__spawn_agent"
+            "multi_agent_v1.spawn_agent"
         );
         assert_eq!(
             wire.body()["messages"][0]["tool_calls"][0]["function"]["name"],
-            "multi_agent_v1__spawn_agent"
+            "multi_agent_v1.spawn_agent"
         );
     }
 
@@ -869,9 +860,11 @@ mod tests {
             "model": "upstream-model",
             "messages": [{"role": "user", "content": "hello"}],
             "tools": [
-                {"type": "namespace", "name": "mcp__node_repl", "tools": [
-                    {"type": "function", "name": "js", "parameters": {"type": "object"}}
-                ]},
+                {"type": "function", "function": {
+                    "name": "mcp__node_repl__js",
+                    "description": "the projected namespace child",
+                    "parameters": {"type": "object"}
+                }},
                 {"type": "function", "function": {
                     "name": "mcp__node_repl.js",
                     "description": "an independently declared tool",
@@ -882,6 +875,7 @@ mod tests {
         let wire =
             build_v3_provider_12_responses_wire_payload("req-declaration-name", chat_target, body)
                 .expect("ordinary declaration name must reach the provider unchanged");
+        assert_eq!(wire.body()["tools"][0]["name"], "mcp__node_repl__js");
         assert_eq!(wire.body()["tools"][1]["name"], "mcp__node_repl.js");
         assert_eq!(
             wire.body()["tools"][1]["function"]["name"],
@@ -890,7 +884,7 @@ mod tests {
     }
 
     #[test]
-    fn wire_maps_historical_namespace_call_without_current_tools() {
+    fn wire_preserves_historical_namespace_call_without_current_tools() {
         let body = json!({
             "model": "upstream-model",
             "input": [{"type": "function_call", "name": "mcp__codex_review.review_start"}]
@@ -900,15 +894,15 @@ mod tests {
             target(),
             body,
         )
-        .expect("known historical MCP namespace call must be normalized");
+        .expect("historical call must reach provider transport without convention guessing");
         assert_eq!(
             wire.body()["input"][0]["name"],
-            "mcp__codex_review__review_start"
+            "mcp__codex_review.review_start"
         );
     }
 
     #[test]
-    fn wire_maps_historical_namespace_call_with_empty_current_tools() {
+    fn wire_preserves_historical_namespace_call_with_empty_current_tools() {
         let body = json!({
             "model": "upstream-model",
             "tools": [],
@@ -919,15 +913,15 @@ mod tests {
             target(),
             body,
         )
-        .expect("known historical MCP namespace call must be normalized");
+        .expect("historical call must reach provider transport without convention guessing");
         assert_eq!(
             wire.body()["input"][0]["name"],
-            "mcp__codex_review__review_start"
+            "mcp__codex_review.review_start"
         );
     }
 
     #[test]
-    fn wire_maps_historical_namespace_tool_use_name_in_input() {
+    fn wire_preserves_historical_namespace_tool_use_name_in_input() {
         let body = json!({
             "model": "upstream-model",
             "input": [{"type": "tool_use", "name": "mcp__codex_review.review_start"}]
@@ -937,15 +931,15 @@ mod tests {
             target(),
             body,
         )
-        .expect("historical MCP tool_use names must be normalized");
+        .expect("historical tool_use must reach provider transport without convention guessing");
         assert_eq!(
             wire.body()["input"][0]["name"],
-            "mcp__codex_review__review_start"
+            "mcp__codex_review.review_start"
         );
     }
 
     #[test]
-    fn wire_maps_historical_namespace_call_with_empty_current_tools_for_openai_chat() {
+    fn wire_preserves_historical_namespace_call_with_empty_current_tools_for_openai_chat() {
         let body = json!({
             "model": "upstream-model",
             "tools": [],
@@ -962,16 +956,16 @@ mod tests {
             chat_target,
             body,
         )
-        .expect("known historical MCP namespace call must be normalized");
+        .expect("historical call must reach provider transport without convention guessing");
 
         assert_eq!(
             wire.body()["input"][0]["name"],
-            "mcp__codex_review__review_start"
+            "mcp__codex_review.review_start"
         );
     }
 
     #[test]
-    fn wire_maps_historical_codex_namespace_call_for_both_provider_shapes() {
+    fn wire_preserves_historical_codex_namespace_call_for_both_provider_shapes() {
         for provider_type in ["responses", "openai_chat"] {
             let mut provider = target();
             provider.provider_type = provider_type.into();
@@ -990,16 +984,16 @@ mod tests {
                 provider,
                 body,
             )
-            .expect("historical Codex namespace calls must project to legal provider names");
-            assert_eq!(wire.body()["input"][0]["name"], "functions__exec");
-            assert_eq!(wire.body()["input"][1]["name"], "functions__exec");
+            .expect("historical calls must reach provider transport without convention guessing");
+            assert_eq!(wire.body()["input"][0]["name"], "functions.exec");
+            assert_eq!(wire.body()["input"][1]["name"], "functions.exec");
             assert_eq!(
                 wire.body()["messages"][0]["content"][0]["name"],
-                "functions__exec"
+                "functions.exec"
             );
             assert_eq!(
                 wire.body()["messages"][0]["tool_calls"][0]["function"]["name"],
-                "functions__exec"
+                "functions.exec"
             );
         }
     }
@@ -1059,7 +1053,7 @@ mod tests {
     }
 
     #[test]
-    fn wire_maps_historical_namespace_call_when_namespace_declaration_is_incomplete() {
+    fn wire_preserves_historical_namespace_call_when_namespace_declaration_is_incomplete() {
         let body = json!({
             "model": "upstream-model",
             "tools": [{"type": "namespace", "name": "mcp__codex_review", "tools": [
@@ -1070,26 +1064,27 @@ mod tests {
         let wire = build_v3_provider_12_responses_wire_payload(
             "req-historical-tool-incomplete-namespace",
             target(),
-            body,
+            body.clone(),
         )
-        .expect("incomplete namespace declarations still require convention mapping");
+        .expect("wire is transport-only and must not invent a convention mapper");
+        assert_eq!(wire.body()["tools"], body["tools"]);
         assert_eq!(
             wire.body()["input"][0]["name"],
-            "mcp__codex_review__review_start"
+            "mcp__codex_review.review_start"
         );
     }
 
     #[test]
-    fn wire_flattens_namespace_children_into_dual_field_functions_for_openai_chat_provider() {
+    fn openai_chat_normalizes_preprojected_namespace_children_into_dual_field_functions() {
         let mut chat_target = target();
         chat_target.provider_type = "openai_chat".into();
+        // The request projection already flattened the namespace container;
+        // the wire only applies the provider-private dual-field tool shape.
         let body = json!({
             "model": "upstream-model", "input": "hello", "tools": [
                 {"type": "function", "function": {"name": "plain_tool", "description": "d", "parameters": {"type": "object"}}},
-                {"type": "namespace", "name": "mcp__node_repl", "tools": [
-                    {"type": "function", "name": "mcp__node_repl__js", "description": "run js", "parameters": {"type": "object", "properties": {}}, "strict": false},
-                    {"type": "function", "name": "mcp__node_repl__npm", "description": "npm", "parameters": {"type": "object", "properties": {}}}
-                ]}
+                {"type": "function", "function": {"name": "mcp__node_repl__js", "description": "run js", "parameters": {"type": "object", "properties": {}}, "strict": false}},
+                {"type": "function", "function": {"name": "mcp__node_repl__npm", "description": "npm", "parameters": {"type": "object", "properties": {}}}}
             ]
         });
         let wire =
@@ -1098,7 +1093,7 @@ mod tests {
         assert_eq!(
             tools.len(),
             3,
-            "namespace container must be replaced by its children: {tools:?}"
+            "the projected children must remain distinct: {tools:?}"
         );
         assert_eq!(
             tools[0],
@@ -1124,10 +1119,6 @@ mod tests {
         assert_eq!(tools[2]["type"], json!("function"));
         assert_eq!(tools[2]["name"], json!("mcp__node_repl__npm"));
         assert_eq!(tools[2]["function"]["name"], json!("mcp__node_repl__npm"));
-        assert!(
-            tools.iter().all(|tool| tool["type"] != json!("namespace")),
-            "no namespace container may cross provider wire payload: {tools:?}"
-        );
     }
 
     #[test]
@@ -2293,7 +2284,7 @@ mod tests {
     }
 
     #[test]
-    fn wire_expands_custom_namespace_and_rewrites_call_names() {
+    fn wire_preserves_custom_namespace_and_call_names_for_request_projection_owner() {
         let body = json!({
             "model": "upstream-model",
             "stream": false,
@@ -2311,16 +2302,15 @@ mod tests {
             ]
         });
         let wire =
-            build_v3_provider_12_responses_wire_payload("req-custom-namespace", target(), body)
-                .expect("custom namespace declarations must survive to the provider wire layer");
-        assert_eq!(wire.body()["tools"][0]["name"], "custom_ns__run");
-        assert_eq!(wire.body()["tools"][1]["name"], "mcp__mcpx__workspace");
-        assert_eq!(wire.body()["input"][0]["name"], "custom_ns__run");
-        assert_eq!(wire.body()["input"][1]["name"], "mcp__mcpx__workspace");
+            build_v3_provider_12_responses_wire_payload("req-custom-namespace", target(), body.clone())
+                .expect("already-projected declarations must reach provider transport");
+        assert_eq!(wire.body()["tools"], body["tools"]);
+        assert_eq!(wire.body()["input"][0]["name"], "custom_ns.run");
+        assert_eq!(wire.body()["input"][1]["name"], "mcp__mcpx.workspace");
     }
 
     #[test]
-    fn wire_rejects_conflicting_namespace_tool_schemas() {
+    fn wire_forwards_conflicting_namespace_tool_schemas_without_guessing() {
         let body = json!({
             "model": "upstream-model",
             "stream": false,
@@ -2334,20 +2324,13 @@ mod tests {
             ],
             "input": "hello"
         });
-        let error = build_v3_provider_12_responses_wire_payload(
+        let wire = build_v3_provider_12_responses_wire_payload(
             "req-conflicting-namespace",
             target(),
-            body,
+            body.clone(),
         )
-        .expect_err("conflicting expanded provider tool names must fail closed");
-        assert!(
-            error.to_string().contains("ConflictingOutboundFields"),
-            "conflict must name the duplicate provider tool contract: {error}"
-        );
-        assert!(
-            error.to_string().contains("custom_ns__run"),
-            "conflict must identify the provider name: {error}"
-        );
+        .expect("namespace declarations are forwarded to the request projection owner");
+        assert_eq!(wire.body()["tools"], body["tools"]);
     }
 }
 

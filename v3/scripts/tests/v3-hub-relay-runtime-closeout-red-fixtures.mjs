@@ -18,6 +18,13 @@ const verifier = resolve(
 );
 const cases = [
   {
+    name: 'client identity inverse runs before response governance',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime/response_closeout.rs',
+    marker: 'let resp03 = hooks.govern(resp02, response_hook_profile)?;',
+    mutation: 'let _early_client_payload = project_client_response(resp02.provider_raw().payload.0.as_ref(), &successful_attempt_view)?;\n    let resp03 = hooks.govern(resp02, response_hook_profile)?;',
+    diagnostic: /client identity inverse must run after response governance/,
+  },
+  {
     name: 'runtime drops servertool response profile',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime/response_closeout.rs',
     marker: 'hooks.govern(resp02, response_hook_profile)?',
@@ -103,7 +110,7 @@ const cases = [
   },
   {
     name: 'responses relay SSE skips response hooks before client projection',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner_response_interpretation.rs',
     marker: 'let (mut finalized_provider_value, response_web_search_state) =',
     mutation: 'let (mut forbidden_finalized_provider_value, response_web_search_state) =',
     diagnostic: /expected 2 occurrences of let \(mut finalized_provider_value, response_web_search_state\) =/,
@@ -216,8 +223,8 @@ const cases = [
   {
     name: 'shared relay Error01 builder call removed',
     file: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
-    marker: '    let source = build_v3_error_01_source_raised_external(\n        V3ErrorSourceKind::ProviderFailure,\n        source_stage,\n        code.clone(),',
-    mutation: '    let source = removed_v3_error_01_source_raised_external(\n        V3ErrorSourceKind::ProviderFailure,\n        source_stage,\n        code.clone(),',
+    marker: '            build_v3_error_01_source_raised_external(\n                V3ErrorSourceKind::ProviderFailure,\n                source_stage,\n                code.clone(),',
+    mutation: '            removed_v3_error_01_source_raised_external(\n                V3ErrorSourceKind::ProviderFailure,\n                source_stage,\n                code.clone(),',
     diagnostic: /missing build_v3_error_01_source_raised_external\(/,
   },
 ];
@@ -231,6 +238,7 @@ const copyPaths = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner_response_interpretation.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs',

@@ -238,7 +238,7 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
                 Some(request_identity.pipeline_id.clone()),
                 execution_id,
                 payload,
-                protocol_plan.as_ref(),
+                protocol_plan.as_ref().map(client_entry),
                 None,
                 None,
                 None,
@@ -389,7 +389,10 @@ pub(crate) async fn execute_responses_relay_websocket_output(
                 Some(plan.decision.target.clone()),
                 Some(plan.expanded.clone()),
                 BTreeSet::new(),
+                None,
+                None,
                 plan.relay_runtime_seeds(),
+                V3RelayEntryOrigin::ClientEntry,
             )
             .await
         }
@@ -406,7 +409,10 @@ pub(crate) async fn execute_responses_relay_websocket_output(
                 None,
                 None,
                 BTreeSet::new(),
+                None,
+                None,
                 V3ResponsesRelayRuntimeSeeds::default(),
+                V3RelayEntryOrigin::ClientEntry,
             )
             .await
         }
@@ -436,7 +442,7 @@ pub(crate) async fn execute_responses_relay_websocket_output(
             Some(pipeline_id),
             execution_id,
             handoff.request_payload.clone(),
-            Some(&handoff.plan),
+            Some(relay_entry(&handoff.plan, handoff.request_entry_origin)),
             Some(handoff.observability_accumulator),
             Some(request_execution_control),
             None,

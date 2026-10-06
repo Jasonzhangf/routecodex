@@ -22,15 +22,15 @@ pub(super) fn project_chat_store_to_anthropic_wire(projected: &mut Value) -> Res
 }
 
 pub(super) fn responses_metadata_as_anthropic_metadata(
+    canonical_metadata: Option<&Value>,
     responses_request_extension: Option<&Map<String, Value>>,
 ) -> Result<Option<Value>, V3AnthropicCodecError> {
-    let public_user_id = responses_public_metadata_user_id(responses_request_extension)?;
+    let public_user_id = responses_public_metadata_user_id(canonical_metadata)?;
     let client_user_id = responses_client_user_id(responses_request_extension)?;
     let user_id = match (public_user_id, client_user_id) {
         (Some(public), Some(client)) if public != client => {
             return Err(V3AnthropicCodecError::MalformedField {
-                field:
-                    "routecodex_chat_extension.responses_request.metadata/client_metadata.user_id",
+                field: "metadata/client_metadata.user_id",
             });
         }
         (Some(public), _) => Some(public),
@@ -216,16 +216,14 @@ fn reject_unmapped_anthropic_text_format_fields(
 }
 
 fn responses_public_metadata_user_id(
-    extension: Option<&Map<String, Value>>,
+    metadata: Option<&Value>,
 ) -> Result<Option<&str>, V3AnthropicCodecError> {
-    let Some(metadata) = extension.and_then(|row| row.get("metadata")) else {
+    let Some(metadata) = metadata else {
         return Ok(None);
     };
     let metadata = metadata
         .as_object()
-        .ok_or(V3AnthropicCodecError::MalformedField {
-            field: "routecodex_chat_extension.responses_request.metadata",
-        })?;
+        .ok_or(V3AnthropicCodecError::MalformedField { field: "metadata" })?;
     // Arbitrary public Responses metadata is not provider-wire metadata for Anthropic.
     // V3AnthropicResponsesProjectionContext carries it on the adjacent response projection;
     // this helper extracts only the exact Anthropic metadata.user_id intersection.
@@ -237,7 +235,7 @@ fn responses_public_metadata_user_id(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or(V3AnthropicCodecError::MalformedField {
-            field: "routecodex_chat_extension.responses_request.metadata.user_id",
+            field: "metadata.user_id",
         })?;
     Ok(Some(user_id))
 }

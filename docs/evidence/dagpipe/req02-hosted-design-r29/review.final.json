@@ -1,0 +1,44 @@
+{
+  "contract_version": "1",
+  "scope": {
+    "mode": "uncommitted",
+    "commit": "b64d46498f5ebe76169ce918bab4ef25265e41a0",
+    "base": null
+  },
+  "module_boundary_evidence": [
+    {
+      "module": "REQ02 hosted-history normalization and typed profile",
+      "owner": "Registered field library inside normalize_request_losslessly; parent owns map synchronization and delivery",
+      "paths": "Primary scope: docs/design/v3-req02-hosted-history-operator-contract-20261005.md, selected by docs/design/v3-req02-direct-design-review-scope-20261005.md; supporting declarations: docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml and docs/design/v3-req02-mixed-history-fold.md; implementation remains pending.",
+      "edges": "Configured request_input_shape_branch@1 selects the web_search_call case by discriminator; one source visit emits an assistant function call and adjacent tool result; message-span/history records associate both destinations with the original source item; configured mixed-history fold carries associations to final destinations; current Responses projection consumes the recorded association. Separate tool_search_call/tool_search_output semantics remain excluded from the single-event case. Legacy codec is a behavioral reference, not an alternate execution edge.",
+      "resources": "Complete action, event, status, errors, result and unknown fields remain canonical business values; typed records hold identity, paths, encoding and source/destination associations. Generated IDs are representation identities; inverse retains original identity-field names and presence. No current tool declaration, routing policy, provider-health mutation or local continuation is introduced.",
+      "gates": "Design scope contains no product implementation; implementation tests/build/install/restart are therefore not current admission evidence. Read the hosted baseline receipt and exit0 from /Volumes/Intel/playground/routecodex/req02-main339-combined-r22-20261004/docs/evidence/dagpipe/: receipt binds clean baseline f1204ab19f10d84da8558c846990258dd20575d8 and the unchanged public runtime test. Proposed implementation gates preserve that assertion, require one provider attempt, exact SDK roundtrip and a real HTTP provider that rejects missing/reordered pairs or changed action/result, and retain separate tool-search public tests. Compiler must reject unknown encoding, duplicate cases and ambiguous ownership; profile/source-inventory bindings remain explicit prerequisites before implementation."
+    },
+    {
+      "module": "Hosted-history current aliases, typed edits and inverse projection",
+      "owner": "Chat Process registered field editor owns current edits; registered current-history projection owns inverse emission",
+      "paths": "docs/design/v3-req02-hosted-history-operator-contract-20261005.md; docs/design/v3-req02-current-field-associations.md; docs/architecture/v3-resource-operation-map.yml; docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml. Allowed implementation is existing field-editor/library/current-history helpers; REQ06 project_canonical_request.rs, Server, Compat and response governance remain outside this slice.",
+      "edges": "Original event action maps to encoded assistant arguments and event-JSON action aliases; one public typed edit updates surviving aliases atomically; ordered conflicting edits use the later explicit edit. Structural edits move/remove associations with actual elements. Current inverse associates contributions by original source item rather than array position or name search and emits one hosted item. Full deletion emits none; partial deletion uses surviving current contributions without recreating removed business values. No callback or cross-node state mutation is added.",
+      "resources": "Immutable request_inverse_context and explicit_history_pairing retain original associations; request-local current_field_associations stores original mapping references and current structural paths only. Current canonical values own edited action/result data. Opaque source references recover shape/presence/encoding, not stale business values. GovernChatRequest remains the sole current-association writer; projection consumes a local view.",
+      "gates": "Contract requires public normalize/edit/current-inverse consumers covering unchanged equality, call-only and event-only action edits, conflicting edits in both orders, nonoverlapping event/result changes, complete and partial deletion, unknown nested fields, absent/nonobject arguments, long strings and CRLF. Acceptance asserts alias consistency and no resurrection. Helper/map/gate and supported alias-encoding bindings must be registered before coding. Full candidate tool-execution and follow-up gates remain separate; historical hosted representation does not claim that a current client tool ran."
+    },
+    {
+      "module": "Operation-runner graph, attempt isolation and finalization",
+      "owner": "RuntimeRequestGraphEntry and non-Clone Runtime finalizer; Error chain owns internal failures; Server forwards opaque request handles",
+      "paths": "docs/architecture/dagpipe/v3.operation_runner.request.graph.json; docs/architecture/dagpipe/v3.operation_runner.response.graph.json; docs/architecture/dagpipe/v3.operation_runner.error.graph.json; docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml; four V3 architecture maps; docs/design/v3-req02-direct-actual-emission-addendum-20261004.md.",
+      "edges": "Hosted operator reuses capture → normalize → target/execution planning → current governance → standard/registered Direct projection → transport. Successful attempt admission precedes successful-context publication and inverse/client framing. Failed attempts terminate through typed Error/Runtime disposition; retry starts another attempt without replacing the immutable original pair. Cancellation, disconnect, future/stream Drop and terminal completion release attempt scope before request scope. Hosted operator adds no process, listener, lifecycle owner or graph backedge.",
+      "resources": "Original inverse/history pair and current associations are request-scoped; projection/declaration context is attempt-scoped. Failed attempt state cannot enter the successful response view. Business payload and typed control resources remain separate. Compile/internal failures have internal typed exits; they do not authorize client error responses or fabricated successful terminal events.",
+      "gates": "Read-only dagpipe graph validate succeeded for request (9 nodes/9 edges), response (5 nodes/4 edges) and error (6 nodes/5 edges); these results prove static topology only. git diff HEAD --check succeeded. SDK registry/schema/effect compilation, executable hosted operator, real HTTP/WS behavior, exact-candidate runtime delivery and implementation review remain pending and are not claimed by this design. Pure design review does not require runtime lifecycle actions or development/debug stage-note writes."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "P2",
+      "file": "docs/design/v3-req02-hosted-history-operator-contract-20261005.md",
+      "line": 33,
+      "rule": "Clarify identity selection for present fields without a usable nonempty identity",
+      "evidence": "identity_paths requires a nonempty call identity, but generated_identity_prefix is described as applying only when every configured field is absent. Present empty-string, null or nonstring identity fields therefore have no explicit selection rule. The referenced established helper, responses_openai_codec.rs::build_v3_openai_chat_hosted_tool_history_call_id, selects the first nonempty string and generates a source-index identity whenever none is usable, including when fields are present. This is a design ambiguity; no current implementation regression is established in this documentation-only tree.",
+      "remediation": "Describe generation as applying when no configured path supplies a usable nonempty string, while preserving original field values and presence in the event/inverse. Add present-empty/null/nonstring ID cases to the planned public roundtrip coverage."
+    }
+  ]
+}

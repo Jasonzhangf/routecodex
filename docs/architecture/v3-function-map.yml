@@ -220,6 +220,7 @@ features:
   - v3/crates/routecodex-v3-lifecycle
   - v3/crates/routecodex-v3-cli
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/executors.rs
   - v3/scripts/prepare-v3-previous-release-fixture.mjs
   - .github/workflows/test.yml
   - .github/workflows/release.yml
@@ -933,7 +934,7 @@ features:
   - select_v3_preplanned_direct_target
   - v3_direct_selected_available_for_send
   - plan_v3_responses_protocol_execution_with_provider_health
-  - execute_v3_responses_direct_runtime_kernel_core
+  - execute_v3_responses_direct_runtime_kernel_core_resident
   - resolve_v3_relay_target_outcome
   - reselect_from_captured_target_plan
   allowed_paths:
@@ -1271,7 +1272,7 @@ features:
     builder_symbol: build_v3_hub_req_inbound_01_client_raw
   - node: V3HubReqInbound02Normalized
     owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
-    builder_symbol: build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01
+    builder_symbol: build_v3_hub_req_inbound_02_from_canonical
   - node: V3HubReqChatProcess04Governed
     owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
     builder_symbol: build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02
@@ -1342,6 +1343,9 @@ features:
   - file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_openai_chat_content_part.rs
     owner_boundary: OpenAI Chat content-part normalization helper included by request_outbound_format.rs;
       no lifecycle/node transition owner
+  - file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_openai_chat_messages.rs
+    owner_boundary: OpenAI Chat provider-standard message projection included by
+      request_outbound_format.rs; no lifecycle/node transition owner
   - file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs
     owner_boundary: Gemini provider-standard request projection helpers included by
       request_outbound_format.rs; no lifecycle/node transition owner
@@ -1368,7 +1372,7 @@ features:
   - build_v3_hub_req_inbound_01_client_raw
   - build_v3_provider_resp_inbound_01_raw
   adjacent_builder_symbols:
-  - build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01
+  - build_v3_hub_req_inbound_02_from_canonical
   - build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02
   - build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04
   - build_v3_hub_req_target_06_from_v3_hub_req_execution_05
@@ -3535,7 +3539,7 @@ features:
   - characterize_v3_openai_chat_client_input_to_hub_semantic
   - characterize_v3_openai_chat_provider_raw_to_hub_response_semantic
   - characterize_v3_gemini_client_input_to_hub_semantic
-  - govern_protocol_tool_identity_at_req04
+  - govern_tool_outputs_at_req04
   - govern_v3_hub_relay_response
   - build_provider_req_compat_06_from_v3_hub_req_outbound_07
   - build_provider_resp_compat_02_from_v3_provider_resp_inbound_01
@@ -3779,11 +3783,12 @@ features:
   entry_symbols:
   - bind_v3_selected_provider_model
   - responses_direct_request_projection_hook
-  - build_v3_provider_standard_protocol_payload_from_req07
+  - bind_selected_provider_model
   - build_v3_provider_12_responses_wire_payload
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/selected_provider_model_binding.rs
   - v3/crates/routecodex-v3-runtime/src/hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/operation_runner/operators/project_canonical_request.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
   - v3/crates/routecodex-v3-provider-responses/src/wire.rs
   - v3/crates/routecodex-v3-provider-responses/src/error.rs
@@ -4411,9 +4416,14 @@ features:
   - persist_v3_error_evidence_payload
   - capture_v3_responses_relay_provider_snapshots
   - finalize_v3_responses_relay_server_output
+  - project_v3_relay_terminal_diagnostics
+  - persist_v3_terminal_error_evidence
+  - persist_v3_terminal_error_evidence_pair
   allowed_paths:
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/live_snapshot.rs
+  - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+  - v3/crates/routecodex-v3-server/src/terminal_error_evidence.rs
   - v3/crates/routecodex-v3-debug/src/sample_store.rs
   - v3/crates/routecodex-v3-server/tests
   - docs/architecture
@@ -4430,6 +4440,8 @@ features:
   - v3-responses-relay-error-evidence-01
   - v3-responses-relay-error-evidence-02
   - v3-responses-relay-error-evidence-03
+  - v3-relay-terminal-error-evidence-04
+  - v3-projected-terminal-error-evidence-05
 - feature_id: v3.build_test_artifact_budget
   status: active
   owner_module: v3-build-test-artifact-budget
@@ -4572,12 +4584,14 @@ features:
   - routecodex-v3-runtime
   owner_files:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core/provider_timeouts.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
   resource_bindings:
   - v3.config.provider_sse_first_frame_timeout
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core/provider_timeouts.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
   forbidden_paths:
@@ -4651,8 +4665,8 @@ features:
 - feature_id: v3.history_image_cleanup
   status: active_normalization_and_session_compat_projection
   change_risk: medium
-  owner_kind: rust_project_v3_req_inbound_normalization
-  owner_scope: ReqInbound history-turn image normalization plus the adjacent
+  owner_kind: rust_project_v3_registered_request_rewrite
+  owner_scope: Registered Relay Chat Process and Direct request-hook history image cleanup plus the adjacent
     ProviderReqCompat06 session-preserving compatibility projection for a
     selected target without multimodal/vision capability. Image facts must
     select multimodal first; the projection is allowed only after typed target
@@ -4661,10 +4675,14 @@ features:
   - routecodex-v3-runtime
   owner_files:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/history_image_cleanup.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/history_image_cleanup.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
+  - v3/crates/routecodex-v3-server/tests/req02_history_cleanup_owner.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
   forbidden_paths:
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs
   required_gates:
@@ -4672,6 +4690,7 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib hooks::tests::direct_responses_projection_preserves_current_image_for_selected_target
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib multimodal_target_preserves_image_bytes_for_session_semantics
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib non_multimodal_target_projects_image_to_session_placeholder
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test req02_history_cleanup_owner
   runtime_status: source_controlled_runtime_boundary_verified
 
 - feature_id: v3.direct_runtime_kernel_core
@@ -4788,7 +4807,7 @@ features:
   - V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation
   - V3ProviderHealthStore::cooldown_entries
   - V3ProviderFailureRuntimeHealth::run_due_provider_health_probes
-  - V3ProviderFailureRuntimeHealth::run_exhaustion_rescue_probes
+  - V3ProviderFailureRuntimeHealth::run_cooldown_rescue_probes_for_candidates
   - build_v3_provider_global_probe_target
   - select_v3_expanded_target_with_exhaustion_rescue
   - select_v3_expanded_target_with_admission_rescue
@@ -4858,6 +4877,7 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime runtime_policy_maps_account_and_recoverable_http_classes_to_global_health -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime cooldown_exhaustion --lib -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime later_tier_selection_skips_in_flight_rescue_probes_without_waiting --lib -- --nocapture
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test req09_pool_exhaustion_recovery_blackbox -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime provider_concurrency --lib -- --nocapture
   - npm run test:v3-provider-adaptive-concurrency
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test anthropic_relay_mixed_pool_failover_integration anthropic_relay_provider_concurrency_full_switches_without_waiting -- --exact --nocapture
@@ -4964,6 +4984,8 @@ features:
   - npm run test:v3-hub-relay-runtime-closeout
   - npm run verify:v3-hub-relay-runtime-closeout
   - npm run test:v3-hub-relay-runtime-closeout-red-fixtures
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test req09_relay_witness_owner_blackbox -- --nocapture
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test req09_relay_mixed_failure_blackbox -- --nocapture
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-architecture-docs
@@ -5005,7 +5027,7 @@ features:
   - V3RoutePolicyRuntimeState::discard_request
   - observe_route_turn
   - compile_route_policies
-  - execute_v3_responses_direct_runtime_kernel_core
+  - execute_v3_responses_direct_runtime_kernel_core_resident
   - plan_v3_responses_protocol_execution_with_provider_health
   - execute_v3_direct_runtime_kernel_core
   - V3VirtualRouter::resolve_route_pool_plan
@@ -5176,6 +5198,7 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-server/src/client_sse_transport.rs
   - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+  - v3/crates/routecodex-v3-server/src/executors.rs
   - v3/crates/routecodex-v3-server/src/frame_builders.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
@@ -5192,6 +5215,7 @@ features:
   allowed_paths:
   - v3/crates/routecodex-v3-server/src/client_sse_transport.rs
   - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+  - v3/crates/routecodex-v3-server/src/executors.rs
   - v3/crates/routecodex-v3-server/src/frame_builders.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
@@ -5369,6 +5393,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_extra_tail_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_extra_tests.rs
   resource_bindings:
   - v3.request.normal_payload
@@ -5784,8 +5809,12 @@ features:
   - v3/crates/routecodex-v3-runtime/src/execution_control.rs
   - v3/crates/routecodex-v3-runtime/src/execution_control/tests.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_request_scope.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_request_entrypoints.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+  - v3/scripts/architecture/render-v3-execution-control-payload-architecture.mjs
+  - v3/scripts/tests/v3-execution-control-payload-architecture-red-fixtures.mjs
   resource_bindings:
   - v3.execution.request_lifecycle_control
   - v3.execution.target_plan
@@ -5802,9 +5831,13 @@ features:
   - v3/crates/routecodex-v3-runtime/src/execution_control.rs
   - v3/crates/routecodex-v3-runtime/src/execution_control/tests.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_request_scope.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_request_entrypoints.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+  - v3/scripts/architecture/render-v3-execution-control-payload-architecture.mjs
+  - v3/scripts/tests/v3-execution-control-payload-architecture-red-fixtures.mjs
   - v3/crates/routecodex-v3-runtime/tests
   - docs/architecture
   - docs/goals/v3-execution-control-payload-architecture-audit-*.md
@@ -6090,7 +6123,7 @@ features:
   status: node01_capture_runtime_candidate_full_runner_pending
   change_risk: high
   owner_kind: design_architecture
-  owner_scope: Unified operation runner DAGpipe design, lifecycle manifest, exact ErrorErr01-06 binding, typed owner/release table, RuntimeRequestGraphEntry owner for invocation origin, and first runtime slice. The current runtime candidate implements only Node 01 capture_client_json; later nodes remain pending. The first slice owns one Runtime capture operation; Server HTTP and Responses WebSocket are caller/forwarding boundaries only.
+  owner_scope: Unified operation runner DAGpipe design and incremental cutover. REQ01 capture is the existing runtime slice; REQ02 normalization and its necessary consumer/resource interfaces are design candidates, not wired runtime. Runtime owns request-local fixed slots and finalization; Server carries opaque handles only; Direct views use registered hooks, Relay uses canonical Chat Process, and standard projection remains at Outbound. Later complete operation nodes remain pending.
   owner_crate: routecodex-v3-runtime
   owner_file: docs/design/v3-unified-operation-runner-design.md
   resource_bindings:
@@ -6099,6 +6132,7 @@ features:
   - v3.operation_runner.execution_mode
   - v3.operation_runner.request_origin_kind
   - v3.operation_runner.request_inverse_context
+  - v3.operation_runner.current_field_associations
   - v3.operation_runner.attempt_projection_context
   - v3.operation_runner.attempt_declaration_map
   - v3.operation_runner.explicit_history_pairing
@@ -6139,6 +6173,7 @@ features:
   - compile_v3_operation_runner_graph
   - plan_v3_operation_runner_execution
   - normalize_v3_operation_runner_request_losslessly
+  - govern_v3_operation_runner_chat_request
   - project_v3_operation_runner_standard_provider_request
   - govern_v3_operation_runner_chat_response
   - inverse_project_v3_operation_runner_client_response
@@ -6147,6 +6182,13 @@ features:
   - docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml
   - docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml
   - docs/design/v3-unified-operation-runner-design.md
+  - docs/design/v3-req02-cutover-consumer-contract.md
+  - docs/design/v3-req02-field-profile-admission.md
+  - docs/design/v3-req02-lossless-instruction-segments.md
+  - docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml
+  - docs/design/v3-req02-current-field-associations.md
+  - docs/design/v3-req02-direct-actual-emission-addendum-20261004.md
+  - docs/design/v3-req02-hosted-history-operator-contract-20261005.md
   - docs/goals/v3-unified-operation-runner-astra-r1-plan.md
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-function-map.yml
@@ -6154,17 +6196,55 @@ features:
   - docs/architecture/v3-verification-map.yml
   - v3/scripts/architecture/verify-v3-operation-runner-dagpipe.mjs
   - v3/scripts/tests/v3-operation-runner-red-fixtures.mjs
+  - v3/scripts/architecture/verify-v3-static-hook-registry.mjs
+  - v3/scripts/tests/v3-h1-source-red-fixtures.mjs
   - package.json
   - v3/crates/routecodex-v3-runtime/src/operation_runner
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_01_client_raw.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_responses_items.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_names.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_declaration_emission.rs
+  - v3/crates/provider-compat-core/src/namespace_tools.rs
+  - v3/crates/routecodex-v3-runtime/src/execution_control.rs
+  - v3/crates/routecodex-v3-runtime/src/nodes.rs
+  - v3/crates/routecodex-v3-runtime/src/hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_execution_control.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_request_scope.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_01_client_raw.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_responses_items.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core/request_scope.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime/response_closeout.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
   - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+  - v3/crates/routecodex-v3-server/src/metadata_center.rs
   - v3/crates/routecodex-v3-server/src/websocket.rs
   - v3/crates/routecodex-v3-server/src/executors.rs
   - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
+  - v3/crates/routecodex-v3-server/src/live_snapshot.rs
   - v3/crates/routecodex-v3-server/tests
   forbidden_paths:
   - v3/crates/routecodex-v3-provider-responses/src
@@ -6181,6 +6261,20 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_direct_last_default_projects_after_provider_failure
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server openai_chat_http_entry_completes_responses_tool_round_trip
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_inbound_websocket_projects_json_completed_event_and_enters_runtime
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test req02_namespace_presence --test req02_nested_declarations --test req02_public_normalization --test req02_tool_shapes --no-fail-fast
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test req02_hub_sdk_inbound
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test req02_history_cleanup_owner --test req02_named_output_presence
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test req02_canonical_media_images --test req02_chat_history_images --no-fail-fast
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test req02_successful_response_cross_kind --test req02_successful_response_view --no-fail-fast
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test req02_scope_runtime_consumer --test req02_shared_relay_scope --test req02_direct_scope_edges --test req02_scope_pretransport --no-fail-fast
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test req02_protocol_relay_consumers
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test req02_anthropic_successful_inverse
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test req02_tool_output_current_fields_r28
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test req02_request_scope_lifecycle
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib execution_control
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --tests --no-run
+  - npm run verify:v3-static-hook-registry
+  - npm run test:v3-h1-source-red-fixtures
   - git diff --check
 - feature_id: v3.anthropic_control_text_resp03
   status: source_gate_verified

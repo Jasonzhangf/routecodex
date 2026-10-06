@@ -1,0 +1,13 @@
+# 成功attempt响应consumer作者纠正
+
+父通过同候选公开consumer运行确认两个真实行为红，原始命令实际exit101、0PASS/2FAIL：server/tests/req02_successful_response_cross_kind.rs；父日志.execution/response-cross-kind-author-red.log。这是作者debug，不是review。
+
+1. 原namespaced custom可以在provider投影成flat function。`mapping.emitted_namespace == original.namespace`以及`mapping.emitted_kind == original.kind`的要求违反透明逆向合同。当前公开projector因`attempt_declaration.emitted_identity`拒绝，不能靠把夹具的emitted kind/namespace改为original来造绿。映射关联依据declaration_record_id；emitted字段描述真实provider声明，original字段描述真实客户端声明，两侧允许不同。移除此错误相等要求，按真实映射恢复。
+2. 原非namespaced function改名后，响应当前保留wire_alias，未恢复original_tool。恢复必须覆盖所有有映射工具，不仅namespace工具和custom；未映射普通工具维持原合同。
+3. 不能把原显式null namespace当as_str失败，也不能把缺省/null/string混同。恢复按原presence及值，不按分隔符或模型名猜。保留function/custom完整参数与自由文本、call_id。
+4. 现view-only constructor将metadata/reasoning_summary_policy设None，后续实际caller替换必须显式保留其既有业务投影。业务值留数据面，通过明确的业务context参数或既有字段读取公共helper消费，不把metadata/schema/参数复制进typed控制slots、不从governed tools重新猜identity。
+5. SSE必须经同一provider SSE materializer实际消费typed view/context；JSON恢复后重新frame只证明client framing，不能冒充provider SSE inverse consumer。必要只增加现有materializer的公共with_context overload，委托现有唯一实现，不增第二SSE reducer。
+
+产品修订限定既有request_context_store成功view、anthropic_codec/projection_context、anthropic_codec_tool_projection及provider_stream_materialization的最小typed身份消费与公共委托接口。协议语义与生命周期不变，Runtime caller/REQ06仍由各owner负责。父两项公开回归只读，worker自己的测试补两请求/失败→成功attempt/namespace presence/JSON及真实provider SSE案例。
+
+每命令直接重定向日志并返回原退出码，不再用tail/rg/echo掩盖测试。原作者代码和日志保留，纠正候选未通过前不得组合父或接4444。

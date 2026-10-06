@@ -1,0 +1,43 @@
+{
+  "contract_version": "1",
+  "scope": {
+    "mode": "uncommitted",
+    "commit": "3a72ad81320b1c435b08c0d99343c7c22efa5197",
+    "base": null
+  },
+  "module_boundary_evidence": [
+    {
+      "module": "REQ02 字段配置与结构 binding 实施前设计",
+      "owner": "v3.unified_operation_runner_design；字段 profile owner 负责声明，唯一 operation-runner verifier owner 负责编译准入，字段算子 owner 负责实际变换",
+      "paths": "docs/design/v3-req02-field-profile-admission.md；docs/design/v3-req02-cutover-consumer-contract.md；只读对照 docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml、docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml、v3/scripts/architecture/verify-v3-operation-runner-dagpipe.mjs",
+      "edges": "当前变更只声明实施前合同，未修改可执行 profile、source inventory、verifier 或 Rust。设计要求 Anthropic request.tool_choice、request.tools 与 Gemini request.systemInstruction 的真实结构父字段先进入唯一 source inventory，再允许注册结构算子的逐方向 binding；结构组装使用已有子字段配置，不新增重复业务叶子 consumer。每个 binding 必须经过自身 operator@version、direction、typed profile、source/destination/shape/semantics/transform 校验；配置失败显式终止编译，未知业务值仍经 opaque 路径传递。",
+      "resources": "复用现有 matrix、field profile 与 verifier，不新增字段注册表、第二 canonical schema 或兼容例外。拟补 source inventory 只登记实际父字段，不提升 semantic/projection coverage。optional(string) 缺省合法，有值必须为非空字符串；结构行不能因 consumers 为空而跳过其实际可执行 binding 的检查。",
+      "gates": "本次设计文档 SHA256 与 .execution/profile-design-only-r2-inputs.sha256 一致。只读执行 verify-v3-operation-runner-dagpipe.mjs 成功，证明当前树既有配置及静态声明通过；不能证明尚未纳入当前树的新 profile/schema。设计明确要求后续组合 inventory/profile/verifier、全部 red fixtures、结构 binding 正反例及正式 matrix renderer/parity gate，未把这些待完成验证声明为已完成。"
+    },
+    {
+      "module": "Gemini media 请求归一化与下游消费设计",
+      "owner": "请求字段算子 owner 负责 canonical media 输出及 provenance；Chat Process 负责历史媒体治理；标准 Outbound 与 registered Direct hook 分别负责目标协议投影",
+      "paths": "docs/design/v3-req02-field-profile-admission.md；docs/design/v3-req02-cutover-consumer-contract.md；只读对照 docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml 的 media.inline_data、media.mime_type 字段合同",
+      "edges": "Gemini inlineData.data/mimeType → 公开 REQ02 runner → canonical messages.content.media.inline_data/media.mime_type → 标准 Outbound 或 registered Direct native view → provider 请求 → 客户端响应。设计识别参考字段库仍生成 image_url data URI 的未解决偏差，要求修实际输出与 provenance 位置，禁止只改 manifest 或目的字符串。未知类型、未知兄弟字段与缺 mimeType 保留可转发语义，不通过旧入站转换器恢复旁路。",
+      "resources": "媒体业务值及存在性保留在 canonical payload，provenance 关联真实输出位置；不默认猜 MIME，不裁剪原值。历史图片清理仍由 Chat Process 唯一拥有，当前轮图片保持完整。本次未引入媒体运行实现，也未改变实际 parser/normalizer 接受域。",
+      "gates": "matrix 对 inlineData.data 与 mimeType 的分离映射支持本次设计目标。设计要求公开 runner 的明确输入/外部输出断言，以及真实 Server 入口观察 provider-bound image 和最终响应；内部 provenance 检查只能辅助。媒体黑盒、下游投影及实际工具/响应行为仍明确 open，当前文档准入不替代其实现验证。"
+    },
+    {
+      "module": "REQ02 请求 DAG、Direct/Relay consumer 与响应逆向关联",
+      "owner": "RuntimeRequestGraphEntry 拥有入口；REQ02 拥有原始 inverse/history 初始化；入口/Direct worker 独占 kernel factory caller 接线；既有 Chat Process、Outbound、Direct hooks 与 response owners 保留各自语义责任",
+      "paths": "docs/architecture/dagpipe/v3.operation_runner.request.graph.json；docs/architecture/v3-function-map.yml；docs/architecture/v3-mainline-call-map.yml；docs/architecture/v3-resource-operation-map.yml；docs/architecture/v3-verification-map.yml；docs/architecture/wiki/v3-mainline-caller-flow.md；docs/architecture/wiki/html/v3-mainline-caller-flow.html；docs/design/v3-unified-operation-runner-design.md；docs/design/v3-req02-cutover-consumer-contract.md",
+      "edges": "REQ01 client-json → 经 SDK 编译执行的 REQ02 slice → canonical-request → target/execution planning → 当前 Chat 数据治理 → 标准投影 → transport-request；请求图单源单汇，Error 图独立。修改移除 REQ02、target resolution 与标准投影对 normal_payload 镜像的依赖，改由声明的数据 ARC 传递。拟接线覆盖 HTTP/WS、Relay/Gemini、registered Direct view、既有 JSON/SSE response consumers；原始工具 namespace/name/kind、完整 arguments、call/result 关联通过原请求 pair 与成功 attempt 恢复，禁止 raw-standardized 旁路、重复归一化或 accessor-only 消费。",
+      "resources": "REQ02 首次 RawEntry 成对发布 request_inverse_context 与 explicit_history_pairing，retry/internal_followup 的 AlreadyCanonical 读取原 pair；业务值保留于 payload，typed slots 只承载身份、路径、encoding 与配对引用。resource map 已补 REQ02 对 history pairing 的读取权限。REQ06-owned projection helper 返回业务 payload 与 typed attempt context，响应只消费成功 attempt。",
+      "gates": "只读 dagpipe graph validate 成功：9 nodes、9 edges、9 waves；operation-runner、resource-map、mainline-call-map gates 均成功，git diff --check 无错误，9 个记录输入的 SHA256 全部匹配。静态验证不证明 Operator 编译或 live 接线。现有 R2 review receipt 被限定为 consumer 设计依赖；本次新增结构/media 合同没有借用该回执作为自身实现证据。四协议、Direct/Relay、HTTP/WS、JSON/SSE、opaque 值、真实客户端工具执行与 follow-up 仍列为后续实施必需验收。"
+    },
+    {
+      "module": "请求/attempt 生命周期与阶段证据边界",
+      "owner": "Runtime factory 拥有请求资源创建；RuntimeRequestFinalizer 拥有唯一请求释放；实际 JSON/error 输出或 SSE stream owner 接管 non-Clone guard；任务作者拥有阶段笔记及自有临时资源",
+      "paths": "docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml；docs/design/v3-req02-cutover-consumer-contract.md；docs/goals/req02-profile-design-only-notes-20261003.md；docs/goals/req02-consumer-boundary-20261002.md；docs/evidence/dagpipe/req02-consumer-design-review-receipt-20261003.md；.execution/profile-design-only-gate-r2.log；.execution/profile-design-only-gate-r3.log；.execution/profile-design-only-r2-inputs.sha256",
+      "edges": "真实 requestId → Runtime request-local 固定 slots → 原始 pair 一次发布 → 独立 invocation/attempt → 成功响应消费或 typed error/cancel/drop → attempt cleanup → request finalizer。retry/followup 保留请求资源并开始新 attempt，不制造跨节点回边。JSON/error 消费与 Drop、SSE EOF/Drop、future drop、HTTP/WS disconnect 均有明确释放终点；handle clone 不拥有 finalization。",
+      "resources": "一个 opaque handle 贯穿 V3RequestExecutionControl 与 Server metadata carrier，无跨请求 registry 或第二 MetadataCenter；唯一不可 Clone guard 随实际输出移动，attempt 先于 request 释放。旧 consumer 草稿的 Server 创建资源及 Direct raw 旁路已被新合同明确撤销。节点笔记记录既有 node_modules 链接为本任务待清理资源；当前活动设计树未声明资源收口完成，本次只读审查未创建资源。",
+      "gates": "阶段笔记保留首次 ERR_MODULE_NOT_FOUND: yaml、撤销被后续 exit0 遮蔽的成功声明、取消 R2 审查及修复依赖后独立 gate exit0 的证据。R3 重跑具有明确依赖变化和失败原因，不属于无失效条件的重复验证。当前 scope 为设计文档/maps/graph，Rust 测试、build/install/restart、黑盒工具回合、实现架构 review、merge/push 与资源 cleanup 不作为本次已完成事项，也未被当前证据冒充。"
+    }
+  ],
+  "findings": []
+}

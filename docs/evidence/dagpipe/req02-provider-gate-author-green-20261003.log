@@ -1,0 +1,4 @@
+[verify:v3-provider-action-gate] ok
+- V3 required machine edges: 48
+- every declared symbol exists and every caller body invokes its declared callee
+- V3 map-manifest endpoints, status, symbols, files, and owner bindings are synchronized

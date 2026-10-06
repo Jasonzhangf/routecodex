@@ -31,6 +31,27 @@ fn raw_request_for(
     )
 }
 
+fn invocation_for(
+    request_id: &str,
+    entry: V3HubEntryProtocol,
+) -> routecodex_v3_runtime::operation_runner::RequestInvocationContext {
+    let protocol = match entry {
+        V3HubEntryProtocol::Responses => "responses",
+        V3HubEntryProtocol::Anthropic => "anthropic",
+        V3HubEntryProtocol::Gemini => "gemini",
+        V3HubEntryProtocol::OpenAiChat => "openai_chat",
+    };
+    routecodex_v3_runtime::operation_runner::RequestInvocationContext::new(
+        routecodex_v3_runtime::operation_runner::V3RequestContextHandle::new(
+            request_id.to_string(),
+            protocol.to_string(),
+        ),
+        format!("{request_id}-entry"),
+        format!("{request_id}-attempt"),
+        routecodex_v3_runtime::operation_runner::RequestOriginKind::ClientEntry,
+    )
+}
+
 fn chat_tool_output_content<'a>(payload: &'a Value, call_id: &str) -> Option<&'a str> {
     if let Some(input) = payload.get("input").and_then(Value::as_array) {
         if let Some(item) = input.iter().find(|item| {
@@ -206,6 +227,7 @@ fn protocol_transport_matrix_uses_one_chat_process_governance_path() {
                 .run(
                     raw_request_for(current_tool_round_payload(), entry, transport),
                     &V3HubServertoolRequestProfile::disabled(),
+                    &invocation_for(&format!("multiturn-{entry:?}-{transport:?}"), entry),
                 )
                 .expect("new/current-history tool output must be governed at Req04");
             assert_eq!(new_outcome.tool_output_count(), 1);
@@ -289,6 +311,10 @@ fn apply_patch_tool_output_error_is_preserved_without_continuation_state() {
                 }]
             })),
             &V3HubServertoolRequestProfile::disabled(),
+            &invocation_for(
+                "apply-patch-output-error",
+                V3HubEntryProtocol::Responses,
+            ),
         )
         .unwrap();
     assert_eq!(outcome.tool_output_count(), 1);
@@ -317,6 +343,10 @@ fn apply_patch_legacy_function_call_accepts_custom_output_after_client_projectio
                 }]
             })),
             &V3HubServertoolRequestProfile::disabled(),
+            &invocation_for(
+                "apply-patch-legacy-function-call",
+                V3HubEntryProtocol::Responses,
+            ),
         )
         .unwrap();
     assert_eq!(outcome.tool_output_count(), 1);
@@ -327,30 +357,40 @@ fn apply_patch_legacy_function_call_accepts_custom_output_after_client_projectio
 }
 
 #[test]
-fn request_governance_rejects_orphan_output_wrong_kind_and_missing_call_id() {
+fn request_governance_rejects_orphan_output_and_preserves_missing_call_id() {
     let hooks = compile_v3_hub_relay_request_hooks();
 
     assert!(matches!(
         hooks.run(
             raw_request(json!({"input":[{"type":"function_call_output","call_id":"call_function","output":"x"}]})),
             &V3HubServertoolRequestProfile::disabled(),
+            &invocation_for("orphan-output", V3HubEntryProtocol::Responses),
         ),
         Err(V3HubRelayRequestError::OrphanToolOutput { .. })
     ));
 
-    assert!(matches!(
-        hooks.run(
+    // Kind/name admission is ablated: a result whose call id names a declared
+    // call stays forwardable. An output item without a call id is not a tool
+    // result at all, so REQ02 keeps its bytes as client business data instead
+    // of inventing a proxy error.
+    let preserved = hooks
+        .run(
             raw_request(
-                json!({"input":[{"type":"custom_tool_call_output","output":"missing id"}]})
+                json!({"input":[{"type":"custom_tool_call_output","output":"missing id"}]}),
             ),
             &V3HubServertoolRequestProfile::disabled(),
-        ),
-        Err(V3HubRelayRequestError::ReqInboundInvalid { .. })
-    ));
+            &invocation_for("missing-call-id", V3HubEntryProtocol::Responses),
+        )
+        .expect("a missing call id must stay forwardable client data");
+    assert_eq!(preserved.tool_output_count(), 0);
+    let payload = preserved.payload();
+    assert_eq!(payload["messages"][0]["role"], "user");
+    assert_eq!(payload["messages"][0]["content"], "missing id");
+    assert!(payload["messages"][0].get("tool_call_id").is_none());
 }
 
 #[test]
-fn attachment_history_is_preserved_without_placeholder_cleanup() {
+fn attachment_history_bytes_survive_while_req04_cleans_the_canonical_wire() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let outcome = hooks
         .run(
@@ -363,13 +403,37 @@ fn attachment_history_is_preserved_without_placeholder_cleanup() {
                 ]
             })),
             &V3HubServertoolRequestProfile::disabled(),
+            &invocation_for("attachment-history", V3HubEntryProtocol::Responses),
         )
         .expect("Req04 attachment history governance");
-    let serialized = serde_json::to_string(outcome.payload()).unwrap();
+    let payload = outcome.payload();
 
-    assert!(!serialized.contains("HISTORY"));
-    assert!(serialized.contains("[Image]"));
-    assert!(serialized.contains("data:image/png;base64,CURRENT"));
+    // The registered Req04 Chat Process owner replaces history images on the
+    // canonical wire with the stable placeholder; relay_request does not own
+    // that policy.
+    assert_eq!(
+        payload["messages"][0]["content"],
+        json!([{"type":"text","text":"[Image]"}])
+    );
+    assert_eq!(payload["messages"][2]["content"], "[Image]");
+    // The current turn image stays intact with its exact bytes.
+    assert_eq!(
+        payload["messages"][3]["content"],
+        json!([{"type":"image_url","image_url":{"url":"data:image/png;base64,CURRENT"}}])
+    );
+    // The original client bytes are preserved losslessly, so the inverse
+    // projection can still restore them; relay_request must not silently drop
+    // or rewrite the captured request.
+    let records = payload["routecodex_chat_extension"]["chat_extension_opaque_record"]
+        .as_array()
+        .expect("lossless opaque records must survive governance");
+    assert!(
+        records.iter().any(|record| {
+            record["path"] == "request.input[0]"
+                && record["value"]["content"][0]["image_url"] == "data:image/png;base64,HISTORY"
+        }),
+        "original client image bytes must stay recoverable in the inverse record"
+    );
 }
 
 #[test]
@@ -384,6 +448,7 @@ fn attachment_history_missing_resource_is_preserved_as_client_data() {
                 ]
             })),
             &V3HubServertoolRequestProfile::disabled(),
+            &invocation_for("attachment-missing", V3HubEntryProtocol::Responses),
         )
         .expect("missing attachment metadata must not trigger history cleanup");
     let serialized = serde_json::to_string(outcome.payload()).unwrap();
@@ -569,6 +634,7 @@ fn provider_and_client_payloads_reject_routecodex_control_leakage() {
                 "routecodex_internal":{"debug":true}
             })),
             &V3HubServertoolRequestProfile::disabled(),
+            &invocation_for("side-channel-request", V3HubEntryProtocol::Responses),
         ),
         Err(V3HubRelayRequestError::SideChannelLeaked { .. })
     ));

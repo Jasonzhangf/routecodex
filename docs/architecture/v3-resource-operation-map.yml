@@ -1217,9 +1217,9 @@ resources:
       deltas: { normal_http: 1, recoverable_including_502: -5, account_401_403: -20 }
       cooldown_condition: every typed provider failure blocks the exact providerId+authAlias+model identity immediately; the dynamic cooldown/probe ladder is selected from continuous failure streak and meaningful observed failure rate
       revival_rule: only a successful provider transport probe may remove cooldown state
-      exhaustion_rescue_rule: the complete candidate set may force one single-flight probe per continuous cooldown block; only a successful probe resets that generation
-      generation_state: rescueProbeAttempted remains attached to the providerId+authAlias cooldown block until a successful probe removes the block
-      in_flight_rule: if another request owns a cooldown probe, this request skips the cooled candidate and continues to the selected later tier without waiting
+      exhaustion_rescue_rule: complete eligible-pool exhaustion returns the current request terminal without waiting or resuming; the independent background owner remains the future-request recovery driver, and only a successful semantic probe resets that generation
+      generation_state: rescueProbeAttempted remains attached to the providerId+authAlias cooldown block until a successful probe removes the block; completion is read by later NEW requests from the shared typed store
+      in_flight_rule: if another request owns a cooldown probe, this request skips the cooled candidate and continues to the selected later tier without waiting; complete exhaustion never waits for that probe or for any recovery generation
       dry_run_rule: dry-run never acquires or sends a rescue probe
     allowed_writers: [V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::acquire_provider_cooldown_probe_if_due, V3ProviderHealthStore::acquire_provider_cooldown_rescue_probe, V3ProviderHealthStore::cancel_provider_cooldown_probe_at_generation, V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation]
     allowed_readers: [V3ProviderHealthStore::provider_cooldown_probe_keys, V3ProviderHealthStore::provider_cooldown_probe_keys_due, V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_next_deadline_ms]
@@ -3256,6 +3256,7 @@ resources:
     allowed_writers: [RuntimeRequestGraphEntry]
     allowed_readers:
     - normalize_v3_operation_runner_request_losslessly
+    - govern_v3_operation_runner_chat_request
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, payload_writer, protocol_adapter]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -3272,18 +3273,45 @@ resources:
     identity: [requestId, entryProtocol]
     semantic_contract:
       storage: metadata_center.inbound_inverse_context
+      incremental_storage: Runtime request-local fixed slot referenced by the same opaque Server MetadataCenter/V3RequestExecutionControl handle; no cross-request map or second MetadataCenter
       content: immutable original client entry-protocol field provenance and current request tool identity, namespace, kind, name, and source path/encoding references; remains valid across retry and internal servertool follow-up
       internal_origin_rule: never rebuilt from an internal follow-up payload; request graph re-entry reads the preserved slot and does not replace it
       client_entry_rule: initialized only when request_origin_kind=client_entry
+      publication: original inverse/history pair is published atomically once from RawEntry; successful response consumers use the same request handle
       retry_internal_followup_rule: read and preserved when request_origin_kind=retry or internal_followup; never overwritten from follow-up payload
       payload_rule: arguments and tool business values remain in canonical payload; only identity, paths, and encoding are stored here
     allowed_writers: [normalize_v3_operation_runner_request_losslessly]
-    allowed_readers: [normalize_v3_operation_runner_request_losslessly, project_v3_operation_runner_standard_provider_request, inverse_project_v3_operation_runner_client_response]
+    allowed_readers: [normalize_v3_operation_runner_request_losslessly, govern_v3_operation_runner_chat_request, project_v3_operation_runner_standard_provider_request, inverse_project_v3_operation_runner_client_response]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug]
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: true
     release_point: runtime_request_finalizer
+    binding_status: design_pending
+
+  - resource_id: v3.operation_runner.current_field_associations
+    resource_kind: projection_resource
+    lifecycle: v3.operation_runner.request
+    owner_feature_id: v3.unified_operation_runner_design
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3OperationRunnerGovernChatRequest
+    identity: [requestId, entryProtocol]
+    semantic_contract:
+      storage: existing_Runtime_request_local_fixed_slot_via_same_opaque_handle
+      initial_source: immutable request_inverse_context destinations describe only normalization output layout; first client entry seeds current references before governance
+      content: stable references into original FieldMapping records plus current structural destination paths; never business values
+      writer: the existing Chat Process node delegates every actual structural edit to the registered field library and publishes canonical data with its current references together
+      direct_rule: Direct branch registers pass-through current references without rewriting business payload
+      reentry: retry and internal followup retain original pair and current references; never rebuild current references from initial paths after layout changes
+      projection: Direct and standard Outbound read current references; actual emit points record original record_id into the attempt map; local view transforms never write this request slot
+      source_boundary: no name_schema_model_matching; new origins do not invent original client record IDs
+    allowed_writers: [govern_v3_operation_runner_chat_request]
+    allowed_readers: [govern_v3_operation_runner_chat_request, project_v3_operation_runner_standard_provider_request]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, project_v3_operation_runner_standard_provider_request]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: true
+    release_point: runtime_request_finalizer_after_attempt_cleanup
     binding_status: design_pending
 
   - resource_id: v3.operation_runner.attempt_projection_context
@@ -3312,8 +3340,14 @@ resources:
     semantic_contract:
       writer: project_v3_operation_runner_standard_provider_request
       content: collision_safe_bijection_for_tools_actually_emitted_for_this_attempt
+      incremental_owner: the existing standard Outbound and registered Direct view delegate to the REQ06-owned project_canonical_request helper under this same projection owner; response adapters read the successful attempt map, never the planned or failed attempt
+      actual_emission_owner: the existing standard Responses Outbound emit point and the registered Direct request projection hook write this map at the same traversal that actually pushes provider tool declarations; no provider wire semantic mapper is authorized to rewrite the map or the emitted declaration shape
+      direct_return_contract: responses_direct_request_projection_hook_with_key_catalog_and_view returns the wire payload and an AttemptContext built from the same emitted mappings under the existing request guard; it delegates declaration/projection writing to the existing project_canonical_request owner and is not a second writer
+      standard_outbound_return_contract: project_canonical_request returns the standard payload and the same AttemptContext separately for Direct and Relay; provider wire construction consumes the already-emitted body and performs only wire/auth/transport concerns
+      wire_transport_only: routecodex-v3-provider-responses wire.rs must not perform namespace/custom/history semantic rewriting or declaration-less convention fallback
       new_call_rule: Chat Process Resp03 may authorize a new provider call only from this successful attempt's map
       inverse_rule: RespOutbound restores original client identity from this map only for the successful attempt
+      publication_rule: publish_successful_attempt happens only after the single JSON decode and classify_v3_provider_terminal_admission pass; failed attempts never enter the successful view
       payload_rule: tool arguments and inputs remain opaque business payload; the map stores identity, namespace, kind, encoding, and call/output references only
     allowed_writers: [project_v3_operation_runner_standard_provider_request]
     allowed_readers: [normalize_v3_operation_runner_provider_response, govern_v3_operation_runner_chat_response, inverse_project_v3_operation_runner_client_response]
@@ -3340,7 +3374,7 @@ resources:
       resp03_reader: Chat Process Resp03 reads explicit history pairing for validation and pass-through only
       payload_rule: argument and output values remain in canonical payload; only identity and pairing references are control state
     allowed_writers: [normalize_v3_operation_runner_request_losslessly]
-    allowed_readers: [govern_v3_operation_runner_chat_request, project_v3_operation_runner_standard_provider_request, govern_v3_operation_runner_chat_response]
+    allowed_readers: [normalize_v3_operation_runner_request_losslessly, govern_v3_operation_runner_chat_request, project_v3_operation_runner_standard_provider_request, govern_v3_operation_runner_chat_response]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -3529,6 +3563,13 @@ resources:
     owner_crate: routecodex-v3-config
     owner_node: V3Config05ManifestPublished
     identity: [contractId, schemaVersion, fieldSets, operatorRegistry]
+    hosted_history_contract:
+      source: docs/design/v3-req02-hosted-history-operator-contract-20261005.md
+      static_configuration: typed hosted_history_cases on request_input_shape_branch; protocol target encodings are configured, not model/provider guesses
+      business_value_owner: existing canonical request payload holds one current native hosted event; typed references hold paths/identity only
+      projection_owner: registered field library and existing standard Outbound history emitter; no new resource or graph node
+      inverse_owner: registered current history projection reads current association, never original opaque business values
+      admission_status: design_admitted_implementation_pending
     allowed_writers: [publish_v3_operation_runner_field_profile]
     allowed_readers: [compile_v3_operation_runner_graph, pipeline_runtime::compile, verifyV3OperationRunnerDagpipe]
     forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, dynamic_loader]

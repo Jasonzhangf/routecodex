@@ -1,16 +1,13 @@
 use crate::V3ProviderError;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
-use provider_compat_core::namespace_tools::{
-    flatten_namespace_tool_for_provider, namespace_tool_name_map,
-    push_unique_provider_function_tool,
-};
+use provider_compat_core::namespace_tools::push_unique_provider_function_tool;
 use routecodex_v3_config::internal::is_v3_gpt_family_model;
 use routecodex_v3_config::{V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind};
 use serde_json::{json, Map, Value};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 
-/// Protocol name recognized by the shared namespace-tool flattener for Responses wire
-/// function shape (`{type:"function", name, description?, parameters?, strict?}`).
+/// Protocol name recognized by the shared provider function-tool helper for the
+/// Responses wire function shape (`{type:"function", name, ...}`).
 const RESPONSES_WIRE_PROTOCOL_NAME: &str = "openai-responses";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -185,11 +182,22 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
             actual_model,
         });
     }
-    let mut body = expand_namespace_tools_in_responses_wire_body(
-        &request_id,
-        &target.provider_type,
-        current_request_body,
-    )?;
+    // Namespace/custom declaration expansion and historical call-name
+    // conversion are owned by the request projection stage. This wire only
+    // applies the declared provider-private function-tool shape and then
+    // deduplicates the final provider declarations.
+    let mut body = current_request_body;
+    if target.provider_type.trim() == "openai_chat" {
+        if let Some(tools) = body.get("tools").and_then(Value::as_array).cloned() {
+            if let Some(object) = body.as_object_mut() {
+                object.insert(
+                    "tools".to_string(),
+                    Value::Array(normalize_openai_chat_function_tools(&request_id, tools)?),
+                );
+            }
+        }
+    }
+    body = deduplicate_provider_declaration_tools(&request_id, body)?;
     normalize_cc_sol_empty_tool_search_results(&mut body, &target);
     normalize_deepseek_thinking_tool_choice(&mut body, &target);
     // 请求侧 reasoning wire 兜底（非 gpt 目标，每次请求必经）：
@@ -703,301 +711,40 @@ fn normalize_cc_sol_empty_tool_search_results(
     }
 }
 
-/// Responses wire tools only support provider-native tool types; a Codex `type=namespace`
-/// container (MCP tool discovery) is not a standard Responses tool and fails strict providers.
-/// Flatten each namespace child into a plain `function` tool, preserving order and child
-/// name/description/parameters/strict, so no `namespace` container crosses the provider wire.
-///
-/// The expanded `function` shape follows the target provider's native tool convention:
-/// `responses` providers (OpenAI Responses standard) receive the flat form
-/// (`{"type":"function","name":...}`), while `openai_chat` providers (Chat-style gateways
-/// such as Console Go, whose `/v1/responses` endpoint reuses the Chat tool serde) receive
-/// the nested form (`{"type":"function","function":{...}}`).
-fn expand_namespace_tools_in_responses_wire_body(
+/// Deduplicate the final provider function declarations. Identical duplicates
+/// collapse to one; conflicting declarations for the same provider tool name
+/// are a real contract conflict and fail. Namespace/custom declaration
+/// expansion and historical call-name conversion are owned by the request
+/// projection stage, so this pass only sees already-projected provider tools.
+fn deduplicate_provider_declaration_tools(
     request_id: &str,
-    provider_type: &str,
     mut body: Value,
 ) -> Result<Value, V3ProviderError> {
     let Some(tools) = body.get("tools").and_then(Value::as_array).cloned() else {
-        rewrite_namespace_qualified_call_names_from_convention(&mut body, provider_type);
         return Ok(body);
     };
-    let has_namespace = tools
-        .iter()
-        .any(|tool| tool.get("type").and_then(Value::as_str) == Some("namespace"));
-    if !has_namespace {
-        rewrite_namespace_qualified_call_names_from_convention(&mut body, provider_type);
-    }
-    let protocol = match provider_type {
-        "openai_chat" => "openai-chat",
-        _ => RESPONSES_WIRE_PROTOCOL_NAME,
-    };
-    let mut expanded = Vec::with_capacity(tools.len());
-    let mut namespace_name_map = HashMap::new();
+    let mut unique = Vec::with_capacity(tools.len());
+    let mut indexes = HashMap::new();
     for tool in tools {
-        if let Some(mapping) = namespace_tool_name_map(&tool).map_err(|detail| {
-            V3ProviderError::NamespaceToolFlattenFailed {
-                request_id: request_id.to_string(),
-                detail,
-            }
-        })? {
-            namespace_name_map.extend(mapping);
+        if tool.get("type").and_then(Value::as_str) != Some("function") {
+            unique.push(tool);
+            continue;
         }
-        match flatten_namespace_tool_for_provider(protocol, &tool) {
-            Ok(Some(children)) => expanded.extend(children),
-            Ok(None) => expanded.push(tool),
-            Err(detail) => {
-                return Err(V3ProviderError::NamespaceToolFlattenFailed {
-                    request_id: request_id.to_string(),
-                    detail,
-                })
-            }
-        }
-    }
-    if provider_type == "openai_chat" {
-        expanded = normalize_openai_chat_function_tools(request_id, expanded)?;
-    }
-    let mut expanded_tool_indexes = HashMap::new();
-    let mut unique_expanded = Vec::with_capacity(expanded.len());
-    for tool in expanded {
         push_unique_provider_function_tool(
-            &mut unique_expanded,
-            &mut expanded_tool_indexes,
+            &mut unique,
+            &mut indexes,
             tool,
-            protocol,
+            RESPONSES_WIRE_PROTOCOL_NAME,
         )
         .map_err(|detail| V3ProviderError::NamespaceToolFlattenFailed {
             request_id: request_id.to_string(),
             detail,
         })?;
     }
-    body["tools"] = Value::Array(unique_expanded);
-    rewrite_namespace_qualified_call_names(&mut body, &namespace_name_map);
-    // Historical inputs may carry an MCP-qualified call even when the current
-    // tool declaration is incomplete or omitted its child. Apply the same
-    // validated convention mapping as the no-tools path so strict providers
-    // never receive a dotted function name.
-    rewrite_namespace_qualified_call_names_from_convention(&mut body, provider_type);
+    if let Some(object) = body.as_object_mut() {
+        object.insert("tools".to_string(), Value::Array(unique));
+    }
     Ok(body)
-}
-
-fn rewrite_namespace_qualified_call_names(body: &mut Value, names: &HashMap<String, String>) {
-    fn rewrite_call_object(value: &mut Value, names: &HashMap<String, String>) {
-        let Some(object) = value.as_object_mut() else {
-            return;
-        };
-        if let Some(Value::String(name)) = object.get_mut("name") {
-            if let Some(mapped) = names.get(name.as_str()) {
-                *name = mapped.clone();
-            }
-        }
-        if let Some(function) = object.get_mut("function").and_then(Value::as_object_mut) {
-            if let Some(Value::String(name)) = function.get_mut("name") {
-                if let Some(mapped) = names.get(name.as_str()) {
-                    *name = mapped.clone();
-                }
-            }
-        }
-    }
-
-    if let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) {
-        for item in input {
-            if matches!(
-                item.get("type").and_then(Value::as_str),
-                Some("function_call" | "custom_tool_call" | "tool_call" | "tool_use")
-            ) {
-                rewrite_call_object(item, names);
-            }
-        }
-    }
-    if let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) {
-        for message in messages {
-            let Some(tool_calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut)
-            else {
-                continue;
-            };
-            for tool_call in tool_calls {
-                if tool_call.get("type").and_then(Value::as_str) == Some("function") {
-                    rewrite_call_object(tool_call, names);
-                }
-            }
-        }
-    }
-}
-
-fn rewrite_namespace_qualified_call_names_from_convention(body: &mut Value, provider_type: &str) {
-    let declared_flat_dotted_names = collect_declared_flat_dotted_tool_names(body, provider_type);
-    if let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) {
-        for item in input {
-            let kind = item.get("type").and_then(Value::as_str);
-            if !matches!(
-                kind,
-                Some("function_call" | "custom_tool_call" | "tool_call" | "tool_use")
-            ) {
-                continue;
-            }
-            let Some(name) = item.get("name").and_then(Value::as_str) else {
-                continue;
-            };
-            if let Some(mapped) =
-                map_known_provider_call_name_unless_declared(name, &declared_flat_dotted_names)
-            {
-                item["name"] = Value::String(mapped);
-            }
-        }
-    }
-    if let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) {
-        for message in messages {
-            if let Some(tool_calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut) {
-                for tool_call in tool_calls {
-                    if tool_call.get("type").and_then(Value::as_str) != Some("function") {
-                        continue;
-                    }
-                    if let Some(function) =
-                        tool_call.get_mut("function").and_then(Value::as_object_mut)
-                    {
-                        map_call_name_from_convention(function, &declared_flat_dotted_names);
-                    }
-                }
-            }
-            if let Some(content) = message.get_mut("content").and_then(Value::as_array_mut) {
-                for part in content {
-                    if matches!(
-                        part.get("type").and_then(Value::as_str),
-                        Some("tool_use" | "function_call" | "custom_tool_call")
-                    ) {
-                        map_call_name_from_convention(
-                            part.as_object_mut()
-                                .expect("matched tool call must be an object"),
-                            &declared_flat_dotted_names,
-                        );
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn collect_declared_flat_dotted_tool_names(body: &Value, provider_type: &str) -> HashSet<String> {
-    let mut names = HashSet::new();
-    collect_flat_dotted_tool_names(body.get("tools"), provider_type, &mut names);
-    for item in body
-        .get("input")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        if item.get("type").and_then(Value::as_str) == Some("additional_tools") {
-            collect_flat_dotted_tool_names(item.get("tools"), provider_type, &mut names);
-        }
-    }
-    names
-}
-
-fn collect_flat_dotted_tool_names(
-    tools: Option<&Value>,
-    provider_type: &str,
-    names: &mut HashSet<String>,
-) {
-    for tool in tools.and_then(Value::as_array).into_iter().flatten() {
-        let Some(object) = tool.as_object() else {
-            continue;
-        };
-        let is_function = object.get("type").and_then(Value::as_str) == Some("function");
-        let is_anthropic_custom = provider_type == "anthropic"
-            && object.get("type").is_none()
-            && object
-                .get("input_schema")
-                .and_then(Value::as_object)
-                .is_some();
-        if !is_function && !is_anthropic_custom {
-            continue;
-        }
-        let name = object.get("name").and_then(Value::as_str).or_else(|| {
-            object
-                .get("function")
-                .and_then(Value::as_object)
-                .and_then(|function| function.get("name"))
-                .and_then(Value::as_str)
-        });
-        let Some(name) = name else {
-            continue;
-        };
-        if name.contains('.') {
-            names.insert(name.to_string());
-        }
-    }
-}
-
-fn map_call_name_from_convention(
-    object: &mut Map<String, Value>,
-    declared_flat_dotted_names: &HashSet<String>,
-) {
-    let Some(name) = object.get("name").and_then(Value::as_str) else {
-        return;
-    };
-    if let Some(mapped) =
-        map_known_provider_call_name_unless_declared(name, declared_flat_dotted_names)
-    {
-        object.insert("name".to_string(), Value::String(mapped));
-    }
-}
-
-fn map_known_provider_call_name_unless_declared(
-    name: &str,
-    declared_flat_dotted_names: &HashSet<String>,
-) -> Option<String> {
-    if declared_flat_dotted_names.contains(name) {
-        return None;
-    }
-    map_known_provider_call_name(name)
-}
-
-fn map_known_provider_call_name(name: &str) -> Option<String> {
-    let legacy_mcp_name = name
-        .strip_prefix("functions.mcp__")
-        .map(|rest| format!("mcp__{rest}"));
-    let candidate = legacy_mcp_name.as_deref().unwrap_or(name);
-    map_known_namespace_qualified_call_name(candidate)
-        .or_else(|| map_known_internal_qualified_call_name(candidate))
-        .or(legacy_mcp_name)
-}
-
-fn map_known_internal_qualified_call_name(name: &str) -> Option<String> {
-    let (namespace, child) = name.split_once('.')?;
-    if child.is_empty()
-        || child.contains('.')
-        || !is_namespace_component(namespace)
-        || !is_namespace_component(child)
-    {
-        return None;
-    }
-    match namespace {
-        "functions" | "servertool" | "mcp" | "native" | "multi_agent_v1" => {
-            Some(format!("{namespace}__{child}"))
-        }
-        _ => None,
-    }
-}
-
-fn map_known_namespace_qualified_call_name(name: &str) -> Option<String> {
-    let remainder = name.strip_prefix("mcp__")?;
-    let (namespace, child) = remainder.split_once('.')?;
-    if namespace.is_empty()
-        || child.is_empty()
-        || child.contains('.')
-        || !is_namespace_component(namespace)
-        || !is_namespace_component(child)
-    {
-        return None;
-    }
-    Some(format!("mcp__{namespace}__{child}"))
-}
-
-fn is_namespace_component(value: &str) -> bool {
-    value
-        .bytes()
-        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
 /// Console Go (`openai_chat`) 的 `/v1/responses` 端点使用 Chat 风格工具 serde 的变体：

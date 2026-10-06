@@ -1,0 +1,13 @@
+# REQ02 子声明kind presence作者纠正
+
+继续本任务独占树 /Volumes/Intel/playground/routecodex/req02-nested-declarations-20261003，base最新main75cab8267、前child29942已真实exit0，产物保留。你不是独自工作；另一worker写独立GCM harness。全新GCM，无resume/fork。父已逐文件审本树差异，不能把已通过用例重复审计当推进。
+
+现有绿证据：tool_shapes4PASS、nested_declarations2PASS、namespace_presence2PASS、public_normalization5PASS、operation_runner51PASS，原红与结果已落盘。无需重跑未改输入。作者发现本次新增push_openai_like_child_declaration使用openai_like_tool_identity的历史默认kind=function，因此新子项缺type或type=null会被推断为function。这是本次新增的业务身份猜测，不能接线。旧顶层kind默认属于未触及历史行为，当前不要扩范围。
+
+唯一可写：library.rs新增push_openai_like_child_declaration helper；server/tests/req02_nested_declarations.rs中新增公开回归；docs/goals/req02-nested-kind-correction-result-20261003.md。所有路径在本树，其他产品/test/profile/maps/graph只读。不要改已有测试断言或未知类型业务payload。
+
+先添加公开consumer回归：namespace容器tools同时含显式function、显式custom、缺type但有name的未知object、type=null未知object、其他unknown type；所有原始values/siblings在canonical工具列表和container opaque记录精确保持，typed子声明只由原项显式function/custom构造。缺type和type=null不得被记为function；控制资源不存schema/参数。把容器name缺省与显式null及字符串关联也作为新用例的实际presence断言，不猜namespace或创建合成名字。
+
+先单独运行CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-server --test req02_nested_declarations -- --nocapture取得新真实红。然后在child helper读取原object的明确type；只有显式function/custom才生成known typed引用，其他项按既有完整opaque业务保留合同处理，不加拒绝、不引入fallback、第二扫描或protocol/model分支。复用同一原name提取owner，不复制语义。
+
+修改后分别运行nested_declarations、tool_shapes、namespace_presence、public_normalization四公开tests及operation_runner开发filter，均真实exit0才能报绿；每命令单独日志留本树.execution并保留原错，不写通用/tmp名字导致别的worker覆盖。git diff --check单独退出。完成iff：新行为红绿、最小diff、全部受影响回归实结果、exact library/test/profile hashes与结果文件；只证明公开归一化，不称HTTP/WS/实际tools或节点交付。结果落盘立即退出，不commit/merge/push/install/restart。

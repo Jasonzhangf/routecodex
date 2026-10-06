@@ -7,10 +7,15 @@ use crate::projection_drop_log::{
 };
 
 use super::anthropic_request_field_projection::project_chat_store_to_anthropic_wire;
+use super::request_outbound_builtin_tool_projection::is_openai_responses_hosted_web_search_tool;
 use super::request_outbound_builtin_tool_projection::project_openai_chat_provider_tools_for_web_search_mode_recording;
-use super::request_outbound_builtin_tool_projection::project_openai_responses_custom_tools_to_function_schema;
-use super::request_outbound_builtin_tool_projection::project_openai_responses_hosted_web_search_for_selected_target;
+use super::request_outbound_builtin_tool_projection::project_openai_responses_hosted_web_search_options_for_selected_target;
 use super::request_outbound_builtin_tool_projection::promote_tool_search_output_tools_to_provider_tools;
+use super::request_outbound_builtin_tool_projection::provider_tool_declaration_sources;
+use super::request_outbound_declaration_emission::StandardOutboundDeclarationObserver;
+use super::request_outbound_declaration_emission::{
+    emitted_declaration_kinds, rewrite_direct_history_call_names,
+};
 use super::request_outbound_metadata::{
     project_openai_chat_reasoning_context_policy,
     project_openai_chat_reasoning_effort_from_reasoning,
@@ -20,10 +25,10 @@ use super::request_outbound_metadata::{
 use std::collections::BTreeSet;
 #[path = "request_outbound_responses_items.rs"]
 mod request_outbound_responses_items;
-use self::request_outbound_responses_items::{
-    chat_content_to_responses_content, chat_tool_call_to_responses_input_item,
-    chat_tool_result_to_responses_input_item,
-};
+pub(crate) use self::request_outbound_responses_items::build_responses_input_from_chat_messages;
+use self::request_outbound_responses_items::build_responses_input_from_chat_messages_with_hosted_emissions;
+use provider_compat_core::namespace_tools::flatten_namespace_tool_for_provider_with_sources;
+use provider_compat_core::namespace_tools::namespace_tool_name_map;
 pub(crate) fn build_v3_openai_chat_standard_request_from_chat_canonical(
     payload: &Value,
 ) -> Result<Value, String> {
@@ -48,9 +53,10 @@ pub(crate) fn build_v3_openai_chat_standard_request_from_chat_canonical_recordin
         routecodex_v3_config::V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
         true,
         drop_context,
+        None,
     )
 }
-pub(crate) fn build_v3_openai_chat_standard_request_for_selected_web_search_mode(
+pub fn build_v3_openai_chat_standard_request_for_selected_web_search_mode(
     payload: &Value,
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
     has_web_search_capability: bool,
@@ -82,12 +88,171 @@ pub(crate) fn build_v3_openai_chat_standard_request_for_selected_web_search_mode
         web_search_execution_mode,
         has_web_search_capability,
         drop_context,
+        None,
+    )
+}
+
+/// Standard Chat provider request plus the typed declaration mappings produced
+/// while emitting provider tools. The declaration list is returned physically
+/// separate from the payload; callers bind it into the attempt declaration map.
+///
+/// `inverse` is the request's original inverse context and `current` is the
+/// request's current field association slot. Each emitted provider declaration
+/// is associated with the original canonical source tool that currently lives
+/// at the emitted structural path; the immutable inverse destination is never
+/// used for post-governance matching. The payload is byte-identical to the
+/// observer-free standard builder.
+pub(crate) fn build_v3_openai_chat_standard_request_from_chat_canonical_with_declarations_inner(
+    payload: &Value,
+    inverse: &crate::operation_runner::RequestInverseContext,
+    current: &crate::operation_runner::CurrentFieldAssociations,
+    model_id: Option<&str>,
+    web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
+    has_web_search_capability: bool,
+    drop_context: &V3ProjectionDropContext,
+) -> Result<
+    (
+        Value,
+        Vec<V3ProjectionDropRecord>,
+        Vec<crate::operation_runner::ToolMappingReference>,
+    ),
+    String,
+> {
+    if payload.get("messages").and_then(Value::as_array).is_none() {
+        return Err("OpenAI Chat provider wire requires Chat canonical messages".to_string());
+    }
+    let mut observer = StandardOutboundDeclarationObserver::new(inverse, current);
+    let hosted_emissions =
+        crate::operation_runner::project_hosted_history_emissions(payload, inverse, current)?;
+    let payload = crate::operation_runner::project_canonical_standard_view(payload)?;
+    let (normalized, drops) = normalize_openai_chat_messages_payload_with_hosted_history(
+        &payload,
+        model_id,
+        web_search_execution_mode,
+        has_web_search_capability,
+        drop_context,
+        Some(&mut observer),
+        &hosted_emissions,
+        inverse.entry_protocol == "responses",
+    )?;
+    Ok((normalized, drops, observer.into_mappings()))
+}
+
+pub(crate) fn build_v3_openai_chat_standard_request_from_chat_canonical_with_declarations(
+    payload: &Value,
+    inverse: &crate::operation_runner::RequestInverseContext,
+    current: &crate::operation_runner::CurrentFieldAssociations,
+) -> Result<(Value, Vec<crate::operation_runner::ToolMappingReference>), String> {
+    let (payload, _drops, declarations) =
+        build_v3_openai_chat_standard_request_from_chat_canonical_with_declarations_inner(
+            payload,
+            inverse,
+            current,
+            None,
+            routecodex_v3_config::V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
+            true,
+            &V3ProjectionDropContext::disabled(),
+        )?;
+    Ok((payload, declarations))
+}
+
+pub(crate) fn build_v3_openai_chat_standard_request_from_chat_canonical_for_selected_with_declarations(
+    payload: &Value,
+    inverse: &crate::operation_runner::RequestInverseContext,
+    current: &crate::operation_runner::CurrentFieldAssociations,
+    model_id: Option<&str>,
+    web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
+    has_web_search_capability: bool,
+) -> Result<
+    (
+        Value,
+        Vec<V3ProjectionDropRecord>,
+        Vec<crate::operation_runner::ToolMappingReference>,
+    ),
+    String,
+> {
+    build_v3_openai_chat_standard_request_from_chat_canonical_with_declarations_inner(
+        payload,
+        inverse,
+        current,
+        model_id,
+        web_search_execution_mode,
+        has_web_search_capability,
+        &V3ProjectionDropContext::disabled(),
     )
 }
 pub(crate) fn build_v3_openai_responses_standard_request_from_chat_canonical(
     payload: &Value,
 ) -> Result<Value, String> {
     build_v3_openai_responses_standard_request_for_selected_target(payload, true)
+}
+
+/// Standard Responses provider request plus the typed declaration mappings
+/// produced while emitting the preserved Responses tool declarations.
+///
+/// The observer is threaded through the same Responses projection used by the
+/// observer-free builder. Namespace containers stay in the payload; their
+/// emitted children are recorded at their structural destination paths. Origin
+/// identity comes from the request's current field association slot, never from
+/// the immutable inverse destination.
+fn build_v3_openai_responses_standard_request_from_chat_canonical_with_declarations_inner(
+    payload: &Value,
+    inverse: &crate::operation_runner::RequestInverseContext,
+    current: &crate::operation_runner::CurrentFieldAssociations,
+    has_web_search_capability: bool,
+) -> Result<
+    (
+        Value,
+        Vec<V3ProjectionDropRecord>,
+        Vec<crate::operation_runner::ToolMappingReference>,
+    ),
+    String,
+> {
+    let hosted_emissions =
+        crate::operation_runner::project_hosted_history_emissions(payload, inverse, current)?;
+    let payload = crate::operation_runner::project_canonical_standard_view(payload)?;
+    let mut observer = StandardOutboundDeclarationObserver::new(inverse, current);
+    let (projected, drops) =
+        build_v3_openai_responses_standard_request_for_selected_target_with_observer_and_drops_and_emissions(
+            &payload,
+            has_web_search_capability,
+            Some(&mut observer),
+            Some(hosted_emissions.as_slice()),
+        )?;
+    Ok((projected, drops, observer.into_mappings()))
+}
+
+pub(crate) fn build_v3_openai_responses_standard_request_from_chat_canonical_with_declarations(
+    payload: &Value,
+    inverse: &crate::operation_runner::RequestInverseContext,
+    current: &crate::operation_runner::CurrentFieldAssociations,
+) -> Result<(Value, Vec<crate::operation_runner::ToolMappingReference>), String> {
+    let (payload, _drops, declarations) =
+        build_v3_openai_responses_standard_request_from_chat_canonical_with_declarations_inner(
+            payload, inverse, current, true,
+        )?;
+    Ok((payload, declarations))
+}
+
+pub(crate) fn build_v3_openai_responses_standard_request_from_chat_canonical_for_selected_with_declarations(
+    payload: &Value,
+    inverse: &crate::operation_runner::RequestInverseContext,
+    current: &crate::operation_runner::CurrentFieldAssociations,
+    has_web_search_capability: bool,
+) -> Result<
+    (
+        Value,
+        Vec<V3ProjectionDropRecord>,
+        Vec<crate::operation_runner::ToolMappingReference>,
+    ),
+    String,
+> {
+    build_v3_openai_responses_standard_request_from_chat_canonical_with_declarations_inner(
+        payload,
+        inverse,
+        current,
+        has_web_search_capability,
+    )
 }
 
 pub(crate) fn build_v3_openai_responses_standard_request_for_selected_target(
@@ -109,6 +274,32 @@ pub(crate) fn build_v3_openai_responses_standard_request_for_selected_target_wit
     payload: &Value,
     has_web_search_capability: bool,
 ) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
+    build_v3_openai_responses_standard_request_for_selected_target_with_observer_and_drops(
+        payload,
+        has_web_search_capability,
+        None,
+    )
+}
+
+fn build_v3_openai_responses_standard_request_for_selected_target_with_observer_and_drops(
+    payload: &Value,
+    has_web_search_capability: bool,
+    observer: Option<&mut StandardOutboundDeclarationObserver<'_>>,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
+    build_v3_openai_responses_standard_request_for_selected_target_with_observer_and_drops_and_emissions(
+        payload,
+        has_web_search_capability,
+        observer,
+        None,
+    )
+}
+
+fn build_v3_openai_responses_standard_request_for_selected_target_with_observer_and_drops_and_emissions(
+    payload: &Value,
+    has_web_search_capability: bool,
+    mut observer: Option<&mut StandardOutboundDeclarationObserver<'_>>,
+    hosted_emissions: Option<&[crate::operation_runner::HostedHistoryEmission]>,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
     if payload.get("previous_response_id").is_some() {
         return Err(
             "UnmappedOutboundFields target_protocol=responses paths=$.previous_response_id"
@@ -116,8 +307,13 @@ pub(crate) fn build_v3_openai_responses_standard_request_for_selected_target_wit
         );
     }
     let (mut projected, drops) =
-        build_v3_openai_responses_request_from_chat_canonical_with_drops(payload)?;
-    project_openai_responses_hosted_web_search_for_selected_target(
+        build_v3_openai_responses_request_from_chat_canonical_with_drops_and_emissions(
+            payload,
+            has_web_search_capability,
+            observer.as_mut().map(|observer| &mut **observer),
+            hosted_emissions,
+        )?;
+    project_openai_responses_hosted_web_search_options_for_selected_target(
         &mut projected,
         has_web_search_capability,
     );
@@ -127,7 +323,7 @@ pub(crate) fn build_v3_openai_responses_standard_request_for_selected_target_wit
 fn build_v3_openai_responses_request_from_chat_canonical(payload: &Value) -> Result<Value, String> {
     let drop_context = V3ProjectionDropContext::disabled();
     let (value, mut drops) =
-        build_v3_openai_responses_request_from_chat_canonical_with_drops(payload)?;
+        build_v3_openai_responses_request_from_chat_canonical_with_drops(payload, true, None)?;
     drop_context.restamp_and_emit(&mut drops);
     Ok(value)
 }
@@ -135,6 +331,22 @@ fn build_v3_openai_responses_request_from_chat_canonical(payload: &Value) -> Res
 /// non-error carrier：把投影阶段的丢弃记录交给请求作用域盖章落盘。
 fn build_v3_openai_responses_request_from_chat_canonical_with_drops(
     payload: &Value,
+    has_web_search_capability: bool,
+    observer: Option<&mut StandardOutboundDeclarationObserver<'_>>,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
+    build_v3_openai_responses_request_from_chat_canonical_with_drops_and_emissions(
+        payload,
+        has_web_search_capability,
+        observer,
+        None,
+    )
+}
+
+fn build_v3_openai_responses_request_from_chat_canonical_with_drops_and_emissions(
+    payload: &Value,
+    has_web_search_capability: bool,
+    mut observer: Option<&mut StandardOutboundDeclarationObserver<'_>>,
+    hosted_emissions: Option<&[crate::operation_runner::HostedHistoryEmission]>,
 ) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
     if payload.get("reasoning").is_some() {
         return Err(
@@ -156,7 +368,7 @@ fn build_v3_openai_responses_request_from_chat_canonical_with_drops(
     }
     responses_payload.insert(
         "input".to_string(),
-        build_responses_input_from_chat_messages(messages)?,
+        build_responses_input_from_chat_messages_with_hosted_emissions(messages, hosted_emissions)?,
     );
     for key in [
         "tools",
@@ -196,15 +408,114 @@ fn build_v3_openai_responses_request_from_chat_canonical_with_drops(
         "truncation",
         "web_search_options",
     ] {
-        if let Some(value) = projected_source.get(key) {
-            responses_payload.insert(key.to_string(), value.clone());
+        if key != "tools" {
+            if let Some(value) = projected_source.get(key) {
+                responses_payload.insert(key.to_string(), value.clone());
+            }
         }
     }
+    if let Some(tools) = project_openai_responses_tools_with_emission(
+        payload,
+        has_web_search_capability,
+        observer.as_mut().map(|observer| &mut **observer),
+    )? {
+        responses_payload.insert("tools".to_string(), tools);
+    }
+    // The same declaration traversal converts historical calls to the emitted
+    // flat provider names and representation. The provider wire no longer
+    // rewrites history, and declaration-less convention guessing is not
+    // performed.
+    let mut namespace_names = std::collections::HashMap::new();
+    if let Some(tools) = payload.get("tools").and_then(Value::as_array) {
+        for tool in tools {
+            if let Some(mapping) = namespace_tool_name_map(tool)? {
+                namespace_names.extend(mapping);
+            }
+        }
+    }
+    let emitted_kinds = emitted_declaration_kinds(
+        responses_payload
+            .get("tools")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]),
+    );
+    let mut responses_payload = Value::Object(responses_payload);
+    rewrite_direct_history_call_names(&mut responses_payload, &namespace_names, &emitted_kinds);
     Ok((
-        normalize_responses_payload_for_provider_standard(&Value::Object(responses_payload))?,
+        normalize_responses_payload_for_provider_standard(&responses_payload)?,
         drops,
     ))
 }
+
+fn project_openai_responses_tools_with_emission(
+    payload: &Value,
+    has_web_search_capability: bool,
+    mut observer: Option<&mut StandardOutboundDeclarationObserver<'_>>,
+) -> Result<Option<Value>, String> {
+    if let Some(tools) = payload.get("tools").filter(|tools| !tools.is_array()) {
+        return Ok(Some(tools.clone()));
+    }
+    let sources = provider_tool_declaration_sources(payload)?;
+    if sources.is_empty() && payload.get("tools").is_none() {
+        return Ok(None);
+    }
+    let mut emitted = Vec::with_capacity(sources.len());
+    for (canonical_source_path, tool) in &sources {
+        if !has_web_search_capability && is_openai_responses_hosted_web_search_tool(tool) {
+            continue;
+        }
+        if let Some(projection) =
+            flatten_namespace_tool_for_provider_with_sources("openai-responses", tool)?
+        {
+            for (emission, flattened) in projection.sources.iter().zip(projection.tools) {
+                let source_path = namespace_child_canonical_path(
+                    canonical_source_path,
+                    &emission.source_child_indices,
+                );
+                let destination_index = emitted.len();
+                emitted.push(flattened);
+                if let Some(observer) = observer.as_mut() {
+                    observer.note_emitted(
+                        destination_index,
+                        &source_path,
+                        &emitted[destination_index],
+                    );
+                }
+            }
+        } else {
+            let projected =
+                provider_compat_core::namespace_tools::provider_function_tool_from_canonical(
+                    "openai-responses",
+                    tool,
+                );
+            let destination_index = emitted.len();
+            emitted.push(projected.unwrap_or_else(|| tool.clone()));
+            if let Some(observer) = observer.as_mut() {
+                if !is_openai_responses_hosted_web_search_tool(tool) {
+                    observer.note_emitted(
+                        destination_index,
+                        canonical_source_path,
+                        &emitted[destination_index],
+                    );
+                }
+            }
+        }
+    }
+    Ok(Some(Value::Array(emitted)))
+}
+
+pub(super) fn namespace_child_canonical_path(
+    namespace_path: &str,
+    source_child_indices: &[usize],
+) -> String {
+    let mut path = String::from(namespace_path);
+    for child_index in source_child_indices {
+        path.push_str(&format!(".tools[{child_index}]"));
+    }
+    path
+}
+
 fn normalize_responses_payload_for_provider_standard(payload: &Value) -> Result<Value, String> {
     // The caller has already completed the adjacent Chat -> Responses projection.
     // Re-running it here would reapply public metadata limits to the provider
@@ -228,19 +539,21 @@ fn normalize_responses_payload_for_provider_standard(payload: &Value) -> Result<
     Ok(normalized)
 }
 
-fn normalize_responses_input_content_parts(payload: &mut Value) {
+pub(crate) fn normalize_responses_input_content_parts(payload: &mut Value) {
     let Some(items) = payload.get_mut("input").and_then(Value::as_array_mut) else {
         return;
     };
     for item in items {
-        let is_non_assistant_message =
-            item.get("role")
-                .and_then(Value::as_str)
-                .is_some_and(|role| {
-                    role.eq_ignore_ascii_case("user")
-                        || role.eq_ignore_ascii_case("system")
-                        || role.eq_ignore_ascii_case("developer")
-                });
+        let role = item
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let is_non_assistant_message = Some(role.as_str()).is_some_and(|role| {
+            role.eq_ignore_ascii_case("user")
+                || role.eq_ignore_ascii_case("system")
+                || role.eq_ignore_ascii_case("developer")
+        });
         if !is_non_assistant_message {
             continue;
         }
@@ -248,12 +561,10 @@ fn normalize_responses_input_content_parts(payload: &mut Value) {
             continue;
         };
         for part in parts {
-            let Some(row) = part.as_object_mut() else {
-                continue;
-            };
-            if row.get("type").and_then(Value::as_str) == Some("text") {
-                row.insert("type".to_string(), Value::String("input_text".to_string()));
-            }
+            *part = request_outbound_responses_items::project_responses_part_representation(
+                part.clone(),
+                &role,
+            );
         }
     }
 }
@@ -376,16 +687,14 @@ fn normalize_responses_target_token_and_logprob_fields(payload: &mut Value) {
     }
 }
 
-pub(crate) fn build_v3_anthropic_provider_request_source_from_chat_canonical(
+fn build_v3_anthropic_provider_request_source_from_chat_canonical_inner(
     payload: &Value,
-    entry_protocol: V3HubEntryProtocol,
+    _entry_protocol: V3HubEntryProtocol,
+    _model_capabilities: Option<&[String]>,
 ) -> Result<Value, String> {
     let drop_context = V3ProjectionDropContext::disabled();
     let (value, mut drops) =
-        build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops(
-            payload,
-            entry_protocol,
-        )?;
+        build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops(payload)?;
     drop_context.restamp_and_emit(&mut drops);
     Ok(value)
 }
@@ -393,32 +702,39 @@ pub(crate) fn build_v3_anthropic_provider_request_source_from_chat_canonical(
 /// non-error carrier：把投影阶段的丢弃记录交给请求作用域盖章落盘。
 pub(crate) fn build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops(
     payload: &Value,
-    entry_protocol: V3HubEntryProtocol,
 ) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
-    match entry_protocol {
-        V3HubEntryProtocol::Responses => {
-            if payload.get("messages").and_then(Value::as_array).is_some() {
-                return project_outbound_payload_for_target_protocol_with_drops(
-                    payload,
-                    V3OutboundTargetProtocol::Anthropic,
-                );
-            }
-            Err("Responses entry to Anthropic provider wire requires governed Chat extension messages".to_string())
-        }
-        V3HubEntryProtocol::Anthropic | V3HubEntryProtocol::OpenAiChat => {
-            if payload.get("messages").and_then(Value::as_array).is_some() {
-                return project_outbound_payload_for_target_protocol_with_drops(
-                    payload,
-                    V3OutboundTargetProtocol::Anthropic,
-                );
-            }
-            Err("Anthropic provider wire requires governed Chat/Anthropic messages".to_string())
-        }
-        V3HubEntryProtocol::Gemini => Err(
-            "Gemini entry to Anthropic provider wire requires an explicit protocol codec"
-                .to_string(),
-        ),
+    // Inbound has already normalized every entry to Chat. Standard Outbound
+    // consumes that shape; the original entry cannot select another pipeline.
+    if payload.get("messages").and_then(Value::as_array).is_none() {
+        return Err("Anthropic provider wire requires governed Chat messages".to_string());
     }
+    project_outbound_payload_for_target_protocol_with_drops(
+        payload,
+        V3OutboundTargetProtocol::Anthropic,
+    )
+}
+
+pub(crate) fn build_v3_anthropic_provider_request_source_from_chat_canonical(
+    payload: &Value,
+    entry_protocol: V3HubEntryProtocol,
+) -> Result<Value, String> {
+    build_v3_anthropic_provider_request_source_from_chat_canonical_inner(
+        payload,
+        entry_protocol,
+        None,
+    )
+}
+
+pub(crate) fn build_v3_anthropic_provider_request_source_from_chat_canonical_for_selected(
+    payload: &Value,
+    entry_protocol: V3HubEntryProtocol,
+    model_capabilities: &[String],
+) -> Result<Value, String> {
+    build_v3_anthropic_provider_request_source_from_chat_canonical_inner(
+        payload,
+        entry_protocol,
+        Some(model_capabilities),
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -504,7 +820,6 @@ fn project_outbound_payload_for_target_protocol_inner_with_drops(
             None => project_gemini_compatible_fields(&mut source)?,
         }
     }
-    promote_tool_search_output_tools_to_provider_tools(&mut source)?;
     let source = &source;
     let control_paths = collect_outbound_control_field_paths(source);
     if !control_paths.is_empty() {
@@ -585,7 +900,7 @@ fn apply_outbound_projection_transforms(
     match target_protocol {
         V3OutboundTargetProtocol::OpenAiResponses => {
             project_responses_request_chat_extension_to_openai_responses(projected)?;
-            project_openai_responses_custom_tools_to_function_schema(projected)?;
+            project_chat_canonical_tool_choice_to_responses_wire(projected);
             validate_openai_metadata(projected, "responses")?;
             project_openai_responses_reasoning_extensions_to_reasoning(projected)?;
         }
@@ -605,6 +920,26 @@ fn apply_outbound_projection_transforms(
         }
     }
     Ok(())
+}
+
+/// chat canonical -> Responses wire `tool_choice` projection.
+///
+/// `tables/tool_choice_map.json` declares hub `tool` -> responses `function` and
+/// states that the object transform (name extraction) belongs to the transform.
+/// Canonical names one specific tool as
+/// `{"type":"function","function":{"name":..}}`, and the Responses wire names it
+/// with the same function-tool shape as `tools[]`, so this reuses the single
+/// owner of that shape instead of writing a second rule.
+fn project_chat_canonical_tool_choice_to_responses_wire(projected: &mut Value) {
+    let Some(tool_choice) = projected.get_mut("tool_choice") else {
+        return;
+    };
+    if let Some(flat) = provider_compat_core::namespace_tools::provider_function_tool_from_canonical(
+        "openai-responses",
+        tool_choice,
+    ) {
+        *tool_choice = flat;
+    }
 }
 
 /// chat canonical → Anthropic wire 的 web_search 工具投影：
@@ -1127,244 +1462,9 @@ fn allowed_top_level_outbound_fields(
         .unwrap_or_else(|error| panic!("request_field_map lookup failed for {protocol}: {error}"))
 }
 
-pub(crate) fn build_responses_input_from_chat_messages(
-    messages: &[Value],
-) -> Result<Value, String> {
-    let mut output = Vec::new();
-    for message in messages {
-        let Some(row) = message.as_object() else {
-            continue;
-        };
-        let role = row
-            .get("role")
-            .and_then(Value::as_str)
-            .unwrap_or("user")
-            .trim();
-        if role.eq_ignore_ascii_case("tool")
-            || message
-                .pointer("/routecodex_chat_extension/responses_tool_output_name")
-                .is_some()
-        {
-            if let Some(item) = chat_tool_result_to_responses_input_item(row)? {
-                output.push(item);
-            }
-            continue;
-        }
-        if role.eq_ignore_ascii_case("assistant") {
-            if let Some(reasoning) = chat_assistant_reasoning_to_responses_input_item(row) {
-                output.push(reasoning);
-            }
-            if let Some(tool_calls) = row.get("tool_calls").and_then(Value::as_array) {
-                let items = tool_calls
-                    .iter()
-                    .map(chat_tool_call_to_responses_input_item)
-                    .collect::<Result<Vec<Option<Value>>, String>>()?
-                    .into_iter()
-                    .flatten()
-                    .collect::<Vec<Value>>();
-                if !items.is_empty() {
-                    output.extend(items);
-                    continue;
-                }
-            }
-        }
-        let content = row
-            .get("content")
-            .map(|content| chat_content_to_responses_content(content, role))
-            .transpose()?
-            .unwrap_or_else(|| Value::Array(Vec::new()));
-        output.push(Value::Object(Map::from_iter([
-            ("type".to_string(), Value::String("message".to_string())),
-            (
-                "role".to_string(),
-                Value::String(if role.is_empty() { "user" } else { role }.to_string()),
-            ),
-            ("content".to_string(), content),
-        ])));
-    }
-    Ok(Value::Array(output))
-}
-
-fn chat_assistant_reasoning_to_responses_input_item(row: &Map<String, Value>) -> Option<Value> {
-    let text = row
-        .get("reasoning_content")
-        .or_else(|| row.get("reasoning_text"))
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())?;
-    Some(json!({
-        "type": "reasoning",
-        "summary": [{"type": "summary_text", "text": text}]
-    }))
-}
-
 /// 返回 (投影值, 丢弃记录) 的 non-error carrier 版本；丢弃记录同时来自
 /// stage-3 顶层白名单投影与 openai_chat provider tools 投影。
-fn normalize_openai_chat_messages_payload(
-    payload: &Value,
-    model_id: Option<&str>,
-    web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
-    has_web_search_capability: bool,
-    drop_context: &V3ProjectionDropContext,
-) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
-    let mut drops = Vec::new();
-    let (mut normalized, mut carrier_drops) =
-        project_outbound_payload_for_target_protocol_with_drops(
-            payload,
-            V3OutboundTargetProtocol::OpenAiChat,
-        )?;
-    drops.append(&mut carrier_drops);
-    if let Some(row) = normalized.as_object_mut() {
-        if let Some(max_output_tokens) = row.remove("max_output_tokens") {
-            row.entry("max_completion_tokens".to_string())
-                .or_insert(max_output_tokens);
-        }
-        if let Some(reasoning_effort) = project_openai_chat_reasoning_effort_from_reasoning(row) {
-            row.entry("reasoning_effort".to_string())
-                .or_insert(reasoning_effort);
-        }
-    }
-    let instructions = normalized
-        .as_object_mut()
-        .and_then(|row| row.remove("instructions"))
-        .and_then(|value| value.as_str().map(str::to_string))
-        .map(|text| text.trim().to_string())
-        .filter(|text| !text.is_empty());
-    super::request_outbound_mcp_names::normalize_openai_chat_namespace_history_names(
-        &mut normalized,
-    )?;
-    let Some(messages) = normalized.get_mut("messages").and_then(Value::as_array_mut) else {
-        return Ok((normalized, drops));
-    };
-    if let Some(instructions) = instructions {
-        let already_visible = messages.iter().any(|message| {
-            matches!(
-                message.get("role").and_then(Value::as_str),
-                Some("system" | "developer")
-            ) && message
-                .get("content")
-                .and_then(Value::as_str)
-                .is_some_and(|content| content.contains(&instructions))
-        });
-        if !already_visible {
-            if let Some(system_message) = messages.iter_mut().find(|message| {
-                matches!(
-                    message.get("role").and_then(Value::as_str),
-                    Some("system" | "developer")
-                )
-            }) {
-                if let Some(system_row) = system_message.as_object_mut() {
-                    match system_row.get_mut("content") {
-                        Some(Value::String(content)) => {
-                            if !content.trim().is_empty() {
-                                content.push_str("\n\n");
-                            }
-                            content.push_str(&instructions);
-                        }
-                        Some(Value::Array(parts)) => {
-                            parts.push(json!({"type": "text", "text": instructions}));
-                        }
-                        _ => {
-                            system_row.insert("content".to_string(), Value::String(instructions));
-                        }
-                    }
-                }
-            } else {
-                messages.insert(0, json!({"role": "system", "content": instructions}));
-            }
-        }
-    }
-    for message in messages.iter_mut() {
-        let Some(message_row) = message.as_object_mut() else {
-            continue;
-        };
-        super::request_outbound_mcp_names::normalize_openai_chat_message_tool_call_names(
-            message_row,
-        );
-        consume_routecodex_chat_extension_for_openai_chat_provider(message_row);
-        // Map `developer` role to `system` for OpenAI Chat provider wire
-        // compatibility. Many third-party Chat Completions providers (e.g.
-        // xmcc2) reject `developer` role with HTTP 400, accepting only
-        // `system`. The `developer` role is an OpenAI extension; standard
-        // Chat Completions providers expect `system` for instruction messages.
-        if message_row
-            .get("role")
-            .and_then(Value::as_str)
-            .is_some_and(|role| role.eq_ignore_ascii_case("developer"))
-        {
-            message_row.insert("role".to_string(), Value::String("system".to_string()));
-        }
-        let Some(content) = message_row.get_mut("content") else {
-            continue;
-        };
-        if let Value::Array(parts) = content {
-            let normalized_parts = parts
-                .iter()
-                .map(request_outbound_openai_chat_content_part::normalize_openai_chat_message_content_part)
-                .collect::<Result<Vec<_>, String>>()?;
-            *content = Value::Array(normalized_parts);
-        }
-    }
-    project_openai_chat_provider_tools_for_web_search_mode_recording(
-        &mut normalized,
-        model_id,
-        web_search_execution_mode,
-        has_web_search_capability,
-        drop_context,
-        &mut drops,
-    )?;
-    ensure_openai_chat_stream_usage_option(&mut normalized);
-    super::request_outbound_mcp_names::project_openai_chat_namespace_wire_names(
-        &mut normalized,
-        payload,
-    )?;
-    if let Some(choice) = normalized
-        .get_mut("tool_choice")
-        .and_then(Value::as_object_mut)
-    {
-        if choice.get("type").and_then(Value::as_str) == Some("function")
-            && !choice.contains_key("function")
-        {
-            if let Some(name) = choice.remove("name") {
-                choice.insert("function".to_owned(), json!({"name": name}));
-            }
-        }
-    }
-    Ok((normalized, drops))
-}
-
-fn consume_routecodex_chat_extension_for_openai_chat_provider(
-    message_row: &mut Map<String, Value>,
-) {
-    remove_object_field(message_row, "routecodex_chat_extension");
-    let Some(tool_calls) = message_row
-        .get_mut("tool_calls")
-        .and_then(Value::as_array_mut)
-    else {
-        return;
-    };
-    for tool_call in tool_calls {
-        if let Some(tool_call_row) = tool_call.as_object_mut() {
-            remove_object_field(tool_call_row, "routecodex_chat_extension");
-        }
-    }
-}
-
-fn remove_object_field(row: &mut Map<String, Value>, key: &str) -> Option<Value> {
-    row.remove(key)
-}
-
-fn ensure_openai_chat_stream_usage_option(payload: &mut Value) {
-    let Some(row) = payload.as_object_mut() else {
-        return;
-    };
-    if row.get("stream").and_then(Value::as_bool) != Some(true) {
-        return;
-    }
-    if row.contains_key("stream_options") {
-        return;
-    }
-    row.insert("stream_options".to_string(), json!({"include_usage": true}));
-}
+include!("request_outbound_openai_chat_messages.rs");
 
 #[path = "request_outbound_openai_chat_content_part.rs"]
 mod request_outbound_openai_chat_content_part;
@@ -1380,3 +1480,11 @@ mod request_outbound_gemini_tests;
 #[cfg(test)]
 #[path = "request_outbound_drop_tests.rs"]
 mod request_outbound_drop_tests;
+
+#[cfg(test)]
+#[path = "request_outbound_responses_declaration_emission_tests.rs"]
+mod request_outbound_responses_declaration_emission_tests;
+
+#[cfg(test)]
+#[path = "request_outbound_current_emission_consumer_tests.rs"]
+mod request_outbound_current_emission_consumer_tests;

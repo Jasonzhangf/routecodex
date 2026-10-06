@@ -16,15 +16,15 @@ const fixtures = [
   {
     name: 'mainline builder mapped back to root',
     relative: 'docs/architecture/v3-mainline-call-map.yml',
-    from: '    callee_symbol: build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01\n    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs',
-    to: '    callee_symbol: build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01\n    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
+    from: '    callee_symbol: build_v3_hub_req_inbound_02_from_canonical\n    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs',
+    to: '    callee_symbol: build_v3_hub_req_inbound_02_from_canonical\n    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
     diagnostic: /callee_file|root aggregator|req_inbound_02_normalized/,
   },
   {
     name: 'duplicate builder in root aggregator',
     relative: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
-    append: '\npub fn build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01() {}\n',
-    diagnostic: /root aggregator|build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01|duplicate/,
+    append: '\npub fn build_v3_hub_req_inbound_02_from_canonical() {}\n',
+    diagnostic: /root aggregator|build_v3_hub_req_inbound_02_from_canonical|duplicate/,
   },
   {
     name: 'duplicate node struct outside declared owner',
@@ -40,7 +40,7 @@ const fixtures = [
   {
     name: 'shared helper owns node-local builder',
     relative: 'v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs',
-    append: '\npub fn build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01() {}\n',
+    append: '\npub fn build_v3_hub_req_inbound_02_from_canonical() {}\n',
     diagnostic: /shared helper must not define builder|common\.rs/,
   },
   {

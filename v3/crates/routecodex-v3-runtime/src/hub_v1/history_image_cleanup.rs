@@ -1,8 +1,8 @@
 // feature: 唯一登记的历史 payload 清理例外 —— 历史图片统一占位清理
 //
 // 规则（v5，Jason 2026-08-08）：
-// - 所有请求在 inbound 归一化阶段统一执行（Relay ReqInbound02 + Direct
-//   V3Req04StandardizedResponses 共用本纯函数）。
+// - Relay 的 registered Chat Process hook 与 Direct 的 registered request hook
+//   共用本纯函数；Inbound 归一化保持原始请求及 immutable inverse pair。
 // - 仅清理历史轮次（最后一个 user 消息/input item 之外）的图片 part；
 //   当前轮图片保留（驱动 multimodal 路由）。
 // - 历史图片 part 原位替换为统一固定文本占位符 {"type":"text","text":"[Image]"}
@@ -201,17 +201,7 @@ fn normalize_chat_content_parts(message: &mut Value) {
             let Some(row) = part.as_object_mut() else {
                 continue;
             };
-            // 与 responses output[] 判定一致：有 image_url / data / file_id / file_url
-            // 即视为图片（Codex 的图片 part 有时不带 type 字段，只靠字段名）。
-            // （Codex 的图片 part 有时不带 type 字段，只靠 type==image_url 会漏）。
-            let is_image = row.contains_key("image_url")
-                || row.contains_key("data")
-                || row.contains_key("file_id")
-                || row
-                    .get("file_url")
-                    .and_then(Value::as_str)
-                    .is_some_and(|value| value.trim().starts_with("data:image/"));
-            if is_image {
+            if is_v3_embedded_image_carrier(row) {
                 *part = serde_json::json!({"type":"text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
             }
         }
@@ -301,7 +291,34 @@ fn is_v3_embedded_image_carrier(map: &serde_json::Map<String, Value>) -> bool {
             .as_str()
             .is_some_and(|value| value.trim().to_ascii_lowercase().starts_with("data:image/"));
     }
-    false
+    match map.get("type").and_then(Value::as_str) {
+        Some("media") => {
+            let Some(media) = map.get("media").and_then(Value::as_object) else {
+                return false;
+            };
+            is_v3_image_mime(media.get("mime_type"))
+                && is_v3_non_empty_string(media.get("inline_data"))
+        }
+        Some("file") => {
+            let Some(file) = map.get("file").and_then(Value::as_object) else {
+                return false;
+            };
+            is_v3_image_mime(file.get("mime_type")) && is_v3_non_empty_string(file.get("file_url"))
+        }
+        _ => false,
+    }
+}
+
+fn is_v3_image_mime(value: Option<&Value>) -> bool {
+    value
+        .and_then(Value::as_str)
+        .is_some_and(|mime| mime.trim().to_ascii_lowercase().starts_with("image/"))
+}
+
+fn is_v3_non_empty_string(value: Option<&Value>) -> bool {
+    value
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty())
 }
 
 fn normalize_responses_content_parts(item: &mut Value) {
@@ -317,16 +334,7 @@ fn normalize_responses_image_part_array(parts: &mut [Value]) -> bool {
         let Some(row) = part.as_object_mut() else {
             continue;
         };
-        // 有 image_url / data / file_id / file_url 即视为图片（Codex 的 fco.output 图片 part
-        // 有时不带 type 字段——只靠 type 匹配会漏，历史 base64 原样进 wire → context 400）。
-        let is_image = row.contains_key("image_url")
-            || row.contains_key("data")
-            || row.contains_key("file_id")
-            || row
-                .get("file_url")
-                .and_then(Value::as_str)
-                .is_some_and(|value| value.trim().starts_with("data:image/"));
-        if is_image {
+        if is_v3_embedded_image_carrier(row) {
             *part = serde_json::json!({"type":"input_text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
             changed = true;
         }

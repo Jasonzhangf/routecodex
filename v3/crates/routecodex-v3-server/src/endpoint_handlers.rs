@@ -1,38 +1,10 @@
 use crate::*;
 use axum::body::Body;
 use axum::http::{HeaderMap, Response};
+use futures_util::FutureExt;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-
-pub(crate) fn pending_endpoint_after_responses_admission(
-    state: Arc<V3ListenerState>,
-    front_connection_identity: Option<V3FrontConnectionIdentity>,
-    request_headers: HeaderMap,
-    method: String,
-    path: String,
-    started_at: Instant,
-    entry_protocol: String,
-    execution_mode: V3EntryProtocolExecutionMode,
-    pending_owner_symbol: Option<String>,
-    request_purpose: V3RequestPurpose,
-    payload: Value,
-) -> std::pin::Pin<Box<impl std::future::Future<Output = Response<Body>> + Send>> {
-    // Avoid a second poll frame for the large protocol-dispatch future.
-    Box::pin(pending_endpoint_after_responses_admission_inner(
-        state,
-        front_connection_identity,
-        request_headers,
-        method,
-        path,
-        started_at,
-        entry_protocol,
-        execution_mode,
-        pending_owner_symbol,
-        request_purpose,
-        payload,
-    ))
-}
 
 pub(crate) async fn pending_endpoint_after_responses_admission_inner(
     state: Arc<V3ListenerState>,
@@ -194,7 +166,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     // response to witness and the client boundary is the
                     // transport break. The Error06 body stays provider-private
                     // evidence on disk, never a client payload.
-                    if let Some(response) = persist_v3_projected_terminal_error_evidence(
+                    persist_v3_projected_terminal_error_evidence(
                         &state,
                         &entry_protocol,
                         &path,
@@ -202,9 +174,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         &payload,
                         &node_trace,
                         &projected,
-                    ) {
-                        return response;
-                    }
+                    );
                     return provider_terminal_response(
                         &state,
                         front_connection_identity,
@@ -288,10 +258,12 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     &state.debug,
                     plan,
                 )
+                .boxed()
                 .await
             }
             None => {
                 execute_v3_responses_direct_dry_run_runtime(fixture, &state.manifest, &state.debug)
+                    .boxed()
                     .await
             }
         };
@@ -402,6 +374,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 &state.responses_relay_server_tool_state,
                 server_tool_scope,
             )
+            .boxed()
             .await
             {
                 V3ResponsesRelayDryRunOutcome::Foundation(output) => output,
@@ -426,6 +399,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                             &state.debug,
                             &handoff.plan,
                         )
+                        .boxed()
                         .await;
                     prepend_v3_protocol_plan_trace_to_foundation_output(
                         &mut output,
@@ -504,6 +478,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             },
             client_headers,
         )
+        .boxed()
         .await;
         if let Some(response) = record_v3_live_snapshot_projection(
             &state,
@@ -529,7 +504,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         return foundation_output_response(output);
     }
     if entry_protocol == "openai_chat" && execution_mode == V3EntryProtocolExecutionMode::Direct {
-        return execute_v3_openai_chat_direct_server_outcome(
+        return Box::pin(execute_v3_openai_chat_direct_server_outcome(
             &state,
             front_connection_identity,
             method,
@@ -543,7 +518,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             started_at,
             request_console_project_path.as_deref(),
             request_purpose,
-        )
+        ))
         .await;
     }
     if entry_protocol == "openai_chat" && execution_mode == V3EntryProtocolExecutionMode::Relay {
@@ -557,7 +532,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             &console_payload,
         );
         let output =
-            match execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_execution_mode(
+            match Box::pin(execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_execution_mode(
                 &state.manifest,
                 V3OpenAiChatRelayRuntimeInput {
                     server_id: state.server.id.clone(),
@@ -567,13 +542,30 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 },
                 state.provider_health.runtime_health(),
                 V3HubExecutionMode::Relay,
-            )
+            ))
             .await
             {
                 Ok(output) => output,
                 Err(error) => project_v3_openai_chat_relay_runtime_failure(error),
             };
         if let Some(disposition) = output.terminal_disposition.clone() {
+            project_v3_relay_terminal_diagnostics(
+                &state,
+                &trace_scope,
+                V3TerminalErrorEvidence {
+                    entry_protocol: &entry_protocol,
+                    endpoint: &path,
+                    request_id: &request_id,
+                    raw_request_payload: &payload,
+                    status: output.status,
+                    node_trace: &output.node_trace,
+                    error_chain: output.error_chain.as_deref(),
+                    observability: output.observability.as_ref(),
+                },
+                snapshot_session_id.as_deref(),
+                request_console_project_path.as_deref(),
+                openai_chat_error_body_for_console(&output.client_body),
+            );
             return provider_terminal_response(
                 &state,
                 front_connection_identity,
@@ -582,22 +574,18 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 terminal_evidence,
             );
         }
-        if output.error_chain.is_some() {
-            if let Some(response) = emit_relay_error_chain_if_any(
-                &state,
-                &trace_scope,
-                &entry_protocol,
-                &path,
-                &request_id,
-                snapshot_session_id.as_deref(),
-                output.status,
-                output.error_chain.as_deref(),
-                openai_chat_error_body_for_console(&output.client_body),
-                request_console_project_path.as_deref(),
-            ) {
-                return response;
-            }
-        }
+        emit_relay_error_chain_if_any(
+            &state,
+            &trace_scope,
+            &entry_protocol,
+            &path,
+            &request_id,
+            snapshot_session_id.as_deref(),
+            output.status,
+            output.error_chain.as_deref(),
+            openai_chat_error_body_for_console(&output.client_body),
+            request_console_project_path.as_deref(),
+        );
         let mut output = output;
         if let Some(response) = capture_v3_relay_provider_snapshots(
             &state,
@@ -663,7 +651,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 );
             }
         };
-        let output = match execute_v3_anthropic_relay_runtime_with_default_transport_client_headers_provider_health(
+        let output = match Box::pin(execute_v3_anthropic_relay_runtime_with_default_transport_client_headers_provider_health(
             &state.manifest,
             V3AnthropicRelayRuntimeInput {
                 server_id: state.server.id.clone(),
@@ -676,13 +664,30 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             },
             client_headers,
             state.provider_health.runtime_health(),
-        )
+        ))
         .await
         {
             Ok(output) => output,
             Err(error) => project_v3_anthropic_relay_runtime_failure(error),
         };
         if let Some(disposition) = output.terminal_disposition.clone() {
+            project_v3_relay_terminal_diagnostics(
+                &state,
+                &trace_scope,
+                V3TerminalErrorEvidence {
+                    entry_protocol: &entry_protocol,
+                    endpoint: &path,
+                    request_id: &request_id,
+                    raw_request_payload: &payload,
+                    status: output.status,
+                    node_trace: &output.node_trace,
+                    error_chain: output.error_chain.as_deref(),
+                    observability: output.observability.as_ref(),
+                },
+                snapshot_session_id.as_deref(),
+                request_console_project_path.as_deref(),
+                Some(&output.client_response),
+            );
             return provider_terminal_response(
                 &state,
                 front_connection_identity,
@@ -691,7 +696,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 terminal_evidence,
             );
         }
-        if let Some(response) = emit_relay_error_chain_if_any(
+        emit_relay_error_chain_if_any(
             &state,
             &trace_scope,
             &entry_protocol,
@@ -702,9 +707,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             output.error_chain.as_deref(),
             Some(&output.client_response),
             request_console_project_path.as_deref(),
-        ) {
-            return response;
-        }
+        );
         let mut output = output;
         if let Some(response) = capture_v3_relay_provider_snapshots(
             &state,
@@ -793,12 +796,30 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             },
             state.provider_health.runtime_health(),
         )
+        .boxed()
         .await
         {
             Ok(output) => output,
             Err(error) => project_v3_gemini_relay_runtime_failure(error),
         };
         if let Some(disposition) = output.terminal_disposition.clone() {
+            project_v3_relay_terminal_diagnostics(
+                &state,
+                &trace_scope,
+                V3TerminalErrorEvidence {
+                    entry_protocol: &entry_protocol,
+                    endpoint: &path,
+                    request_id: &request_id,
+                    raw_request_payload: &payload,
+                    status: output.status,
+                    node_trace: &output.node_trace,
+                    error_chain: output.error_chain.as_deref(),
+                    observability: output.observability.as_ref(),
+                },
+                snapshot_session_id.as_deref(),
+                request_console_project_path.as_deref(),
+                gemini_error_body_for_console(&output.client_body),
+            );
             return provider_terminal_response(
                 &state,
                 front_connection_identity,
@@ -807,7 +828,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 terminal_evidence,
             );
         }
-        if let Some(response) = emit_relay_error_chain_if_any(
+        emit_relay_error_chain_if_any(
             &state,
             &trace_scope,
             &entry_protocol,
@@ -818,9 +839,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             output.error_chain.as_deref(),
             gemini_error_body_for_console(&output.client_body),
             request_console_project_path.as_deref(),
-        ) {
-            return response;
-        }
+        );
         let console_payload = payload.clone();
         let console_context = build_v3_console_emission_context(
             &state,
@@ -922,7 +941,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     Some(plan.decision.target.clone()),
                     Some(plan.expanded.clone()),
                     BTreeSet::new(),
+                    None,
+                    None,
                     plan.relay_runtime_seeds(),
+                    V3RelayEntryOrigin::ClientEntry,
                 )
                 .await
                 {
@@ -950,7 +972,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     None,
                     None,
                     BTreeSet::new(),
+                    None,
+                    None,
                     V3ResponsesRelayRuntimeSeeds::default(),
+                    V3RelayEntryOrigin::ClientEntry,
                 )
                 .await
                 {
@@ -972,7 +997,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     Some(plan.decision.target.clone()),
                     Some(plan.expanded.clone()),
                     BTreeSet::new(),
+                    None,
+                    None,
                     plan.relay_runtime_seeds(),
+                    V3RelayEntryOrigin::ClientEntry,
                 )
                 .await
                 {
@@ -997,7 +1025,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     None,
                     None,
                     BTreeSet::new(),
+                    None,
+                    None,
                     V3ResponsesRelayRuntimeSeeds::default(),
+                    V3RelayEntryOrigin::ClientEntry,
                 )
                 .await
                 {
@@ -1009,32 +1040,28 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         if let Some(disposition) = output.terminal_disposition.take() {
             // A provider terminal disposition ends the client transport without
             // a client payload, so this path never reaches the relay closeout
-            // below. The chain and status are still real typed facts: persist
-            // the error evidence and project the chain first, otherwise a
-            // request that really failed keeps an observability row whose every
-            // Error node reads "not_reached" and leaves no artifact on disk.
-            if let Some(response) = persist_v3_responses_relay_terminal_error_evidence(
-                &state,
-                &entry_protocol,
-                &path,
-                &request_id,
-                &console_payload,
-                &output,
-            ) {
-                return response;
-            }
-            if let Some(response) = project_v3_responses_relay_error_chain(
+            // below. The status, node trace and Error chain are still real typed
+            // facts: record the request-bound evidence and project the chain
+            // first, otherwise a request that really failed keeps an
+            // observability row whose every Error node reads "not_reached" and
+            // leaves no artifact on disk.
+            project_v3_relay_terminal_diagnostics(
                 &state,
                 &trace_scope,
-                &entry_protocol,
-                &path,
-                &request_id,
+                V3TerminalErrorEvidence {
+                    entry_protocol: &entry_protocol,
+                    endpoint: &path,
+                    request_id: &request_id,
+                    raw_request_payload: &console_payload,
+                    status: output.status,
+                    node_trace: &output.node_trace,
+                    error_chain: output.error_chain.as_deref(),
+                    observability: output.observability.as_ref(),
+                },
                 snapshot_session_id.as_deref(),
                 request_console_project_path.as_deref(),
-                &output,
-            ) {
-                return response;
-            }
+                relay_error_body_for_console(&output.client_body),
+            );
             return provider_terminal_response(
                 &state,
                 front_connection_identity,
@@ -1055,7 +1082,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             }
         }
         if let Some(handoff) = output.protocol_direct_handoff.take() {
-            let outcome = execute_responses_direct_server_outcome(
+            let outcome = Box::pin(execute_responses_direct_server_outcome(
                 &state,
                 &request_headers,
                 method,
@@ -1064,13 +1091,13 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 Some(request_identity.pipeline_id.clone()),
                 execution_id,
                 handoff.request_payload.clone(),
-                Some(&handoff.plan),
+                Some(relay_entry(&handoff.plan, handoff.request_entry_origin)),
                 Some(handoff.observability_accumulator),
                 Some(handoff.request_execution_control),
                 Some(provider_failure_event_sink.clone()),
                 Some(route_selection_event_sink.clone()),
                 request_purpose,
-            )
+            ))
             .await;
             match outcome {
                 V3ResponsesDirectServerOutcome::ProviderTerminal(disposition) => {
@@ -1156,30 +1183,25 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     if let Some(disposition) = relay_output.terminal_disposition.take() {
                         // Same entry, same defect as the branch below: a
                         // provider terminal disposition bypasses the relay
-                        // closeout, so the real typed chain and the on-disk
+                        // closeout, so the real typed facts and the on-disk
                         // evidence have to be recorded here as well.
-                        if let Some(response) = persist_v3_responses_relay_terminal_error_evidence(
-                            &state,
-                            &entry_protocol,
-                            &path,
-                            &request_id,
-                            &console_payload,
-                            &relay_output,
-                        ) {
-                            return response;
-                        }
-                        if let Some(response) = project_v3_responses_relay_error_chain(
+                        project_v3_relay_terminal_diagnostics(
                             &state,
                             &trace_scope,
-                            &entry_protocol,
-                            &path,
-                            &request_id,
+                            V3TerminalErrorEvidence {
+                                entry_protocol: &entry_protocol,
+                                endpoint: &path,
+                                request_id: &request_id,
+                                raw_request_payload: &console_payload,
+                                status: relay_output.status,
+                                node_trace: &relay_output.node_trace,
+                                error_chain: relay_output.error_chain.as_deref(),
+                                observability: relay_output.observability.as_ref(),
+                            },
                             snapshot_session_id.as_deref(),
                             request_console_project_path.as_deref(),
-                            &relay_output,
-                        ) {
-                            return response;
-                        }
+                            relay_error_body_for_console(&relay_output.client_body),
+                        );
                         return provider_terminal_response(
                             &state,
                             front_connection_identity,
@@ -1241,7 +1263,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         );
         let provider_failure_event_sink = build_v3_provider_failure_event_sink(&console_context);
         let route_selection_event_sink = build_v3_route_selection_event_sink(&console_context);
-        let outcome = execute_responses_direct_server_outcome(
+        let outcome = Box::pin(execute_responses_direct_server_outcome(
             &state,
             &request_headers,
             method,
@@ -1252,13 +1274,13 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             payload,
             responses_protocol_plan
                 .as_ref()
-                .map(V3MetadataCenterExecutionPlan::protocol_plan),
+                .map(|plan| client_entry(plan.protocol_plan())),
             None,
             None,
             Some(provider_failure_event_sink.clone()),
             Some(route_selection_event_sink.clone()),
             request_purpose,
-        )
+        ))
         .await;
         match outcome {
             V3ResponsesDirectServerOutcome::ProviderTerminal(disposition) => {
@@ -1371,31 +1393,26 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             V3ResponsesDirectServerOutcome::RelayOutput(output) => {
                 if let Some(disposition) = output.terminal_disposition.clone() {
                     // Third and last Responses terminal-disposition site: same
-                    // entry, same defect, so the real typed chain and the
+                    // entry, same defect, so the real typed facts and the
                     // on-disk evidence are recorded before the client transport
                     // is broken without a payload.
-                    if let Some(response) = persist_v3_responses_relay_terminal_error_evidence(
-                        &state,
-                        &entry_protocol,
-                        &path,
-                        &request_id,
-                        &raw_request_payload,
-                        &output,
-                    ) {
-                        return response;
-                    }
-                    if let Some(response) = project_v3_responses_relay_error_chain(
+                    project_v3_relay_terminal_diagnostics(
                         &state,
                         &trace_scope,
-                        &entry_protocol,
-                        &path,
-                        &request_id,
+                        V3TerminalErrorEvidence {
+                            entry_protocol: &entry_protocol,
+                            endpoint: &path,
+                            request_id: &request_id,
+                            raw_request_payload: &raw_request_payload,
+                            status: output.status,
+                            node_trace: &output.node_trace,
+                            error_chain: output.error_chain.as_deref(),
+                            observability: output.observability.as_ref(),
+                        },
                         snapshot_session_id.as_deref(),
                         request_console_project_path.as_deref(),
-                        &output,
-                    ) {
-                        return response;
-                    }
+                        relay_error_body_for_console(&output.client_body),
+                    );
                     return provider_terminal_response(
                         &state,
                         front_connection_identity,
@@ -1479,18 +1496,3 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         )
     }
 }
-
-#[path = "endpoint_trace.rs"]
-mod endpoint_trace;
-use endpoint_trace::resolve_v3_dry_run_target_label;
-pub(crate) use endpoint_trace::{
-    is_provider_request_dry_run, merge_v3_direct_handoff_provider_failure_events,
-    merge_v3_protocol_plan_trace, merge_v3_relay_handoff_provider_failure_events_into_direct_frame,
-    prepend_v3_protocol_plan_trace_to_foundation_output,
-    prepend_v3_protocol_plan_trace_to_responses_relay_output,
-    prepend_v3_relay_handoff_trace_to_direct_frame,
-};
-
-#[path = "request_identity.rs"]
-mod request_identity;
-pub(crate) use request_identity::*;

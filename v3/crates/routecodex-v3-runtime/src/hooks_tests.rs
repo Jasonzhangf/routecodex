@@ -34,6 +34,70 @@ fn direct_developer_wire_mount(
     Ok(())
 }
 
+fn hook_request_scope(
+    protocol: &str,
+    payload: serde_json::Value,
+) -> (
+    serde_json::Value,
+    crate::operation_runner::RequestInvocationContext,
+) {
+    use crate::operation_runner::{
+        execute_v3_operation_runner_request_capture_client_json,
+        execute_v3_operation_runner_request_normalize_losslessly, CurrentFieldAssociations,
+        RequestInvocationContext, RequestNormalizationEntry, RequestOriginKind,
+        V3RequestContextHandle,
+    };
+    let handle = V3RequestContextHandle::new("hooks-request".into(), protocol.into());
+    let invocation = RequestInvocationContext::new(
+        handle.clone(),
+        "hooks-invocation".into(),
+        "hooks-attempt".into(),
+        RequestOriginKind::ClientEntry,
+    );
+    let captured = execute_v3_operation_runner_request_capture_client_json(payload).unwrap();
+    let canonical = execute_v3_operation_runner_request_normalize_losslessly(
+        &handle,
+        &invocation,
+        RequestNormalizationEntry::RawEntry(captured),
+    )
+    .unwrap();
+    let pair = handle.original_pair().unwrap();
+    handle
+        .publish_current_field_associations(CurrentFieldAssociations::from_normalization(
+            &pair.inverse_context,
+        ))
+        .unwrap();
+    (canonical, invocation)
+}
+
+fn required_view(
+    payload: serde_json::Value,
+    selected: &V3Target10ConcreteProviderSelected,
+) -> crate::kernel::V3DirectRequestProjectionView {
+    let (canonical, invocation) = hook_request_scope("responses", payload);
+    crate::kernel::build_v3_direct_request_projection_view(
+        &canonical,
+        selected,
+        &invocation,
+        "hooks-attempt",
+    )
+    .unwrap()
+}
+
+fn required_chat_view(
+    payload: serde_json::Value,
+    selected: &V3Target10ConcreteProviderSelected,
+) -> crate::kernel::V3DirectRequestProjectionView {
+    let (canonical, invocation) = hook_request_scope("openai_chat", payload);
+    crate::kernel::build_v3_direct_request_projection_view(
+        &canonical,
+        selected,
+        &invocation,
+        "hooks-attempt",
+    )
+    .unwrap()
+}
+
 fn direct_policy_with_models(
     client_model: &str,
     canonical_model: &str,
@@ -123,8 +187,11 @@ fn direct_request_projection_binds_selected_wire_model_before_provider_wire() {
         "provider-wire-model",
     );
 
-    let wire = registry
-        .run_request_projection(&policy)
+    let (wire, _actual_attempt) = registry
+        .run_request_projection(
+            &policy,
+            &required_view(policy.request_body.clone(), &policy.target),
+        )
         .expect("route-selected direct model must bind before Provider12");
 
     assert_eq!(wire.body()["model"], "provider-wire-model");
@@ -133,6 +200,7 @@ fn direct_request_projection_binds_selected_wire_model_before_provider_wire() {
 
 #[test]
 fn direct_responses_projection_normalizes_non_assistant_text_parts() {
+    let registry = register_responses_direct_hooks();
     let mut policy = direct_policy_with_models(
         "client-route-alias",
         "canonical-provider-model",
@@ -147,13 +215,19 @@ fn direct_responses_projection_normalizes_non_assistant_text_parts() {
         }]
     });
 
-    let wire = responses_direct_request_projection_hook(&policy)
+    let (wire, _actual_attempt) =
+        responses_direct_request_projection_hook_with_key_catalog_and_view(
+            &policy,
+            &registry.request_key_catalog(),
+            &required_view(policy.request_body.clone(), &policy.target),
+        )
         .expect("Direct Responses projection must normalize provider content types");
     assert_eq!(wire.body()["input"][0]["content"][0]["type"], "input_text");
 }
 
 #[test]
 fn direct_responses_projection_reprojects_chat_messages_back_to_responses_input() {
+    let registry = register_responses_direct_hooks();
     let mut policy = direct_policy_with_models(
         "client-route-alias",
         "canonical-provider-model",
@@ -170,7 +244,12 @@ fn direct_responses_projection_reprojects_chat_messages_back_to_responses_input(
         }]
     });
 
-    let wire = responses_direct_request_projection_hook(&policy)
+    let (wire, _actual_attempt) =
+        responses_direct_request_projection_hook_with_key_catalog_and_view(
+            &policy,
+            &registry.request_key_catalog(),
+            &required_view(policy.request_body.clone(), &policy.target),
+        )
         .expect("Responses provider must not receive Chat messages on /v1/responses");
     let body = wire.body();
     assert!(
@@ -183,6 +262,7 @@ fn direct_responses_projection_reprojects_chat_messages_back_to_responses_input(
 
 #[test]
 fn direct_responses_default_target_drops_only_hosted_search() {
+    let registry = register_responses_direct_hooks();
     let mut policy = direct_policy_with_models("client", "canonical", "wire");
     policy.request_body = json!({
         "model": "client",
@@ -193,7 +273,13 @@ fn direct_responses_default_target_drops_only_hosted_search() {
         ],
         "tool_choice": {"type": "web_search"}
     });
-    let wire = responses_direct_request_projection_hook(&policy).unwrap();
+    let (wire, _actual_attempt) =
+        responses_direct_request_projection_hook_with_key_catalog_and_view(
+            &policy,
+            &registry.request_key_catalog(),
+            &required_view(policy.request_body.clone(), &policy.target),
+        )
+        .unwrap();
     assert_eq!(wire.body()["tools"].as_array().unwrap().len(), 1);
     assert_eq!(wire.body()["tools"][0]["name"], "lookup");
     assert!(wire.body().get("tool_choice").is_none());
@@ -203,7 +289,13 @@ fn direct_responses_default_target_drops_only_hosted_search() {
         .candidate
         .model_capabilities
         .push("web_search".to_string());
-    let hosted_wire = responses_direct_request_projection_hook(&policy).unwrap();
+    let (hosted_wire, _actual_attempt) =
+        responses_direct_request_projection_hook_with_key_catalog_and_view(
+            &policy,
+            &registry.request_key_catalog(),
+            &required_view(policy.request_body.clone(), &policy.target),
+        )
+        .unwrap();
     assert_eq!(hosted_wire.body()["tools"].as_array().unwrap().len(), 2);
     assert_eq!(hosted_wire.body()["tool_choice"]["type"], "web_search");
 }
@@ -239,8 +331,11 @@ fn direct_hook_registry_mounts_request_key_catalog_at_runtime() {
         },
     );
     let registry = register_responses_direct_hooks_with_key_catalog(&catalog);
-    let wire = registry
-        .run_request_projection(&policy)
+    let (wire, _actual_attempt) = registry
+        .run_request_projection(
+            &policy,
+            &required_view(policy.request_body.clone(), &policy.target),
+        )
         .expect("registered request key catalog must be consumed by Direct");
     assert!(wire.body()["instructions"]
         .as_str()
@@ -280,7 +375,12 @@ fn direct_request_key_catalog_effect_reaches_responses_provider_wire_body() {
             rewrite: direct_tools_wire_mount,
         },
     );
-    let wire = responses_direct_request_projection_hook_with_key_catalog(&policy, &catalog)
+    let (wire, _actual_attempt) =
+        responses_direct_request_projection_hook_with_key_catalog_and_view(
+            &policy,
+            &catalog,
+            &required_view(policy.request_body.clone(), &policy.target),
+        )
         .expect("typed Direct request key catalog must project to provider wire");
     assert!(wire.body()["instructions"]
         .as_str()
@@ -309,7 +409,12 @@ fn direct_responses_projection_preserves_current_image_for_selected_target() {
         }]
     });
     let catalog = default_v3_direct_request_key_hook_catalog();
-    let wire = responses_direct_request_projection_hook_with_key_catalog(&policy, &catalog)
+    let (wire, _actual_attempt) =
+        responses_direct_request_projection_hook_with_key_catalog_and_view(
+            &policy,
+            &catalog,
+            &required_view(policy.request_body.clone(), &policy.target),
+        )
         .expect("Direct request projection must use the selected target compat owner");
     assert_eq!(wire.body()["input"][0], policy.request_body["input"][0]);
 }
@@ -351,8 +456,12 @@ fn direct_request_key_catalog_effect_reaches_chat_provider_wire_body() {
             rewrite: direct_tools_wire_mount,
         },
     );
-    let wire = chat_direct_request_projection_hook_with_key_catalog(&policy, &catalog)
-        .expect("typed Direct Chat request key catalog must project to provider wire");
+    let (wire, _actual_attempt) = chat_direct_request_projection_hook_with_key_catalog_and_view(
+        &policy,
+        &catalog,
+        &required_chat_view(policy.request_body.clone(), &policy.target),
+    )
+    .expect("typed Direct Chat request key catalog must project to provider wire");
     let messages = wire.body()["messages"].as_array().unwrap();
     assert!(messages.iter().any(|message| {
         message["role"] == "system"
@@ -390,7 +499,12 @@ fn chat_direct_default_target_drops_unavailable_hosted_web_search_tool() {
             "tool_choice": {"type": "web_search_20250305"}
         }),
     };
-    let wire = chat_direct_request_projection_hook(&policy).expect("default provider wire");
+    let (wire, _actual_attempt) = chat_direct_request_projection_hook_with_key_catalog_and_view(
+        &policy,
+        &register_responses_direct_hooks().request_key_catalog(),
+        &required_chat_view(policy.request_body.clone(), &policy.target),
+    )
+    .expect("default provider wire");
     assert!(wire.body().get("web_search_options").is_none());
     assert!(wire.body().get("tool_choice").is_none());
     assert_eq!(wire.body()["tools"][0]["function"]["name"], "read_file");
@@ -416,7 +530,12 @@ fn chat_direct_applies_declared_provider_compat_after_standard_projection() {
             "verbosity": "high"
         }),
     };
-    let wire = chat_direct_request_projection_hook(&policy).expect("Direct Chat wire");
+    let (wire, _actual_attempt) = chat_direct_request_projection_hook_with_key_catalog_and_view(
+        &policy,
+        &register_responses_direct_hooks().request_key_catalog(),
+        &required_chat_view(policy.request_body.clone(), &policy.target),
+    )
+    .expect("Direct Chat wire");
     assert!(wire.body().get("prompt_cache_key").is_none());
     assert!(wire.body().get("verbosity").is_none());
     assert_eq!(wire.body()["model"], "provider-wire-model");
@@ -456,10 +575,10 @@ fn chat_direct_codec_consumes_the_registered_key_catalog() {
             rewrite: |_, _| Ok(()),
         },
     );
-    let wire = <crate::kernel::V3ChatDirectCodec as crate::kernel::V3DirectProtocolCodec>::run_request_projection(
+    let (wire, _actual_attempt) = <crate::kernel::V3ChatDirectCodec as crate::kernel::V3DirectProtocolCodec>::run_request_projection(
             &policy,
             &catalog,
-            &crate::projection_drop_log::V3ProjectionDropContext::disabled(),
+            &required_chat_view(policy.request_body.clone(), &policy.target),
         )
         .expect("Chat codec must consume the adjacent typed key catalog");
     assert!(wire.body()["messages"][0]["content"]
@@ -470,8 +589,7 @@ fn chat_direct_codec_consumes_the_registered_key_catalog() {
 }
 
 #[test]
-fn responses_direct_openai_chat_target_uses_chat_transport_contract() {
-    let registry = register_responses_direct_hooks();
+fn responses_relay_openai_chat_target_uses_chat_transport_contract() {
     let mut policy = direct_policy_with_models(
         "client-route-alias",
         "deepseek-v4-flash",
@@ -491,15 +609,63 @@ fn responses_direct_openai_chat_target_uses_chat_transport_contract() {
         "tool_choice": "required"
     });
 
-    let wire = registry
-        .run_request_projection(&policy)
-        .expect("direct OpenAI Chat target must build provider wire");
+    let (canonical, invocation) = hook_request_scope("responses", policy.request_body.clone());
+    let handle = invocation.request_handle();
+    let pair = handle.original_pair().unwrap();
+    let current = handle.current_field_associations().unwrap();
+    let candidate = &policy.target.candidate;
+    let protocol = crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat;
+    let projected = crate::operation_runner::project_canonical_request(
+        &canonical,
+        &pair.inverse_context,
+        &current,
+        &pair.explicit_history_pairing,
+        crate::hub_v1::V3HubExecutionMode::Relay,
+        protocol,
+        candidate,
+        "hooks-relay-attempt",
+    )
+    .expect("cross-protocol request must use the registered Relay projection");
+    let body = crate::hub_v1::apply_v3_provider_req_compat_to_provider_payload(
+        projected.payload,
+        candidate,
+        protocol,
+        &crate::hub_v1::V3ProviderCompatProfileId::from_config(
+            candidate.compatibility_profile.as_deref(),
+        ),
+    )
+    .expect("Relay provider compat must retain the transport contract");
+    let wire = build_v3_provider_12_responses_wire_payload(
+        policy.request_id.clone(),
+        V3ResponsesProviderTarget {
+            provider_id: candidate.provider_id.clone(),
+            provider_type: candidate.provider_type.clone(),
+            base_url: candidate.base_url.clone(),
+            canonical_model_id: candidate.model_id.clone(),
+            wire_model: candidate.wire_model.clone(),
+            compatibility_profile: candidate.compatibility_profile.clone(),
+            headers: candidate.headers.clone(),
+            sse_first_frame_timeout_ms: candidate.sse_first_frame_timeout_ms,
+            auth: V3ProviderAuthHandle {
+                alias: candidate.auth_alias.clone(),
+                secret: V3ProviderAuthSecretHandle::Environment("TEST_KEY".into()),
+            },
+            responses_transport: candidate.responses_transport,
+            websocket_v2_url: candidate.websocket_v2_url.clone(),
+            provider_request_cleanup: candidate.provider_request_cleanup.clone(),
+            request_timeout_ms: candidate.request_timeout_ms,
+            initial_concurrency_budget: candidate.initial_concurrency_budget,
+            concurrency_acquire_timeout_ms: candidate.concurrency_acquire_timeout_ms,
+        },
+        body,
+    )
+    .expect("Relay OpenAI Chat target must build provider wire");
     assert!(wire.body().get("input").is_none());
     assert_eq!(wire.body()["messages"][0]["role"], "user");
     assert_eq!(wire.body()["messages"][0]["content"], "hello");
     assert!(
         wire.body().get("tool_choice").is_none(),
-        "direct DeepSeek thinking wire must apply ProviderReqCompat06: {}",
+        "Relay DeepSeek thinking wire must apply ProviderReqCompat06: {}",
         wire.body()
     );
     assert_eq!(wire.body()["tools"][1]["type"], "function");
@@ -507,9 +673,8 @@ fn responses_direct_openai_chat_target_uses_chat_transport_contract() {
         wire.body()["tools"][1]["function"]["name"],
         "multi_agent_v1__spawn_agent"
     );
-    let transport = registry
-        .run_provider_transport(wire)
-        .expect("direct OpenAI Chat target must use Chat transport");
+    let transport = crate::hub_v1::build_v3_provider_transport_request_for_protocol(protocol, wire)
+        .expect("Relay OpenAI Chat target must use Chat transport");
     assert!(transport.url().ends_with("/chat/completions"));
 }
 
@@ -529,8 +694,11 @@ fn responses_direct_responses_target_applies_deepseek_thinking_compat() {
         "tool_choice": "required"
     });
 
-    let wire = registry
-        .run_request_projection(&policy)
+    let (wire, _actual_attempt) = registry
+        .run_request_projection(
+            &policy,
+            &required_view(policy.request_body.clone(), &policy.target),
+        )
         .expect("direct Responses target must build provider wire");
     assert!(
         wire.body().get("tool_choice").is_none(),
@@ -697,11 +865,63 @@ fn provider_local_auth_secret_failure_is_internal_runtime_identity() {
         },
     );
 
-    assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
+    assert_eq!(source.source_kind, V3ErrorSourceKind::ProviderLocalFailure);
+    assert_eq!(source.code, "provider_local_runtime_error");
     assert!(source.external_error.is_none());
-    let internal = source.internal_error.expect("internal auth/runtime code");
+    let internal = source
+        .internal_error
+        .as_ref()
+        .expect("internal auth/runtime code");
     assert_eq!(internal.internal_code, "500-160");
     assert_eq!(internal.node_id, "V3Transport13ResponsesHttpRequest");
+    let decision = V3ErrorHandlingCenter::decide_provider(
+        V3ErrorHandlingCenterInput {
+            source,
+            action_scope: V3ErrorActionScope::None,
+            candidates_remaining: 0,
+            source_status: None,
+        },
+        false,
+        false,
+        None,
+    );
+    let projected = V3ErrorHandlingCenter::project_terminal(decision);
+    assert_eq!(projected.status, 598);
+}
+
+#[test]
+fn provider_local_auth_secret_read_failure_is_internal_runtime_identity() {
+    let source = provider_error_source("V3Transport13ResponsesHttpRequest")(
+        V3ProviderError::AuthSecretRead {
+            request_id: "req".to_string(),
+            provider_id: "cc".to_string(),
+            auth_alias: "key1".to_string(),
+            reason: "secret file unreadable".to_string(),
+        },
+    );
+
+    assert_eq!(source.source_kind, V3ErrorSourceKind::ProviderLocalFailure);
+    assert_eq!(source.code, "provider_local_runtime_error");
+    assert!(source.external_error.is_none());
+    let internal = source
+        .internal_error
+        .as_ref()
+        .expect("internal auth/runtime code");
+    assert_eq!(internal.internal_code, "500-160");
+    assert_eq!(internal.node_id, "V3Transport13ResponsesHttpRequest");
+    let decision = V3ErrorHandlingCenter::decide_provider(
+        V3ErrorHandlingCenterInput {
+            source,
+            action_scope: V3ErrorActionScope::None,
+            candidates_remaining: 0,
+            source_status: None,
+        },
+        false,
+        false,
+        None,
+    );
+    let projected = V3ErrorHandlingCenter::project_terminal(decision);
+    assert_eq!(projected.status, 598);
 }
 
 #[test]
