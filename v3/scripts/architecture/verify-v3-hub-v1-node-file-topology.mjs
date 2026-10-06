@@ -86,6 +86,22 @@ function read(file) {
   }
 }
 
+// Rust sources may splice a same-module fragment with include!("..."); the
+// REQ02 file-size ratchet split e.g. hub_v1/anthropic_relay_runtime.rs that way.
+// The including file owns every symbol its included fragments define, so a
+// definition found in an included fragment counts for the including file and a
+// call-map binding keeps naming its pre-split module owner.
+function includedFragmentMatches(file, pattern) {
+  const source = read(file);
+  const directive = /include!\s*\(\s*"([^"]+)"\s*\)/gu;
+  let match;
+  while ((match = directive.exec(source)) !== null) {
+    const fragment = path.join(path.dirname(file), match[1]);
+    if (fs.existsSync(abs(fragment)) && pattern.test(read(fragment))) return true;
+  }
+  return false;
+}
+
 function parseYaml(file) {
   try {
     return YAML.parse(read(file));
@@ -141,7 +157,11 @@ function fnDefinitionPattern(symbol) {
 }
 
 function filesMatching(pattern) {
-  return sourceFiles.filter((file) => fs.existsSync(abs(file)) && pattern.test(read(file)));
+  return sourceFiles.filter(
+    (file) =>
+      fs.existsSync(abs(file)) &&
+      (pattern.test(read(file)) || includedFragmentMatches(file, pattern))
+  );
 }
 
 function typeDefinitionFiles(symbol) {

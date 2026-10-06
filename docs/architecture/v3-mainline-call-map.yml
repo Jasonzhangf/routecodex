@@ -6787,7 +6787,7 @@ chains:
       caller_symbol: execute_v3_anthropic_relay_runtime_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
       callee_symbol: record_provider_success_after_response_governance
-      callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs
+      callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
       resource_flow:
@@ -6805,7 +6805,7 @@ chains:
       from_node: V3ProviderActionSuccessFinalize
       to_node: V3ProviderActionSuccessRecorded
       caller_symbol: record_provider_success_after_response_governance
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs
+      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
       callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       status: anchored
