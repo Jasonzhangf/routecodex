@@ -25,12 +25,13 @@ sequenceDiagram
 
 ## Frozen skeleton
 
-The skeleton owner is `routecodex-v3-server/src/endpoint_handlers.rs`:
+The skeleton owner is `routecodex-v3-server/src/client_sse_transport.rs`:
 
 1. `V3DirectSseAccept01ClientChannel` is selected for Responses client SSE
    intent before provider execution completes. The request-stage execution
    plan owns Direct versus Relay; this Front boundary does not select it.
-   The concrete shared accept owner is `V3FrontSseAcceptSkeleton`; the
+   The concrete shared accept owner is `accept_v3_client_sse_transport` in
+   that transport module; the
    request-intent owner is the single `v3_request_wants_sse` helper in the
    server entry module.
 2. The channel returns `text/event-stream` and owns the transport-only

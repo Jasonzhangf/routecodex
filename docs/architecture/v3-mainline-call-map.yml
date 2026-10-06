@@ -5906,6 +5906,36 @@ chains:
       side_channel_reads: [v3.config.http_sse_keepalive_interval]
       side_channel_writes: []
 
+- chain_id: v3.client_sse_head_commit
+  owner_feature_id: v3.client_sse_head_commit
+  summary: A streamed client request commits the HTTP SSE response head and transport keepalives at the Server boundary while the Runtime still buffers the full provider attempt, and an exec replacement drains in-flight client responses before closing their transports.
+  manifest: docs/architecture/manifests/v3.client_sse_head_commit.mainline.yml
+  entry_contract:
+    node: V3ServerSseHeadCommit01ClientHead
+    owner_doc: docs/architecture/wiki/v3-client-sse-head-commit.md
+  edges:
+  - step_id: v3-client-sse-head-commit-01
+    from_node: V3ServerSseHeadCommit01ClientHead
+    to_node: V3ServerRespOutbound06ClientFrame
+    caller_symbol: pending_model_request
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: accept_v3_client_sse_transport
+    callee_file: v3/crates/routecodex-v3-server/src/client_sse_transport.rs
+    status: anchored
+    edge_kind: transport_head_commit
+    owner_feature_id: v3.client_sse_head_commit
+    semantic_input: streamed client request headers plus the bounded keepalive interval and the pending runtime outcome
+    semantic_output: committed 200 text/event-stream channel with transport-only keepalives, then the projected client payload by SSE transport framing, or an explicit transport break when the outcome has no successful client payload
+    resource_flow:
+      consumes:
+      - v3.sse.direct.accept_skeleton
+      - v3.sse.transport_encoded_chunk
+      - v3.config.http_sse_keepalive_interval
+      produces: []
+      side_channel_reads:
+      - v3.front.request_activity_gate
+      side_channel_writes: []
+
 - chain_id: v3.provider_action_gate.mainline
   owner_feature_id: v3.provider_action_gate
   summary: V3 provider action gate serializes provider failure recovery, permit ownership, post-commit SSE success/failure observation, and provider response event-codec terminal evidence; the Server frame owner consumes typed Error01 and performs the sole Error06 client-protocol projection.
@@ -8059,7 +8089,7 @@ chains:
   owner_feature_id: v3.direct_sse_accept_skeleton
   summary: Protocol-typed client SSE establishes a shared Front transport channel and heartbeat before the execution-plan-selected Direct or Relay attempt finishes; only successful runtime-projected client frames cross the channel, while typed terminal failure aborts the affected transport without an error frame or reparsed HTTP JSON.
   manifest: docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml
-  implementation_symbols: [V3FrontSseAcceptSkeleton, v3_request_wants_sse]
+  implementation_symbols: [accept_v3_client_sse_transport, v3_request_wants_sse]
   supporting_callers: [pending_endpoint_after_responses_admission, execute_responses_direct_server_outcome]
   entry_contract:
     node: V3DirectSseAccept01ClientChannel
