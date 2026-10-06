@@ -8,7 +8,6 @@ mod field_operator_instructions;
 mod field_operator_library;
 mod field_operator_profiles;
 mod field_operator_records;
-mod field_operator_responses_declaration;
 mod hosted_history_projection;
 mod normalize_request_losslessly;
 mod project_canonical_fields;

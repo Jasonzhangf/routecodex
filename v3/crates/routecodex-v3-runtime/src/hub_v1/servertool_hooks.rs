@@ -4,7 +4,7 @@ use super::{
     V3HubRelayResponseHookProfile, V3HubRespInbound02Normalized, V3ServerToolName,
     V3WebSearchCenterPhase, V3WebSearchCenterState,
 };
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use servertool_core::cli_contract::{
     build_client_exec_cli_projection_output, parse_servertool_cli_projection_tool_arguments,
     ServertoolCliProjectionToolArgumentsInput,
@@ -388,6 +388,71 @@ fn payload_declares_web_search_tool(payload: &Value) -> bool {
                     })
             })
         })
+}
+
+/// Search options a Responses `input[]` `web_search` declaration carries into
+/// its canonical `tools[]` declaration.
+const V3_RESPONSES_WEB_SEARCH_OPTION_KEYS: [&str; 4] = [
+    "search_context_size",
+    "user_location",
+    "external_web_access",
+    "search_content_types",
+];
+
+/// Relay request Chat Process: materialize the hosted-tool declarations a
+/// Responses client sent as `input[]` items into canonical `tools[]`.
+///
+/// Inbound stays lossless, so such an `input[]` declaration item reaches the
+/// Chat Process as its lossless canonical carrier, which is not chat history.
+/// The Relay Chat Process is the single owner that turns that declaration into
+/// the canonical tool surface that the web_search capability and the provider
+/// wire projection consume. Direct never runs this node, so a Direct request
+/// keeps the client payload untouched.
+pub(crate) fn lift_v3_responses_input_hosted_declarations(payload: &mut Value) {
+    let Some(object) = payload.as_object_mut() else {
+        return;
+    };
+    let declarations = collect_v3_responses_input_hosted_declarations(object.get("messages"));
+    if declarations.is_empty() {
+        return;
+    }
+    match object.get_mut("tools") {
+        Some(Value::Array(tools)) => tools.extend(declarations),
+        // A malformed non-array `tools` field keeps its lossless raw value.
+        Some(_) => {}
+        None => {
+            object.insert("tools".to_string(), Value::Array(declarations));
+        }
+    }
+}
+
+fn collect_v3_responses_input_hosted_declarations(messages: Option<&Value>) -> Vec<Value> {
+    let mut declarations = Vec::new();
+    for message in messages.and_then(Value::as_array).into_iter().flatten() {
+        match message.get("type").and_then(Value::as_str) {
+            Some("web_search") => declarations.push(v3_responses_web_search_declaration(message)),
+            Some("additional_tools") => {
+                if let Some(tools) = message.get("tools").and_then(Value::as_array) {
+                    declarations.extend(tools.iter().cloned());
+                }
+            }
+            _ => {}
+        }
+    }
+    declarations
+}
+
+/// The canonical declaration of a Responses `input[]` `web_search` item: the
+/// hosted `web_search` tool plus the search options the client declared.
+fn v3_responses_web_search_declaration(message: &Value) -> Value {
+    let mut declaration = Map::new();
+    declaration.insert("type".to_string(), Value::String("web_search".to_string()));
+    for key in V3_RESPONSES_WEB_SEARCH_OPTION_KEYS {
+        if let Some(value) = message.get(key) {
+            declaration.insert(key.to_string(), value.clone());
+        }
+    }
+    Value::Object(declaration)
 }
 
 pub struct V3ServerToolResponseHookOutcome {

@@ -2,7 +2,8 @@ use super::{
     apply_v3_web_search_request_hook_at_req04,
     build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02,
     build_v3_hub_req_inbound_02_from_request_invocation, find_v3_hub_side_channel_key,
-    govern_v3_servertool_request_at_req04, V3HubEntryProtocol, V3HubReqChatProcess04Governed,
+    govern_v3_servertool_request_at_req04, lift_v3_responses_input_hosted_declarations,
+    V3HubEntryProtocol, V3HubReqChatProcess04Governed,
     V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized, V3HubRequestSemanticProtocol,
     V3ToolThinkingTurnContext, V3WebSearchCenterState,
 };
@@ -239,6 +240,14 @@ impl V3HubRelayRequestHooks {
                 V3HubRelayRequestError::MemoryRawCaptureGuidanceInjectionFailed { reason }
             })?;
             normalized.memory_raw_capture_guidance_injected = true;
+        }
+        // Req04 owns the Relay request payload rewrite: the Responses `input[]`
+        // hosted declarations the client sent become canonical `tools[]` here,
+        // not in the shared lossless inbound normalizer that Direct also uses.
+        if normalized.entry_protocol() == V3HubEntryProtocol::Responses {
+            lift_v3_responses_input_hosted_declarations(Arc::make_mut(
+                &mut normalized.previous.payload.0,
+            ));
         }
         let (web_search_state, tool_thinking_turn_context) = govern_v3_servertool_request_at_req04(
             Arc::make_mut(&mut normalized.previous.payload.0),
