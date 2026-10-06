@@ -45,7 +45,7 @@ pub(crate) fn build_v3_gemini_standard_request_from_chat_canonical_with_declarat
     if let Some(native) = row.get_mut("routecodex_chat_extension")
         .and_then(Value::as_object_mut).and_then(|extension| extension.remove("gemini_request")) {
         let native = native.as_object().ok_or("Gemini native extension requires an object")?;
-        row.extend(native.iter().map(|(key, value)| (key.clone(), value.clone())));
+        merge_gemini_native_extension(row, native)?;
     }
     let messages = row.remove("messages").ok_or("Gemini standard projection requires Chat messages")?;
     let messages = messages.as_array().ok_or("Gemini standard projection requires a message array")?;
@@ -212,6 +212,36 @@ pub(crate) fn build_v3_gemini_standard_request_from_chat_canonical_with_declarat
         &source, V3OutboundTargetProtocol::Gemini, model_capabilities,
     )?;
     Ok((payload, drops, native_mappings.unwrap_or_else(|| observer.into_mappings())))
+}
+
+/// Restore the lossless `gemini_request` native extension onto the Gemini wire row.
+///
+/// Most entries are original Gemini top-level fields and are restored verbatim.
+/// `process_generation_config` preserves an unknown `generationConfig` child under
+/// the flat key `generationConfig.<child>` (the inbound mapping quotes that key, so
+/// it is one literal extension key). Re-nesting it under `generationConfig` is the
+/// inverse of that inbound step; leaving it at the top level would hand the Gemini
+/// top-level whitelist a key it cannot represent, so the projection would drop a
+/// field the client asked for (for example `thinkingConfig`).
+fn merge_gemini_native_extension(
+    row: &mut Map<String, Value>,
+    native: &Map<String, Value>,
+) -> Result<(), String> {
+    for (key, value) in native {
+        match key.strip_prefix("generationConfig.") {
+            Some(child) => {
+                row.entry("generationConfig".to_string())
+                    .or_insert_with(|| Value::Object(Map::new()))
+                    .as_object_mut()
+                    .ok_or("Gemini generationConfig requires an object")?
+                    .insert(child.to_string(), value.clone());
+            }
+            None => {
+                row.insert(key.clone(), value.clone());
+            }
+        }
+    }
+    Ok(())
 }
 
 fn emit_gemini_declaration(
