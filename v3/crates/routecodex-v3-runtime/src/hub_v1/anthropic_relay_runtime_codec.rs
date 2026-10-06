@@ -1,13 +1,24 @@
 use super::usage_normalization::project_v3_anthropic_usage_from_canonical;
 use super::{
     project_v3_responses_reasoning_item_as_anthropic_content, V3AnthropicCodecError,
-    V3HubProviderWireProtocol, V3HubTransportIntent,
+    V3AnthropicResponsesProjectionContext, V3HubProviderWireProtocol, V3HubTransportIntent,
 };
+use crate::operation_runner::ResponseProjectionView;
 use crate::protocol_tables::{map_value as table_map_value, V3TableDirection, V3TableKind};
 use serde_json::{json, Value};
 
 pub fn project_v3_responses_json_as_anthropic_message(
     response: &Value,
+) -> Result<Value, V3AnthropicCodecError> {
+    project_v3_responses_json_as_anthropic_message_with_context(
+        response,
+        &V3AnthropicResponsesProjectionContext::default(),
+    )
+}
+
+pub fn project_v3_responses_json_as_anthropic_message_with_context(
+    response: &Value,
+    context: &V3AnthropicResponsesProjectionContext,
 ) -> Result<Value, V3AnthropicCodecError> {
     let object = response
         .as_object()
@@ -31,7 +42,7 @@ pub fn project_v3_responses_json_as_anthropic_message(
                 content.push(json!({
                     "type":"tool_use",
                     "id":item.get("call_id").cloned().unwrap_or(Value::Null),
-                    "name":item.get("name").cloned().unwrap_or(Value::Null),
+                    "name":anthropic_client_tool_name(item, context),
                     "input":input
                 }));
             }
@@ -40,7 +51,7 @@ pub fn project_v3_responses_json_as_anthropic_message(
                 content.push(json!({
                     "type":"tool_use",
                     "id":item.get("call_id").or_else(|| item.get("id")).cloned().unwrap_or(Value::Null),
-                    "name":item.get("name").cloned().unwrap_or(Value::Null),
+                    "name":anthropic_client_tool_name(item, context),
                     "input":responses_custom_tool_call_input(item)?
                 }));
             }
@@ -90,7 +101,17 @@ pub fn project_v3_responses_json_as_anthropic_message(
 pub fn project_v3_responses_json_as_anthropic_events(
     response: &Value,
 ) -> Result<Vec<Value>, V3AnthropicCodecError> {
-    let message = project_v3_responses_json_as_anthropic_message(response)?;
+    project_v3_responses_json_as_anthropic_events_with_context(
+        response,
+        &V3AnthropicResponsesProjectionContext::default(),
+    )
+}
+
+pub fn project_v3_responses_json_as_anthropic_events_with_context(
+    response: &Value,
+    context: &V3AnthropicResponsesProjectionContext,
+) -> Result<Vec<Value>, V3AnthropicCodecError> {
+    let message = project_v3_responses_json_as_anthropic_message_with_context(response, context)?;
     project_v3_anthropic_message_as_sse_events(&message)
 }
 
@@ -106,10 +127,39 @@ pub fn project_v3_anthropic_client_response_for_provider(
     provider_protocol: V3HubProviderWireProtocol,
     transport_intent: V3HubTransportIntent,
 ) -> Result<Value, V3AnthropicCodecError> {
+    project_v3_anthropic_client_response_for_provider_with_context(
+        semantic,
+        provider_protocol,
+        transport_intent,
+        &V3AnthropicResponsesProjectionContext::default(),
+    )
+}
+
+pub fn project_v3_anthropic_client_response_for_provider_with_view(
+    semantic: &Value,
+    view: &ResponseProjectionView,
+    provider_protocol: V3HubProviderWireProtocol,
+    transport_intent: V3HubTransportIntent,
+) -> Result<Value, V3AnthropicCodecError> {
+    let context = V3AnthropicResponsesProjectionContext::from_successful_attempt(view)?;
+    project_v3_anthropic_client_response_for_provider_with_context(
+        semantic,
+        provider_protocol,
+        transport_intent,
+        &context,
+    )
+}
+
+fn project_v3_anthropic_client_response_for_provider_with_context(
+    semantic: &Value,
+    provider_protocol: V3HubProviderWireProtocol,
+    transport_intent: V3HubTransportIntent,
+    context: &V3AnthropicResponsesProjectionContext,
+) -> Result<Value, V3AnthropicCodecError> {
     let message = if provider_protocol == V3HubProviderWireProtocol::OpenAiChat {
-        project_v3_openai_chat_completion_as_anthropic_message(semantic)?
+        project_v3_openai_chat_completion_as_anthropic_message_with_context(semantic, context)?
     } else {
-        project_v3_responses_json_as_anthropic_message(semantic)?
+        project_v3_responses_json_as_anthropic_message_with_context(semantic, context)?
     };
     match transport_intent {
         V3HubTransportIntent::Sse => {
@@ -124,6 +174,16 @@ pub fn project_v3_anthropic_client_response_for_provider(
 /// materialized SSE) into an Anthropic client message.
 pub fn project_v3_openai_chat_completion_as_anthropic_message(
     response: &Value,
+) -> Result<Value, V3AnthropicCodecError> {
+    project_v3_openai_chat_completion_as_anthropic_message_with_context(
+        response,
+        &V3AnthropicResponsesProjectionContext::default(),
+    )
+}
+
+fn project_v3_openai_chat_completion_as_anthropic_message_with_context(
+    response: &Value,
+    context: &V3AnthropicResponsesProjectionContext,
 ) -> Result<Value, V3AnthropicCodecError> {
     let object = response
         .as_object()
@@ -172,10 +232,15 @@ pub fn project_v3_openai_chat_completion_as_anthropic_message(
         let input = serde_json::from_str::<Value>(arguments)
             .ok()
             .unwrap_or_else(|| json!({}));
+        let name = function
+            .get("name")
+            .and_then(Value::as_str)
+            .map(|emitted_name| anthropic_client_tool_name_from_emitted(emitted_name, context))
+            .unwrap_or_else(|| function.get("name").cloned().unwrap_or(Value::Null));
         content.push(json!({
             "type":"tool_use",
             "id":tool_call.get("id").cloned().unwrap_or(Value::Null),
-            "name":function.get("name").cloned().unwrap_or(Value::Null),
+            "name":name,
             "input":input
         }));
     }
@@ -401,6 +466,37 @@ fn optional_anthropic_reasoning_string<'a>(
         })
 }
 
+fn anthropic_client_tool_name(
+    item: &Value,
+    context: &V3AnthropicResponsesProjectionContext,
+) -> Value {
+    match item.get("name").and_then(Value::as_str) {
+        Some(emitted_name) => anthropic_client_tool_name_from_emitted(emitted_name, context),
+        None => item.get("name").cloned().unwrap_or(Value::Null),
+    }
+}
+
+/// Consume the successful-attempt typed view to restore the client-facing tool
+/// identity (original name plus declared namespace) from the emitted wire name.
+/// Only the typed view authorizes this inverse; callers without a successful
+/// attempt pass an empty context and the emitted name is preserved.
+fn anthropic_client_tool_name_from_emitted(
+    emitted_name: &str,
+    context: &V3AnthropicResponsesProjectionContext,
+) -> Value {
+    let Some((_kind, Some(original_name), namespace)) =
+        context.successful_attempt_tool_identity(emitted_name)
+    else {
+        return Value::String(emitted_name.to_string());
+    };
+    let name = namespace
+        .and_then(Value::as_str)
+        .filter(|namespace| !namespace.trim().is_empty())
+        .map(|namespace| format!("{namespace}.{original_name}"))
+        .unwrap_or_else(|| original_name.to_string());
+    Value::String(name)
+}
+
 fn parse_responses_function_call_arguments(item: &Value) -> Result<Value, V3AnthropicCodecError> {
     let arguments = item
         .get("arguments")
@@ -471,6 +567,104 @@ fn responses_stop_reason_as_anthropic_stop_reason(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::operation_runner::{
+        execute_v3_operation_runner_request_capture_client_json,
+        execute_v3_operation_runner_request_normalize_losslessly, AttemptContext,
+        AttemptDeclarationMap, AttemptProjectionContext, RequestInvocationContext,
+        RequestNormalizationEntry, RequestOriginKind, ResponseProjectionView, ToolMappingReference,
+        V3RequestContextHandle,
+    };
+
+    #[test]
+    fn successful_attempt_view_restores_original_anthropic_mcp_name() {
+        let raw = json!({
+            "model": "client-model",
+            "input": [{"role": "user", "content": "Use the search tool"}],
+            "tools": [{
+                "type": "function",
+                "name": "mcp__search.find",
+                "parameters": {"type": "object"}
+            }]
+        });
+        let handle = V3RequestContextHandle::new(
+            "req02-anthropic-inverse-unit".to_string(),
+            "responses".to_string(),
+        );
+        let invocation = RequestInvocationContext::new(
+            handle.clone(),
+            "req02-anthropic-inverse-unit:invocation".to_string(),
+            "req02-anthropic-inverse-unit:attempt".to_string(),
+            RequestOriginKind::ClientEntry,
+        );
+        let captured = execute_v3_operation_runner_request_capture_client_json(raw)
+            .expect("public capture must accept the tool declaration");
+        execute_v3_operation_runner_request_normalize_losslessly(
+            &handle,
+            &invocation,
+            RequestNormalizationEntry::RawEntry(captured),
+        )
+        .expect("public normalization must publish the inverse pair");
+        let pair = handle.original_pair().expect("published inverse pair");
+        let declaration = pair
+            .inverse_context
+            .tool_declarations
+            .first()
+            .expect("tool declaration");
+        let mapping = ToolMappingReference {
+            declaration_record_id: declaration.record_id.clone(),
+            source_path: declaration.source_path.clone(),
+            destination_path: "tools[0]".to_string(),
+            emitted_kind: "function".to_string(),
+            emitted_name: Some("mcp__search__find".to_string()),
+            emitted_namespace: None,
+            encoding: "json".to_string(),
+        };
+        let attempt = AttemptContext {
+            attempt_id: "req02-anthropic-inverse-unit:attempt".to_string(),
+            projection: AttemptProjectionContext {
+                attempt_id: "req02-anthropic-inverse-unit:attempt".to_string(),
+                provider_protocol: "anthropic".to_string(),
+                provider_model: "anthropic-wire".to_string(),
+                paths: Vec::new(),
+            },
+            declarations: AttemptDeclarationMap {
+                attempt_id: "req02-anthropic-inverse-unit:attempt".to_string(),
+                provider_protocol: "anthropic".to_string(),
+                provider_model: "anthropic-wire".to_string(),
+                tool_mappings: vec![mapping],
+            },
+        };
+        handle
+            .publish_successful_attempt(attempt.clone())
+            .expect("publish successful attempt");
+        let view = ResponseProjectionView::from_successful_attempt(&handle, &attempt)
+            .expect("successful attempt view");
+        let context = V3AnthropicResponsesProjectionContext::from_successful_attempt(&view)
+            .expect("successful attempt projection context");
+
+        let message = project_v3_responses_json_as_anthropic_message_with_context(
+            &json!({
+                "id": "resp_inverse_unit",
+                "output": [{
+                    "type": "function_call",
+                    "call_id": "mcp-call",
+                    "name": "mcp__search__find",
+                    "arguments": "{\"arguments\":{\"query\":\"find nested json\"}}"
+                }],
+                "status": "completed"
+            }),
+            &context,
+        )
+        .expect("client Anthropic projection must restore the original identity");
+
+        assert_eq!(message["content"][0]["type"], "tool_use");
+        assert_eq!(message["content"][0]["id"], "mcp-call");
+        assert_eq!(message["content"][0]["name"], "mcp__search.find");
+        assert_eq!(
+            message["content"][0]["input"],
+            json!({"arguments": {"query": "find nested json"}})
+        );
+    }
 
     #[test]
     fn anthropic_sse_projection_rejects_tool_use_without_input() {
@@ -487,6 +681,112 @@ mod tests {
             V3AnthropicCodecError::MalformedField {
                 field: "tool_use input"
             }
+        );
+    }
+
+    #[test]
+    fn openai_chat_wire_client_projection_restores_original_anthropic_mcp_name() {
+        // The openai_chat provider wire carries the emitted `__`-encoded name in
+        // `choices[0].message.tool_calls[].function.name`. The Anthropic client
+        // projection must consume the same successful-attempt typed view as the
+        // Anthropic/Responses wires and restore the original dotted identity.
+        let raw = json!({
+            "model": "client-model",
+            "input": [{"role": "user", "content": "Use the search tool"}],
+            "tools": [{
+                "type": "function",
+                "name": "mcp__search.find",
+                "parameters": {"type": "object"}
+            }]
+        });
+        let handle = V3RequestContextHandle::new(
+            "req02-anthropic-inverse-openai-chat-unit".to_string(),
+            "responses".to_string(),
+        );
+        let invocation = RequestInvocationContext::new(
+            handle.clone(),
+            "req02-anthropic-inverse-openai-chat-unit:invocation".to_string(),
+            "req02-anthropic-inverse-openai-chat-unit:attempt".to_string(),
+            RequestOriginKind::ClientEntry,
+        );
+        let captured = execute_v3_operation_runner_request_capture_client_json(raw)
+            .expect("public capture must accept the tool declaration");
+        execute_v3_operation_runner_request_normalize_losslessly(
+            &handle,
+            &invocation,
+            RequestNormalizationEntry::RawEntry(captured),
+        )
+        .expect("public normalization must publish the inverse pair");
+        let pair = handle.original_pair().expect("published inverse pair");
+        let declaration = pair
+            .inverse_context
+            .tool_declarations
+            .first()
+            .expect("tool declaration");
+        let mapping = ToolMappingReference {
+            declaration_record_id: declaration.record_id.clone(),
+            source_path: declaration.source_path.clone(),
+            destination_path: "tools[0]".to_string(),
+            emitted_kind: "function".to_string(),
+            emitted_name: Some("mcp__search__find".to_string()),
+            emitted_namespace: None,
+            encoding: "json".to_string(),
+        };
+        let attempt = AttemptContext {
+            attempt_id: "req02-anthropic-inverse-openai-chat-unit:attempt".to_string(),
+            projection: AttemptProjectionContext {
+                attempt_id: "req02-anthropic-inverse-openai-chat-unit:attempt".to_string(),
+                provider_protocol: "openai_chat".to_string(),
+                provider_model: "chat-wire".to_string(),
+                paths: Vec::new(),
+            },
+            declarations: AttemptDeclarationMap {
+                attempt_id: "req02-anthropic-inverse-openai-chat-unit:attempt".to_string(),
+                provider_protocol: "openai_chat".to_string(),
+                provider_model: "chat-wire".to_string(),
+                tool_mappings: vec![mapping],
+            },
+        };
+        handle
+            .publish_successful_attempt(attempt.clone())
+            .expect("publish successful attempt");
+        let view = ResponseProjectionView::from_successful_attempt(&handle, &attempt)
+            .expect("successful attempt view");
+
+        let message = project_v3_anthropic_client_response_for_provider_with_view(
+            &json!({
+                "id": "chatcmpl-req02-openai-chat-inverse",
+                "object": "chat.completion",
+                "model": "chat-wire",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [{
+                            "id": "mcp-call",
+                            "type": "function",
+                            "function": {
+                                "name": "mcp__search__find",
+                                "arguments": "{\"arguments\":{\"query\":\"find nested json\"}}"
+                            }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }]
+            }),
+            &view,
+            V3HubProviderWireProtocol::OpenAiChat,
+            V3HubTransportIntent::Json,
+        )
+        .expect("openai_chat client projection must restore the original identity");
+
+        assert_eq!(message["content"][0]["type"], "tool_use");
+        assert_eq!(message["content"][0]["id"], "mcp-call");
+        assert_eq!(message["content"][0]["name"], "mcp__search.find");
+        assert_eq!(
+            message["content"][0]["input"],
+            json!({"arguments": {"query": "find nested json"}})
         );
     }
 }

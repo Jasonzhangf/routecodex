@@ -22,6 +22,9 @@ pub(crate) fn provider_wire_protocol_for_provider_type(
     provider_type: &str,
 ) -> Result<V3HubProviderWireProtocol, String> {
     match provider_type.trim() {
+        // A Responses provider entry must always use the Responses wire protocol,
+        // even if a forwarder/compat target initially resolves it to OpenAI Chat.
+        // cc-sol returns HTTP 400 for Chat-shaped messages on /v1/responses.
         "responses" | "openai_responses" | "openai-responses" => {
             Ok(V3HubProviderWireProtocol::Responses)
         }

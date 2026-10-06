@@ -22,6 +22,7 @@ pub struct V3AnthropicRelayRuntimeOutput {
     pub observability: Option<V3RuntimeObservability>,
     pub stream_observation: Option<V3RuntimeStreamObservation>,
     pub provider_snapshots: Option<V3RelayProviderSnapshots>,
+    pub request_finalizer: Option<crate::operation_runner::V3RequestFinalizerGuard>,
 }
 
 impl V3AnthropicRelayRuntimeOutput {
@@ -134,7 +135,10 @@ pub(crate) fn project_v3_anthropic_relay_runtime_failure_with_trace(
         V3AnthropicRelayRuntimeError::ProviderCompat(error)
             if error.classification() == V3ProviderCompatErrorClassification::RequestPayloadInvalid
     );
-    let provider_pool_exhausted = matches!(&error, V3AnthropicRelayRuntimeError::ProviderPoolExhausted { .. });
+    let provider_pool_exhausted = matches!(
+        &error,
+        V3AnthropicRelayRuntimeError::ProviderPoolExhausted { .. }
+    );
     let internal_status = match &error {
         V3AnthropicRelayRuntimeError::ExecutionControlRequest(_) => Some(598),
         V3AnthropicRelayRuntimeError::ExecutionControlResponse(_) => Some(599),
@@ -191,7 +195,8 @@ pub(crate) fn project_v3_anthropic_relay_runtime_failure_with_trace(
         trace,
     );
     if provider_pool_exhausted {
-        output.terminal_disposition = Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse);
+        output.terminal_disposition =
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse);
     }
     output
 }
@@ -262,8 +267,8 @@ fn provider_runtime_failure(error: V3ProviderError, provider_id: &str) -> V3Rela
             }
         };
         let source = crate::hooks::build_v3_provider_error_source(source_stage, error);
-        let projected = V3ErrorHandlingCenter::project_terminal(
-            V3ErrorHandlingCenter::decide_provider(
+        let projected =
+            V3ErrorHandlingCenter::project_terminal(V3ErrorHandlingCenter::decide_provider(
                 V3ErrorHandlingCenterInput {
                     source,
                     action_scope: V3ErrorActionScope::None,
@@ -273,8 +278,7 @@ fn provider_runtime_failure(error: V3ProviderError, provider_id: &str) -> V3Rela
                 false,
                 false,
                 None,
-            ),
-        );
+            ));
         return V3RelayProviderFailure {
             status: projected.status,
             // Internal transport handoff failure: no upstream HTTP response exists.
@@ -348,6 +352,7 @@ fn provider_failure_output(
         observability: None,
         stream_observation: None,
         provider_snapshots: None,
+        request_finalizer: None,
     }
 }
 
@@ -369,6 +374,7 @@ fn error_output(
         observability: None,
         stream_observation: None,
         provider_snapshots: None,
+        request_finalizer: None,
     }
 }
 
@@ -409,13 +415,11 @@ mod anthropic_client_sse_projection_tests {
 
     #[tokio::test]
     async fn closeout_replay_uses_selected_provider_wire_protocol() {
-        let chunks = vec![
-            br#"event: response.output_text.delta
+        let chunks = vec![br#"event: response.output_text.delta
 data: {"type":"response.output_text.delta","response_id":"resp_partial","delta":"partial"}
 
 "#
-            .to_vec(),
-        ];
+        .to_vec()];
         let error = V3AnthropicRelayRuntimeError::ProviderCompat(V3ProviderCompatError::other(
             "response",
             "compat:passthrough".to_string(),
@@ -593,4 +597,96 @@ async fn collect_v3_anthropic_relay_provider_sse_chunks(
         chunks.push(chunk?);
     }
     Ok(chunks)
+}
+
+fn anthropic_relay_client_headers_as_provider_request_headers(
+    client_headers: &[V3AnthropicRelayClientHeader],
+) -> Vec<routecodex_v3_provider_responses::V3ProviderRequestHeader> {
+    client_headers
+        .iter()
+        .filter_map(|header| {
+            build_v3_anthropic_provider_request_header(&header.name, header.value.trim())
+        })
+        .collect()
+}
+
+fn publish_anthropic_successful_attempt_view(
+    request_context: &crate::nodes::V3RequestContextHandle,
+    attempt_context: &crate::operation_runner::AttemptContext,
+) -> Result<
+    crate::operation_runner::ResponseProjectionView,
+    V3AnthropicRelayRuntimeError,
+> {
+    request_context
+        .publish_successful_attempt(attempt_context.clone())
+        .map_err(V3AnthropicRelayRuntimeError::ExecutionControlResponse)?;
+    crate::operation_runner::ResponseProjectionView::from_successful_attempt(
+        request_context,
+        attempt_context,
+    )
+    .map_err(V3AnthropicRelayRuntimeError::ExecutionControlResponse)
+}
+
+fn record_provider_success_after_response_governance(
+    receipt: &crate::nodes::V3AttemptSuccessReceipt,
+    provider_health: &V3ProviderFailureRuntimeHealth,
+    failure_session_scope: &V3ProviderFailureSessionScope,
+    provider_id: &str,
+    auth_alias: &str,
+    model_id: &str,
+) -> Result<(), V3AnthropicRelayRuntimeError> {
+    provider_health
+        .record_provider_success_in_failure_scope(
+            receipt,
+            failure_session_scope,
+            provider_id,
+            Some(auth_alias),
+            Some(model_id),
+            v3_relay_provider_policy_now_epoch_ms()
+                .map_err(V3AnthropicRelayRuntimeError::Target)?,
+        )
+        .map_err(|error| V3AnthropicRelayRuntimeError::Target(error.to_string()))
+}
+
+async fn anthropic_provider_stream_failure_from_closeout_error(
+    error: &V3AnthropicRelayRuntimeError,
+    chunks: Vec<Vec<u8>>,
+    request_id: &str,
+    provider_id: &str,
+    provider_wire_protocol: V3HubProviderWireProtocol,
+) -> Option<V3RelayProviderFailure> {
+    if !matches!(error, V3AnthropicRelayRuntimeError::ProviderCompat(_)) {
+        return None;
+    }
+    let provider = Box::pin(futures_util::stream::iter(chunks.into_iter().map(Ok)));
+    let materialization_result =
+        crate::hub_v1::responses_relay_runtime::materialize_v3_provider_sse_as_canonical_response(
+            provider_wire_protocol,
+            provider,
+        )
+        .await;
+    let materialization_error = materialization_result.err()?;
+    let failure = crate::hub_v1::responses_relay_runtime::provider_response_stream_relay_failure(
+        materialization_error,
+        request_id,
+        provider_id,
+        None,
+    )
+    .ok()?;
+    Some(V3RelayProviderFailure {
+        status: failure.status,
+        provider_status: failure.provider_status,
+        client_response: json!({
+            "type": "error",
+            "error": {
+                "type": failure.policy_error_type,
+                "message": failure.policy_error_message,
+            }
+        }),
+        source_stage: failure.source_stage,
+        terminal_projection: failure.terminal_projection,
+        terminal_disposition: failure.terminal_disposition,
+        error_type_fn: extract_error_type_style,
+        error_message_fn: extract_message_type_style,
+    })
 }

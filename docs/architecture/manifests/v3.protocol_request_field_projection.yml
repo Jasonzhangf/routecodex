@@ -59,7 +59,7 @@ payload_semantics:
   - request.messages.tool_result.extra_fields
 semantic_registry:
   - semantic_id: request.metadata
-    chat_storage: routecodex_chat_extension.responses_request.metadata
+    chat_storage: metadata
     type: object
     projections:
       responses: metadata_openai_limits

@@ -13,6 +13,7 @@ business_unmatched_value:
   value_owner: chat_extension_opaque_record
   inverse_reference_owner: typed_request_inverse_context_or_response_provenance
   preserve: original_path_value_encoding_and_inverse_association
+  provider_projection: retain_in_request_canonical_only
   admission: continue_request_or_response
   projection: return_to_same_client_protocol_without_semantic_rewrite
 binding_contract:
@@ -33,6 +34,13 @@ binding_contract:
       parent_owned false and may declare their own leaf consumer only for an explicitly
       classified leaf such as an opaque tool payload path. No path may be consumed twice
       in the same direction.
+    container_runtime_binding_rule: |
+      A structure_only row whose params.semantics is array_container_shape or
+      tool_declaration_transform MUST declare params.direction_bindings for every
+      applicable request direction. Each binding names the exact source path, canonical
+      destination, registered operator@version, typed shape, and transform_id. The
+      transform_id is a typed operator parameter selected by configuration; runtime code
+      MUST NOT infer the transformation from the protocol name.
     typed_discriminator_rule: |
       A Responses raw path record that is read differently by item type or content part
       type MUST declare typed_discriminator_cases. Each case carries one or more
@@ -62,6 +70,12 @@ binding_contract:
     static_config: operator, protocol, section, path, shape, semantics, transform_id, collision_policy, failure_class
     runtime_injected: typed control resources passed by the fixed runner, never serialized into payload
   typed_operator_profiles:
+    routecodex.v3.field.fold_history_merge@1:
+      client_request_to_chat:
+        destination: string
+        source_order: array(string)
+        equivalence_policy: enum(canonical_exact_or_declared_text_or_empty_assistant_tool_content)
+        conflict_policy: enum(preserve_distinct_in_source_order)
     routecodex.v3.field.lossless_preserve@1:
       client_request_to_chat:
         shape: enum(object,array,array_item,leaf,opaque_complete_value,inverse_projection,fold_merge,unrepresentable)
@@ -121,6 +135,7 @@ binding_contract:
       client_request_to_chat:
         shape: enum(object,array,array_item,leaf,opaque_complete_value,inverse_projection,fold_merge,unrepresentable)
         semantics: enum(array_container_shape,extended_semantic)
+        transform_id: optional(string)
         failure_class: enum(598,599)
       chat_to_provider:
         shape: enum(object,array,array_item,leaf,opaque_complete_value,inverse_projection,fold_merge,unrepresentable)
@@ -218,6 +233,7 @@ binding_contract:
       client_request_to_chat:
         shape: enum(leaf,object)
         semantics: enum(tool_choice_shape_branch,extended_semantic)
+        transform_id: optional(string)
         failure_class: enum(598,599)
       chat_to_provider:
         shape: enum(leaf,object)
@@ -235,6 +251,7 @@ binding_contract:
       client_request_to_chat:
         shape: enum(leaf,array,object)
         semantics: enum(request_input_shape_branch,extended_semantic)
+        hosted_history_cases: optional(hosted_history_case_list)
         failure_class: enum(598,599)
       chat_to_provider:
         shape: enum(leaf,array,object)
@@ -261,6 +278,7 @@ binding_contract:
       client_request_to_chat:
         shape: enum(object,array,array_item,leaf,opaque_complete_value,inverse_projection,fold_merge,unrepresentable)
         semantics: enum(tool_declaration_transform,extended_semantic)
+        transform_id: optional(string)
         failure_class: enum(598,599)
       chat_to_provider:
         shape: enum(object,array,array_item,leaf,opaque_complete_value,inverse_projection,fold_merge,unrepresentable)
@@ -279,6 +297,7 @@ binding_contract:
         shape: enum(object,array,array_item,leaf,opaque_complete_value,inverse_projection,fold_merge,unrepresentable)
         semantics: enum(role_value_map,extended_semantic)
         table: resource(role_map)
+        transform_id: optional(string)
         failure_class: enum(598,599)
       chat_to_provider:
         shape: enum(object,array,array_item,leaf,opaque_complete_value,inverse_projection,fold_merge,unrepresentable)
@@ -981,6 +1000,25 @@ arc_schemas:
 path_consumers:
   - protocol: responses
     section: request_fields
+    path: request.client_metadata
+    consumers:
+      client_request_to_chat: routecodex.v3.field.lossless_preserve@1
+      chat_to_provider: routecodex.v3.field.request_field_whitelist@1
+    params:
+      shape: leaf
+      semantics: enum(extended_semantic)
+      direction_bindings:
+        client_request_to_chat:
+          source: request.client_metadata
+          destination: chat.routecodex_chat_extension.responses_request.client_metadata
+          operator: routecodex.v3.field.lossless_preserve@1
+          shape: leaf
+          semantics: enum(preserve_field)
+          failure_class: enum(598)
+      failure_class: enum(598)
+    mapping_record: exact
+  - protocol: responses
+    section: request_fields
     path: request.background
     consumers:
       client_request_to_chat: routecodex.v3.field.identity_preserve@1
@@ -1023,14 +1061,14 @@ path_consumers:
       direction_bindings:
         client_request_to_chat:
           source: request.include
-          destination: chat.extension.responses_request.include
+          destination: chat.routecodex_chat_extension.responses_request.include
           operator: routecodex.v3.field.responses_include_transform@1
           shape: array
           transform_id: v3.responses.include_to_chat_extension.v1
           default_projection: preserve_unrepresentable_as_opaque
           failure_class: enum(598)
         chat_to_provider:
-          source: chat.extension.responses_request.include
+          source: chat.routecodex_chat_extension.responses_request.include
           destination: provider.standard.request.include
           operator: routecodex.v3.field.responses_include_transform@1
           shape: array
@@ -1062,6 +1100,13 @@ path_consumers:
       - request.input[].name
       - request.input[].output
       - request.input[].input
+      # Observed hosted raw member paths carried as opaque current semantics.
+      - request.input[].action
+      - request.input[].tool_call_id
+      - request.input[].result
+      - request.input[].result_items
+      - request.input[].error
+      - request.input[].tools
       - request.input[].caller
       - request.input[].namespace
       - request.input[].summary[].text
@@ -1079,7 +1124,52 @@ path_consumers:
       shape: enum(leaf,array)
       semantics: enum(request_input_shape_branch)
       failure_class: enum(598)
+      hosted_history_cases:
+        - discriminator_value: web_search_call
+          function_name: web_search
+          identity_paths:
+            - call_id
+            - tool_call_id
+            - id
+          generated_identity_prefix: call_routecodex_web_search
+          argument_paths:
+            - action
+          non_object_argument_encoding: value_member
+          absent_argument_encoding: empty_object
+          canonical_encoding: single_hosted_event_extension
+          canonical_extension_key: responses_hosted_history_event
+          provider_chat_encoding: adjacent_call_and_complete_event_result
+          provider_anthropic_encoding: assistant_native_hosted_blocks
+          provider_gemini_encoding: adjacent_call_and_complete_event_result
+          native_call_block_type: server_tool_use
+          native_result_block_type: web_search_tool_result
+          native_result_encoding: current_event_outcome_members
+          native_result_excluded_fields:
+            - type
+            - id
+            - call_id
+            - tool_call_id
+          inverse_encoding: current_source_event_value
     null_behavior: enum(preserve_null)
+    mapping_record: exact
+  - protocol: responses
+    section: request_fields
+    path: request.messages
+    parent_owned: true
+    structure_only: true
+    params:
+      shape: array
+      semantics: enum(array_container_shape)
+      direction_bindings:
+        client_request_to_chat:
+          source: request.messages
+          destination: chat.messages
+          operator: routecodex.v3.field.array_container_shape@1
+          shape: array
+          semantics: enum(array_container_shape)
+          transform_id: v3.openai_chat_messages_to_chat_messages.v1
+          failure_class: enum(598)
+      failure_class: enum(598)
     mapping_record: exact
   - protocol: responses
     section: request_fields
@@ -1265,6 +1355,14 @@ path_consumers:
       chat_to_provider: routecodex.v3.field.value_domain_transform@1
     params:
       shape: leaf
+      direction_bindings:
+        client_request_to_chat:
+          source: request.reasoning.effort
+          destination: chat.reasoning_effort
+          operator: routecodex.v3.field.value_domain_transform@1
+          shape: leaf
+          semantics: enum(value_domain_transform)
+          failure_class: enum(598)
       semantics: enum(value_domain_transform)
       failure_class: enum(598)
     mapping_record: exact
@@ -1276,6 +1374,14 @@ path_consumers:
       chat_to_provider: routecodex.v3.field.value_domain_transform@1
     params:
       shape: leaf
+      direction_bindings:
+        client_request_to_chat:
+          source: request.reasoning.summary
+          destination: chat.reasoning_summary_policy
+          operator: routecodex.v3.field.value_domain_transform@1
+          shape: leaf
+          semantics: enum(value_domain_transform)
+          failure_class: enum(598)
       semantics: enum(value_domain_transform)
       failure_class: enum(598)
     mapping_record: exact
@@ -1371,10 +1477,18 @@ path_consumers:
     section: request_fields
     path: request.text.format
     consumers:
-      client_request_to_chat: routecodex.v3.field.value_domain_transform@1
+      client_request_to_chat: routecodex.v3.field.lossless_preserve@1
       chat_to_provider: routecodex.v3.field.value_domain_transform@1
     params:
       shape: leaf
+      direction_bindings:
+        client_request_to_chat:
+          source: request.text.format
+          destination: chat.routecodex_chat_extension.responses_request.text.format
+          operator: routecodex.v3.field.lossless_preserve@1
+          shape: leaf
+          semantics: enum(preserve_field)
+          failure_class: enum(598)
       semantics: enum(value_domain_transform)
       failure_class: enum(598)
     mapping_record: exact
@@ -1382,10 +1496,18 @@ path_consumers:
     section: request_fields
     path: request.text.verbosity
     consumers:
-      client_request_to_chat: routecodex.v3.field.value_domain_transform@1
+      client_request_to_chat: routecodex.v3.field.lossless_preserve@1
       chat_to_provider: routecodex.v3.field.value_domain_transform@1
     params:
       shape: leaf
+      direction_bindings:
+        client_request_to_chat:
+          source: request.text.verbosity
+          destination: chat.routecodex_chat_extension.responses_request.text.verbosity
+          operator: routecodex.v3.field.lossless_preserve@1
+          shape: leaf
+          semantics: enum(preserve_field)
+          failure_class: enum(598)
       semantics: enum(value_domain_transform)
       failure_class: enum(598)
     mapping_record: exact
@@ -1449,6 +1571,26 @@ path_consumers:
     params:
       shape: leaf
       semantics: enum(tool_declaration_transform)
+      failure_class: enum(598)
+    mapping_record: exact
+  - protocol: responses
+    section: input_fields
+    path: request.input[].tools
+    consumers:
+      client_request_to_chat: routecodex.v3.field.tool_declaration_transform@1
+      chat_to_provider: routecodex.v3.field.tool_declaration_transform@1
+    params:
+      shape: array
+      semantics: enum(tool_declaration_transform)
+      direction_bindings:
+        client_request_to_chat:
+          source: request.input[].tools
+          destination: chat.messages[].tools
+          operator: routecodex.v3.field.tool_declaration_transform@1
+          shape: array
+          semantics: enum(tool_declaration_transform)
+          transform_id: v3.openai_chat_tools_to_chat_tools.v1
+          failure_class: enum(598)
       failure_class: enum(598)
     mapping_record: exact
   - protocol: responses
@@ -1812,6 +1954,12 @@ path_consumers:
         - type_value: custom_tool_call
           semantic_id: tool.call.name
           operator: routecodex.v3.field.array_container_shape@1
+        - type_value: function_call_output
+          semantic_id: tool.result.name
+          operator: routecodex.v3.field.array_container_shape@1
+        - type_value: custom_tool_call_output
+          semantic_id: tool.result.name
+          operator: routecodex.v3.field.array_container_shape@1
   - protocol: responses
     section: input_fields
     path: request.input[].caller
@@ -1834,6 +1982,15 @@ path_consumers:
       semantics: enum(array_container_shape)
       failure_class: enum(598)
     mapping_record: exact
+    typed_discriminator_cases:
+      discriminator_path: request.input[].type
+      cases:
+        - type_value: function_call_output
+          semantic_id: tool.result.namespace
+          operator: routecodex.v3.field.array_container_shape@1
+        - type_value: custom_tool_call_output
+          semantic_id: tool.result.namespace
+          operator: routecodex.v3.field.array_container_shape@1
   - protocol: responses
     section: input_fields
     path: request.input[].output
@@ -1873,6 +2030,65 @@ path_consumers:
         - type_value: custom_tool_call
           semantic_id: tool.call.input
           operator: routecodex.v3.field.opaque_tool_payload@1
+  # Observed hosted raw member paths. These are observed compatibility
+  # semantics for the configured hosted-history case, not SDK-native claims.
+  # The configured case carries the complete event opaquely; these rows only
+  # register the member source paths for admission and source inventory.
+  - protocol: responses
+    section: input_fields
+    path: request.input[].action
+    consumers:
+      client_request_to_chat: routecodex.v3.field.array_container_shape@1
+      chat_to_provider: routecodex.v3.field.array_container_shape@1
+    params:
+      shape: array_item
+      semantics: enum(array_container_shape)
+      failure_class: enum(598)
+    mapping_record: exact
+  - protocol: responses
+    section: input_fields
+    path: request.input[].tool_call_id
+    consumers:
+      client_request_to_chat: routecodex.v3.field.array_container_shape@1
+      chat_to_provider: routecodex.v3.field.array_container_shape@1
+    params:
+      shape: array_item
+      semantics: enum(array_container_shape)
+      failure_class: enum(598)
+    mapping_record: exact
+  - protocol: responses
+    section: input_fields
+    path: request.input[].result
+    consumers:
+      client_request_to_chat: routecodex.v3.field.array_container_shape@1
+      chat_to_provider: routecodex.v3.field.array_container_shape@1
+    params:
+      shape: array_item
+      semantics: enum(array_container_shape)
+      failure_class: enum(598)
+    mapping_record: exact
+  - protocol: responses
+    section: input_fields
+    path: request.input[].result_items
+    consumers:
+      client_request_to_chat: routecodex.v3.field.array_container_shape@1
+      chat_to_provider: routecodex.v3.field.array_container_shape@1
+    params:
+      shape: array
+      semantics: enum(array_container_shape)
+      failure_class: enum(598)
+    mapping_record: exact
+  - protocol: responses
+    section: input_fields
+    path: request.input[].error
+    consumers:
+      client_request_to_chat: routecodex.v3.field.array_container_shape@1
+      chat_to_provider: routecodex.v3.field.array_container_shape@1
+    params:
+      shape: array_item
+      semantics: enum(array_container_shape)
+      failure_class: enum(598)
+    mapping_record: exact
   - protocol: responses
     section: input_fields
     path: request.input[].summary[].text
@@ -2742,6 +2958,15 @@ path_consumers:
     params:
       shape: array
       semantics: enum(array_container_shape)
+      direction_bindings:
+        client_request_to_chat:
+          source: request.messages
+          destination: chat.messages
+          operator: routecodex.v3.field.array_container_shape@1
+          shape: array
+          semantics: enum(array_container_shape)
+          transform_id: v3.openai_chat_messages_to_chat_messages.v1
+          failure_class: enum(598)
       failure_class: enum(598)
     mapping_record: exact
   - protocol: openai_chat
@@ -3186,6 +3411,15 @@ path_consumers:
     params:
       shape: array
       semantics: enum(tool_declaration_transform)
+      direction_bindings:
+        client_request_to_chat:
+          source: request.tools
+          destination: chat.tools
+          operator: routecodex.v3.field.tool_declaration_transform@1
+          shape: array
+          semantics: enum(tool_declaration_transform)
+          transform_id: v3.openai_chat_tools_to_chat_tools.v1
+          failure_class: enum(598)
       failure_class: enum(598)
     mapping_record: exact
   - protocol: openai_chat
@@ -3768,6 +4002,15 @@ path_consumers:
     params:
       shape: array
       semantics: enum(array_container_shape)
+      direction_bindings:
+        client_request_to_chat:
+          source: request.messages
+          destination: chat.messages
+          operator: routecodex.v3.field.array_container_shape@1
+          shape: array
+          semantics: enum(array_container_shape)
+          transform_id: v3.anthropic_messages_to_chat_messages.v1
+          failure_class: enum(598)
       failure_class: enum(598)
     mapping_record: exact
   - protocol: anthropic
@@ -3833,6 +4076,14 @@ path_consumers:
       chat_to_provider: routecodex.v3.field.value_domain_transform@1
     params:
       shape: leaf
+      direction_bindings:
+        client_request_to_chat:
+          source: request.output_config.effort
+          destination: chat.reasoning_effort
+          operator: routecodex.v3.field.value_domain_transform@1
+          shape: leaf
+          semantics: enum(value_domain_transform)
+          failure_class: enum(598)
       semantics: enum(value_domain_transform)
       failure_class: enum(598)
     mapping_record: exact
@@ -3866,6 +4117,14 @@ path_consumers:
       chat_to_provider: routecodex.v3.field.value_domain_transform@1
     params:
       shape: leaf
+      direction_bindings:
+        client_request_to_chat:
+          source: request.stop_sequences
+          destination: chat.stop
+          operator: routecodex.v3.field.value_domain_transform@1
+          shape: leaf
+          semantics: enum(value_domain_transform)
+          failure_class: enum(598)
       semantics: enum(value_domain_transform)
       failure_class: enum(598)
     mapping_record: exact
@@ -3926,6 +4185,14 @@ path_consumers:
       chat_to_provider: routecodex.v3.field.value_domain_transform@1
     params:
       shape: leaf
+      direction_bindings:
+        client_request_to_chat:
+          source: request.thinking.type
+          destination: chat.reasoning_thinking_mode
+          operator: routecodex.v3.field.value_domain_transform@1
+          shape: leaf
+          semantics: enum(value_domain_transform)
+          failure_class: enum(598)
       semantics: enum(value_domain_transform)
       failure_class: enum(598)
     mapping_record: exact
@@ -3937,6 +4204,14 @@ path_consumers:
       chat_to_provider: routecodex.v3.field.usage_value_map@1
     params:
       shape: leaf
+      direction_bindings:
+        client_request_to_chat:
+          source: request.thinking.budget_tokens
+          destination: chat.reasoning_budget_tokens
+          operator: routecodex.v3.field.usage_value_map@1
+          shape: leaf
+          semantics: enum(usage_value_map)
+          failure_class: enum(598)
       semantics: enum(usage_value_map)
       failure_class: enum(598)
     mapping_record: exact
@@ -3948,7 +4223,42 @@ path_consumers:
       chat_to_provider: routecodex.v3.field.value_domain_transform@1
     params:
       shape: leaf
+      direction_bindings:
+        client_request_to_chat:
+          source: request.thinking.display
+          destination: chat.reasoning_display_policy
+          operator: routecodex.v3.field.value_domain_transform@1
+          shape: leaf
+          semantics: enum(value_domain_transform)
+          failure_class: enum(598)
       semantics: enum(value_domain_transform)
+      failure_class: enum(598)
+    mapping_record: exact
+  - protocol: anthropic
+    section: request_fields
+    path: request.tool_choice
+    parent_owned: true
+    structure_only: true
+    union_shape: true
+    scalar_consumer:
+      client_request_to_chat: routecodex.v3.field.tool_choice_shape_branch@1
+      chat_to_provider: routecodex.v3.field.tool_choice_shape_branch@1
+    shape_children:
+      - request.tool_choice.type
+      - request.tool_choice.name
+      - request.tool_choice.disable_parallel_tool_use
+    params:
+      shape: enum(leaf,object)
+      semantics: enum(tool_choice_shape_branch)
+      direction_bindings:
+        client_request_to_chat:
+          source: request.tool_choice
+          destination: chat.tool_choice
+          operator: routecodex.v3.field.tool_choice_shape_branch@1
+          shape: enum(leaf,object)
+          semantics: enum(tool_choice_shape_branch)
+          transform_id: v3.anthropic_tool_choice_to_chat_tool_choice.v1
+          failure_class: enum(598)
       failure_class: enum(598)
     mapping_record: exact
   - protocol: anthropic
@@ -4049,6 +4359,25 @@ path_consumers:
     params:
       shape: array_item
       semantics: enum(tool_declaration_transform)
+      failure_class: enum(598)
+    mapping_record: exact
+  - protocol: anthropic
+    section: request_fields
+    path: request.tools
+    parent_owned: true
+    structure_only: true
+    params:
+      shape: array
+      semantics: enum(tool_declaration_transform)
+      direction_bindings:
+        client_request_to_chat:
+          source: request.tools
+          destination: chat.tools
+          operator: routecodex.v3.field.tool_declaration_transform@1
+          shape: array
+          semantics: enum(tool_declaration_transform)
+          transform_id: v3.anthropic_tools_to_chat_tools.v1
+          failure_class: enum(598)
       failure_class: enum(598)
     mapping_record: exact
   - protocol: anthropic
@@ -5128,6 +5457,15 @@ path_consumers:
     params:
       shape: array
       semantics: enum(array_container_shape)
+      direction_bindings:
+        client_request_to_chat:
+          source: request.contents
+          destination: chat.messages
+          operator: routecodex.v3.field.array_container_shape@1
+          shape: array
+          semantics: enum(array_container_shape)
+          transform_id: v3.gemini_contents_to_chat_messages.v1
+          failure_class: enum(598)
       failure_class: enum(598)
     mapping_record: exact
   - protocol: gemini
@@ -5140,6 +5478,25 @@ path_consumers:
       shape: leaf
       failure_class: enum(598)
       semantics: enum(preserve_field)
+    mapping_record: exact
+  - protocol: gemini
+    section: request_fields
+    path: request.systemInstruction
+    parent_owned: true
+    structure_only: true
+    params:
+      shape: object
+      semantics: enum(preserve_field)
+      direction_bindings:
+        client_request_to_chat:
+          source: request.systemInstruction
+          destination: chat.system.instructions
+          operator: routecodex.v3.field.array_container_shape@1
+          shape: object
+          semantics: enum(array_container_shape)
+          transform_id: v3.gemini_system_instruction_to_chat_system.v1
+          failure_class: enum(598)
+      failure_class: enum(598)
     mapping_record: exact
   - protocol: gemini
     section: request_fields
@@ -5187,6 +5544,15 @@ path_consumers:
     params:
       shape: array
       semantics: enum(tool_declaration_transform)
+      direction_bindings:
+        client_request_to_chat:
+          source: request.tools
+          destination: chat.tools
+          operator: routecodex.v3.field.tool_declaration_transform@1
+          shape: array
+          semantics: enum(tool_declaration_transform)
+          transform_id: v3.gemini_tools_to_chat_tools.v1
+          failure_class: enum(598)
       failure_class: enum(598)
     mapping_record: exact
   - protocol: gemini
@@ -5196,6 +5562,15 @@ path_consumers:
     structure_only: true
     params:
       shape: object
+      direction_bindings:
+        client_request_to_chat:
+          source: request.toolConfig
+          destination: chat.tool_choice
+          operator: routecodex.v3.field.array_container_shape@1
+          shape: object
+          semantics: enum(array_container_shape)
+          transform_id: v3.gemini_tool_config_to_chat_tool_choice.v1
+          failure_class: enum(598)
       failure_class: enum(598)
       semantics: enum(preserve_field)
     mapping_record: exact
@@ -5239,6 +5614,15 @@ path_consumers:
     structure_only: true
     params:
       shape: object
+      direction_bindings:
+        client_request_to_chat:
+          source: request.generationConfig
+          destination: chat.generation_config
+          operator: routecodex.v3.field.array_container_shape@1
+          shape: object
+          semantics: enum(array_container_shape)
+          transform_id: v3.gemini_generation_config_to_chat_generation_config.v1
+          failure_class: enum(598)
       failure_class: enum(598)
       semantics: enum(preserve_field)
     mapping_record: exact
@@ -5284,6 +5668,15 @@ path_consumers:
     params:
       shape: array_item
       semantics: enum(role_value_map)
+      direction_bindings:
+        client_request_to_chat:
+          source: request.contents[].role
+          destination: chat.messages[].role
+          operator: routecodex.v3.field.role_value_map@1
+          shape: array_item
+          semantics: enum(role_value_map)
+          transform_id: v3.gemini_role_to_chat_role.v1
+          failure_class: enum(598)
       failure_class: enum(598)
     mapping_record: exact
   - protocol: gemini
@@ -5306,6 +5699,15 @@ path_consumers:
     params:
       shape: array_item
       semantics: enum(array_container_shape)
+      direction_bindings:
+        client_request_to_chat:
+          source: request.contents[].parts[].inlineData.data
+          destination: chat.messages[].content[].media.inline_data
+          operator: routecodex.v3.field.array_container_shape@1
+          shape: array_item
+          semantics: enum(array_container_shape)
+          transform_id: v3.gemini_inline_data_to_chat_media_inline_data.v1
+          failure_class: enum(598)
       failure_class: enum(598)
     mapping_record: exact
   - protocol: gemini
@@ -5317,6 +5719,15 @@ path_consumers:
     params:
       shape: array_item
       semantics: enum(array_container_shape)
+      direction_bindings:
+        client_request_to_chat:
+          source: request.contents[].parts[].inlineData.mimeType
+          destination: chat.messages[].content[].media.mime_type
+          operator: routecodex.v3.field.array_container_shape@1
+          shape: array_item
+          semantics: enum(array_container_shape)
+          transform_id: v3.gemini_inline_mime_type_to_chat_media_mime_type.v1
+          failure_class: enum(598)
       failure_class: enum(598)
     mapping_record: exact
   - protocol: gemini
@@ -7366,6 +7777,18 @@ extension_path_consumers:
     section: extended_superset
     params:
       shape: leaf
+      semantics: enum(extended_semantic)
+      failure_class: enum(598)
+    mapping_record: exact
+  - path: request.messages.hosted_history.event
+    direction: request
+    consumers:
+      client_request_to_chat: routecodex.v3.field.lossless_preserve@1
+      chat_to_provider: routecodex.v3.field.standard_projection@1
+    protocol: openai_chat_extension
+    section: extended_superset
+    params:
+      shape: object
       semantics: enum(extended_semantic)
       failure_class: enum(598)
     mapping_record: exact
@@ -9450,6 +9873,22 @@ fold_contract:
     - untyped parameters
     - cross-protocol codec/wire mix that bypasses the shared walker
   registered_folds:
+    - operator: routecodex.v3.field.fold_history_merge
+      operator_version: "1"
+      direction: client_request_to_chat
+      protocol: responses
+      input_paths:
+        - request.messages
+        - request.input
+      params:
+        destination: chat.messages
+        source_order:
+          - request.messages
+          - request.input
+        equivalence_policy: canonical_exact_or_declared_text_or_empty_assistant_tool_content
+        conflict_policy: preserve_distinct_in_source_order
+      finalize_operator: routecodex.v3.field.fold_finalize@1
+      finalize_position: after_all_fold_input_paths
     - operator: routecodex.v3.field.fold_role_developer_to_system
       operator_version: "1"
       direction: chat_to_provider
@@ -9626,6 +10065,8 @@ operator_registry:
     - operator: routecodex.v3.field.token_limit_rename
       operator_version: "1"
     - operator: routecodex.v3.field.fold_role_developer_to_system
+      operator_version: "1"
+    - operator: routecodex.v3.field.fold_history_merge
       operator_version: "1"
     - operator: routecodex.v3.field.fold_role_system_to_developer
       operator_version: "1"

@@ -93,6 +93,7 @@ success_receipt_contract:
     - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
     - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
     - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+    - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner_response_interpretation.rs
     - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
     - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
     - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs

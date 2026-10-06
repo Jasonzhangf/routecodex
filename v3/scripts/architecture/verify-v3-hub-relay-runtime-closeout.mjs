@@ -36,6 +36,7 @@ const responsesRuntime = readFileSync(responsesRuntimePath, 'utf8')
   + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs', 'utf8')
   + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs', 'utf8')
   + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs', 'utf8')
+  + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner_response_interpretation.rs', 'utf8')
   + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs', 'utf8');
 const responsesRelayJsonHooks = readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs', 'utf8');
 const responsesProviderEventCodec = readFileSync(responsesProviderEventCodecPath, 'utf8');
@@ -165,10 +166,16 @@ requireOrderedSequence(runtime, runtimePath, [
   'fn closeout_anthropic_relay_normalized_response<F>(',
   'let hooks = compile_v3_hub_relay_response_hooks();',
   'let resp03 = hooks.govern(resp02, response_hook_profile)?;',
-  'let client_payload = project_client_response(resp03.provider_payload())?;',
+  'project_client_response(resp03.provider_payload(), &successful_attempt_view)?;',
   'build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload(',
   'build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05)',
 ]);
+const normalizedCloseout = runtime.slice(runtime.indexOf('fn closeout_anthropic_relay_normalized_response<F>('));
+const governIndex = normalizedCloseout.indexOf('hooks.govern(resp02, response_hook_profile)?');
+const inverseIndex = normalizedCloseout.indexOf('project_client_response(');
+if (inverseIndex >= 0 && inverseIndex < governIndex) {
+  failures.push(`${runtimePath}: client identity inverse must run after response governance`);
+}
 requireOrdered(
   runtime,
   runtimePath,
@@ -286,9 +293,12 @@ requireCount(
   'let (mut finalized_provider_value, response_web_search_state) =',
   2,
 );
+// R53-F moved the ordered provider-response SSE path verbatim out of
+// responses_relay_runtime_inner.rs into the response-interpretation companion;
+// the ordered anchor follows the file that now owns that path.
 requireOrderedSequence(
-  readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs', 'utf8'),
-  responsesRuntimePath + '::inner',
+  readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner_response_interpretation.rs', 'utf8'),
+  responsesRuntimePath + '::inner_response_interpretation',
   [
     'V3ProviderResponseBody::Sse(stream) => {',
     'build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context',

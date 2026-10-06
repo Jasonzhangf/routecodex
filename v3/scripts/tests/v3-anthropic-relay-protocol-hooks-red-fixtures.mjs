@@ -1,13 +1,15 @@
 #!/usr/bin/env node
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const repoRoot = process.cwd();
+const repoRoot = existsSync(resolve(process.cwd(), 'docs/architecture'))
+  ? process.cwd()
+  : resolve(process.cwd(), '..');
 const verifier = resolve(
   repoRoot,
-  'scripts/architecture/verify-v3-anthropic-relay-protocol-hooks.mjs',
+  'v3/scripts/architecture/verify-v3-anthropic-relay-protocol-hooks.mjs',
 );
 const source = 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_hooks.rs';
 const tests = 'v3/crates/routecodex-v3-runtime/tests/hub_anthropic_relay_protocol_hooks.rs';
@@ -34,11 +36,11 @@ const fixtures = [
     /missing validate_v3_anthropic_hub_response_payload_for_client_projection/,
   ],
   [
-    'request inbound responses semantic codec removed',
+    'request inbound registered SDK bridge removed',
     source,
-    'encode_v3_anthropic_request_as_responses_semantic',
+    'build_v3_hub_req_inbound_02_from_request_invocation',
     'characterize_v3_anthropic_client_input_to_hub_semantic',
-    /missing encode_v3_anthropic_request_as_responses_semantic/,
+    /missing build_v3_hub_req_inbound_02_from_request_invocation/,
   ],
   [
     'entry protocol guard inverted',

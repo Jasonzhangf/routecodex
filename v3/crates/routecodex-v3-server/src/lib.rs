@@ -4,6 +4,7 @@ mod compaction_request;
 mod console;
 mod debug_runtime_degradation;
 mod endpoint_handlers;
+mod endpoint_trace;
 mod executors;
 mod frame_builders;
 mod listener_accept;
@@ -12,6 +13,7 @@ mod live_snapshot_projections;
 mod metadata_center;
 mod models_catalog;
 mod request_id;
+mod request_identity;
 mod responses_direct_server_outcome;
 mod restart_closeout;
 mod restart_handoff;
@@ -23,14 +25,13 @@ mod webui_observability_endpoints;
 
 use compaction_request::classify_v3_request_purpose;
 use console::*;
-use endpoint_handlers::{
-    allocate_v3_console_request_id, allocate_v3_console_request_identity,
-    format_v3_request_id_entry, format_v3_request_id_token,
-    merge_v3_direct_handoff_provider_failure_events, merge_v3_protocol_plan_trace,
-    merge_v3_relay_handoff_provider_failure_events_into_direct_frame,
-    next_v3_console_request_identity, pending_endpoint_after_responses_admission,
+use endpoint_handlers::pending_endpoint_after_responses_admission;
+use endpoint_trace::{
+    is_provider_request_dry_run, merge_v3_direct_handoff_provider_failure_events,
+    merge_v3_protocol_plan_trace, merge_v3_relay_handoff_provider_failure_events_into_direct_frame,
+    prepend_v3_protocol_plan_trace_to_foundation_output,
     prepend_v3_protocol_plan_trace_to_responses_relay_output,
-    prepend_v3_relay_handoff_trace_to_direct_frame,
+    prepend_v3_relay_handoff_trace_to_direct_frame, resolve_v3_dry_run_target_label,
 };
 pub use executors::*;
 pub(crate) use frame_builders::*;
@@ -40,6 +41,10 @@ pub(crate) use metadata_center::*;
 use request_id::{
     format_v3_tm, v3_request_id_clock_now, V3AllocatedRequestIdentity, V3RequestCounterState,
     V3RequestIdCounter,
+};
+use request_identity::{
+    allocate_v3_console_request_id, allocate_v3_console_request_identity,
+    format_v3_request_id_entry, format_v3_request_id_token, next_v3_console_request_identity,
 };
 pub use restart_handoff::*;
 pub(crate) use routecodex_v3_runtime::V3RequestPurpose;
@@ -64,7 +69,8 @@ use futures_util::{stream, StreamExt};
 use libc::EINTR;
 use listener_accept::{run_v3_listener_accept_loop, V3ListenerAcceptState};
 use responses_direct_server_outcome::{
-    execute_responses_direct_server_outcome, V3ResponsesDirectServerOutcome,
+    client_entry, execute_responses_direct_server_outcome, relay_entry, V3DirectEntry,
+    V3ResponsesDirectServerOutcome,
 };
 use routecodex_v3_config::{
     collect_v3_route_group_catalog_model_refs, resolve_routecodex_package_version_from_executable,
@@ -95,6 +101,7 @@ use routecodex_v3_runtime::{
     execute_v3_anthropic_relay_runtime_with_default_transport_client_headers_provider_health,
     execute_v3_foundation_pending_runtime, execute_v3_gemini_relay_runtime_with_default_transport,
     execute_v3_gemini_relay_runtime_with_default_transport_provider_health,
+    execute_v3_openai_chat_relay_handoff_runtime_with_default_transport_provider_health_and_request_control,
     execute_v3_openai_chat_relay_runtime_with_default_transport,
     execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health,
     execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_execution_mode,
@@ -118,8 +125,8 @@ use routecodex_v3_runtime::{
     V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput, V3HubExecutionMode,
     V3OpenAiChatClientStream, V3OpenAiChatCommittedStream, V3OpenAiChatRelayClientBody,
     V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3ProviderHealthProbeFailure,
-    V3RelayProviderSnapshots, V3RequestExecutionControl, V3Resp15ClientPayload,
-    V3ResponsesDirectRuntimeSharedState, V3ResponsesDirectServerToolScope,
+    V3RelayEntryOrigin, V3RelayProviderSnapshots, V3RelayRuntimeEntry, V3RequestExecutionControl,
+    V3Resp15ClientPayload, V3ResponsesDirectRuntimeSharedState, V3ResponsesDirectServerToolScope,
     V3ResponsesDirectServerToolState, V3ResponsesProtocolExecutionPlan, V3ResponsesRelayClientBody,
     V3ResponsesRelayClientStream, V3ResponsesRelayDryRunOutcome,
     V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayProviderSnapshotCapture,
@@ -291,40 +298,6 @@ pub fn build_v3_server_startup_01_listener_set_from_config_05(
 const V3_EXEC_INFLIGHT_DRAIN: std::time::Duration = std::time::Duration::from_secs(5);
 
 impl V3ServerAggregateHandle {
-    pub async fn prepare_exec_attempt(&self) -> Result<V3ServerExecPreparation, String> {
-        self.flush_runtime_persistence();
-        let codex_sample_exec_guard = match self.codex_sample_persist_worker.as_ref() {
-            Some(worker) => match tokio::time::timeout(
-                std::time::Duration::from_secs(1),
-                worker.quiesce_for_exec(),
-            )
-            .await
-            {
-                Ok(Ok(guard)) => Some(guard),
-                Ok(Err(error)) => {
-                    return Err(format!(
-                        "codex sample persistence preparation failed: {error}"
-                    ))
-                }
-                Err(_) => {
-                    return Err(
-                        "codex sample persistence preparation timed out; worker retained".into(),
-                    )
-                }
-            },
-            None => None,
-        };
-        let codex_sample_persist_failures = codex_sample_exec_guard
-            .as_ref()
-            .map(|guard| guard.persist_failures())
-            .unwrap_or_default();
-        Ok(V3ServerExecPreparation {
-            front_checkpoints: self.front_transport_broker.freeze(Instant::now()),
-            codex_sample_persist_failures,
-            _codex_sample_exec_guard: codex_sample_exec_guard,
-        })
-    }
-
     pub fn front_transport_broker(&self) -> &V3FrontTransportBroker {
         &self.front_transport_broker
     }

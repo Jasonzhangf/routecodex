@@ -1,0 +1,27 @@
+{
+  "contract_version": "1",
+  "scope": {
+    "mode": "uncommitted",
+    "commit": "b436b68bcad0a809e9722e6fa179ee8ccc414e3c",
+    "base": null
+  },
+  "module_boundary_evidence": [
+    {
+      "module": "v3.operation_runner.dagpipe.request / REQ02 resource-effects design",
+      "owner": "v3.unified_operation_runner_design；Runtime 拥有归一化与请求级资源，RuntimeRequestGraphEntry 拥有 invocation origin，RuntimeRequestFinalizer 拥有请求资源释放",
+      "paths": "docs/architecture/dagpipe/v3.operation_runner.request.graph.json；docs/architecture/v3-mainline-call-map.yml；docs/architecture/v3-resource-operation-map.yml；docs/design/v3-unified-operation-runner-design.md；docs/architecture/wiki/html/v3-mainline-caller-flow.html；当前 diff 未修改 Rust、配置 profile 或真实 caller",
+      "edges": "请求图保持 source-request → capture_client_json → client-json → normalize_request_losslessly → canonical-request；canonical-request 分别进入 resolve_target 与 plan_execution，随后汇合进入治理、标准投影、Compat、wire 和 transport-request 唯一出口；本轮移除 REQ02、target resolution 与标准投影对 normal_payload 镜像的声明，受影响 caller-map 条目用 data_arc_flow 表达业务 ARC，typed resource_flow 保留控制及关联资源；相关 caller/callee 仍标 binding_pending，没有把设计修订声明为运行接线",
+      "resources": "REQ02 读取 published_manifest、request_origin_kind、request_inverse_context 和 explicit_history_pairing；仅 client_entry 初始化 inverse/history，retry/internal_followup 读取并保留原关联；资源 map 已补 REQ02 的 history reader；业务参数和结果保留在 canonical payload，关联资源仅保存身份、路径、编码和配对引用；origin 随 graph invocation 返回结束，inverse/history 在 runtime_request_finalizer 释放；成功、失败、取消及断连的实际释放接线仍属于后续实现验收，本轮没有新增运行时状态或资源",
+      "gates": "本次只读执行 dagpipe graph validate：request@1 有 9 nodes、9 edges、9 waves，静态拓扑有效；verify-v3-operation-runner-dagpipe.mjs 通过；verify-v3-resource-map.mjs 通过；以 ROUTECODEX_V3_ADMISSION_WORKSPACE=1 执行 verify-v3-mainline-caller-flow.mjs 通过，Markdown/HTML 同步；git diff --check 通过；caller-flow 首次未指定 admission workspace 时因默认 build-contracts 路径不存在退出，按脚本声明的工作区模式执行后通过；SDK 编译、工具完整回合、安装、重启和 live replay 不由本轮文档验证证明，当前未修改 runtime，因而不作为本轮设计修订的运行验证要求"
+    },
+    {
+      "module": "REQ02 cutover orchestration documents and worker contracts",
+      "owner": "父编排负责合同、设计审查、集成与最终验收；field、consumer、profile worker 各自拥有声明的独立工作范围",
+      "paths": "docs/goals/dagpipe-req02-sequential-cutover-20261002.md；docs/goals/dagpipe-req02-cutover-notes-20261002.md；docs/goals/req02-consumer-design-worker-r3-20261002.md；docs/goals/req02-field-library-worker-r3-20261002.md；docs/goals/req02-operator-worker-contract-20261002.md；docs/goals/req02-profile-worker-20261002.md；.execution/ 为 worker 执行记录",
+      "edges": "交付合同明确需求 → scope/owner → 图与合同修订及独立设计准入 → 独占实现 → 公开 consumer → 候选真实 caller 与隔离 HTTP/WS 工具回合 → 适用 runtime 验证 → 独立架构审查 → main/remote 回执 → 自有资源清理；REQ06 保留外部 owner；consumer 文档任务只定稿接口，field 切片不接生产 caller，profile 配置须审查后才能组合到实施树；既有工具基线、旧候选和静态图均未被当作 REQ02 交付证据",
+      "resources": "文档指定外置独占 worktree、显式 cwd 和允许/禁止文件范围，保护共享 dirty 树、旧候选、其他 worker 及 4444 runtime；本任务 worktree、CODEX_HOME、依赖链接和临时执行资源由父编排在终点回收，活动或阻塞资源保留；本次 reviewer 未创建、修改或删除上述资源",
+      "gates": "阶段笔记保留 R1/R2 审查问题、对应修订、输入 SHA、证据位置和下一步，重验原因来自 graph/map 输入变化；worker 合同包含具体测试命令与完成条件，明确归一化单测不能替代 provider 保留、完整工具执行回执或真实入口验收；当前 REQ02 产品实现、consumer 接线、终端释放和交付证据均明确未完成，没有发现本轮文档把这些 pending 节点冒充已验证结果"
+    }
+  ],
+  "findings": []
+}

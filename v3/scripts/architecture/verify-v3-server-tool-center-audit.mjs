@@ -88,8 +88,10 @@ for (const typeName of [
 
 // 5) 控制面写 helper 与调用点必须实际传参（静态抽查 relay/direct/hop 三侧）。
 //    写 helper 定义侧检查签名携带 written_by；调用点侧检查 origin 字面量存在。
+//    Relay 的两处控制面写入随 R53-F 从 responses_relay_runtime_inner.rs 原样移动到
+//    responses_relay_runtime_inner_response_interpretation.rs，锚点跟随新 owner。
 const writeCallSites = [
-  ['hub_v1/responses_relay_runtime_inner.rs', 'literal'],
+  ['hub_v1/responses_relay_runtime_inner_response_interpretation.rs', 'literal'],
   ['kernel.rs', 'literal'],
   ['hub_v1/web_search_hop.rs', 'literal'],
   ['kernel/direct_state.rs', 'signature'],

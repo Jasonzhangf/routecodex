@@ -43,6 +43,7 @@ const files = {
   resourceMap: 'docs/architecture/v3-resource-operation-map.yml',
   wiki: 'docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md',
   serverFrameBuilders: 'v3/crates/routecodex-v3-server/src/frame_builders.rs',
+  crossKindPublicRegression: 'v3/crates/routecodex-v3-server/tests/req02_field_fold_http.rs',
   packageJson: 'package.json',
 };
 
@@ -98,9 +99,14 @@ for (const script of requiredScripts) {
 requireAll(text.request, files.request, [
   'govern_tool_outputs_at_req04',
   'OrphanToolOutput { index: usize, call_id: String }',
-  'ToolOutputKindMismatch',
   'SideChannelLeaked',
   'current_payload_start',
+]);
+requireAll(text.crossKindPublicRegression, files.crossKindPublicRegression, [
+  'mixed_source_output_kind_preserves_representable_http_pair_without_name_rules',
+  'custom_tool_call_output',
+  'opaque_client_tool',
+  'mixed-kind-call',
 ]);
 forbid(text.request, files.request, /normalize_apply_patch_tool_output_item_at_req04|normalize_apply_patch_output_text_at_req04|APPLY_PATCH_ERROR_TEXT|APPLY_PATCH_RESULT_TEXT/, 'proxy-authored apply_patch executor feedback');
 forbid(
@@ -264,7 +270,7 @@ requireAll(text.tests, files.tests, [
   'apply_patch_response_is_projected_to_freeform_custom_tool_before_client_projection',
   'apply_patch_tool_output_error_is_preserved_without_continuation_state',
   'apply_patch_legacy_function_call_accepts_custom_output_after_client_projection',
-  'request_governance_rejects_orphan_output_wrong_kind_and_missing_call_id',
+  'request_governance_rejects_orphan_output_and_preserves_missing_call_id',
   'response_governance_classifies_function_custom_servertool_and_internal_tools_before_commit',
   'responses_sse_arbitrary_chunks_preserve_delta_order_and_terminal_tool_order',
   'provider_and_client_payloads_reject_routecodex_control_leakage',
@@ -276,7 +282,7 @@ requireAll(text.tests, files.tests, [
   'V3HubEntryProtocol::Gemini',
   'V3HubTransportIntent::Sse',
   'data:image/png;base64,CURRENT',
-  'attachment_history_is_preserved_without_placeholder_cleanup',
+  'attachment_history_bytes_survive_while_req04_cleans_the_canonical_wire',
   'attachment_history_missing_resource_is_preserved_as_client_data',
 ]);
 requireAll(text.responseSemanticsTests, files.responseSemanticsTests, [

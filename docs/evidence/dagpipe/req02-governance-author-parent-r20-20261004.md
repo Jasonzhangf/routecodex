@@ -1,0 +1,15 @@
+# REQ02 governance slice r20
+
+Status: governance source slice accepted into isolated candidate; REQ02 INCOMPLETE. No implementation review, merge, push, installation or restart.
+
+Author tree: `/Volumes/Intel/playground/routecodex/req02-gates-main337-r17-20261004`, base `39fe7d3ffcf3079aa40b0b5835700b13955f0aec` plus frozen parent candidate. Fresh default `codex exec --profile gcm`, real exit0. Author result: `.execution/req02-gates-r17-result.md` SHA256 `08e3fef98b1a41ed99263460431815098eb9c7594ab5108462333e96d400d8d3`; notes: `.execution/req02-gates-r17-notes.md` SHA256 `478ab60a2ad029cbf26f6f225a4785eaac348cd0d8a22be39ebda8c83943bfdf`.
+
+Four governance files only were imported with apply_patch after confirming parent blobs equaled author pre-edit index blobs. No active product draft was imported. Author parity baseline and 135 prohibited mutations PASS; model baseline and10 prohibited mutations PASS. Aggregate `verify:v3-protocol-conversion-field-parity-ci` remains exit101 with runtime integration5PASS8FAIL. Those original failures remain recorded and independently diagnosed; static green does not supersede them.
+
+Parent tree: `/Volumes/Intel/playground/routecodex/req02-main337-combined-r17-20261004`, same base plus uncommitted candidate; base HEAD is not a complete candidate SHA. Earlier same-owner Chat message helper decomposition invalidated two old source bindings. Parent moved the max token assertion and client_metadata silent-delete mutation to `request_outbound_openai_chat_messages.rs`, retained the original forbidden transformations, and added an include-detachment negative fixture. The combined original owner and included helper share one prohibition check. First mismatched apply_patch made no changes; corrected patch uses exact current source. All original failure logs remain under `.execution/req02-parent-r20-parity-*`.
+
+Final parent parity baseline `.execution/req02-parent-r20-parity-gate-3.log/.exit`: PASS0. Final prohibited mutations `.execution/req02-parent-r20-parity-red-3.log/.exit`: PASS0,136 forbidden mutations rejected. Selected model baseline and10 prohibited mutations `.execution/req02-parent-r20-model-{gate,red}.log/.exit`: PASS0. `git diff --check`: PASS0.
+
+Final parity verifier SHA256 `990e2e8ba486d600c6769c20ffeacb58cf243407996dcc3d8f0c63fe04b4f440`; parity fixture SHA256 `5debb825267a041f69f97610e693f6403c360fc240409441ae6abc2ed5d93860`. Model verifier SHA256 `c642eda4fb5418952b320041e2b2578e45c5c02dbb36646bb21ec300532f52e1`; model fixture SHA256 `745c4f04bd1635b5dfb7d6a3d22812aa07a82214027a3ce4e310e70de59a08d6`.
+
+Remaining acceptance: resolve runtime8FAIL and Direct actual emit/admission/publication gaps; finish Shared/Anthropic lifecycle consumers; combine frozen source; run candidate-bound real HTTP/WS and gpt5.5/5.6 exec, apply_patch and MCP execution/follow-up; then applicable runtime evidence and independent implementation architecture review. Author tree/evidence preserved while the node remains incomplete. Production4444 unchanged.

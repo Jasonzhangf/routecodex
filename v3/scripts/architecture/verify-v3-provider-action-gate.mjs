@@ -32,6 +32,8 @@ const files = {
   gemini: 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs',
   relayShared: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs',
   relayCore: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs',
+  relayCoreRequestScope:
+    'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core/request_scope.rs',
   server: 'v3/crates/routecodex-v3-server/src/lib.rs',
   serverTests: 'v3/crates/routecodex-v3-server/src/tests/mod.rs',
   gateTests: 'v3/crates/routecodex-v3-runtime/tests/provider_action_gate_contract.rs',
@@ -159,9 +161,41 @@ for (const rel of Object.values(files)) {
   if (!fs.existsSync(abs(rel))) failures.push(`${rel}: missing required file`);
 }
 const text = Object.fromEntries(Object.entries(files).map(([key, rel]) => [key, read(rel)]));
-// 并行 worker 拆分：responses relay 执行函数迁至 responses_relay_runtime_inner.rs，
-// gate 语义（provider 动作门禁/恢复）同时覆盖主文件与 inner 执行体。
+// 生命周期 wrapper 与 provider 业务 resident 分离后，gate 绑定 resident 真源；
+// wrapper 只负责 request scope 载体与 resident 的直接委托。
 text.responses = text.responses + '\n' + text.responsesInner;
+
+for (const [stepId, callerSymbol, callerFile, calleeSymbol, calleeFile] of [
+  [
+    'v3-provider-action-gate-wrapper-responses',
+    'execute_v3_responses_relay_runtime_inner',
+    files.responses,
+    'execute_v3_responses_relay_runtime_resident',
+    files.responsesInner,
+  ],
+  [
+    'v3-provider-action-gate-wrapper-anthropic',
+    'execute_v3_anthropic_relay_runtime_inner',
+    files.anthropic,
+    'execute_v3_anthropic_relay_runtime_resident',
+    files.anthropic,
+  ],
+  [
+    'v3-provider-action-gate-wrapper-relay-core',
+    'execute_v3_relay_runtime_core',
+    files.relayCoreRequestScope,
+    'execute_v3_relay_runtime_resident',
+    files.relayCore,
+  ],
+]) {
+  assertCallerInvokesCallee({
+    step_id: stepId,
+    caller_symbol: callerSymbol,
+    caller_file: callerFile,
+    callee_symbol: calleeSymbol,
+    callee_file: calleeFile,
+  });
+}
 
 for (const token of [
   '"ProviderReqCompat06ProviderCompat"',
@@ -173,8 +207,8 @@ for (const token of [
 }
 const responsesRelayRequestBody = findFunctionBody(
   text.responses,
-  'execute_v3_responses_relay_runtime_inner',
-  files.responses,
+  'execute_v3_responses_relay_runtime_resident',
+  files.responsesInner,
 );
 for (const [label, pattern] of [
   [
@@ -189,8 +223,8 @@ for (const [label, pattern] of [
   if (!pattern.test(responsesRelayRequestBody)) {
     failures.push(
       label.startsWith('V3ProviderReqOutbound08WirePayload')
-        ? `${files.responses}: ${label} must enter handle_provider_request_failure`
-        : `${files.responses}: ${label} is missing`,
+        ? `${files.responsesInner}: ${label} must enter handle_provider_request_failure`
+        : `${files.responsesInner}: ${label} is missing`,
     );
   }
 }
@@ -200,7 +234,9 @@ for (const forbidden of [
   'last_target_protocol_incompatible_error',
 ]) {
   if (responsesRelayRequestBody.includes(forbidden)) {
-    failures.push(`${files.responses}: ProviderReqCompat06ProviderCompat must not switch provider through ${forbidden}`);
+    failures.push(
+      `${files.responsesInner}: ProviderReqCompat06ProviderCompat must not switch provider through ${forbidden}`,
+    );
   }
 }
 assertCallerInvokesCallee({

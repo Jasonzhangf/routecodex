@@ -10,9 +10,31 @@ export function attachProviderActionGateHelpers(context) {
   const { root, failures, files } = context;
 
 const abs = (rel) => path.join(root, rel);
+// Rust sources may splice a same-module fragment with include!("...") (the
+// REQ02 file-size ratchet split e.g. hub_v1/responses_relay_runtime_inner.rs
+// and hub_v1/anthropic_relay_runtime.rs this way). The gate anchors follow the
+// split owners, so resolve include! the same way rustc does: splice the
+// included file (resolved against the including file's directory) into the
+// source the anchors inspect. Guards are read/visit based; a missing fragment
+// is reported and left in place.
+const readRustExpanded = (rel, visited, depth) => {
+  const source = fs.readFileSync(abs(rel), 'utf8');
+  if (!rel.endsWith('.rs')) return source;
+  if (depth < 0 || visited.has(rel)) return source;
+  const nextVisited = new Set(visited).add(rel);
+  return source.replace(/include!\s*\(\s*"([^"]+)"\s*\)\s*;?/gu, (match, included) => {
+    const includedRel = path.join(path.dirname(rel), included);
+    try {
+      return readRustExpanded(includedRel, nextVisited, depth - 1);
+    } catch (error) {
+      failures.push(`${rel}: cannot expand include!(${included}): ${error.message}`);
+      return match;
+    }
+  });
+};
 const read = (rel) => {
   try {
-    return fs.readFileSync(abs(rel), 'utf8');
+    return readRustExpanded(rel, new Set(), 32);
   } catch (error) {
     failures.push(`${rel}: cannot read: ${error.message}`);
     return '';
@@ -250,7 +272,7 @@ const requiredV3Edges = [
     step_id: 'v3-provider-action-gate-01',
     from_node: 'ProviderReqCompat06ProviderCompat',
     to_node: 'V3Error05ExecutionDecision',
-    caller_symbol: 'execute_v3_responses_relay_runtime_inner',
+    caller_symbol: 'execute_v3_responses_relay_runtime_resident',
     caller_file: files.responsesInner,
     callee_symbol: 'handle_v3_responses_relay_provider_failure',
     callee_file: files.responses,
@@ -262,7 +284,7 @@ const requiredV3Edges = [
     step_id: 'v3-provider-action-gate-02',
     from_node: 'V3ProviderReqOutbound08WirePayload',
     to_node: 'V3Error05ExecutionDecision',
-    caller_symbol: 'execute_v3_responses_relay_runtime_inner',
+    caller_symbol: 'execute_v3_responses_relay_runtime_resident',
     caller_file: files.responsesInner,
     callee_symbol: 'handle_v3_responses_relay_provider_failure',
     callee_file: files.responses,
@@ -346,7 +368,7 @@ const requiredV3Edges = [
     step_id: 'v3-provider-action-gate-10',
     from_node: 'V3Error05RecoveryWitness',
     to_node: 'V3ProviderActionGateAdmission',
-    caller_symbol: 'execute_v3_responses_relay_runtime_inner',
+    caller_symbol: 'execute_v3_responses_relay_runtime_resident',
     caller_file: files.responsesInner,
     callee_symbol: 'V3ProviderFailureRuntimeHealth::wait_for_error05_recovery',
     callee_file: files.policy,
@@ -358,7 +380,7 @@ const requiredV3Edges = [
     step_id: 'v3-provider-action-gate-11',
     from_node: 'V3Error05RecoveryWitness',
     to_node: 'V3ProviderActionGateAdmission',
-    caller_symbol: 'execute_v3_anthropic_relay_runtime_inner',
+    caller_symbol: 'execute_v3_anthropic_relay_runtime_resident',
     caller_file: files.anthropic,
     callee_symbol: 'V3ProviderFailureRuntimeHealth::wait_for_error05_recovery',
     callee_file: files.policy,
@@ -371,7 +393,7 @@ const requiredV3Edges = [
     from_node: 'V3Error05RecoveryWitness',
     to_node: 'V3ProviderActionGateAdmission',
     // openai_chat/gemini 已收敛到统一 relay 骨架：wait_for_error05_recovery 在骨架内。
-    caller_symbol: 'execute_v3_relay_runtime_core',
+    caller_symbol: 'execute_v3_relay_runtime_resident',
     caller_file: files.relayCore,
     callee_symbol: 'V3ProviderFailureRuntimeHealth::wait_for_error05_recovery',
     callee_file: files.policy,
@@ -384,7 +406,7 @@ const requiredV3Edges = [
     from_node: 'V3Error05RecoveryWitness',
     to_node: 'V3ProviderActionGateAdmission',
     // gemini 已收敛到统一 relay 骨架（见 12）。
-    caller_symbol: 'execute_v3_relay_runtime_core',
+    caller_symbol: 'execute_v3_relay_runtime_resident',
     caller_file: files.relayCore,
     callee_symbol: 'V3ProviderFailureRuntimeHealth::wait_for_error05_recovery',
     callee_file: files.policy,
@@ -445,7 +467,7 @@ const requiredV3Edges = [
     step_id: 'v3-provider-action-gate-20',
     from_node: 'V3ProviderActionGateAdmission',
     to_node: 'V3ProviderActionPermitInFlight',
-    caller_symbol: 'execute_v3_responses_relay_runtime_inner',
+    caller_symbol: 'execute_v3_responses_relay_runtime_resident',
     caller_file: files.responsesInner,
     callee_symbol: 'V3ProviderActionAdmission::take_permit',
     callee_file: files.gate,
@@ -457,7 +479,7 @@ const requiredV3Edges = [
     step_id: 'v3-provider-action-gate-21',
     from_node: 'V3ProviderActionGateAdmission',
     to_node: 'V3ProviderActionPermitInFlight',
-    caller_symbol: 'execute_v3_anthropic_relay_runtime_inner',
+    caller_symbol: 'execute_v3_anthropic_relay_runtime_resident',
     caller_file: files.anthropic,
     callee_symbol: 'V3ProviderActionAdmission::take_permit',
     callee_file: files.gate,
@@ -470,7 +492,7 @@ const requiredV3Edges = [
     from_node: 'V3ProviderActionGateAdmission',
     to_node: 'V3ProviderActionPermitInFlight',
     // openai_chat/gemini 已收敛到统一 relay 骨架：admission.take_permit 在骨架内。
-    caller_symbol: 'execute_v3_relay_runtime_core',
+    caller_symbol: 'execute_v3_relay_runtime_resident',
     caller_file: files.relayCore,
     callee_symbol: 'V3ProviderActionAdmission::take_permit',
     callee_file: files.gate,
@@ -482,7 +504,7 @@ const requiredV3Edges = [
     step_id: 'v3-provider-action-gate-23',
     from_node: 'V3ProviderActionGateAdmission',
     to_node: 'V3ProviderActionPermitInFlight',
-    caller_symbol: 'execute_v3_anthropic_relay_runtime_inner',
+    caller_symbol: 'execute_v3_anthropic_relay_runtime_resident',
     caller_file: files.anthropic,
     callee_symbol: 'V3ProviderActionAdmission::take_permit',
     callee_file: files.gate,
@@ -506,7 +528,7 @@ const requiredV3Edges = [
     step_id: 'v3-provider-action-gate-25',
     from_node: 'V3ProviderActionPermitInFlight',
     to_node: 'V3ProviderActionPermitAbandonRequested',
-    caller_symbol: 'execute_v3_responses_relay_runtime_inner',
+    caller_symbol: 'execute_v3_responses_relay_runtime_resident',
     caller_file: files.responsesInner,
     callee_symbol: 'V3ProviderActionPermit::drop',
     callee_file: files.gate,
@@ -518,7 +540,7 @@ const requiredV3Edges = [
     step_id: 'v3-provider-action-gate-26',
     from_node: 'V3ProviderActionPermitInFlight',
     to_node: 'V3ProviderActionPermitAbandonRequested',
-    caller_symbol: 'execute_v3_anthropic_relay_runtime_inner',
+    caller_symbol: 'execute_v3_anthropic_relay_runtime_resident',
     caller_file: files.anthropic,
     callee_symbol: 'V3ProviderActionPermit::drop',
     callee_file: files.gate,
@@ -531,7 +553,7 @@ const requiredV3Edges = [
     from_node: 'V3ProviderActionPermitInFlight',
     to_node: 'V3ProviderActionPermitAbandonRequested',
     // openai_chat/gemini 已收敛到统一 relay 骨架：permit drop 在骨架内。
-    caller_symbol: 'execute_v3_relay_runtime_core',
+    caller_symbol: 'execute_v3_relay_runtime_resident',
     caller_file: files.relayCore,
     callee_symbol: 'V3ProviderActionPermit::drop',
     callee_file: files.gate,
@@ -543,7 +565,7 @@ const requiredV3Edges = [
     step_id: 'v3-provider-action-gate-28',
     from_node: 'V3ProviderActionPermitInFlight',
     to_node: 'V3ProviderActionPermitAbandonRequested',
-    caller_symbol: 'execute_v3_anthropic_relay_runtime_inner',
+    caller_symbol: 'execute_v3_anthropic_relay_runtime_resident',
     caller_file: files.anthropic,
     callee_symbol: 'V3ProviderActionPermit::drop',
     callee_file: files.gate,
@@ -747,7 +769,7 @@ const requiredV3Edges = [
     step_id: 'v3-provider-action-gate-45',
     from_node: 'V3ProviderActionPermitInFlight',
     to_node: 'V3ProviderActionSuccessRecorded',
-    caller_symbol: 'execute_v3_responses_relay_runtime_inner',
+    caller_symbol: 'execute_v3_responses_relay_runtime_resident',
     caller_file: files.responsesInner,
     callee_symbol: 'V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope',
     callee_file: files.policy,
@@ -759,7 +781,7 @@ const requiredV3Edges = [
     step_id: 'v3-provider-action-gate-46',
     from_node: 'V3ProviderActionPermitInFlight',
     to_node: 'V3ProviderActionSuccessFinalize',
-    caller_symbol: 'execute_v3_anthropic_relay_runtime_inner',
+    caller_symbol: 'execute_v3_anthropic_relay_runtime_resident',
     caller_file: files.anthropic,
     callee_symbol: 'record_provider_success_after_response_governance',
     callee_file: files.anthropic,
