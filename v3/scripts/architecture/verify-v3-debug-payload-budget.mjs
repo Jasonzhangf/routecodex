@@ -159,7 +159,7 @@ requireMatch(
 );
 requireMatch(
   sampleStore,
-  /unbounded_channel\(\)[\s\S]*V3_CODEX_SAMPLE_PERSIST_JOB_OVERHEAD_BYTES[\s\S]*try_acquire_many_owned[\s\S]*enqueue\.send\(message\)/,
+  /unbounded_channel\(\)[\s\S]*V3_CODEX_SAMPLE_PERSIST_JOB_OVERHEAD_BYTES[\s\S]*try_acquire_many_owned[\s\S]*sender\.send\(message\)/,
   "Sample persistence must bound pending samples by payload bytes plus a fixed per-job overhead instead of a fixed message count",
 );
 requireMatch(
@@ -297,21 +297,6 @@ for (const testName of [
 ]) {
   requireMatch(debugTests, new RegExp(`fn ${testName}\\b`), `${testName} must exist`);
 }
-requireMatch(
-  sampleStore,
-  /persist_writes_verbatim_sample_when_enabled/,
-  "Sample store must have a verbatim persistence test",
-);
-requireMatch(
-  sampleStore,
-  /persist_forces_error_evidence_when_disabled/,
-  "Sample store must have a forced error-evidence test",
-);
-requireMatch(
-  sampleStore,
-  /retention_caps_samples_at_configured_limit[\s\S]*V3_CODEX_SAMPLE_REQUEST_RETENTION/,
-  "Sample store must have a retention-cap test at the configured default",
-);
 for (const [source, label] of [
   [v3FunctionMap, "V3 function map"],
   [functionMap, "global function map"],

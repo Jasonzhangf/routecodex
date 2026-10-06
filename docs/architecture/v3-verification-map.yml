@@ -244,6 +244,7 @@ features:
   design:
   - docs/goals/v3-managed-live-server-lifecycle-plan.md
   - docs/goals/v3-managed-server-lifecycle-test-design.md
+  - docs/architecture/dags/v3.managed_restart.graph.json
   contract:
   - docs/architecture/manifests/v3.managed_server_lifecycle.mainline.yml
   - docs/architecture/v3-resource-operation-map.yml
@@ -264,6 +265,17 @@ features:
   - routecodex dev shim may enable snap/debug by default while rcc/rccv3 stable shims require explicit --snap/--debug and restart.plan.json remains previous-release compatible
   required_integration:
   - actual CLI start/status/duplicate-start/restart/stop on temporary aggregate listeners
+  - previous_release_one_step_content_change and previous_release_one_step_config_path_change execute one official restart from a real old handler, preserve PID/start-token/session, refresh nonce, retain one owner and complete provider-backed Responses before and after.
+  - previous_release_transfer_rejects_wrong_stale_and_malformed_identity and previous_release_transfer_rejects_listener_drift_and_invalid_auth_before_dispatch retain the original owner and complete Responses without dispatching invalid migration.
+  - Native old-handler fixture is prepared from pinned previous source by v3/scripts/prepare-v3-previous-release-fixture.mjs before existing lifecycle/workspace consumers in PR and release CI; local gates require ROUTECODEX_V3_PREVIOUS_RELEASE_BINARY explicitly.
+  - p0_restart_repeated_declarations_keep_exact_owner covers real CLI A-to-B-to-A-to-C exec with one exact owner and unchanged PID.
+  - p0_restart_rejects_unwritable_handoff_without_shutdown and p0_restart_rejects_native_exec_and_invalid_inputs_without_shutdown cover explicit rejection, original declaration/nonce/PID/listeners, and the same open public Responses connection.
+  - p0_restart_control_disconnect_retains_original_connection_and_owner covers pre-exec cancellation and retained control/front ownership.
+  - p0_restart_pending_hooks_cleanup_survives_declaration_changes covers configured hooks identity rejection, A-to-B-to-B-to-C retained cleanup ownership, no duplicate hooks, continued real Responses completion, and recovery to one replacement hooks group.
+  - p0_restart_success_with_hooks_closes_inflight_json_and_sse_then_serves_new_requests covers successful exec with configured hooks and in-flight public JSON/SSE, declared accepted-socket closure, exact replacement identity, unique hooks cleanup, and complete requests after restart.
+  - p0_restart_recovers_historical_sample_failure_and_retains_native_rejection_worker covers real failed diagnostic persistence, repaired filesystem, exact native exec rejection preserving the original connection and identity, resumed sample writes, and subsequent successful official restart.
+  - responses_direct_exec_cutoff_drains_and_resumes_original_sample_worker and responses_direct_exec_sample_drain_timeout_keeps_listener_and_admission cover real HTTP samples bracketed by an OS retention lock, complete accepted artifacts, explicit cutoff refusal, and original-worker recovery after guard release or timeout.
+  - responses_direct_historical_sample_failure_does_not_reject_exec_preparation covers real HTTP persistence failure history retained as diagnostic evidence without blocking completed exec drain.
   - managed_child_applies_configured_fd_limit_before_hooks_sidecar proves the real `rccv3 start` entry
     applies `[runtime] fd_limit` to the managed child before an inherited child (hooks sidecar) is launched
   - managed_child_lowers_inherited_fd_limit_to_configured_value proves the configured cap lowers a higher inherited soft limit without changing the hard limit
@@ -280,6 +292,7 @@ features:
   - live managed 5555 restart with concurrent V2 health and real JSON/SSE Responses
   required_gates:
   - npm run verify:v3-managed-server-lifecycle
+  - npm run verify:v3-dagpipe-feature-graphs
   - npm run test:v3-managed-server-lifecycle-red-fixtures
   - npm run test:v3-managed-server-lifecycle
   - npm run verify:v3-architecture-docs

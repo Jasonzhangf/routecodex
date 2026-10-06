@@ -21,6 +21,7 @@ pub(crate) use process::{
 const HOOKS_INSTALL_RECORD_ENV: &str = "ROUTECODEX_HOOKS_INSTALL_RECORD";
 const HOOKS_INSTALL_RECORD_RELATIVE: &str = ".codex/routecodex-hooks/install.json";
 pub(crate) const HOOKS_SIDECAR_PROCESS_FILE: &str = "hooks-sidecar.pid";
+const HOOKS_SIDECAR_CLEANUP_FILE: &str = "hooks-sidecar-cleanup.json";
 const SIDECAR_START_TIMEOUT: Duration = Duration::from_secs(15);
 pub(crate) const HOOKS_READINESS_ADMISSION_TIMEOUT: Duration = Duration::from_secs(1);
 // Hooks are optional. Bound the wait for the supervisor task so a broken
@@ -38,6 +39,12 @@ struct V3HooksSidecarProcessRecord {
     control_socket_identity: Option<CodexAppSocketIdentity>,
     #[serde(default)]
     codexapp_socket_cleanup: Option<PersistedCodexAppSocketCleanup>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct V3HooksSidecarCleanupOwner {
+    instance_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -121,6 +128,77 @@ fn hooks_sidecar_supervisor_exit_detail() -> String {
 }
 
 impl V3HooksSidecarSupervisor {
+    pub(crate) fn ensure_exec_target_available(
+        previous_instance_dir: &Path,
+        instance_dir: &Path,
+    ) -> Result<(), V3LifecycleError> {
+        if previous_instance_dir != instance_dir
+            && instance_dir.join(HOOKS_SIDECAR_CLEANUP_FILE).try_exists()?
+        {
+            return Err(V3LifecycleError::HooksControlValidation(
+                "target instance already retains unresolved hooks cleanup ownership".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn retain_exec_owner(
+        previous_instance_dir: &Path,
+        instance_dir: &Path,
+    ) -> Result<(), V3LifecycleError> {
+        Self::ensure_exec_target_available(previous_instance_dir, instance_dir)?;
+        if previous_instance_dir == instance_dir {
+            return Ok(());
+        }
+        let previous_pending = previous_instance_dir.join(HOOKS_SIDECAR_CLEANUP_FILE);
+        let pending = instance_dir.join(HOOKS_SIDECAR_CLEANUP_FILE);
+        if previous_pending.exists() {
+            fs::rename(previous_pending, pending)?;
+        } else if previous_instance_dir
+            .join(HOOKS_SIDECAR_PROCESS_FILE)
+            .exists()
+        {
+            let instance_id = previous_instance_dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| {
+                    V3LifecycleError::HooksControlValidation(
+                        "previous hooks instance identity is unavailable".into(),
+                    )
+                })?;
+            write_json_atomic(
+                &pending,
+                &V3HooksSidecarCleanupOwner {
+                    instance_id: instance_id.to_string(),
+                },
+            )?;
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn cleanup_exec_owner(instance_dir: &Path) -> Option<String> {
+        let pending = instance_dir.join(HOOKS_SIDECAR_CLEANUP_FILE);
+        let cleanup_dir = if pending.exists() {
+            match pending_hooks_cleanup_directory(instance_dir) {
+                Ok(directory) => directory,
+                Err(error) => return Some(format!("hooks sidecar exec cleanup failed: {error}")),
+            }
+        } else {
+            instance_dir.to_path_buf()
+        };
+        match terminate_exec_sidecar_by_record(&cleanup_dir).await {
+            Ok(ForcedSidecarCleanup::RecordRemoved) => remove_file_if_present(&pending)
+                .err()
+                .map(|error| format!("hooks sidecar exec cleanup association retained: {error}")),
+            Ok(ForcedSidecarCleanup::RecordPreserved) => {
+                Some("hooks sidecar exec cleanup incomplete; process record retained".into())
+            }
+            Err(error) => Some(format!(
+                "hooks sidecar exec cleanup failed; process record retained: {error}"
+            )),
+        }
+    }
+
     pub(crate) fn spawn(instance_dir: PathBuf, instance_id: String) -> Self {
         let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
         let supervisor_stop_rx = stop_rx.clone();
@@ -311,6 +389,29 @@ impl V3HooksSidecarSupervisor {
             }
         }
     }
+}
+
+fn pending_hooks_cleanup_directory(instance_dir: &Path) -> Result<PathBuf, V3LifecycleError> {
+    let owner: V3HooksSidecarCleanupOwner =
+        read_json(&instance_dir.join(HOOKS_SIDECAR_CLEANUP_FILE)).map_err(|error| {
+            V3LifecycleError::HooksControlValidation(format!(
+                "invalid pending hooks cleanup owner: {error}"
+            ))
+        })?;
+    let mut components = Path::new(&owner.instance_id).components();
+    if !matches!(components.next(), Some(std::path::Component::Normal(_)))
+        || components.next().is_some()
+    {
+        return Err(V3LifecycleError::HooksControlValidation(
+            "invalid pending hooks cleanup instance identity".into(),
+        ));
+    }
+    Ok(instance_dir
+        .parent()
+        .ok_or_else(|| {
+            V3LifecycleError::HooksControlValidation("hooks instance parent unavailable".into())
+        })?
+        .join(owner.instance_id))
 }
 
 async fn run_managed_hooks_sidecar(
@@ -578,6 +679,11 @@ async fn start_configured_hooks_sidecar_with_timeout_and_cancel(
     start_timeout: Duration,
     mut cancel_rx: Option<&mut tokio::sync::watch::Receiver<bool>>,
 ) -> Result<Option<V3HooksSidecarProcess>, V3LifecycleError> {
+    if instance_dir.join(HOOKS_SIDECAR_CLEANUP_FILE).exists() {
+        return Err(optional_hooks_error(V3LifecycleError::HooksControlValidation(
+            "previous hooks sidecar cleanup unresolved; retained owner association blocks replacement".into(),
+        )));
+    }
     let Some(record_path) = hooks_install_record_path()
         .map_err(|error| optional_hooks_error_reason(HooksUnavailableReason::Missing, error))?
     else {
@@ -713,8 +819,8 @@ async fn start_configured_hooks_sidecar_with_timeout_and_cancel(
     // lifecycle explicitly stops it.
     let mut group_leader = TokioCommand::new("/bin/sh")
         .arg("-c")
-        .arg("trap '' TERM INT; trap 'exit 0' USR1; read -r line")
-        .stdin(Stdio::piped())
+        .arg("trap '' TERM INT; exec /bin/sleep 2147483647")
+        .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .process_group(0)

@@ -595,6 +595,452 @@ chains:
       produces: [v3.debug.codex_sample_persist_failure]
       side_channel_reads: [v3.debug.codex_sample_persist_failure]
       side_channel_writes: [v3.debug.codex_sample_persist_failure]
+- chain_id: v3.managed_restart_attempt
+  owner_feature_id: v3.managed_server_lifecycle
+  summary: Lifecycle retains the original aggregate and hooks owner until native exec succeeds; current and previous-release transfer protocols converge on one exact adoption finish.
+  edges:
+  - step_id: v3-restart-cli-check-hooks-target
+    from_node: V3Lifecycle06LiveControlled
+    to_node: V3LifecycleRestartPrepared
+    caller_symbol: prepare_previous_release_restart_transfer
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    callee_symbol: V3HooksSidecarSupervisor::ensure_exec_target_available
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads: [v3.lifecycle.hooks_sidecar_process]
+      side_channel_writes: []
+    semantic_contract:
+    - Read-only target association validation precedes transfer creation and control dispatch, including dispatch to a previous-release handler; rejection preserves the live owner and unrelated cleanup state.
+  - step_id: v3-restart-handler-check-hooks-target
+    from_node: V3Lifecycle06LiveControlled
+    to_node: V3LifecycleRestartPrepared
+    caller_symbol: restart_managed_runtime_in_place
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/control_plane.rs
+    callee_symbol: V3HooksSidecarSupervisor::ensure_exec_target_available
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads: [v3.lifecycle.hooks_sidecar_process]
+      side_channel_writes: []
+    semantic_contract:
+    - The current handler checks target association before aggregate preparation or exec, protecting direct control requests without mutating foreign hooks ownership.
+  - step_id: v3-restart-prepare-previous-release-transfer
+    from_node: V3Lifecycle06LiveControlled
+    to_node: V3LifecycleRestartPrepared
+    caller_symbol: V3ManagedLifecycle::restart_with_observer
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: prepare_previous_release_restart_transfer
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: []
+      produces: [v3.lifecycle.previous_release_restart_transfer]
+      side_channel_reads: [v3.lifecycle.instance_declaration, v3.lifecycle.pid_cache, v3.lifecycle.control_channel]
+      side_channel_writes: []
+    semantic_contract:
+    - Caller validates compiled target auth before dispatch; callee requires exact listeners and live PID/start-token/nonce/control before exclusive intent creation.
+  - step_id: v3-restart-bind-transfer-rejection-guard
+    from_node: V3Lifecycle06LiveControlled
+    to_node: V3LifecycleRestartPrepared
+    caller_symbol: restart_managed_runtime_in_place
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/control_plane.rs
+    callee_symbol: bind_previous_release_restart_transfer
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads: [v3.lifecycle.previous_release_restart_transfer, v3.lifecycle.instance_declaration, v3.lifecycle.pid_cache]
+      side_channel_writes: []
+  - step_id: v3-restart-prepare-live
+    from_node: V3Lifecycle06LiveControlled
+    to_node: V3LifecycleRestartPrepared
+    caller_symbol: restart_managed_runtime_in_place
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/control_plane.rs
+    callee_symbol: V3ServerAggregateHandle::prepare_exec_attempt
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: []
+      produces: [v3.front.runtime_handoff_checkpoint]
+      side_channel_reads: [v3.debug.codex_sample_persist_failure]
+      side_channel_writes: []
+    semantic_contract:
+    - Caller holds the accepted typed ControlRestartPlan; aggregate delegates reversible sample cutoff and complete drain to Debug, then delegates checkpoint mutation to Front freeze. Lifecycle retains the returned guard through native exec and drops it on rejection; historical diagnostics are report data, not restart admission truth.
+  - step_id: v3-restart-cleanup-exact-hooks
+    from_node: V3LifecycleRestartExecReentered
+    to_node: V3LifecycleRestartHooksReconciled
+    caller_symbol: V3ManagedLifecycle::run_managed_child_with_declaration
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: V3HooksSidecarSupervisor::cleanup_exec_owner
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads: [v3.lifecycle.hooks_sidecar_process]
+      side_channel_writes: [v3.lifecycle.hooks_sidecar_process]
+  - step_id: v3-restart-control-exchange
+    from_node: V3Lifecycle02InstanceDeclared
+    to_node: V3Lifecycle06LiveControlled
+    caller_symbol: send_restart_control
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/control_plane.rs
+    callee_symbol: send_control_without_timeout
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/control_plane.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.lifecycle.pid_cache, v3.lifecycle.control_channel]
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: []
+    semantic_contract:
+    - The locked public restart exchange includes delegated PID/control consumption; this edge identifies the actual transport reader, not additional send_restart_control reader rights.
+  - step_id: v3-restart-retain-hooks-cleanup-owner
+    from_node: V3LifecycleRestartExecReentered
+    to_node: V3LifecycleRestartHooksOwnerRetained
+    caller_symbol: adopt_exec_restart_declaration_change
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    callee_symbol: V3HooksSidecarSupervisor::retain_exec_owner
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads: [v3.lifecycle.hooks_sidecar_process]
+      side_channel_writes: [v3.lifecycle.hooks_sidecar_process]
+  - step_id: v3-restart-read-retained-hooks-owner
+    from_node: V3LifecycleRestartHooksOwnerRetained
+    to_node: V3LifecycleRestartHooksOwnerResolved
+    caller_symbol: V3HooksSidecarSupervisor::cleanup_exec_owner
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
+    callee_symbol: pending_hooks_cleanup_directory
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads: [v3.lifecycle.hooks_sidecar_process]
+      side_channel_writes: []
+  - step_id: v3-restart-gate-hooks-replacement
+    from_node: V3LifecycleRestartHooksOwnerResolved
+    to_node: V3LifecycleRestartHooksReconciled
+    caller_symbol: start_managed_hooks_sidecar_cancelable
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
+    callee_symbol: start_configured_hooks_sidecar_with_timeout_and_cancel
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads: [v3.lifecycle.hooks_sidecar_process]
+      side_channel_writes: []
+  - step_id: v3-restart-plan-declaration
+    from_node: V3Lifecycle06LiveControlled
+    to_node: V3Lifecycle01ValidatedConfig
+    caller_symbol: control_restart_plan
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/restart_plan.rs
+    callee_symbol: V3ManagedLifecycle::declaration
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.lifecycle.restart_plan]
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-restart-declaration-snapshot
+    from_node: V3Lifecycle01ValidatedConfig
+    to_node: V3Lifecycle02InstanceDeclared
+    caller_symbol: V3ManagedLifecycle::declaration
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: V3ManagedLifecycle::declaration_with_runtime
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.config.published_manifest]
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-restart-freeze-front
+    from_node: V3LifecycleRestartPrepared
+    to_node: V3RuntimeHandoffCheckpoint
+    caller_symbol: V3ServerAggregateHandle::prepare_exec_attempt
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: V3FrontTransportBroker::freeze
+    callee_file: v3/crates/routecodex-v3-server/src/restart_handoff.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.front.runtime_handoff_checkpoint]
+      produces: [v3.front.runtime_handoff_checkpoint]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-restart-cleanup-rejected-artifacts
+    from_node: V3LifecycleRestartPrepared
+    to_node: V3Lifecycle06LiveControlled
+    caller_symbol: restart_managed_runtime_in_place
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/control_plane.rs
+    callee_symbol: cleanup_rejected_restart_handoff
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/control_plane.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.lifecycle.exec_restart_artifacts]
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: [v3.lifecycle.exec_restart_artifacts]
+    semantic_contract:
+    - Caller creates staged declaration and Front/provider JSON artifacts; rejection deletes only attempt-created files and retains the original owner.
+  - step_id: v3-restart-adopt-exact-artifacts
+    from_node: V3LifecycleRestartExecReentered
+    to_node: V3Lifecycle05IdentityPublished
+    caller_symbol: V3ManagedLifecycle::run_managed_child_with_declaration
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: adopt_exec_restart_declaration_change
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.lifecycle.exec_restart_artifacts]
+      produces: []
+      side_channel_reads: [v3.lifecycle.instance_declaration, v3.lifecycle.pid_cache, v3.lifecycle.control_channel, v3.lifecycle.previous_release_restart_transfer]
+      side_channel_writes: [v3.lifecycle.previous_release_restart_transfer]
+  - step_id: v3-restart-adopt-previous-release-transfer
+    from_node: V3LifecycleRestartExecReentered
+    to_node: V3Lifecycle05IdentityPublished
+    caller_symbol: V3ManagedLifecycle::run_managed_child_with_declaration
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: adopt_previous_release_restart_declaration_change
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.lifecycle.exec_restart_artifacts]
+      produces: []
+      side_channel_reads: [v3.lifecycle.previous_release_restart_transfer, v3.lifecycle.instance_declaration, v3.lifecycle.pid_cache, v3.lifecycle.control_channel, v3.lifecycle.status_record]
+      side_channel_writes: [v3.lifecycle.previous_release_restart_transfer]
+    semantic_contract:
+    - Without current exec-owner environment, validate only the exact target intent and previous-handler control removal; do not scan historical owners.
+  - step_id: v3-restart-current-shared-adoption-finish
+    from_node: V3LifecycleRestartExecReentered
+    to_node: V3Lifecycle05IdentityPublished
+    caller_symbol: adopt_exec_restart_declaration_change
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    callee_symbol: finish_exec_restart_adoption
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.lifecycle.exec_restart_artifacts]
+      produces: [v3.lifecycle.instance_declaration]
+      side_channel_reads: []
+      side_channel_writes: [v3.lifecycle.exec_restart_artifacts, v3.lifecycle.control_channel]
+  - step_id: v3-restart-previous-release-shared-adoption-finish
+    from_node: V3LifecycleRestartExecReentered
+    to_node: V3Lifecycle05IdentityPublished
+    caller_symbol: adopt_previous_release_restart_declaration_change
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    callee_symbol: finish_exec_restart_adoption
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.lifecycle.exec_restart_artifacts]
+      produces: [v3.lifecycle.instance_declaration]
+      side_channel_reads: []
+      side_channel_writes: [v3.lifecycle.exec_restart_artifacts, v3.lifecycle.control_channel]
+  - step_id: v3-restart-cleanup-previous-owner
+    from_node: V3Lifecycle05IdentityPublished
+    to_node: V3Lifecycle07GracefullyStopped
+    caller_symbol: finish_exec_restart_adoption
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    callee_symbol: cleanup_previous_exec_restart_owner
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.lifecycle.control_channel]
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: [v3.lifecycle.control_channel, v3.lifecycle.pid_cache, v3.lifecycle.restart_plan]
+  - step_id: v3-restart-publish-previous-stopped
+    from_node: V3Lifecycle06LiveControlled
+    to_node: V3Lifecycle07GracefullyStopped
+    caller_symbol: cleanup_previous_exec_restart_owner
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    callee_symbol: write_status
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/fs_locks.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: []
+      produces: [v3.lifecycle.status_record]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-restart-verify-published-declaration
+    from_node: V3LifecycleRestartExecReentered
+    to_node: V3Lifecycle02InstanceDeclared
+    caller_symbol: V3ManagedLifecycle::run_managed_child_with_declaration
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: verify_published_declaration
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/fs_locks.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.lifecycle.instance_declaration]
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-restart-read-startup-detail
+    from_node: V3LifecycleRestartExecReentered
+    to_node: V3Lifecycle05IdentityPublished
+    caller_symbol: V3ManagedLifecycle::run_managed_child_with_declaration
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: read_pending_startup_detail
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/control_plane.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.lifecycle.status_record]
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-restart-retire-previous-plan
+    from_node: V3LifecycleRestartExecReentered
+    to_node: V3Lifecycle05IdentityPublished
+    caller_symbol: V3ManagedLifecycle::run_managed_child_with_declaration
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: remove_restart_plan_for_previous_control_identity
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/restart_plan.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.lifecycle.restart_plan]
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: [v3.lifecycle.restart_plan]
+  - step_id: v3-restart-restore-provider-checkpoints
+    from_node: V3LifecycleRestartExecReentered
+    to_node: V3Lifecycle05IdentityPublished
+    caller_symbol: V3ManagedLifecycle::run_managed_child_with_declaration
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: restore_default_provider_transport_handoff_checkpoints
+    callee_file: v3/crates/routecodex-v3-runtime/src/kernel/default_transport.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.lifecycle.exec_restart_artifacts]
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: [v3.lifecycle.exec_restart_artifacts]
+    semantic_contract:
+    - Child reads provider JSON, delegates typed restore to Runtime and removes the file; Front JSON is discarded without claiming client reattachment.
+  - step_id: v3-restart-publish-child-status
+    from_node: V3LifecycleRestartExecReentered
+    to_node: V3Lifecycle06LiveControlled
+    caller_symbol: V3ManagedLifecycle::run_managed_child_with_declaration
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: write_status
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/fs_locks.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: []
+      produces: [v3.lifecycle.status_record]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-restart-publish-adopted-starting
+    from_node: V3Lifecycle05IdentityPublished
+    to_node: V3Lifecycle04ChildSpawned
+    caller_symbol: adopt_exec_restart_declaration_change
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    callee_symbol: write_status
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/fs_locks.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: []
+      produces: [v3.lifecycle.status_record]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-restart-wait-sample-persistence
+    from_node: V3LifecycleRestartPrepared
+    to_node: V3CodexSamplePersistFailureReported
+    caller_symbol: V3ServerAggregateHandle::prepare_exec_attempt
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: V3CodexSamplePersistHandle::quiesce_for_exec
+    callee_file: v3/crates/routecodex-v3-debug/src/sample_store.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads: [v3.debug.codex_sample_persist_failure]
+      side_channel_writes: []
+    semantic_contract:
+    - Server delegates queue admission mutation to Debug; it holds the returned reversible guard without directly writing the queue.
+  - step_id: v3-restart-drain-quiesced-samples
+    from_node: V3LifecycleRestartPrepared
+    to_node: V3CodexSamplePersistFailureReported
+    caller_symbol: V3CodexSamplePersistHandle::quiesce_for_exec
+    caller_file: v3/crates/routecodex-v3-debug/src/sample_store.rs
+    callee_symbol: V3CodexSamplePersistHandle::wait_for_drain
+    callee_file: v3/crates/routecodex-v3-debug/src/sample_store.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.debug.codex_sample_persist_queue]
+      produces: [v3.debug.codex_sample_persist_queue]
+      side_channel_reads: [v3.debug.codex_sample_persist_failure]
+      side_channel_writes: []
+    semantic_contract:
+    - Guard is installed before any await; the sole worker Barrier distinguishes transport/drain failure from completed historical diagnostic failures.
+  - step_id: v3-restart-start-aggregate
+    from_node: V3LifecycleRestartExecReentered
+    to_node: V3ServerStartup01ListenerSetPreflight
+    caller_symbol: V3ManagedLifecycle::run_managed_child_with_declaration
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.config.published_manifest]
+      produces: [v3.server.listener_set]
+      side_channel_reads: []
+      side_channel_writes: []
+    semantic_contract:
+    - Child delegates listener construction to Server; this edge does not grant lifecycle listener writer rights.
+  - step_id: v3-restart-build-listener-set
+    from_node: V3Config05ManifestPublished
+    to_node: V3ServerStartup01ListenerSetPreflight
+    caller_symbol: spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: build_v3_server_startup_01_listener_set_from_config_05
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.config.published_manifest]
+      produces: [v3.server.listener_set]
+      side_channel_reads: []
+      side_channel_writes: []
 - chain_id: v3.runtime_fd_limit
   owner_feature_id: v3.managed_server_lifecycle
   summary: Managed child carries the typed OS descriptor limit and declaration from the same Config snapshot before listener or hooks startup.
