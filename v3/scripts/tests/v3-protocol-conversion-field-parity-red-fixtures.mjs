@@ -46,6 +46,7 @@ const files = [
   'v3/crates/routecodex-v3-runtime/src/operation_runner/operators/project_canonical_request.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner_response_interpretation.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_extra_tests.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs',
@@ -102,7 +103,7 @@ const cases = [
   },
   {
     name: 'Provider response projection is collapsed into the client inbound error variant',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner_response_interpretation.rs',
     from: 'V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(\n                                    error.to_string(),\n                                )',
     to: 'V3ResponsesRelayRuntimeError::InboundCanonical(error.to_string())',
     diagnostic: /no_shared_client_error_variant|InboundCanonical/u,

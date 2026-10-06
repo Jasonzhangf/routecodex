@@ -34,6 +34,7 @@ const paths = {
   directPassthroughTests: 'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   responsesRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   responsesRuntimeInner: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
+  responsesRuntimeInnerResponseInterpretation: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner_response_interpretation.rs',
   responsesRuntimeTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests.rs',
   responsesRuntimeTestsExtra: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_extra_tests.rs',
   responsesRelayDryRun: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs',
@@ -123,12 +124,18 @@ const requestFieldProjectionModules = YAML.parse(text.requestFieldProjectionModu
 
 requireText(text.responsesRelayTypes, `${paths.responsesRelayTypes}::client_input_error_type`, 'ClientInboundCanonical(String)');
 requireText(text.responsesRelayDryRun, `${paths.responsesRelayDryRun}::client_input_error_projection`, 'V3ResponsesRelayRuntimeError::ClientInboundCanonical(message)');
-requireText(text.responsesRuntimeInner, `${paths.responsesRuntimeInner}::provider_response_projection_error`, 'V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(');
+// The provider-response projection error mapping moved verbatim out of
+// responses_relay_runtime_inner.rs into the response-interpretation companion
+// (R53-F split); the anchor follows the new owner file.
+requireText(text.responsesRuntimeInnerResponseInterpretation, `${paths.responsesRuntimeInnerResponseInterpretation}::provider_response_projection_error`, 'V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(');
 requireText(text.webSearchSidecar, `${paths.webSearchSidecar}::internal_sidecar_error`, 'WebSearchSidecarControlError::Message(format!(');
 requireText(text.webSearchSidecar, `${paths.webSearchSidecar}::internal_sidecar_error_message`, 'web_search hooks sidecar task failed: {error}');
 requireText(text.responsesRuntimeTestsExtra, `${paths.responsesRuntimeTestsExtra}::error_origin_reverse_tests`, 'provider_response_projection_failure_projects_internal_599');
 requireText(text.responsesRuntimeTestsExtra, `${paths.responsesRuntimeTestsExtra}::error_origin_reverse_tests`, 'internal_web_search_canonicalization_failure_is_not_client_invalid_request');
 forbid(text.responsesRuntimeInner, `${paths.responsesRuntimeInner}::no_shared_client_error_variant`, [/V3ResponsesRelayRuntimeError::InboundCanonical\(/u]);
+// The same invariant now also covers the response-interpretation companion that
+// owns the moved relay response projection code.
+forbid(text.responsesRuntimeInnerResponseInterpretation, `${paths.responsesRuntimeInnerResponseInterpretation}::no_shared_client_error_variant`, [/V3ResponsesRelayRuntimeError::InboundCanonical\(/u]);
 forbid(text.webSearchSidecar, `${paths.webSearchSidecar}::no_shared_client_error_variant`, [/V3ResponsesRelayRuntimeError::InboundCanonical\(/u]);
 
 for (const phrase of [
