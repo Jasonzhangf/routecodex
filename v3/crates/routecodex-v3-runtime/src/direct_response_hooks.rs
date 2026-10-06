@@ -106,6 +106,9 @@ fn rewrite_direct_sse_success_frame(
 struct DirectSseResponsesItemIdentities {
     by_item_id: std::collections::HashMap<String, String>,
     by_output_index: std::collections::HashMap<u64, String>,
+    /// Chat tool-call indexes restart at 0 inside every choice, so the Chat
+    /// stream keys emitted identity by `(choice index, tool-call index)`.
+    by_chat_choice_index: std::collections::HashMap<(u64, u64), String>,
     freeform_input: std::collections::HashMap<String, DirectFreeformInputCursor>,
 }
 
@@ -142,12 +145,108 @@ fn decode_direct_freeform_input_prefix(raw: &str) -> Option<String> {
     match trimmed.as_bytes().first()? {
         b'"' => decode_direct_json_string_prefix(&trimmed[1..]),
         b'{' => {
-            let key = trimmed.find("\"input\"")?;
-            let rest = trimmed.get(key + "\"input\"".len()..)?.trim_start();
-            let rest = rest.strip_prefix(':')?.trim_start();
+            let rest = root_object_member_value_prefix(trimmed, "input")?;
             decode_direct_json_string_prefix(rest.strip_prefix('"')?)
         }
         _ => Some(trimmed.to_string()),
+    }
+}
+
+/// Return the text after the `:` of the root object member `member`.
+///
+/// A provider may place other members before the one this runtime owns, and such
+/// a member may itself carry a member with the same name. Only the root member is
+/// the client's value, so this walks the root object member by member and tracks
+/// container and string boundaries instead of searching for the first `"input"`
+/// text.
+fn root_object_member_value_prefix<'a>(document: &'a str, member: &str) -> Option<&'a str> {
+    let bytes = document.as_bytes();
+    let mut cursor = 1; // past the root '{'
+    loop {
+        skip_json_whitespace(bytes, &mut cursor);
+        match bytes.get(cursor)? {
+            b',' => {
+                cursor += 1;
+                continue;
+            }
+            b'}' => return None,
+            b'"' => {}
+            _ => return None,
+        }
+        let (key_literal, after_key) = json_string_literal(document, cursor)?;
+        let key = serde_json::from_str::<String>(key_literal).ok()?;
+        cursor = after_key;
+        skip_json_whitespace(bytes, &mut cursor);
+        if bytes.get(cursor) != Some(&b':') {
+            return None;
+        }
+        cursor += 1;
+        skip_json_whitespace(bytes, &mut cursor);
+        if key == member {
+            return document.get(cursor..);
+        }
+        cursor = skip_json_value(document, cursor)?;
+    }
+}
+
+fn skip_json_whitespace(bytes: &[u8], cursor: &mut usize) {
+    while matches!(bytes.get(*cursor), Some(b' ' | b'\t' | b'\n' | b'\r')) {
+        *cursor += 1;
+    }
+}
+
+/// Return the raw JSON string literal starting at `start` and the index just
+/// past its closing quote. `None` means the buffer is truncated inside it.
+fn json_string_literal(document: &str, start: usize) -> Option<(&str, usize)> {
+    let bytes = document.as_bytes();
+    let mut cursor = start + 1;
+    while let Some(byte) = bytes.get(cursor) {
+        match byte {
+            b'\\' => cursor += 2,
+            b'"' => return document.get(start..cursor + 1).map(|raw| (raw, cursor + 1)),
+            _ => cursor += 1,
+        }
+    }
+    None
+}
+
+/// Return the index just past the JSON value starting at `start`.
+fn skip_json_value(document: &str, start: usize) -> Option<usize> {
+    let bytes = document.as_bytes();
+    match bytes.get(start)? {
+        b'"' => json_string_literal(document, start).map(|(_, after)| after),
+        b'{' | b'[' => {
+            let mut cursor = start;
+            let mut depth = 0usize;
+            while let Some(byte) = bytes.get(cursor) {
+                match byte {
+                    b'"' => cursor = json_string_literal(document, cursor)?.1,
+                    b'{' | b'[' => {
+                        depth += 1;
+                        cursor += 1;
+                    }
+                    b'}' | b']' => {
+                        depth = depth.checked_sub(1)?;
+                        cursor += 1;
+                        if depth == 0 {
+                            return Some(cursor);
+                        }
+                    }
+                    _ => cursor += 1,
+                }
+            }
+            None
+        }
+        _ => {
+            let mut cursor = start;
+            while let Some(byte) = bytes.get(cursor) {
+                if matches!(byte, b',' | b'}' | b']') {
+                    break;
+                }
+                cursor += 1;
+            }
+            Some(cursor)
+        }
     }
 }
 
@@ -535,6 +634,12 @@ fn rewrite_direct_sse_chat_success_event(
         return Ok(());
     };
     for choice in choices {
+        // Chat numbers `tool_calls[].index` inside each choice, so identity and
+        // the free-form cursor must be scoped by the choice too.
+        let choice_index = choice
+            .get("index")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
         for container in ["delta", "message"] {
             let Some(calls) = choice
                 .get_mut(container)
@@ -563,10 +668,12 @@ fn rewrite_direct_sse_chat_success_event(
                         if crate::hub_v1::declared_tool_kind_for_emitted_name(view, name)
                             .is_some() =>
                     {
-                        identities.by_output_index.insert(index, name.to_string());
+                        identities
+                            .by_chat_choice_index
+                            .insert((choice_index, index), name.to_string());
                         name.to_string()
                     }
-                    _ => match identities.by_output_index.get(&index) {
+                    _ => match identities.by_chat_choice_index.get(&(choice_index, index)) {
                         Some(name) => name.clone(),
                         None => continue,
                     },
@@ -594,7 +701,9 @@ fn rewrite_direct_sse_chat_success_event(
                             // envelope inside `function.arguments` deltas. Publish
                             // the raw free-form characters already unambiguous.
                             identities
-                                .freeform_input_cursor(format!("chat:{container}:{index}"))
+                                .freeform_input_cursor(format!(
+                                    "chat:{choice_index}:{container}:{index}"
+                                ))
                                 .advance(&arguments)
                         }),
                 };
