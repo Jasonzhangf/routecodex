@@ -108,59 +108,6 @@ where
     finish_direct_request_scope(output, finalizer)
 }
 
-/// Public Runtime consumer entry that runs the generic Direct kernel with an
-/// already-created request execution control. The caller owns the request
-/// identity; the kernel consumes the captured JSON through the REQ02 SDK.
-pub async fn execute_v3_direct_runtime_kernel_core_with_request_control<
-    C: V3DirectProtocolCodec,
-    T: ResponsesTransport + ?Sized + 'static,
->(
-    control: C::Control,
-    manifest: &V3Config05ManifestPublished,
-    raw: V3Server03HttpRequestRaw,
-    transport: &T,
-    provider_health: V3ProviderFailureRuntimeHealth,
-    now_epoch_ms: u64,
-    allow_exhaustion_rescue_probe: bool,
-    provider_failure_event_sink: Option<&V3RuntimeProviderFailureEventSink>,
-    route_selection_event_sink: Option<&V3RuntimeRouteSelectionEventSink>,
-    request_execution_control: V3RequestExecutionControl,
-) -> V3ResponsesDirectRuntimeOutput
-where
-    C: Send + Sync + 'static,
-    C::Control: Clone + Send + Sync + 'static,
-    C::Standardized: Send + Sync + 'static,
-    C::Policy: Send + Sync + 'static,
-{
-    let request_key_catalog =
-        crate::kernel::direct_request_key_hooks::default_v3_direct_request_key_hook_catalog();
-    let finalizer = match request_execution_control.take_request_finalizer() {
-        Ok(finalizer) => finalizer,
-        Err(error) => {
-            return error_output(
-                runtime_source("V3ExecutionAttemptBudget", error),
-                Vec::new(),
-                &crate::hooks::register_responses_direct_hooks(),
-            );
-        }
-    };
-    let output = execute_v3_direct_runtime_kernel_core_resident::<C, T>(
-        control,
-        manifest,
-        raw,
-        transport,
-        provider_health,
-        now_epoch_ms,
-        allow_exhaustion_rescue_probe,
-        provider_failure_event_sink,
-        route_selection_event_sink,
-        &request_key_catalog,
-        request_execution_control,
-    )
-    .await;
-    finish_direct_request_scope(output, finalizer)
-}
-
 async fn execute_v3_direct_runtime_kernel_core_resident<
     C: V3DirectProtocolCodec,
     T: ResponsesTransport + ?Sized + 'static,
@@ -211,7 +158,13 @@ where
         V3DirectEntryOrigin::ClientEntry,
     ) {
         Ok(canonical) => canonical,
-        Err(source) => return error_output(source, trace, &crate::hooks::register_responses_direct_hooks()),
+        Err(source) => {
+            return error_output(
+                source,
+                trace,
+                &crate::hooks::register_responses_direct_hooks(),
+            )
+        }
     };
     C::replace_body(&mut standardized, canonical);
     trace.push(C::STANDARDIZED_STAGE);
@@ -668,7 +621,8 @@ where
                     selected_admission = match admit_v3_selected_target_after_recovery(&selected) {
                         V3AdmitAfterRecovery::Admitted(admission) => Some(admission),
                         V3AdmitAfterRecovery::Busy => {
-                            failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
+                            failed_candidates
+                                .insert(v3_relay_provider_candidate_key(&selected.candidate));
                             drop(provider_action_permit.take());
                             provider_action_permit_target = None;
                             continue;
@@ -755,7 +709,11 @@ where
             Ok(raw) => raw,
             Err(V3ProviderError::ConcurrencyBusy { .. }) => {
                 if let Err(error) = runtime_timing.finish_external() {
-                    return error_output(runtime_source("V3RuntimeTimingExternal", error), trace, &crate::hooks::register_responses_direct_hooks());
+                    return error_output(
+                        runtime_source("V3RuntimeTimingExternal", error),
+                        trace,
+                        &crate::hooks::register_responses_direct_hooks(),
+                    );
                 }
                 failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
                 drop(provider_action_permit.take());
@@ -1396,13 +1354,19 @@ where
                 (V3ClientBody::CommittedSse(committed), receipt)
             }
             V3ProviderAttemptBody::Json(mut body) => {
-                if let Err(source) = crate::hooks::register_responses_direct_hooks().run_successful_json_response_projection(
-                    &mut body,
-                    response_projection.compat_plan.provider_protocol,
-                    request_execution_control.request_context(),
-                    &actual_attempt,
-                ) {
-                    return error_output(source, trace, &crate::hooks::register_responses_direct_hooks());
+                if let Err(source) = crate::hooks::register_responses_direct_hooks()
+                    .run_successful_json_response_projection(
+                        &mut body,
+                        response_projection.compat_plan.provider_protocol,
+                        request_execution_control.request_context(),
+                        &actual_attempt,
+                    )
+                {
+                    return error_output(
+                        source,
+                        trace,
+                        &crate::hooks::register_responses_direct_hooks(),
+                    );
                 }
                 (
                     V3ClientBody::Json(body),

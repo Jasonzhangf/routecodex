@@ -1,6 +1,14 @@
 # V3 Module Decomposition SOP（巨型文件拆解标准作业程序）
 
 Status: partial execution; scoped changes recorded below.
+Scoped split (2026-10-06): `kernel/direct_request_scope.rs` also owns
+`execute_v3_direct_runtime_kernel_core_with_request_control`, moved out of
+`kernel/v3_direct_core.rs`. The main file was 1520 lines and is now 1484; the
+existing include companion is now 224. The moved function body was verified
+byte-verbatim before targeted formatting; the public path, generic signature,
+body semantics and caller order are unchanged. The
+symbol is not bound in the four architecture maps, so no mapped caller anchor
+changed.
 Scoped split (2026-10-06): `hub_v1/anthropic_codec/responses_tool_projection.rs` owns the
 Responses tool-declaration and tool-choice projection cluster moved out of
 `hub_v1/anthropic_codec/responses_to_anthropic.rs`

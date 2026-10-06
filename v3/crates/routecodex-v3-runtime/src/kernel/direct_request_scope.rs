@@ -5,6 +5,59 @@ use crate::operation_runner::{
 use routecodex_v3_error::{build_v3_error_01_source_raised_internal, V3InternalErrorCode};
 use routecodex_v3_target::V3Target10ConcreteProviderSelected;
 
+/// Public Runtime consumer entry that runs the generic Direct kernel with an
+/// already-created request execution control. The caller owns the request
+/// identity; the kernel consumes the captured JSON through the REQ02 SDK.
+pub async fn execute_v3_direct_runtime_kernel_core_with_request_control<
+    C: V3DirectProtocolCodec,
+    T: ResponsesTransport + ?Sized + 'static,
+>(
+    control: C::Control,
+    manifest: &V3Config05ManifestPublished,
+    raw: V3Server03HttpRequestRaw,
+    transport: &T,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    now_epoch_ms: u64,
+    allow_exhaustion_rescue_probe: bool,
+    provider_failure_event_sink: Option<&V3RuntimeProviderFailureEventSink>,
+    route_selection_event_sink: Option<&V3RuntimeRouteSelectionEventSink>,
+    request_execution_control: V3RequestExecutionControl,
+) -> V3ResponsesDirectRuntimeOutput
+where
+    C: Send + Sync + 'static,
+    C::Control: Clone + Send + Sync + 'static,
+    C::Standardized: Send + Sync + 'static,
+    C::Policy: Send + Sync + 'static,
+{
+    let request_key_catalog =
+        crate::kernel::direct_request_key_hooks::default_v3_direct_request_key_hook_catalog();
+    let finalizer = match request_execution_control.take_request_finalizer() {
+        Ok(finalizer) => finalizer,
+        Err(error) => {
+            return error_output(
+                runtime_source("V3ExecutionAttemptBudget", error),
+                Vec::new(),
+                &crate::hooks::register_responses_direct_hooks(),
+            );
+        }
+    };
+    let output = execute_v3_direct_runtime_kernel_core_resident::<C, T>(
+        control,
+        manifest,
+        raw,
+        transport,
+        provider_health,
+        now_epoch_ms,
+        allow_exhaustion_rescue_probe,
+        provider_failure_event_sink,
+        route_selection_event_sink,
+        &request_key_catalog,
+        request_execution_control,
+    )
+    .await;
+    finish_direct_request_scope(output, finalizer)
+}
+
 /// Replace the raw standardized body with the canonical request built from the
 /// already-captured client JSON. Planning and projection then read only the
 /// canonical request; the raw body is replaced, not kept as a parallel truth.
@@ -57,10 +110,9 @@ pub(crate) fn build_v3_direct_request_canonical_from_captured(
         crate::hub_v1::V3HubInvocationSource::Client,
         crate::hub_v1::V3HubTransportIntent::Json,
     );
-    let normalized = crate::hub_v1::build_v3_hub_req_inbound_02_from_request_invocation(
-        req01, &invocation,
-    )
-    .map_err(direct_request_view_error)?;
+    let normalized =
+        crate::hub_v1::build_v3_hub_req_inbound_02_from_request_invocation(req01, &invocation)
+            .map_err(direct_request_view_error)?;
     crate::hub_v1::govern_v3_operation_runner_current_request_fields(
         normalized.payload(),
         &invocation,
