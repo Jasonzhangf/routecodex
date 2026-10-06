@@ -37,7 +37,9 @@ REQ02只执行`client_request_to_chat`。另外三方向暂由既有owner实现�
 | 响应JSON/SSE | 既有response owner消费成功attempt的typed projection view及原始inverse/history，实际恢复namespace、name、function/custom类型和opaque关联；禁止只增加accessor或继续从governed payload猜原始身份。 |
 | Server | 创建/搬运Runtime factory返回的opaque handle/guard，HTTP/WS及显式Relay均覆盖；metadata plan是carrier之一，不能作为所有请求唯一创建点。 |
 
-REQ06 owner提供最小`project_canonical_request(canonical, compiled_profile, inverse, history, attempt_identity) -> ProjectedRequest` helper；返回数据与typed attempt上下文分离。该helper可被既有Outbound及registered Direct hook使用，不运行完整REQ06 Operator。REQ02任务不改其独占Operator文件，按交接合同协调helper与配置。
+REQ06 owner提供最小`project_canonical_request(...) -> CanonicalRequestProjection` helper；返回数据与typed attempt上下文分离。该helper可被既有Outbound及registered Direct hook使用，不运行完整REQ06 Operator。REQ02任务不改其独占Operator文件，按交接合同协调helper与配置。
+
+2026-10-05 命名同步（R52a 审计 A0）：交付实现是`operation_runner/operators/project_canonical_request.rs:79`，返回类型`CanonicalRequestProjection`（同文件`:26`）；本文件早期草案写的`ProjectedRequest`在全树无任何引用。交付实现不把`compiled_profile`作为形参传入，而是由helper内部按当前请求解析profile。类型名与形参表以交付实现为准。
 
 response owner提供`ResponseProjectionView::from_successful_attempt(request_context, attempt_context)`并接入既有JSON/SSE/client projector；这项必须有真实反向恢复行为和工具回合证据，类型定义本身不算消费。
 

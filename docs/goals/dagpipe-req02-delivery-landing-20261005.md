@@ -120,6 +120,24 @@ live 样本；独立架构 review PASS；clean-main merge + push + 远端回执�
 - 退出条件：两条修复在各自 worktree 达标并提交；Lead 集成到 R49 → 重跑定向套件 +
   `multi_listener_server` 全量 → 只剩 `req02_attempt_buffer_boundary_direct` 一个已知父红。
 - 停止条件：任一 worker 无法证明根因、或以栈大小/断言放宽过关 → 该子项判 BLOCKED，不合并。
+- **状态：R50 已达标（2026-10-06T04:00Z）**。两条修复提交于各自分支
+  （`b84c2d587`、`82f671c1d`），Lead 先做 R49d 组合（见下），再 cherry-pick 为
+  `e1a86c6d7` + `c9eb63f93`；三条冻结 oracle 在候选 `c9eb63f93` 上单独运行全绿。
+  全量套件的真实红集由隔离单跑裁定（见 R52d 记账），不阻塞 R51 入口。
+
+### R49d｜与最新 main 组合（2026-10-06T04:00Z，已完成）
+
+- `origin/main` 从 `ec8048b6a` 推进到 `934ebe939`（PR #347/#348/#349），必须重新组合。
+- 动作：merge（保留 R49/R49b/R49c 已验证提交）→ merge commit `d8b575bf8`；
+  4 处冲突按"保留 R43 的 SOP 记录式拆分 + 采纳 upstream 新语义"处置；
+  把 `relay_runtime_core.rs` 中重复的超时实现收敛到 upstream 唯一 owner `relay_runtime_shared.rs`。
+- 副作用与应对：`kernel.rs` 因组合回到 1500 上限 → 按 SOP 做一次记录式拆分
+  （`kernel/direct_request_scope.rs` 新增 `canonical_body_from_captured`），kernel.rs → 1492，
+  为 R51 的 hook（kernel.rs +6）留出余量。
+- 组合后新增红项（进 R51d/R51c）：`verify:v3-file-size` 两文件组合溢出；
+  `chain:v3.provider_action_gate.mainline` 指纹出现第三个状态，需 Jason 人工授权（不得自改锁）。
+- 退出条件：候选可编译；`verify:v3-mainline-caller-flow`、`verify:v3-dagpipe-governance` PASS；
+  R47 两个冻结补丁在新树上 `git apply --check` 仍 exit 0；三条冻结 oracle 全绿。**已满足**。
 
 ### R51｜R47 SSE 闭环（红→绿，红项不放宽）
 
@@ -168,11 +186,27 @@ live 样本；独立架构 review PASS；clean-main merge + push + 远端回执�
   格式化副本上 `verify:v3-file-size` 仍 ok。
 - 停止条件：格式化提交出现无法归因于 rustfmt 的差异 → 停止，逐文件回退并归因，禁止整棵回滚。
 
+### R51d｜组合溢出文件的拆解（file-size 归零）
+
+- 入口：R51c 的格式化提交已完成（拆解不得与格式化混在同一提交，否则无法归因）。
+- 背景（实测）：组合后 `verify:v3-file-size` 红于两文件 ——
+  `hub_v1/anthropic_relay_runtime.rs` **1506**、`hub_v1/responses_relay_runtime_inner.rs` **1503**。
+  两侧单独都不超（R43 侧 1489/1486，upstream 侧 1411/1456），属**组合**溢出；
+  连带 `test:v3-file-size-red-fixtures` 红（其 green 用例跑真实策略）。
+- 动作：按 `v3-module-decomposition-sop.md` 做 scoped split，并在该 SOP 头部登记 "Scoped split"；
+  只移动语义完整的块，保留函数体与 crate 可见调用路径；同步更新
+  `v3-mainline-call-map.yml` / `v3-function-map.yml` / `v3-verification-map.yml` 中对应 file 锚点
+  （两文件在 call map 中有 39 处 file 锚点，逐个核对；禁止批量文本替换）。
+- 退出条件：`verify:v3-file-size` PASS；`test:v3-file-size-red-fixtures` PASS；
+  `verify:v3-mainline-caller-flow` PASS（锚点与源一致）；受影响套件重跑全绿。
+- 停止条件：锚点漂移无法在不改锁的前提下同步 → 保留现状、记录缺口、上报，不删校验。
+
 ### R52｜依赖收敛 + 架构绑定（只读并行轮）
 
 三路只读审计并行，互不写同一文件；结论由 Lead 收口后统一改文件。
 
-- 52a REQ06 最小公共 helper 审计：`project_canonical_request(...) -> ProjectedRequest`；
+- 52a REQ06 最小公共 helper 审计：`project_canonical_request(...) -> CanonicalRequestProjection`
+  （已按 R52a 审计把合同里的 `ProjectedRequest` 更正为交付实现真名，见 `52e`）；
   核对唯一类型（`V3RequestContextHandle`、`ToolDeclarationReference`、`AttemptContext`、
   `ToolMappingReference`、`ResponseProjectionView::from_successful_attempt`）、数据/控制分离、
   registered Direct hook 仍是 Direct payload 改写唯一 owner。
@@ -195,6 +229,30 @@ live 样本；独立架构 review PASS；clean-main merge + push + 远端回执�
   （R49b 已实测 40/40 全绿，优于 R45 基线 39/40；R50/R51/R51c 改动后须重跑维持）；
   52d 清单落盘且无 R43 引入的未授权红项。
 - 停止条件：固定锁漂移且无授权 → 保留锁，记录缺口，不修改锁规避。
+
+### R53-R｜R43 引入的 5 项回归（并发 3 路，2026-10-06T04:35Z 新增）
+
+- 触发：隔离单跑候选 `c9eb63f93` 的 `multi_listener_server` 全量（93 用例，各自独立进程，
+  `--test-threads=1`，`timeout 150`）得 **88 ok / 4 FAILED / 1 HANG**；
+  同 5 项在 R43 前基线 worktree `req02-baseline-ec8048b6a-20261005`（detached `ec8048b6a`）**全部 ok**。
+  ⇒ 判定为 **R43/REQ02 引入的回归**，不得记为"既有红"。
+- 聚类（3 个根因）与派单：
+  - A｜custom-tool 身份：`responses_relay_apply_patch_feedback_preserves_client_output_two_turns`
+    + R47 套件剩余 3 红（`expected custom_tool_call, got function_call`）→ `task-4`
+    / worker `req02-r53-tool-identity`。
+  - B｜Direct→Relay handoff 重归一：`responses_relay_anthropic_dsml_failure_reselects_valid_provider`、
+    `responses_relay_websocket_consumes_direct_handoff_instead_of_projecting_null`、
+    `responses_relay_direct_handoff_commits_route_policy_history_for_next_request`（HANG）
+    → `task-5` / worker `req02-r53-handoff`（**只读**根因 + DAG 闭环 + 独立设计 review；
+    合同第 44-51 行明确要求该节编码前先过独立设计审查，故本轮不写产品代码）。
+  - C｜入站 WebSocket 第二个 `previous_response_id` 拒绝：
+    `responses_inbound_websocket_rejects_second_previous_response_id_without_provider_send`
+    → `task-6` / worker `req02-r53-ws-continuation`。
+- 退出条件：A、C 两类在各自 worktree 达标并提交，Lead 集成后对应用例转绿且原断言未放宽；
+  B 类产出可复核的根因、DAG 闭环与设计 review PASS，随后另派实现轮。
+- 停止条件：任一红项无法定位唯一 owner，或需靠放宽断言/栈大小/绕过守卫过关 → 判 BLOCKED 并上报。
+- 记账：本轮 5 红替代原先"只剩 `req02_attempt_buffer_boundary_direct` 一个父红"的假设；
+  `req02_scope_runtime_consumer` 的父红仍需在同一基线上重新核对，避免同类误判。
 
 ### R53｜精确候选作者验证
 
