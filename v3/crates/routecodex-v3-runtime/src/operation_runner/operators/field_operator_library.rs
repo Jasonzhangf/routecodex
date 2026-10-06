@@ -3,7 +3,6 @@ use std::sync::OnceLock;
 
 use super::field_operator_helpers::{
     map_gemini_tool_choice, map_role_for_transform, map_tool_choice_scalar, map_tool_choice_value,
-    openai_like_tool_identity,
 };
 use super::field_operator_instructions::{InstructionSource, SystemInstructionBuilder};
 use super::field_operator_history::canonical_tool_call_name;
@@ -13,6 +12,7 @@ use super::field_operator_profiles::{
     ProfileIndex, ProfileRow, CLIENT_REQUEST_DIRECTION,
 };
 use super::field_operator_records::{append_history_relative, MessageSourceRange};
+use super::field_operator_responses_declaration::HostedToolDeclaration;
 use super::project_canonical_paths::{field_path, write_path};
 const FIELD_PROFILES_YAML: &str = include_str!(
     "../../../../../../docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml"
@@ -68,6 +68,7 @@ pub(super) struct RequestNormalizer<'a> {
     pub(super) provenance: Vec<Value>,
     pub(super) opaque_records: Vec<Value>,
     pub(super) tool_declarations: Vec<Value>,
+    pub(super) hosted_tool_declarations: Vec<HostedToolDeclaration>,
     pub(super) history_pairing: Vec<Value>,
     pub(super) extension_responses_include: Option<Value>,
     pub(super) next_opaque_record: usize,
@@ -91,6 +92,7 @@ impl<'a> RequestNormalizer<'a> {
             provenance: Vec::new(),
             opaque_records: Vec::new(),
             tool_declarations: Vec::new(),
+            hosted_tool_declarations: Vec::new(),
             history_pairing: Vec::new(),
             extension_responses_include: None,
             next_opaque_record: 0,
@@ -141,6 +143,7 @@ impl<'a> RequestNormalizer<'a> {
                 }
             }
         }
+        self.flush_hosted_tool_declarations();
         Ok(())
     }
 
@@ -247,17 +250,6 @@ impl<'a> RequestNormalizer<'a> {
             inverse_context: Value::Object(inverse),
             explicit_history_pairing,
         }
-    }
-
-    fn extension_value(&self) -> Value {
-        let mut extension = Map::new();
-        if !self.opaque_records.is_empty() {
-            extension.insert(
-                "chat_extension_opaque_record".to_string(),
-                Value::Array(self.opaque_records.clone()),
-            );
-        }
-        Value::Object(extension)
     }
 
     fn process_top_level_field(
@@ -730,6 +722,8 @@ impl<'a> RequestNormalizer<'a> {
             return;
         }
         match item_type {
+            // `input[]` hosted web_search declaration: a canonical `tools[]` declaration, not history.
+            "web_search" => self.absorb_responses_web_search_declaration(object, item_path),
             "function_call" | "custom_tool_call" => {
                 let call_id = object.get("call_id").and_then(Value::as_str);
                 let name = object.get("name").and_then(Value::as_str);

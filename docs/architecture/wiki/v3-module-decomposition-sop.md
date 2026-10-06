@@ -1,6 +1,15 @@
 # V3 Module Decomposition SOP（巨型文件拆解标准作业程序）
 
 Status: partial execution; scoped changes recorded below.
+Scoped split (2026-10-06): `operation_runner/operators/field_operator_records.rs` also owns
+`RequestNormalizer::extension_value`, moved verbatim out of
+`operation_runner/operators/field_operator_library.rs`, which is the one production file
+sitting exactly on the 1500-line gate. The method joins the other extension helpers in the
+same `impl RequestNormalizer` (`insert_extension_value`, `take_extension_object`) and stays
+`pub(super)`, so the caller path in `field_operator_library::normalize` is preserved. The
+library file was 1500 lines and is now 1494 (11 lines moved out, 5 added for the R53
+Responses `input[]` hosted-declaration flush); `field_operator_records.rs` was 598 and is now
+612. The body is unchanged, so function semantics and every caller path are preserved.
 Scoped split (2026-10-06): `hub_v1/responses_relay_runtime_inner.rs` keeps the relay
 request/attempt phase and splices `hub_v1/responses_relay_runtime_inner_response_interpretation.rs`
 with `include!`. The companion owns the provider-response interpretation match

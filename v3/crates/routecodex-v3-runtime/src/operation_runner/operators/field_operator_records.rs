@@ -512,6 +512,20 @@ impl<'a> RequestNormalizer<'a> {
             None => Map::new(),
         }
     }
+
+    /// Extension object carrying every opaque record. It is the lossless carrier
+    /// for a client root that is not an object, so no top-level field can carry
+    /// the extension. It lives with the other extension helpers.
+    pub(super) fn extension_value(&self) -> Value {
+        let mut extension = Map::new();
+        if !self.opaque_records.is_empty() {
+            extension.insert(
+                "chat_extension_opaque_record".to_string(),
+                Value::Array(self.opaque_records.clone()),
+            );
+        }
+        Value::Object(extension)
+    }
 }
 
 fn canonical_result_kind(kind: &str) -> Option<String> {
