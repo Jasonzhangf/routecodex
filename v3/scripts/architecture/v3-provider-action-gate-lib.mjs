@@ -10,9 +10,31 @@ export function attachProviderActionGateHelpers(context) {
   const { root, failures, files } = context;
 
 const abs = (rel) => path.join(root, rel);
+// Rust sources may splice a same-module fragment with include!("...") (the
+// REQ02 file-size ratchet split e.g. hub_v1/responses_relay_runtime_inner.rs
+// and hub_v1/anthropic_relay_runtime.rs this way). The gate anchors follow the
+// split owners, so resolve include! the same way rustc does: splice the
+// included file (resolved against the including file's directory) into the
+// source the anchors inspect. Guards are read/visit based; a missing fragment
+// is reported and left in place.
+const readRustExpanded = (rel, visited, depth) => {
+  const source = fs.readFileSync(abs(rel), 'utf8');
+  if (!rel.endsWith('.rs')) return source;
+  if (depth < 0 || visited.has(rel)) return source;
+  const nextVisited = new Set(visited).add(rel);
+  return source.replace(/include!\s*\(\s*"([^"]+)"\s*\)\s*;?/gu, (match, included) => {
+    const includedRel = path.join(path.dirname(rel), included);
+    try {
+      return readRustExpanded(includedRel, nextVisited, depth - 1);
+    } catch (error) {
+      failures.push(`${rel}: cannot expand include!(${included}): ${error.message}`);
+      return match;
+    }
+  });
+};
 const read = (rel) => {
   try {
-    return fs.readFileSync(abs(rel), 'utf8');
+    return readRustExpanded(rel, new Set(), 32);
   } catch (error) {
     failures.push(`${rel}: cannot read: ${error.message}`);
     return '';
