@@ -12,14 +12,18 @@ use super::anthropic_request_field_projection::{
     validate_responses_cache_and_store_for_anthropic,
 };
 use super::client_metadata_projection::unsupported_client_metadata_paths;
+use crate::operation_runner::{CurrentFieldAssociations, RequestInverseContext, ToolMappingReference};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::OnceLock;
 
+#[cfg(test)]
+mod anthropic_emission_tests;
 mod message_encoding;
 mod namespace_tool_names;
 mod projection_context;
 mod response_projection;
 mod responses_to_anthropic;
+mod tool_declaration_projection;
 use super::usage_normalization::project_v3_responses_usage_from_canonical;
 use message_encoding::non_empty_string;
 pub use projection_context::V3AnthropicResponsesProjectionContext;
@@ -30,13 +34,16 @@ use response_projection::{
     V3AnthropicTerminalKind,
 };
 use responses_to_anthropic::{
-    chat_messages_as_anthropic_messages, responses_input_as_anthropic_messages,
-    responses_system_as_anthropic_system, responses_tool_choice_as_anthropic_tool_choice,
-    responses_tools_for_anthropic_wire,
+    chat_messages_as_anthropic_messages, chat_messages_as_anthropic_messages_with_hosted,
+    responses_input_as_anthropic_messages, responses_system_as_anthropic_system,
+    responses_tool_choice_as_anthropic_tool_choice,
 };
 pub(crate) use responses_to_anthropic::{
     project_v3_responses_reasoning_item_as_anthropic_content,
     responses_web_search_tool_as_anthropic_tool,
+};
+use tool_declaration_projection::{
+    responses_tools_for_anthropic_wire_with_declarations, AnthropicToolSourceDeclarations,
 };
 
 const CLAUDE_CODE_SYSTEM_PROMPT_MD: &str = include_str!("claude_code_system_prompt.md");
@@ -146,6 +153,8 @@ pub enum V3AnthropicCodecError {
     UnpairedWebSearchToolResult { index: usize, tool_use_id: String },
     #[error("UnmappedOutboundFields target_protocol=anthropic paths={paths}")]
     UnmappedOutboundFields { paths: String },
+    #[error("Hosted history projection failed: {reason}")]
+    HostedHistoryProjection { reason: String },
 }
 
 pub fn validate_v3_anthropic_client_input_payload(
@@ -419,6 +428,37 @@ pub fn encode_v3_anthropic_request_as_responses_semantic(
 pub fn encode_v3_responses_semantic_as_anthropic_request(
     input: Value,
 ) -> Result<Value, V3AnthropicCodecError> {
+    encode_v3_responses_semantic_as_anthropic_request_inner(input, None)
+}
+
+pub fn encode_v3_responses_semantic_as_anthropic_request_with_declarations(
+    input: Value,
+    source_declarations: &[ToolMappingReference],
+) -> Result<(Value, Vec<ToolMappingReference>), V3AnthropicCodecError> {
+    let mut declarations = AnthropicToolSourceDeclarations::new(source_declarations);
+    let wire =
+        encode_v3_responses_semantic_as_anthropic_request_inner(input, Some(&mut declarations))?;
+    Ok((wire, declarations.into_mappings()))
+}
+
+pub use tool_declaration_projection::encode_v3_responses_semantic_as_anthropic_request_with_current_declarations;
+
+fn encode_v3_responses_semantic_as_anthropic_request_inner(
+    input: Value,
+    mut declarations: Option<&mut AnthropicToolSourceDeclarations<'_>>,
+) -> Result<Value, V3AnthropicCodecError> {
+    encode_v3_responses_semantic_as_anthropic_request_inner_with_hosted(
+        input,
+        declarations,
+        &[],
+    )
+}
+
+fn encode_v3_responses_semantic_as_anthropic_request_inner_with_hosted(
+    input: Value,
+    mut declarations: Option<&mut AnthropicToolSourceDeclarations<'_>>,
+    hosted_emissions: &[crate::operation_runner::HostedHistoryEmission],
+) -> Result<Value, V3AnthropicCodecError> {
     reject_side_channel_fields(&input)?;
     namespace_tool_names::validate_anthropic_declared_tool_names(&input)
         .map_err(|reason| V3AnthropicCodecError::AmbiguousToolDispatch { reason })?;
@@ -450,7 +490,11 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
         system_parts.push(system);
     }
     let messages = if let Some(messages) = object.get("messages") {
-        chat_messages_as_anthropic_messages(messages, &mut system_parts)?
+        chat_messages_as_anthropic_messages_with_hosted(
+            messages,
+            &mut system_parts,
+            hosted_emissions,
+        )?
     } else {
         responses_input_as_anthropic_messages(object.get("input"), &mut system_parts)?
     };
@@ -465,7 +509,12 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
         );
     }
     output.insert("messages".to_string(), Value::Array(messages));
-    let tools = responses_tools_for_anthropic_wire(object)?;
+    let tools = responses_tools_for_anthropic_wire_with_declarations(
+        object,
+        declarations
+            .as_mut()
+            .map(|declarations| &mut **declarations),
+    )?;
     if !tools.is_empty() {
         output.insert("tools".to_string(), Value::Array(tools));
     }
@@ -491,7 +540,10 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
             output.insert(key.to_string(), value.to_owned());
         }
     }
-    if let Some(metadata) = responses_metadata_as_anthropic_metadata(responses_request_extension)? {
+    if let Some(metadata) = responses_metadata_as_anthropic_metadata(
+        object.get("metadata"),
+        responses_request_extension,
+    )? {
         output.insert("metadata".to_string(), metadata);
     }
     if let Some(value) = object

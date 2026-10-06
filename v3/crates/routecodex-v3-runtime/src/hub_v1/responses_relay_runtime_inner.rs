@@ -8,7 +8,7 @@ use crate::provider_failure_runtime_policy::{
 use futures_util::StreamExt;
 use serde_json::{json, Value};
 
-pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
+pub(super) async fn execute_v3_responses_relay_runtime_resident<T: ResponsesTransport>(
     manifest: &V3Config05ManifestPublished,
     mut input: V3ResponsesRelayRuntimeInput,
     transport: &T,
@@ -21,11 +21,13 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
     initial_expanded: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
     initial_request_local_excluded_candidates: BTreeSet<String>,
+    initial_observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
+    request_execution_control: crate::nodes::V3RequestExecutionControl,
     initial_relay_seeds: V3ResponsesRelayRuntimeSeeds,
+    entry_origin: V3RelayEntryOrigin,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    let observability_accumulator = initial_relay_seeds
-        .observability_accumulator
-        .unwrap_or_else(V3RuntimeObservabilityAccumulator::start);
+    let observability_accumulator =
+        initial_observability_accumulator.unwrap_or_else(V3RuntimeObservabilityAccumulator::start);
     let route_policy_pending = initial_relay_seeds.route_policy_pending;
     let route_policy_scope = initial_relay_seeds.route_policy_scope;
     let runtime_timing = observability_accumulator.timing();
@@ -89,7 +91,13 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         manifest.debug.projection_drop_log_file.clone(),
         std::sync::Arc::clone(&req01.payload.0),
     );
-    let req02 = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(req01)
+    let invocation = crate::operation_runner::RequestInvocationContext::new(
+        request_execution_control.request_context().clone(),
+        format!("{}:relay-entry", input.request_id),
+        format!("{}:entry", input.request_id),
+        entry_origin.request_origin_kind(),
+    );
+    let req02 = build_v3_hub_req_inbound_02_from_request_invocation(req01, &invocation)
         .map_err(V3ResponsesRelayRuntimeError::ClientInboundCanonical)?;
     trace.push("V3HubReqInbound02Normalized");
     let request_hook_profile = responses_relay_request_hook_profile(
@@ -121,14 +129,11 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     // pre-hook Responses body here would classify the wire shape instead of the
     // normalized request and can miss semantic routing facts such as reasoning.
     let route_facts_body = std::sync::Arc::clone(request_outcome.payload_arc());
-    let anthropic_response_projection_context =
-        V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&provider_semantic_body)
-            .map_err(|error| {
-                V3ResponsesRelayRuntimeError::ProviderWireEncoding(error.to_string())
-            })?;
     let request_tool_thinking_enabled = request_outcome.tool_thinking_enabled();
     let request_tool_thinking_turn_context = request_outcome.tool_thinking_turn_context().clone();
     let req04 = request_outcome.into_governed();
+    govern_v3_operation_runner_current_request_fields(req04.governed_payload(), &invocation, &[])
+        .map_err(V3ResponsesRelayRuntimeError::ClientInboundCanonical)?;
     let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
         req04,
         V3HubExecutionMode::Relay,
@@ -143,11 +148,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut last_external_http = None;
     let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
-    let request_execution_control = match initial_relay_seeds.request_execution_control {
-        Some(control) => control,
-        None => crate::nodes::V3RequestExecutionControl::from_manifest(manifest, &input.server_id)
-            .map_err(|error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string()))?,
-    };
     let attempt_budget = request_execution_control.attempt_budget();
     let mut provider_send_attempts = attempt_budget.transport_attempts();
     let deterministic_sample = v3_relay_provider_target_selection_sample(&input.request_id);
@@ -164,7 +164,10 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         retry_policy: shared_retry_policy,
         deterministic_sample,
     };
+    let mut relay_attempt_index = 0_u64;
     loop {
+        let attempt_id = format!("{}:relay-attempt:{relay_attempt_index}", input.request_id);
+        relay_attempt_index = relay_attempt_index.saturating_add(1);
         let (selected, mut selected_admission): (
             routecodex_v3_target::V3Target10ConcreteProviderSelected,
             Option<V3RuntimeProviderAdmission>,
@@ -309,6 +312,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         .with_additional_attempts(provider_send_attempts),
                     request_execution_control,
                 }),
+                request_finalizer: None,
             });
         }
         let selected_target_provider_id = selected.candidate.provider_id.clone();
@@ -322,10 +326,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
             V3HubTargetResolution::Routed,
             selected.candidate.clone(),
         );
-        let req07 =
-            build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_wire_protocol);
-        let target =
-            handle_error_before_resp03!(provider_target(manifest, req07.selected_target()));
         let mut selected_observability =
             build_v3_relay_observability_from_selected(&selected, client_response_transport_intent);
         selected_observability.attempts = Some(
@@ -371,6 +371,32 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 continue;
             }};
         }
+        let req07 = match build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
+            req06,
+            req05.governed_payload(),
+            request_execution_control.request_context(),
+            V3HubExecutionMode::Relay,
+            &attempt_id,
+            provider_wire_protocol,
+        ) {
+            Ok(req07) => req07,
+            Err(error) => {
+                let mut error = classify_v3_provider_compat_error(
+                    "request_protocol",
+                    &V3ProviderCompatProfileId::from_config(
+                        selected.candidate.compatibility_profile.as_deref(),
+                    ),
+                    error,
+                );
+                error.stage = "V3HubReqOutbound07ProviderSemantic";
+                handle_provider_request_failure!(V3ResponsesRelayRuntimeError::ProviderCompat(
+                    error
+                ));
+            }
+        };
+        let attempt_context = req07.attempt_context().clone();
+        let target =
+            handle_error_before_resp03!(provider_target(manifest, req07.selected_target()));
         let req_compat = match build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07) {
             Ok(projected) => record_projected_drops(&projection_drop_context, projected),
             Err(error) => {
@@ -710,12 +736,12 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     }
                     continue;
                 }
-                let hook_provider_value =
+                let admission_hook_provider_value =
                     if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
                         handle_error_before_resp03!(
                             project_v3_anthropic_message_as_responses_response_with_context(
                                 &provider_value,
-                                &anthropic_response_projection_context,
+                                &V3AnthropicResponsesProjectionContext::default(),
                             )
                             .map_err(|error| {
                                 V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
@@ -742,7 +768,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         responses_relay_diagnostics::provider_response_semantic_error_from_manifest(
                             Some(manifest),
                             Some(&selected_target_provider_id),
-                            &hook_provider_value,
+                            &admission_hook_provider_value,
                         )
                     })
                 {
@@ -824,6 +850,46 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         None => None,
                     },
                 };
+                handle_error_before_resp03!(request_execution_control
+                    .request_context()
+                    .publish_successful_attempt(attempt_context.clone()));
+                let successful_attempt_view =
+                    crate::operation_runner::ResponseProjectionView::from_successful_attempt(
+                        request_execution_control.request_context(),
+                        &attempt_context,
+                    )
+                    .map_err(V3ResponsesRelayRuntimeError::ProviderWireEncoding)?;
+                let anthropic_response_projection_context =
+                    V3AnthropicResponsesProjectionContext::from_successful_attempt_with_chat_canonical_business_context(
+                        &successful_attempt_view,
+                        &provider_semantic_body,
+                    )
+                    .map_err(|error| {
+                        V3ResponsesRelayRuntimeError::ProviderWireEncoding(error.to_string())
+                    })?;
+                let mut hook_provider_value =
+                    if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
+                        handle_error_before_resp03!(
+                            project_v3_anthropic_message_as_responses_response_with_context(
+                                &provider_value,
+                                &anthropic_response_projection_context,
+                            )
+                            .map_err(|error| {
+                                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                                    error.to_string(),
+                                )
+                            })
+                        )
+                    } else {
+                        provider_value.clone()
+                    };
+                handle_error_before_resp03!(
+                    super::responses_openai_chat_conversion::restore_v3_responses_provider_representation_tool_identities_with_successful_attempt(
+                        &mut hook_provider_value,
+                        &successful_attempt_view,
+                        provider_wire_protocol,
+                    )
+                );
                 let (mut finalized_provider_value, response_web_search_state) =
                     match run_json_response_hooks(
                         V3ResponsesRelayJsonResponseHookInput {
@@ -838,6 +904,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             provider_protocol: hook_provider_protocol,
                             source_provider_protocol: provider_wire_protocol,
                             projection_context: &anthropic_response_projection_context,
+                            successful_attempt_view: &successful_attempt_view,
                             provider_response_transport_intent: V3HubTransportIntent::Json,
                             tool_thinking_enabled: request_tool_thinking_enabled,
                             tool_thinking_turn_context: &request_tool_thinking_turn_context,
@@ -994,6 +1061,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     finalized_response: Some(finalized_response),
                     provider_snapshots: None,
                     protocol_direct_handoff: None,
+                    request_finalizer: None,
                 });
             }
             V3ProviderResponseBody::Sse(stream) => {
@@ -1021,7 +1089,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             sse_idle_timeout,
                         ),
                         &stream_observation,
-                        &anthropic_response_projection_context,
+                        &V3AnthropicResponsesProjectionContext::default(),
                     )
                     .await;
                 handle_error_before_resp03!(runtime_timing
@@ -1168,6 +1236,31 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     }
                     continue;
                 }
+                handle_error_before_resp03!(request_execution_control
+                    .request_context()
+                    .publish_successful_attempt(attempt_context.clone()));
+                let successful_attempt_view =
+                    crate::operation_runner::ResponseProjectionView::from_successful_attempt(
+                        request_execution_control.request_context(),
+                        &attempt_context,
+                    )
+                    .map_err(V3ResponsesRelayRuntimeError::ProviderWireEncoding)?;
+                let anthropic_response_projection_context =
+                    V3AnthropicResponsesProjectionContext::from_successful_attempt_with_chat_canonical_business_context(
+                        &successful_attempt_view,
+                        &provider_semantic_body,
+                    )
+                    .map_err(|error| {
+                        V3ResponsesRelayRuntimeError::ProviderWireEncoding(error.to_string())
+                    })?;
+                let mut provider_value = provider_value;
+                handle_error_before_resp03!(
+                    super::responses_openai_chat_conversion::restore_v3_responses_provider_representation_tool_identities_with_successful_attempt(
+                        &mut provider_value,
+                        &successful_attempt_view,
+                        provider_wire_protocol,
+                    )
+                );
                 let (mut finalized_provider_value, response_web_search_state) =
                     match run_json_response_hooks(
                         V3ResponsesRelayJsonResponseHookInput {
@@ -1182,6 +1275,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             provider_protocol: hook_provider_protocol,
                             source_provider_protocol: provider_wire_protocol,
                             projection_context: &anthropic_response_projection_context,
+                            successful_attempt_view: &successful_attempt_view,
                             provider_response_transport_intent: V3HubTransportIntent::Sse,
                             tool_thinking_enabled: request_tool_thinking_enabled,
                             tool_thinking_turn_context: &request_tool_thinking_turn_context,
@@ -1384,56 +1478,9 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     finalized_response: Some(finalized_response),
                     provider_snapshots: None,
                     protocol_direct_handoff: None,
+                    request_finalizer: None,
                 });
             }
         }
     }
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct V3ResponsesRelayToolOutputIds {
-    pub(crate) consumed_ids: Vec<String>,
-}
-
-pub(crate) fn find_responses_tool_output_ids(
-    payload: &Value,
-) -> Result<V3ResponsesRelayToolOutputIds, V3ResponsesRelayRuntimeError> {
-    let mut ids = V3ResponsesRelayToolOutputIds::default();
-    for item in payload
-        .get("input")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        if !matches!(
-            item.get("type").and_then(Value::as_str),
-            Some("function_call_output" | "custom_tool_call_output" | "tool_call_output")
-        ) {
-            continue;
-        }
-        let id = item
-            .get("call_id")
-            .or_else(|| item.get("tool_call_id"))
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty());
-        let Some(id) = id else {
-            // 命名无配对输出（name+namespace，无 call_id）是合法客户端语义：
-            // 它没有可消费的 call 身份，身份由 name/namespace 承载，下游 canonical
-            // 保留该身份且不得伪造 call_id。只有既无 call_id 又无 name 才是畸形输入。
-            if item
-                .get("name")
-                .and_then(Value::as_str)
-                .is_some_and(|value| !value.trim().is_empty())
-            {
-                continue;
-            }
-            return Err(V3ResponsesRelayRuntimeError::ClientInboundCanonical(
-                "Responses tool output requires call_id".to_string(),
-            ));
-        };
-        if !ids.consumed_ids.iter().any(|existing| existing == id) {
-            ids.consumed_ids.push(id.to_owned());
-        }
-    }
-    Ok(ids)
 }

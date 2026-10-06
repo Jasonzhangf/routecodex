@@ -1,0 +1,1564 @@
+   Compiling proc-macro2 v1.0.106
+   Compiling quote v1.0.46
+   Compiling unicode-ident v1.0.24
+   Compiling libc v0.2.186
+   Compiling serde_core v1.0.228
+   Compiling itoa v1.0.18
+   Compiling cfg-if v1.0.4
+   Compiling serde v1.0.228
+   Compiling zmij v1.0.21
+   Compiling memchr v2.8.3
+   Compiling serde_json v1.0.150
+   Compiling bytes v1.12.1
+   Compiling version_check v0.9.5
+   Compiling pin-project-lite v0.2.17
+   Compiling stable_deref_trait v1.2.1
+   Compiling typenum v1.20.1
+   Compiling thiserror v1.0.69
+   Compiling futures-core v0.3.32
+   Compiling shlex v2.0.1
+   Compiling find-msvc-tools v0.1.9
+   Compiling zeroize v1.9.0
+   Compiling litemap v0.8.2
+   Compiling smallvec v1.15.2
+   Compiling writeable v0.6.3
+   Compiling autocfg v1.5.1
+   Compiling once_cell v1.21.4
+   Compiling hashbrown v0.17.1
+   Compiling equivalent v1.0.2
+   Compiling futures-sink v0.3.32
+   Compiling untrusted v0.9.0
+   Compiling utf8_iter v1.0.4
+   Compiling icu_properties_data v2.2.0
+   Compiling httparse v1.10.1
+   Compiling icu_normalizer_data v2.2.0
+   Compiling percent-encoding v2.3.2
+   Compiling siphasher v1.0.3
+   Compiling rustls-pki-types v1.15.0
+   Compiling futures-task v0.3.32
+   Compiling cc v1.2.66
+   Compiling slab v0.4.12
+   Compiling core-foundation-sys v0.8.7
+   Compiling generic-array v0.14.7
+   Compiling zerocopy v0.8.53
+   Compiling rustls v0.23.41
+   Compiling aho-corasick v1.1.4
+   Compiling phf_shared v0.12.1
+   Compiling chrono-tz v0.10.4
+   Compiling winnow v0.7.15
+   Compiling toml_write v0.1.2
+   Compiling num-traits v0.2.19
+   Compiling subtle v2.6.1
+   Compiling regex-syntax v0.8.11
+   Compiling phf v0.12.1
+   Compiling iana-time-zone v0.1.65
+   Compiling http v1.4.2
+   Compiling try-lock v0.2.5
+   Compiling tower-service v0.3.3
+   Compiling webpki-roots v1.0.8
+   Compiling form_urlencoded v1.2.2
+   Compiling tracing-core v0.1.36
+   Compiling futures-channel v0.3.32
+   Compiling want v0.3.1
+   Compiling atomic-waker v1.1.2
+   Compiling getrandom v0.4.2
+   Compiling indexmap v2.14.0
+   Compiling base64 v0.22.1
+   Compiling sync_wrapper v1.0.2
+   Compiling ryu v1.0.23
+   Compiling log v0.4.33
+   Compiling ipnet v2.12.0
+   Compiling tower-layer v0.3.3
+   Compiling utf-8 v0.7.6
+   Compiling bitflags v2.13.0
+   Compiling data-encoding v2.11.0
+   Compiling byteorder v1.5.0
+   Compiling webpki-roots v0.26.11
+   Compiling bit-vec v0.8.0
+   Compiling anyhow v1.0.102
+   Compiling tracing v0.1.44
+   Compiling lazy_static v1.5.0
+   Compiling rustc-hash v2.1.2
+   Compiling unsafe-libyaml v0.2.11
+   Compiling bit-set v0.8.0
+   Compiling http-body v1.0.1
+   Compiling http-body-util v0.1.3
+   Compiling ring v0.17.14
+   Compiling syn v2.0.118
+   Compiling regex-automata v0.4.14
+   Compiling errno v0.3.14
+   Compiling mio v1.2.1
+   Compiling socket2 v0.6.4
+   Compiling getrandom v0.2.17
+   Compiling cpufeatures v0.2.17
+   Compiling signal-hook-registry v1.4.8
+   Compiling rand_core v0.6.4
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling digest v0.10.7
+   Compiling sha2 v0.10.9
+   Compiling sha1 v0.10.7
+   Compiling routecodex-v3-route-classifier v0.1.0 (/Volumes/Intel/playground/routecodex/req02-web-history-baseline-r21-20261004/v3/crates/routecodex-v3-route-classifier)
+   Compiling regex v1.12.4
+   Compiling bstr v1.13.0
+   Compiling fancy-regex v0.17.0
+   Compiling synstructure v0.13.2
+   Compiling chrono v0.4.45
+   Compiling uuid v1.23.1
+   Compiling serde_derive v1.0.228
+   Compiling zerofrom-derive v0.1.7
+   Compiling yoke-derive v0.8.2
+   Compiling zerovec-derive v0.11.3
+   Compiling displaydoc v0.2.6
+   Compiling tokio-macros v2.7.0
+   Compiling thiserror-impl v1.0.69
+   Compiling futures-macro v0.3.32
+   Compiling async-trait v0.1.89
+   Compiling tiktoken-rs v0.12.0
+   Compiling tokio v1.52.3
+   Compiling futures-util v0.3.32
+   Compiling zerofrom v0.1.8
+   Compiling yoke v0.8.3
+   Compiling routecodex-v3-sse v0.1.0 (/Volumes/Intel/playground/routecodex/req02-web-history-baseline-r21-20261004/v3/crates/routecodex-v3-sse)
+   Compiling zerovec v0.11.6
+   Compiling zerotrie v0.2.4
+   Compiling ppv-lite86 v0.2.21
+   Compiling rand_chacha v0.3.1
+   Compiling rand v0.8.7
+   Compiling toml_datetime v0.6.11
+   Compiling serde_spanned v0.6.9
+   Compiling serde_urlencoded v0.7.1
+   Compiling provider-compat-core v0.1.0 (/Volumes/Intel/playground/routecodex/req02-web-history-baseline-r21-20261004/v3/crates/provider-compat-core)
+   Compiling servertool-core v0.1.0 (/Volumes/Intel/playground/routecodex/req02-web-history-baseline-r21-20261004/v3/crates/servertool-core)
+   Compiling pipeline_runtime v0.1.0 (https://github.com/Jasonzhangf/DAGpipe.git?tag=v0.1.0#8cb59fb5)
+   Compiling routecodex-v3-agent-memory v0.1.0 (/Volumes/Intel/playground/routecodex/req02-web-history-baseline-r21-20261004/v3/crates/routecodex-v3-agent-memory)
+   Compiling serde_yaml v0.9.34+deprecated
+   Compiling routecodex-v3-config v0.1.0 (/Volumes/Intel/playground/routecodex/req02-web-history-baseline-r21-20261004/v3/crates/routecodex-v3-config)
+   Compiling toml_edit v0.22.27
+   Compiling routecodex-v3-hooks v0.1.0 (/Volumes/Intel/playground/routecodex/req02-web-history-baseline-r21-20261004/v3/crates/routecodex-v3-hooks)
+   Compiling tinystr v0.8.3
+   Compiling potential_utf v0.1.5
+   Compiling icu_collections v2.2.0
+   Compiling icu_locale_core v2.2.0
+   Compiling icu_provider v2.2.0
+   Compiling icu_properties v2.2.0
+   Compiling icu_normalizer v2.2.0
+   Compiling toml v0.8.23
+   Compiling rustls-webpki v0.103.13
+   Compiling hyper v1.10.1 (/Volumes/Intel/playground/routecodex/req02-web-history-baseline-r21-20261004/v3/vendor/hyper)
+   Compiling tower v0.5.3
+   Compiling tokio-util v0.7.18
+   Compiling idna_adapter v1.2.2
+   Compiling idna v1.1.0
+   Compiling hyper-util v0.1.20
+   Compiling url v2.5.8
+   Compiling tower-http v0.6.11
+   Compiling tokio-rustls v0.26.4
+   Compiling tungstenite v0.24.0
+   Compiling hyper-rustls v0.27.9
+   Compiling routecodex-v3-debug v0.1.0 (/Volumes/Intel/playground/routecodex/req02-web-history-baseline-r21-20261004/v3/crates/routecodex-v3-debug)
+   Compiling routecodex-v3-virtual-router v0.1.0 (/Volumes/Intel/playground/routecodex/req02-web-history-baseline-r21-20261004/v3/crates/routecodex-v3-virtual-router)
+   Compiling reqwest v0.12.28
+   Compiling tokio-tungstenite v0.24.0
+   Compiling routecodex-v3-error v0.1.0 (/Volumes/Intel/playground/routecodex/req02-web-history-baseline-r21-20261004/v3/crates/routecodex-v3-error)
+   Compiling routecodex-v3-provider-responses v0.1.0 (/Volumes/Intel/playground/routecodex/req02-web-history-baseline-r21-20261004/v3/crates/routecodex-v3-provider-responses)
+   Compiling routecodex-v3-target v0.1.0 (/Volumes/Intel/playground/routecodex/req02-web-history-baseline-r21-20261004/v3/crates/routecodex-v3-target)
+   Compiling routecodex-v3-runtime v0.1.0 (/Volumes/Intel/playground/routecodex/req02-web-history-baseline-r21-20261004/v3/crates/routecodex-v3-runtime)
+warning: unused imports: `V3DirectRequestKeyEdits`, `V3DirectRequestKeyKind`, `V3DirectRequestKeyMount`, and `V3DirectRequestKeyView`
+ --> crates/routecodex-v3-runtime/src/hooks.rs:4:5
+  |
+4 |     V3DirectRequestKeyEdits, V3DirectRequestKeyHookCatalog, V3DirectRequestKeyKind,
+  |     ^^^^^^^^^^^^^^^^^^^^^^^                                 ^^^^^^^^^^^^^^^^^^^^^^
+5 |     V3DirectRequestKeyMount, V3DirectRequestKeyView, V3DirectRequestProtocol,
+  |     ^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `serde_json::json`
+ --> crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree_tests.rs:2:5
+  |
+2 | use serde_json::json;
+  |     ^^^^^^^^^^^^^^^^
+
+warning: unused import: `serde_json::json`
+ --> crates/routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree_tests.rs:2:5
+  |
+2 | use serde_json::json;
+  |     ^^^^^^^^^^^^^^^^
+
+warning: unused imports: `build_v3_openai_chat_standard_request_for_selected_web_search_mode`, `build_v3_openai_chat_standard_request_from_chat_canonical`, `build_v3_openai_responses_standard_request_for_selected_target`, and `build_v3_openai_responses_standard_request_from_chat_canonical`
+  --> crates/routecodex-v3-runtime/src/hub_v1.rs:73:5
+   |
+73 |     build_v3_openai_chat_standard_request_for_selected_web_search_mode,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+74 |     build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording,
+75 |     build_v3_openai_chat_standard_request_from_chat_canonical,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+76 |     build_v3_openai_chat_standard_request_from_chat_canonical_recording,
+77 |     build_v3_openai_responses_standard_request_for_selected_target,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+78 |     build_v3_openai_responses_standard_request_for_selected_target_with_drops,
+79 |     build_v3_openai_responses_standard_request_from_chat_canonical,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `apply_v3_web_search_request_hook_at_req04`
+ --> crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs:2:5
+  |
+2 |     apply_v3_web_search_request_hook_at_req04,
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `provider_compat_boundary_source`
+ --> crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs:2:13
+  |
+2 | use super::{provider_compat_boundary_source, V3ProviderCompatErrorClassification};
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::pin::Pin`
+  --> crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs:22:5
+   |
+22 | use std::pin::Pin;
+   |     ^^^^^^^^^^^^^
+
+warning: unused import: `ReqwestResponsesTransport`
+  --> crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs:15:50
+   |
+15 |     build_v3_provider_12_responses_wire_payload, ReqwestResponsesTransport, ResponsesTransport,
+   |                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::pin::Pin`
+  --> crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs:21:5
+   |
+21 | use std::pin::Pin;
+   |     ^^^^^^^^^^^^^
+
+warning: unused import: `SseField`
+  --> crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs:37:45
+   |
+37 |     build_v3_sse_transport_in_01_raw_chunk, SseField, SseIncrementalDecoder, SseTransportLimits,
+   |                                             ^^^^^^^^
+
+warning: unused import: `std::pin::Pin`
+  --> crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs:41:5
+   |
+41 | use std::pin::Pin;
+   |     ^^^^^^^^^^^^^
+
+warning: unused import: `MutexGuard`
+  --> crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs:42:29
+   |
+42 | use std::sync::{Arc, Mutex, MutexGuard};
+   |                             ^^^^^^^^^^
+
+warning: unused import: `V3ResponsesRelayToolOutputIds`
+  --> crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs:61:37
+   |
+61 |     find_responses_tool_output_ids, V3ResponsesRelayToolOutputIds,
+   |                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `responses_relay_dry_run::*`
+   --> crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs:101:5
+    |
+101 | use responses_relay_dry_run::*;
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `provider_response_stream_failure` and `server_routing_group`
+   --> crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs:113:5
+    |
+113 |     provider_response_stream_failure, provider_runtime_failure, provider_semantic_failure,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+114 |     provider_terminal_admission_failure, server_routing_group,
+    |                                          ^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `run_v3_relay_provider_failure_policy`
+ --> crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs:7:5
+  |
+7 |     run_v3_relay_provider_failure_policy, v3_relay_provider_policy_now_epoch_ms,
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `V3Error05ExecutionAction`, `V3Error05RecoveryAdmissionWitness`, and `V3_ERROR_CHAIN_NODE_IDS`
+  --> crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs:17:38
+   |
+17 |     build_v3_error_01_source_raised, V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness,
+   |                                      ^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+18 |     V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
+19 |     V3ProviderFailureSessionScope, V3_ERROR_CHAIN_NODE_IDS,
+   |                                    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `ReqwestResponsesTransport`, `V3ProviderAuthHandle`, `V3ProviderAuthSecretHandle`, and `V3ResponsesProviderTarget`
+  --> crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs:24:51
+   |
+24 |     is_v3_anthropic_provider_request_header_name, ReqwestResponsesTransport, ResponsesTransport,
+   |                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+25 |     V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError, V3ProviderResponseBody,
+   |     ^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+26 |     V3ProviderSseStream, V3ResponsesProviderTarget,
+   |                          ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::pin::Pin`
+  --> crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs:35:5
+   |
+35 | use std::pin::Pin;
+   |     ^^^^^^^^^^^^^
+
+warning: unused import: `MutexGuard`
+  --> crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs:36:29
+   |
+36 | use std::sync::{Arc, Mutex, MutexGuard};
+   |                             ^^^^^^^^^^
+
+warning: unused import: `V3ResponsesSseContentRewrite`
+ --> crates/routecodex-v3-runtime/src/hub_v1/relay_sse_hooks.rs:3:5
+  |
+3 |     V3ResponsesSseContentRewrite, V3ResponsesSseHookInput, V3ResponsesSseSemanticObject,
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `V3HubRelayRequestHookEvent`
+ --> crates/routecodex-v3-runtime/src/kernel.rs:9:5
+  |
+9 |     V3HubRelayRequestHookEvent, V3HubRelayResponseHookProfile, V3HubTransportIntent,
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `V3Error05RecoveryAdmissionWitness` and `is_v3_retryable_transient_source`
+  --> crates/routecodex-v3-runtime/src/kernel.rs:31:5
+   |
+31 |     is_v3_retryable_transient_source, V3Error01SourceRaised, V3Error05ExecutionAction,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+32 |     V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected,
+   |                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `SseTransportIn02DecodedFrame`, `build_v3_sse_transport_in_02_from_fields`, and `build_v3_sse_transport_in_03_from_v3_sse_transport_in_02`
+  --> crates/routecodex-v3-runtime/src/kernel.rs:43:45
+   |
+43 |     build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_in_02_from_fields,
+   |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+44 |     build_v3_sse_transport_in_03_from_v3_sse_transport_in_02,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+45 |     build_v3_sse_transport_out_04_from_v3_sse_transport_in_03, SseField, SseIncrementalDecoder,
+46 |     SseTransportIn02DecodedFrame, SseTransportIn03ValidatedFrameStream, SseTransportLimits,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `hooks::build_v3_provider_error_source`
+  --> crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs:18:5
+   |
+18 |     hooks::build_v3_provider_error_source,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `V3ProviderAuthHandle`, `V3ProviderAuthSecretHandle`, `V3ResponsesProviderTarget`, and `build_v3_provider_12_responses_wire_payload`
+  --> crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs:26:5
+   |
+26 |     build_v3_provider_12_responses_wire_payload, V3Provider12ResponsesWirePayload,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+27 |     V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderResp14Raw,
+   |     ^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+28 |     V3ResponsesProviderTarget,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `serde_json::Value`
+  --> crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs:31:5
+   |
+31 | use serde_json::Value;
+   |     ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `Duration`
+  --> crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs:31:17
+   |
+31 | use std::time::{Duration, SystemTime, UNIX_EPOCH};
+   |                 ^^^^^^^^
+
+warning: unused imports: `Arc` and `Mutex`
+  --> crates/routecodex-v3-runtime/src/shared.rs:25:17
+   |
+25 | use std::sync::{Arc, Mutex};
+   |                 ^^^  ^^^^^
+
+warning: variable does not need to be mutable
+   --> crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs:213:9
+    |
+213 |     let mut result = run_v3_relay_provider_failure_policy(
+    |         ----^^^^^^
+    |         |
+    |         help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+  --> crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs:13:5
+   |
+13 |     mut input: V3ResponsesRelayRuntimeInput,
+   |     ----^^^^^
+   |     |
+   |     help: remove this `mut`
+
+warning: variable does not need to be mutable
+  --> crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs:15:5
+   |
+15 |     mut control: C::Control,
+   |     ----^^^^^^^
+   |     |
+   |     help: remove this `mut`
+
+warning: variable does not need to be mutable
+  --> crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs:52:5
+   |
+52 |     mut control: C::Control,
+   |     ----^^^^^^^
+   |     |
+   |     help: remove this `mut`
+
+warning: unused import: `futures_util::StreamExt`
+ --> crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs:9:5
+  |
+9 | use futures_util::StreamExt;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `futures_util::StreamExt`
+ --> crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs:8:5
+  |
+8 | use futures_util::StreamExt;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused variable: `tool_thinking_enabled`
+   --> crates/routecodex-v3-runtime/src/shared.rs:426:5
+    |
+426 |     tool_thinking_enabled: bool,
+    |     ^^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_tool_thinking_enabled`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `toolreason_client_projection`
+   --> crates/routecodex-v3-runtime/src/shared.rs:427:5
+    |
+427 |     toolreason_client_projection: bool,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_toolreason_client_projection`
+
+warning: unused variable: `model_id`
+   --> crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs:187:17
+    |
+187 |             let model_id = candidate.model_id.clone();
+    |                 ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_model_id`
+
+warning: unused variable: `delta_type`
+   --> crates/routecodex-v3-runtime/src/hub_v1/anthropic_sse_tree.rs:695:9
+    |
+695 |         delta_type => block.extensions.extend(object_extensions(delta, &["type"])),
+    |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_delta_type`
+
+warning: unused variable: `drop_context`
+   --> crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs:205:5
+    |
+205 |     drop_context: &V3ProjectionDropContext,
+    |     ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_drop_context`
+
+warning: unused variable: `path`
+   --> crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs:598:5
+    |
+598 |     path: &str,
+    |     ^^^^ help: if this is intentional, prefix it with an underscore: `_path`
+
+warning: unused variable: `expected_model_id`
+  --> crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs:95:5
+   |
+95 |     expected_model_id: Option<&str>,
+   |     ^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_expected_model_id`
+
+warning: unused variable: `expected_model_id`
+   --> crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs:310:5
+    |
+310 |     expected_model_id: Option<&str>,
+    |     ^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_expected_model_id`
+
+warning: variable does not need to be mutable
+    --> crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs:1100:9
+     |
+1100 |     let mut input_schema = json!({
+     |         ----^^^^^^^^^^^^
+     |         |
+     |         help: remove this `mut`
+
+warning: unused variable: `object`
+   --> crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs:759:5
+    |
+759 |     object: &Map<String, Value>,
+    |     ^^^^^^ help: if this is intentional, prefix it with an underscore: `_object`
+
+warning: unused variable: `routing_group`
+   --> crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs:197:9
+    |
+197 |     let routing_group = server_routing_group(manifest, &input.server_id)
+    |         ^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_routing_group`
+
+warning: unused variable: `routing_group`
+   --> crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs:247:9
+    |
+247 |     let routing_group = server_routing_group(manifest, &input.server_id)
+    |         ^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_routing_group`
+
+warning: variable does not need to be mutable
+   --> crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs:777:18
+    |
+777 |         let Some(mut payload) = object.data_value().cloned() else {
+    |                  ----^^^^^^^
+    |                  |
+    |                  help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs:1122:33
+     |
+1122 | ...                   for mut payload in transducer.push_event(event)? {
+     |                           ----^^^^^^^
+     |                           |
+     |                           help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime_sse.rs:288:37
+    |
+288 | ...                   for mut payload in transducer.push_event(event)? {
+    |                           ----^^^^^^^
+    |                           |
+    |                           help: remove this `mut`
+
+warning: unused variable: `tool_thinking_enabled`
+  --> crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime_sse.rs:57:5
+   |
+57 |     tool_thinking_enabled: bool,
+   |     ^^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_tool_thinking_enabled`
+
+warning: variable does not need to be mutable
+  --> crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_failure_output.rs:31:5
+   |
+31 |     mut trace: Vec<&'static str>,
+   |     ----^^^^^
+   |     |
+   |     help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs:498:5
+    |
+498 |     mut trace: Vec<&'static str>,
+    |     ----^^^^^
+    |     |
+    |     help: remove this `mut`
+
+warning: unreachable pattern
+  --> crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs:51:13
+   |
+50 |             Some(V3ServerToolInstanceState::WebSearch(state)) => Ok(Some(state)),
+   |             ------------------------------------------------- matches all the relevant values
+51 |             Some(_) => Err(V3ResponsesRelayRuntimeError::ServerToolStatePoisoned),
+   |             ^^^^^^^ no value can reach this
+   |
+   = note: `#[warn(unreachable_patterns)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `manifest`
+   --> crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs:396:5
+    |
+396 |     manifest: &V3Config05ManifestPublished,
+    |     ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_manifest`
+
+warning: unused variable: `server_id`
+   --> crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs:397:5
+    |
+397 |     server_id: &str,
+    |     ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_server_id`
+
+warning: variable does not need to be mutable
+   --> crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs:358:5
+    |
+358 |     mut trace: Vec<&'static str>,
+    |     ----^^^^^
+    |     |
+    |     help: remove this `mut`
+
+warning: unused variable: `transport_source`
+    --> crates/routecodex-v3-runtime/src/kernel.rs:1006:21
+     |
+1006 |                 let transport_source = source.clone();
+     |                     ^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_transport_source`
+
+warning: unused variable: `direct_web_search_request_state`
+    --> crates/routecodex-v3-runtime/src/kernel.rs:1137:13
+     |
+1137 |         let direct_web_search_request_state =
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_direct_web_search_request_state`
+
+warning: value assigned to `provider_request_snapshot` is never read
+   --> crates/routecodex-v3-runtime/src/kernel.rs:325:41
+    |
+325 |     let mut provider_request_snapshot = None;
+    |                                         ^^^^ this value is reassigned later and never used
+...
+771 |         provider_request_snapshot = Some(transport_request.provider_request_projection());
+    |         ------------------------- `provider_request_snapshot` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unreachable pattern
+  --> crates/routecodex-v3-runtime/src/kernel/direct_state.rs:95:13
+   |
+94 |             Some(V3ServerToolInstanceState::WebSearch(state)) => Ok(Some(state)),
+   |             ------------------------------------------------- matches all the relevant values
+95 |             Some(_) => Err("cross-tool direct web search load rejected".to_string()),
+   |             ^^^^^^^ no value can reach this
+
+warning: variable does not need to be mutable
+   --> crates/routecodex-v3-runtime/src/kernel/direct_response_thinking_compat.rs:116:9
+    |
+116 |     let mut frames = decoder
+    |         ----^^^^^^
+    |         |
+    |         help: remove this `mut`
+
+warning: value assigned to `provider_request_snapshot` is never read
+   --> crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs:233:41
+    |
+233 |     let mut provider_request_snapshot = None;
+    |                                         ^^^^ this value is reassigned later and never used
+...
+446 |         provider_request_snapshot = Some(transport_request.provider_request_projection());
+    |         ------------------------- `provider_request_snapshot` is overwritten here before the previous value is read
+
+warning: type `servertool_hooks::V3ToolThinkingTurnContext` is more private than the item `V3DirectResponseCompatContext::tool_thinking_turn_context`
+   --> crates/routecodex-v3-runtime/src/direct_response_hooks.rs:115:5
+    |
+115 |     pub tool_thinking_turn_context: V3ToolThinkingTurnContext,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `V3DirectResponseCompatContext::tool_thinking_turn_context` is reachable at visibility `pub`
+    |
+note: but type `servertool_hooks::V3ToolThinkingTurnContext` is only usable at visibility `pub(crate)`
+   --> crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs:86:1
+    |
+ 86 | pub(crate) struct V3ToolThinkingTurnContext {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+warning: type `V3AttemptStoreError` is more private than the item `execution_control::V3RequestExecutionControl::deadline_unix_ms`
+   --> crates/routecodex-v3-runtime/src/execution_control.rs:132:5
+    |
+132 |     pub fn deadline_unix_ms(&self) -> Result<u64, V3AttemptStoreError> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method `execution_control::V3RequestExecutionControl::deadline_unix_ms` is reachable at visibility `pub`
+    |
+note: but type `V3AttemptStoreError` is only usable at visibility `pub(crate)`
+   --> crates/routecodex-v3-runtime/src/execution_control.rs:84:1
+    |
+ 84 | pub(crate) enum V3AttemptStoreError {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `servertool_hooks::V3ToolThinkingTurnContext` is more private than the item `v3_direct_protocol_codec::V3DirectProtocolCodec::tool_thinking_turn_context`
+  --> crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs:82:5
+   |
+82 | /     fn tool_thinking_turn_context(
+83 | |         standardized: &Self::Standardized,
+84 | |     ) -> &crate::hub_v1::V3ToolThinkingTurnContext;
+   | |___________________________________________________^ associated function `v3_direct_protocol_codec::V3DirectProtocolCodec::tool_thinking_turn_context` is reachable at visibility `pub`
+   |
+note: but type `servertool_hooks::V3ToolThinkingTurnContext` is only usable at visibility `pub(crate)`
+  --> crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs:86:1
+   |
+86 | pub(crate) struct V3ToolThinkingTurnContext {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `servertool_hooks::V3ToolThinkingTurnContext` is more private than the item `<V3ResponsesDirectCodec as v3_direct_protocol_codec::V3DirectProtocolCodec>::tool_thinking_turn_context`
+   --> crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs:248:5
+    |
+248 | /     fn tool_thinking_turn_context(
+249 | |         standardized: &Self::Standardized,
+250 | |     ) -> &crate::hub_v1::V3ToolThinkingTurnContext {
+    | |__________________________________________________^ associated function `<V3ResponsesDirectCodec as v3_direct_protocol_codec::V3DirectProtocolCodec>::tool_thinking_turn_context` is reachable at visibility `pub`
+    |
+note: but type `servertool_hooks::V3ToolThinkingTurnContext` is only usable at visibility `pub(crate)`
+   --> crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs:86:1
+    |
+ 86 | pub(crate) struct V3ToolThinkingTurnContext {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `servertool_hooks::V3ToolThinkingTurnContext` is more private than the item `<V3ChatDirectCodec as v3_direct_protocol_codec::V3DirectProtocolCodec>::tool_thinking_turn_context`
+   --> crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs:450:5
+    |
+450 | /     fn tool_thinking_turn_context(
+451 | |         standardized: &Self::Standardized,
+452 | |     ) -> &crate::hub_v1::V3ToolThinkingTurnContext {
+    | |__________________________________________________^ associated function `<V3ChatDirectCodec as v3_direct_protocol_codec::V3DirectProtocolCodec>::tool_thinking_turn_context` is reachable at visibility `pub`
+    |
+note: but type `servertool_hooks::V3ToolThinkingTurnContext` is only usable at visibility `pub(crate)`
+   --> crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs:86:1
+    |
+ 86 | pub(crate) struct V3ToolThinkingTurnContext {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `servertool_hooks::V3ToolThinkingTurnContext` is more private than the item `nodes::V3Req04StandardizedResponses::tool_thinking_turn_context`
+   --> crates/routecodex-v3-runtime/src/nodes.rs:168:5
+    |
+168 |     pub tool_thinking_turn_context: crate::hub_v1::V3ToolThinkingTurnContext,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `nodes::V3Req04StandardizedResponses::tool_thinking_turn_context` is reachable at visibility `pub`
+    |
+note: but type `servertool_hooks::V3ToolThinkingTurnContext` is only usable at visibility `pub(crate)`
+   --> crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs:86:1
+    |
+ 86 | pub(crate) struct V3ToolThinkingTurnContext {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `servertool_hooks::V3ToolThinkingTurnContext` is more private than the item `nodes::V3Req04StandardizedChat::tool_thinking_turn_context`
+   --> crates/routecodex-v3-runtime/src/nodes.rs:186:5
+    |
+186 |     pub tool_thinking_turn_context: crate::hub_v1::V3ToolThinkingTurnContext,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `nodes::V3Req04StandardizedChat::tool_thinking_turn_context` is reachable at visibility `pub`
+    |
+note: but type `servertool_hooks::V3ToolThinkingTurnContext` is only usable at visibility `pub(crate)`
+   --> crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs:86:1
+    |
+ 86 | pub(crate) struct V3ToolThinkingTurnContext {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `V3ProtocolTables` is more private than the item `protocol_tables`
+   --> crates/routecodex-v3-runtime/src/protocol_tables.rs:203:1
+    |
+203 | pub fn protocol_tables() -> Result<&'static V3ProtocolTables, String> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ function `protocol_tables` is reachable at visibility `pub`
+    |
+note: but type `V3ProtocolTables` is only usable at visibility `pub(self)`
+   --> crates/routecodex-v3-runtime/src/protocol_tables.rs:169:1
+    |
+169 | struct V3ProtocolTables {
+    | ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `request_key_catalog` is never used
+   --> crates/routecodex-v3-runtime/src/hooks.rs:152:19
+    |
+115 | impl V3HookRegistry {
+    | ------------------- method in this implementation
+...
+152 |     pub(crate) fn request_key_catalog(&self) -> &V3DirectRequestKeyHookCatalog {
+    |                   ^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `apply_responses_toolreason_sse_hook` is never used
+   --> crates/routecodex-v3-runtime/src/hooks.rs:268:15
+    |
+268 | pub(crate) fn apply_responses_toolreason_sse_hook(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `apply_relay_toolreason_sse_hook` is never used
+   --> crates/routecodex-v3-runtime/src/hooks.rs:296:15
+    |
+296 | pub(crate) fn apply_relay_toolreason_sse_hook(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `apply_toolreason_sse_hook_with_stream_observation` is never used
+   --> crates/routecodex-v3-runtime/src/hooks.rs:324:4
+    |
+324 | fn apply_toolreason_sse_hook_with_stream_observation(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `responses_direct_request_projection_hook` is never used
+   --> crates/routecodex-v3-runtime/src/hooks.rs:378:15
+    |
+378 | pub(crate) fn responses_direct_request_projection_hook(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `chat_direct_request_projection_hook` is never used
+   --> crates/routecodex-v3-runtime/src/hooks.rs:744:15
+    |
+744 | pub(crate) fn chat_direct_request_projection_hook(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `chat_direct_request_projection_hook_with_key_catalog` is never used
+   --> crates/routecodex-v3-runtime/src/hooks.rs:751:15
+    |
+751 | pub(crate) fn chat_direct_request_projection_hook_with_key_catalog(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: variant `ProviderPoolExhausted` is never constructed
+   --> crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs:378:5
+    |
+374 | pub enum V3RelayCoreError {
+    |          ---------------- variant in this enum
+...
+378 |     ProviderPoolExhausted {
+    |     ^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `V3RelayCoreError` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: function `v3_openai_chat_message_has_visible_payload` is never used
+   --> crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs:595:4
+    |
+595 | fn v3_openai_chat_message_has_visible_payload(message: &Value) -> bool {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `RewriteResponsesHook` is never constructed
+ --> crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree_tests.rs:4:8
+  |
+4 | struct RewriteResponsesHook {
+  |        ^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `V3AnthropicSseTransportObject` is never constructed
+ --> crates/routecodex-v3-runtime/src/hub_v1/anthropic_sse_tree.rs:6:19
+  |
+6 | pub(crate) struct V3AnthropicSseTransportObject {
+  |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: associated items `new`, `event_name`, and `data` are never used
+  --> crates/routecodex-v3-runtime/src/hub_v1/anthropic_sse_tree.rs:12:19
+   |
+11 | impl V3AnthropicSseTransportObject {
+   | ---------------------------------- associated items in this implementation
+12 |     pub(crate) fn new(event_name: Option<String>, data: Value) -> Self {
+   |                   ^^^
+...
+15 |     pub(crate) fn event_name(&self) -> Option<&str> {
+   |                   ^^^^^^^^^^
+...
+18 |     pub(crate) fn data(&self) -> &Value {
+   |                   ^^^^
+
+warning: enum `V3AnthropicSseDelta` is never used
+   --> crates/routecodex-v3-runtime/src/hub_v1/anthropic_sse_tree.rs:102:17
+    |
+102 | pub(crate) enum V3AnthropicSseDelta {
+    |                 ^^^^^^^^^^^^^^^^^^^
+
+warning: struct `V3AnthropicSseSemanticObject` is never constructed
+   --> crates/routecodex-v3-runtime/src/hub_v1/anthropic_sse_tree.rs:136:19
+    |
+136 | pub(crate) struct V3AnthropicSseSemanticObject {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `V3AnthropicSseHookInput` is never constructed
+   --> crates/routecodex-v3-runtime/src/hub_v1/anthropic_sse_tree.rs:146:19
+    |
+146 | pub(crate) struct V3AnthropicSseHookInput<'a> {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: trait `V3AnthropicSseSemanticHook` is never used
+   --> crates/routecodex-v3-runtime/src/hub_v1/anthropic_sse_tree.rs:152:18
+    |
+152 | pub(crate) trait V3AnthropicSseSemanticHook {
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `apply_v3_anthropic_sse_semantic_hook` is never used
+   --> crates/routecodex-v3-runtime/src/hub_v1/anthropic_sse_tree.rs:160:15
+    |
+160 | pub(crate) fn apply_v3_anthropic_sse_semantic_hook(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `RewriteChatHook` is never constructed
+ --> crates/routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree_tests.rs:4:8
+  |
+4 | struct RewriteChatHook {
+  |        ^^^^^^^^^^^^^^^
+
+warning: function `project_openai_chat_provider_tools_for_web_search_mode` is never used
+   --> crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs:180:15
+    |
+180 | pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `build_v3_openai_chat_standard_request_from_chat_canonical` is never used
+  --> crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs:27:15
+   |
+27 | pub(crate) fn build_v3_openai_chat_standard_request_from_chat_canonical(
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `build_v3_openai_chat_standard_request_for_selected_web_search_mode` is never used
+  --> crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs:53:15
+   |
+53 | pub(crate) fn build_v3_openai_chat_standard_request_for_selected_web_search_mode(
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `build_v3_openai_responses_standard_request_from_chat_canonical` is never used
+  --> crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs:87:15
+   |
+87 | pub(crate) fn build_v3_openai_responses_standard_request_from_chat_canonical(
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `build_v3_openai_responses_standard_request_for_selected_target` is never used
+  --> crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs:93:15
+   |
+93 | pub(crate) fn build_v3_openai_responses_standard_request_for_selected_target(
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `build_v3_openai_responses_request_from_chat_canonical` is never used
+   --> crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs:127:4
+    |
+127 | fn build_v3_openai_responses_request_from_chat_canonical(payload: &Value) -> Result<Value, String> {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `build_v3_anthropic_provider_request_source_from_chat_canonical` is never used
+   --> crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs:379:15
+    |
+379 | pub(crate) fn build_v3_anthropic_provider_request_source_from_chat_canonical(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `project_outbound_payload_for_target_protocol` is never used
+   --> crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs:443:15
+    |
+443 | pub(crate) fn project_outbound_payload_for_target_protocol(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `project_outbound_payload_for_selected_target_protocol` is never used
+   --> crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs:463:15
+    |
+463 | pub(crate) fn project_outbound_payload_for_selected_target_protocol(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `provider_req_compat_reasoning_effort_explicit` is never used
+  --> crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs:80:15
+   |
+80 | pub(crate) fn provider_req_compat_reasoning_effort_explicit(payload: &Value) -> bool {
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `classify_v3_provider_json_error_body` is never used
+   --> crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs:309:15
+    |
+309 | pub(crate) fn classify_v3_provider_json_error_body(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `log_v3_toolreason_observation_at_resp03_with_context` is never used
+  --> crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs:22:4
+   |
+22 | fn log_v3_toolreason_observation_at_resp03_with_context(
+   |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `classify_v3_toolreason_observation_at_resp03` is never used
+  --> crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs:87:4
+   |
+87 | fn classify_v3_toolreason_observation_at_resp03(
+   |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `audit_v3_toolreason_dry_run_payloads` is never used
+   --> crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs:151:15
+    |
+151 | pub(crate) fn audit_v3_toolreason_dry_run_payloads(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `collect_v3_toolreason_dry_run_counts` is never used
+   --> crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs:191:4
+    |
+191 | fn collect_v3_toolreason_dry_run_counts(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `map_v3_toolreason_to_reasoning_content_at_resp03` is never used
+    --> crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs:1891:15
+     |
+1891 | pub(crate) fn map_v3_toolreason_to_reasoning_content_at_resp03(payload: &mut Value, enabled: bool) {
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `map_v3_toolreason_to_reasoning_content_at_resp03_with_projection` is never used
+    --> crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs:1895:15
+     |
+1895 | pub(crate) fn map_v3_toolreason_to_reasoning_content_at_resp03_with_projection(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `map_v3_toolreason_to_reasoning_content_at_resp03_with_projection_and_request_id` is never used
+    --> crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs:1911:15
+     |
+1911 | pub(crate) fn map_v3_toolreason_to_reasoning_content_at_resp03_with_projection_and_request_id(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `map_v3_openai_chat_toolreason_delta_at_resp03` is never used
+    --> crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs:2261:4
+     |
+2261 | fn map_v3_openai_chat_toolreason_delta_at_resp03(payload: &mut Value, project_to_client: bool) {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `map_v3_openai_chat_toolreason_delta_for_relay_projection` is never used
+    --> crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs:2338:15
+     |
+2338 | pub(crate) fn map_v3_openai_chat_toolreason_delta_for_relay_projection(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `v3_toolreason_projection_authorized_at_resp03` is never used
+    --> crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs:2547:15
+     |
+2547 | pub(crate) fn v3_toolreason_projection_authorized_at_resp03(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `map_v3_toolreason_stream_event_at_resp03` is never used
+    --> crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs:2737:15
+     |
+2737 | pub(crate) fn map_v3_toolreason_stream_event_at_resp03(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `map_v3_toolreason_stream_event_at_resp03_with_request_id` is never used
+    --> crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs:2756:15
+     |
+2756 | pub(crate) fn map_v3_toolreason_stream_event_at_resp03_with_request_id(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `map_v3_openai_chat_toolreason_chunk_at_resp03` is never used
+    --> crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs:3202:4
+     |
+3202 | fn map_v3_openai_chat_toolreason_chunk_at_resp03(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `project_v3_toolreason_sse_chunk_at_resp03` is never used
+    --> crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs:3370:15
+     |
+3370 | pub(crate) fn project_v3_toolreason_sse_chunk_at_resp03(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `project_v3_toolreason_sse_chunk_at_resp03_with_projection` is never used
+    --> crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs:3388:15
+     |
+3388 | pub(crate) fn project_v3_toolreason_sse_chunk_at_resp03_with_projection(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `project_v3_toolreason_sse_chunk_at_resp03_with_projection_and_request_id` is never used
+    --> crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs:3407:15
+     |
+3407 | pub(crate) fn project_v3_toolreason_sse_chunk_at_resp03_with_projection_and_request_id(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `project_v3_toolreason_sse_final_buffer_at_resp03` is never used
+    --> crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs:3456:15
+     |
+3456 | pub(crate) fn project_v3_toolreason_sse_final_buffer_at_resp03(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `project_v3_toolreason_sse_final_buffer_at_resp03_with_projection` is never used
+    --> crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs:3471:15
+     |
+3471 | pub(crate) fn project_v3_toolreason_sse_final_buffer_at_resp03_with_projection(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `project_v3_toolreason_sse_final_buffer_at_resp03_with_projection_and_request_id` is never used
+    --> crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs:3488:15
+     |
+3488 | pub(crate) fn project_v3_toolreason_sse_final_buffer_at_resp03_with_projection_and_request_id(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `is_original_custom_tool` is never used
+   --> crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs:107:19
+    |
+ 91 | impl V3ToolThinkingTurnContext {
+    | ------------------------------ method in this implementation
+...
+107 |     pub(crate) fn is_original_custom_tool(&self, name: &str) -> bool {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `inject_v3_tool_thinking_guidance_at_req04` is never used
+   --> crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs:116:15
+    |
+116 | pub(crate) fn inject_v3_tool_thinking_guidance_at_req04(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `identify_v3_servertool_request_tool` is never used
+   --> crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs:304:15
+    |
+304 | pub(crate) fn identify_v3_servertool_request_tool(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: associated function `new` is never used
+   --> crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs:766:19
+    |
+765 | impl V3OpenAiChatResponsesSseTransducer {
+    | --------------------------------------- associated function in this implementation
+766 |     pub(crate) fn new() -> Self {
+    |                   ^^^
+
+warning: fields `tool_thinking_enabled` and `toolreason_argument_buffers` are never read
+   --> crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs:511:5
+    |
+493 | struct V3OpenAiChatSseState {
+    |        -------------------- fields in this struct
+...
+511 |     tool_thinking_enabled: bool,
+    |     ^^^^^^^^^^^^^^^^^^^^^
+...
+514 |     toolreason_argument_buffers: Vec<String>,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: field `argument_buffers` is never read
+ --> crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime_sse.rs:4:5
+  |
+1 | struct V3RelayToolreasonStreamState {
+  |        ---------------------------- field in this struct
+...
+4 |     argument_buffers: Vec<String>,
+  |     ^^^^^^^^^^^^^^^^
+
+warning: function `build_v3_responses_provider_response_from_openai_chat_payload` is never used
+  --> crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs:29:15
+   |
+29 | pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload(
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `execute_v3_responses_relay_dry_run_runtime` is never used
+ --> crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs:4:21
+  |
+4 | pub(crate) async fn execute_v3_responses_relay_dry_run_runtime(
+  |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `execute_v3_responses_relay_dry_run_runtime_with_server_tool_state_and_initial_target` is never used
+  --> crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs:34:21
+   |
+34 | pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_with_server_tool_state_and_initial_target(
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `server_routing_group` is never used
+  --> crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs:10:15
+   |
+10 | pub(crate) fn server_routing_group(
+   |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: method `record_post_commit_error` is never used
+   --> crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs:309:19
+    |
+291 | impl V3RuntimeStreamObservation {
+    | ------------------------------- method in this implementation
+...
+309 |     pub(crate) fn record_post_commit_error(&self, error: &str) -> Result<(), String> {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `build_v3_web_search_hook_request_from_value` is never used
+  --> crates/routecodex-v3-runtime/src/hub_v1/web_search_hook_request.rs:51:15
+   |
+51 | pub(crate) fn build_v3_web_search_hook_request_from_value<
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `extract_web_search_text_result` is never used
+   --> crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs:229:15
+    |
+229 | pub(crate) fn extract_web_search_text_result(provider_value: &Value) -> Option<String> {
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `with_responses` and `with_chat` are never used
+  --> crates/routecodex-v3-runtime/src/hub_v1/relay_sse_hooks.rs:44:25
+   |
+33 | impl V3RelaySseHookCatalog {
+   | -------------------------- methods in this implementation
+...
+44 |     pub(crate) const fn with_responses(
+   |                         ^^^^^^^^^^^^^^
+...
+54 |     pub(crate) const fn with_chat(
+   |                         ^^^^^^^^^
+
+warning: function `noop_responses_rewrite` is never used
+  --> crates/routecodex-v3-runtime/src/hub_v1/relay_sse_hooks.rs:95:4
+   |
+95 | fn noop_responses_rewrite(
+   |    ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: field `same_candidate_retries` is never read
+  --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs:81:5
+   |
+79 | pub(crate) struct V3DirectProviderFailurePolicyState<'state> {
+   |                   ---------------------------------- field in this struct
+80 |     failed_candidates: &'state mut BTreeSet<String>,
+81 |     same_candidate_retries: &'state mut BTreeMap<String, usize>,
+   |     ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `wrap_direct_sse_provider_event_json_observation_stream` is never used
+  --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:12:4
+   |
+12 | fn wrap_direct_sse_provider_event_json_observation_stream(
+   |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `wrap_direct_sse_provider_event_json_observation_stream_with_compat` is never used
+  --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:40:15
+   |
+40 | pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat(
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `V3DirectSseSemanticState` is never constructed
+   --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:254:8
+    |
+254 | struct V3DirectSseSemanticState {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: associated function `new` is never used
+   --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:261:8
+    |
+260 | impl V3DirectSseSemanticState {
+    | ----------------------------- associated function in this implementation
+261 |     fn new() -> Self {
+    |        ^^^
+
+warning: function `collect_direct_sse_attempt_after_terminal` is never used
+   --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:270:21
+    |
+270 | pub(crate) async fn collect_direct_sse_attempt_after_terminal(
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `collect_direct_sse_attempt_after_terminal_with_memory` is never used
+   --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:285:21
+    |
+285 | pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `rewrite_direct_sse_memory` is never used
+   --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:422:4
+    |
+422 | fn rewrite_direct_sse_memory(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `direct_sse_output_text_key` is never used
+   --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:521:4
+    |
+521 | fn direct_sse_output_text_key(event: &serde_json::Value) -> (usize, usize) {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `parse_direct_sse_json_frames` is never used
+   --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:534:4
+    |
+534 | fn parse_direct_sse_json_frames(frame: &[u8]) -> Vec<serde_json::Value> {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `rewrite_direct_sse_frame` is never used
+   --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:543:4
+    |
+543 | fn rewrite_direct_sse_frame(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `parse_direct_sse_json_segment` is never used
+   --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:561:4
+    |
+561 | fn parse_direct_sse_json_segment(segment: &str) -> Option<(serde_json::Value, String)> {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `materialize_direct_responses_terminal_usage` is never used
+   --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:572:4
+    |
+572 | fn materialize_direct_responses_terminal_usage(frame: &[u8]) -> Vec<u8> {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `project_and_collect_direct_sse_attempt` is never used
+   --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:608:21
+    |
+608 | pub(crate) async fn project_and_collect_direct_sse_attempt(
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `record_direct_sse_provider_event_json_chunk` is never used
+   --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:661:4
+    |
+661 | fn record_direct_sse_provider_event_json_chunk(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `record_direct_sse_provider_event_json_frame` is never used
+   --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:793:4
+    |
+793 | fn record_direct_sse_provider_event_json_frame(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `provider_sse_failure_source` is never used
+   --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:805:4
+    |
+805 | fn provider_sse_failure_source(message: impl Into<String>) -> V3Error01SourceRaised {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `compat_source` is never used
+   --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:826:15
+    |
+826 | pub(crate) fn compat_source(
+    |               ^^^^^^^^^^^^^
+
+warning: function `extract_v3_provider_compat_boundary_field` is never used
+   --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:848:4
+    |
+848 | fn extract_v3_provider_compat_boundary_field(reason: &str) -> Option<&'static str> {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `target_exhausted_output_with_observability` is never used
+   --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:922:15
+    |
+922 | pub(crate) fn target_exhausted_output_with_observability(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `provider_terminal_output` is never used
+   --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:980:15
+    |
+980 | pub(crate) fn provider_terminal_output(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `committed_sse_provider_failure_output` is never used
+    --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:1100:15
+     |
+1100 | pub(crate) fn committed_sse_provider_failure_output(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `rewrite_v3_direct_thinking_tag_sse_bytes` is never used
+   --> crates/routecodex-v3-runtime/src/kernel/direct_response_thinking_compat.rs:114:4
+    |
+114 | fn rewrite_v3_direct_thinking_tag_sse_bytes(input: &[u8]) -> Result<Vec<u8>, String> {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `error_output` is never used
+   --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:897:15
+    |
+897 | pub(crate) fn error_output(
+    |               ^^^^^^^^^^^^
+
+warning: function `relay_handoff_output` is never used
+    --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:1127:15
+     |
+1127 | pub(crate) fn relay_handoff_output(
+     |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `debug_error_output` is never used
+    --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:1166:4
+     |
+1166 | fn debug_error_output(
+     |    ^^^^^^^^^^^^^^^^^^
+
+warning: function `client_payload_debug_value` is never used
+    --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:1183:4
+     |
+1183 | fn client_payload_debug_value(payload: &V3Resp15ClientPayload) -> Value {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `V3RuntimeAttemptAvailability` is never constructed
+    --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:1199:8
+     |
+1199 | struct V3RuntimeAttemptAvailability<'a, R> {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `candidate_key` is never used
+    --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:1228:4
+     |
+1228 | fn candidate_key(candidate: &V3TargetCandidate) -> String {
+     |    ^^^^^^^^^^^^^
+
+warning: function `availability_key` is never used
+    --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:1236:4
+     |
+1236 | fn availability_key(provider_id: &str, auth_alias: Option<&str>, model_id: Option<&str>) -> String {
+     |    ^^^^^^^^^^^^^^^^
+
+warning: function `remaining_available_candidates` is never used
+    --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:1245:4
+     |
+1245 | fn remaining_available_candidates<R: V3ProviderAvailabilityReader>(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `first_remaining_available_candidate_key` is never used
+    --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:1269:4
+     |
+1269 | fn first_remaining_available_candidate_key<R: V3ProviderAvailabilityReader>(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `require_static_hooks` is never used
+    --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:1293:4
+     |
+1293 | fn require_static_hooks(hook_registry: &V3HookRegistry) {
+     |    ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `direct_runtime_allowed_execution_modes` is never used
+    --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:1311:15
+     |
+1311 | pub(crate) fn direct_runtime_allowed_execution_modes(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `total_attempts` is never used
+    --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:1324:4
+     |
+1324 | fn total_attempts(
+     |    ^^^^^^^^^^^^^^
+
+warning: function `validate_initial_direct_plan` is never used
+    --> crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs:1331:4
+     |
+1331 | fn validate_initial_direct_plan(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `with_responses`, `with_chat`, and `with_toolreason` are never used
+   --> crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs:131:25
+    |
+119 | impl V3DirectSseTypedHookCatalog {
+    | -------------------------------- methods in this implementation
+...
+131 |     pub(crate) const fn with_responses(
+    |                         ^^^^^^^^^^^^^^
+...
+141 |     pub(crate) const fn with_chat(
+    |                         ^^^^^^^^^
+...
+151 |     pub(crate) const fn with_toolreason(mut self, hook: ToolreasonHook) -> Self {
+    |                         ^^^^^^^^^^^^^^^
+
+warning: function `noop_responses_rewrite` is never used
+   --> crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs:224:4
+    |
+224 | fn noop_responses_rewrite(
+    |    ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `with_provider_protocol` and `with_provider_response_compat_profile` are never used
+   --> crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs:255:19
+    |
+254 | impl V3DirectSseContentConsumer {
+    | ------------------------------- methods in this implementation
+255 |     pub(crate) fn with_provider_protocol(
+    |                   ^^^^^^^^^^^^^^^^^^^^^^
+...
+279 |     pub(crate) fn with_provider_response_compat_profile(mut self, profile: Option<String>) -> Self {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `V3ProviderSseErrorConsumer` is never constructed
+   --> crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs:739:19
+    |
+739 | pub(crate) struct V3ProviderSseErrorConsumer {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: associated function `new` is never used
+   --> crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs:745:19
+    |
+744 | impl V3ProviderSseErrorConsumer {
+    | ------------------------------- associated function in this implementation
+745 |     pub(crate) fn new(provider_protocol: V3HubProviderWireProtocol) -> Self {
+    |                   ^^^
+
+warning: field `protocols` is never read
+   --> crates/routecodex-v3-runtime/src/protocol_tables.rs:154:9
+    |
+153 |     Value {
+    |     ----- field in this variant
+154 |         protocols: Vec<String>,
+    |         ^^^^^^^^^
+    |
+    = note: `V3TableData` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: field `protocols` is never read
+   --> crates/routecodex-v3-runtime/src/protocol_tables.rs:158:9
+    |
+157 |     Field {
+    |     ----- field in this variant
+158 |         protocols: Vec<String>,
+    |         ^^^^^^^^^
+    |
+    = note: `V3TableData` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: field `protocols` is never read
+   --> crates/routecodex-v3-runtime/src/protocol_tables.rs:162:9
+    |
+161 |     FieldWhitelist {
+    |     -------------- field in this variant
+162 |         protocols: Vec<String>,
+    |         ^^^^^^^^^
+    |
+    = note: `V3TableData` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: field `retry_policy` is never read
+   --> crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs:273:16
+    |
+268 | pub(crate) struct V3RelayProviderFailurePolicyContext<'ctx> {
+    |                   ----------------------------------- field in this struct
+...
+273 |     pub(crate) retry_policy: V3RelayProviderFailureRetryPolicy,
+    |                ^^^^^^^^^^^^
+
+warning: field `default_same_provider_retries` is never read
+   --> crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs:373:5
+    |
+370 | pub struct V3ProviderFailureRuntimeHealth {
+    |            ------------------------------ field in this struct
+...
+373 |     default_same_provider_retries: usize,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `V3ProviderFailureRuntimeHealth` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: methods `default_same_provider_retries`, `record_provider_failure_record`, `record_provider_failure_record_from_source`, `record_provider_transient_bypass_in_session`, `record_post_commit_provider_stream_failure`, and `wait_for_exact_selected_provider_action` are never used
+    --> crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs:625:19
+     |
+ 425 | impl V3ProviderFailureRuntimeHealth {
+     | ----------------------------------- methods in this implementation
+...
+ 625 |     pub(crate) fn default_same_provider_retries(&self) -> usize {
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 629 |     pub(crate) fn record_provider_failure_record(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 650 |     pub(crate) fn record_provider_failure_record_from_source(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 851 |     pub(crate) fn record_provider_transient_bypass_in_session(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 943 |     pub(crate) fn record_post_commit_provider_stream_failure(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+1049 |     pub(crate) async fn wait_for_exact_selected_provider_action(
+     |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `resolve_v3_relay_target_outcome` is never used
+    --> crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs:1727:15
+     |
+1727 | pub(crate) fn resolve_v3_relay_target_outcome(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `project_provider_raw_to_client_payload_with_plan` is never used
+   --> crates/routecodex-v3-runtime/src/shared.rs:133:21
+    |
+133 | pub(crate) async fn project_provider_raw_to_client_payload_with_plan(
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `project_provider_raw_to_client_payload_with_plan_and_projection` is never used
+   --> crates/routecodex-v3-runtime/src/shared.rs:147:21
+    |
+147 | pub(crate) async fn project_provider_raw_to_client_payload_with_plan_and_projection(
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `observed_sse_client_stream` is never used
+   --> crates/routecodex-v3-runtime/src/shared.rs:686:4
+    |
+686 | fn observed_sse_client_stream(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `observed_sse_client_stream_with_timeout` is never used
+   --> crates/routecodex-v3-runtime/src/shared.rs:707:4
+    |
+707 | fn observed_sse_client_stream_with_timeout(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `observed_sse_client_stream_with_timeout_and_projection` is never used
+   --> crates/routecodex-v3-runtime/src/shared.rs:727:4
+    |
+727 | fn observed_sse_client_stream_with_timeout_and_projection(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `apply_toolreason_to_sse_chunk_buffered` is never used
+    --> crates/routecodex-v3-runtime/src/shared.rs:1075:4
+     |
+1075 | fn apply_toolreason_to_sse_chunk_buffered(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `apply_toolreason_to_sse_chunk_buffered_with_state` is never used
+    --> crates/routecodex-v3-runtime/src/shared.rs:1092:4
+     |
+1092 | fn apply_toolreason_to_sse_chunk_buffered_with_state(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `project_provider_raw_to_client_payload` is never used
+    --> crates/routecodex-v3-runtime/src/shared.rs:1392:21
+     |
+1392 | pub(crate) async fn project_provider_raw_to_client_payload(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `raw_utf8_valid` is never used
+   --> crates/routecodex-v3-runtime/src/sse_object_pipeline.rs:109:19
+    |
+ 26 | impl SseObjectFrame {
+    | ------------------- method in this implementation
+...
+109 |     pub(crate) fn raw_utf8_valid(&self) -> bool {
+    |                   ^^^^^^^^^^^^^^
+
+warning: function `process_sse_object_json` is never used
+   --> crates/routecodex-v3-runtime/src/sse_object_pipeline.rs:206:15
+    |
+206 | pub(crate) fn process_sse_object_json<C: SseObjectConsumer>(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `project_sse_frame_json` is never used
+   --> crates/routecodex-v3-runtime/src/sse_object_pipeline.rs:219:15
+    |
+219 | pub(crate) fn project_sse_frame_json(
+    |               ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `routecodex-v3-runtime` (lib) generated 193 warnings (run `cargo fix --lib -p routecodex-v3-runtime` to apply 57 suggestions)
+    Finished `test` profile [unoptimized] target(s) in 15.54s
+     Running tests/responses_relay_field_parity_integration.rs (target/debug/deps/responses_relay_field_parity_integration-26b727fcaf48374b)
+running 1 test
+test responses_openai_chat_field_parity_web_search_call_history_projects_tool_pair ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.19s
+[v3-cargo-test] debug allocation after cleanup: 500125696 bytes

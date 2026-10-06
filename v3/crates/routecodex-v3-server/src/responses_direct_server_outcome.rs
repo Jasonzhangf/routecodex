@@ -194,11 +194,12 @@ pub(super) async fn execute_responses_direct_server_outcome(
         }
     };
     if let Some(handoff) = output.protocol_relay_handoff {
+        let relay_runtime_seeds = handoff.relay_runtime_seeds();
         let runtime_input = V3ResponsesRelayRuntimeInput {
             server_id: state.server.id.clone(),
             failure_session_scope: provider_failure_session_scope,
             request_id: request_id.clone(),
-            payload: payload.clone(),
+            payload: handoff.canonical_request,
         };
         let relay_server_tool_scope = match build_responses_relay_server_tool_scope(
             request_headers,
@@ -231,7 +232,6 @@ pub(super) async fn execute_responses_direct_server_outcome(
         let capture_provider_response = state
             .debug
             .should_capture_snapshot_stage("provider-response");
-        let relay_runtime_seeds = handoff.relay_runtime_seeds();
         let relay_result = if capture_provider_request || capture_provider_response {
             execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
                 &state.manifest,
@@ -252,7 +252,10 @@ pub(super) async fn execute_responses_direct_server_outcome(
                 Some(handoff.target),
                 Some(handoff.expanded),
                 handoff.request_local_excluded_candidates,
+                Some(handoff.observability_accumulator),
+                Some(handoff.request_execution_control),
                 relay_runtime_seeds,
+                V3RelayEntryOrigin::DirectRelayHandoff,
             )
             .await
         } else {
@@ -272,7 +275,10 @@ pub(super) async fn execute_responses_direct_server_outcome(
                 Some(handoff.target),
                 Some(handoff.expanded),
                 handoff.request_local_excluded_candidates,
+                Some(handoff.observability_accumulator),
+                Some(handoff.request_execution_control),
                 relay_runtime_seeds,
+                V3RelayEntryOrigin::DirectRelayHandoff,
             )
             .await
         };
@@ -391,6 +397,9 @@ pub(super) async fn execute_responses_direct_server_outcome(
             ),
         );
     }
+    // Runtime owns SSE terminal release. Consuming a materialized JSON/error
+    // output releases its guard here; no second stream lifecycle is created.
+    drop(output.request_finalizer.take());
     let mut frame = build_v3_server_16_http_frame_from_v3_resp_15(
         output.client_payload,
         output.node_trace,
@@ -398,7 +407,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
     );
     frame.observability = output.observability;
     frame.stream_observation = output.stream_observation;
-    V3ResponsesDirectServerOutcome::DirectFrame(
-        project_v3_responses_direct_stream_error_frame_if_requested(frame, requested_stream),
-    )
+    let frame =
+        project_v3_responses_direct_stream_error_frame_if_requested(frame, requested_stream);
+    V3ResponsesDirectServerOutcome::DirectFrame(frame)
 }

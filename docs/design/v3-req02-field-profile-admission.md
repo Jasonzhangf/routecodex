@@ -1,0 +1,33 @@
+# REQ02 显式字段配置准入补充
+
+状态：作者候选，待配置设计准入，不继承consumer设计R2为实际profile差异PASS。请求scope/公共runner接口沿已审consumer合同保持不变。
+
+## 实际配置与源字段缺口
+
+profile worker已逐row增加请求方向显式绑定，另有typed参数schema的optional(string)。实际gate显示三处结构父字段未在source inventory单独列出：Anthropic request.tool_choice、request.tools、Gemini request.systemInstruction。其子字段已在唯一matrix中；现有Anthropic codec读取tools和tool_choice，Gemini字段库的注册变换读取systemInstruction。它们是实际协议对象的结构父字段，不是根据shape_children发明的业务叶子。
+
+在唯一matrix的source_inventory明确补这三个父字段，仅补字段存在性，不提升任何semantic/projection coverage状态或修改既有媒体表示。禁止放宽inventory检查、用前缀匹配授权未知字段，或给缺路径绑定任意“兼容例外”。新profile还须通过原来的未知字段/重复owner/shape_children负例。
+
+三个父字段分别归入既有canonical分类及tool_choice、tools、messages语义组：Gemini systemInstruction是组装system消息的结构输入，不等同于其中parts叶子。同步真实source_field_counts为Anthropic84、Gemini122；semantic field_count、current_impl及projection/coverage状态均不改。该静态关联不是新增算子或运行验收声明，REQ02实际binding仍待独立准入及黑盒验证。
+
+## 结构算子的配置与职责
+
+structure_only+parent_owned行可以声明逐方向的结构变换binding。其作用是选定注册的容器结构算子，并按已有子字段配置组装canonical容器；它不声明一个额外业务叶子的consumer、不二次消费tool arguments/input等opaque值。普通字段binding仍必须对应本行的consumer或union scalar_consumer。
+
+compile gate必须验证结构binding自身的registered operator@version、方向typed profile、source inventory、source/destination/shape/semantics/transform参数。不能因为structure_only无consumers就跳过实际可执行binding检查。配置缺失/未注册算子是compile错误；未知业务值仍保留opaque并继续传递，不新增运行时业务拒绝。
+
+此项与consumer R2已审optional(string)和逐方向profile规则一起由唯一verifier实现；补structural binding正反fixture。gate worker当前只执行R2已审范围，这份补充PASS前不派它扩大实现。
+
+## 已确认的媒体算子偏差
+
+profile作者选择Gemini inlineData.data→`chat.messages[].content[].media.inline_data`、mimeType→`media.mime_type`，与当前唯一matrix一致；参考字段库仍在field_operator_gemini.rs生成`image_url.url`的data URI，并把provenance记到image_url字段。这不是已完成的绑定；只改manifest或provenance字符串不会使数据到达声明目的。
+
+请求字段算子owner在本补充准入后实现两项注册media变换：保留原inline data及mimeType的值和存在性，输出声明的canonical media字段，provenance指向同一真实位置。不默认猜mime、不解析/裁剪原值；未知类型/未知兄弟字段保留opaque。当前媒体历史清理owner仍是Chat Process，不借此改历史值或当前图片。标准Outbound与注册Direct native view按声明把canonical media表示投影到目标协议；这是已有helper/consumer合同的必需输入边，不能绕回旧入站转换器。
+
+实施测试须从公开REQ02 runner输入真实inlineData形状、断言canonical结果和原值保留，并从真实Server入口观察provider-bound image与最终响应语义；未知值和缺mimeType也要可重放。内部provenance检查只能辅助定位，不能替代黑盒回归。这一实现前置偏差保持open，配置设计PASS不宣称媒体或REQ02行为已修复。
+
+## 作者验收与接线界限
+
+先将source inventory、显式profile、唯一verifier组合，运行operation-runner gate和全部red fixtures；矩阵通过其正式renderer与parity gate。字段库验证每条binding的实际输出、canonical carrier、provenance destination一致：尤其Gemini media绑定不能只改目的字符串而保留旧输出位置。媒体差异回字段算子/消费者唯一owner修复，不通过修改覆盖状态或把原数据silent strip过关。
+
+配置准入只决定这些声明/结构边是否合法；实际REQ02仍需资源/runner、真实入口、工具回合、runtime、实现review、merge/push及cleanup全部完成。

@@ -32,6 +32,7 @@ const copied = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core/request_scope.rs',
   'v3/crates/routecodex-v3-server/src/console/impl_bulk.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs',
@@ -224,6 +225,75 @@ const cases = [
     diagnostic: /Responses Relay must re-arm the exact retained recovery ticket/u,
   },
   {
+    name: 'Responses resident provider failure call is bypassed while the wrapper fakes it',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
+    mutate: (source) => source
+      .replaceAll(
+        'handle_v3_responses_relay_provider_failure(',
+        'bypass_v3_responses_relay_provider_failure(',
+      )
+      .replace(
+        '    let mut output = execute_v3_responses_relay_runtime_resident(',
+        '    handle_v3_responses_relay_provider_failure(\n'
+          + '        &failure_context,\n'
+          + '        selected,\n'
+          + '        failure,\n'
+          + '        &mut V3ResponsesRelayProviderRetryState {\n'
+          + '            failed_candidates: &mut failed_candidates,\n'
+          + '            same_candidate_retries: &mut same_candidate_retries,\n'
+          + '            retry_selected: &mut retry_selected,\n'
+          + '            pending_recovery: &mut pending_provider_action_recovery,\n'
+          + '            provider_failure_events: &mut provider_failure_events,\n'
+          + '            provider_failure_event_sink: provider_failure_event_sink.as_ref(),\n'
+          + '            selected_observability: &selected_observability,\n'
+          + '            trace: &mut trace,\n'
+          + '            last_eligible_external_http: &mut last_eligible_external_http,\n'
+          + '        },\n'
+          + '    );\n'
+          + '    let mut output = execute_v3_responses_relay_runtime_resident(',
+      ),
+    diagnostic: /does not call handle_v3_responses_relay_provider_failure/u,
+  },
+  {
+    name: 'Responses resident recovery wait is bypassed while the wrapper fakes it',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
+    mutate: (source) => source
+      .replace(
+        'provider_health\n                .wait_for_error05_recovery(&recovery, &selected)',
+        'provider_health\n                .bypass_error05_recovery(&recovery, &selected)',
+      )
+      .replace(
+        '    let mut output = execute_v3_responses_relay_runtime_resident(',
+        '    provider_health.wait_for_error05_recovery(&recovery, &selected);\n'
+          + '    let mut output = execute_v3_responses_relay_runtime_resident(',
+      ),
+    diagnostic: /does not call V3ProviderFailureRuntimeHealth::wait_for_error05_recovery/u,
+  },
+  {
+    name: 'Responses resident permit acquisition is bypassed while the wrapper fakes it',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
+    mutate: (source) => source
+      .replace(
+        '_provider_action_permit = admission.take_permit();',
+        '_provider_action_permit = admission.bypass_permit();',
+      )
+      .replace(
+        '    let mut output = execute_v3_responses_relay_runtime_resident(',
+        '    let _fake_permit = admission.take_permit();\n'
+          + '    let mut output = execute_v3_responses_relay_runtime_resident(',
+      ),
+    diagnostic: /does not call V3ProviderActionAdmission::take_permit/u,
+  },
+  {
+    name: 'Shared Relay lifecycle wrapper stops delegating to its resident',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core/request_scope.rs',
+    mutate: (source) => source.replace(
+      'execute_v3_relay_runtime_resident::<C, T>(',
+      'execute_v3_relay_runtime_core::<C, T>(',
+    ),
+    diagnostic: /does not call execute_v3_relay_runtime_resident/u,
+  },
+  {
     name: 'V3 unrelated failure revokes an already-owned group permit',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
     mutate: (source) => source.replace(
@@ -313,9 +383,9 @@ const cases = [
     name: 'V3 map declares a fake caller symbol',
     path: 'docs/architecture/v3-mainline-call-map.yml',
     mutate: (source) => mutateYaml(source, (document) => {
-      edge(document, 'v3-provider-action-gate-01').caller_symbol = 'fake_execute_v3_responses_relay_runtime_inner';
+      edge(document, 'v3-provider-action-gate-01').caller_symbol = 'fake_execute_v3_responses_relay_runtime_resident';
     }),
-    diagnostic: /caller_symbol must equal execute_v3_responses_relay_runtime_inner/u,
+    diagnostic: /caller_symbol must equal execute_v3_responses_relay_runtime_resident/u,
   },
   {
     name: 'V3 terminal admission caller stops invoking atomic commit',

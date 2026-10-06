@@ -146,7 +146,7 @@
     "test:v3-hub-relay-runtime-closeout-red-fixtures": "npm --prefix v3 run test:v3-hub-relay-runtime-closeout-red-fixtures",
     "verify:v3-hub-v1-node-file-topology": "npm --prefix v3 run verify:v3-hub-v1-node-file-topology",
     "test:v3-hub-v1-node-file-topology-red-fixtures": "npm --prefix v3 run test:v3-hub-v1-node-file-topology-red-fixtures",
-    "test:v3-relay-tool-servertool-multiturn-parity-closeout": "CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test hub_relay_tool_servertool_multiturn_parity -- --nocapture",
+    "test:v3-relay-tool-servertool-multiturn-parity-closeout": "CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test hub_relay_tool_servertool_multiturn_parity -- --nocapture && CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test req02_field_fold_http -- --nocapture",
     "verify:v3-relay-tool-servertool-multiturn-parity-closeout": "node v3/scripts/architecture/verify-v3-relay-tool-servertool-multiturn-parity.mjs",
     "test:v3-relay-tool-servertool-multiturn-parity-closeout-red-fixtures": "node v3/scripts/tests/v3-relay-tool-servertool-multiturn-parity-red-fixtures.mjs",
     "verify:v3-relay-hook-resources": "node v3/scripts/architecture/verify-v3-relay-hook-resources.mjs",

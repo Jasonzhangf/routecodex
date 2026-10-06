@@ -84,7 +84,6 @@ fn anthropic_target_carries_drop_records_for_unrepresentable_keys() {
 
     let (wire, drops) = build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops(
         &payload,
-        V3HubEntryProtocol::Responses,
     )
     .expect("unrepresentable vendor key must drop, not fail the request");
 

@@ -922,7 +922,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     Some(plan.decision.target.clone()),
                     Some(plan.expanded.clone()),
                     BTreeSet::new(),
+                    None,
+                    None,
                     plan.relay_runtime_seeds(),
+                    V3RelayEntryOrigin::ClientEntry,
                 )
                 .await
                 {
@@ -950,7 +953,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     None,
                     None,
                     BTreeSet::new(),
+                    None,
+                    None,
                     V3ResponsesRelayRuntimeSeeds::default(),
+                    V3RelayEntryOrigin::ClientEntry,
                 )
                 .await
                 {
@@ -972,7 +978,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     Some(plan.decision.target.clone()),
                     Some(plan.expanded.clone()),
                     BTreeSet::new(),
+                    None,
+                    None,
                     plan.relay_runtime_seeds(),
+                    V3RelayEntryOrigin::ClientEntry,
                 )
                 .await
                 {
@@ -997,7 +1006,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     None,
                     None,
                     BTreeSet::new(),
+                    None,
+                    None,
                     V3ResponsesRelayRuntimeSeeds::default(),
+                    V3RelayEntryOrigin::ClientEntry,
                 )
                 .await
                 {
@@ -1479,18 +1491,3 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         )
     }
 }
-
-#[path = "endpoint_trace.rs"]
-mod endpoint_trace;
-use endpoint_trace::resolve_v3_dry_run_target_label;
-pub(crate) use endpoint_trace::{
-    is_provider_request_dry_run, merge_v3_direct_handoff_provider_failure_events,
-    merge_v3_protocol_plan_trace, merge_v3_relay_handoff_provider_failure_events_into_direct_frame,
-    prepend_v3_protocol_plan_trace_to_foundation_output,
-    prepend_v3_protocol_plan_trace_to_responses_relay_output,
-    prepend_v3_relay_handoff_trace_to_direct_frame,
-};
-
-#[path = "request_identity.rs"]
-mod request_identity;
-pub(crate) use request_identity::*;

@@ -44,6 +44,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[path = "responses_openai_chat_conversion.rs"]
 mod responses_openai_chat_conversion;
+pub use responses_openai_chat_conversion::project_v3_openai_chat_response_as_responses_with_successful_attempt;
+pub(crate) use responses_openai_chat_conversion::project_v3_responses_tool_search_call;
+pub(crate) use responses_openai_chat_conversion::restore_v3_responses_normalized_tool_identities_with_successful_attempt;
+pub(crate) use responses_openai_chat_conversion::restore_v3_chat_tool_identities_with_successful_attempt;
 #[path = "responses_relay_diagnostics.rs"]
 mod responses_relay_diagnostics;
 #[path = "responses_relay_dry_run.rs"]
@@ -56,11 +60,125 @@ mod responses_relay_json_hooks;
 mod responses_relay_runtime_inner;
 #[path = "responses_relay_types.rs"]
 mod responses_relay_types;
-use responses_relay_runtime_inner::execute_v3_responses_relay_runtime_inner;
-pub(crate) use responses_relay_runtime_inner::{
-    find_responses_tool_output_ids, V3ResponsesRelayToolOutputIds,
-};
+use responses_relay_runtime_inner::execute_v3_responses_relay_runtime_resident;
 pub use responses_relay_types::*;
+
+pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
+    manifest: &V3Config05ManifestPublished,
+    mut input: V3ResponsesRelayRuntimeInput,
+    transport: &T,
+    server_tool_state: Option<V3ResponsesRelayServerToolExecution<'_>>,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    retry_policy: V3ResponsesRelayRetryPolicy,
+    allow_exhaustion_rescue_probe: bool,
+    provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
+    route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
+    initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
+    initial_expanded: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
+    initial_request_local_excluded_candidates: BTreeSet<String>,
+    initial_observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
+    initial_request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
+    initial_relay_seeds: V3ResponsesRelayRuntimeSeeds,
+    entry_origin: V3RelayEntryOrigin,
+) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
+    let control = match initial_request_execution_control {
+        Some(control) => control,
+        None => crate::nodes::V3RequestExecutionControl::new(
+            manifest,
+            &input.server_id,
+            &input.request_id,
+            "responses",
+        )
+        .map_err(V3ResponsesRelayRuntimeError::ExecutionControl)?,
+    };
+    let finalizer = control
+        .take_request_finalizer()
+        .map_err(V3ResponsesRelayRuntimeError::ExecutionControl)?;
+    let mut output = execute_v3_responses_relay_runtime_resident(
+        manifest,
+        input,
+        transport,
+        server_tool_state,
+        provider_health,
+        retry_policy,
+        allow_exhaustion_rescue_probe,
+        provider_failure_event_sink,
+        route_selection_event_sink,
+        initial_selected_target,
+        initial_expanded,
+        initial_request_local_excluded_candidates,
+        initial_observability_accumulator,
+        control,
+        initial_relay_seeds,
+        entry_origin,
+    )
+    .await?;
+    if let Some(handoff) = output.protocol_direct_handoff.as_ref() {
+        handoff
+            .request_execution_control
+            .restore_request_finalizer_for_handoff(finalizer)
+            .map_err(|(_finalizer, error)| V3ResponsesRelayRuntimeError::ExecutionControl(error))?;
+    } else {
+        output.client_body = match output.client_body {
+            V3ResponsesRelayClientBody::Sse(stream) => {
+                V3ResponsesRelayClientBody::Sse(stream.with_request_finalizer(Some(finalizer)))
+            }
+            body => {
+                output.request_finalizer = Some(finalizer);
+                body
+            }
+        };
+    }
+    Ok(output)
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct V3ResponsesRelayToolOutputIds {
+    pub(crate) consumed_ids: Vec<String>,
+}
+
+pub(crate) fn find_responses_tool_output_ids(
+    payload: &Value,
+) -> Result<V3ResponsesRelayToolOutputIds, V3ResponsesRelayRuntimeError> {
+    let mut ids = V3ResponsesRelayToolOutputIds::default();
+    for item in payload
+        .get("input")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if !matches!(
+            item.get("type").and_then(Value::as_str),
+            Some("function_call_output" | "custom_tool_call_output" | "tool_call_output")
+        ) {
+            continue;
+        }
+        let id = item
+            .get("call_id")
+            .or_else(|| item.get("tool_call_id"))
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty());
+        let Some(id) = id else {
+            // 命名无配对输出（name+namespace，无 call_id）是合法客户端语义：
+            // 它没有可消费的 call 身份，身份由 name/namespace 承载，下游 canonical
+            // 保留该身份且不得伪造 call_id。只有既无 call_id 又无 name 才是畸形输入。
+            if item
+                .get("name")
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.trim().is_empty())
+            {
+                continue;
+            }
+            return Err(V3ResponsesRelayRuntimeError::ClientInboundCanonical(
+                "Responses tool output requires call_id".to_string(),
+            ));
+        };
+        if !ids.consumed_ids.iter().any(|existing| existing == id) {
+            ids.consumed_ids.push(id.to_owned());
+        }
+    }
+    Ok(ids)
+}
 // Provider health store 保持 opaque：health handle 归 Provider runtime boundary
 //（worker 拆分时误入 types.rs，由 module-boundaries gate 强制移回）。
 #[derive(Debug, Clone)]
@@ -172,7 +290,10 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_server
         None,
         None,
         BTreeSet::new(),
+        None,
+        None,
         V3ResponsesRelayRuntimeSeeds::default(),
+        V3RelayEntryOrigin::ClientEntry,
     ))
     .await
 }
@@ -189,7 +310,10 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_se
     initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
     initial_expanded: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
     initial_request_local_excluded_candidates: BTreeSet<String>,
+    initial_observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
+    initial_request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
     initial_relay_seeds: V3ResponsesRelayRuntimeSeeds,
+    entry_origin: V3RelayEntryOrigin,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     let transport = V3LiveSnapResponsesTransport::with_default_transport();
     let snapshots = transport.snapshots();
@@ -210,7 +334,10 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_se
         initial_selected_target,
         initial_expanded,
         initial_request_local_excluded_candidates,
+        initial_observability_accumulator,
+        initial_request_execution_control,
         initial_relay_seeds,
+        entry_origin,
     ))
     .await?;
     output.provider_snapshots = Some(snapshots.into_payload(
@@ -241,7 +368,10 @@ pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTr
         None,
         None,
         BTreeSet::new(),
+        None,
+        None,
         V3ResponsesRelayRuntimeSeeds::default(),
+        V3RelayEntryOrigin::ClientEntry,
     ))
     .await
 }
@@ -268,7 +398,10 @@ pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
         None,
         None,
         BTreeSet::new(),
+        None,
+        None,
         V3ResponsesRelayRuntimeSeeds::default(),
+        V3RelayEntryOrigin::ClientEntry,
     ))
     .await
 }
@@ -739,6 +872,7 @@ mod responses_provider_event_codec;
 use provider_stream_materialization::*;
 pub use provider_stream_materialization::{
     materialize_v3_provider_sse_as_canonical_response,
+    materialize_v3_provider_sse_as_canonical_response_with_context,
     materialize_v3_responses_provider_sse_as_canonical_response,
 };
 use responses_provider_event_codec::*;

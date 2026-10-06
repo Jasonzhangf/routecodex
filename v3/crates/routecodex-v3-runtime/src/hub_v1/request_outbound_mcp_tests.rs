@@ -922,13 +922,9 @@ fn responses_provider_wire_preserves_promoted_namespace_for_wire_expansion() {
 
     assert!(
         request["tools"].as_array().is_some_and(|tools| tools.iter().any(|tool| {
-            tool["type"] == "namespace"
-                && tool["name"] == "mcp__mcpx"
-                && tool["tools"].as_array().is_some_and(|children| children.iter().any(
-                    |child| child["type"] == "function" && child["name"] == "workspace"
-                ))
+            tool["type"] == "function" && tool["name"] == "mcp__mcpx__workspace"
         })),
-        "Responses provider tools must keep namespace declarations so the provider wire layer can expand call names: {request}"
+        "Responses provider tools must emit the flattened discovery child: {request}"
     );
 }
 

@@ -59,11 +59,26 @@ pub(super) fn chat_messages_as_anthropic_messages(
     value: &Value,
     system_parts: &mut Vec<String>,
 ) -> Result<Vec<Value>, V3AnthropicCodecError> {
+    chat_messages_as_anthropic_messages_with_hosted(value, system_parts, &[])
+}
+
+pub(super) fn chat_messages_as_anthropic_messages_with_hosted(
+    value: &Value,
+    system_parts: &mut Vec<String>,
+    hosted_emissions: &[crate::operation_runner::HostedHistoryEmission],
+) -> Result<Vec<Value>, V3AnthropicCodecError> {
     let messages = value
         .as_array()
         .ok_or(V3AnthropicCodecError::MessagesNotArray)?;
+    let mut hosted_by_message = std::collections::BTreeMap::new();
+    for emission in hosted_emissions {
+        hosted_by_message
+            .entry(emission.canonical_message_index)
+            .or_insert_with(Vec::new)
+            .push(emission);
+    }
     let mut output = Vec::new();
-    for message in messages {
+    for (message_index, message) in messages.iter().enumerate() {
         let object = message
             .as_object()
             .ok_or(V3AnthropicCodecError::MalformedField { field: "message" })?;
@@ -116,6 +131,37 @@ pub(super) fn chat_messages_as_anthropic_messages(
                 content.push(openai_chat_tool_call_as_anthropic_tool_use(tool_call)?);
             }
         }
+        if let Some(emissions) = hosted_by_message.get(&message_index) {
+            let absorbed_by_ordinary_tool_use = role == "assistant"
+                && output.last().and_then(Value::as_object).is_some_and(|last| {
+                    last.get("role").and_then(Value::as_str) == Some("assistant")
+                        && last
+                            .get("content")
+                            .and_then(Value::as_array)
+                            .is_some_and(|blocks| {
+                                blocks.iter().any(|block| {
+                                    block.get("type").and_then(Value::as_str)
+                                        == Some("tool_use")
+                                })
+                            })
+                });
+            if absorbed_by_ordinary_tool_use {
+                if let Some(last) = output.last_mut().and_then(Value::as_object_mut) {
+                    if let Some(blocks) = last
+                        .get_mut("content")
+                        .and_then(Value::as_array_mut)
+                    {
+                        for emission in emissions {
+                            blocks.extend(emission.anthropic_blocks.iter().cloned());
+                        }
+                    }
+                }
+                continue;
+            }
+            for emission in emissions {
+                content.extend(emission.anthropic_blocks.iter().cloned());
+            }
+        }
         if content.is_empty() {
             continue;
         }
@@ -133,23 +179,41 @@ pub(super) fn openai_chat_tool_call_as_anthropic_tool_use(
     let object = value
         .as_object()
         .ok_or(V3AnthropicCodecError::MalformedField { field: "tool_call" })?;
-    let function = object.get("function").and_then(Value::as_object);
-    let input = match function
-        .and_then(|function| function.get("arguments"))
-        .or_else(|| object.get("arguments"))
-    {
-        Some(Value::String(raw)) => {
-            serde_json::from_str(raw).unwrap_or_else(|_| json!({"input": raw}))
-        }
-        Some(value) => value.to_owned(),
-        None => json!({}),
+    let custom = if object.get("type").and_then(Value::as_str) == Some("custom") {
+        object.get("custom").and_then(Value::as_object)
+    } else {
+        None
     };
-    let is_custom = value
-        .pointer("/routecodex_chat_extension/responses_tool_call_type")
-        .and_then(Value::as_str)
-        == Some("custom_tool_call");
-    let name = function
-        .and_then(|function| function.get("name"))
+    let function = object.get("function").and_then(Value::as_object);
+    let input = if let Some(custom) = custom {
+        match custom.get("input") {
+            Some(Value::String(raw)) => json!({"input": raw}),
+            _ => {
+                return Err(V3AnthropicCodecError::MalformedField {
+                    field: "custom_tool_call.input",
+                });
+            }
+        }
+    } else {
+        match function
+            .and_then(|function| function.get("arguments"))
+            .or_else(|| object.get("arguments"))
+        {
+            Some(Value::String(raw)) => {
+                serde_json::from_str(raw).unwrap_or_else(|_| json!({"input": raw}))
+            }
+            Some(value) => value.to_owned(),
+            None => json!({}),
+        }
+    };
+    let is_custom = custom.is_some()
+        || value
+            .pointer("/routecodex_chat_extension/responses_tool_call_type")
+            .and_then(Value::as_str)
+            == Some("custom_tool_call");
+    let name = custom
+        .and_then(|custom| custom.get("name"))
+        .or_else(|| function.and_then(|function| function.get("name")))
         .or_else(|| object.get("name"))
         .and_then(Value::as_str)
         .map(|name| anthropic_tool_call_wire_name(name, is_custom))
@@ -851,91 +915,7 @@ pub(super) fn responses_tool_output_as_anthropic_content(value: Option<&Value>) 
 pub(super) fn responses_tools_for_anthropic_wire(
     object: &Map<String, Value>,
 ) -> Result<Vec<Value>, V3AnthropicCodecError> {
-    let mut output = Vec::new();
-    let mut tool_indexes = HashMap::new();
-    append_responses_tools_for_anthropic_wire(object.get("tools"), &mut output, &mut tool_indexes)?;
-    for item in object
-        .get("input")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        if item.get("type").and_then(Value::as_str) == Some("additional_tools") {
-            append_responses_tools_for_anthropic_wire(
-                item.get("tools"),
-                &mut output,
-                &mut tool_indexes,
-            )?;
-        }
-    }
-    Ok(output)
-}
-
-pub(super) fn append_responses_tools_for_anthropic_wire(
-    tools: Option<&Value>,
-    output: &mut Vec<Value>,
-    tool_indexes: &mut HashMap<String, usize>,
-) -> Result<(), V3AnthropicCodecError> {
-    for tool in tools.and_then(Value::as_array).into_iter().flatten() {
-        let tool_object = tool
-            .as_object()
-            .ok_or(V3AnthropicCodecError::MalformedField { field: "tools[]" })?;
-        if tool_object.get("type").and_then(Value::as_str) == Some("namespace") {
-            let namespace = tool_object.get("name").and_then(Value::as_str).ok_or(
-                V3AnthropicCodecError::MalformedField {
-                    field: "tools[].name",
-                },
-            )?;
-            for child in tool_object
-                .get("tools")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-            {
-                let mut child = child.clone();
-                if let Some(child_object) = child.as_object_mut() {
-                    let child_name = child_object
-                        .get("name")
-                        .or_else(|| child_object.get("function").and_then(|f| f.get("name")))
-                        .and_then(Value::as_str)
-                        .ok_or(V3AnthropicCodecError::MalformedField {
-                            field: "tools[].name",
-                        })?;
-                    if child_object.get("type").and_then(Value::as_str) != Some("namespace") {
-                        child_object.insert(
-                            "name".to_string(),
-                            Value::String(
-                                super::namespace_tool_names::anthropic_namespace_wire_name(
-                                    namespace, child_name,
-                                ),
-                            ),
-                        );
-                    }
-                }
-                append_responses_tools_for_anthropic_wire(
-                    Some(&Value::Array(vec![child])),
-                    output,
-                    tool_indexes,
-                )?;
-            }
-            continue;
-        }
-        let anthropic_tool = responses_tool_as_anthropic_tool(tool_object)?;
-        let name = anthropic_tool
-            .get("name")
-            .and_then(Value::as_str)
-            .ok_or(V3AnthropicCodecError::MalformedField {
-                field: "tools[].name",
-            })?
-            .to_string();
-        if let Some(index) = tool_indexes.get(&name).copied() {
-            output[index] = anthropic_tool;
-        } else {
-            tool_indexes.insert(name, output.len());
-            output.push(anthropic_tool);
-        }
-    }
-    Ok(())
+    responses_tools_for_anthropic_wire_with_declarations(object, None)
 }
 
 pub(super) fn responses_tool_as_anthropic_tool(

@@ -253,7 +253,9 @@ function validateRuntimeIsolationSource() {
   const anthropicInnerStart = anthropicRelayRuntime.indexOf('async fn execute_v3_anthropic_relay_runtime_inner');
   const anthropicInnerEnd = anthropicRelayRuntime.indexOf('fn anthropic_relay_client_headers_as_provider_request_headers(', anthropicInnerStart);
   const anthropicInner = anthropicRelayRuntime.slice(anthropicInnerStart, anthropicInnerEnd);
-  requireValue(anthropicInner.includes('V3RequestExecutionControl::from_manifest(manifest, &input.server_id)') && anthropicInner.includes('let attempt_budget = request_execution_control.attempt_budget();'), `${anthropicRelayRuntimeRel}: Anthropic Relay must create one request execution control`);
+  const anthropicControlFactories = anthropicInner.match(/V3RequestExecutionControl::new\(/gu) ?? [];
+  const anthropicRequestFactory = /V3RequestExecutionControl::new\(\s*manifest,\s*&input\.server_id,\s*&input\.request_id,\s*"anthropic",\s*\)/u;
+  requireValue(anthropicControlFactories.length === 1 && anthropicRequestFactory.test(anthropicInner) && anthropicInner.includes('let attempt_budget = request_execution_control.attempt_budget();'), `${anthropicRelayRuntimeRel}: Anthropic Relay must create one request execution control`);
   const anthropicAttemptAdmission = anthropicInner.search(/attempt_budget\s*\.\s*admit_transport_attempt\(\)/u);
   const anthropicTransportSend = anthropicInner.indexOf('transport.send(transport_request)');
   requireValue(anthropicAttemptAdmission >= 0 && anthropicAttemptAdmission < anthropicTransportSend, `${anthropicRelayRuntimeRel}: Anthropic provider send must consume the request transport-attempt budget before network I/O`);

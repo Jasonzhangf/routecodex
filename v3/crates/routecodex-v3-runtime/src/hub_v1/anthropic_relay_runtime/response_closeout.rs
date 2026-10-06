@@ -1,13 +1,19 @@
 use super::*;
+use crate::operation_runner::ResponseProjectionView;
 
 pub(super) async fn closeout_anthropic_relay_sse_response<F>(
     resp01: V3ProviderRespInbound01Raw,
     response_hook_profile: &V3HubRelayResponseHookProfile,
     trace: &mut Vec<&'static str>,
     project_client_response: F,
+    request_context: &crate::nodes::V3RequestContextHandle,
+    attempt_context: &crate::operation_runner::AttemptContext,
 ) -> Result<(Value, bool, V3RuntimeStreamObservation), V3AnthropicRelayRuntimeError>
 where
-    F: FnOnce(&Value) -> Result<Value, V3AnthropicRelayRuntimeError>,
+    F: FnOnce(
+        &Value,
+        &ResponseProjectionView,
+    ) -> Result<Value, V3AnthropicRelayRuntimeError>,
 {
     trace.push("V3ProviderRespInbound01Raw");
     let compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01_sse(resp01).await?;
@@ -20,6 +26,8 @@ where
         response_hook_profile,
         trace,
         project_client_response,
+        request_context,
+        attempt_context,
     )
 }
 
@@ -28,9 +36,14 @@ pub(super) fn closeout_anthropic_relay_response<F>(
     response_hook_profile: &V3HubRelayResponseHookProfile,
     trace: &mut Vec<&'static str>,
     project_client_response: F,
+    request_context: &crate::nodes::V3RequestContextHandle,
+    attempt_context: &crate::operation_runner::AttemptContext,
 ) -> Result<(Value, bool, V3RuntimeStreamObservation), V3AnthropicRelayRuntimeError>
 where
-    F: FnOnce(&Value) -> Result<Value, V3AnthropicRelayRuntimeError>,
+    F: FnOnce(
+        &Value,
+        &ResponseProjectionView,
+    ) -> Result<Value, V3AnthropicRelayRuntimeError>,
 {
     trace.push("V3ProviderRespInbound01Raw");
     let hooks = compile_v3_hub_relay_response_hooks();
@@ -42,6 +55,8 @@ where
         response_hook_profile,
         trace,
         project_client_response,
+        request_context,
+        attempt_context,
     )
 }
 
@@ -50,9 +65,14 @@ fn closeout_anthropic_relay_normalized_response<F>(
     response_hook_profile: &V3HubRelayResponseHookProfile,
     trace: &mut Vec<&'static str>,
     project_client_response: F,
+    request_context: &crate::nodes::V3RequestContextHandle,
+    attempt_context: &crate::operation_runner::AttemptContext,
 ) -> Result<(Value, bool, V3RuntimeStreamObservation), V3AnthropicRelayRuntimeError>
 where
-    F: FnOnce(&Value) -> Result<Value, V3AnthropicRelayRuntimeError>,
+    F: FnOnce(
+        &Value,
+        &ResponseProjectionView,
+    ) -> Result<Value, V3AnthropicRelayRuntimeError>,
 {
     let hooks = compile_v3_hub_relay_response_hooks();
     // 在 resp02 被 govern move 前克隆归一化 payload（含原始 tool_use——
@@ -67,6 +87,8 @@ where
         response_hook_profile.toolreason_expected_model_id(),
     )
     .map_err(V3AnthropicRelayRuntimeError::Target)?;
+    let successful_attempt_view =
+        super::publish_anthropic_successful_attempt_view(request_context, attempt_context)?;
     let resp03 = hooks.govern(resp02, response_hook_profile)?;
     trace.push("V3HubRespChatProcess03Governed");
     let (resp03, web_search_transition, _web_search_hook_outcome) = resp03.into_parts();
@@ -92,14 +114,16 @@ where
         if !is_hosted_web_search {
             return Err(V3AnthropicRelayRuntimeError::WebSearchInterceptedUnprojected);
         }
-        let client_payload = project_client_response(resp02_payload.as_ref())?;
+        let client_payload =
+            project_client_response(resp02_payload.as_ref(), &successful_attempt_view)?;
         return Ok((
             client_payload,
             servertool_followup_required,
             stream_observation,
         ));
     }
-    let client_payload = project_client_response(resp03.provider_payload())?;
+    let client_payload =
+        project_client_response(resp03.provider_payload(), &successful_attempt_view)?;
     let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload(
         resp03,
         client_payload,

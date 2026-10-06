@@ -1,5 +1,5 @@
 use provider_compat_core::namespace_tools::{
-    flatten_namespace_tool_for_provider, openai_chat_freeform_custom_tool_parameters,
+    flatten_namespace_tool_for_provider_with_sources, openai_chat_freeform_custom_tool_parameters,
     provider_function_tool_name, push_unique_provider_function_tool,
     replace_provider_function_tool, validate_namespace_tool_dispatch_names,
 };
@@ -9,6 +9,7 @@ use std::collections::{BTreeSet, HashMap};
 use routecodex_v3_config::V3WebSearchExecutionMode;
 
 use super::is_v3_gpt_canonical_model;
+use super::request_outbound_declaration_emission::StandardOutboundDeclarationObserver;
 use super::request_outbound_mcp_names::provider_function_name;
 use crate::projection_drop_log::{V3ProjectionDropContext, V3ProjectionDropRecord};
 
@@ -16,16 +17,34 @@ pub(crate) fn project_openai_responses_hosted_web_search_for_selected_target(
     payload: &mut Value,
     has_web_search_capability: bool,
 ) {
+    project_openai_responses_hosted_web_search_tools_for_selected_target(
+        payload,
+        has_web_search_capability,
+    );
+    project_openai_responses_hosted_web_search_options_for_selected_target(
+        payload,
+        has_web_search_capability,
+    );
+}
+
+fn project_openai_responses_hosted_web_search_tools_for_selected_target(
+    payload: &mut Value,
+    has_web_search_capability: bool,
+) {
     if has_web_search_capability {
         return;
     }
     if let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) {
-        tools.retain(|tool| {
-            !matches!(
-                tool.get("type").and_then(Value::as_str),
-                Some("web_search" | "web_search_preview" | "web_search_20250305")
-            )
-        });
+        tools.retain(|tool| !is_openai_responses_hosted_web_search_tool(tool));
+    }
+}
+
+pub(super) fn project_openai_responses_hosted_web_search_options_for_selected_target(
+    payload: &mut Value,
+    has_web_search_capability: bool,
+) {
+    if has_web_search_capability {
+        return;
     }
     if let Some(root) = payload.as_object_mut() {
         root.remove("web_search_options");
@@ -36,6 +55,13 @@ pub(crate) fn project_openai_responses_hosted_web_search_for_selected_target(
             root.remove("tool_choice");
         }
     }
+}
+
+pub(super) fn is_openai_responses_hosted_web_search_tool(tool: &Value) -> bool {
+    matches!(
+        tool.get("type").and_then(Value::as_str),
+        Some("web_search" | "web_search_preview" | "web_search_20250305")
+    )
 }
 
 fn is_hosted_web_search_choice(choice: &Value) -> bool {
@@ -120,51 +146,45 @@ pub(super) fn promote_tool_search_output_tools_to_provider_tools(
     Ok(())
 }
 
-pub(super) fn project_openai_responses_custom_tools_to_function_schema(
-    payload: &mut Value,
-) -> Result<(), String> {
-    let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) else {
-        return Ok(());
-    };
-    for (index, tool) in tools.iter_mut().enumerate() {
-        let Some(row) = tool.as_object_mut() else {
-            continue;
-        };
-        if row.get("type").and_then(Value::as_str) == Some("function") {
-            // Req04 already owns Tool-Thinking schema compilation. This
-            // projection stage only preserves an already-governed function
-            // surface; injecting here would create a second semantic owner and
-            // collide with the reserved fields on custom wrappers.
-            continue;
-        }
-        if row.get("type").and_then(Value::as_str) != Some("custom") {
-            continue;
-        }
-        let name = row
-            .get("name")
-            .and_then(Value::as_str)
-            .filter(|name| !name.trim().is_empty())
-            .ok_or_else(|| {
-                format!(
-                    "MalformedOutboundField target_protocol=responses path=$.tools[{index}].name"
-                )
-            })?;
-        if !name.eq_ignore_ascii_case("apply_patch") {
-            continue;
-        }
-        let schema = openai_chat_freeform_custom_tool_parameters();
-        let mut function = Map::new();
-        function.insert("name".to_string(), Value::String(name.to_string()));
-        if let Some(description) = row.get("description") {
-            function.insert("description".to_string(), description.clone());
-        }
-        function.insert("parameters".to_string(), schema);
-        *tool = serde_json::json!({
-            "type":"function",
-            "function":Value::Object(function)
-        });
+/// Structural declaration sources consumed by the standard declaration
+/// producer. History keeps its declaration domain; only actual provider
+/// emission creates a target declaration and records this source address.
+pub(super) fn provider_tool_declaration_sources(payload: &Value) -> Result<Vec<(String, Value)>, String> {
+    let mut sources = Vec::new();
+    if let Some(tools) = payload.get("tools").and_then(Value::as_array) {
+        sources.extend(tools.iter().enumerate().map(|(index, tool)| {
+            (format!("chat.tools[{index}]"), tool.clone())
+        }));
     }
-    Ok(())
+    if let Some(messages) = payload.get("messages").and_then(Value::as_array) {
+        for (message_index, message) in messages.iter().enumerate() {
+            if !matches!(message.get("type").and_then(Value::as_str),
+                Some("tool_search_output" | "additional_tools")) {
+                if message.pointer("/routecodex_chat_extension/responses_tool_output_type")
+                    .and_then(Value::as_str) == Some("tool_search_output") {
+                    if let Some(content) = message.get("content") {
+                        let declarations = match content {
+                            Value::String(text) => serde_json::from_str::<Value>(text)
+                                .map_err(|error| format!("tool declaration source chat.messages[{message_index}].content: {error}"))?,
+                            value => value.clone(),
+                        };
+                        if let Some(tools) = declarations.as_array() {
+                            sources.extend(tools.iter().enumerate().map(|(index, tool)| {
+                                (format!("chat.messages[{message_index}].content[{index}]"), tool.clone())
+                            }));
+                        }
+                    }
+                }
+                continue;
+            }
+            if let Some(tools) = message.get("tools").and_then(Value::as_array) {
+                sources.extend(tools.iter().enumerate().map(|(index, tool)| {
+                    (format!("chat.messages[{message_index}].tools[{index}]"), tool.clone())
+                }));
+            }
+        }
+    }
+    Ok(sources)
 }
 
 #[cfg(test)]
@@ -174,6 +194,7 @@ pub(super) fn project_openai_chat_provider_tools(payload: &mut Value) -> Result<
         None,
         V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
         true,
+        None,
     )
 }
 
@@ -182,8 +203,10 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
     model_id: Option<&str>,
     web_search_execution_mode: V3WebSearchExecutionMode,
     has_web_search_capability: bool,
+    mut observer: Option<&mut StandardOutboundDeclarationObserver<'_>>,
 ) -> Result<(), String> {
     let mut drops = Vec::new();
+    let sources = provider_tool_declaration_sources(payload)?;
     project_openai_chat_provider_tools_for_web_search_mode_recording(
         payload,
         model_id,
@@ -191,6 +214,8 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
         has_web_search_capability,
         &V3ProjectionDropContext::disabled(),
         &mut drops,
+        observer.as_mut().map(|observer| &mut **observer),
+        &sources,
     )
 }
 
@@ -204,28 +229,38 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode_recording(
     has_web_search_capability: bool,
     drop_context: &V3ProjectionDropContext,
     drops: &mut Vec<V3ProjectionDropRecord>,
+    mut observer: Option<&mut StandardOutboundDeclarationObserver<'_>>,
+    sources: &[(String, Value)],
 ) -> Result<(), String> {
     let refreshed_provider_tool_names = validate_namespace_tool_dispatch_names(payload)?;
-    let Some(root) = payload.as_object_mut() else {
-        return Ok(());
+    // The provider declaration traversal below is the single place that chooses
+    // the emitted namespace wire name. Resolve the collision-free alias here so
+    // the wire declaration, the recorded attempt mapping, and the history/forced
+    // choice rewrite all name the same tool.
+    let namespace_wire_aliases = {
+        let declarations: Vec<Value> = sources.iter().map(|(_, tool)| tool.clone()).collect();
+        super::request_outbound_mcp_names::openai_chat_namespace_wire_aliases(&serde_json::json!({
+            "tools": declarations,
+        }))?
     };
-    let Some(tools) = root.remove("tools") else {
+    let Some(root) = payload.as_object_mut() else {
         return Ok(());
     };
     // 客户端可能发送非数组 `tools`（例如字符串/对象）。openai_chat wire 的
     // tools 必须是声明数组，非数组不携带任何可转换的工具声明语义；stage 1/2
     // 对 tools 无损，因此这里证明是客户端原始形态。没有兼容表示 → 丢弃并继续，
     // 不再让客户端收到 598 provider_request_payload_invalid。
-    let Some(tools) = tools.as_array() else {
-        drops.push(V3ProjectionDropRecord::new(
-            "openai_chat",
-            "$.tools",
-            "non_array_tools_unrepresentable",
-            tools.clone(),
-            "project_openai_chat_provider_tools_for_web_search_mode",
-        ));
-        return Ok(());
-    };
+    if let Some(tools) = root.remove("tools") {
+        if !tools.is_array() {
+            drops.push(V3ProjectionDropRecord::new(
+                "openai_chat",
+                "$.tools",
+                "non_array_tools_unrepresentable",
+                tools,
+                "project_openai_chat_provider_tools_for_web_search_mode",
+            ));
+        }
+    }
     // gpt 家族模型保留标准 hosted web_search 语义（openai 官方支持）；其余
     // 所有模型统一替换为内部 websearch 工具（RouteCodex 本地搜索 hop 执行，
     // 不区分 provider、不依赖 provider 原生搜索能力）。家族判定真源在 compat
@@ -235,19 +270,24 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode_recording(
     let mut normalized_tool_indexes = HashMap::<String, usize>::new();
     let mut web_search_options = Map::new();
     let mut has_web_search = false;
-    for (index, tool) in tools.iter().enumerate() {
+    for (index, (canonical_source_path, tool)) in sources.iter().enumerate() {
         let tool_type = tool.get("type").and_then(Value::as_str);
         if tool_type == Some("namespace") {
-            let flattened = flatten_namespace_tool_for_provider("openai-chat", tool)
+            let projection = flatten_namespace_tool_for_provider_with_sources("openai-chat", tool)
                 .map_err(|error| format!("$.tools[{index}]: {error}"))?
                 .ok_or_else(|| format!("$.tools[{index}]: namespace tool was not flattened"))?;
-            for tool in flattened {
-                push_provider_tool_with_refresh_precedence(
+            for (emission, flattened) in projection.sources.iter().zip(projection.tools) {
+                let flattened = apply_namespace_wire_alias(flattened, &namespace_wire_aliases);
+                let source_path =
+                    namespace_child_canonical_path(canonical_source_path, &emission.source_child_indices);
+                push_provider_tool_with_emission(
                     &mut normalized_tools,
                     &mut normalized_tool_indexes,
-                    tool,
+                    flattened,
                     "openai_chat",
                     &refreshed_provider_tool_names,
+                    observer.as_mut().map(|observer| &mut **observer),
+                    &source_path,
                 )?;
             }
             continue;
@@ -275,11 +315,16 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode_recording(
                 // Mode B（显式内部路由，如 MiniMax 走标准 web search 内部路由）
                 // 或非 gpt 模型：标准 web_search 声明投影为本地 websearch
                 // function tool（单一工具名 websearch，供 Resp03 同轮拦截本地执行）。
-                push_unique_provider_function_tool(
+                let local = build_local_web_search_function_tool(tool, index, "websearch")?;
+                let source_path = format!("chat.tools[{index}]");
+                push_provider_tool_with_emission(
                     &mut normalized_tools,
                     &mut normalized_tool_indexes,
-                    build_local_web_search_function_tool(tool, index, "websearch")?,
+                    local,
                     "openai_chat",
+                    &refreshed_provider_tool_names,
+                    observer.as_mut().map(|observer| &mut **observer),
+                    &source_path,
                 )?;
             } else if has_web_search_capability {
                 // gpt 模型 + provider 具备 web_search 能力：保持既有 hosted
@@ -296,12 +341,14 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode_recording(
             // 避免未知字段/误调用）。
         } else {
             let normalized = normalize_openai_chat_provider_tool(tool, index)?;
-            push_provider_tool_with_refresh_precedence(
+            push_provider_tool_with_emission(
                 &mut normalized_tools,
                 &mut normalized_tool_indexes,
                 normalized,
                 "openai_chat",
                 &refreshed_provider_tool_names,
+                observer.as_mut().map(|observer| &mut **observer),
+                canonical_source_path,
             )?;
         }
     }
@@ -327,21 +374,85 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode_recording(
     Ok(())
 }
 
-fn push_provider_tool_with_refresh_precedence(
+/// Push one provider declaration and, when an observer is present, record the
+/// actual emitted destination from the canonical source that produced it. The
+/// association is written at the real producer point using the emitter's own
+/// `tool_indexes` identity: a refresh replacement records the new destination,
+/// a deduplicated no-op keeps the source the emitter actually retained, and a
+/// genuinely new declaration records the push index.
+/// Replace the emitted namespace child name with its collision-free wire alias
+/// when the allocator had to disambiguate it against another declaration.
+pub(super) fn apply_namespace_wire_alias(mut tool: Value, aliases: &HashMap<String, String>) -> Value {
+    let name = tool
+        .get("function")
+        .and_then(Value::as_object)
+        .and_then(|function| function.get("name"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| tool.get("name").and_then(Value::as_str).map(str::to_string));
+    let Some(alias) = name.as_ref().and_then(|name| aliases.get(name)).cloned() else {
+        return tool;
+    };
+    if let Some(function) = tool.get_mut("function").and_then(Value::as_object_mut) {
+        function.insert("name".to_string(), Value::String(alias));
+    } else if let Some(row) = tool.as_object_mut() {
+        row.insert("name".to_string(), Value::String(alias));
+    }
+    tool
+}
+
+fn push_provider_tool_with_emission(
     tools: &mut Vec<Value>,
     tool_indexes: &mut HashMap<String, usize>,
     tool: Value,
     target_protocol: &str,
     refreshed_provider_tool_names: &BTreeSet<String>,
+    observer: Option<&mut StandardOutboundDeclarationObserver<'_>>,
+    canonical_source_path: &str,
 ) -> Result<(), String> {
-    if provider_function_tool_name(&tool)
-        .is_some_and(|name| refreshed_provider_tool_names.contains(name))
-    {
+    let name = provider_function_tool_name(&tool).map(str::to_string);
+    let prior_index = name
+        .as_ref()
+        .and_then(|name| tool_indexes.get(name).copied());
+    let replaces = name
+        .as_ref()
+        .is_some_and(|name| refreshed_provider_tool_names.contains(name));
+    if replaces {
         replace_provider_function_tool(tools, tool_indexes, tool);
-        Ok(())
     } else {
-        push_unique_provider_function_tool(tools, tool_indexes, tool, target_protocol)
+        push_unique_provider_function_tool(tools, tool_indexes, tool, target_protocol)?;
     }
+    if let Some(observer) = observer {
+        // A named declaration that already existed and was not refreshed was
+        // deduplicated by the emitter, which retained the earlier source.
+        if prior_index.is_some() && !replaces {
+            return Ok(());
+        }
+        let destination_index = name
+            .as_ref()
+            .and_then(|name| tool_indexes.get(name).copied())
+            .or_else(|| tools.len().checked_sub(1));
+        if let Some(destination_index) = destination_index {
+            observer.note_emitted(
+                destination_index,
+                canonical_source_path,
+                &tools[destination_index],
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Canonical path of a namespace child: the outer namespace tool path followed
+/// by every structural child index the flattener recorded at the actual leaf
+/// push. Nested namespace indices accumulate so the path matches the canonical
+/// declaration location, not the emitted provider name.
+fn namespace_child_canonical_path(namespace_path: &str, source_child_indices: &[usize]) -> String {
+    let mut path = String::from(namespace_path);
+    for child_index in source_child_indices {
+        path.push_str(&format!(".tools[{child_index}]"));
+    }
+    path
 }
 
 fn build_local_web_search_function_tool(

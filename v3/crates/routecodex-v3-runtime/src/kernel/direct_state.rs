@@ -317,10 +317,21 @@ pub struct V3ResponsesDirectRuntimeOutput {
     pub observability: Option<V3RuntimeObservability>,
     pub stream_observation: Option<V3RuntimeStreamObservation>,
     pub protocol_relay_handoff: Option<V3ResponsesProtocolRelayHandoff>,
+    /// REQ02 request-scope finalizer. The Runtime moves the single
+    /// non-cloneable guard here when it reaches a terminal Direct output so the
+    /// Front output owner releases the request scope at the real terminal
+    /// (JSON/error consumption, SSE EOF/Drop, cancel/future drop, disconnect).
+    /// Handoff outputs leave the guard inside `request_execution_control`.
+    pub request_finalizer: Option<crate::operation_runner::V3RequestFinalizerGuard>,
 }
 
 #[derive(Debug)]
 pub struct V3ResponsesProtocolRelayHandoff {
+    /// Business data already normalized by REQ02 during the Direct phase. The
+    /// Relay entry consumes this canonical Value directly instead of recapturing
+    /// the client wire; control facts stay in the typed fields below and are
+    /// never mirrored into this payload.
+    pub canonical_request: serde_json::Value,
     pub target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     pub expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
     pub request_local_excluded_candidates: BTreeSet<String>,
@@ -330,6 +341,12 @@ pub struct V3ResponsesProtocolRelayHandoff {
     pub provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
     pub observability_accumulator: V3RuntimeObservabilityAccumulator,
     pub request_execution_control: V3RequestExecutionControl,
+    pub request_entry_origin: V3DirectRelayHandoffRequestOrigin,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V3DirectRelayHandoffRequestOrigin {
+    AlreadyCanonical,
 }
 
 impl V3ResponsesProtocolRelayHandoff {
@@ -337,8 +354,6 @@ impl V3ResponsesProtocolRelayHandoff {
         crate::V3ResponsesRelayRuntimeSeeds {
             route_policy_pending: self.route_policy_pending.clone(),
             route_policy_scope: self.route_policy_scope.clone(),
-            observability_accumulator: Some(self.observability_accumulator.clone()),
-            request_execution_control: Some(self.request_execution_control.clone()),
         }
     }
 }

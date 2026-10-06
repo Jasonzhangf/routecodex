@@ -974,6 +974,7 @@ pub(crate) fn projected_error_output_with_observability_and_snapshots(
         node_trace,
         error_chain: Some(projected.chain.to_vec()),
         protocol_relay_handoff: None,
+        request_finalizer: None,
     }
 }
 
@@ -1125,6 +1126,7 @@ pub(crate) fn committed_sse_provider_failure_output(
 }
 
 pub(crate) fn relay_handoff_output(
+    canonical_request: Value,
     target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
     request_local_excluded_candidates: BTreeSet<String>,
@@ -1154,6 +1156,8 @@ pub(crate) fn relay_handoff_output(
         node_trace: node_trace.clone(),
         error_chain: None,
         protocol_relay_handoff: Some(V3ResponsesProtocolRelayHandoff {
+            request_entry_origin: crate::kernel::V3DirectRelayHandoffRequestOrigin::AlreadyCanonical,
+            canonical_request,
             target,
             expanded,
             request_local_excluded_candidates,
@@ -1164,6 +1168,7 @@ pub(crate) fn relay_handoff_output(
             observability_accumulator,
             request_execution_control,
         }),
+        request_finalizer: None,
     }
 }
 

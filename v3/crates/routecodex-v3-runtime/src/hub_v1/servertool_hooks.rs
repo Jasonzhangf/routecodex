@@ -197,17 +197,19 @@ fn wrap_v3_custom_tools_at_req04(
     Ok(names)
 }
 
-pub(crate) fn current_v3_tool_thinking_payload_start(payload: &Value) -> Result<usize, String> {
+pub(crate) fn current_v3_tool_thinking_payload_start(payload: &Value) -> usize {
     for field in ["messages", "input"] {
         let Some(items) = payload.get(field).and_then(Value::as_array) else {
             continue;
         };
+        // A legal tool follow-up can contain only calls and outputs. In that
+        // case the whole array is the current turn, so the boundary is zero.
         return items
             .iter()
             .rposition(|item| item.get("role").and_then(Value::as_str) == Some("user"))
-            .ok_or_else(|| format!("Responses {field} array has no current user message"));
+            .unwrap_or(0);
     }
-    Ok(0)
+    0
 }
 
 pub(crate) fn is_v3_tool_thinking_output_continuation(payload: &Value) -> bool {
@@ -862,5 +864,69 @@ mod web_search_hook_contract_tests {
                 title: Some("Example".to_string()),
             }]
         );
+    }
+}
+
+#[cfg(test)]
+mod tool_thinking_boundary_tests {
+    use super::*;
+
+    #[test]
+    fn current_v3_tool_thinking_payload_start_accepts_legal_call_output_followup() {
+        let payload = json!({
+            "input": [
+                {
+                    "type": "function_call",
+                    "call_id": "exec-call",
+                    "name": "exec",
+                    "arguments": "printf '%s' 'literal $() and `bytes`'"
+                },
+                {
+                    "type": "custom_tool_call",
+                    "call_id": "patch-call",
+                    "name": "apply_patch",
+                    "input": "*** Begin Patch\n*** Add File: /tmp/exact-path\n+literal\n*** End Patch\n"
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "exec-call",
+                    "output": "complete output"
+                },
+                {
+                    "type": "custom_tool_call_output",
+                    "call_id": "patch-call",
+                    "output": "patch applied"
+                }
+            ]
+        });
+
+        assert_eq!(current_v3_tool_thinking_payload_start(&payload), 0);
+    }
+
+    #[test]
+    fn current_v3_tool_thinking_payload_start_uses_last_user_position() {
+        let payload = json!({
+            "messages": [
+                {"role": "user", "content": "first"},
+                {"role": "assistant", "content": "reply"},
+                {"role": "user", "content": "latest"}
+            ]
+        });
+
+        assert_eq!(current_v3_tool_thinking_payload_start(&payload), 2);
+    }
+
+    #[test]
+    fn current_v3_tool_thinking_payload_start_allows_empty_array() {
+        let payload = json!({"input": []});
+
+        assert_eq!(current_v3_tool_thinking_payload_start(&payload), 0);
+    }
+
+    #[test]
+    fn current_v3_tool_thinking_payload_start_allows_no_array() {
+        let payload = json!({"model": "client-model"});
+
+        assert_eq!(current_v3_tool_thinking_payload_start(&payload), 0);
     }
 }

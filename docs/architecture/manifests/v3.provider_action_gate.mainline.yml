@@ -53,7 +53,7 @@ edges:
     to: V3Error05ExecutionDecision
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_symbol: execute_v3_responses_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
     callee_symbol: handle_v3_responses_relay_provider_failure
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
@@ -62,7 +62,7 @@ edges:
     to: V3Error05ExecutionDecision
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_symbol: execute_v3_responses_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
     callee_symbol: handle_v3_responses_relay_provider_failure
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
@@ -125,7 +125,7 @@ edges:
     to: V3ProviderActionGateAdmission
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_symbol: execute_v3_responses_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
     callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -134,7 +134,7 @@ edges:
     to: V3ProviderActionGateAdmission
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_anthropic_relay_runtime_inner
+    caller_symbol: execute_v3_anthropic_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
     callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -143,7 +143,7 @@ edges:
     to: V3ProviderActionGateAdmission
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_relay_runtime_core
+    caller_symbol: execute_v3_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
     callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -152,7 +152,7 @@ edges:
     to: V3ProviderActionGateAdmission
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_relay_runtime_core
+    caller_symbol: execute_v3_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
     callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -197,7 +197,7 @@ edges:
     to: V3ProviderActionPermitInFlight
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_symbol: execute_v3_responses_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
     callee_symbol: V3ProviderActionAdmission::take_permit
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -206,7 +206,7 @@ edges:
     to: V3ProviderActionPermitInFlight
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_anthropic_relay_runtime_inner
+    caller_symbol: execute_v3_anthropic_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
     callee_symbol: V3ProviderActionAdmission::take_permit
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -215,7 +215,7 @@ edges:
     to: V3ProviderActionPermitInFlight
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_relay_runtime_core
+    caller_symbol: execute_v3_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
     callee_symbol: V3ProviderActionAdmission::take_permit
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -224,7 +224,7 @@ edges:
     to: V3ProviderActionPermitInFlight
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_anthropic_relay_runtime_inner
+    caller_symbol: execute_v3_anthropic_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
     callee_symbol: V3ProviderActionAdmission::take_permit
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -242,7 +242,7 @@ edges:
     to: V3ProviderActionPermitAbandonRequested
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_symbol: execute_v3_responses_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
     callee_symbol: V3ProviderActionPermit::drop
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -251,7 +251,7 @@ edges:
     to: V3ProviderActionPermitAbandonRequested
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_anthropic_relay_runtime_inner
+    caller_symbol: execute_v3_anthropic_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
     callee_symbol: V3ProviderActionPermit::drop
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -260,7 +260,7 @@ edges:
     to: V3ProviderActionPermitAbandonRequested
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_relay_runtime_core
+    caller_symbol: execute_v3_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
     callee_symbol: V3ProviderActionPermit::drop
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -269,7 +269,7 @@ edges:
     to: V3ProviderActionPermitAbandonRequested
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_anthropic_relay_runtime_inner
+    caller_symbol: execute_v3_anthropic_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
     callee_symbol: V3ProviderActionPermit::drop
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -422,7 +422,7 @@ edges:
     to: V3ProviderActionSuccessRecorded
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_symbol: execute_v3_responses_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
     callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -431,7 +431,7 @@ edges:
     to: V3ProviderActionSuccessFinalize
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_anthropic_relay_runtime_inner
+    caller_symbol: execute_v3_anthropic_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
     callee_symbol: record_provider_success_after_response_governance
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs

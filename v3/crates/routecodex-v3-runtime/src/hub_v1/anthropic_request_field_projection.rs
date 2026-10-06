@@ -22,9 +22,13 @@ pub(super) fn project_chat_store_to_anthropic_wire(projected: &mut Value) -> Res
 }
 
 pub(super) fn responses_metadata_as_anthropic_metadata(
+    canonical_metadata: Option<&Value>,
     responses_request_extension: Option<&Map<String, Value>>,
 ) -> Result<Option<Value>, V3AnthropicCodecError> {
-    let public_user_id = responses_public_metadata_user_id(responses_request_extension)?;
+    let public_user_id = responses_public_metadata_user_id(
+        canonical_metadata
+            .or_else(|| responses_request_extension.and_then(|row| row.get("metadata"))),
+    )?;
     let client_user_id = responses_client_user_id(responses_request_extension)?;
     let user_id = match (public_user_id, client_user_id) {
         (Some(public), Some(client)) if public != client => {
@@ -216,9 +220,9 @@ fn reject_unmapped_anthropic_text_format_fields(
 }
 
 fn responses_public_metadata_user_id(
-    extension: Option<&Map<String, Value>>,
+    metadata: Option<&Value>,
 ) -> Result<Option<&str>, V3AnthropicCodecError> {
-    let Some(metadata) = extension.and_then(|row| row.get("metadata")) else {
+    let Some(metadata) = metadata else {
         return Ok(None);
     };
     let metadata = metadata

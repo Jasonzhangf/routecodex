@@ -165,10 +165,16 @@ requireOrderedSequence(runtime, runtimePath, [
   'fn closeout_anthropic_relay_normalized_response<F>(',
   'let hooks = compile_v3_hub_relay_response_hooks();',
   'let resp03 = hooks.govern(resp02, response_hook_profile)?;',
-  'let client_payload = project_client_response(resp03.provider_payload())?;',
+  'project_client_response(resp03.provider_payload(), &successful_attempt_view)?;',
   'build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload(',
   'build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05)',
 ]);
+const normalizedCloseout = runtime.slice(runtime.indexOf('fn closeout_anthropic_relay_normalized_response<F>('));
+const governIndex = normalizedCloseout.indexOf('hooks.govern(resp02, response_hook_profile)?');
+const inverseIndex = normalizedCloseout.indexOf('project_client_response(');
+if (inverseIndex >= 0 && inverseIndex < governIndex) {
+  failures.push(`${runtimePath}: client identity inverse must run after response governance`);
+}
 requireOrdered(
   runtime,
   runtimePath,

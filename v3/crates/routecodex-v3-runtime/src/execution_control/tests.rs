@@ -1,6 +1,7 @@
 use super::*;
 use futures_util::StreamExt;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 
 fn test_limits(
@@ -354,4 +355,143 @@ async fn committed_sse_drop_after_last_handoff_frame_is_completed() {
         observed_terminal_after_drop(2).await,
         V3CommittedSseTerminal::Completed
     );
+}
+
+#[test]
+fn growth_rewrite_preserves_frame_order_terminal_and_release() {
+    let process_bytes = Arc::new(AtomicUsize::new(0));
+    let mut limits = test_limits(64, 64, 64);
+    limits.attempt_max_frames = 8;
+    let budget = V3AttemptBudget::new_isolated(limits, Arc::clone(&process_bytes));
+    let mut builder = V3CommittedClientSseBuilder::with_budget(budget.clone()).unwrap();
+    builder.push(vec![1, 2, 3]).unwrap();
+    builder.push(vec![4, 5]).unwrap();
+    builder.mark_last_frame_as_terminal().unwrap();
+    builder.push(vec![6]).unwrap();
+    assert_eq!(budget.request_resident_bytes(), 6);
+
+    builder
+        .rewrite_frames_with_growth(|frame, writer| {
+            writer.write_all(frame).unwrap();
+            writer.write_all(b"!").unwrap();
+            Ok(())
+        })
+        .unwrap();
+
+    assert_eq!(builder.byte_len, 9);
+    assert_eq!(builder.terminal_frame_index, Some(1));
+    assert_eq!(
+        builder.frames,
+        vec![vec![1, 2, 3, b'!'], vec![4, 5, b'!'], vec![6, b'!']]
+    );
+    assert_eq!(budget.request_resident_bytes(), 9);
+    assert_eq!(process_bytes.load(Ordering::Acquire), 9);
+
+    let stream = builder.seal_after_validated_terminal().unwrap();
+    assert_eq!(stream.terminal_frame_index, 1);
+    drop(stream);
+    assert_eq!(budget.request_resident_bytes(), 0);
+    assert_eq!(process_bytes.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn growth_rewrite_limit_failure_commits_nothing_and_leaks_nothing() {
+    let process_bytes = Arc::new(AtomicUsize::new(0));
+    let mut limits = test_limits(8, 16, 16);
+    limits.attempt_max_frames = 8;
+    let budget = V3AttemptBudget::new_isolated(limits, Arc::clone(&process_bytes));
+    let mut builder = V3CommittedClientSseBuilder::with_budget(budget.clone()).unwrap();
+    builder.push(vec![1, 2, 3, 4]).unwrap();
+    builder.push(vec![5, 6, 7, 8]).unwrap();
+    builder.mark_last_frame_as_terminal().unwrap();
+    assert_eq!(budget.request_resident_bytes(), 8);
+
+    let error = builder
+        .rewrite_frames_with_growth(|frame, writer| {
+            writer
+                .write_all(frame)
+                .map_err(|error| V3AttemptStoreError::InvalidAttemptState(error.to_string()))?;
+            writer
+                .write_all(b"!")
+                .map_err(|error| V3AttemptStoreError::InvalidAttemptState(error.to_string()))?;
+            Ok(())
+        })
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        V3AttemptStoreError::LocalResourceExhausted(_)
+    ));
+    assert_eq!(budget.request_resident_bytes(), 8);
+    assert_eq!(process_bytes.load(Ordering::Acquire), 8);
+    assert_eq!(builder.byte_len, 8);
+    assert_eq!(builder.terminal_frame_index, Some(1));
+    assert_eq!(builder.frames, vec![vec![1, 2, 3, 4], vec![5, 6, 7, 8]]);
+
+    drop(builder);
+    assert_eq!(budget.request_resident_bytes(), 0);
+    assert_eq!(process_bytes.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn growth_rewrite_callback_error_keeps_its_classification() {
+    let process_bytes = Arc::new(AtomicUsize::new(0));
+    let budget =
+        V3AttemptBudget::new_isolated(test_limits(64, 64, 64), Arc::clone(&process_bytes));
+    let mut builder = V3CommittedClientSseBuilder::with_budget(budget.clone()).unwrap();
+    builder.push(vec![1, 2, 3]).unwrap();
+    builder.mark_last_frame_as_terminal().unwrap();
+
+    let error = builder
+        .rewrite_frames_with_growth(|_frame, _writer| {
+            Err(V3AttemptStoreError::InvalidAttemptState(
+                "inverse rewrite could not decode frame".to_string(),
+            ))
+        })
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        V3AttemptStoreError::InvalidAttemptState(message)
+            if message == "inverse rewrite could not decode frame"
+    ));
+    assert_eq!(budget.request_resident_bytes(), 3);
+    assert_eq!(builder.byte_len, 3);
+    assert_eq!(builder.frames, vec![vec![1, 2, 3]]);
+
+    drop(builder);
+    assert_eq!(budget.request_resident_bytes(), 0);
+    assert_eq!(process_bytes.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn growth_rewrite_does_not_commit_when_callback_ignores_write_failure() {
+    let process_bytes = Arc::new(AtomicUsize::new(0));
+    let budget =
+        V3AttemptBudget::new_isolated(test_limits(4, 64, 64), Arc::clone(&process_bytes));
+    let mut builder = V3CommittedClientSseBuilder::with_budget(budget.clone()).unwrap();
+    builder.push(vec![1, 2, 3, 4]).unwrap();
+    builder.mark_last_frame_as_terminal().unwrap();
+
+    let error = builder
+        .rewrite_frames_with_growth(|frame, writer| {
+            // The second write exceeds the attempt ceiling; ignore it and
+            // claim success. The builder must still refuse to commit.
+            let _ = writer.write_all(frame);
+            let _ = writer.write_all(b"!");
+            Ok(())
+        })
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        V3AttemptStoreError::LocalResourceExhausted(_)
+    ));
+    assert_eq!(budget.request_resident_bytes(), 4);
+    assert_eq!(builder.byte_len, 4);
+    assert_eq!(builder.frames, vec![vec![1, 2, 3, 4]]);
+
+    drop(builder);
+    assert_eq!(budget.request_resident_bytes(), 0);
+    assert_eq!(process_bytes.load(Ordering::Acquire), 0);
 }

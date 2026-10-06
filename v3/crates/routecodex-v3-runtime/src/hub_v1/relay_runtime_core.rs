@@ -21,7 +21,8 @@ use crate::provider_failure_runtime_policy::{
     V3RelayProviderFailureRetryPolicy, V3RelayProviderTargetResolutionInput,
     V3RuntimeProviderAdmission,
 };
-use crate::runtime_timing::V3RuntimeTimingState;
+use crate::runtime_timing::V3RuntimeObservabilityAccumulator;
+use crate::operation_runner::RequestOriginKind;
 use futures_util::StreamExt;
 use routecodex_v3_config::{V3Config05ManifestPublished, V3WebSearchExecutionMode};
 use routecodex_v3_error::V3ProviderFailureSessionScope;
@@ -310,69 +311,14 @@ fn observe_v3_provider_sse(
 /// Relay provider attempt 总等待窗口：从 provider manifest 的 `request_timeout_ms` 读取，
 /// 未配置时 serde default 为 300_000ms（5 分钟）。深上下文 provider 可通过
 /// `timeout = 900000` 覆盖为更长窗口。超时后归一化为 Transport 错误进入错误链。
-pub(crate) fn v3_relay_transport_response_timeout_from_ms(
-    request_timeout_ms: Option<u64>,
-) -> std::time::Duration {
-    std::time::Duration::from_millis(request_timeout_ms.filter(|&ms| ms > 0).unwrap_or(300_000))
-}
-
-pub(crate) fn v3_relay_transport_response_timeout(
-    manifest: &V3Config05ManifestPublished,
-    provider_id: &str,
-) -> std::time::Duration {
-    v3_relay_transport_response_timeout_from_ms(
-        manifest
-            .providers
-            .get(provider_id)
-            .map(|p| p.request_timeout_ms),
-    )
-}
-
-#[cfg(test)]
-mod response_header_timeout_contract_tests {
-    use super::*;
-
-    #[test]
-    fn relay_transport_header_timeout_reads_provider_request_timeout() {
-        assert_eq!(
-            v3_relay_transport_response_timeout_from_ms(Some(900_000)),
-            std::time::Duration::from_millis(900_000)
-        );
-    }
-
-    #[test]
-    fn relay_transport_header_timeout_defaults_and_zero_use_default_timeout() {
-        assert_eq!(
-            v3_relay_transport_response_timeout_from_ms(None),
-            std::time::Duration::from_millis(300_000)
-        );
-        assert_eq!(
-            v3_relay_transport_response_timeout_from_ms(Some(0)),
-            std::time::Duration::from_millis(300_000)
-        );
-    }
-}
-
-/// The published provider SSE timeout intentionally covers both the first frame
-/// and the maximum inter-frame idle interval for relay streams.
-pub(crate) fn v3_provider_sse_idle_timeout(
-    manifest: &V3Config05ManifestPublished,
-    provider_id: &str,
-) -> Result<std::time::Duration, String> {
-    manifest.providers.get(provider_id).and_then(|provider| provider.sse_first_frame_timeout_ms)
-        .filter(|timeout_ms| *timeout_ms > 0).map(std::time::Duration::from_millis)
-        .ok_or_else(|| {
-            format!(
-                "published provider SSE first-frame/inter-frame timeout is missing for provider {provider_id}"
-            )
-        })
-}
+include!("relay_runtime_core/provider_timeouts.rs");
 use std::fmt;
 
 /// 骨架内部错误（协议入口负责映射到自身错误类型）。
 #[derive(Debug, Clone, PartialEq)]
 pub enum V3RelayCoreError {
     StaticRegistry(String),
+    Request(V3HubRelayRequestError),
     EndpointPath(String),
     Target(String),
     ProviderPoolExhausted {
@@ -387,6 +333,7 @@ impl fmt::Display for V3RelayCoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             V3RelayCoreError::StaticRegistry(message) => write!(f, "static registry: {message}"),
+            V3RelayCoreError::Request(error) => write!(f, "request: {error}"),
             V3RelayCoreError::EndpointPath(message) => write!(f, "endpoint path: {message}"),
             V3RelayCoreError::Target(message) => write!(f, "target: {message}"),
             V3RelayCoreError::ProviderPoolExhausted {
@@ -425,16 +372,6 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
         server_id: &str,
         payload: &Value,
     ) -> Result<V3HubServertoolRequestProfile, V3RelayCoreError>;
-
-    /// ReqInbound02 归一化（anthropic 特化：responses 语义轴断言 + anthropic 请求
-    /// 结构归一化；其余协议用默认共享 builder）。
-    fn req_inbound_02(
-        req01: V3HubReqInbound01ClientRaw,
-    ) -> Result<V3HubReqInbound02Normalized, V3RelayCoreError> {
-        Ok(build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(
-            req01,
-        ))
-    }
 
     /// HTTP status 失败构造（错误 body 形状是协议 wire 差异：gemini/openai 原样 +
     /// 各自提取 fn；anthropic 需先转换 responses 错误形状）。
@@ -526,6 +463,12 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
         trace: Vec<&'static str>,
     ) -> Self::Output;
 
+    /// Adapt the output carrier only; Runtime owns the single terminal guard.
+    fn finish_request_scope(
+        output: Self::Output,
+        finalizer: crate::operation_runner::V3RequestFinalizerGuard,
+    ) -> Self::Output;
+
     /// request 失败 body 形状（协议 wire 差异：gemini/responses 用 error.code，
     /// openai_chat 用 error.type，anthropic 用 {"type":"error",...}）。
     /// 默认共享 code 风格；协议 codec 按 wire 覆载。
@@ -538,11 +481,9 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
     }
 }
 
-/// relay 统一主循环骨架。
-///
-/// 生命周期（VR 重试 loop / provider action recovery / 错误策略循环）只在本函数；
-/// 骨架上的逻辑（共享辅助、codec 方法）不持有生命周期。
-pub async fn execute_v3_relay_runtime_core<C, T>(
+include!("relay_runtime_core/request_scope.rs");
+
+async fn execute_v3_relay_runtime_resident<C, T>(
     manifest: &V3Config05ManifestPublished,
     server_id: &str,
     failure_session_scope: V3ProviderFailureSessionScope,
@@ -555,7 +496,8 @@ pub async fn execute_v3_relay_runtime_core<C, T>(
     retry_policy: V3RelayProviderFailureRetryPolicy,
     provider_header_overrides: Vec<V3ProviderRequestHeader>,
     allow_exhaustion_rescue_probe: bool,
-    initial_request_execution_control: Option<V3RequestExecutionControl>,
+    entry: V3RelayRuntimeEntry,
+    request_execution_control: V3RequestExecutionControl,
     route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
 ) -> Result<C::Output, V3RelayCoreError>
 where
@@ -564,10 +506,19 @@ where
 {
     compile_v3_hub_v1_static_registry()
         .map_err(|error| V3RelayCoreError::StaticRegistry(error.to_string()))?;
+    let V3RelayRuntimeEntry {
+        origin: entry_origin,
+        mut selected_target,
+        expanded: captured_expanded,
+        request_local_excluded_candidates,
+        observability_accumulator,
+    } = entry;
     let mut trace = Vec::with_capacity(17);
     // 统一 relay timing：internal = RouteCodex 处理，external = provider 等待；
     // 只写入 typed observability，不进入 payload。
-    let runtime_timing = V3RuntimeTimingState::start();
+    let runtime_timing = observability_accumulator
+        .unwrap_or_else(V3RuntimeObservabilityAccumulator::start)
+        .timing();
     let transport_intent = if payload.get("stream").and_then(Value::as_bool) == Some(true) {
         V3HubTransportIntent::Sse
     } else {
@@ -594,15 +545,28 @@ where
         manifest, server_id, request_id, raw,
     );
     C::validate_client_payload(&req01.payload.0)?;
-    let req02 = C::req_inbound_02(req01)?;
+    let invocation = crate::operation_runner::RequestInvocationContext::new(
+        request_execution_control.request_context().clone(),
+        format!("{request_id}:relay-entry"),
+        format!("{request_id}:entry"),
+        entry_origin.request_origin_kind(),
+    );
+    let req02 = build_v3_hub_req_inbound_02_from_request_invocation(req01, &invocation)
+        .map_err(|reason| {
+            V3RelayCoreError::Request(V3HubRelayRequestError::ReqInboundInvalid { reason })
+        })?;
     trace.push("V3HubReqInbound02Normalized");
     let request_outcome = compile_v3_hub_relay_request_hooks()
         .run_from_normalized(req02, &request_hook_profile)
-        .map_err(|error| V3RelayCoreError::Target(error.to_string()))?;
+        .map_err(V3RelayCoreError::Request)?;
     trace.push("V3HubReqChatProcess04Governed");
     let request_web_search_state = request_outcome.web_search_state().cloned();
     let request_tool_thinking_enabled = request_outcome.tool_thinking_enabled();
     let req04 = request_outcome.into_governed();
+    govern_v3_operation_runner_current_request_fields(req04.governed_payload(), &invocation, &[])
+        .map_err(|reason| {
+            V3RelayCoreError::Request(V3HubRelayRequestError::ReqInboundInvalid { reason })
+        })?;
     if execution_mode != V3HubExecutionMode::Relay {
         return Err(V3RelayCoreError::Target(format!(
             "relay runtime received non-relay execution mode: {execution_mode:?}"
@@ -616,33 +580,28 @@ where
         &requested_model,
     )?;
     let routing_payload_ref: &Value = routing_payload.as_ref();
-    let mut failed_candidates = BTreeSet::new();
+    let mut failed_candidates = request_local_excluded_candidates;
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
     let mut pending_provider_action_recovery = None;
     let mut provider_action_permit: Option<V3ProviderActionPermit> = None;
     let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> = None;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut last_external_http = None;
-    let request_execution_control = match initial_request_execution_control {
-        Some(control) => control,
-        None => V3RequestExecutionControl::from_manifest(manifest, server_id).map_err(|error| {
-            V3RelayCoreError::Target(format!(
-                "V3ExecutionAttemptBudget rejected relay request: {error}"
-            ))
-        })?,
-    };
     let attempt_budget = request_execution_control.attempt_budget();
     let deterministic_sample = v3_relay_provider_target_selection_sample(request_id);
     let failure_context = V3RelayProviderFailurePolicyContext {
         manifest,
-        captured_target_09: None,
+        captured_target_09: captured_expanded.as_ref(),
         failure_session_scope: failure_session_scope.clone(),
         provider_health: &provider_health,
         retry_policy,
         deterministic_sample,
     };
+    let mut relay_attempt_index = 0_u64;
     loop {
-        let preferred_selected = retry_selected.take();
+        let attempt_id = format!("{request_id}:relay-attempt:{relay_attempt_index}");
+        relay_attempt_index = relay_attempt_index.saturating_add(1);
+        let preferred_selected = retry_selected.take().or_else(|| selected_target.take());
         let (selected, mut selected_admission): (
             routecodex_v3_target::V3Target10ConcreteProviderSelected,
             Option<V3RuntimeProviderAdmission>,
@@ -750,11 +709,6 @@ where
             selected.candidate.clone(),
         );
         trace.push("V3HubReqTarget06Resolved");
-        let req07 =
-            build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_wire_protocol);
-        trace.push("V3HubReqOutbound07ProviderSemantic");
-        let target = provider_target(manifest, req07.selected_target(), C::EXPECTED_PROVIDER_TYPE)
-            .map_err(V3RelayCoreError::Target)?;
         macro_rules! handle_provider_request_failure {
             ($stage:expr, $kind:expr, $error:expr) => {{
                 let terminal_failure = handle_provider_failure(
@@ -778,6 +732,25 @@ where
                 continue;
             }};
         }
+        let req07 = match build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
+            req06,
+            req05.governed_payload(),
+            request_execution_control.request_context(),
+            execution_mode,
+            &attempt_id,
+            provider_wire_protocol,
+        ) {
+            Ok(req07) => req07,
+            Err(error) => handle_provider_request_failure!(
+                "V3HubReqOutbound07ProviderSemantic",
+                "provider_request_semantic_error",
+                error
+            ),
+        };
+        trace.push("V3HubReqOutbound07ProviderSemantic");
+        let attempt_context = req07.attempt_context().clone();
+        let target = provider_target(manifest, req07.selected_target(), C::EXPECTED_PROVIDER_TYPE)
+            .map_err(V3RelayCoreError::Target)?;
         let req_compat = match build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07) {
             Ok(projected) => record_projected_drops(&drop_ctx, projected),
             Err(error) => handle_provider_request_failure!(
@@ -1116,6 +1089,10 @@ where
                         continue;
                     }
                 };
+                request_execution_control
+                    .request_context()
+                    .publish_successful_attempt(attempt_context.clone())
+                    .map_err(V3RelayCoreError::Target)?;
                 let attempt_success_receipt =
                     crate::nodes::V3AttemptSuccessReceipt::from_buffered_terminal_attempt();
                 provider_health
@@ -1449,6 +1426,10 @@ where
                     }
                 };
                 drop(provider_action_permit.take());
+                request_execution_control
+                    .request_context()
+                    .publish_successful_attempt(attempt_context.clone())
+                    .map_err(V3RelayCoreError::Target)?;
                 let attempt_success_receipt =
                     crate::nodes::V3AttemptSuccessReceipt::from_sealed_sse_attempt(&committed_sse);
                 provider_health

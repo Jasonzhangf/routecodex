@@ -18,6 +18,13 @@ const verifier = resolve(
 );
 const cases = [
   {
+    name: 'client identity inverse runs before response governance',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime/response_closeout.rs',
+    marker: 'let resp03 = hooks.govern(resp02, response_hook_profile)?;',
+    mutation: 'let _early_client_payload = project_client_response(resp02.provider_raw().payload.0.as_ref(), &successful_attempt_view)?;\n    let resp03 = hooks.govern(resp02, response_hook_profile)?;',
+    diagnostic: /client identity inverse must run after response governance/,
+  },
+  {
     name: 'runtime drops servertool response profile',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime/response_closeout.rs',
     marker: 'hooks.govern(resp02, response_hook_profile)?',

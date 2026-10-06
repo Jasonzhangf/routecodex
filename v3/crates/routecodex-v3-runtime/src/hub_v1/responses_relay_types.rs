@@ -34,6 +34,7 @@ pub struct V3ResponsesRelayRuntimeOutput {
     pub finalized_response: Option<Value>,
     pub provider_snapshots: Option<V3ResponsesRelayProviderSnapshots>,
     pub protocol_direct_handoff: Option<V3ResponsesProtocolDirectHandoff>,
+    pub request_finalizer: Option<crate::operation_runner::V3RequestFinalizerGuard>,
 }
 
 #[derive(Debug)]
@@ -48,14 +49,14 @@ pub struct V3ResponsesProtocolDirectHandoff {
     pub request_execution_control: crate::nodes::V3RequestExecutionControl,
 }
 
-/// Carry-over inputs that seed a Relay run from an upstream Direct/protocol plan
-/// or Direct handoff. Grouped so the call sites stay compact.
+/// Route-policy carry-over that seeds a Relay run from an upstream
+/// Direct/protocol plan or Direct handoff. Grouped so the call sites stay
+/// compact. Request scope, entry origin and observability are owned by
+/// `V3RelayRuntimeEntry` / the explicit Relay entry parameters.
 #[derive(Default)]
 pub struct V3ResponsesRelayRuntimeSeeds {
     pub route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
     pub route_policy_scope: Option<crate::route_policy::V3RoutePolicyScope>,
-    pub observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
-    pub request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
 }
 
 pub enum V3ResponsesRelayDryRunOutcome {

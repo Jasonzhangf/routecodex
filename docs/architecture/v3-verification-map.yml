@@ -2990,6 +2990,7 @@ features:
   owner_scope: Unified relay main-loop skeleton (VR retry / provider action recovery / error policy loop); per-protocol V3RelayProtocolCodec impls.
   owner_modules:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core/request_scope.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
   required_gates:
@@ -3033,18 +3034,20 @@ features:
 - feature_id: v3.history_image_cleanup
   status: active_normalization_and_session_compat_projection
   change_risk: medium
-  owner_kind: rust_project_v3_req_inbound_normalization
-  owner_scope: ReqInbound history image normalization plus typed-target-gated session compatibility projection for selected non-multimodal targets; multimodal targets preserve image bytes.
+  owner_kind: rust_project_v3_registered_request_rewrite
+  owner_scope: Registered Relay Chat Process and Direct request-hook history image cleanup plus typed-target-gated session compatibility projection for selected non-multimodal targets; lossless Inbound preserves original image bytes.
   owner_modules:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/history_image_cleanup.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib hooks::tests::direct_responses_projection_preserves_current_image_for_selected_target
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib multimodal_target_preserves_image_bytes_for_session_semantics
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib non_multimodal_target_projects_image_to_session_placeholder
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test req02_history_cleanup_owner
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-error --lib transient_stage_code_classifier
   completion_rule:
-    source: Relay runtime lib tests pass (normalize_v3_history_image_placeholders explicitly exempted as semantic normalization, not history repair).
+    source: Registered request rewrite tests pass; public inbound-to-Req04 consumer proves original image bytes and inverse pair remain intact while history images are replaced only in the current working view.
 - feature_id: v3.direct_runtime_kernel_core
   status: active_skeleton
   change_risk: critical
@@ -3658,12 +3661,23 @@ features:
   status: node01_capture_runtime_candidate_full_runner_pending
   change_risk: high
   owner_kind: design_architecture
-  owner_scope: Unified operation runner DAGpipe design, lifecycle manifest, exact ErrorErr01-06 binding, typed owner/release table, and first runtime slice. This candidate delivers only Node 01 capture_client_json; later operation nodes remain pending.
+  owner_scope: Unified operation runner DAGpipe design, existing REQ01 capture slice, and pending REQ02 incremental normalization cutover with real Direct/Relay consumers and request/attempt resource terminals. Design admission and baseline capabilities do not prove implementation, caller wiring, or live delivery.
   owner_modules:
   - routecodex-v3-runtime
   - routecodex-v3-config
   design:
   - docs/design/v3-unified-operation-runner-design.md
+  - docs/design/v3-req02-cutover-consumer-contract.md
+  - docs/design/v3-req02-current-field-associations.md
+  - docs/design/v3-req02-direct-actual-emission-addendum-20261004.md
+  - docs/design/v3-req02-hosted-history-operator-contract-20261005.md
+  hosted_history_acceptance:
+    status: design_admitted_implementation_pending
+    public_current_inverse: req02_hosted_current_event tests exact roundtrip, current Replace/Remove/Move and complete unknown values
+    real_http: req02_hosted_history_http tests one Chat pair, native Responses event and Anthropic hosted blocks with ordinary call/output interleaving
+    unchanged_regressions: responses_openai_chat_field_parity_web_search_call_history_projects_tool_pair and responses_hosted_web_search_between_tool_call_and_output_preserves_anthropic_adjacency
+    configuration: operation_runner gate and invalid hosted_history_cases fixtures; observed source inventory only
+    completion_limit: no wiring or full node delivery claim until full exec/apply_patch/MCP tools acceptance, exact candidate build and independent implementation review
   contract:
   - docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml
   - docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml
@@ -3672,14 +3686,28 @@ features:
   - docs/architecture/dagpipe/v3.operation_runner.error.graph.json
   - docs/architecture/manifests/error.mainline.yml
   required_contract:
+  - REQ02 emits canonical messages and routecodex_chat_extension directly; opaque values remain business payload, while identity/path/encoding references remain typed control resources
+  - REQ02 consumes the already captured client-json through a compiled single-node slice derived from the canonical graph; it does not recapture or directly invoke the Operator
+  - Runtime creates one request-local resource handle before first normalization/planning from the real requestId; graph invocationId and attemptId are separate; Server only forwards the opaque handle
+  - client_entry and RawEntry publish inverse/history atomically once; retry/internal_followup and AlreadyCanonical preserve the original pair and never re-normalize native payload
+  - Direct consumes canonical data through registered native projection/view hooks; Relay and Gemini consumers read canonical data without a raw-standardized bypass or second normalizer
+  - the Outbound helper returns separate provider payload and typed actual-attempt declaration/projection context; existing response owners consume the successful attempt and original inverse pair for namespace/name/function/custom recovery
+  - one non-Clone Runtime finalizer guard moves with actual JSON/error output or SSE stream; consumption, EOF/Drop, cancel, future drop, and HTTP/WS disconnect release attempt resources before request resources
+  - REQ02 old normalization branches are removed only together with their real consumer replacement; existing historical image cleanup moves once to Chat Process and preserves current-turn images
+  - candidate acceptance covers four protocols, supported Direct/Relay, HTTP/WS, JSON/SSE, opaque nested values, retry/followup/handoff, and all resource terminals; gpt-5.5 and gpt-5.6 GCM consumers execute exec_command/apply_patch/MCP and return results plus follow-up
   - request and response and error graphs are separate SESE DAGpipe graphs
   - every graph node binds exact operator@operator_version
   - the response provenance edge is RespInbound02 -> Resp03 -> RespOutbound05; RespInbound02 produces v3.operation_runner.response_provenance, Resp03 consumes it and produces response_tool_binding/execution_disposition, and RespOutbound05 consumes response_tool_binding/execution_disposition only for the successful attempt
   - RespInbound02 is the unique producer of v3.operation_runner.response_provenance; Resp03 and RespOutbound05 are its only readers
   - ReqOutbound07 is the unique producer of v3.operation_runner.attempt_declaration_map and records only tools actually emitted for this successful attempt
+  - Direct request projection returns the wire payload and AttemptContext from the same actual emission traversal; provider-responses wire.rs is transport-only for namespace/custom/history transformation
+  - Direct successful JSON publication happens only after the single provider response decode and classify_v3_provider_terminal_admission pass; failed attempts never enter ResponseProjectionView
+  - failure, EOF, disconnect, and cancel clean attempt resources before request resources; no client error response is authored and no successful attempt is published
   - explicit_history_pairing is a registered typed resource written by ReqInbound02 and read by Req04, ReqOutbound07, and Resp03 for validation/pass-through only
-  - request_origin_kind is an immutable invocation-scoped typed control resource keyed by [requestId, invocationId, originKind]; RuntimeRequestGraphEntry is the sole producer before every request graph invocation, normalize_request_losslessly is its only graph reader, storage is none, scope ends when the graph invocation returns, and RuntimeRequestFinalizer does not consume or release it
+  - request_origin_kind is an immutable invocation-scoped typed control resource keyed by [requestId, invocationId, originKind]; RuntimeRequestGraphEntry is the sole producer before every request graph invocation; normalize_request_losslessly and govern_chat_request are its only graph readers, storage is none, scope ends when the graph invocation returns, and RuntimeRequestFinalizer does not consume or release it
   - request_inverse_context and explicit_history_pairing are request-scoped; they initialize only for client_entry, are preserved on retry/internal_followup, and release only at RuntimeRequestFinalizer
+  - current_field_associations is request-scoped with govern_chat_request as its sole writer; governance reads the immutable inverse and invocation origin to seed once, registered structural edits carry references with actual elements, Direct and standard projection consume current references, and RuntimeRequestFinalizer releases this slot after attempt cleanup
+  - the current_field_associations resource must agree across graph, resource allowed readers/writer, function resource_bindings, lifecycle typed_resources and slots, and verification assertions; normalize and governance are the only declared origin readers
   - response_tool_binding is written by Resp03 for the new provider call returned in this successful attempt and read only by RespOutbound05
   - the response graph sink is v3.operation_runner.client_frame_candidate; the candidate is staged and never enters a client body directly
   - the legacy-named error graph sink v3.error.client_projection_candidate carries internal evidence only; Error06 never authorizes a model-client error candidate; Runtime consumes retry or terminal no-commit decisions and Server/SSE commits only success or aborts the affected transport
@@ -3719,6 +3747,7 @@ features:
   - no Server/SSE frame node appears in allowed_readers of v3.operation_runner.client_frame_candidate or v3.error.client_projection_candidate
   - no retry disposition is produced by Resp03; execution_disposition legal_values are exactly client_commit and servertool_followup
   - no old current_attempt_declaration_map or request_history_pairing identifiers appear in the operation-runner design/map/lifecycle references owned by this feature
+  - no declaration-less convention fallback or second namespace/custom mapper remains in provider wire construction
   - no cross-graph backedge or second runner re-enters an earlier graph before the current graph returns to its single sink
   - retry and servertool intermediate outcomes go through the typed Error05/RuntimeInternalFollowup disposition and the single graph sink; no graph node or Server/SSE frame commits before the graph returns and RuntimeClientCommit consumes the staged candidate
   - no graph node writes v3.operation_runner.request_origin_kind; no payload-carried origin marker or fallback shortcut replaces the typed invocation origin
@@ -3739,6 +3768,32 @@ features:
   - v3/crates/routecodex-v3-server/src/executors.rs
   - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
   - docs/architecture/v3-function-map.yml
+  - v3/crates/routecodex-v3-server/tests/req02_namespace_presence.rs
+  - v3/crates/routecodex-v3-server/tests/req02_tool_call_namespace_presence.rs
+  - v3/crates/routecodex-v3-server/tests/req02_nested_declarations.rs
+  - v3/crates/routecodex-v3-server/tests/req02_public_normalization.rs
+  - v3/crates/routecodex-v3-server/tests/req02_hub_sdk_inbound.rs
+  - v3/crates/routecodex-v3-server/tests/req02_history_cleanup_owner.rs
+  - v3/crates/routecodex-v3-server/tests/req02_named_output_presence.rs
+  - v3/crates/routecodex-v3-server/tests/req02_mixed_responses_history.rs
+  - v3/crates/routecodex-v3-server/tests/req02_mixed_fold_repeated.rs
+  - v3/crates/routecodex-v3-server/tests/req02_mixed_history_preservation.rs
+  - v3/crates/routecodex-v3-server/tests/req02_tool_shapes.rs
+  - v3/crates/routecodex-v3-server/tests/req02_canonical_media_images.rs
+  - v3/crates/routecodex-v3-server/tests/req02_chat_history_images.rs
+  - v3/crates/routecodex-v3-server/tests/req02_successful_response_cross_kind.rs
+  - v3/crates/routecodex-v3-server/tests/req02_successful_response_view.rs
+  - v3/crates/routecodex-v3-server/tests/req02_scope_runtime_consumer.rs
+  - v3/crates/routecodex-v3-server/tests/req02_shared_relay_scope.rs
+  - v3/crates/routecodex-v3-server/tests/req02_direct_scope_edges.rs
+  - v3/crates/routecodex-v3-server/tests/req02_scope_pretransport.rs
+  - v3/crates/routecodex-v3-server/tests/req02_protocol_relay_consumers.rs
+  - v3/crates/routecodex-v3-server/tests/req02_anthropic_successful_inverse.rs
+  - v3/crates/routecodex-v3-server/tests/req02_tool_output_current_fields_r28.rs
+  - v3/crates/routecodex-v3-server/tests/req02_direct_json_successful_inverse_r44.rs
+  - v3/crates/routecodex-v3-server/tests/req02_hosted_standard_emitters_r37.rs
+  - v3/crates/routecodex-v3-server/tests/req02_responses_hosted_emission_r40.rs
+  - v3/crates/routecodex-v3-server/tests/req02_request_scope_lifecycle.rs
   - docs/architecture/dagpipe/v3.operation_runner.response.graph.json
   - docs/architecture/dagpipe/v3.operation_runner.error.graph.json
   - docs/architecture/v3-resource-operation-map.yml
@@ -3750,9 +3805,27 @@ features:
   - npm run test:v3-operation-runner-red-fixtures
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime operation_runner --lib
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server p6_responses_endpoint_uses_runtime_provider_path_and_projects_json
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_direct_last_default_projects_after_provider_failure
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_direct_shared_provider_health_reselects_after_unrecoverable_failure
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_direct_provider_http_error_never_reaches_the_client
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server openai_chat_http_entry_completes_responses_tool_round_trip
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_inbound_websocket_projects_json_completed_event_and_enters_runtime
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test req02_namespace_presence --test req02_tool_call_namespace_presence --test req02_nested_declarations --test req02_public_normalization --test req02_tool_shapes --no-fail-fast
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test req02_hub_sdk_inbound
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test req02_history_cleanup_owner --test req02_named_output_presence
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test req02_canonical_media_images --test req02_chat_history_images --no-fail-fast
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test req02_successful_response_cross_kind --test req02_successful_response_view --no-fail-fast
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test req02_scope_runtime_consumer --test req02_shared_relay_scope --test req02_direct_scope_edges --test req02_scope_pretransport --no-fail-fast
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test req02_protocol_relay_consumers
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test req02_anthropic_successful_inverse
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test req02_tool_output_current_fields_r28
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test req02_direct_json_successful_inverse_r44
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test req02_hosted_standard_emitters_r37 --test req02_responses_hosted_emission_r40 --no-fail-fast
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test req02_mixed_responses_history --test req02_mixed_fold_repeated --test req02_mixed_history_preservation --no-fail-fast
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test req02_request_scope_lifecycle
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib execution_control
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --tests --no-run
+  - npm run verify:v3-static-hook-registry
+  - npm run test:v3-h1-source-red-fixtures
   - npm run verify:v3-resource-map
   - npm run verify:v3-mainline-caller-flow
   - npm run verify:v3-architecture-docs
@@ -3760,7 +3833,7 @@ features:
   completion_boundary:
     source_controlled: required
     mapped_gates: required
-    runtime: required_for_node01_capture_client_json_slice
+    runtime: required_for_each_delivered_slice_including_REQ02; isolation_entry_and_tools_pass_before_shared_install; candidate_build_install_restart_replay_before_implementation_review
     remaining_operation_nodes: pending
 - feature_id: v3.anthropic_control_text_resp03
   status: source_gate_verified

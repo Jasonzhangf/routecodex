@@ -65,52 +65,77 @@ pub(super) fn anthropic_tool_use_as_responses_call(
         .ok_or(V3AnthropicCodecError::MalformedField {
             field: "tool_use.input",
         })?;
-    if let Some(client_name) = context.governed_custom_tool_client_name(name) {
-        let wrapper = input
-            .as_object()
-            .filter(|value| value.contains_key("input"));
-        let mut output = Map::from_iter([
-            (
-                "type".to_string(),
-                Value::String("custom_tool_call".to_string()),
-            ),
-            ("call_id".to_string(), Value::String(call_id.to_owned())),
-            ("name".to_string(), Value::String(client_name.to_owned())),
-        ]);
-        if let Some((namespace, tool_name)) = context.namespaced_custom_tool_identity(name) {
-            output.insert("namespace".to_string(), Value::String(namespace.to_owned()));
-            output.insert("name".to_string(), Value::String(tool_name.to_owned()));
+    if let Some((original_kind, original_name, original_namespace)) =
+        context.successful_attempt_tool_identity(name)
+    {
+        if original_kind == "tool_search" {
+            return Ok(super::responses_relay_runtime::project_v3_responses_tool_search_call(call_id, input.clone()));
         }
-        let raw = if let Some(wrapper) = wrapper {
-            if !wrapper.keys().all(|key| {
-                matches!(
-                    key.as_str(),
-                    "input" | "reason" | "goal_alignment_confidence" | "model_id"
+        if let Some(original_name) = original_name {
+        match original_kind {
+            "custom" => {
+                return custom_tool_call_from_input(
+                    call_id,
+                    original_name,
+                    original_namespace,
+                    input,
                 )
-            }) || wrapper.get("input").and_then(Value::as_str).is_none()
-            {
-                return Err(V3AnthropicCodecError::MalformedField {
-                    field: "custom tool_use.input",
-                });
             }
-            for key in ["reason", "goal_alignment_confidence", "model_id"] {
-                if let Some(value) = wrapper.get(key) {
-                    output.insert(key.to_string(), value.clone());
-                }
+            "function" => {
+                return function_call_from_input(call_id, original_name, original_namespace, input)
             }
-            wrapper
-                .get("input")
-                .and_then(Value::as_str)
-                .expect("validated custom wrapper input")
-                .to_owned()
-        } else {
-            serde_json::to_string(input).map_err(|_| V3AnthropicCodecError::MalformedField {
-                field: "custom tool_use.input",
-            })?
-        };
-        output.insert("input".to_string(), Value::String(raw));
-        return Ok(Value::Object(output));
+            _ => {}
+        }
+        }
     }
+    if let Some(client_name) = context.governed_custom_tool_client_name(name) {
+        let (client_name, namespace) = context
+            .namespaced_custom_tool_identity(name)
+            .map(|(namespace, tool_name)| (tool_name, Some(Value::String(namespace.to_string()))))
+            .unwrap_or((client_name, None));
+        return custom_tool_call_from_input(call_id, client_name, namespace.as_ref(), input);
+    }
+    let mut output = function_call_from_input(call_id, name, None, input)?;
+    if let Some(object) = output.as_object_mut() {
+        super::request_outbound_mcp_names::restore_responses_mcp_namespace(
+            object,
+            context.mcp_tool_identities(),
+        );
+    }
+    Ok(output)
+}
+
+fn custom_tool_call_from_input(
+    call_id: &str,
+    name: &str,
+    namespace: Option<&Value>,
+    input: &Value,
+) -> Result<Value, V3AnthropicCodecError> {
+    let (raw, extensions) = custom_tool_input(input)?;
+    let mut output = Map::from_iter([
+        (
+            "type".to_string(),
+            Value::String("custom_tool_call".to_string()),
+        ),
+        ("call_id".to_string(), Value::String(call_id.to_owned())),
+        ("name".to_string(), Value::String(name.to_owned())),
+    ]);
+    if let Some(namespace) = namespace {
+        output.insert("namespace".to_string(), namespace.clone());
+    }
+    for (key, value) in extensions {
+        output.insert(key, value);
+    }
+    output.insert("input".to_string(), Value::String(raw));
+    Ok(Value::Object(output))
+}
+
+fn function_call_from_input(
+    call_id: &str,
+    name: &str,
+    namespace: Option<&Value>,
+    input: &Value,
+) -> Result<Value, V3AnthropicCodecError> {
     let mut output = Map::from_iter([
         (
             "type".to_string(),
@@ -127,11 +152,53 @@ pub(super) fn anthropic_tool_use_as_responses_call(
             })?),
         ),
     ]);
-    super::request_outbound_mcp_names::restore_responses_mcp_namespace(
-        &mut output,
-        context.mcp_tool_identities(),
-    );
+    if let Some(namespace) = namespace {
+        output.insert("namespace".to_string(), namespace.clone());
+    }
     Ok(Value::Object(output))
+}
+
+fn custom_tool_input(
+    input: &Value,
+) -> Result<(String, Vec<(String, Value)>), V3AnthropicCodecError> {
+    if let Some(text) = input.as_str() {
+        return Ok((text.to_string(), Vec::new()));
+    }
+    let Some(wrapper) = input
+        .as_object()
+        .filter(|value| value.contains_key("input"))
+    else {
+        return serde_json::to_string(input)
+            .map(|raw| (raw, Vec::new()))
+            .map_err(|_| V3AnthropicCodecError::MalformedField {
+                field: "custom tool_use.input",
+            });
+    };
+    if !wrapper.keys().all(|key| {
+        matches!(
+            key.as_str(),
+            "input" | "reason" | "goal_alignment_confidence" | "model_id"
+        )
+    }) || wrapper.get("input").and_then(Value::as_str).is_none()
+    {
+        return Err(V3AnthropicCodecError::MalformedField {
+            field: "custom tool_use.input",
+        });
+    }
+    let raw = wrapper
+        .get("input")
+        .and_then(Value::as_str)
+        .expect("validated custom wrapper input")
+        .to_owned();
+    let extensions = ["reason", "goal_alignment_confidence", "model_id"]
+        .into_iter()
+        .filter_map(|key| {
+            wrapper
+                .get(key)
+                .map(|value| (key.to_string(), value.clone()))
+        })
+        .collect();
+    Ok((raw, extensions))
 }
 
 #[cfg(test)]

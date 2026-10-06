@@ -7,8 +7,12 @@ const root = process.cwd();
 const failures = [];
 const files = {
   owner: 'v3/crates/routecodex-v3-runtime/src/selected_provider_model_binding.rs',
-  direct: 'v3/crates/routecodex-v3-runtime/src/hooks.rs',
-  relay: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
+  directRequestScope: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_request_scope.rs',
+  directProjection: 'v3/crates/routecodex-v3-runtime/src/operation_runner/operators/project_canonical_request.rs',
+  directHook: 'v3/crates/routecodex-v3-runtime/src/hooks.rs',
+  relay: 'v3/crates/routecodex-v3-runtime/src/operation_runner/operators/project_canonical_request.rs',
+  req07: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_outbound_07_provider_semantic.rs',
+  compat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
   providerWire: 'v3/crates/routecodex-v3-provider-responses/src/wire.rs',
   providerError: 'v3/crates/routecodex-v3-provider-responses/src/error.rs',
   functionMap: 'docs/architecture/v3-function-map.yml',
@@ -66,29 +70,46 @@ requireText(text.owner, files.owner, 'selected.wire_model.as_str()');
 requireText(text.owner, files.owner, 'wire_model != wire_model.trim()');
 if (ownerWrites !== 1) failures.push(`${files.owner}: shared owner must perform exactly one selected wire-model write, found ${ownerWrites}`);
 
-const directStart = text.direct.indexOf('fn responses_direct_request_projection_hook');
-const directEnd = text.direct.indexOf('\nfn ', directStart + 1);
-const directSource = directStart >= 0
-  ? text.direct.slice(directStart, directEnd >= 0 ? directEnd : undefined)
-  : '';
-const directBind = directSource.indexOf('bind_v3_selected_provider_model(');
-const directWire = directSource.indexOf('build_v3_provider_12_responses_wire_payload(', directBind);
-if (directBind < 0 || directWire < 0 || directBind > directWire) {
-  failures.push(`${files.direct}: Direct must bind selected model before Provider12 wire build`);
+const directScopeProject = text.directRequestScope.indexOf('project_canonical_request(');
+const directScopeBind = text.directProjection.indexOf('bind_selected_provider_model(projection.payload, selected)');
+const directScopeOwner = text.directRequestScope.indexOf('let projection = project_canonical_request(');
+if (directScopeProject < 0 || directScopeOwner < 0 || directScopeBind < 0) {
+  failures.push(`${files.directRequestScope}: Direct projection view must reach project_canonical_request`);
+  failures.push(`${files.directProjection}: Direct must bind selected model before Provider12 wire build`);
 }
-requireText(text.direct, files.direct, 'provider_model_binding_mismatch');
-requireText(text.direct, files.direct, 'V3ErrorSourceKind::RuntimeFailure');
+const directProjectionStart = text.directProjection.indexOf('V3HubExecutionMode::Direct =>');
+const directProjectionEnd = text.directProjection.indexOf('V3HubExecutionMode::Relay =>', directProjectionStart + 1);
+const directProjectionSource = directProjectionStart >= 0
+  ? text.directProjection.slice(directProjectionStart, directProjectionEnd >= 0 ? directProjectionEnd : undefined)
+  : '';
+const directProjectionCall = text.directProjection.indexOf('project_canonical_direct_request(canonical, inverse, current, history)?');
+const directProjectionBind = text.directProjection.indexOf('bind_selected_provider_model(projection.payload, selected)?');
+if (directProjectionCall < 0 || directProjectionBind < 0 || directProjectionCall > directProjectionBind) {
+  failures.push(`${files.directProjection}: Direct must project canonical request before binding selected model`);
+}
+for (const pattern of [/build_v3_direct_request_projection_view/, /request_view\.payload/]) {
+  if (pattern.test(directProjectionSource)) {
+    failures.push(`${files.directProjection}: Direct bind owner must not reload through ${pattern}`);
+  }
+}
+requireText(text.directHook, files.directHook, 'provider_model_binding_mismatch');
+requireText(text.directHook, files.directHook, 'V3ErrorSourceKind::RuntimeFailure');
 
-const relayBuilderStart = text.relay.indexOf('fn build_v3_provider_standard_protocol_payload_from_req07');
+const relayBuilderStart = text.relay.indexOf('fn bind_selected_provider_model');
 const relayBind = text.relay.indexOf('bind_v3_selected_provider_model(', relayBuilderStart);
 if (relayBuilderStart < 0 || relayBind < relayBuilderStart) {
   failures.push(`${files.relay}: Relay protocol payload builder must call the shared selected-model owner`);
 }
-const compatStart = text.relay.indexOf('fn apply_v3_provider_req_compat');
-const compatRun = text.relay.indexOf('run_req_outbound_stage3_compat(', compatStart);
-const boundBuilderCall = text.relay.indexOf('build_v3_provider_standard_protocol_payload_from_req07(input)', compatStart);
-if (compatStart < 0 || compatRun < 0 || boundBuilderCall < 0 || boundBuilderCall > compatRun + 500) {
-  failures.push(`${files.relay}: ProviderReqCompat06 must receive the bound protocol payload`);
+requireText(text.req07, files.req07, 'project_canonical_request(');
+requireText(text.req07, files.req07, 'standard_payload: projected.payload');
+const compatStart = text.compat.indexOf('fn apply_v3_provider_req_compat');
+const compatEnd = text.compat.indexOf('\nfn ', compatStart + 1);
+const compatSource = text.compat.slice(compatStart, compatEnd >= 0 ? compatEnd : undefined);
+if (compatStart < 0 || !compatSource.includes('input.standard_payload().clone()')) {
+  failures.push(`${files.compat}: ProviderReqCompat06 must receive the bound protocol payload`);
+}
+if (text.compat.includes('build_v3_provider_standard_protocol_payload_from_req07')) {
+  failures.push(`${files.compat}: ProviderReqCompat06 must not repeat standard projection`);
 }
 
 requireText(text.providerError, files.providerError, 'ProviderModelBindingMismatch');

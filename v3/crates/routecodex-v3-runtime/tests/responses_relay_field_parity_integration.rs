@@ -205,6 +205,32 @@ async fn responses_openai_chat_field_parity_legacy_tool_output_normalizes_before
 }
 
 #[tokio::test]
+async fn responses_openai_chat_field_parity_distinct_text_sources_preserve_both_turns() {
+    let transport = normalization_transport();
+    let result = execute_v3_responses_relay_runtime(
+        &manifest_openai_chat_wire(),
+        responses_relay_input(
+            "req-normalization-distinct-text",
+            serde_json::json!({"input":"hi","messages":[{"role":"user","content":"different"}]}),
+        ),
+        &transport,
+    )
+    .await
+    .expect("distinct source histories must remain representable");
+    assert_eq!(result.status, 200);
+    assert!(result.error_chain.is_none());
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    assert_eq!(
+        provider_projection_body(&captures[0])["messages"],
+        serde_json::json!([
+            {"role":"user","content":"different"},
+            {"role":"user","content":"hi"}
+        ])
+    );
+}
+
+#[tokio::test]
 async fn responses_openai_chat_field_parity_normalization_preserves_failure_boundaries() {
     // Non-array `tools` is deliberately NOT in this failure-boundary list. It is an
     // openai_chat field that cannot be represented compatibly, so stage-3 output
@@ -214,20 +240,8 @@ async fn responses_openai_chat_field_parity_normalization_preserves_failure_boun
     // boundary must stay visible.
     for (payload, expected) in [
         (
-            serde_json::json!({"input":"hi","messages":[{"role":"user","content":"different"}]}),
-            "conflicting input and messages",
-        ),
-        (
             serde_json::json!({"messages":[{"role":"assistant","tool_calls":[{"id":"call_known","type":"function","function":{"name":"lookup","arguments":"{}"}}]}],"input":[{"type":"function_call_output","call_id":"call_orphan","output":"unpaired"}]}),
             "orphan tool output",
-        ),
-        (
-            serde_json::json!({"messages":[{"role":"assistant","tool_calls":[{"id":"call_known","type":"function","function":{"name":"lookup","arguments":"{}"}}]}],"input":[{"type":"custom_tool_call_output","call_id":"call_known","output":"wrong kind"}]}),
-            "tool output kind mismatch",
-        ),
-        (
-            serde_json::json!({"messages":[{"role":"assistant","tool_calls":[{"id":"call_known","type":"function","function":{"name":"lookup","arguments":"{}"}}]},{"role":"tool","tool_call_id":"call_known","content":"old"}],"input":[{"type":"function_call_output","call_id":"call_known","output":"different"}]}),
-            "conflicting tool output",
         ),
     ] {
         let transport = normalization_transport();
@@ -260,6 +274,118 @@ async fn responses_openai_chat_field_parity_normalization_preserves_failure_boun
         );
         assert!(transport.captures.lock().unwrap().is_empty());
     }
+}
+
+#[tokio::test]
+async fn responses_openai_chat_field_parity_mixed_source_kind_projects_original_result() {
+    // A `function` call paired with a `custom_tool_call_output` is representable
+    // on both wires. The removed kind admission check rejected it; this pins the
+    // positive projection instead: original result kind, call id, and the
+    // complete output survive, with exactly one provider attempt.
+    let arguments = "{\"q\":\"preserve exact arguments\"}";
+    let output = "wrong kind remains data\r\nEXACT_TAIL";
+    let payload = serde_json::json!({
+        "messages":[{"role":"assistant","tool_calls":[{"id":"call_known","type":"function","function":{"name":"lookup","arguments":arguments}}]}],
+        "input":[{"type":"custom_tool_call_output","call_id":"call_known","output":output}],
+        "stream":false
+    });
+
+    // Chat wire: the pair reaches the provider once; the original call kind,
+    // call id, and full result content are preserved.
+    let transport = normalization_transport();
+    let result = execute_v3_responses_relay_runtime(
+        &manifest_openai_chat_wire(),
+        responses_relay_input("req-mixed-kind-chat", payload.clone()),
+        &transport,
+    )
+    .await
+    .expect("a representable cross-kind tool pair must not be rejected on the Chat wire");
+    assert_eq!(result.status, 200);
+    assert!(result.error_chain.is_none());
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    let body = provider_projection_body(&captures[0]);
+    assert!(body.get("input").is_none());
+    let messages = body["messages"].as_array().unwrap();
+    assert_eq!(messages[0]["tool_calls"][0]["id"], "call_known");
+    assert_eq!(messages[0]["tool_calls"][0]["type"], "function");
+    assert_eq!(messages[0]["tool_calls"][0]["function"]["name"], "lookup");
+    assert_eq!(
+        messages[0]["tool_calls"][0]["function"]["arguments"],
+        arguments
+    );
+    assert_eq!(messages[1]["role"], "tool");
+    assert_eq!(messages[1]["tool_call_id"], "call_known");
+    assert_eq!(messages[1]["content"], output);
+    drop(captures);
+
+    // Responses wire: the original result kind is restored, not rewritten.
+    let transport = ProviderProjectionJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        response: serde_json::json!({"id":"resp-mixed-kind","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}),
+    };
+    let result = execute_v3_responses_relay_runtime(
+        &manifest_provider_wire("responses"),
+        responses_relay_input("req-mixed-kind-responses", payload),
+        &transport,
+    )
+    .await
+    .expect("a representable cross-kind tool pair must not be rejected on the Responses wire");
+    assert_eq!(result.status, 200);
+    assert!(result.error_chain.is_none());
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    let items = provider_projection_body(&captures[0])["input"]
+        .as_array()
+        .expect("Responses target history");
+    let call = items
+        .iter()
+        .find(|item| item["type"] == "function_call")
+        .expect("assistant function call must project to a function_call item");
+    assert_eq!(call["call_id"], "call_known");
+    assert_eq!(call["name"], "lookup");
+    assert_eq!(call["arguments"], arguments);
+    let tool_output = items
+        .iter()
+        .find(|item| item["type"] == "custom_tool_call_output")
+        .expect("original custom result kind must be preserved on the Responses wire");
+    assert_eq!(tool_output["call_id"], "call_known");
+    assert_eq!(tool_output["output"], output);
+}
+
+#[tokio::test]
+async fn responses_openai_chat_field_parity_distinct_tool_results_preserve_source_order() {
+    let transport = normalization_transport();
+    let output = execute_v3_responses_relay_runtime(
+        &manifest_openai_chat_wire(),
+        responses_relay_input(
+            "req-normalization-distinct-results",
+            serde_json::json!({
+                "messages":[
+                    {"role":"assistant","tool_calls":[{"id":"call_known","type":"function","function":{"name":"lookup","arguments":"{}"}}]},
+                    {"role":"tool","tool_call_id":"call_known","content":"old"}
+                ],
+                "input":[{"type":"function_call_output","call_id":"call_known","output":"different"}]
+            }),
+        ),
+        &transport,
+    )
+    .await
+    .expect("distinct results are preserved by the admitted lossless history fold");
+    assert_eq!(output.status, 200);
+    assert!(output.error_chain.is_none());
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    let body = provider_projection_body(&captures[0]);
+    let messages = body["messages"].as_array().expect("Chat wire history");
+    assert_eq!(messages.len(), 3);
+    assert_eq!(messages[0]["tool_calls"][0]["id"], "call_known");
+    assert_eq!(messages[0]["tool_calls"][0]["function"]["arguments"], "{}");
+    assert_eq!(messages[1]["tool_call_id"], "call_known");
+    assert_eq!(messages[1]["content"], "old");
+    assert_eq!(messages[2]["tool_call_id"], "call_known");
+    assert_eq!(messages[2]["content"], "different");
+    assert!(body.get("input").is_none());
 }
 
 #[tokio::test]
@@ -491,7 +617,7 @@ async fn responses_openai_chat_field_parity_rejects_malformed_client_metadata_be
         captures: Mutex::new(Vec::new()),
         response: serde_json::json!({}),
     };
-    let error = execute_v3_responses_relay_runtime(
+    let output = execute_v3_responses_relay_runtime(
         &manifest_openai_chat_wire(),
         responses_relay_input(
             "req-responses-openai-chat-client-metadata-reject",
@@ -505,10 +631,20 @@ async fn responses_openai_chat_field_parity_rejects_malformed_client_metadata_be
         &transport,
     )
     .await
-    .expect_err("malformed client_metadata must fail before provider send");
-    assert!(error
-        .to_string()
-        .contains("metadata/client_metadata must be an object"));
+    .expect("request-stage failure must use the runtime typed error output");
+    assert_eq!(output.status, 598);
+    assert!(output.error_chain.is_some());
+    let routecodex_v3_runtime::V3ResponsesRelayClientBody::Json(body) = output.client_body else {
+        panic!("request-stage internal failure must carry a JSON error resource");
+    };
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .is_some_and(|message| {
+                message.contains("MalformedOutboundField target_protocol=openai_chat path=$.client_metadata")
+            }),
+        "the typed error must preserve its precise cause: {body}"
+    );
     assert_eq!(
         transport.captures.lock().unwrap().len(),
         0,

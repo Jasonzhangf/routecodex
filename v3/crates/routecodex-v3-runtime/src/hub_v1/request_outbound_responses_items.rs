@@ -7,14 +7,108 @@ use super::super::request_outbound_mcp_names::provider_function_name;
 use super::super::request_outbound_tool_id::compact_tool_id;
 use super::{project_outbound_nested_payload_for_target_protocol, V3OutboundTargetProtocol};
 
+pub(crate) fn build_responses_input_from_chat_messages(
+    messages: &[Value],
+) -> Result<Value, String> {
+    build_responses_input_from_chat_messages_with_hosted_emissions(messages, None)
+}
+
+/// Same walk as the ordinary history encoder. A canonical message index that
+/// carries a registered current hosted event emits that complete native event
+/// once; every other message keeps the ordinary Responses item encoding. The
+/// decision is made inside this single traversal, so no message is projected as
+/// an ordinary item and then overwritten.
+pub(super) fn build_responses_input_from_chat_messages_with_hosted_emissions(
+    messages: &[Value],
+    hosted_emissions: Option<&[crate::operation_runner::HostedHistoryEmission]>,
+) -> Result<Value, String> {
+    let mut output = Vec::new();
+    for (message_index, message) in messages.iter().enumerate() {
+        if let Some(emission) = hosted_emissions.and_then(|emissions| {
+            emissions
+                .iter()
+                .find(|emission| emission.canonical_message_index == message_index)
+        }) {
+            output.push(emission.event.clone());
+            continue;
+        }
+        let Some(row) = message.as_object() else {
+            continue;
+        };
+        let role = row
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or("user")
+            .trim();
+        if role.eq_ignore_ascii_case("tool")
+            || message
+                .pointer("/routecodex_chat_extension/responses_tool_output_name")
+                .is_some()
+        {
+            if let Some(item) = chat_tool_result_to_responses_input_item(row)? {
+                output.push(item);
+            }
+            continue;
+        }
+        if role.eq_ignore_ascii_case("assistant") {
+            if let Some(reasoning) = chat_assistant_reasoning_to_responses_input_item(row) {
+                output.push(reasoning);
+            }
+            if let Some(tool_calls) = row.get("tool_calls").and_then(Value::as_array) {
+                let items = tool_calls
+                    .iter()
+                    .map(chat_tool_call_to_responses_input_item)
+                    .collect::<Result<Vec<Option<Value>>, String>>()?
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<Value>>();
+                if !items.is_empty() {
+                    output.extend(items);
+                    continue;
+                }
+            }
+        }
+        let content = row
+            .get("content")
+            .map(|content| chat_content_to_responses_content(content, role))
+            .transpose()?
+            .unwrap_or_else(|| Value::Array(Vec::new()));
+        output.push(Value::Object(Map::from_iter([
+            ("type".to_string(), Value::String("message".to_string())),
+            (
+                "role".to_string(),
+                Value::String(if role.is_empty() { "user" } else { role }.to_string()),
+            ),
+            ("content".to_string(), content),
+        ])));
+    }
+    Ok(Value::Array(output))
+}
+
+fn chat_assistant_reasoning_to_responses_input_item(row: &Map<String, Value>) -> Option<Value> {
+    let text = row
+        .get("reasoning_content")
+        .or_else(|| row.get("reasoning_text"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())?;
+    Some(json!({
+        "type": "reasoning",
+        "summary": [{"type": "summary_text", "text": text}]
+    }))
+}
+
 pub(super) fn normalize_responses_content_part_for_role(
     part: &Value,
     role: &str,
 ) -> Result<Value, String> {
-    let mut normalized = project_outbound_nested_payload_for_target_protocol(
+    let normalized = project_outbound_nested_payload_for_target_protocol(
         part,
         V3OutboundTargetProtocol::OpenAiResponses,
     )?;
+    Ok(project_responses_part_representation(normalized, role))
+}
+
+pub(super) fn project_responses_part_representation(mut normalized: Value, role: &str) -> Value {
     let is_assistant = role.eq_ignore_ascii_case("assistant");
     if let Some(row) = normalized.as_object_mut() {
         let part_type = row.get("type").and_then(Value::as_str).unwrap_or("").trim();
@@ -60,7 +154,7 @@ pub(super) fn normalize_responses_content_part_for_role(
             }
         }
     }
-    Ok(normalized)
+    normalized
 }
 
 pub(super) fn chat_content_to_responses_content(
@@ -106,11 +200,19 @@ pub(super) fn chat_tool_call_to_responses_input_item(
         return Ok(None);
     };
     let function = row.get("function").and_then(Value::as_object);
-    let responses_tool_call_type = row
-        .get("routecodex_chat_extension")
-        .and_then(|extension| extension.get("responses_tool_call_type"))
-        .and_then(Value::as_str)
-        .unwrap_or("function_call");
+    let custom = if row.get("type").and_then(Value::as_str) == Some("custom") {
+        row.get("custom").and_then(Value::as_object)
+    } else {
+        None
+    };
+    let responses_tool_call_type = if custom.is_some() {
+        "custom_tool_call"
+    } else {
+        row.get("routecodex_chat_extension")
+            .and_then(|extension| extension.get("responses_tool_call_type"))
+            .and_then(Value::as_str)
+            .unwrap_or("function_call")
+    };
     let call_id = row
         .get("call_id")
         .or_else(|| row.get("tool_call_id"))
@@ -121,8 +223,9 @@ pub(super) fn chat_tool_call_to_responses_input_item(
     let Some(call_id) = call_id else {
         return Ok(None);
     };
-    let name = function
+    let name = custom
         .and_then(|entry| entry.get("name"))
+        .or_else(|| function.and_then(|entry| entry.get("name")))
         .or_else(|| row.get("name"))
         .and_then(Value::as_str)
         .map(str::trim)
@@ -146,10 +249,16 @@ pub(super) fn chat_tool_call_to_responses_input_item(
         .unwrap_or_else(|| serde_json::to_string(&arguments).unwrap_or_else(|_| "{}".to_string()));
     if responses_tool_call_type == "custom_tool_call" {
         let item_id = responses_custom_item_id(row, call_id);
-        let input = serde_json::from_str::<Value>(&arguments_text)
-            .ok()
-            .and_then(|value| value.get("input").cloned())
-            .unwrap_or_else(|| Value::String(arguments_text.clone()));
+        let input = if let Some(custom) = custom {
+            custom.get("input").cloned().ok_or_else(|| {
+                "MalformedOutboundField target_protocol=responses path=$.input[].custom_tool_call.input".to_string()
+            })?
+        } else {
+            serde_json::from_str::<Value>(&arguments_text)
+                .ok()
+                .and_then(|value| value.get("input").cloned())
+                .unwrap_or_else(|| Value::String(arguments_text.clone()))
+        };
         return Ok(Some(Value::Object(Map::from_iter([
             (
                 "type".to_string(),

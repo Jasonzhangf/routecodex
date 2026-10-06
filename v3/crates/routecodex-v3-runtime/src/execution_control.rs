@@ -2,9 +2,11 @@ use futures_util::Stream;
 use std::fmt;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
+
+use crate::operation_runner::{V3RequestContextHandle, V3RequestFinalizerGuard};
 
 const V3_COMMITTED_SSE_ATTEMPT_MAX_BYTES: usize = 64 * 1024 * 1024;
 const V3_COMMITTED_SSE_ATTEMPT_MAX_FRAMES: usize = 262_144;
@@ -107,6 +109,8 @@ pub(crate) struct V3AttemptBudget {
 #[derive(Clone)]
 pub struct V3RequestExecutionControl {
     attempt_budget: V3AttemptBudget,
+    request_context: V3RequestContextHandle,
+    request_finalizer: Arc<Mutex<Option<V3RequestFinalizerGuard>>>,
 }
 
 impl fmt::Debug for V3RequestExecutionControl {
@@ -116,17 +120,93 @@ impl fmt::Debug for V3RequestExecutionControl {
 }
 
 impl V3RequestExecutionControl {
-    pub(crate) fn from_manifest(
+    pub fn new(
         manifest: &routecodex_v3_config::V3Config05ManifestPublished,
         server_id: &str,
-    ) -> Result<Self, V3AttemptStoreError> {
+        request_id: &str,
+        entry_protocol: &str,
+    ) -> Result<Self, String> {
+        if request_id.trim().is_empty() {
+            return Err("request execution control requires a non-empty request id".to_string());
+        }
+        if entry_protocol.trim().is_empty() {
+            return Err(
+                "request execution control requires a non-empty entry protocol".to_string(),
+            );
+        }
+        let request_context =
+            V3RequestContextHandle::new(request_id.to_string(), entry_protocol.to_string());
+        let request_finalizer = request_context.take_finalizer()?;
         Ok(Self {
-            attempt_budget: V3AttemptBudget::from_manifest(manifest, server_id)?,
+            attempt_budget: V3AttemptBudget::from_manifest(manifest, server_id)
+                .map_err(|error| error.to_string())?,
+            request_context,
+            request_finalizer: Arc::new(Mutex::new(Some(request_finalizer))),
         })
     }
 
     pub(crate) fn attempt_budget(&self) -> V3AttemptBudget {
         self.attempt_budget.clone()
+    }
+
+    /// Observes the exact request-scope identity without owning its terminal.
+    pub fn request_context(&self) -> &V3RequestContextHandle {
+        &self.request_context
+    }
+
+    /// Moves the one non-cloneable request-scope guard out of this control.
+    ///
+    /// The real Runtime future calls this before its first await so a later
+    /// cancellation releases the scope even while ordinary control clones stay
+    /// alive. A second take is an explicit invariant failure.
+    pub fn take_request_finalizer(&self) -> Result<V3RequestFinalizerGuard, String> {
+        let mut slot = self.request_finalizer.lock().map_err(|_| {
+            format!(
+                "request {} finalizer slot lock poisoned",
+                self.request_context.request_id()
+            )
+        })?;
+        slot.take().ok_or_else(|| {
+            format!(
+                "request {} finalizer guard already moved",
+                self.request_context.request_id()
+            )
+        })
+    }
+
+    /// Moves the same guard back onto the control for a typed Direct/Relay
+    /// handoff. The next Runtime future takes it again before awaiting.
+    ///
+    /// On failure the guard is returned so the caller can keep it on the
+    /// existing typed error output instead of silently dropping it.
+    pub fn restore_request_finalizer_for_handoff(
+        &self,
+        finalizer: V3RequestFinalizerGuard,
+    ) -> Result<(), (V3RequestFinalizerGuard, String)> {
+        let mut slot = match self.request_finalizer.lock() {
+            Ok(slot) => slot,
+            Err(poisoned) => {
+                drop(poisoned.into_inner());
+                return Err((
+                    finalizer,
+                    format!(
+                        "request {} finalizer slot lock poisoned",
+                        self.request_context.request_id()
+                    ),
+                ));
+            }
+        };
+        if slot.is_some() {
+            return Err((
+                finalizer,
+                format!(
+                    "request {} finalizer slot already occupied during handoff",
+                    self.request_context.request_id()
+                ),
+            ));
+        }
+        *slot = Some(finalizer);
+        Ok(())
     }
 
     pub fn deadline_unix_ms(&self) -> Result<u64, V3AttemptStoreError> {
@@ -387,6 +467,63 @@ impl Drop for V3AttemptReservation {
     }
 }
 
+/// Budget-reserving writer for one growth-admitted committed-SSE frame rewrite.
+///
+/// Bytes are reserved on the shared attempt reservation before they are copied
+/// into the frame buffer, so a rewrite that grows a frame cannot materialize
+/// output the attempt/request/process ceilings would reject. The first
+/// reservation failure is retained as a typed attempt-store error so the
+/// builder can return that classification instead of relabelling the caller's
+/// own error.
+struct V3GrowthRewriteSink<'a> {
+    reservation: &'a mut V3AttemptReservation,
+    attempt_max_bytes: usize,
+    total: usize,
+    buffer: Vec<u8>,
+    failure: Option<V3AttemptStoreError>,
+}
+
+impl V3GrowthRewriteSink<'_> {
+    fn record_failure(&mut self, error: V3AttemptStoreError) -> std::io::Error {
+        let message = error.to_string();
+        if self.failure.is_none() {
+            self.failure = Some(error);
+        }
+        std::io::Error::new(std::io::ErrorKind::Other, message)
+    }
+}
+
+impl std::io::Write for V3GrowthRewriteSink<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let next_total = match self.total.checked_add(bytes.len()) {
+            Some(next_total) => next_total,
+            None => {
+                return Err(self.record_failure(V3AttemptStoreError::LocalResourceExhausted(
+                    "provider SSE attempt byte count overflowed".to_string(),
+                )))
+            }
+        };
+        if next_total > self.attempt_max_bytes {
+            return Err(self.record_failure(V3AttemptStoreError::LocalResourceExhausted(
+                format!(
+                    "provider SSE attempt exceeded the committed replay byte limit ({})",
+                    self.attempt_max_bytes
+                ),
+            )));
+        }
+        if let Err(error) = self.reservation.reserve(bytes.len()) {
+            return Err(self.record_failure(error));
+        }
+        self.buffer.extend_from_slice(bytes);
+        self.total = next_total;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 /// Runtime-sealed replay of one completely validated provider attempt.
 ///
 /// The inner stream and constructor are intentionally private. Server/Front
@@ -483,6 +620,13 @@ impl V3CommittedClientSseStream {
             }),
             next_frame_index,
             terminal_frame_index,
+        }
+    }
+
+    pub fn with_request_finalizer(self, finalizer: Option<V3RequestFinalizerGuard>) -> Self {
+        match finalizer {
+            Some(finalizer) => self.observe(|_| {}, move |_terminal| drop(finalizer)),
+            None => self,
         }
     }
 }
@@ -644,6 +788,76 @@ impl V3CommittedClientSseBuilder {
         self.byte_len = new_bytes;
         self.frames = rewritten;
         Ok(())
+    }
+
+    /// Fallible, growth-admitting frame rewrite owned by the same attempt
+    /// reservation. Each existing frame is rewritten in order through a
+    /// budget-reserving writer, so byte capacity is reserved on the
+    /// attempt/request/process budget before any output byte is copied. Frame
+    /// order and the terminal frame index are preserved because every input
+    /// frame produces exactly one non-empty output frame.
+    ///
+    /// A failure restores the original frames and releases every byte reserved
+    /// for output, so no partial output is committed and no reservation leaks.
+    /// On success the previous reservation is released once and the new total
+    /// stays reserved until seal or drop.
+    pub(crate) fn rewrite_frames_with_growth(
+        &mut self,
+        mut rewrite: impl FnMut(&[u8], &mut dyn std::io::Write) -> Result<(), V3AttemptStoreError>,
+    ) -> Result<(), V3AttemptStoreError> {
+        self.reservation.budget.ensure_resident()?;
+        let attempt_max_bytes = self.limits.attempt_max_bytes;
+        let old_bytes = self.byte_len;
+        let frames = std::mem::take(&mut self.frames);
+        let mut rewritten: Vec<Vec<u8>> = Vec::with_capacity(frames.len());
+        let mut new_total = 0usize;
+        let mut outcome: Result<(), V3AttemptStoreError> = Ok(());
+        for frame in &frames {
+            let mut sink = V3GrowthRewriteSink {
+                reservation: &mut self.reservation,
+                attempt_max_bytes,
+                total: new_total,
+                buffer: Vec::new(),
+                failure: None,
+            };
+            let rewrite_result = rewrite(frame.as_slice(), &mut sink);
+            let failure = sink.failure.take();
+            new_total = sink.total;
+            let buffer = std::mem::take(&mut sink.buffer);
+            drop(sink);
+            if let Some(error) = failure {
+                outcome = Err(error);
+                break;
+            }
+            match rewrite_result {
+                Ok(()) if !buffer.is_empty() => rewritten.push(buffer),
+                Ok(()) => {
+                    outcome = Err(V3AttemptStoreError::InvalidAttemptState(
+                        "committed SSE frame rewrite produced an empty frame".to_string(),
+                    ));
+                    break;
+                }
+                Err(error) => {
+                    outcome = Err(error);
+                    break;
+                }
+            }
+        }
+        match outcome {
+            Ok(()) => {
+                self.reservation.budget.release(old_bytes);
+                self.reservation.bytes = new_total;
+                self.byte_len = new_total;
+                self.frames = rewritten;
+                Ok(())
+            }
+            Err(error) => {
+                self.reservation.budget.release(new_total);
+                self.reservation.bytes = old_bytes;
+                self.frames = frames;
+                Err(error)
+            }
+        }
     }
 
     pub(crate) fn seal_after_validated_terminal(

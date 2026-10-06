@@ -389,7 +389,10 @@ pub(crate) async fn execute_responses_relay_websocket_output(
                 Some(plan.decision.target.clone()),
                 Some(plan.expanded.clone()),
                 BTreeSet::new(),
+                None,
+                None,
                 plan.relay_runtime_seeds(),
+                V3RelayEntryOrigin::ClientEntry,
             )
             .await
         }
@@ -406,7 +409,10 @@ pub(crate) async fn execute_responses_relay_websocket_output(
                 None,
                 None,
                 BTreeSet::new(),
+                None,
+                None,
                 V3ResponsesRelayRuntimeSeeds::default(),
+                V3RelayEntryOrigin::ClientEntry,
             )
             .await
         }

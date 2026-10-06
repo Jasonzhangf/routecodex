@@ -79,8 +79,8 @@ locked_items:
     locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:066f368a851c78f829302259adf7d10ebfebb51a0965dc6f0b759bac702474e3
-    last_manual_authorization_id: auth-20260915-v3-remove-continuation-hub-request
+    fingerprint: sha256:6f8f7f5faaf85cc053565813ee6816fe66019622866c98f9664c0bd2cdfb3a0e
+    last_manual_authorization_id: auth-20261004-req02-canonical-hub-request
   - item_id: chain:v3.hub_pipeline.v1.response
     chain_id: v3.hub_pipeline.v1.response
     status: audited_locked
@@ -162,16 +162,16 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-09-21T10:07:17-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:9ea64f75f123e43d34390fb4befc4948e8dba9cfdfce84f4c84013ef92aecab5
-    last_manual_authorization_id: auth-20260921-v3-gemini-selected-target-outbound-helper-bind
+    fingerprint: sha256:6aa0e6e6b1009b2f2a8ec7806f638cb88eb4f21da63272276f445dc560d32403
+    last_manual_authorization_id: auth-20261004-req02-outbound-helper-callers
   - item_id: chain:v3.hub_pipeline.v1.relay_request_source_slice
     chain_id: v3.hub_pipeline.v1.relay_request_source_slice
     status: audited_locked
     reviewed_by: Jason
     locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:d2e58f7b5e4d0b2a23480ca16f93e2cdb4eafd15f1ed85b280712bea43802892
-    last_manual_authorization_id: auth-20260915-v3-remove-continuation-relay-request
+    fingerprint: sha256:2e592a41347015dcdecc1c088be3f71b6bace06a96755fd72cc09b59c054794e
+    last_manual_authorization_id: auth-20261004-req02-relay-request-invocation
   - item_id: chain:v3.hub_pipeline.v1.relay_response_source_slice
     chain_id: v3.hub_pipeline.v1.relay_response_source_slice
     status: audited_locked
@@ -242,16 +242,16 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:7b3839cd5ac05ce2266e74742ed50b5126a2e67af82593392d7abc251a3187ea
-    last_manual_authorization_id: auth-20260915-v3-remove-continuation-openai-chat-relay
+    fingerprint: sha256:b07b10f9efc9bca1cd977e6819be08053ea3bb8c1c40716e0e8fb25193ac0d41
+    last_manual_authorization_id: auth-20261004-req02-chat-relay-resident
   - item_id: chain:v3.gemini_relay.controlled_runtime
     chain_id: v3.gemini_relay.controlled_runtime
     status: audited_locked
     reviewed_by: Jason
     locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:fe3f9fe3728235c7dc805caa3ab23b5027c707a93d32453f0dd3ec53a531e7c4
-    last_manual_authorization_id: auth-20260915-v3-remove-continuation-gemini-relay
+    fingerprint: sha256:7030ac4520d2c3c73392672447cb160ea77e128699673836b878632b24cc4ffc
+    last_manual_authorization_id: auth-20261004-req02-gemini-relay-resident
   - item_id: chain:v3.entry_protocol_registry_contract.mainline
     chain_id: v3.entry_protocol_registry_contract.mainline
     status: audited_locked
@@ -290,8 +290,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:0912de537b49626d13b9eecd35fccd11571add788fa5184db9024cd3b123a6c5
-    last_manual_authorization_id: auth-20260915-v3-remove-continuation-protocol-parity
+    fingerprint: sha256:f7a6fa8410d9cd68a6476e30208298595a3d62672429abcc2e1afa07234f5dca
+    last_manual_authorization_id: auth-20261004-req02-sdk-parity-normalization
   - item_id: chain:v3.responses_relay.source_server_entry
     chain_id: v3.responses_relay.source_server_entry
     status: audited_locked
@@ -322,8 +322,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:6d923b9da6c48b768c07139d1b52a15f4054ecdf5c9ee54a3f845d14295b9b4c
-    last_manual_authorization_id: auth-20260915-v3-remove-continuation-tool-parity
+    fingerprint: sha256:362af699671cac8b12f070ed10df0d5f422a4012021586973cb829ee71d93996
+    last_manual_authorization_id: auth-20261005-req02-tool-parity-current-caller
   - item_id: chain:v3.resp03_tool_governance_gap_closeout
     chain_id: v3.resp03_tool_governance_gap_closeout
     status: audited_locked
@@ -354,16 +354,16 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:50868ef476fc01071f66891af7b15a28c047020020b81789a05a8b54b40e541a
-    last_manual_authorization_id: auth-20260915-v3-remove-continuation-protocol-boundary
+    fingerprint: sha256:d176b8344d67e90972800a9de0eae161319d3a49902e51722f0cdea245ec45e4
+    last_manual_authorization_id: auth-20261004-req02-tool-output-owner
   - item_id: chain:v3.selected_provider_model_binding
     chain_id: v3.selected_provider_model_binding
     status: audited_locked
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:be1802c1c54fef4cf837d72bafa154901b318dc6b44f03152cd4f59335bb833e
-    last_manual_authorization_id: auth-20260816-v3-build-domain-path-migration-provider-compat
+    fingerprint: sha256:eb4162320f4cda2430ec5ac7ca7e1f844fdc345c58e526c12ba133ede66daf0e
+    last_manual_authorization_id: auth-20261004-req02-standard-model-owner
   - item_id: chain:v3.console_request_count_visibility.mainline
     chain_id: v3.console_request_count_visibility.mainline
     status: audited_locked
@@ -378,16 +378,16 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:b0969cb8869745217f6f8247c9fa37bd8e2962cb23bb2040eddd108e3a5fbce1
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:cbd3d6818bf30506fc424864f4e05438ff38fd2c829787b9173298ed69d7d275
+    last_manual_authorization_id: auth-20261004-req02-console-resident-callers
   - item_id: chain:v3.runtime_timing_observability.mainline
     chain_id: v3.runtime_timing_observability.mainline
     status: audited_locked
     reviewed_by: Jason
     locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:d3cf88658ce49c20b1c8be822e3b1ac8e7191d8ed4229c4a7b4c13872b114fe5
-    last_manual_authorization_id: auth-20260915-v3-remove-continuation-runtime-timing
+    fingerprint: sha256:1ef69eca24c97028fe5c00faab72dc76e6c999e0cf04546522a2f17d421c9f27
+    last_manual_authorization_id: auth-20261004-req02-timing-resident-callers
   - item_id: chain:v3.responses_session_admission
     chain_id: v3.responses_session_admission
     status: audited_locked
@@ -408,10 +408,10 @@ locked_items:
     chain_id: v3.provider_action_gate.mainline
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-09-15T00:00:00-07:00'
+    locked_at: '2026-10-04T01:07:04Z'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:78d79632e9ad17d590ec3c2f631ba01361706cea83a84914532e3e367c72531b
-    last_manual_authorization_id: auth-20260915-v3-remove-continuation-provider-action
+    fingerprint: sha256:2c98f80e4310712b2cc10d509ec35bc7156c6ca457dd26adb2397fd8f2077231
+    last_manual_authorization_id: auth-20261003-req02-provider-action-resident-callers
   - item_id: chain:v3.build_test_artifact_budget
     chain_id: v3.build_test_artifact_budget
     status: audited_locked
@@ -450,9 +450,81 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-29T20:40:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:487da1203d72afc7ff984d1e24ab4ee9703a739e8170ee883c23526d1abaf70e
-    last_manual_authorization_id: auth-20260830-v3-execution-control-provider-global
+    fingerprint: sha256:20a5cd0ef5bcaadbacf9e7cd72073d50ca26ebf36a02342f09e0254a8474f8dd
+    last_manual_authorization_id: auth-20261004-req02-provider-probe-resident
 manual_authorizations:
+  - authorization_id: auth-20261005-req02-tool-parity-current-caller
+    item_id: chain:v3.hub_relay.tool_servertool_multiturn_parity
+    approved_by: Jason
+    reason: "Jason explicitly instructed removal of proxy-added rejection, preservation of representable tool requests, and incremental REQ02 implementation, then approved changes with 批准更改，继续. This records that existing authorization for the public consumer caller renamed to request_governance_rejects_orphan_output_and_preserves_missing_call_id. Node order, owner, callee, and resource flow are unchanged. The original orphan assertion remains; the public test now preserves the requested representable missing-ID and cross-kind behavior. Formal parity passed runtime 12 and real HTTP 3 cases. This is caller synchronization, not a claimed implementation review or a waiver of E2E, runtime, review, or integration gates."
+    fingerprint_before: sha256:6d923b9da6c48b768c07139d1b52a15f4054ecdf5c9ee54a3f845d14295b9b4c
+    fingerprint_after: sha256:362af699671cac8b12f070ed10df0d5f422a4012021586973cb829ee71d93996
+  - authorization_id: auth-20261004-req02-canonical-hub-request
+    item_id: chain:v3.hub_pipeline.v1.request
+    approved_by: Jason
+    reason: "Jason authorized the incremental REQ02 cutover and instructed 批准更改，继续. Req02 now consumes governed canonical input through the single canonical builder. This records the authorized caller binding; implementation review and live acceptance remain required."
+    fingerprint_before: sha256:066f368a851c78f829302259adf7d10ebfebb51a0965dc6f0b759bac702474e3
+    fingerprint_after: sha256:6f8f7f5faaf85cc053565813ee6816fe66019622866c98f9664c0bd2cdfb3a0e
+  - authorization_id: auth-20261004-req02-outbound-helper-callers
+    item_id: chain:v3.protocol_conversion_field_parity.outbound_helper_bindings
+    approved_by: Jason
+    reason: "Jason authorized the incremental REQ02 cutover and instructed 批准更改，继续. The Chat message helper keeps its namespace and owner in a physical include file; the Responses response-context caller is the actual resident. No protocol policy or lifecycle node changes."
+    fingerprint_before: sha256:9ea64f75f123e43d34390fb4befc4948e8dba9cfdfce84f4c84013ef92aecab5
+    fingerprint_after: sha256:6aa0e6e6b1009b2f2a8ec7806f638cb88eb4f21da63272276f445dc560d32403
+  - authorization_id: auth-20261004-req02-relay-request-invocation
+    item_id: chain:v3.hub_pipeline.v1.relay_request_source_slice
+    approved_by: Jason
+    reason: "Jason authorized the incremental REQ02 cutover and instructed 批准更改，继续. Relay normalization consumes the typed request invocation and captured JSON through the REQ02 SDK entry. No local continuation or second normalization is introduced."
+    fingerprint_before: sha256:d2e58f7b5e4d0b2a23480ca16f93e2cdb4eafd15f1ed85b280712bea43802892
+    fingerprint_after: sha256:2e592a41347015dcdecc1c088be3f71b6bace06a96755fd72cc09b59c054794e
+  - authorization_id: auth-20261004-req02-chat-relay-resident
+    item_id: chain:v3.openai_chat_relay.controlled_runtime
+    approved_by: Jason
+    reason: "Jason authorized the incremental REQ02 cutover and instructed 批准更改，继续. The map binds normalization to the actual shared Relay resident, while the Chat wrapper transfers its unique request guard. Protocol differences remain in the codec."
+    fingerprint_before: sha256:7b3839cd5ac05ce2266e74742ed50b5126a2e67af82593392d7abc251a3187ea
+    fingerprint_after: sha256:b07b10f9efc9bca1cd977e6819be08053ea3bb8c1c40716e0e8fb25193ac0d41
+  - authorization_id: auth-20261004-req02-gemini-relay-resident
+    item_id: chain:v3.gemini_relay.controlled_runtime
+    approved_by: Jason
+    reason: "Jason authorized the incremental REQ02 cutover and instructed 批准更改，继续. The map binds normalization to the actual shared Relay resident, while the Gemini wrapper transfers its unique request guard. Protocol differences remain in the codec."
+    fingerprint_before: sha256:fe3f9fe3728235c7dc805caa3ab23b5027c707a93d32453f0dd3ec53a531e7c4
+    fingerprint_after: sha256:7030ac4520d2c3c73392672447cb160ea77e128699673836b878632b24cc4ffc
+  - authorization_id: auth-20261004-req02-sdk-parity-normalization
+    item_id: chain:v3.protocol_conversion_field_parity
+    approved_by: Jason
+    reason: "Jason authorized the incremental REQ02 cutover and instructed 批准更改，继续. The parity chain now binds the typed request invocation to the public lossless SDK normalization owner, replacing the retired Responses-only inbound compatibility builder."
+    fingerprint_before: sha256:0912de537b49626d13b9eecd35fccd11571add788fa5184db9024cd3b123a6c5
+    fingerprint_after: sha256:f7a6fa8410d9cd68a6476e30208298595a3d62672429abcc2e1afa07234f5dca
+  - authorization_id: auth-20261004-req02-tool-output-owner
+    item_id: chain:v3.protocol_normalization_tool_governance_boundary
+    approved_by: Jason
+    reason: "Jason authorized the incremental REQ02 cutover and instructed 批准更改，继续. Req04 tool governance edges name govern_tool_outputs_at_req04 after identity normalization moved to its single lossless field owner. No payload repair is added outside the declared owner."
+    fingerprint_before: sha256:50868ef476fc01071f66891af7b15a28c047020020b81789a05a8b54b40e541a
+    fingerprint_after: sha256:d176b8344d67e90972800a9de0eae161319d3a49902e51722f0cdea245ec45e4
+  - authorization_id: auth-20261004-req02-standard-model-owner
+    item_id: chain:v3.selected_provider_model_binding
+    approved_by: Jason
+    reason: "Jason authorized the incremental REQ02 cutover and instructed 批准更改，继续. Selected model binding moves from Provider Compat to the canonical standard-projection helper, which calls the existing unique binding owner. Compat consumes the already bound standard payload."
+    fingerprint_before: sha256:be1802c1c54fef4cf837d72bafa154901b318dc6b44f03152cd4f59335bb833e
+    fingerprint_after: sha256:eb4162320f4cda2430ec5ac7ca7e1f844fdc345c58e526c12ba133ede66daf0e
+  - authorization_id: auth-20261004-req02-console-resident-callers
+    item_id: chain:v3.console_human_readable_layering.mainline
+    approved_by: Jason
+    reason: "Jason authorized the incremental REQ02 cutover and instructed 批准更改，继续. Console route observations bind the actual Direct and Responses Relay residents after guard-transfer wrapper extraction; observations remain read-only side channels."
+    fingerprint_before: sha256:b0969cb8869745217f6f8247c9fa37bd8e2962cb23bb2040eddd108e3a5fbce1
+    fingerprint_after: sha256:cbd3d6818bf30506fc424864f4e05438ff38fd2c829787b9173298ed69d7d275
+  - authorization_id: auth-20261004-req02-timing-resident-callers
+    item_id: chain:v3.runtime_timing_observability.mainline
+    approved_by: Jason
+    reason: "Jason authorized the incremental REQ02 cutover and instructed 批准更改，继续. Timing edges bind the actual Direct and Responses Relay residents after guard-transfer wrapper extraction; timing remains an independent side channel."
+    fingerprint_before: sha256:d3cf88658ce49c20b1c8be822e3b1ac8e7191d8ed4229c4a7b4c13872b114fe5
+    fingerprint_after: sha256:1ef69eca24c97028fe5c00faab72dc76e6c999e0cf04546522a2f17d421c9f27
+  - authorization_id: auth-20261004-req02-provider-probe-resident
+    item_id: chain:v3.provider_global_subscription_probe
+    approved_by: Jason
+    reason: "Jason authorized the incremental REQ02 cutover and instructed 批准更改，继续. Provider probe selection and error-classification edges bind the actual Responses Relay resident. Probe and health policy remain in their existing typed owners."
+    fingerprint_before: sha256:487da1203d72afc7ff984d1e24ab4ee9703a739e8170ee883c23526d1abaf70e
+    fingerprint_after: sha256:20a5cd0ef5bcaadbacf9e7cd72073d50ca26ebf36a02342f09e0254a8474f8dd
   - authorization_id: auth-20260929-v3-hooks-sidecar-chain-lock
     item_id: chain:v3.rcc_internal_hooks_sidecar
     approved_by: Jason
@@ -1258,3 +1330,10 @@ manual_authorizations:
     reason: "Jason's explicit all-model-entry prohibition covers every cause, including failures before application admission. Real raw TCP reproduces Hyper-generated HTTP400/431 bypassing the application no-response consumer. This scoped repair binds the Server/Front typed HTTP parse-error policy to a narrow native Hyper builder/Conn API as srv07/srv08. The native producer is disabled without changing protocol acceptance, business payloads, lifecycle topology, or unrelated routing. These edges remain design-only until authored and verified. This records the existing authorized error-boundary repair, not a new authorization or a claimed manual implementation review."
     fingerprint_before: sha256:66e47a57a103d5eaebe5c275e3bf6a438cd4cec8d153083d6c6c1e43d88090d4
     fingerprint_after: sha256:e09b3524db5510c71781bc145a257d1283eebeac736120b4f8f5a69f06c04adf
+  - authorization_id: auth-20261003-req02-provider-action-resident-callers
+    item_id: chain:v3.provider_action_gate.mainline
+    approved_by: Jason
+    approved_at: '2026-10-04T01:07:04Z'
+    reason: "Jason explicitly approved the proposed REQ02 caller lock refresh with 批准更改，继续. Request lifecycle wrappers now move the unique finalizer guard and delegate execution; provider actions remain in execute_v3_responses_relay_runtime_resident and execute_v3_relay_runtime_resident. The map and exact-body gate bind those resident callers. This authorization refreshes only that caller synchronization lock; it does not change provider policy or waive author tests, real tool E2E, architecture review, runtime acceptance, or merge gates."
+    fingerprint_before: sha256:78d79632e9ad17d590ec3c2f631ba01361706cea83a84914532e3e367c72531b
+    fingerprint_after: sha256:2c98f80e4310712b2cc10d509ec35bc7156c6ca457dd26adb2397fd8f2077231

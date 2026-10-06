@@ -949,7 +949,7 @@ chains:
   - step_id: v3-config-provider-sse-timeout-02
     from_node: V3Config05ManifestPublished
     to_node: V3RelaySseFirstFrameGuard
-    caller_symbol: execute_v3_relay_runtime_core
+    caller_symbol: execute_v3_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
     callee_symbol: guard_relay_sse_first_frame
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
@@ -1542,9 +1542,9 @@ chains:
   - step_id: v3-hub-req-01
     from_node: V3HubReqInbound01ClientRaw
     to_node: V3HubReqInbound02Normalized
-    caller_symbol: all_adjacent_builders_form_the_fixed_typed_topology
+    caller_symbol: governed_chain_from_canonical
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs
-    callee_symbol: build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01
+    callee_symbol: build_v3_hub_req_inbound_02_from_canonical
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
     status: anchored
     binding_kind: h1_typed_test
@@ -1756,7 +1756,7 @@ chains:
     from_node: V3HubReqOutbound07ProviderSemantic
     to_node: ProviderReqCompat06ProviderCompat
     caller_symbol: normalize_openai_chat_messages_payload
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_openai_chat_messages.rs
     callee_symbol: project_openai_chat_provider_tools
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs
     status: anchored
@@ -1793,7 +1793,7 @@ chains:
   - step_id: v3-protocol-field-parity-anthropic-response-context-01
     from_node: ProviderRespCompat02ProviderCompat
     to_node: V3HubRespInbound02Normalized
-    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_symbol: execute_v3_responses_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
     callee_symbol: project_v3_anthropic_message_as_responses_response_with_context
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
@@ -1818,7 +1818,7 @@ chains:
     to_node: V3HubReqInbound02Normalized
     caller_symbol: V3HubRelayRequestHooks::run
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
-    callee_symbol: build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01
+    callee_symbol: build_v3_hub_req_inbound_02_from_request_invocation
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
     status: anchored
     binding_kind: relay_request_source_slice
@@ -3366,9 +3366,9 @@ chains:
   - step_id: v3-openai-chat-relay-02
     from_node: V3HubReqInbound01ClientRaw
     to_node: V3HubReqInbound02Normalized
-    caller_symbol: execute_v3_openai_chat_relay_runtime
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
-    callee_symbol: build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01
+    caller_symbol: execute_v3_relay_runtime_resident
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+    callee_symbol: build_v3_hub_req_inbound_02_from_request_invocation
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
     status: anchored
     owner_feature_id: v3.openai_chat_relay_runtime_integration
@@ -3629,9 +3629,9 @@ chains:
   - step_id: v3-gemini-relay-02
     from_node: V3HubReqInbound01ClientRaw
     to_node: V3HubReqInbound02Normalized
-    caller_symbol: execute_v3_gemini_relay_runtime
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
-    callee_symbol: build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01
+    caller_symbol: execute_v3_relay_runtime_resident
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+    callee_symbol: build_v3_hub_req_inbound_02_from_request_invocation
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
     status: anchored
     owner_feature_id: v3.gemini_relay_runtime_integration
@@ -4291,10 +4291,10 @@ chains:
   - step_id: v3-protocol-field-parity-responses-chat-inbound-order-01
     from_node: V3HubReqInbound01ClientRaw
     to_node: V3HubReqInbound02Normalized
-    caller_symbol: build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01
+    caller_symbol: build_v3_hub_req_inbound_02_from_request_invocation
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
-    callee_symbol: build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
+    callee_symbol: execute_v3_operation_runner_request_normalize_losslessly
+    callee_file: v3/crates/routecodex-v3-runtime/src/operation_runner/mod.rs
     status: anchored
     binding_kind: adjacent_inbound_static_order_projection
     owner_feature_id: v3.protocol_conversion_field_parity
@@ -4693,7 +4693,7 @@ chains:
   - step_id: v3-relay-tool-parity-02
     from_node: V3HubReqInbound02Normalized
     to_node: V3HubReqChatProcess04Governed
-    caller_symbol: request_governance_rejects_orphan_output_wrong_kind_and_missing_call_id
+    caller_symbol: request_governance_rejects_orphan_output_and_preserves_missing_call_id
     caller_file: v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
     callee_symbol: govern_tool_outputs_at_req04
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
@@ -5030,7 +5030,7 @@ chains:
     to_node: V3HubReqChatProcess04Governed
     caller_symbol: openai_chat_tool_identity_is_governed_at_req04_after_normalization
     caller_file: v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs
-    callee_symbol: govern_protocol_tool_identity_at_req04
+    callee_symbol: govern_tool_outputs_at_req04
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
     status: anchored
     owner_feature_id: v3.protocol_normalization_tool_governance_boundary
@@ -5048,7 +5048,7 @@ chains:
     to_node: V3HubReqChatProcess04Governed
     caller_symbol: gemini_function_response_identity_is_governed_at_req04_after_normalization
     caller_file: v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs
-    callee_symbol: govern_protocol_tool_identity_at_req04
+    callee_symbol: govern_tool_outputs_at_req04
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
     status: anchored
     owner_feature_id: v3.protocol_normalization_tool_governance_boundary
@@ -5172,8 +5172,8 @@ chains:
   - step_id: v3-model-bind-03
     from_node: V3HubReqOutbound07ProviderSemantic
     to_node: V3SelectedProviderModelBindingBlock
-    caller_symbol: build_v3_provider_standard_protocol_payload_from_req07
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+    caller_symbol: bind_selected_provider_model
+    caller_file: v3/crates/routecodex-v3-runtime/src/operation_runner/operators/project_canonical_request.rs
     callee_symbol: bind_v3_selected_provider_model
     callee_file: v3/crates/routecodex-v3-runtime/src/selected_provider_model_binding.rs
     status: anchored
@@ -5493,7 +5493,7 @@ chains:
   - step_id: v3-console-realtime-02
     from_node: V3RuntimeRouteSelectionObservation
     to_node: V3RuntimeRouteSelectionEventSink
-    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_symbol: execute_v3_responses_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
     callee_symbol: V3RuntimeRouteSelectionEventSink
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
@@ -5529,7 +5529,7 @@ chains:
   - step_id: v3-console-realtime-04
     from_node: V3RuntimeRouteSelectionObservation
     to_node: V3RuntimeRouteSelectionEventSink
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: V3RuntimeRouteSelectionEventSink
     callee_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
@@ -5588,7 +5588,7 @@ chains:
   - step_id: v3-runtime-timing-01
     from_node: V3RuntimeTimingStart
     to_node: V3RuntimeTimingExternalAttempt
-    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_symbol: execute_v3_responses_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
     callee_symbol: start_external
     callee_file: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
@@ -5605,7 +5605,7 @@ chains:
   - step_id: v3-runtime-timing-02
     from_node: V3RuntimeTimingExternalAttempt
     to_node: V3RuntimeTimingExternalComplete
-    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_symbol: execute_v3_responses_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
     callee_symbol: finish_external
     callee_file: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
@@ -5623,7 +5623,7 @@ chains:
   - step_id: v3-runtime-timing-03
     from_node: V3RuntimeTimingExternalComplete
     to_node: V3RuntimeTimingExternalAttempt
-    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_symbol: execute_v3_responses_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
     callee_symbol: start_external
     callee_file: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
@@ -5641,7 +5641,7 @@ chains:
   - step_id: v3-runtime-timing-04
     from_node: V3RuntimeTimingExternalComplete
     to_node: V3RuntimeTimingTerminal
-    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_symbol: execute_v3_responses_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
     callee_symbol: finish_runtime
     callee_file: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
@@ -5659,7 +5659,7 @@ chains:
   - step_id: v3-runtime-timing-05
     from_node: V3RuntimeTimingTerminal
     to_node: V3RuntimeTimingStreamObservation
-    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_symbol: execute_v3_responses_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
     callee_symbol: record_timing
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
@@ -5693,7 +5693,7 @@ chains:
   - step_id: v3-runtime-timing-07
     from_node: V3RuntimeTimingTerminal
     to_node: V3RuntimeTimingObservability
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: finish_runtime
     callee_file: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
@@ -5727,7 +5727,7 @@ chains:
   - step_id: v3-runtime-timing-09
     from_node: V3RuntimeTimingStart
     to_node: V3RuntimeTimingExternalAttempt
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: start_external
     callee_file: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
@@ -5799,7 +5799,7 @@ chains:
   - step_id: v3-runtime-timing-13
     from_node: V3RuntimeTimingExternalComplete
     to_node: V3RuntimeTimingProtocolHandoff
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: with_additional_attempts
     callee_file: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
@@ -5914,7 +5914,7 @@ chains:
     - step_id: v3-provider-action-gate-01
       from_node: ProviderReqCompat06ProviderCompat
       to_node: V3Error05ExecutionDecision
-      caller_symbol: execute_v3_responses_relay_runtime_inner
+      caller_symbol: execute_v3_responses_relay_runtime_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
       callee_symbol: handle_v3_responses_relay_provider_failure
       callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
@@ -5934,7 +5934,7 @@ chains:
     - step_id: v3-provider-action-gate-02
       from_node: V3ProviderReqOutbound08WirePayload
       to_node: V3Error05ExecutionDecision
-      caller_symbol: execute_v3_responses_relay_runtime_inner
+      caller_symbol: execute_v3_responses_relay_runtime_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
       callee_symbol: handle_v3_responses_relay_provider_failure
       callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
@@ -6074,7 +6074,7 @@ chains:
     - step_id: v3-provider-action-gate-10
       from_node: V3Error05RecoveryWitness
       to_node: V3ProviderActionGateAdmission
-      caller_symbol: execute_v3_responses_relay_runtime_inner
+      caller_symbol: execute_v3_responses_relay_runtime_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
       callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -6094,7 +6094,7 @@ chains:
     - step_id: v3-provider-action-gate-11
       from_node: V3Error05RecoveryWitness
       to_node: V3ProviderActionGateAdmission
-      caller_symbol: execute_v3_anthropic_relay_runtime_inner
+      caller_symbol: execute_v3_anthropic_relay_runtime_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
       callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -6114,7 +6114,7 @@ chains:
     - step_id: v3-provider-action-gate-12
       from_node: V3Error05RecoveryWitness
       to_node: V3ProviderActionGateAdmission
-      caller_symbol: execute_v3_relay_runtime_core
+      caller_symbol: execute_v3_relay_runtime_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
       callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -6134,7 +6134,7 @@ chains:
     - step_id: v3-provider-action-gate-13
       from_node: V3Error05RecoveryWitness
       to_node: V3ProviderActionGateAdmission
-      caller_symbol: execute_v3_relay_runtime_core
+      caller_symbol: execute_v3_relay_runtime_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
       callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -6234,7 +6234,7 @@ chains:
     - step_id: v3-provider-action-gate-20
       from_node: V3ProviderActionGateAdmission
       to_node: V3ProviderActionPermitInFlight
-      caller_symbol: execute_v3_responses_relay_runtime_inner
+      caller_symbol: execute_v3_responses_relay_runtime_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
       callee_symbol: V3ProviderActionAdmission::take_permit
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -6254,7 +6254,7 @@ chains:
     - step_id: v3-provider-action-gate-21
       from_node: V3ProviderActionGateAdmission
       to_node: V3ProviderActionPermitInFlight
-      caller_symbol: execute_v3_anthropic_relay_runtime_inner
+      caller_symbol: execute_v3_anthropic_relay_runtime_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
       callee_symbol: V3ProviderActionAdmission::take_permit
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -6274,7 +6274,7 @@ chains:
     - step_id: v3-provider-action-gate-22
       from_node: V3ProviderActionGateAdmission
       to_node: V3ProviderActionPermitInFlight
-      caller_symbol: execute_v3_relay_runtime_core
+      caller_symbol: execute_v3_relay_runtime_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
       callee_symbol: V3ProviderActionAdmission::take_permit
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -6294,7 +6294,7 @@ chains:
     - step_id: v3-provider-action-gate-23
       from_node: V3ProviderActionGateAdmission
       to_node: V3ProviderActionPermitInFlight
-      caller_symbol: execute_v3_anthropic_relay_runtime_inner
+      caller_symbol: execute_v3_anthropic_relay_runtime_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
       callee_symbol: V3ProviderActionAdmission::take_permit
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -6334,7 +6334,7 @@ chains:
     - step_id: v3-provider-action-gate-25
       from_node: V3ProviderActionPermitInFlight
       to_node: V3ProviderActionPermitAbandonRequested
-      caller_symbol: execute_v3_responses_relay_runtime_inner
+      caller_symbol: execute_v3_responses_relay_runtime_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
       callee_symbol: V3ProviderActionPermit::drop
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -6354,7 +6354,7 @@ chains:
     - step_id: v3-provider-action-gate-26
       from_node: V3ProviderActionPermitInFlight
       to_node: V3ProviderActionPermitAbandonRequested
-      caller_symbol: execute_v3_anthropic_relay_runtime_inner
+      caller_symbol: execute_v3_anthropic_relay_runtime_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
       callee_symbol: V3ProviderActionPermit::drop
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -6374,7 +6374,7 @@ chains:
     - step_id: v3-provider-action-gate-27
       from_node: V3ProviderActionPermitInFlight
       to_node: V3ProviderActionPermitAbandonRequested
-      caller_symbol: execute_v3_relay_runtime_core
+      caller_symbol: execute_v3_relay_runtime_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
       callee_symbol: V3ProviderActionPermit::drop
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -6394,7 +6394,7 @@ chains:
     - step_id: v3-provider-action-gate-28
       from_node: V3ProviderActionPermitInFlight
       to_node: V3ProviderActionPermitAbandonRequested
-      caller_symbol: execute_v3_anthropic_relay_runtime_inner
+      caller_symbol: execute_v3_anthropic_relay_runtime_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
       callee_symbol: V3ProviderActionPermit::drop
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -6734,7 +6734,7 @@ chains:
     - step_id: v3-provider-action-gate-45
       from_node: V3ProviderActionPermitInFlight
       to_node: V3ProviderActionSuccessRecorded
-      caller_symbol: execute_v3_responses_relay_runtime_inner
+      caller_symbol: execute_v3_responses_relay_runtime_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
       callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -6754,7 +6754,7 @@ chains:
     - step_id: v3-provider-action-gate-46
       from_node: V3ProviderActionPermitInFlight
       to_node: V3ProviderActionSuccessFinalize
-      caller_symbol: execute_v3_anthropic_relay_runtime_inner
+      caller_symbol: execute_v3_anthropic_relay_runtime_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
       callee_symbol: record_provider_success_after_response_governance
       callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
@@ -7068,7 +7068,7 @@ chains:
   - step_id: v3-rd-target-select-relay-core-admission-rescue
     from_node: V3Target09CandidateSetExpanded
     to_node: V3Target10ConcreteProviderSelected
-    caller_symbol: execute_v3_relay_runtime_core
+    caller_symbol: execute_v3_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
     callee_symbol: resolve_v3_relay_target_outcome_with_admission_rescue
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
@@ -7087,7 +7087,7 @@ chains:
   - step_id: v3-rd-target-select-responses-relay-admission-rescue
     from_node: V3Target09CandidateSetExpanded
     to_node: V3Target10ConcreteProviderSelected
-    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_symbol: execute_v3_responses_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
     callee_symbol: resolve_v3_relay_target_outcome_with_admission_rescue
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
@@ -7171,7 +7171,7 @@ chains:
   - step_id: v3-provider-admission-lease-relay-handoff
     from_node: V3RuntimeProviderAdmission
     to_node: V3PreAcquiredProviderAdmission
-    caller_symbol: execute_v3_relay_runtime_core
+    caller_symbol: execute_v3_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
     callee_symbol: V3Transport13ResponsesRequest::with_pre_acquired_admission
     callee_file: v3/crates/routecodex-v3-provider-responses/src/transport.rs
@@ -7185,7 +7185,7 @@ chains:
   - step_id: v3-provider-admission-lease-responses-relay-handoff
     from_node: V3RuntimeProviderAdmission
     to_node: V3PreAcquiredProviderAdmission
-    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_symbol: execute_v3_responses_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
     callee_symbol: V3Transport13ResponsesRequest::with_pre_acquired_admission
     callee_file: v3/crates/routecodex-v3-provider-responses/src/transport.rs
@@ -7375,7 +7375,7 @@ chains:
   - step_id: v3-provider-global-probe-03
     from_node: V3Error02Classified
     to_node: V3ProviderHealthStore
-    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_symbol: execute_v3_responses_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
     callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
@@ -7389,7 +7389,7 @@ chains:
   - step_id: v3-provider-global-probe-error-classification
     from_node: V3Error01SourceRaised
     to_node: V3Error02Classified
-    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_symbol: execute_v3_responses_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
     callee_symbol: build_v3_error_02_classified_from_v3_error_01_with_provider_global_policy
     callee_file: v3/crates/routecodex-v3-error/src/lib.rs
@@ -7440,9 +7440,9 @@ chains:
   - step_id: v3-tool-thinking-provider-schema-preservation
     from_node: V3HubReqOutbound07ProviderSemantic
     to_node: ProviderReqCompat06ProviderCompat
-    caller_symbol: build_v3_provider_standard_protocol_payload_from_req07
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
-    callee_symbol: build_v3_openai_chat_standard_request_for_selected_web_search_mode
+    caller_symbol: project_canonical_request
+    caller_file: v3/crates/routecodex-v3-runtime/src/operation_runner/operators/project_canonical_request.rs
+    callee_symbol: build_v3_openai_chat_standard_request_from_chat_canonical_for_selected_with_declarations
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
     status: anchored
     behavior_gap: current Req04 wrapper and mechanical projection are source-controlled; remaining gap is complete native/custom live evidence across every provider protocol
@@ -7617,7 +7617,7 @@ chains:
   - step_id: v3-route-policy-03
     from_node: V3RoutePolicyAction
     to_node: V3Router06RoutePoolResolved
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: V3VirtualRouter::resolve_route_pool_plan
     callee_file: v3/crates/routecodex-v3-virtual-router/src/lib.rs
@@ -7659,7 +7659,7 @@ chains:
   - step_id: v3-provider-global-probe-relay-error-source
     from_node: V3HubRespChatProcess03Governed
     to_node: V3Error01SourceRaised
-    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_symbol: execute_v3_responses_relay_runtime_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
     callee_symbol: build_v3_error_01_source_raised_external
     callee_file: v3/crates/routecodex-v3-error/src/lib.rs
@@ -8372,7 +8372,65 @@ chains:
 - chain_id: v3.operation_runner.dagpipe.request
   owner_feature_id: v3.unified_operation_runner_design
   manifest: docs/architecture/dagpipe/v3.operation_runner.request.graph.json
-  summary: Design-only DAGpipe request graph; one source client JSON, one exit transport request, with target and execution decision before Chat Process. RuntimeRequestGraphEntry creates immutable request_origin_kind for each request graph invocation before it starts; only normalize reads it. Retry and servertool re-entry preserve the original request_inverse_context and explicit_history_pairing until RuntimeRequestFinalizer; normalize initializes inverse context only for client_entry and never rebuilds it from an internal follow-up payload.
+  summary: DAGpipe request graph; REQ01 capture is the existing executable slice, REQ02 cutover and downstream nodes remain pending. One source client JSON, one exit transport request. RuntimeRequestGraphEntry creates invocation origin; normalization initializes the original inverse/history pair once and re-entry preserves it. The pending REQ02 consumer/resource contract below does not assert live caller replacement.
+  req02_cutover_contract:
+    status: design_admitted_implementation_pending
+    contract: docs/design/v3-req02-cutover-consumer-contract.md
+    entry:
+      callers: [pending_endpoint_after_responses_admission_inner, handle_responses_websocket_message_with_mode]
+      caller_files: [v3/crates/routecodex-v3-server/src/endpoint_handlers.rs, v3/crates/routecodex-v3-server/src/websocket.rs]
+      runtime_owner: RuntimeRequestGraphEntry
+      runtime_file: v3/crates/routecodex-v3-runtime/src/operation_runner/mod.rs
+      input: captured client-json from REQ01; no recapture
+      output: canonical-request with messages and routecodex_chat_extension
+      execution: compile and run normalize_request_losslessly@1 single-node slice derived from canonical graph; no direct Operator call
+    control:
+      factory_owner: RuntimeRequestGraphEntry
+      direct_factory_adapter: resolve_v3_direct_request_execution_control
+      direct_factory_adapter_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_execution_control.rs
+      direct_factory_caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+      direct_factory_change_scope: entry/Direct worker alone updates factory caller arguments and passes real requestId plus the existing handle; no second budget or request-scope factory
+      storage_owner: request-local fixed typed slots carried by existing V3RequestExecutionControl and Server MetadataCenter opaque handle
+      identities: real requestId, new invocationId as SDK execution_id, explicit attemptId
+      initial_pair: client_entry RawEntry publishes request_inverse_context and explicit_history_pairing atomically once
+      reentry: retry/internal_followup/direct_relay_handoff AlreadyCanonical reads the original pair unchanged; origin is explicit typed Runtime entry state
+      direct_relay_handoff:
+        status: design_admitted_implementation_pending
+        contract: docs/design/v3-req02-cutover-consumer-contract.md
+        producer: execute_v3_direct_runtime_kernel_core_resident
+        producer_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+        carrier: V3ResponsesProtocolRelayHandoff carries canonical_request plus existing opaque control and selected target resources
+        consumers:
+        - v3/crates/routecodex-v3-server/src/executors.rs
+        - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
+        normalization_owner: Runtime request graph entry selects DirectRelayHandoff plus AlreadyCanonical without recapture or pair replacement
+        target_owner: Target Interpreter consumes captured target and candidates; no Virtual Router reentry
+    consumers:
+      relay: Req02 builder consumes Operator canonical output; old per-protocol normalization branches are removed
+      gemini: existing Chat Process reads canonical messages/tools plus Gemini extensions; native codec remains wire-only
+      direct: registered Direct projection/view hook consumes canonical and emits native work view; raw standardized bypass is removed
+      outbound: existing standard Outbound consumes canonical through REQ06-owned project_canonical_request helper and publishes actual-attempt context separately from provider payload
+      response: existing RespInbound02/Resp03/RespOutbound05 consume successful-attempt context and original request pair; JSON/SSE actually restore original tool namespace/name/kind and complete values
+      images: historical image placeholder cleanup moves once from old Inbound branch to existing Chat Process; current-turn images are preserved
+      hosted_history:
+        status: design_admitted_implementation_pending
+        contract: docs/design/v3-req02-hosted-history-operator-contract-20261005.md
+        normalization_owner: registered request_input_shape_branch field library
+        normalization_file: v3/crates/routecodex-v3-runtime/src/operation_runner/operators/field_operator_library.rs
+        current_value: one responses_hosted_history_event extension on an assistant history anchor
+        inverse_owner: registered current history projection
+        inverse_file: v3/crates/routecodex-v3-runtime/src/operation_runner/operators/project_canonical_history.rs
+        emission_owner: existing standard Outbound history emitters delegate to registered field-library helper
+        emission_helper: v3/crates/routecodex-v3-runtime/src/operation_runner/operators/hosted_history_projection.rs
+        target_contract: Chat adjacent ordinary pair; Responses one native event; Anthropic native assistant server_tool_use and web_search_tool_result preserving surrounding ordinary pairing; Gemini standard call/result encoding
+        data_contract: all emitted representations read the same current event; Replace/Remove/Move govern existing associations; no duplicated canonical value or opaque-source replay
+        configuration_owner: typed hosted_history_cases on request_input_shape_branch profile; compile rejects invalid authoring only
+        forbidden_owner: Provider wire, Compat, Server and a second Inbound or Chat Process postprocessor
+    finalization:
+      owner: RuntimeRequestFinalizer
+      carrier: unique non-Clone guard moved with JSON/error output or SSE stream; opaque handle clones never finalize
+      terminals: [json_consumed, error_consumed, sse_eof, sse_drop, cancel, future_drop, http_disconnect, websocket_disconnect]
+      release_order: attempt cleanup before request cleanup; retry/followup release only attempt resources
   entry_contract:
     node: V3OperationRunnerCaptureClientJson
     owner_doc: docs/design/v3-unified-operation-runner-design.md
@@ -8443,9 +8501,12 @@ chains:
     callee_file: pending
     status: binding_pending
     owner_feature_id: v3.unified_operation_runner_design
+    data_arc_flow:
+      consumes: [source-request]
+      produces: [client-json]
     resource_flow:
-      consumes: [v3.request.normal_payload]
-      produces: [v3.request.normal_payload]
+      consumes: []
+      produces: []
       side_channel_reads:
       - v3.operation_runner.dagpipe_manifest
       - v3.operation_runner.field_profile_manifest
@@ -8460,12 +8521,16 @@ chains:
     callee_file: pending
     status: binding_pending
     owner_feature_id: v3.unified_operation_runner_design
+    data_arc_flow:
+      consumes: [client-json]
+      produces: [canonical-request]
     resource_flow:
-      consumes: [v3.request.normal_payload, v3.config.published_manifest]
-      produces: [v3.request.normal_payload, v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing]
+      consumes: [v3.config.published_manifest]
+      produces: [v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing]
       side_channel_reads:
       - v3.operation_runner.request_origin_kind
       - v3.operation_runner.request_inverse_context
+      - v3.operation_runner.explicit_history_pairing
       - v3.operation_runner.metadata_center_control
       side_channel_writes: [v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing]
   - step_id: v3-op-runner-req-02b
@@ -8477,12 +8542,16 @@ chains:
     callee_file: pending
     status: binding_pending
     owner_feature_id: v3.unified_operation_runner_design
+    data_arc_flow:
+      consumes: [client-json]
+      produces: [canonical-request]
     resource_flow:
-      consumes: [v3.request.normal_payload, v3.config.published_manifest]
-      produces: [v3.request.normal_payload, v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing]
+      consumes: [v3.config.published_manifest]
+      produces: [v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing]
       side_channel_reads:
       - v3.operation_runner.request_origin_kind
       - v3.operation_runner.request_inverse_context
+      - v3.operation_runner.explicit_history_pairing
       - v3.operation_runner.metadata_center_control
       side_channel_writes: [v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing]
   - step_id: v3-op-runner-req-03
@@ -8509,10 +8578,10 @@ chains:
     status: binding_pending
     owner_feature_id: v3.unified_operation_runner_design
     resource_flow:
-      consumes: [v3.operation_runner.execution_mode, v3.operation_runner.tool_thinking_turn_context, v3.operation_runner.explicit_history_pairing]
-      produces: [v3.operation_runner.tool_thinking_turn_context]
-      side_channel_reads: [v3.operation_runner.execution_mode, v3.operation_runner.explicit_history_pairing]
-      side_channel_writes: [v3.operation_runner.tool_thinking_turn_context]
+      consumes: [v3.operation_runner.execution_mode, v3.operation_runner.tool_thinking_turn_context, v3.operation_runner.explicit_history_pairing, v3.operation_runner.request_origin_kind, v3.operation_runner.request_inverse_context, v3.operation_runner.current_field_associations]
+      produces: [v3.operation_runner.tool_thinking_turn_context, v3.operation_runner.current_field_associations]
+      side_channel_reads: [v3.operation_runner.execution_mode, v3.operation_runner.explicit_history_pairing, v3.operation_runner.request_origin_kind, v3.operation_runner.request_inverse_context, v3.operation_runner.current_field_associations]
+      side_channel_writes: [v3.operation_runner.tool_thinking_turn_context, v3.operation_runner.current_field_associations]
   - step_id: v3-op-runner-req-05
     from_node: V3OperationRunnerGovernChatRequest
     to_node: V3OperationRunnerProjectProviderSemantic
@@ -8522,11 +8591,68 @@ chains:
     callee_file: pending
     status: binding_pending
     owner_feature_id: v3.unified_operation_runner_design
+    data_arc_flow:
+      consumes: [governed-request]
+      produces: [standard-provider-request]
     resource_flow:
-      consumes: [v3.request.normal_payload, v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing]
+      consumes: [v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing, v3.operation_runner.current_field_associations]
       produces: [v3.request.provider_semantic, v3.operation_runner.attempt_projection_context, v3.operation_runner.attempt_declaration_map]
-      side_channel_reads: [v3.operation_runner.execution_mode, v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing]
+      side_channel_reads: [v3.operation_runner.execution_mode, v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing, v3.operation_runner.current_field_associations]
       side_channel_writes: [v3.operation_runner.attempt_projection_context, v3.operation_runner.attempt_declaration_map]
+  - step_id: v3-op-runner-req-05-direct-actual-emission
+    from_node: V3OperationRunnerGovernChatRequest
+    to_node: V3OperationRunnerProjectProviderSemantic
+    caller_symbol: responses_direct_request_projection_hook_with_key_catalog_and_view
+    caller_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
+    callee_symbol: flatten_namespace_tool_for_provider_with_sources
+    callee_file: v3/crates/provider-compat-core/src/namespace_tools.rs
+    status: binding_pending
+    binding_kind: planned_direct_actual_declaration_emission
+    owner_feature_id: v3.unified_operation_runner_design
+    behavior_gap: the Direct hook currently returns only the wire payload while provider-responses wire.rs performs the actual namespace/custom/history transform; implementation must return AttemptContext from the same actual emission traversal under the existing request guard
+    data_arc_flow:
+      consumes: [standard-provider-request]
+      produces: [v3.provider.responses_wire_payload, v3.operation_runner.attempt_projection_context, v3.operation_runner.attempt_declaration_map]
+    resource_flow:
+      consumes: [v3.operation_runner.request_inverse_context, v3.operation_runner.current_field_associations]
+      produces: [v3.operation_runner.attempt_projection_context, v3.operation_runner.attempt_declaration_map]
+      side_channel_reads: [v3.operation_runner.request_inverse_context, v3.operation_runner.current_field_associations]
+      side_channel_writes: [v3.operation_runner.attempt_projection_context, v3.operation_runner.attempt_declaration_map]
+  - step_id: v3-op-runner-req-05-responses-actual-emission
+    from_node: V3HubReqOutbound07ProviderSemantic
+    to_node: V3ProviderReqOutbound08WirePayload
+    caller_symbol: build_v3_openai_responses_standard_request_from_chat_canonical_for_selected_with_declarations
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+    callee_symbol: flatten_namespace_tool_for_provider_with_sources
+    callee_file: v3/crates/provider-compat-core/src/namespace_tools.rs
+    status: binding_pending
+    binding_kind: planned_standard_responses_actual_declaration_emission
+    owner_feature_id: v3.unified_operation_runner_design
+    behavior_gap: Responses standard Outbound currently records namespace-container traversal while provider-responses wire.rs flattens later; implementation must flatten at the standard Outbound emit point and return mappings from the same traversal
+    data_arc_flow:
+      consumes: [v3.request.provider_semantic]
+      produces: [v3.hub.provider_wire_payload, v3.operation_runner.attempt_projection_context, v3.operation_runner.attempt_declaration_map]
+    resource_flow:
+      consumes: [v3.operation_runner.request_inverse_context, v3.operation_runner.current_field_associations]
+      produces: [v3.operation_runner.attempt_projection_context, v3.operation_runner.attempt_declaration_map]
+      side_channel_reads: [v3.operation_runner.request_inverse_context, v3.operation_runner.current_field_associations]
+      side_channel_writes: [v3.operation_runner.attempt_projection_context, v3.operation_runner.attempt_declaration_map]
+  - step_id: v3-op-runner-req-06-provider-wire-transport-only
+    from_node: V3ProviderReqOutbound08WirePayload
+    to_node: V3ProviderReqOutbound09TransportRequest
+    caller_symbol: build_v3_provider_12_responses_wire_payload
+    caller_file: v3/crates/routecodex-v3-provider-responses/src/wire.rs
+    callee_symbol: build_v3_provider_12_responses_wire_payload_for_endpoint
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/wire.rs
+    status: binding_pending
+    binding_kind: planned_transport_only_provider_boundary
+    owner_feature_id: v3.responses_provider_runtime
+    behavior_gap: wire.rs currently calls expand_namespace_tools_in_responses_wire_body and rewrites namespace-qualified history names; this transformation must move to the registered Direct hook or standard Responses Outbound emit point, leaving provider wire with wire/auth/transport concerns only
+    resource_flow:
+      consumes: [v3.hub.provider_wire_payload]
+      produces: [v3.provider.transport_request]
+      side_channel_reads: []
+      side_channel_writes: []
   - step_id: v3-op-runner-req-06
     from_node: V3OperationRunnerProjectProviderSemantic
     to_node: V3OperationRunnerCompatRequest
@@ -8575,6 +8701,7 @@ chains:
       producer: RuntimeRequestGraphEntry
       readers:
       - V3OperationRunnerNormalizeRequest
+      - V3OperationRunnerGovernChatRequest
       legal_values: [client_entry, retry, internal_followup]
       client_entry:
         effect: RuntimeRequestGraphEntry creates originKind=client_entry before the original graph invocation; V3OperationRunnerNormalizeRequest initializes request_inverse_context and explicit_history_pairing from the original client entry payload
@@ -8590,10 +8717,19 @@ chains:
       conditional_write: initialized only when request_origin_kind=client_entry
       readers:
       - V3OperationRunnerNormalizeRequest
+      - V3OperationRunnerGovernChatRequest
       - V3OperationRunnerProjectProviderSemantic
       - V3OperationRunnerInverseProjectClient
       reentry_rule: when request_origin_kind=retry or internal_followup, V3OperationRunnerNormalizeRequest reads and preserves the existing slot and never overwrites it from follow-up payload
       release: runtime_request_finalizer
+    current_field_associations:
+      resource: v3.operation_runner.current_field_associations
+      producer: V3OperationRunnerGovernChatRequest
+      readers: [V3OperationRunnerGovernChatRequest, V3OperationRunnerProjectProviderSemantic]
+      initial_write: first client entry seeds current references from original normalized layout before registered field edits
+      reentry_rule: preserve current layout and original pair; registered edits carry origins with actual elements
+      payload_rule: typed reference paths only; never serialized into payload or reconstructed from names schemas models or logs
+      release: runtime_request_finalizer_after_attempt_cleanup
 
 - chain_id: v3.operation_runner.dagpipe.response
   owner_feature_id: v3.unified_operation_runner_design
@@ -8680,6 +8816,50 @@ chains:
       produces: [v3.operation_runner.client_frame_candidate]
       side_channel_reads: [v3.operation_runner.execution_disposition]
       side_channel_writes: [v3.operation_runner.client_frame_candidate]
+  - step_id: v3-op-runner-resp-01-direct-admission-order
+    from_node: V3ProviderResp14Raw
+    to_node: V3OperationRunnerCompatResponse
+    caller_symbol: responses_direct_response_projection_hook_with_context
+    caller_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
+    callee_symbol: project_provider_raw_to_client_payload_with_plan_and_projection_and_observation_context
+    callee_file: v3/crates/routecodex-v3-runtime/src/shared.rs
+    status: anchored
+    binding_kind: json_decode_admission_before_publication
+    owner_feature_id: v3.unified_operation_runner_design
+    behavior: the existing Shared JSON projector returns the decoded and admitted provider payload; both Runtime kernels then call the registered successful JSON projection hook, which publishes actual_attempt and constructs ResponseProjectionView on the same request handle before inverse mapping; no new decoder or Shared callback
+    resource_flow:
+      consumes: [v3.response.provider_raw, v3.operation_runner.attempt_projection_context]
+      produces: [v3.hub.response_semantic]
+      side_channel_reads: [v3.operation_runner.attempt_projection_context, v3.operation_runner.attempt_declaration_map]
+      side_channel_writes: []
+  runtime_successful_attempt_boundary:
+    status: binding_pending
+    json_status: anchored
+    sse_status: binding_pending
+    owner: RuntimeRequestContext
+    caller_files: [v3/crates/routecodex-v3-runtime/src/kernel.rs, v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs]
+    callee_file: v3/crates/routecodex-v3-runtime/src/operation_runner/request_context_store.rs
+    registered_json_hook: V3HookRegistry::run_successful_json_response_projection
+    registered_json_hook_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
+    json_inverse_owner: apply_v3_direct_json_successful_attempt_hook
+    json_inverse_owner_file: v3/crates/routecodex-v3-runtime/src/direct_response_hooks.rs
+    json_caller_bindings:
+      - caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
+        caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+        callee_symbol: V3HookRegistry::run_successful_json_response_projection
+        callee_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
+        status: anchored
+      - caller_symbol: execute_v3_direct_runtime_kernel_core_resident
+        caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+        callee_symbol: V3HookRegistry::run_successful_json_response_projection
+        callee_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
+        status: anchored
+    ordered_symbols: [V3RequestContextHandle::publish_successful_attempt, ResponseProjectionView::from_successful_attempt]
+    input: admitted_provider_payload_and_actual_attempt_context
+    output: same_request_successful_attempt_view
+    graph_entry: V3OperationRunnerCompatResponse
+    resource_rule: publication selects the admitted attempt without rewriting its declaration map; NormalizeResponse remains the sole response_provenance producer and GovernResponse remains the sole response_tool_binding and execution_disposition producer; inverse consumes those owners' outputs and this same successful view
+    failure_rule: failed_or_incomplete_attempts_do_not_publish_a_view_or_enter_client_inverse
   execution_disposition:
     resource: v3.operation_runner.execution_disposition
     producer: V3OperationRunnerGovernResponse

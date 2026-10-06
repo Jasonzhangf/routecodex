@@ -2,6 +2,7 @@ mod client_transport_observation;
 mod compaction_request;
 mod console;
 mod endpoint_handlers;
+mod endpoint_trace;
 mod executors;
 mod frame_builders;
 mod live_snapshot;
@@ -9,6 +10,7 @@ mod live_snapshot_projections;
 mod metadata_center;
 mod models_catalog;
 mod request_id;
+mod request_identity;
 mod responses_direct_server_outcome;
 mod restart_closeout;
 mod restart_handoff;
@@ -20,14 +22,17 @@ mod webui_observability_endpoints;
 
 use compaction_request::classify_v3_request_purpose;
 use console::*;
-use endpoint_handlers::{
-    allocate_v3_console_request_id, allocate_v3_console_request_identity,
-    format_v3_request_id_entry, format_v3_request_id_token,
-    merge_v3_direct_handoff_provider_failure_events, merge_v3_protocol_plan_trace,
-    merge_v3_relay_handoff_provider_failure_events_into_direct_frame,
-    next_v3_console_request_identity, pending_endpoint_after_responses_admission,
+use endpoint_handlers::pending_endpoint_after_responses_admission;
+use endpoint_trace::{
+    is_provider_request_dry_run, merge_v3_direct_handoff_provider_failure_events,
+    merge_v3_protocol_plan_trace, merge_v3_relay_handoff_provider_failure_events_into_direct_frame,
+    prepend_v3_protocol_plan_trace_to_foundation_output,
     prepend_v3_protocol_plan_trace_to_responses_relay_output,
-    prepend_v3_relay_handoff_trace_to_direct_frame,
+    prepend_v3_relay_handoff_trace_to_direct_frame, resolve_v3_dry_run_target_label,
+};
+use request_identity::{
+    allocate_v3_console_request_id, allocate_v3_console_request_identity,
+    format_v3_request_id_entry, format_v3_request_id_token, next_v3_console_request_identity,
 };
 pub use executors::*;
 pub(crate) use frame_builders::*;
@@ -93,6 +98,7 @@ use routecodex_v3_runtime::{
     execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health,
     execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_execution_mode,
     execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_execution_mode_and_request_control,
+    execute_v3_openai_chat_relay_handoff_runtime_with_default_transport_provider_health_and_request_control,
     execute_v3_responses_direct_dry_run_runtime,
     execute_v3_responses_direct_dry_run_runtime_with_initial_target,
     execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug,
@@ -112,7 +118,8 @@ use routecodex_v3_runtime::{
     V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput, V3HubExecutionMode,
     V3OpenAiChatClientStream, V3OpenAiChatCommittedStream, V3OpenAiChatRelayClientBody,
     V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3ProviderHealthProbeFailure,
-    V3RelayProviderSnapshots, V3RequestExecutionControl, V3Resp15ClientPayload,
+    V3RelayEntryOrigin, V3RelayProviderSnapshots, V3RelayRuntimeEntry, V3RequestExecutionControl,
+    V3Resp15ClientPayload,
     V3ResponsesDirectRuntimeSharedState, V3ResponsesDirectServerToolScope,
     V3ResponsesDirectServerToolState, V3ResponsesProtocolExecutionPlan, V3ResponsesRelayClientBody,
     V3ResponsesRelayClientStream, V3ResponsesRelayDryRunOutcome,

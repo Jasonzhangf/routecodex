@@ -91,16 +91,19 @@ const boundaries = [
     owner: 'ReqInbound02 entry normalization',
     text: functionBody(
       hub,
-      'pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01',
+      'pub fn build_v3_hub_req_inbound_02_from_canonical',
     ),
     required: ['previous: input', 'V3HubRequestSemanticProtocol::Chat'],
   },
   {
-    owner: 'ReqInbound02 fail-fast public builder',
-    text: functionBody(hub, 'pub fn build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01'),
+    owner: 'ReqInbound02 registered SDK public builder',
+    text: functionBody(hub, 'pub fn build_v3_hub_req_inbound_02_from_request_invocation'),
     required: [
-      'build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01',
-      '.expect("V3 ReqInbound02 normalization failed")',
+      'execute_v3_operation_runner_request_normalize_losslessly',
+      'invocation.request_handle()',
+      'RequestNormalizationEntry::RawEntry',
+      'RequestNormalizationEntry::AlreadyCanonical',
+      'build_v3_hub_req_inbound_02_from_canonical',
     ],
   },
   {
@@ -339,13 +342,12 @@ requireAll(responseToolCollector, 'RespChatProcess tool governance collector', [
 
 const anthropicRelayReqInbound = functionBody(anthropicRelayHooks, 'pub fn run_v3_anthropic_relay_runtime_req_inbound');
 requireAll(anthropicRelayReqInbound, 'Anthropic Relay request protocol codec boundary', [
-  'encode_v3_anthropic_request_as_responses_semantic',
-  'build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01',
+  'build_v3_hub_req_inbound_02_from_request_invocation(raw, invocation)',
 ]);
-// anthropicRelayStaticReqInbound 守卫（run_v3_anthropic_relay_req_inbound_hook 的
-// encode/build 双 builder 检查）随该函数删除而移除（2026-08-08 并行重构，函数已不存在）；
-// 替代守卫是上方 run_v3_anthropic_relay_runtime_req_inbound 的
-// encode_v3_anthropic_request_as_responses_semantic + build_v3_hub_req_inbound_02 检查。
+forbidAll(anthropicRelayReqInbound, 'Anthropic Relay request protocol codec boundary', [
+  /encode_v3_anthropic_request_as_responses_semantic/,
+  /build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01/,
+]);
 
 const responseRuntime = functionBody(responsesRelayJsonHooks, 'fn run_json_response_hooks');
 

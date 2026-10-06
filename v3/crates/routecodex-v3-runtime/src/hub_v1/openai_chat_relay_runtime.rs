@@ -36,11 +36,6 @@ impl V3OpenAiChatRelayClientBody {
         }
     }
 }
-impl From<String> for V3OpenAiChatRelayRuntimeError {
-    fn from(value: String) -> Self {
-        Self::Target(value)
-    }
-}
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3OpenAiChatRelayRuntimeInput {
     pub server_id: String,
@@ -59,6 +54,7 @@ pub struct V3OpenAiChatRelayRuntimeOutput {
     pub observability: Option<V3RuntimeObservability>,
     pub stream_observation: Option<V3RuntimeStreamObservation>,
     pub provider_snapshots: Option<V3RelayProviderSnapshots>,
+    pub request_finalizer: Option<crate::operation_runner::V3RequestFinalizerGuard>,
 }
 impl V3OpenAiChatRelayRuntimeOutput {
     pub fn into_v3_resp_15_client_payload(self) -> V3Resp15ClientPayload {
@@ -178,6 +174,35 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport_provide
         provider_health,
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         execution_mode,
+        V3RelayRuntimeEntry::client_entry(),
+        Some(request_execution_control),
+        route_policy_pending,
+    )
+    .await
+}
+
+/// Direct-to-Relay handoff entry. The Direct phase already ran REQ02 and
+/// selected a target; this adapter moves the canonical request Value plus the
+/// existing typed control into the shared Relay skeleton. The Runtime entry
+/// selects `DirectRelayHandoff` and consumes the moved target/candidates without
+/// re-entering the Virtual Router, and without republishing the raw pair.
+pub async fn execute_v3_openai_chat_relay_handoff_runtime_with_default_transport_provider_health_and_request_control(
+    manifest: &V3Config05ManifestPublished,
+    input: V3OpenAiChatRelayRuntimeInput,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    execution_mode: V3HubExecutionMode,
+    entry: V3RelayRuntimeEntry,
+    request_execution_control: crate::nodes::V3RequestExecutionControl,
+    route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
+) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
+    execute_v3_openai_chat_relay_runtime_inner(
+        manifest,
+        input,
+        crate::default_responses_transport(),
+        provider_health,
+        V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
+        execution_mode,
+        entry,
         Some(request_execution_control),
         route_policy_pending,
     )
@@ -230,6 +255,7 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_provider_health_and_execu
         provider_health,
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         execution_mode,
+        V3RelayRuntimeEntry::client_entry(),
         None,
         None,
     )
@@ -243,6 +269,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3RelayProviderFailureRetryPolicy,
     execution_mode: V3HubExecutionMode,
+    entry: V3RelayRuntimeEntry,
     request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
     route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
 ) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
@@ -264,11 +291,13 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
         retry_policy,
         Vec::new(),
         true,
+        entry,
         request_execution_control,
         route_policy_pending,
     )
     .await
     .map_err(|error| match error {
+        V3RelayCoreError::Request(error) => V3OpenAiChatRelayRuntimeError::Request(error),
         // 治理层拦截（Mode B web-search）必须保留原变体：fail-fast 投影语义
         // 由 server 端 `project_v3_openai_chat_relay_runtime_failure` 区分。
         V3RelayCoreError::WebSearchIntercepted(_) => {
@@ -284,59 +313,6 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
         | V3RelayCoreError::StaticRegistry(message)
         | V3RelayCoreError::EndpointPath(message) => V3OpenAiChatRelayRuntimeError::Target(message),
     })
-}
-
-pub fn project_v3_openai_chat_relay_runtime_failure(
-    error: V3OpenAiChatRelayRuntimeError,
-) -> V3OpenAiChatRelayRuntimeOutput {
-    let request_payload_invalid = matches!(
-        &error,
-        V3OpenAiChatRelayRuntimeError::ProviderCompat(error)
-            if error.classification() == V3ProviderCompatErrorClassification::RequestPayloadInvalid
-    );
-    let provider_pool_exhausted = matches!(
-        &error,
-        V3OpenAiChatRelayRuntimeError::ProviderPoolExhausted { .. }
-    );
-    let source = match error {
-        V3OpenAiChatRelayRuntimeError::ProviderPoolExhausted {
-            attempted_candidates,
-        } => provider_pool_exhausted_source(
-            "V3Target10ConcreteProviderSelected",
-            &attempted_candidates,
-        ),
-        V3OpenAiChatRelayRuntimeError::ProviderCompat(error) => match error.classification() {
-            V3ProviderCompatErrorClassification::PayloadBoundaryViolation => {
-                super::provider_compat_boundary_source("ProviderRespCompat02ProviderCompat", &error)
-            }
-            V3ProviderCompatErrorClassification::RequestPayloadInvalid => {
-                super::provider_request_payload_source("ProviderReqCompat06ProviderCompat", &error)
-            }
-            V3ProviderCompatErrorClassification::Other => build_v3_error_01_source_raised(
-                V3ErrorSourceKind::RuntimeFailure,
-                "V3HubRuntime",
-                "openai_chat_relay_runtime_error",
-                error.to_string(),
-            ),
-        },
-        error => build_v3_error_01_source_raised(
-            V3ErrorSourceKind::RuntimeFailure,
-            "V3HubRuntime",
-            "openai_chat_relay_runtime_error",
-            error.to_string(),
-        ),
-    };
-    let mut output = error_output(
-        source,
-        if request_payload_invalid { 400 } else { 500 },
-        "none",
-        Vec::new(),
-    );
-    if provider_pool_exhausted {
-        output.terminal_disposition =
-            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse);
-    }
-    output
 }
 
 fn project_json_response(
@@ -1254,41 +1230,12 @@ fn openai_chat_sse_payload_has_terminal_finish_reason(payload: &Value) -> Result
     Ok(terminal)
 }
 
-fn openai_chat_provider_http_failure(
-    status: u16,
-    body: &[u8],
-    _provider_id: &str,
-) -> V3RelayProviderFailure {
-    let body = match serde_json::from_slice::<Value>(body) {
-        Ok(value) => value,
-        Err(_) if body.is_empty() => json!({
-            "error": {
-                "type": "provider_error",
-                "message": format!("provider returned HTTP {status}")
-            }
-        }),
-        Err(error) => json!({
-            "error": {
-                "type": "provider_error",
-                "message": format!("provider returned HTTP {status} with malformed JSON error body: {error}")
-            }
-        }),
-    };
-    V3RelayProviderFailure {
-        status,
-        provider_status: Some(status),
-        client_response: body,
-        source_stage: "V3ProviderReqOutbound09TransportRequest",
-        terminal_projection: None,
-        terminal_disposition: None,
-        error_type_fn: extract_error_type_style,
-        error_message_fn: extract_message_type_style,
-    }
-}
-
 #[path = "openai_chat_relay_failure_output.rs"]
 mod openai_chat_relay_failure_output;
-use openai_chat_relay_failure_output::{error_output, provider_failure_output};
+use openai_chat_relay_failure_output::{
+    error_output, openai_chat_provider_http_failure, provider_failure_output,
+};
+pub use openai_chat_relay_failure_output::project_v3_openai_chat_relay_runtime_failure;
 
 /// OpenAI Chat relay 协议 codec：协议差异的唯一收敛面（骨架驱动）。
 pub struct V3OpenAiChatRelayCodec;
@@ -1544,6 +1491,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             observability: Some(observability),
             stream_observation: None,
             provider_snapshots: Some(provider_snapshots),
+            request_finalizer: None,
         }
     }
 
@@ -1565,6 +1513,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             observability: Some(observability),
             stream_observation: Some(stream_observation),
             provider_snapshots: Some(provider_snapshots),
+            request_finalizer: None,
         }
     }
 
@@ -1573,6 +1522,22 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         trace: Vec<&'static str>,
     ) -> V3OpenAiChatRelayRuntimeOutput {
         provider_failure_output(failure, trace)
+    }
+
+    fn finish_request_scope(
+        mut output: V3OpenAiChatRelayRuntimeOutput,
+        finalizer: crate::operation_runner::V3RequestFinalizerGuard,
+    ) -> V3OpenAiChatRelayRuntimeOutput {
+        output.client_body = match output.client_body {
+            V3OpenAiChatRelayClientBody::Sse(stream) => {
+                V3OpenAiChatRelayClientBody::Sse(stream.with_request_finalizer(Some(finalizer)))
+            }
+            body => {
+                output.request_finalizer = Some(finalizer);
+                body
+            }
+        };
+        output
     }
 }
 

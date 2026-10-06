@@ -33,7 +33,25 @@ pub(super) fn normalize_openai_chat_message_tool_call_names(message: &mut Map<St
             let Some(call) = call.as_object_mut() else {
                 continue;
             };
-            if is_custom_tool_call(call) {
+            if call.get("type").and_then(Value::as_str) == Some("custom") {
+                if let Some(custom) = call.get("custom").and_then(Value::as_object) {
+                    if let Some(input) = custom.get("input") {
+                        let mut function = custom.clone();
+                        function.remove("input");
+                        function.insert(
+                            "arguments".to_string(),
+                            Value::String(serde_json::json!({"input": input}).to_string()),
+                        );
+                        call.remove("custom");
+                        call.insert("type".to_string(), Value::String("function".to_string()));
+                        call.insert("function".to_string(), Value::Object(function));
+                    } else {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+            } else if is_custom_tool_call(call) {
                 continue;
             }
             if let Some(name) = call.get("name").and_then(Value::as_str) {
@@ -381,15 +399,6 @@ pub(super) fn project_openai_chat_namespace_wire_names(
             }
         }
     };
-    for tool in wire
-        .get_mut("tools")
-        .and_then(Value::as_array_mut)
-        .into_iter()
-        .flatten()
-    {
-        rewrite(tool.pointer_mut("/function/name"));
-        rewrite(tool.get_mut("name"));
-    }
     for message in wire
         .get_mut("messages")
         .and_then(Value::as_array_mut)
@@ -414,12 +423,24 @@ pub(super) fn openai_chat_namespace_wire_aliases(
     request: &Value,
 ) -> Result<HashMap<String, String>, String> {
     let (identities, names) = responses_mcp_dispatch_names(request)?;
-    Ok(
-        provider_compat_core::namespace_tools::openai_chat_namespace_wire_names(
-            identities.into_keys().collect(),
-            names,
-        ),
-    )
+    let aliases = provider_compat_core::namespace_tools::openai_chat_namespace_wire_names(
+        identities.keys().cloned().collect(),
+        names,
+    );
+    // The declaration emitter names the wire tool with the hashed wire form, so
+    // the allocator keys the alias by that form. History and forced choices still
+    // carry the logical namespace child name, so publish the same alias under
+    // that key as well.
+    let mut resolved = aliases.clone();
+    for provider_name in identities.keys() {
+        let wire = provider_compat_core::namespace_tools::openai_chat_namespace_wire_name(
+            provider_name,
+        );
+        if let Some(alias) = aliases.get(&wire) {
+            resolved.insert(provider_name.clone(), alias.clone());
+        }
+    }
+    Ok(resolved)
 }
 
 fn is_custom_tool_call(tool_call: &Map<String, Value>) -> bool {

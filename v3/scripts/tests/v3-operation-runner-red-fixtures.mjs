@@ -748,6 +748,264 @@ const mutations = [
     expect: /direction is a binding axis only/u,
   },
   {
+    name: 'unknown-direction-binding',
+    mutate(tmp) {
+      const rel = 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const row = doc.path_consumers.find(
+        (item) => item.protocol === 'responses' && item.section === 'request_fields' && item.path === 'request.include',
+      );
+      if (!row) throw new Error('missing responses request.include row');
+      row.params.direction_bindings.chat_to_unknown_provider = row.params.direction_bindings.chat_to_provider;
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /direction_binding chat_to_unknown_provider has unknown direction/u,
+  },
+  {
+    name: 'unknown-operator-direction-binding',
+    mutate(tmp) {
+      const rel = 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const row = doc.path_consumers.find(
+        (item) => item.protocol === 'responses' && item.section === 'request_fields' && item.path === 'request.include',
+      );
+      if (!row) throw new Error('missing responses request.include row');
+      row.params.direction_bindings.client_request_to_chat.operator = 'routecodex.v3.field.unknown_operator@1';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /client_request_to_chat operator routecodex\.v3\.field\.unknown_operator@1 is not a registered field_operator_library entry/u,
+  },
+  {
+    name: 'direction-binding-missing-required-typed-param',
+    mutate(tmp) {
+      const rel = 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const row = doc.path_consumers.find(
+        (item) => item.protocol === 'responses' && item.section === 'request_fields' && item.path === 'request.include',
+      );
+      if (!row) throw new Error('missing responses request.include row');
+      delete row.params.direction_bindings.client_request_to_chat.failure_class;
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /client_request_to_chat missing typed param failure_class/u,
+  },
+  {
+    name: 'direction-binding-source-outside-inventory',
+    mutate(tmp) {
+      const rel = 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const row = doc.path_consumers.find(
+        (item) => item.protocol === 'responses' && item.section === 'request_fields' && item.path === 'request.include',
+      );
+      if (!row) throw new Error('missing responses request.include row');
+      row.params.direction_bindings.client_request_to_chat.source = 'request.uninventoried_field';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /client_request_to_chat source request\.uninventoried_field is not in protocol source inventory/u,
+  },
+  {
+    name: 'direction-binding-operator-mismatch',
+    mutate(tmp) {
+      const rel = 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const row = doc.path_consumers.find(
+        (item) => item.protocol === 'responses' && item.section === 'request_fields' && item.path === 'request.include',
+      );
+      if (!row) throw new Error('missing responses request.include row');
+      row.params.direction_bindings.client_request_to_chat.operator = 'routecodex.v3.field.identity_preserve@1';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /client_request_to_chat operator routecodex\.v3\.field\.identity_preserve@1 must match consumers\.client_request_to_chat/u,
+  },
+  {
+    name: 'structure-binding-missing-transform',
+    mutate(tmp) {
+      const rel = 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const row = doc.path_consumers.find(
+        (item) => item.protocol === 'openai_chat' && item.section === 'request_fields' && item.path === 'request.messages',
+      );
+      if (!row) throw new Error('missing openai_chat request.messages structure row');
+      delete row.params.direction_bindings.client_request_to_chat.transform_id;
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /structure_only direction_binding client_request_to_chat must declare typed transform_id/u,
+  },
+  {
+    name: 'structure-binding-unknown-operator',
+    mutate(tmp) {
+      const rel = 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const row = doc.path_consumers.find(
+        (item) => item.protocol === 'gemini' && item.section === 'request_fields' && item.path === 'request.contents',
+      );
+      if (!row) throw new Error('missing gemini request.contents structure row');
+      row.params.direction_bindings.client_request_to_chat.operator = 'routecodex.v3.field.unknown_container@1';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /structure_only direction_binding client_request_to_chat operator routecodex\.v3\.field\.unknown_container@1 is not a registered field_operator_library entry/u,
+  },
+  {
+    name: 'structure-binding-wrong-direction',
+    mutate(tmp) {
+      const rel = 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const row = doc.path_consumers.find(
+        (item) => item.protocol === 'anthropic' && item.section === 'request_fields' && item.path === 'request.messages',
+      );
+      if (!row) throw new Error('missing anthropic request.messages structure row');
+      row.params.direction_bindings.provider_response_to_chat = row.params.direction_bindings.client_request_to_chat;
+      delete row.params.direction_bindings.client_request_to_chat;
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /structure_only direction_binding provider_response_to_chat is not applicable to section request_fields/u,
+  },
+  {
+    name: 'structure-binding-source-outside-inventory',
+    mutate(tmp) {
+      const rel = 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const row = doc.path_consumers.find(
+        (item) => item.protocol === 'gemini' && item.section === 'request_fields' && item.path === 'request.tools',
+      );
+      if (!row) throw new Error('missing gemini request.tools structure row');
+      row.params.direction_bindings.client_request_to_chat.source = 'request.uninventoried_tools';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /gemini:request_fields:request\.tools direction_binding client_request_to_chat source request\.uninventoried_tools is not in protocol source inventory/u,
+  },
+  {
+    name: 'structure-binding-missing-typed-param',
+    mutate(tmp) {
+      const rel = 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const row = doc.path_consumers.find(
+        (item) => item.protocol === 'anthropic' && item.section === 'request_fields' && item.path === 'request.tools',
+      );
+      if (!row) throw new Error('missing anthropic request.tools structure row');
+      delete row.params.direction_bindings.client_request_to_chat.failure_class;
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /structure_only direction_binding client_request_to_chat missing typed param failure_class/u,
+  },
+  {
+    name: 'structure-binding-union-scalar-mismatch',
+    mutate(tmp) {
+      const rel = 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const row = doc.path_consumers.find(
+        (item) => item.protocol === 'anthropic' && item.section === 'request_fields' && item.path === 'request.tool_choice',
+      );
+      if (!row) throw new Error('missing anthropic request.tool_choice union row');
+      row.params.direction_bindings.client_request_to_chat.operator = 'routecodex.v3.field.array_container_shape@1';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /structure_only direction_binding client_request_to_chat operator routecodex\.v3\.field\.array_container_shape@1 must match scalar_consumer\.client_request_to_chat routecodex\.v3\.field\.tool_choice_shape_branch@1/u,
+  },
+  {
+    name: 'unknown-fold-operator',
+    mutate(tmp) {
+      const rel = 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const fold = doc.fold_contract.registered_folds.find(
+        (item) => item.operator === 'routecodex.v3.field.fold_history_merge',
+      );
+      if (!fold) throw new Error('missing responses history fold');
+      fold.operator = 'routecodex.v3.field.unknown_fold';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /fold routecodex\.v3\.field\.unknown_fold@1 not in operator_registry or field_operator_library/u,
+  },
+  {
+    name: 'unknown-fold-source',
+    mutate(tmp) {
+      const rel = 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const fold = doc.fold_contract.registered_folds.find(
+        (item) => item.operator === 'routecodex.v3.field.fold_history_merge',
+      );
+      if (!fold) throw new Error('missing responses history fold');
+      fold.params.source_order[0] = 'request.unknown_fold_source';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /fold routecodex\.v3\.field\.fold_history_merge@1 input source request\.unknown_fold_source is not in protocol responses inventory/u,
+  },
+  {
+    name: 'unknown-fold-policy',
+    mutate(tmp) {
+      const rel = 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const fold = doc.fold_contract.registered_folds.find(
+        (item) => item.operator === 'routecodex.v3.field.fold_history_merge',
+      );
+      if (!fold) throw new Error('missing responses history fold');
+      fold.params.equivalence_policy = 'unknown_policy';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /fold routecodex\.v3\.field\.fold_history_merge@1 unknown equivalence_policy unknown_policy/u,
+  },
+  {
+    name: 'duplicate-fold-owner',
+    mutate(tmp) {
+      const rel = 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const fold = doc.fold_contract.registered_folds.find(
+        (item) => item.operator === 'routecodex.v3.field.fold_history_merge',
+      );
+      if (!fold) throw new Error('missing responses history fold');
+      doc.fold_contract.registered_folds.push(structuredClone(fold));
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /fold routecodex\.v3\.field\.fold_history_merge@1 duplicate fold ownership/u,
+  },
+  {
+    name: 'duplicate-fold-source-order',
+    mutate(tmp) {
+      const rel = 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const fold = doc.fold_contract.registered_folds.find(
+        (item) => item.operator === 'routecodex.v3.field.fold_history_merge',
+      );
+      if (!fold) throw new Error('missing responses history fold');
+      fold.params.source_order = ['request.messages', 'request.messages'];
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /fold routecodex\.v3\.field\.fold_history_merge@1 source_order contains duplicate entry request\.messages/u,
+  },
+  {
+    name: 'duplicate-fold-finalizer',
+    mutate(tmp) {
+      const rel = 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const fold = doc.fold_contract.registered_folds.find(
+        (item) => item.operator === 'routecodex.v3.field.fold_history_merge',
+      );
+      if (!fold) throw new Error('missing responses history fold');
+      const duplicate = structuredClone(fold);
+      duplicate.direction = 'chat_to_provider';
+      doc.fold_contract.registered_folds.push(duplicate);
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /fold routecodex\.v3\.field\.fold_history_merge@1 more than one finalizer for destination chat\.messages/u,
+  },
+  {
     name: 'opaque-tool-payload-by-ordinary-operator',
     mutate(tmp) {
       const rel = 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml';
@@ -1533,9 +1791,9 @@ for (const mutation of mutations) {
       encoding: 'utf8',
     });
     const output = `${result.stdout}\n${result.stderr}`;
-    if (!mutation.expect.test(output)) {
+    if (result.status === 0 || !mutation.expect.test(output)) {
       failed += 1;
-      console.error(`[v3-operation-runner-red] ${mutation.name}: expected ${mutation.expect}, got:\n${output || '<no output>'}`);
+      console.error(`[v3-operation-runner-red] ${mutation.name}: expected non-zero exit and ${mutation.expect}, got status ${result.status}:\n${output || '<no output>'}`);
     } else {
       console.log(`[v3-operation-runner-red] ${mutation.name}: failed as expected`);
     }
@@ -1543,5 +1801,195 @@ for (const mutation of mutations) {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 }
+
+function withFixtureCopy(prefix, mutate) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `v3-operation-runner-${prefix}-`));
+  try {
+    for (const rel of files) {
+      const src = path.join(repo, rel);
+      const dest = path.join(tmp, rel);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.cpSync(src, dest);
+    }
+    const manifest = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml');
+    const doc = YAML.parse(fs.readFileSync(manifest, 'utf8'));
+    mutate(doc);
+    fs.writeFileSync(manifest, YAML.stringify(doc));
+    return spawnSync(process.execPath, [verifyScript], {
+      cwd: tmp,
+      env: { ...process.env, ROUTECODEX_V3_SOURCE_ROOT: tmp },
+      encoding: 'utf8',
+    });
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+function responsesRequestInclude(doc) {
+  const row = doc.path_consumers.find(
+    (item) => item.protocol === 'responses' && item.section === 'request_fields' && item.path === 'request.include',
+  );
+  if (!row) throw new Error('missing responses request.include row');
+  return row;
+}
+
+function responsesRequestInput(doc) {
+  const row = doc.path_consumers.find(
+    (item) => item.protocol === 'responses' && item.section === 'request_fields' && item.path === 'request.input',
+  );
+  if (!row) throw new Error('missing responses request.input row');
+  return row;
+}
+
+function expectVerifierPass(name, result) {
+  if (result.status !== 0) {
+    failed += 1;
+    console.error(`[v3-operation-runner-red] ${name}: expected verifier PASS, got:\n${result.stdout}\n${result.stderr}`);
+  } else {
+    console.log(`[v3-operation-runner-red] ${name}: PASS`);
+  }
+}
+
+function expectVerifierFailure(name, result, expected) {
+  const output = `${result.stdout}\n${result.stderr}`;
+  if (result.status === 0 || !expected.test(output)) {
+    failed += 1;
+    console.error(`[v3-operation-runner-red] ${name}: expected non-zero exit and ${expected}, got status ${result.status}:\n${output || '<no output>'}`);
+  } else {
+    console.log(`[v3-operation-runner-red] ${name}: failed as expected`);
+  }
+}
+
+// Positive fixtures: the compile gate must accept the REQ02 optional(string)
+// contract, including omitted optional values and explicit non-empty strings.
+expectVerifierPass('optional-string-omitted', withFixtureCopy('optional-string-omitted', (doc) => {
+  const row = responsesRequestInclude(doc);
+  const profile = doc.binding_contract.typed_operator_profiles['routecodex.v3.field.responses_include_transform@1'];
+  if (!profile) throw new Error('missing responses include profile');
+  profile.client_request_to_chat.transform_id = 'optional(string)';
+  delete row.params.direction_bindings.client_request_to_chat.transform_id;
+}));
+
+expectVerifierPass('optional-string-present', withFixtureCopy('optional-string-present', (doc) => {
+  const row = responsesRequestInclude(doc);
+  const profile = doc.binding_contract.typed_operator_profiles['routecodex.v3.field.responses_include_transform@1'];
+  if (!profile) throw new Error('missing responses include profile');
+  profile.client_request_to_chat.transform_id = 'optional(string)';
+  row.params.direction_bindings.client_request_to_chat.transform_id = 'v3.chat_extension_include_to_responses_wire.v1';
+}));
+
+for (const [name, value] of [
+  ['number', 42],
+  ['object', { nested: true }],
+  ['empty', ''],
+  ['blank', '   '],
+]) {
+  expectVerifierFailure(`optional-string-${name}`, withFixtureCopy(`optional-string-${name}`, (doc) => {
+    const row = responsesRequestInclude(doc);
+    const profile = doc.binding_contract.typed_operator_profiles['routecodex.v3.field.responses_include_transform@1'];
+    if (!profile) throw new Error('missing responses include profile');
+    profile.client_request_to_chat.transform_id = 'optional(string)';
+    row.params.direction_bindings.client_request_to_chat.transform_id = value;
+  }), /optional\(string\)|must be a non-empty string/u);
+}
+
+expectVerifierFailure('required-param-missing', withFixtureCopy('required-param-missing', (doc) => {
+  const row = responsesRequestInclude(doc);
+  delete row.params.direction_bindings.client_request_to_chat.failure_class;
+}), /missing typed param failure_class/u);
+
+expectVerifierPass('single-request-direction-binding', withFixtureCopy('single-request-direction-binding', (doc) => {
+  const row = doc.path_consumers.find(
+    (item) => item.protocol === 'responses' && item.section === 'request_fields' && item.path === 'request.background',
+  );
+  if (!row) throw new Error('missing responses request.background row');
+  row.params.direction_bindings = {
+    client_request_to_chat: {
+      source: 'request.background',
+      destination: 'chat.background',
+      operator: row.consumers.client_request_to_chat,
+      shape: 'leaf',
+      semantics: 'identity_preserve',
+      failure_class: 'enum(598)',
+    },
+  };
+}));
+
+expectVerifierFailure('uncovered-direction-row-param-invalid', withFixtureCopy('uncovered-direction-row-param-invalid', (doc) => {
+  const row = doc.path_consumers.find(
+    (item) => item.protocol === 'responses' && item.section === 'request_fields' && item.path === 'request.background',
+  );
+  if (!row) throw new Error('missing responses request.background row');
+  row.params.direction_bindings = {
+    client_request_to_chat: {
+      source: 'request.background',
+      destination: 'chat.background',
+      operator: row.consumers.client_request_to_chat,
+      shape: 'leaf',
+      semantics: 'identity_preserve',
+      failure_class: 'enum(598)',
+    },
+  };
+  delete row.params.semantics;
+}), /direction chat_to_provider.*missing typed param semantics/u);
+
+expectVerifierPass('two-direction-profile-binding', withFixtureCopy('two-direction-profile-binding', (doc) => {
+  const row = doc.path_consumers.find(
+    (item) => item.protocol === 'responses' && item.section === 'request_fields' && item.path === 'request.background',
+  );
+  if (!row) throw new Error('missing responses request.background row');
+  row.params.direction_bindings = {
+    client_request_to_chat: {
+      source: 'request.background',
+      destination: 'chat.background',
+      operator: row.consumers.client_request_to_chat,
+      shape: 'leaf',
+      semantics: 'identity_preserve',
+      failure_class: 'enum(598)',
+    },
+    chat_to_provider: {
+      source: 'request.background',
+      destination: 'provider.standard.request.background',
+      operator: row.consumers.chat_to_provider,
+      shape: 'leaf',
+      semantics: 'identity_preserve',
+      table: 'resource(request_field_map)',
+      failure_class: 'enum(598)',
+    },
+  };
+}));
+
+// Hosted-history typed configuration admission fixtures. The configured case
+// is an explicit typed recipe; duplicate cases, malformed encodings and
+// unregistered source members must be rejected at compile time.
+expectVerifierPass('hosted-history-case-valid', withFixtureCopy('hosted-history-case-valid', (doc) => {
+  const row = responsesRequestInput(doc);
+  if (!Array.isArray(row.params.hosted_history_cases) || row.params.hosted_history_cases.length !== 1) {
+    throw new Error('missing hosted_history_cases');
+  }
+  row.params.hosted_history_cases[0].argument_paths = ['action'];
+}));
+
+expectVerifierFailure('hosted-history-duplicate-discriminator', withFixtureCopy('hosted-history-duplicate-discriminator', (doc) => {
+  const row = responsesRequestInput(doc);
+  const [first] = row.params.hosted_history_cases;
+  row.params.hosted_history_cases.push({ ...first, canonical_extension_key: 'responses_hosted_history_event_dup' });
+}), /duplicate discriminator case/u);
+
+expectVerifierFailure('hosted-history-duplicate-extension-key', withFixtureCopy('hosted-history-duplicate-extension-key', (doc) => {
+  const row = responsesRequestInput(doc);
+  const [first] = row.params.hosted_history_cases;
+  row.params.hosted_history_cases.push({ ...first, discriminator_value: 'web_search_call_alt' });
+}), /duplicate canonical_extension_key/u);
+
+expectVerifierFailure('hosted-history-malformed-encoding', withFixtureCopy('hosted-history-malformed-encoding', (doc) => {
+  const row = responsesRequestInput(doc);
+  row.params.hosted_history_cases[0].canonical_encoding = 'duplicate_action_event';
+}), /canonical_encoding .* is not an admitted encoding/u);
+
+expectVerifierFailure('hosted-history-unregistered-source-member', withFixtureCopy('hosted-history-unregistered-source-member', (doc) => {
+  const row = responsesRequestInput(doc);
+  row.params.hosted_history_cases[0].argument_paths = ['unregistered_member'];
+}), /source member request\.input\[\]\.unregistered_member is not in source inventory/u);
 
 if (failed > 0) process.exit(1);

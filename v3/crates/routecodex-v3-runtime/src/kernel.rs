@@ -22,8 +22,8 @@ use crate::provider_failure_runtime_policy::{
 use crate::runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingState};
 use crate::shared::V3ProviderAttemptBody;
 use crate::sse_object_pipeline::process_sse_object_frame;
-use async_trait::async_trait;
 use futures_util::{stream, StreamExt};
+use async_trait::async_trait;
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_debug::{V3DebugError, V3DebugRuntime, V3DryRunFixture};
 use routecodex_v3_error::{
@@ -35,9 +35,12 @@ use routecodex_v3_error::{
     V3ProviderTerminalDisposition, V3_ERROR_CHAIN_NODE_IDS, V3_TRANSIENT_TRANSPORT_HANG_CODE,
 };
 use routecodex_v3_provider_responses::{
-    ReqwestResponsesTransport, ResponsesTransport, V3ProviderAvailabilityProjection,
-    V3ProviderAvailabilityReader, V3ProviderError, V3ProviderFailureRecord, V3ProviderResp14Raw,
-    V3ProviderResponseBodyKind, V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
+    ReqwestResponsesTransport, V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader,
+    V3ProviderFailureRecord, V3ProviderResponseBodyKind,
+};
+pub use routecodex_v3_provider_responses::{
+    ResponsesTransport, V3ProviderError, V3ProviderResp14Raw, V3ProviderResponseHeader,
+    V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_in_02_from_fields,
@@ -72,24 +75,11 @@ pub use default_transport::{
     default_provider_transport_handoff_checkpoints, default_responses_transport,
     restore_default_provider_transport_handoff_checkpoints,
 };
+
+include!("kernel/direct_request_scope.rs");
 include!("kernel/direct_kernel_entrypoints.rs");
 include!("kernel/direct_state.rs");
-async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport + ?Sized>(
-    state: V3ResponsesDirectRuntimeCoreState,
-    manifest: &V3Config05ManifestPublished,
-    raw: V3Server03HttpRequestRaw,
-    hook_registry: V3HookRegistry,
-    transport: &T,
-) -> V3ResponsesDirectRuntimeOutput {
-    execute_v3_responses_direct_runtime_kernel_core_resident(
-        state,
-        manifest,
-        raw,
-        hook_registry,
-        transport,
-    )
-    .await
-}
+include!("kernel/direct_request_entrypoints.rs");
 
 async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     T: ResponsesTransport + ?Sized,
@@ -99,6 +89,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     raw: V3Server03HttpRequestRaw,
     hook_registry: V3HookRegistry,
     transport: &T,
+    request_execution_control: V3RequestExecutionControl,
 ) -> V3ResponsesDirectRuntimeOutput {
     let accumulator = state
         .observability_accumulator
@@ -124,12 +115,11 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         provider_failure_event_sink,
         route_selection_event_sink,
         observability_accumulator: _,
-        request_execution_control,
+        request_execution_control: _,
     } = state;
 
     // stage-3 丢弃记录要写「客户端原始值」，必须在 Req04 归一化之前取句柄：
     // `standardized.body` 之后会被 control prepare 与 before-send 改写。
-    let client_original_body = std::sync::Arc::new(raw.body.clone());
     let mut standardized = match build_v3_req_04_standardized_responses_from_v3_server_03(raw) {
         Ok(standardized) => standardized,
         Err(error) => {
@@ -141,15 +131,22 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             );
         }
     };
+    // Consume the already-captured client JSON through the REQ02 registered
+    // SDK entry exactly once. Planning and projection read only the resulting
+    // canonical request; the old raw-standardized body is replaced, not kept
+    // as a parallel truth.
+    let captured = standardized.body.clone();
+    let canonical =
+        match build_v3_direct_request_canonical_from_captured(
+            &request_execution_control,
+            &standardized.request_id,
+            captured,
+        ) {
+            Ok(canonical) => canonical,
+            Err(source) => return error_output(source, trace, &hook_registry),
+        };
+    standardized.body = canonical;
     trace.push("V3Req04StandardizedResponses");
-    let request_execution_control = match resolve_v3_direct_request_execution_control(
-        request_execution_control,
-        manifest,
-        &standardized.server_id,
-    ) {
-        Ok(control) => control,
-        Err(source) => return error_output(source, trace, &hook_registry),
-    };
     let attempt_budget = request_execution_control.attempt_budget();
     if let Some(plan_trace) = initial_plan_trace {
         // Router05..Target09 already ran in the Server-side protocol plan;
@@ -648,6 +645,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 }
             };
             return relay_handoff_output(
+                standardized.body.clone(),
                 decision.target,
                 captured_target_09,
                 failed_candidates.clone(),
@@ -696,28 +694,30 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             return error_output(source, trace, &hook_registry);
         }
 
+        let attempt_id = format!("{standardized_request_id}:direct-attempt:{send_attempts}");
+        let request_view = match V3ResponsesDirectCodec::build_request_projection_view(
+            &standardized,
+            &selected,
+            &request_execution_control,
+            &attempt_id,
+        ) {
+            Ok(view) => view,
+            Err(source) => return error_output(source, trace, &hook_registry),
+        };
         let policy = hook_registry.run_route(selected, &standardized);
         trace.push("V3ResponsesDirect11Policy");
 
-        // stage-3 丢弃上下文：请求身份 + 入口端口 + 客户端原始 payload 句柄 +
-        // 独立丢弃日志路径。
-        let projection_drop_context = crate::projection_drop_log::V3ProjectionDropContext::new(
-            standardized_request_id.clone(),
-            standardized
-                .port
-                .map(|port| port.to_string())
-                .unwrap_or_default(),
-            manifest.debug.projection_drop_log_file.clone(),
-            client_original_body.clone(),
-        );
-        let wire = match hook_registry
-            .run_request_projection_with_drop_context(&policy, &projection_drop_context)
-        {
-            Ok(value) => value,
-            Err(source) => {
-                return error_output(source, trace, &hook_registry);
-            }
-        };
+        // The registered Direct request projection returns the provider wire
+        // plus the actual attempt context produced by the same declaration
+        // traversal. The actual attempt is not published here; the response
+        // admission boundary consumes it in the response slice.
+        let (wire, actual_attempt) =
+            match hook_registry.run_request_projection(&policy, &request_view) {
+                Ok(value) => value,
+                Err(source) => {
+                    return error_output(source, trace, &hook_registry);
+                }
+            };
         trace.push("V3Provider12ResponsesWirePayload");
 
         let transport_request = match hook_registry.run_provider_transport(wire) {
@@ -1413,10 +1413,20 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 let receipt = V3AttemptSuccessReceipt::from_sealed_sse_attempt(&committed);
                 (V3ClientBody::CommittedSse(committed), receipt)
             }
-            V3ProviderAttemptBody::Json(body) => (
-                V3ClientBody::Json(body),
-                V3AttemptSuccessReceipt::from_buffered_terminal_attempt(),
-            ),
+            V3ProviderAttemptBody::Json(mut body) => {
+                if let Err(source) = hook_registry.run_successful_json_response_projection(
+                    &mut body,
+                    response_projection.compat_plan.provider_protocol,
+                    request_execution_control.request_context(),
+                    &actual_attempt,
+                ) {
+                    return error_output(source, trace, &hook_registry);
+                }
+                (
+                    V3ClientBody::Json(body),
+                    V3AttemptSuccessReceipt::from_buffered_terminal_attempt(),
+                )
+            }
             V3ProviderAttemptBody::Bytes(body) => (
                 V3ClientBody::Bytes(body),
                 V3AttemptSuccessReceipt::from_buffered_terminal_attempt(),
@@ -1481,6 +1491,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             node_trace: trace,
             error_chain: None,
             protocol_relay_handoff: None,
+            request_finalizer: None,
         };
     }
 }

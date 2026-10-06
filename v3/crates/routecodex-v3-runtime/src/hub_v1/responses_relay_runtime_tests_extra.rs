@@ -145,12 +145,22 @@ async fn responses_tool_search_output_anthropic_json_relay_preserves_tool_roundt
         None,
         None,
         BTreeSet::new(),
+        None,
+        None,
         V3ResponsesRelayRuntimeSeeds::default(),
+        V3RelayEntryOrigin::ClientEntry,
     )
     .await
     .expect("Anthropic JSON response must traverse the full Relay runtime");
 
-    assert_eq!(output.status, 200);
+    assert_eq!(
+        output.status, 200,
+        "{}",
+        match &output.client_body {
+            V3ResponsesRelayClientBody::Json(value) => value.to_string(),
+            V3ResponsesRelayClientBody::Sse(_) => "unexpected SSE".to_string(),
+        }
+    );
     let V3ResponsesRelayClientBody::Json(response) = output.client_body else {
         panic!("non-streaming request must return a JSON response");
     };
@@ -326,6 +336,12 @@ fn responses_provider_json_restores_declared_mcp_identity_for_tool_followup() {
             "arguments":"{\"path\":\"README.md\"}"
         }]
     });
+    let successful_attempt_view =
+        super::responses_relay_runtime_tests::responses_relay_hook_successful_attempt_view(
+            "mcp-json-roundtrip",
+            request.clone(),
+            V3HubProviderWireProtocol::Responses,
+        );
     let manifest = super::responses_relay_runtime_tests::anthropic_then_openai_chat_manifest();
     let mut trace = Vec::new();
     let (response, _) = run_json_response_hooks(
@@ -341,6 +357,7 @@ fn responses_provider_json_restores_declared_mcp_identity_for_tool_followup() {
             provider_protocol: V3HubProviderWireProtocol::Responses,
             source_provider_protocol: V3HubProviderWireProtocol::Responses,
             projection_context: &projection_context,
+            successful_attempt_view: &successful_attempt_view,
             provider_response_transport_intent: V3HubTransportIntent::Json,
             compatibility_profile: None,
             web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode::None,
@@ -845,6 +862,12 @@ fn anthropic_sse_minimax_profile_still_harvests_text_tool_calls() {
             }]
         }]
     });
+    let successful_attempt_view =
+        super::responses_relay_runtime_tests::responses_relay_hook_successful_attempt_view(
+            "anthropic-sse-minimax",
+            json!({"model":"client-model"}),
+            V3HubProviderWireProtocol::Responses,
+        );
     let manifest = super::responses_relay_runtime_tests::anthropic_then_openai_chat_manifest();
     let mut trace = Vec::new();
     let (response, _) = run_json_response_hooks(
@@ -860,6 +883,7 @@ fn anthropic_sse_minimax_profile_still_harvests_text_tool_calls() {
             provider_protocol: V3HubProviderWireProtocol::Responses,
             source_provider_protocol: V3HubProviderWireProtocol::Anthropic,
             projection_context: &V3AnthropicResponsesProjectionContext::default(),
+            successful_attempt_view: &successful_attempt_view,
             provider_response_transport_intent: V3HubTransportIntent::Sse,
             compatibility_profile: Some("chat:minimax"),
             web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode::None,
@@ -898,6 +922,12 @@ fn anthropic_json_relay_keeps_literal_control_text_unchanged() {
         "stop_reason":"end_turn",
         "usage":{"input_tokens":1,"output_tokens":8}
     });
+    let successful_attempt_view =
+        super::responses_relay_runtime_tests::responses_relay_hook_successful_attempt_view(
+            "anthropic-json-literal",
+            json!({"model":"client-model"}),
+            V3HubProviderWireProtocol::Anthropic,
+        );
     let manifest = super::responses_relay_runtime_tests::anthropic_then_openai_chat_manifest();
     let mut trace = Vec::new();
     let (response, _) = run_json_response_hooks(
@@ -913,6 +943,7 @@ fn anthropic_json_relay_keeps_literal_control_text_unchanged() {
             provider_protocol: V3HubProviderWireProtocol::Anthropic,
             source_provider_protocol: V3HubProviderWireProtocol::Anthropic,
             projection_context: &V3AnthropicResponsesProjectionContext::default(),
+            successful_attempt_view: &successful_attempt_view,
             provider_response_transport_intent: V3HubTransportIntent::Json,
             compatibility_profile: None,
             web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode::None,
@@ -950,6 +981,12 @@ fn anthropic_sse_whole_item_thinking_literal_stays_visible() {
             "content":[{"type":"output_text","text":"<thinking>private</thinking>"}]
         }]
     });
+    let successful_attempt_view =
+        super::responses_relay_runtime_tests::responses_relay_hook_successful_attempt_view(
+            "anthropic-sse-thinking-literal",
+            json!({"model":"client-model"}),
+            V3HubProviderWireProtocol::Responses,
+        );
     let manifest = super::responses_relay_runtime_tests::anthropic_then_openai_chat_manifest();
     let mut trace = Vec::new();
     let (response, _) = run_json_response_hooks(
@@ -965,6 +1002,7 @@ fn anthropic_sse_whole_item_thinking_literal_stays_visible() {
             provider_protocol: V3HubProviderWireProtocol::Responses,
             source_provider_protocol: V3HubProviderWireProtocol::Anthropic,
             projection_context: &V3AnthropicResponsesProjectionContext::default(),
+            successful_attempt_view: &successful_attempt_view,
             provider_response_transport_intent: V3HubTransportIntent::Sse,
             compatibility_profile: None,
             web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode::None,
@@ -980,5 +1018,47 @@ fn anthropic_sse_whole_item_thinking_literal_stays_visible() {
     assert!(
         serialized.contains("<thinking>private</thinking>"),
         "whole-item `<thinking>` literal must stay visible: {serialized}"
+    );
+}
+
+#[test]
+fn openai_chat_provider_usage_normalizes_to_hub_canonical_token_names() {
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &json!({
+            "id": "chatcmpl_usage_shape",
+            "choices": [{
+                "message": {"role": "assistant", "content": "ok"},
+                "finish_reason": "stop"
+            }],
+            "usage": {
+                "prompt_tokens": 11,
+                "prompt_tokens_details": {"cached_tokens": 5},
+                "completion_tokens": 7,
+                "completion_tokens_details": {"reasoning_tokens": 2},
+                "total_tokens": 18
+            }
+        }),
+        &json!({"tools":[]}),
+    )
+    .expect("OpenAI Chat response must project to Responses");
+
+    assert_eq!(response["usage"]["input_tokens"], 11);
+    assert_eq!(
+        response["usage"]["input_tokens_details"]["cached_tokens"],
+        5
+    );
+    assert_eq!(response["usage"]["output_tokens"], 7);
+    assert_eq!(
+        response["usage"]["output_tokens_details"]["reasoning_tokens"],
+        2
+    );
+    assert_eq!(response["usage"]["total_tokens"], 18);
+    assert!(
+        response["usage"].get("prompt_tokens").is_none(),
+        "Hub canonical response usage must not expose OpenAI Chat provider-wire prompt_tokens: {response}"
+    );
+    assert!(
+        response["usage"].get("completion_tokens").is_none(),
+        "Hub canonical response usage must not expose OpenAI Chat provider-wire completion_tokens: {response}"
     );
 }

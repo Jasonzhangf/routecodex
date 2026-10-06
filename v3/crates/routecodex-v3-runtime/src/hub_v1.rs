@@ -49,6 +49,7 @@ pub(crate) use relay_runtime_core::{
     execute_v3_relay_runtime_core, v3_relay_transport_response_timeout, V3RelayCoreError,
     V3RelayProtocolCodec,
 };
+pub use relay_runtime_core::{V3RelayEntryOrigin, V3RelayRuntimeEntry};
 mod responses_openai_codec;
 pub(crate) use responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_for_req_inbound;
 mod responses_sse_tree;
@@ -63,22 +64,32 @@ pub(crate) use history_image_cleanup::{
     normalize_v3_history_image_placeholders,
 };
 mod request_outbound_builtin_tool_projection;
+mod request_outbound_declaration_emission;
 mod request_outbound_format;
 mod request_outbound_mcp_names;
 mod request_outbound_metadata;
 mod request_outbound_tool_id;
 pub(crate) use request_outbound_builtin_tool_projection::project_openai_responses_hosted_web_search_for_selected_target;
+pub use request_outbound_format::build_v3_openai_chat_standard_request_for_selected_web_search_mode;
 pub(crate) use request_outbound_format::{
+    build_v3_gemini_standard_request_from_chat_canonical_with_declarations,
+    build_responses_input_from_chat_messages,
     build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops,
-    build_v3_openai_chat_standard_request_for_selected_web_search_mode,
     build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording,
-    build_v3_openai_chat_standard_request_from_chat_canonical,
     build_v3_openai_chat_standard_request_from_chat_canonical_recording,
+    build_v3_anthropic_provider_request_source_from_chat_canonical,
+    build_v3_openai_chat_standard_request_from_chat_canonical,
+    build_v3_openai_chat_standard_request_from_chat_canonical_for_selected_with_declarations,
+    build_v3_openai_chat_standard_request_from_chat_canonical_with_declarations,
     build_v3_openai_responses_standard_request_for_selected_target,
     build_v3_openai_responses_standard_request_for_selected_target_with_drops,
     build_v3_openai_responses_standard_request_from_chat_canonical,
+    build_v3_openai_responses_standard_request_from_chat_canonical_for_selected_with_declarations,
+    build_v3_openai_responses_standard_request_from_chat_canonical_with_declarations,
     normalize_v3_openai_responses_provider_request_payload,
+    normalize_responses_input_content_parts,
 };
+pub(crate) use request_outbound_declaration_emission::project_direct_provider_request_declarations;
 mod anthropic_codec_tool_projection;
 mod anthropic_request_field_projection;
 
@@ -87,8 +98,11 @@ pub use req_inbound_01_client_raw::*;
 mod req_inbound_02_normalized;
 pub use req_inbound_02_normalized::*;
 mod req_chat_process_04_governed;
-pub use req_chat_process_04_governed::build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02;
 pub use req_chat_process_04_governed::V3HubReqChatProcess04Governed;
+pub use req_chat_process_04_governed::{
+    build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02,
+    govern_v3_operation_runner_current_request_fields,
+};
 mod req_execution_05_planned;
 pub use req_execution_05_planned::*;
 mod req_target_06_resolved;

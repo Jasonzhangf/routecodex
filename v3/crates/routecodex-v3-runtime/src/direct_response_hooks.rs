@@ -1,13 +1,44 @@
 //! Typed Direct response lifecycle and target-selected compatibility plan.
 //!
-//! This module owns hook ordering and compat selection only. It does not parse
-//! SSE frames, classify provider errors, observe continuation, or mutate
-//! client payloads. Those operations remain adjacent stage owners.
+//! This module owns hook ordering, compat selection and registered Direct
+//! payload projection. It does not parse SSE frames, classify provider errors
+//! or observe continuation. Those operations remain adjacent stage owners.
 
 use crate::hub_v1::V3HubProviderWireProtocol;
 use crate::hub_v1::V3ToolThinkingTurnContext;
 use crate::runtime_timing::V3RuntimeTimingState;
 use routecodex_v3_config::V3Config05ManifestPublished;
+
+/// JSON admission has already decoded and accepted the complete provider
+/// attempt. Publish that attempt and invert its actual declaration emission
+/// through the registered Direct owner, before client payload commitment.
+pub(crate) fn apply_v3_direct_json_successful_attempt_hook(
+    payload: &mut serde_json::Value,
+    protocol: V3HubProviderWireProtocol,
+    request: &crate::operation_runner::V3RequestContextHandle,
+    attempt: &crate::operation_runner::AttemptContext,
+) -> Result<(), routecodex_v3_error::V3Error01SourceRaised> {
+    let mut inverse = || -> Result<(), String> {
+        request.publish_successful_attempt(attempt.clone())?;
+        let view = crate::operation_runner::ResponseProjectionView::from_successful_attempt(
+            request, attempt,
+        )?;
+        match protocol {
+            V3HubProviderWireProtocol::Responses =>
+                crate::hub_v1::restore_v3_responses_normalized_tool_identities_with_successful_attempt(payload, &view),
+            V3HubProviderWireProtocol::OpenAiChat =>
+                crate::hub_v1::restore_v3_chat_tool_identities_with_successful_attempt(payload, &view),
+            _ => Ok(()),
+        }.map_err(|error| format!("{error:?}"))
+    };
+    inverse().map_err(|error| routecodex_v3_error::build_v3_error_01_source_raised_internal(
+        routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+        "V3DirectResp15ClientPayloadReady",
+        "direct_successful_attempt_inverse_failed",
+        error,
+        routecodex_v3_error::V3InternalErrorCode::V3DirectResp15ClientPayloadReady,
+    ))
+}
 
 /// The sole Direct response payload hook for protocol-neutral response cleanup.
 /// Both buffered JSON and SSE consumers call this owner; neither transport

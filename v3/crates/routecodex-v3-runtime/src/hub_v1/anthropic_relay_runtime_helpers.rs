@@ -22,6 +22,7 @@ pub struct V3AnthropicRelayRuntimeOutput {
     pub observability: Option<V3RuntimeObservability>,
     pub stream_observation: Option<V3RuntimeStreamObservation>,
     pub provider_snapshots: Option<V3RelayProviderSnapshots>,
+    pub request_finalizer: Option<crate::operation_runner::V3RequestFinalizerGuard>,
 }
 
 impl V3AnthropicRelayRuntimeOutput {
@@ -134,7 +135,10 @@ pub(crate) fn project_v3_anthropic_relay_runtime_failure_with_trace(
         V3AnthropicRelayRuntimeError::ProviderCompat(error)
             if error.classification() == V3ProviderCompatErrorClassification::RequestPayloadInvalid
     );
-    let provider_pool_exhausted = matches!(&error, V3AnthropicRelayRuntimeError::ProviderPoolExhausted { .. });
+    let provider_pool_exhausted = matches!(
+        &error,
+        V3AnthropicRelayRuntimeError::ProviderPoolExhausted { .. }
+    );
     let internal_status = match &error {
         V3AnthropicRelayRuntimeError::ExecutionControlRequest(_) => Some(598),
         V3AnthropicRelayRuntimeError::ExecutionControlResponse(_) => Some(599),
@@ -191,7 +195,8 @@ pub(crate) fn project_v3_anthropic_relay_runtime_failure_with_trace(
         trace,
     );
     if provider_pool_exhausted {
-        output.terminal_disposition = Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse);
+        output.terminal_disposition =
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse);
     }
     output
 }
@@ -262,8 +267,8 @@ fn provider_runtime_failure(error: V3ProviderError, provider_id: &str) -> V3Rela
             }
         };
         let source = crate::hooks::build_v3_provider_error_source(source_stage, error);
-        let projected = V3ErrorHandlingCenter::project_terminal(
-            V3ErrorHandlingCenter::decide_provider(
+        let projected =
+            V3ErrorHandlingCenter::project_terminal(V3ErrorHandlingCenter::decide_provider(
                 V3ErrorHandlingCenterInput {
                     source,
                     action_scope: V3ErrorActionScope::None,
@@ -273,8 +278,7 @@ fn provider_runtime_failure(error: V3ProviderError, provider_id: &str) -> V3Rela
                 false,
                 false,
                 None,
-            ),
-        );
+            ));
         return V3RelayProviderFailure {
             status: projected.status,
             // Internal transport handoff failure: no upstream HTTP response exists.
@@ -348,6 +352,7 @@ fn provider_failure_output(
         observability: None,
         stream_observation: None,
         provider_snapshots: None,
+        request_finalizer: None,
     }
 }
 
@@ -369,6 +374,7 @@ fn error_output(
         observability: None,
         stream_observation: None,
         provider_snapshots: None,
+        request_finalizer: None,
     }
 }
 
@@ -409,13 +415,11 @@ mod anthropic_client_sse_projection_tests {
 
     #[tokio::test]
     async fn closeout_replay_uses_selected_provider_wire_protocol() {
-        let chunks = vec![
-            br#"event: response.output_text.delta
+        let chunks = vec![br#"event: response.output_text.delta
 data: {"type":"response.output_text.delta","response_id":"resp_partial","delta":"partial"}
 
 "#
-            .to_vec(),
-        ];
+        .to_vec()];
         let error = V3AnthropicRelayRuntimeError::ProviderCompat(V3ProviderCompatError::other(
             "response",
             "compat:passthrough".to_string(),
