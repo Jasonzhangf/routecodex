@@ -27,6 +27,37 @@ pub(crate) struct V3ResponsesSessionAdmissionGate {
     notify: Arc<Notify>,
 }
 
+/// Failure of the admission gate itself, confined to the affected request.
+///
+/// Admission is a control gate, so it cannot silently pass a request through.
+/// It can only fail when it cannot hand out a unique token any more; that
+/// failure belongs to the request that asked, not to the listener.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum V3ResponsesSessionAdmissionError {
+    TokenSpaceExhausted,
+}
+
+impl std::fmt::Display for V3ResponsesSessionAdmissionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TokenSpaceExhausted => formatter.write_str(
+                "V3 Responses session admission token space is exhausted for this listener",
+            ),
+        }
+    }
+}
+
+impl std::error::Error for V3ResponsesSessionAdmissionError {}
+
+enum V3ResponsesSessionAdmissionOutcome {
+    /// The request carries no session identity, so the gate does not apply.
+    Ungated,
+    /// This request owns the gate for its scope.
+    Admitted(V3ResponsesSessionAdmissionPermit),
+    /// Another request owns the gate for the same scope.
+    Busy,
+}
+
 #[derive(Debug)]
 pub(crate) struct V3ResponsesSessionAdmissionPermit {
     state: Arc<Mutex<V3ResponsesSessionAdmissionState>>,
@@ -106,14 +137,15 @@ impl V3ResponsesSessionAdmissionGate {
     pub(crate) async fn admit(
         &self,
         scope: V3ResponsesSessionAdmissionScope,
-    ) -> Option<V3ResponsesSessionAdmissionPermit> {
+    ) -> Result<Option<V3ResponsesSessionAdmissionPermit>, V3ResponsesSessionAdmissionError> {
         loop {
             let notified = self.notify.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
-            match self.try_admit(scope.clone()) {
-                Ok(permit) => return permit,
-                Err(()) => notified.await,
+            match self.try_admit(scope.clone())? {
+                V3ResponsesSessionAdmissionOutcome::Ungated => return Ok(None),
+                V3ResponsesSessionAdmissionOutcome::Admitted(permit) => return Ok(Some(permit)),
+                V3ResponsesSessionAdmissionOutcome::Busy => notified.await,
             }
         }
     }
@@ -121,32 +153,46 @@ impl V3ResponsesSessionAdmissionGate {
     fn try_admit(
         &self,
         scope: V3ResponsesSessionAdmissionScope,
-    ) -> Result<Option<V3ResponsesSessionAdmissionPermit>, ()> {
+    ) -> Result<V3ResponsesSessionAdmissionOutcome, V3ResponsesSessionAdmissionError> {
         if scope.session_id.is_none() && scope.conversation_id.is_none() {
-            return Ok(None);
+            return Ok(V3ResponsesSessionAdmissionOutcome::Ungated);
         }
-        let mut state = self
-            .state
-            .lock()
-            .expect("V3 Responses session admission state lock is poisoned");
+        // The guarded state is a pure token map, so a poisoned lock still holds
+        // valid state. Recovering it keeps an unrelated panic from turning into
+        // a permanent admission failure for every later session on this
+        // listener; the reason is reported once instead of on every request.
+        let mut state = match self.state.lock() {
+            Ok(state) => state,
+            Err(poisoned) => {
+                let state = poisoned.into_inner();
+                self.state.clear_poison();
+                eprintln!(
+                    "V3 Responses session admission state lock was poisoned; recovered the admission token map"
+                );
+                state
+            }
+        };
         if state.active.values().any(|active| {
             active.endpoint == scope.endpoint
                 && (same_present_identity(&active.session_id, &scope.session_id)
                     || same_present_identity(&active.conversation_id, &scope.conversation_id))
         }) {
-            return Err(());
+            return Ok(V3ResponsesSessionAdmissionOutcome::Busy);
         }
-        state.next_token = state
-            .next_token
-            .checked_add(1)
-            .expect("V3 Responses session admission token overflowed");
-        let token = state.next_token;
+        let Some(token) = state.next_token.checked_add(1) else {
+            // A panic here would poison the lock for every later request; the
+            // failure belongs to this request only.
+            return Err(V3ResponsesSessionAdmissionError::TokenSpaceExhausted);
+        };
+        state.next_token = token;
         state.active.insert(token, scope);
-        Ok(Some(V3ResponsesSessionAdmissionPermit {
-            state: Arc::clone(&self.state),
-            notify: Arc::clone(&self.notify),
-            token: Some(token),
-        }))
+        Ok(V3ResponsesSessionAdmissionOutcome::Admitted(
+            V3ResponsesSessionAdmissionPermit {
+                state: Arc::clone(&self.state),
+                notify: Arc::clone(&self.notify),
+                token: Some(token),
+            },
+        ))
     }
 }
 
@@ -155,9 +201,11 @@ impl Drop for V3ResponsesSessionAdmissionPermit {
         let Some(token) = self.token.take() else {
             return;
         };
+        // Drop runs while a panic may be unwinding, so it must never panic: a
+        // poisoned lock is recovered instead of expected.
         self.state
             .lock()
-            .expect("V3 Responses session admission state lock is poisoned")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .active
             .remove(&token);
         self.notify.notify_waiters();
@@ -195,7 +243,8 @@ mod tests {
                 Some("conversation-a"),
             ))
             .await
-            .unwrap();
+            .expect("admission must stay available")
+            .expect("first session must receive a permit");
 
         let session_wait_gate = Arc::clone(&gate);
         let mut session_waiter = tokio::spawn(async move {
@@ -217,6 +266,7 @@ mod tests {
             .await
             .expect("same-session waiter must resume after exact permit release")
             .expect("same-session waiter task must not panic")
+            .expect("admission must stay available")
             .expect("same-session waiter must receive a permit");
         drop(session_permit);
 
@@ -227,7 +277,8 @@ mod tests {
                 Some("conversation-a"),
             ))
             .await
-            .unwrap();
+            .expect("admission must stay available")
+            .expect("session must be re-admitted after exact permit release");
         let conversation_wait_gate = Arc::clone(&gate);
         let mut conversation_waiter = tokio::spawn(async move {
             conversation_wait_gate
@@ -259,21 +310,25 @@ mod tests {
         assert!(first_gate
             .admit(scope("/v1/responses", None, None))
             .await
+            .expect("admission must stay available")
             .is_none());
         let _first = first_gate
             .admit(scope("/v1/responses", Some("session-a"), None))
             .await
-            .unwrap();
+            .expect("admission must stay available")
+            .expect("first session must receive a permit");
         let different_scope = timeout(
             Duration::from_millis(100),
             first_gate.admit(scope("/v1/responses", Some("session-b"), None)),
         )
         .await
-        .expect("different scope on one listener must remain concurrent");
+        .expect("different scope on one listener must remain concurrent")
+        .expect("admission must stay available");
         assert!(different_scope.is_some());
         assert!(second_gate
             .admit(scope("/v1/responses", Some("session-a"), None))
             .await
+            .expect("admission must stay available")
             .is_some());
     }
 

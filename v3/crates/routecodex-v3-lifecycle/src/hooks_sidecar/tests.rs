@@ -459,6 +459,94 @@ async fn readiness_admission_is_bounded_and_deferred_detail_is_published() {
 
 #[tokio::test]
 #[cfg(unix)]
+async fn abnormal_supervisor_exit_degrades_hooks_instead_of_failing_the_runtime() {
+    // F6: an optional hooks-sidecar supervisor that dies before publishing
+    // readiness must leave the managed runtime Running with an explicit
+    // degraded detail and must preserve lifecycle control resources. Only a
+    // lifecycle error the supervisor actually reported may stay fatal.
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let root = TempDir::new().unwrap();
+    let instance_dir = root.path().join("instance");
+    let record_path = root.path().join("install.json");
+    let bin_directory = root.path().join("bin");
+    let instance_id = "hooks-abnormal-supervisor-exit-instance";
+    fs::create_dir(&instance_dir).unwrap();
+    fs::create_dir(&bin_directory).unwrap();
+    // The sidecar never publishes readiness, so the supervisor task stays in
+    // its startup window until the abnormal exit below.
+    fs::write(bin_directory.join("rccv3-hooksd"), "#!/bin/sh\nsleep 30\n").unwrap();
+    let mut permissions = fs::metadata(bin_directory.join("rccv3-hooksd"))
+        .unwrap()
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(bin_directory.join("rccv3-hooksd"), permissions).unwrap();
+    fs::write(
+        &record_path,
+        serde_json::json!({
+            "supervisor_enabled": true,
+            "bin_directory": bin_directory,
+            "install_root": root.path(),
+        })
+        .to_string(),
+    )
+    .unwrap();
+    // Lifecycle control resources owned by the startup window.
+    fs::write(instance_dir.join("pid.cache"), "runtime-pid").unwrap();
+    write_json_atomic(
+        &instance_dir.join("control.json"),
+        &V3ManagedControlRecord {
+            schema_version: SCHEMA_VERSION,
+            instance_id: instance_id.to_string(),
+            socket_path: "hooks-sidecar.sock".to_string(),
+            start_nonce: "generation-1".to_string(),
+        },
+    )
+    .unwrap();
+    std::env::set_var(HOOKS_INSTALL_RECORD_ENV, &record_path);
+
+    let mut supervisor =
+        V3HooksSidecarSupervisor::spawn(instance_dir.clone(), instance_id.to_string());
+    supervisor.task.abort();
+    let exit = (&mut supervisor.task).await;
+    assert!(
+        exit.is_err(),
+        "test precondition: the supervisor task must end abnormally, got {exit:?}"
+    );
+
+    let admission = supervisor
+        .wait_for_readiness_or_timeout(Duration::from_secs(1))
+        .await
+        .expect("an optional hooks failure must not fail managed runtime startup");
+    let detail = admission
+        .flatten()
+        .expect("an abnormal supervisor exit must publish a degraded hooks detail");
+    assert!(
+        detail.contains("hooks sidecar unavailable: hooks_unavailable:crashed"),
+        "degraded detail must name the unavailable hooks capability: {detail}"
+    );
+    assert!(
+        detail.contains("exited before publishing readiness"),
+        "degraded detail must record the observed reason: {detail}"
+    );
+
+    // The managed startup projection that turns this detail into a `Running`
+    // status is owned and covered by the managed-runtime tests; this case owns
+    // the readiness decision and the shutdown that follows it.
+    assert!(instance_dir.join("pid.cache").exists());
+    assert!(instance_dir.join("control.json").exists());
+    // Shutdown must still work after a degraded readiness. The readiness path
+    // must not consume the supervisor completion signal, or this later stop
+    // would poll an already-completed channel.
+    let stopped = supervisor.stop().await;
+    assert!(
+        stopped.is_err(),
+        "an abnormally ended supervisor must report a failed stop, got {stopped:?}"
+    );
+    std::env::remove_var(HOOKS_INSTALL_RECORD_ENV);
+}
+
+#[tokio::test]
+#[cfg(unix)]
 async fn deferred_readiness_preserves_exec_restart_sample_persistence_failure() {
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");

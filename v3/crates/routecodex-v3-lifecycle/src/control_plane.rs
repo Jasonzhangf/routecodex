@@ -64,6 +64,62 @@ pub(crate) fn is_control_client_disconnect(error: &std::io::Error) -> bool {
     )
 }
 
+/// Backoff between retries of a transient control-socket accept failure.
+///
+/// The delay bounds the retry rate so a persistent transient condition (for
+/// example fd exhaustion) cannot spin the control loop hot, while the operator
+/// channel and the managed runtime stay alive.
+const CONTROL_ACCEPT_RETRY_DELAY: Duration = Duration::from_millis(50);
+
+/// A transient accept failure ends only the affected accept.
+///
+/// The control socket is the operator channel, so per-accept errno such as
+/// EINTR, EMFILE/ENFILE, ECONNABORTED, EPROTO, or ENETDOWN must not escalate
+/// into a managed-runtime failure. Anything else (for example the listener fd
+/// is gone or is no longer a socket) stays fatal.
+pub(crate) fn control_accept_error_is_transient(error: &V3LifecycleError) -> bool {
+    let V3LifecycleError::Io(error) = error else {
+        return false;
+    };
+    if matches!(
+        error.kind(),
+        std::io::ErrorKind::Interrupted | std::io::ErrorKind::ConnectionAborted
+    ) {
+        return true;
+    }
+    #[cfg(unix)]
+    if matches!(
+        error.raw_os_error(),
+        Some(libc::EMFILE) | Some(libc::ENFILE) | Some(libc::EPROTO) | Some(libc::ENETDOWN)
+    ) {
+        return true;
+    }
+    false
+}
+
+/// Outcome of one control-socket accept failure.
+enum ControlAcceptFailure {
+    /// The accept was transient; the loop must keep serving.
+    Transient,
+    /// The failure ends the managed runtime.
+    Fatal(V3LifecycleError),
+}
+
+/// Classify one control-socket accept failure and bound the retry rate.
+///
+/// The unix and non-unix listeners share this decision, so a transient errno
+/// cannot stay fatal on one platform while it is retried on the other.
+async fn classify_control_accept_failure(error: V3LifecycleError) -> ControlAcceptFailure {
+    if !control_accept_error_is_transient(&error) {
+        return ControlAcceptFailure::Fatal(error);
+    }
+    // One transient accept failure ends only this accept: the control socket
+    // keeps serving and the managed runtime stays Running.
+    eprintln!("managed control accept failed; retrying: {error}");
+    tokio::time::sleep(CONTROL_ACCEPT_RETRY_DELAY).await;
+    ControlAcceptFailure::Transient
+}
+
 pub(crate) async fn write_control_response(
     stream: &mut UnixStream,
     response: &ControlResponse,
@@ -418,16 +474,19 @@ pub(crate) async fn run_managed_control_loop(
             accepted = listener.accept() => accepted.map_err(V3LifecycleError::from),
         } {
             Ok(accepted) => accepted,
-            Err(error) => {
-                return fail_managed_runtime_with_hooks_cleanup(
-                    instance_dir,
-                    &declaration.instance_id,
-                    handle.take(),
-                    hooks_sidecar,
-                    error,
-                )
-                .await;
-            }
+            Err(error) => match classify_control_accept_failure(error).await {
+                ControlAcceptFailure::Transient => continue,
+                ControlAcceptFailure::Fatal(error) => {
+                    return fail_managed_runtime_with_hooks_cleanup(
+                        instance_dir,
+                        &declaration.instance_id,
+                        handle.take(),
+                        hooks_sidecar,
+                        error,
+                    )
+                    .await;
+                }
+            },
         };
         #[cfg(not(unix))]
         let accepted = match tokio::select! {
@@ -459,16 +518,19 @@ pub(crate) async fn run_managed_control_loop(
             accepted = listener.accept() => accepted.map_err(V3LifecycleError::from),
         } {
             Ok(accepted) => accepted,
-            Err(error) => {
-                return fail_managed_runtime_with_hooks_cleanup(
-                    instance_dir,
-                    &declaration.instance_id,
-                    handle.take(),
-                    hooks_sidecar,
-                    error,
-                )
-                .await;
-            }
+            Err(error) => match classify_control_accept_failure(error).await {
+                ControlAcceptFailure::Transient => continue,
+                ControlAcceptFailure::Fatal(error) => {
+                    return fail_managed_runtime_with_hooks_cleanup(
+                        instance_dir,
+                        &declaration.instance_id,
+                        handle.take(),
+                        hooks_sidecar,
+                        error,
+                    )
+                    .await;
+                }
+            },
         };
         let (mut stream, _) = accepted;
         let mut line = String::new();
