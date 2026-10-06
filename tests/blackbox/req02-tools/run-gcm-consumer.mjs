@@ -1218,7 +1218,7 @@ function main() {
     cwd: options.testedWorktree,
     env: childEnv,
     input: prompt,
-    encoding: "buffer",
+    encoding: null,
     maxBuffer: 256 * 1024 * 1024,
     timeout: options.timeoutMs,
   });
