@@ -1130,6 +1130,13 @@ fn managed_config_is_ephemeral(config_path: &Path) -> bool {
     let mut temp_roots = vec![std::env::temp_dir()];
     temp_roots.push(PathBuf::from("/tmp"));
     temp_roots.push(PathBuf::from("/var/tmp"));
+    #[cfg(target_os = "macos")]
+    {
+        // The caller can override TMPDIR while a managed child still
+        // references a config in the system per-user temp root.
+        temp_roots.push(PathBuf::from("/var/folders"));
+        temp_roots.push(PathBuf::from("/private/var/folders"));
+    }
     temp_roots.into_iter().any(|temp_dir| {
         let canonical_temp = fs::canonicalize(&temp_dir).unwrap_or_else(|_| temp_dir.clone());
         config_path.starts_with(&temp_dir)

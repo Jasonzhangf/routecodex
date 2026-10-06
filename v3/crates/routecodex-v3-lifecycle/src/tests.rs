@@ -25,6 +25,10 @@ fn managed_config_ephemeral_detection_covers_system_temp_roots() {
     assert!(managed_config_is_ephemeral(Path::new(
         "/private/tmp/rc-ab/config.toml"
     )));
+    #[cfg(target_os = "macos")]
+    assert!(managed_config_is_ephemeral(Path::new(
+        "/private/var/folders/rc/T/rc-ab/config.toml"
+    )));
     assert!(managed_config_is_ephemeral(
         &std::env::temp_dir().join("rc-mmx/config.toml")
     ));
