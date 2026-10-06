@@ -102,10 +102,10 @@ impl<'a> RequestNormalizer<'a> {
 
     fn normalize(&mut self, raw: &Value) -> Result<(), String> {
         let Some(raw_object) = raw.as_object() else {
-            self.record_opaque("$", raw);
-            self.canonical
-                .insert(ROOT_CARRIER_KEY.to_string(), self.extension_value());
-            return Ok(());
+            return Err(format!(
+                "client request payload for entry protocol `{}` must be a JSON object",
+                self.entry_protocol
+            ));
         };
 
         for (key, value) in raw_object {
