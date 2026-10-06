@@ -11,7 +11,10 @@ use routecodex_v3_runtime::{
     execute_v3_responses_relay_runtime, V3HubEntryProtocol, V3HubProviderWireProtocol,
     V3HubTransportIntent,
 };
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+
+static NEXT_PROVIDER_FIXTURE_ID: AtomicUsize = AtomicUsize::new(1);
 
 struct ProviderProjectionJsonTransport {
     captures: Mutex<Vec<(String, serde_json::Value)>>,
@@ -80,11 +83,23 @@ targets = [{ kind = "provider_model", provider = "chatwire", model = "chat-wire-
 "#,
     )
     .unwrap();
+    // Each fixture owns its credential concurrency identity in the shared runtime.
+    let auth_alias = format!(
+        "controlled-{}",
+        NEXT_PROVIDER_FIXTURE_ID.fetch_add(1, Ordering::Relaxed)
+    );
+    let provider = authoring.providers.get_mut("chatwire").unwrap();
+    provider.provider_type = protocol.to_owned();
+    provider.auth.entries[0].alias = auth_alias.clone();
     authoring
-        .providers
+        .route_groups
         .get_mut("chatwire")
         .unwrap()
-        .provider_type = protocol.to_owned();
+        .pools
+        .get_mut("default")
+        .unwrap()
+        .targets[0]
+        .key = Some(auth_alias);
     routecodex_v3_config::compile_v3_config_05_manifest(authoring).unwrap()
 }
 
