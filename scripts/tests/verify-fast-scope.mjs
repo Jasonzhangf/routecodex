@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -16,6 +15,8 @@ const fineScopes = [
   'v3_tool',
 ];
 const cases = [
+  { relative: 'note.md', contents: 'Large task evidence\n'.repeat(100000), v3: false, v4: false },
+  { relative: 'note.md', contents: 'Large task evidence\n'.repeat(100000), diffMode: 'new-ref', v3: false, v4: false },
   { relative: 'docs/design/v3-gate.md', v3: true, v4: false },
   { relative: 'docs/goals/v3-gate.md', v3: true, v4: false },
   { relative: 'docs/schemas/v3-gate.yml', v3: true, v4: false },
@@ -147,7 +148,6 @@ const cases = [
   },
 ];
 const failures = [];
-
 const workflow = readFileSync(join(repo, '.github', 'workflows', 'test.yml'), 'utf8');
 const v3Verify = readFileSync(join(repo, 'v3', 'scripts', 'verify.mjs'), 'utf8');
 const directArchitectureRuns = (workflow.match(/^\s*run: npm run verify:v3-architecture-ci\s*$/gmu) ?? []).length;

@@ -15,6 +15,7 @@ pub(crate) const TEST_HOOKS_INSTALL_RECORD_ENV: &str = "ROUTECODEX_HOOKS_INSTALL
 mod codex_sample_persistence;
 mod control_plane_accept;
 mod hooks_lifecycle;
+mod restart_plan;
 mod runtime_fd_limit;
 
 #[test]
@@ -136,7 +137,7 @@ async fn failed_hooks_stop_completes_main_lifecycle_and_reports_degraded_cleanup
 
 #[tokio::test]
 #[cfg(unix)]
-async fn failed_hooks_restart_continues_to_replacement() {
+async fn native_exec_failure_retains_aggregate_and_hooks_owner() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
@@ -165,6 +166,7 @@ async fn failed_hooks_restart_continues_to_replacement() {
         .unwrap();
     let restart_plan = ControlRestartPlan {
         control_instance_id: declaration.instance_id.clone(),
+        control_start_nonce: "test-nonce".into(),
         declaration: declaration.clone(),
         executable_path: root.path().join("missing-replacement"),
         snapshots: false,
@@ -173,34 +175,30 @@ async fn failed_hooks_restart_continues_to_replacement() {
         sse_dump: false,
     };
 
-    let error = restart_managed_runtime_in_place(
-        &instance_dir,
-        &socket_path,
-        handle,
-        V3HooksSidecarSupervisor::from_startup(
-            instance_dir.clone(),
-            tokio::spawn(async move { Ok(Some(sidecar)) }),
-        ),
-        restart_plan,
-        false,
-    )
-    .await
-    .unwrap_err();
+    let supervisor = V3HooksSidecarSupervisor::from_startup(
+        instance_dir.clone(),
+        tokio::spawn(async move { Ok(Some(sidecar)) }),
+    );
+    let (stream, _peer) = UnixStream::pair().unwrap();
+    let error =
+        restart_managed_runtime_in_place(&instance_dir, &handle, restart_plan, false, &stream)
+            .await
+            .unwrap_err();
 
     assert!(
-        matches!(error, V3LifecycleError::Io(ref io) if io.kind() == std::io::ErrorKind::NotFound),
-        "restart must pass hooks cleanup failure and attempt replacement, got {error}"
+        error.to_string().contains("No such file"),
+        "restart must report native exec failure, got {error}"
     );
-    let status: V3ManagedStatusRecord = read_json(&instance_dir.join("status.json")).unwrap();
-    assert_eq!(status.state, V3ManagedRunState::Failed);
-    assert!(status.detail.as_deref().is_some_and(|detail| {
-        detail.contains("exec restart failed") && detail.contains("hooks sidecar shutdown failed")
-    }));
+    assert!(!listener_set_is_available(&declaration.listeners));
     assert!(instance_dir.join("pid.cache").exists());
-    assert!(!instance_dir.join("control.json").exists());
-    assert!(!socket_path.exists());
+    assert!(instance_dir.join("control.json").exists());
+    assert!(socket_path.exists());
     assert!(process_record_path.exists());
-    assert!(!restart_plan_path.exists());
+    assert!(restart_plan_path.exists());
+    assert!(!instance_dir.join(FRONT_HANDOFF_FILE).exists());
+    assert!(!instance_dir.join(PROVIDER_HANDOFF_FILE).exists());
+    handle.shutdown().await;
+    assert!(supervisor.stop().await.is_err());
 }
 
 #[tokio::test]
@@ -823,67 +821,6 @@ fn restart_matches_live_previous_owner_when_config_path_changes_for_the_same_lis
 }
 
 #[test]
-fn restart_plan_projects_a_validated_config_path_change_and_rejects_listener_drift() {
-    let root = TempDir::new().unwrap();
-    let instance_dir = root.path().join("instance");
-    ensure_private_dir(&instance_dir).unwrap();
-    let executable_path = std::env::current_exe().unwrap();
-    let current = managed_test_declaration(
-        "v3-legacy-config-owner",
-        &root.path().join("config.v3.toml"),
-        "legacy-digest",
-        executable_path.to_str().unwrap(),
-        45555,
-    );
-    let target = managed_test_declaration(
-        "v3-user-config-owner",
-        &root.path().join("config.toml"),
-        "user-digest",
-        executable_path.to_str().unwrap(),
-        45555,
-    );
-    let request = ControlRequest {
-        schema_version: SCHEMA_VERSION,
-        instance_id: current.instance_id.clone(),
-        start_nonce: "nonce".to_string(),
-        operation: ControlOperation::Restart,
-        ports: None,
-    };
-    let write_plan = |target_declaration: V3ManagedInstanceDeclaration| {
-        write_json_atomic(
-            &instance_dir.join(RESTART_PLAN_FILE),
-            &V3ManagedRestartPlanRecord {
-                schema_version: SCHEMA_VERSION,
-                instance_id: current.instance_id.clone(),
-                start_nonce: "nonce".to_string(),
-                executable_path: executable_path.display().to_string(),
-                target_declaration: Some(target_declaration),
-                snapshots: false,
-                snapshot_direct: false,
-                snapshot_stages: None,
-                sse_dump: false,
-            },
-        )
-        .unwrap();
-    };
-
-    write_plan(target.clone());
-    let projected = control_restart_plan(&instance_dir, &request, &current)
-        .unwrap()
-        .unwrap();
-    assert_eq!(projected.declaration, target);
-
-    let mut listener_drift = target;
-    listener_drift.listeners.push(V3ManagedListenerDeclaration {
-        server_id: "additional".to_string(),
-        bind: "127.0.0.1".to_string(),
-        port: 45556,
-    });
-    write_plan(listener_drift);
-    assert!(control_restart_plan(&instance_dir, &request, &current).is_err());
-}
-
-#[test]
 fn exec_restart_reentry_adopts_changed_declaration_from_previous_owner() {
     let root = TempDir::new().unwrap();
     let state = root.path().join("state");
@@ -926,10 +863,41 @@ fn exec_restart_reentry_adopts_changed_declaration_from_previous_owner() {
     )
     .unwrap();
 
-    assert!(
-        adopt_exec_restart_declaration_change(&state, &expected_dir, &expected).unwrap(),
-        "exec-reentered child must adopt the current declaration"
-    );
+    write_json_atomic(
+        &old_dir.join("control.json"),
+        &V3ManagedControlRecord {
+            schema_version: SCHEMA_VERSION,
+            instance_id: old.instance_id.clone(),
+            start_nonce: "previous-exec-owner".into(),
+            socket_path: managed_control_socket_path(&old.instance_id)
+                .display()
+                .to_string(),
+        },
+    )
+    .unwrap();
+    write_json_atomic(
+        &old_dir.join(FRONT_HANDOFF_FILE),
+        &Vec::<serde_json::Value>::new(),
+    )
+    .unwrap();
+    write_json_atomic(
+        &old_dir.join(PROVIDER_HANDOFF_FILE),
+        &Vec::<serde_json::Value>::new(),
+    )
+    .unwrap();
+    ensure_private_dir(&expected_dir).unwrap();
+    write_json_atomic(&expected_dir.join(EXEC_RESTART_DECLARATION_FILE), &expected).unwrap();
+    let adopted_owner = adopt_exec_restart_declaration_change(
+        &state,
+        &expected_dir,
+        &expected,
+        &ExecRestartOwner {
+            instance_id: old.instance_id.clone(),
+            start_nonce: "previous-exec-owner".into(),
+        },
+    )
+    .unwrap();
+    assert_eq!(adopted_owner, old_dir);
 
     let adopted: V3ManagedInstanceDeclaration =
         read_json(&expected_dir.join("instance.json")).unwrap();
