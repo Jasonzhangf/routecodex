@@ -5,6 +5,8 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
+use crate::sample_retention::enforce_v3_codex_sample_global_retention;
+
 /// Error snapshots are retained by request-id directory.  A request may have
 /// client request/response plus provider request/response files, but those four
 /// files are one evidence record and must consume one retention slot.
@@ -682,88 +684,6 @@ fn lock_v3_codex_sample_filesystem(samples_root: &Path) -> Result<fs::File, Stri
     file.lock()
         .map_err(|error| format!("codex sample filesystem lock {}: {error}", path.display()))?;
     Ok(file)
-}
-
-fn enforce_v3_codex_sample_global_retention(
-    samples_root: &Path,
-    protected_request_dir: Option<&Path>,
-    retention: usize,
-) -> Result<(), String> {
-    let endpoint_dirs = fs::read_dir(samples_root)
-        .map_err(|error| error.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())?;
-    let mut request_dirs = Vec::new();
-    for endpoint_dir in endpoint_dirs {
-        if !endpoint_dir
-            .file_type()
-            .map_err(|error| error.to_string())?
-            .is_dir()
-        {
-            continue;
-        }
-        let ports_dir = endpoint_dir.path().join("ports");
-        if !ports_dir.is_dir() {
-            continue;
-        }
-        for port_dir in fs::read_dir(ports_dir)
-            .map_err(|error| error.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| error.to_string())?
-        {
-            if !port_dir
-                .file_type()
-                .map_err(|error| error.to_string())?
-                .is_dir()
-            {
-                continue;
-            }
-            for request_dir in fs::read_dir(port_dir.path())
-                .map_err(|error| error.to_string())?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|error| error.to_string())?
-            {
-                if !request_dir
-                    .file_type()
-                    .map_err(|error| error.to_string())?
-                    .is_dir()
-                {
-                    continue;
-                }
-                let modified = request_dir
-                    .metadata()
-                    .map_err(|error| error.to_string())?
-                    .modified()
-                    .map_err(|error| error.to_string())?;
-                request_dirs.push((request_dir, modified));
-            }
-        }
-    }
-    if request_dirs.len() <= retention {
-        return Ok(());
-    }
-    request_dirs.sort_by(|left, right| {
-        left.1
-            .cmp(&right.1)
-            .then_with(|| left.0.file_name().cmp(&right.0.file_name()))
-    });
-    let excess = request_dirs.len() - retention;
-    let removable = request_dirs
-        .into_iter()
-        .filter(|(entry, _)| {
-            protected_request_dir.is_none_or(|protected| entry.path() != protected)
-        })
-        .take(excess)
-        .collect::<Vec<_>>();
-    if removable.len() != excess {
-        return Err(format!(
-            "codex sample retention cannot preserve current request while removing {excess} directories"
-        ));
-    }
-    for (entry, _) in removable {
-        fs::remove_dir_all(entry.path()).map_err(|error| error.to_string())?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]
