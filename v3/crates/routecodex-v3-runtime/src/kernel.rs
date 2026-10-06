@@ -1000,6 +1000,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 ),
                 direct_failure_session_scope.session_id(),
                 standardized.tool_thinking_turn_context.clone(),
+                &standardized.body,
             ) {
                 Ok(context) => context,
                 Err(error) => {

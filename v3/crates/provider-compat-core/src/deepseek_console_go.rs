@@ -369,6 +369,13 @@ pub fn apply_deepseek_v4_tool_choice_compat(payload: &mut Value) {
 }
 
 pub(crate) fn apply_response_compat(payload: Value) -> Value {
+    apply_response_compat_with_declared_custom_tools(payload, None)
+}
+
+pub(crate) fn apply_response_compat_with_declared_custom_tools(
+    payload: Value,
+    custom_tool_names: Option<&std::collections::BTreeSet<String>>,
+) -> Value {
     let Some(mut root) = payload.as_object().cloned() else {
         return payload;
     };
@@ -386,6 +393,10 @@ pub(crate) fn apply_response_compat(payload: Value) -> Value {
                 .map(str::trim)
                 .filter(|name| !name.is_empty());
             if name == Some("apply_patch") {
+                continue;
+            }
+            if custom_tool_names.is_some_and(|names| !name.is_some_and(|name| names.contains(name)))
+            {
                 continue;
             }
             let input = item_obj

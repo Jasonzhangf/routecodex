@@ -304,6 +304,7 @@ async fn project_provider_raw_to_client_payload_inner(
                     compat_plan.provider_protocol,
                     tool_thinking_enabled,
                     toolreason_client_projection,
+                    &compat_plan.declared_custom_tool_names,
                 )
                 .await?;
                 (V3ProviderAttemptBody::Sse(stream), stream_observation)
@@ -352,7 +353,9 @@ async fn project_provider_raw_to_client_payload_inner(
             parsed = provider_compat_core::apply_cc_sol_response_compat(parsed);
         }
         if deepseek_console_go {
-            parsed = provider_compat_core::apply_deepseek_console_go_response_compat(parsed);
+            parsed = provider_compat_core::apply_deepseek_console_go_response_compat_with_declared_custom_tools(
+                parsed, &compat_plan.declared_custom_tool_names,
+            );
         }
         if let Some(profile) = provider_response_compat.as_deref() {
             parsed = apply_direct_provider_response_compat(
@@ -425,6 +428,7 @@ async fn process_direct_sse_stream(
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
     tool_thinking_enabled: bool,
     toolreason_client_projection: bool,
+    declared_custom_tool_names: &std::collections::BTreeSet<String>,
 ) -> Result<
     (
         V3ProviderAttemptSseStream,
@@ -460,6 +464,7 @@ async fn process_direct_sse_stream(
         // emit MISSING before the typed hook sees the complete tool args.
         false,
         false,
+        declared_custom_tool_names,
     );
     Ok((client_stream, Some(usage_observation)))
 }
@@ -701,6 +706,7 @@ fn observed_sse_client_stream(
         false,
         None,
         None,
+        &Default::default(),
     )
 }
 
@@ -745,6 +751,7 @@ fn observed_sse_client_stream_with_timeout_and_projection(
         provider_protocol,
         tool_thinking_enabled,
         toolreason_client_projection,
+        &Default::default(),
     )
 }
 
@@ -759,6 +766,7 @@ fn observed_sse_client_stream_with_timeout_and_projection_and_request_id(
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
     tool_thinking_enabled: bool,
     toolreason_client_projection: bool,
+    declared_custom_tool_names: &std::collections::BTreeSet<String>,
 ) -> V3ProviderAttemptSseStream {
     observed_sse_client_stream_with_protocol(
         provider_id,
@@ -771,6 +779,7 @@ fn observed_sse_client_stream_with_timeout_and_projection_and_request_id(
         toolreason_client_projection,
         Some(request_id),
         session_id.map(ToOwned::to_owned),
+        declared_custom_tool_names,
     )
 }
 
@@ -785,6 +794,7 @@ fn observed_sse_client_stream_with_protocol(
     toolreason_client_projection: bool,
     request_id: Option<String>,
     session_id: Option<String>,
+    declared_custom_tool_names: &std::collections::BTreeSet<String>,
 ) -> V3ProviderAttemptSseStream {
     struct ObservedState {
         stream: V3ProviderSseStream,
@@ -804,6 +814,7 @@ fn observed_sse_client_stream_with_protocol(
         tool_thinking_reason_emitted: bool,
         request_id: Option<String>,
         session_id: Option<String>,
+        declared_custom_tool_names: std::collections::BTreeSet<String>,
     }
 
     V3ProviderAttemptSseStream::new(Box::pin(stream::unfold(
@@ -825,6 +836,7 @@ fn observed_sse_client_stream_with_protocol(
             tool_thinking_reason_emitted: false,
             request_id,
             session_id,
+            declared_custom_tool_names: declared_custom_tool_names.clone(),
         },
         move |mut state| async move {
             if state.done {
@@ -889,6 +901,7 @@ fn observed_sse_client_stream_with_protocol(
                         apply_deepseek_console_go_sse_chunk_buffered(
                             &mut state.compatibility_buffer,
                             &chunk,
+                            &state.declared_custom_tool_names,
                         )
                     } else if state
                         .compatibility_profile
@@ -1146,18 +1159,28 @@ fn is_cc_sol_thinking_tags_profile(profile: &str) -> bool {
     matches!(profile.trim(), "responses:thinking-tags" | "responses:cc")
 }
 
-fn apply_deepseek_console_go_sse_chunk_buffered(buffer: &mut Vec<u8>, chunk: &[u8]) -> Vec<u8> {
+fn apply_deepseek_console_go_sse_chunk_buffered(
+    buffer: &mut Vec<u8>,
+    chunk: &[u8],
+    declared_custom_tool_names: &std::collections::BTreeSet<String>,
+) -> Vec<u8> {
     buffer.extend_from_slice(chunk);
     let mut output = Vec::new();
     while let Some(end) = buffer.windows(2).position(|window| window == b"\n\n") {
         let frame_end = end + 2;
         let frame: Vec<u8> = buffer.drain(..frame_end).collect();
-        output.extend(apply_deepseek_console_go_sse_chunk(&frame));
+        output.extend(apply_deepseek_console_go_sse_chunk(
+            &frame,
+            declared_custom_tool_names,
+        ));
     }
     output
 }
 
-fn apply_deepseek_console_go_sse_chunk(frame: &[u8]) -> Vec<u8> {
+fn apply_deepseek_console_go_sse_chunk(
+    frame: &[u8],
+    declared_custom_tool_names: &std::collections::BTreeSet<String>,
+) -> Vec<u8> {
     let text = String::from_utf8_lossy(frame);
     let mut output = String::new();
     for line in text.split_inclusive('\n') {
@@ -1176,11 +1199,14 @@ fn apply_deepseek_console_go_sse_chunk(frame: &[u8]) -> Vec<u8> {
         // owner to that full response so the client dispatch shape stays custom.
         if let Some(response) = payload.get_mut("response") {
             *response =
-                provider_compat_core::apply_deepseek_console_go_response_compat(response.clone());
+                provider_compat_core::apply_deepseek_console_go_response_compat_with_declared_custom_tools(
+                    response.clone(), declared_custom_tool_names,
+                );
         }
         if let Some(item) = payload.get("item").cloned() {
-            let compatible = provider_compat_core::apply_deepseek_console_go_response_compat(
+            let compatible = provider_compat_core::apply_deepseek_console_go_response_compat_with_declared_custom_tools(
                 serde_json::json!({"output": [item]}),
+                declared_custom_tool_names,
             );
             payload["item"] = compatible["output"][0].clone();
         } else if payload.get("response").is_none() {

@@ -53,6 +53,35 @@ async fn controlled_upstream(
             .unwrap();
     }
 
+    if body["tools"][0]["name"] == "echo_function" {
+        let receipt = body["input"].as_array().unwrap().iter().find(|item| {
+            item["call_id"] == "call_function" && item["type"] == "function_call_output"
+        });
+        let output = if let Some(receipt) = receipt {
+            json!([{"type":"message", "role":"assistant", "content":[
+                {"type":"output_text", "text":receipt["output"], "annotations":[]}
+            ]}])
+        } else {
+            json!([{"type":"function_call", "name":"echo_function", "call_id":"call_function",
+                "id":"tool_function", "arguments":"{\"input\":\"FUNCTION_INPUT_OK\"}", "status":"completed"}])
+        };
+        let response = json!({"id":"resp_function", "object":"response", "status":"completed", "output":output});
+        let (content_type, bytes) = if body["stream"] == true {
+            let terminal = json!({"type":"response.completed", "response":response});
+            (
+                "text/event-stream",
+                format!("event: response.completed\ndata: {terminal}\n\n"),
+            )
+        } else {
+            ("application/json", response.to_string())
+        };
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", content_type)
+            .body(Body::from(bytes))
+            .unwrap();
+    }
+
     if body["stream"] == true {
         let receipt =
             body["input"].as_array().unwrap().iter().find(|item| {
@@ -410,6 +439,68 @@ async fn configured_deepseek_compat_covers_routed_official_and_v41_aliases() {
     }
 
     let initial = json!([{"type":"message", "role":"user", "content":"echo"}]);
+    for stream in [false, true] {
+        let tools = json!([{"type":"function", "name":"echo_function", "parameters":{
+            "type":"object", "properties":{"input":{"type":"string"}}, "required":["input"]
+        }}]);
+        let response = client
+            .post(&endpoint)
+            .json(&json!({
+                "model":"gpt-5.5", "input":initial, "tools":tools, "stream":stream,
+                "reasoning":{"effort":"medium"}
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let raw = response.text().await.unwrap();
+        let response: Value = if stream {
+            serde_json::from_str::<Value>(
+                raw.lines()
+                    .find_map(|line| line.strip_prefix("data:"))
+                    .unwrap(),
+            )
+            .unwrap()["response"]
+                .clone()
+        } else {
+            serde_json::from_str(&raw).unwrap()
+        };
+        let call = &response["output"][0];
+        assert_eq!(
+            call["type"], "function_call",
+            "ordinary input parameter must preserve dispatch type: {call}"
+        );
+        assert_eq!(call["name"], "echo_function");
+        assert_eq!(call["call_id"], "call_function");
+        let arguments: Value = serde_json::from_str(call["arguments"].as_str().unwrap()).unwrap();
+        let result = arguments["input"].as_str().unwrap();
+        assert_eq!(result, "FUNCTION_INPUT_OK");
+        assert_one_attempt(&mut captures_rx);
+        let followup = client
+            .post(&endpoint)
+            .json(&json!({
+                "model":"gpt-5.5", "tools":tools, "stream":stream, "reasoning":{"effort":"medium"}, "input":[initial[0], call,
+                    {"type":"function_call_output", "call_id":"call_function", "output":result}]
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(followup.status(), StatusCode::OK);
+        let raw = followup.text().await.unwrap();
+        let response: Value = if stream {
+            serde_json::from_str::<Value>(
+                raw.lines()
+                    .find_map(|line| line.strip_prefix("data:"))
+                    .unwrap(),
+            )
+            .unwrap()["response"]
+                .clone()
+        } else {
+            serde_json::from_str(&raw).unwrap()
+        };
+        assert_eq!(response["output"][0]["content"][0]["text"], result);
+        assert_one_attempt(&mut captures_rx);
+    }
     let tools = json!([{"type":"custom", "name":"echo_custom"}]);
     let first = client
         .post(&endpoint)
