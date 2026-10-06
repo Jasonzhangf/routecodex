@@ -965,6 +965,47 @@ impl V3StableFrontConnection {
     }
 }
 
+/// Write one response frame to the client socket and record the transport write.
+///
+/// The Front write worker and its close flush share this single write path so the
+/// observation, closeout state, and error lane stay identical on both.
+async fn write_front_response_frame(
+    write_half: &mut OwnedWriteHalf,
+    observation: &V3ClientTransportObservation,
+    closeout_state: &V3FrontTransportCloseoutState,
+    frame: &[u8],
+    response_observation: &V3ClientResponseObservation,
+) -> bool {
+    if let Err(error) = write_half.write_all(frame).await {
+        observation.emit(
+            "write_failure",
+            response_observation,
+            None,
+            Some(error.to_string()),
+        );
+        closeout_state.close();
+        return false;
+    }
+    if let Err(error) = write_half.flush().await {
+        observation.emit(
+            "flush_failure",
+            response_observation,
+            None,
+            Some(error.to_string()),
+        );
+        closeout_state.close();
+        return false;
+    }
+    observation.wrote(response_observation, frame.len());
+    closeout_state.mark_transport_wrote();
+    true
+}
+
+/// Bound for writing the response frames that are already queued when a close
+/// signal arrives. The bound keeps a client that stopped reading from holding a
+/// restart replacement open.
+const V3_FRONT_CLOSE_FLUSH: std::time::Duration = std::time::Duration::from_millis(500);
+
 /// Production Front socket owner for the HTTP adapter.
 #[derive(Clone, Debug)]
 pub struct V3StableFrontSocket {
@@ -993,31 +1034,53 @@ impl V3StableFrontSocket {
         let worker_observation = Arc::clone(&observation);
         tokio::spawn(async move {
             let mut close_requested = false;
+            let mut flush_queued_before_close = false;
             loop {
                 tokio::select! {
                     biased;
                     close = &mut close_rx, if !close_requested => {
                         if close.is_ok() {
+                            flush_queued_before_close = true;
                             break;
                         }
                         close_requested = true;
                     },
                     frame = write_rx.recv() => {
                         let Some((frame, response_observation)) = frame else { break };
-                        if let Err(error) = write_half.write_all(&frame).await {
-                            worker_observation.emit("write_failure", &response_observation, None, Some(error.to_string()));
-                            worker_closeout_state.close();
+                        if !write_front_response_frame(
+                            &mut write_half,
+                            &worker_observation,
+                            &worker_closeout_state,
+                            &frame,
+                            &response_observation,
+                        )
+                        .await
+                        {
                             break;
                         }
-                        if let Err(error) = write_half.flush().await {
-                            worker_observation.emit("flush_failure", &response_observation, None, Some(error.to_string()));
-                            worker_closeout_state.close();
-                            break;
-                        }
-                        worker_observation.wrote(&response_observation, frame.len());
-                        worker_closeout_state.mark_transport_wrote();
                     }
                 }
+            }
+            if flush_queued_before_close {
+                // The close branch is biased, so a close signal would otherwise drop
+                // the response tail that reached the write queue but not the socket.
+                // Flush those frames under a bound, then close.
+                let _ = tokio::time::timeout(V3_FRONT_CLOSE_FLUSH, async {
+                    while let Ok((frame, response_observation)) = write_rx.try_recv() {
+                        if !write_front_response_frame(
+                            &mut write_half,
+                            &worker_observation,
+                            &worker_closeout_state,
+                            &frame,
+                            &response_observation,
+                        )
+                        .await
+                        {
+                            break;
+                        }
+                    }
+                })
+                .await;
             }
             let _ = write_half.shutdown().await;
             worker_observation.emit("socket_closed", &worker_observation.current(), None, None);

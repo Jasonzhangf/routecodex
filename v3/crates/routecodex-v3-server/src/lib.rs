@@ -1,3 +1,4 @@
+mod client_sse_transport;
 mod client_transport_observation;
 mod compaction_request;
 mod console;
@@ -130,6 +131,7 @@ use routecodex_v3_sse::{
     build_v3_sse_transport_out_04_keepalive_comment, SseField, SseIncrementalDecoder,
     SseTransportLimits,
 };
+use client_sse_transport::accept_v3_client_sse_transport;
 use serde_json::{json, Map, Value};
 use session_admission::{
     hold_response_body_admission_permit, hold_response_body_request_activity_permit,
@@ -146,6 +148,7 @@ use std::io::Read as _;
 use std::io::Write as _;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -273,6 +276,14 @@ pub fn build_v3_server_startup_01_listener_set_from_config_05(
     }
 }
 
+/// Bounded window an exec replacement gives the client responses that are
+/// already in flight.
+///
+/// The bound keeps the replacement finite when a provider stream or a slow
+/// client would otherwise hold the process open; every remaining in-flight
+/// transport is still closed by `prepare_for_exec` after the window.
+const V3_EXEC_INFLIGHT_DRAIN: std::time::Duration = std::time::Duration::from_secs(5);
+
 impl V3ServerAggregateHandle {
     pub fn front_transport_broker(&self) -> &V3FrontTransportBroker {
         &self.front_transport_broker
@@ -304,11 +315,25 @@ impl V3ServerAggregateHandle {
         codex_sample_persist_failures
     }
 
-    /// Stop accepting new listener work without waiting for active client
-    /// bodies. Active bodies belong to Front/Transport handoff and must be
-    /// checkpointed/reattached by the lifecycle owner; waiting here would
-    /// deadlock restart on a provider stream that is already being replaced.
+    /// Stop accepting new listener work, then give client responses that are
+    /// already in flight a bounded window to finish before their transports are
+    /// closed.
+    ///
+    /// Active bodies belong to Front/Transport handoff and must be
+    /// checkpointed/reattached by the lifecycle owner; waiting without a bound
+    /// would deadlock restart on a provider stream that is already being
+    /// replaced.
     pub async fn prepare_for_exec(mut self) -> V3ServerExecPreparation {
+        for listener in &mut self.listeners {
+            if let Some(shutdown) = listener.shutdown.take() {
+                let _ = shutdown.send(());
+            }
+        }
+        let _ = tokio::time::timeout(
+            V3_EXEC_INFLIGHT_DRAIN,
+            self.request_activity_gate.wait_for_quiescence(),
+        )
+        .await;
         let checkpoints = self.front_transport_broker.freeze(Instant::now());
         // The current exec path does not transfer accepted client descriptors
         // or Hyper connection tasks. Close those transports before replacing
@@ -323,12 +348,6 @@ impl V3ServerAggregateHandle {
         if let Some(shutdown) = self.probe_shutdown.take() {
             let _ = shutdown.send(());
         }
-        for listener in &mut self.listeners {
-            if let Some(shutdown) = listener.shutdown.take() {
-                let _ = shutdown.send(());
-            }
-        }
-        let _ = &self.request_activity_gate;
         V3ServerExecPreparation {
             front_checkpoints: checkpoints,
             codex_sample_persist_failures,
@@ -1114,20 +1133,42 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
         None
     };
     let request_activity_permit = state.request_activity_gate.admit();
-    let response = pending_endpoint_after_responses_admission(
-        state,
-        front_connection_identity,
-        request_headers,
-        method,
-        path,
-        started_at,
-        entry_protocol,
-        execution_mode,
-        pending_owner_symbol,
-        request_purpose,
-        payload,
-    )
-    .await;
+    // The Runtime owns full-attempt buffering, so no provider payload byte is
+    // projected before the runtime outcome exists. The Server owns the client
+    // transport: a client that requested SSE must not stay on a silent
+    // connection for longer than one keepalive interval while the runtime
+    // buffers the attempt.
+    let client_sse_channel = v3_request_wants_sse(&request_headers, &payload)
+        .then_some(Duration::from_millis(state.server.http_sse_keepalive_ms))
+        .filter(|interval| !interval.is_zero());
+    let runtime_outcome: Pin<Box<dyn Future<Output = Response<Body>> + Send>> =
+        Box::pin(pending_endpoint_after_responses_admission(
+            Arc::clone(&state),
+            front_connection_identity,
+            request_headers,
+            method,
+            path,
+            started_at,
+            entry_protocol,
+            execution_mode,
+            pending_owner_symbol,
+            request_purpose,
+            payload,
+        ));
+    let response = match client_sse_channel {
+        Some(keepalive_interval) => {
+            let outcome_state = Arc::clone(&state);
+            accept_v3_client_sse_transport(
+                runtime_outcome,
+                Box::new(move |outcome| {
+                    commit_model_transport_outcome(&outcome_state, front_connection_identity, outcome)
+                }),
+                keepalive_interval,
+            )
+            .await
+        }
+        None => runtime_outcome.await,
+    };
     let response = hold_response_body_request_activity_permit(response, request_activity_permit);
     match admission_permit {
         Some(permit) => hold_response_body_admission_permit(response, permit),
