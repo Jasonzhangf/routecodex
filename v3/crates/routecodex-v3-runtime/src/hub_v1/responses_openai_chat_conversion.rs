@@ -628,6 +628,19 @@ fn project_v3_openai_chat_tool_call_with_successful_attempt(
         let input = match call.representation {
             V3OpenAIChatToolCallRepresentation::Custom => call.arguments.to_string(),
             V3OpenAIChatToolCallRepresentation::Function => {
+                if mapping.emitted_kind != "function" {
+                    // The declaration reached the provider natively, so this
+                    // function call is not this runtime's free-form envelope.
+                    // Keep the provider-representable call; the free-form
+                    // response projection owns the declared custom identity.
+                    return Ok(current_representable_openai_chat_tool_call(
+                        call.call_id,
+                        call.name,
+                        call.arguments,
+                        call.namespace,
+                        false,
+                    ));
+                }
                 parse_v3_openai_chat_custom_tool_input(call.name, call.arguments)?
             }
         };
@@ -768,6 +781,35 @@ pub(crate) fn declared_tool_kind_for_emitted_name(
     })
 }
 
+/// True when the successful attempt emitted this declaration to the provider as
+/// a flattened function carrying the free-form `{"input": ...}` envelope. A
+/// declared custom tool is emitted that way for every provider protocol except
+/// a native Responses custom declaration, and only that flattened form holds
+/// this runtime's envelope inside the provider's `arguments`/`input` bytes.
+pub(crate) fn declared_custom_tool_emitted_as_function_envelope(
+    view: &ResponseProjectionView,
+    emitted_name: &str,
+) -> bool {
+    let Some(mapping) = view
+        .attempt()
+        .declarations
+        .tool_mappings
+        .iter()
+        .find(|mapping| mapping.emitted_name.as_deref() == Some(emitted_name))
+    else {
+        return false;
+    };
+    if mapping.emitted_kind != "function" {
+        return false;
+    }
+    view.request_inverse_context()
+        .tool_declarations
+        .iter()
+        .any(|declaration| {
+            declaration.record_id == mapping.declaration_record_id && declaration.kind == "custom"
+        })
+}
+
 /// Invert one already-normalized Responses `output[]` item from the successful
 /// attempt view. Only identity (`type`/`name`/`namespace`) and the declared
 /// argument envelope change; `call_id`/`id` and all other siblings stay intact.
@@ -859,10 +901,18 @@ fn restore_v3_responses_partial_item_identity(
             object.remove("namespace");
         }
     }
-    if matches!(
-        representation,
-        V3OpenAIChatToolCallRepresentation::Custom
-    ) {
+    // The client-facing type is the declared contract, not the provider wire
+    // representation: a declared custom tool that reached the provider as a
+    // flattened function still carries this runtime's free-form `{"input": ...}`
+    // envelope, so a partial provider `function_call` is already a client
+    // custom call.
+    let custom_client = match representation {
+        V3OpenAIChatToolCallRepresentation::Custom => true,
+        V3OpenAIChatToolCallRepresentation::Function => {
+            declaration.kind == "custom" && mapping.emitted_kind == "function"
+        }
+    };
+    if custom_client {
         object.insert(
             "type".to_string(),
             Value::String("custom_tool_call".to_string()),

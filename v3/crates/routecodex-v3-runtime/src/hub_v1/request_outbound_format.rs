@@ -12,7 +12,9 @@ use super::request_outbound_builtin_tool_projection::project_openai_chat_provide
 use super::request_outbound_builtin_tool_projection::project_openai_responses_hosted_web_search_options_for_selected_target;
 use super::request_outbound_builtin_tool_projection::promote_tool_search_output_tools_to_provider_tools;
 use super::request_outbound_builtin_tool_projection::provider_tool_declaration_sources;
-use super::request_outbound_declaration_emission::rewrite_direct_history_call_names;
+use super::request_outbound_declaration_emission::{
+    emitted_declaration_kinds, rewrite_direct_history_call_names,
+};
 use super::request_outbound_declaration_emission::StandardOutboundDeclarationObserver;
 use super::request_outbound_metadata::{
     project_openai_chat_reasoning_context_policy,
@@ -419,9 +421,10 @@ fn build_v3_openai_responses_request_from_chat_canonical_with_drops_and_emission
     )? {
         responses_payload.insert("tools".to_string(), tools);
     }
-    // The same declaration traversal converts historical call names to the
-    // emitted flat provider names. The provider wire no longer rewrites
-    // history, and declaration-less convention guessing is not performed.
+    // The same declaration traversal converts historical calls to the emitted
+    // flat provider names and representation. The provider wire no longer
+    // rewrites history, and declaration-less convention guessing is not
+    // performed.
     let mut namespace_names = std::collections::HashMap::new();
     if let Some(tools) = payload.get("tools").and_then(Value::as_array) {
         for tool in tools {
@@ -430,8 +433,15 @@ fn build_v3_openai_responses_request_from_chat_canonical_with_drops_and_emission
             }
         }
     }
+    let emitted_kinds = emitted_declaration_kinds(
+        responses_payload
+            .get("tools")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]),
+    );
     let mut responses_payload = Value::Object(responses_payload);
-    rewrite_direct_history_call_names(&mut responses_payload, &namespace_names);
+    rewrite_direct_history_call_names(&mut responses_payload, &namespace_names, &emitted_kinds);
     Ok((
         normalize_responses_payload_for_provider_standard(&responses_payload)?,
         drops,

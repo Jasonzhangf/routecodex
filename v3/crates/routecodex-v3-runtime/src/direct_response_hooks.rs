@@ -102,9 +102,134 @@ fn rewrite_direct_sse_success_frame(
 struct DirectSseResponsesItemIdentities {
     by_item_id: std::collections::HashMap<String, String>,
     by_output_index: std::collections::HashMap<u64, String>,
+    freeform_input: std::collections::HashMap<String, DirectFreeformInputCursor>,
+}
+
+/// Incremental decoder for the emitted free-form custom-tool envelope
+/// `{"input": "<raw>"}`. A provider may split that JSON text at any byte, so the
+/// hook keeps the raw bytes seen so far and the decoded raw-string prefix it has
+/// already published to the client.
+#[derive(Default)]
+struct DirectFreeformInputCursor {
+    raw: String,
+    published: usize,
+}
+
+impl DirectFreeformInputCursor {
+    /// Append one raw provider fragment and return the newly decoded raw
+    /// characters that are safe to publish as the client delta.
+    fn advance(&mut self, fragment: &str) -> String {
+        self.raw.push_str(fragment);
+        let decoded = decode_direct_freeform_input_prefix(&self.raw).unwrap_or_default();
+        let published = self.published.min(decoded.chars().count());
+        let delta: String = decoded.chars().skip(published).collect();
+        self.published = published + delta.chars().count();
+        delta
+    }
+}
+
+/// Decode the free-form string already available in a possibly truncated
+/// provider arguments payload. The emitted envelope is `{"input": "..."}`, but a
+/// provider may also return a bare JSON string or ignore the envelope and return
+/// the raw text itself, exactly as `parse_v3_openai_chat_custom_tool_input`
+/// accepts those shapes.
+fn decode_direct_freeform_input_prefix(raw: &str) -> Option<String> {
+    let trimmed = raw.trim_start();
+    match trimmed.as_bytes().first()? {
+        b'"' => decode_direct_json_string_prefix(&trimmed[1..]),
+        b'{' => {
+            let key = trimmed.find("\"input\"")?;
+            let rest = trimmed.get(key + "\"input\"".len()..)?.trim_start();
+            let rest = rest.strip_prefix(':')?.trim_start();
+            decode_direct_json_string_prefix(rest.strip_prefix('"')?)
+        }
+        _ => Some(trimmed.to_string()),
+    }
+}
+
+/// Decode the JSON string body prefix available in `body`. The body may end in
+/// the middle of the string, of an escape, or of a UTF-16 surrogate pair; only
+/// characters that are already unambiguous are returned.
+fn decode_direct_json_string_prefix(body: &str) -> Option<String> {
+    let mut decoded = String::new();
+    let mut chars = body.chars();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' => return Some(decoded),
+            '\\' => {
+                let Some(escape) = chars.next() else {
+                    return Some(decoded);
+                };
+                match escape {
+                    '"' => decoded.push('"'),
+                    '\\' => decoded.push('\\'),
+                    '/' => decoded.push('/'),
+                    'b' => decoded.push('\u{0008}'),
+                    'f' => decoded.push('\u{000C}'),
+                    'n' => decoded.push('\n'),
+                    'r' => decoded.push('\r'),
+                    't' => decoded.push('\t'),
+                    'u' => {
+                        let hex: String = chars.by_ref().take(4).collect();
+                        if hex.len() < 4 {
+                            return Some(decoded);
+                        }
+                        let Ok(code) = u16::from_str_radix(&hex, 16) else {
+                            return Some(decoded);
+                        };
+                        if (0xD800..=0xDBFF).contains(&code) {
+                            let mut pair = chars.clone();
+                            if pair.next() != Some('\\') || pair.next() != Some('u') {
+                                return Some(decoded);
+                            }
+                            let low_hex: String = pair.by_ref().take(4).collect();
+                            if low_hex.len() < 4 {
+                                return Some(decoded);
+                            }
+                            let Ok(low) = u16::from_str_radix(&low_hex, 16) else {
+                                return Some(decoded);
+                            };
+                            let Some(combined) =
+                                char::decode_utf16([code, low]).next().and_then(Result::ok)
+                            else {
+                                return Some(decoded);
+                            };
+                            decoded.push(combined);
+                            chars = pair;
+                        } else {
+                            let Some(decoded_char) = char::from_u32(u32::from(code)) else {
+                                return Some(decoded);
+                            };
+                            decoded.push(decoded_char);
+                        }
+                    }
+                    _ => return Some(decoded),
+                }
+            }
+            _ => decoded.push(ch),
+        }
+    }
+    Some(decoded)
 }
 
 impl DirectSseResponsesItemIdentities {
+    fn freeform_input_cursor(&mut self, key: String) -> &mut DirectFreeformInputCursor {
+        self.freeform_input.entry(key).or_default()
+    }
+
+    fn event_freeform_key(value: &serde_json::Value) -> Option<String> {
+        value
+            .get("item_id")
+            .and_then(serde_json::Value::as_str)
+            .map(|item_id| format!("item:{item_id}"))
+            .or_else(|| {
+                value
+                    .get("output_index")
+                    .and_then(serde_json::Value::as_u64)
+                    .map(|output_index| format!("index:{output_index}"))
+            })
+    }
+
     fn observe_item(&mut self, item: &serde_json::Value) {
         let Some(name) = item.get("name").and_then(serde_json::Value::as_str) else {
             return;
@@ -223,7 +348,7 @@ fn restore_direct_responses_sse_item(
 fn restore_direct_responses_sse_argument_identity(
     value: &mut serde_json::Value,
     view: &crate::operation_runner::ResponseProjectionView,
-    identities: &DirectSseResponsesItemIdentities,
+    identities: &mut DirectSseResponsesItemIdentities,
     complete: bool,
 ) -> Result<(), crate::execution_control::V3AttemptStoreError> {
     let Some(emitted_name) = identities.emitted_name_for_event(value) else {
@@ -281,6 +406,23 @@ fn restore_direct_responses_sse_argument_identity(
                 })?;
                 value.as_object_mut().unwrap().remove("arguments");
                 value["input"] = serde_json::Value::String(input);
+            } else if crate::hub_v1::declared_custom_tool_emitted_as_function_envelope(
+                view,
+                &emitted_name,
+            ) {
+                // The provider streams this runtime's free-form envelope inside
+                // `function_call_arguments` deltas. Publish the raw free-form
+                // characters that are already unambiguous, not the envelope JSON.
+                if let Some(fragment) = value
+                    .get("delta")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                {
+                    if let Some(key) = DirectSseResponsesItemIdentities::event_freeform_key(value) {
+                        let decoded = identities.freeform_input_cursor(key).advance(&fragment);
+                        value["delta"] = serde_json::Value::String(decoded);
+                    }
+                }
             }
             value["name"] = serde_json::Value::String(original_name);
         }
@@ -422,11 +564,33 @@ fn rewrite_direct_sse_chat_success_event(
                         None => continue,
                     },
                 };
-                let custom_input = call
+                let custom_input = match call
                     .get("custom")
                     .and_then(|custom| custom.get("input"))
                     .and_then(serde_json::Value::as_str)
-                    .map(str::to_owned);
+                    .map(str::to_owned)
+                {
+                    Some(input) => Some(input),
+                    None => call
+                        .get("function")
+                        .and_then(|function| function.get("arguments"))
+                        .and_then(serde_json::Value::as_str)
+                        .filter(|_| {
+                            crate::hub_v1::declared_custom_tool_emitted_as_function_envelope(
+                                view,
+                                &emitted_name,
+                            )
+                        })
+                        .map(str::to_owned)
+                        .map(|arguments| {
+                            // The provider streams this runtime's free-form
+                            // envelope inside `function.arguments` deltas. Publish
+                            // the raw free-form characters already unambiguous.
+                            identities
+                                .freeform_input_cursor(format!("chat:{container}:{index}"))
+                                .advance(&arguments)
+                        }),
+                };
                 crate::hub_v1::restore_v3_chat_streamed_tool_call_identity_with_successful_attempt(
                     call,
                     view,

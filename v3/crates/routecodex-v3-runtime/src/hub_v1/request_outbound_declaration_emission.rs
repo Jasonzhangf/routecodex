@@ -186,6 +186,7 @@ pub(crate) fn project_direct_provider_request_declarations(
         }))?
     };
     let mut namespace_names = std::collections::HashMap::new();
+    let mut emitted_kinds = std::collections::HashMap::new();
     if let Some(tools) = body.get("tools").and_then(Value::as_array).cloned() {
         let mut emitted: Vec<Value> = Vec::with_capacity(tools.len());
         let mut emitted_indexes = std::collections::HashMap::new();
@@ -244,47 +245,184 @@ pub(crate) fn project_direct_provider_request_declarations(
                 }
             }
         }
+        emitted_kinds = emitted_declaration_kinds(&emitted);
         projected["tools"] = Value::Array(emitted);
     }
-    rewrite_direct_history_call_names(&mut projected, &namespace_names);
+    rewrite_direct_history_call_names(&mut projected, &namespace_names, &emitted_kinds);
     let mut actual_attempt = attempt.clone();
     actual_attempt.declarations.tool_mappings = observer.into_mappings();
     Ok((projected, actual_attempt))
 }
 
-/// Convert historical call names in the already-projected provider body to the
-/// flat provider names emitted by the same declaration traversal. A call may
-/// carry its namespace either as a sibling `namespace` field (native Responses)
-/// or encoded in a dotted name (canonical Chat custom namespace child). Only the
-/// names actually emitted by the current declaration traversal are rewritten;
-/// no convention or name-shape guessing is performed.
+/// The emitted provider declaration kind for every emitted provider name.
+///
+/// A declared custom tool reaches the provider either as a native custom
+/// declaration or as a flattened function that carries the free-form
+/// `{"input": ...}` envelope. The emitted declaration decides which history form
+/// the provider accepts, so the kind is read from the declaration the same
+/// traversal actually emitted, never from a name shape or a convention.
+pub(super) fn emitted_declaration_kinds(
+    tools: &[Value],
+) -> std::collections::HashMap<String, String> {
+    let mut kinds = std::collections::HashMap::new();
+    for tool in tools {
+        let kind = tool
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("function");
+        let name = tool
+            .get("name")
+            .or_else(|| tool.pointer("/function/name"))
+            .and_then(Value::as_str);
+        if let Some(name) = name {
+            kinds.insert(name.to_string(), kind.to_string());
+        }
+    }
+    kinds
+}
+
+/// Convert historical calls in the already-projected provider body to the flat
+/// provider names and representation emitted by the same declaration traversal.
+/// A call may carry its namespace either as a sibling `namespace` field (native
+/// Responses) or encoded in a dotted name (canonical Chat custom namespace
+/// child). Only the names actually emitted by the current declaration traversal
+/// are rewritten; no convention or name-shape guessing is performed.
+///
+/// A declared custom call whose provider declaration was emitted as a flattened
+/// function must reach the provider in that function form: the free-form text
+/// moves into the `{"input": ...}` arguments envelope, which is the exact
+/// inverse of restoring the client's `custom_tool_call` identity on the response
+/// side.
 pub(super) fn rewrite_direct_history_call_names(
     body: &mut Value,
     names: &std::collections::HashMap<String, String>,
+    emitted_kinds: &std::collections::HashMap<String, String>,
 ) {
-    fn rewrite_name(object: &mut Map<String, Value>, names: &std::collections::HashMap<String, String>) {
+    /// Resolve the emitted provider name for one call from its own name and
+    /// namespace. An unmapped call keeps its name.
+    fn emitted_name(
+        name: &str,
+        namespace: Option<&str>,
+        names: &std::collections::HashMap<String, String>,
+    ) -> String {
+        let key = match namespace {
+            Some(namespace) if !namespace.is_empty() => format!("{namespace}.{name}"),
+            _ => name.to_string(),
+        };
+        names.get(&key).cloned().unwrap_or_else(|| name.to_string())
+    }
+
+    /// The provider arguments envelope of a flattened free-form custom tool.
+    fn flattened_arguments(
+        emitted: &str,
+        input: &Value,
+        emitted_kinds: &std::collections::HashMap<String, String>,
+    ) -> Option<String> {
+        if emitted_kinds.get(emitted).map(String::as_str) != Some("function") {
+            return None;
+        }
+        serde_json::to_string(&serde_json::json!({ "input": input })).ok()
+    }
+
+    fn rewrite_name(
+        object: &mut Map<String, Value>,
+        names: &std::collections::HashMap<String, String>,
+    ) {
         let Some(name) = object.get("name").and_then(Value::as_str).map(str::to_string) else {
             return;
         };
-        let key = match object.get("namespace").and_then(Value::as_str) {
-            Some(namespace) if !namespace.is_empty() => format!("{namespace}.{name}"),
-            _ => name.clone(),
-        };
-        if let Some(mapped) = names.get(&key) {
-            if mapped != &name {
-                object.insert("name".to_string(), Value::String(mapped.clone()));
-            }
+        let namespace = object
+            .get("namespace")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let emitted = emitted_name(&name, namespace.as_deref(), names);
+        if emitted != name {
+            object.insert("name".to_string(), Value::String(emitted));
         }
     }
+
+    fn rewrite_custom_call(
+        object: &mut Map<String, Value>,
+        names: &std::collections::HashMap<String, String>,
+        emitted_kinds: &std::collections::HashMap<String, String>,
+    ) {
+        let Some(name) = object.get("name").and_then(Value::as_str).map(str::to_string) else {
+            return;
+        };
+        let namespace = object
+            .get("namespace")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let emitted = emitted_name(&name, namespace.as_deref(), names);
+        if let Some(input) = object.get("input").cloned() {
+            if let Some(arguments) = flattened_arguments(&emitted, &input, emitted_kinds) {
+                object.remove("input");
+                object.insert(
+                    "type".to_string(),
+                    Value::String("function_call".to_string()),
+                );
+                object.insert("arguments".to_string(), Value::String(arguments));
+            }
+        }
+        if emitted != name {
+            object.insert("name".to_string(), Value::String(emitted));
+        }
+    }
+
+    /// A canonical Chat custom call is `{id, type: "custom", custom: {name,
+    /// namespace?, input}}`. When its emitted declaration is a flattened
+    /// function, the call becomes the provider's function call carrying the
+    /// envelope; otherwise the name is still reconciled with the emission.
+    fn rewrite_chat_custom_call(
+        tool_call: &mut Value,
+        names: &std::collections::HashMap<String, String>,
+        emitted_kinds: &std::collections::HashMap<String, String>,
+    ) {
+        let Some(custom) = tool_call.get("custom").and_then(Value::as_object) else {
+            return;
+        };
+        let Some(name) = custom.get("name").and_then(Value::as_str).map(str::to_string) else {
+            return;
+        };
+        let namespace = custom
+            .get("namespace")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let emitted = emitted_name(&name, namespace.as_deref(), names);
+        let Some(input) = custom.get("input").cloned() else {
+            return;
+        };
+        let Some(arguments) = flattened_arguments(&emitted, &input, emitted_kinds) else {
+            return;
+        };
+        let Some(object) = tool_call.as_object_mut() else {
+            return;
+        };
+        let mut function = Map::new();
+        function.insert("name".to_string(), Value::String(emitted));
+        if let Some(namespace) = namespace {
+            function.insert("namespace".to_string(), Value::String(namespace));
+        }
+        function.insert("arguments".to_string(), Value::String(arguments));
+        object.remove("custom");
+        object.insert("type".to_string(), Value::String("function".to_string()));
+        object.insert("function".to_string(), Value::Object(function));
+    }
+
     if let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) {
         for item in input {
-            if matches!(
-                item.get("type").and_then(Value::as_str),
-                Some("function_call" | "custom_tool_call" | "tool_call" | "tool_use")
-            ) {
-                if let Some(object) = item.as_object_mut() {
-                    rewrite_name(object, names);
+            match item.get("type").and_then(Value::as_str) {
+                Some("function_call" | "tool_call" | "tool_use") => {
+                    if let Some(object) = item.as_object_mut() {
+                        rewrite_name(object, names);
+                    }
                 }
+                Some("custom_tool_call") => {
+                    if let Some(object) = item.as_object_mut() {
+                        rewrite_custom_call(object, names, emitted_kinds);
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -292,13 +430,19 @@ pub(super) fn rewrite_direct_history_call_names(
         for message in messages {
             if let Some(tool_calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut) {
                 for tool_call in tool_calls {
-                    if tool_call.get("type").and_then(Value::as_str) == Some("function") {
-                        if let Some(function) = tool_call
-                            .get_mut("function")
-                            .and_then(Value::as_object_mut)
-                        {
-                            rewrite_name(function, names);
+                    match tool_call.get("type").and_then(Value::as_str) {
+                        Some("function") => {
+                            if let Some(function) = tool_call
+                                .get_mut("function")
+                                .and_then(Value::as_object_mut)
+                            {
+                                rewrite_name(function, names);
+                            }
                         }
+                        Some("custom") => {
+                            rewrite_chat_custom_call(tool_call, names, emitted_kinds);
+                        }
+                        _ => {}
                     }
                 }
             }
