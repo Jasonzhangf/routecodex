@@ -13,9 +13,8 @@ use routecodex_v3_error::{
 };
 use routecodex_v3_provider_responses::{
     build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency,
-    ReqwestResponsesTransport, ResponsesTransport, V3ProviderError, V3ProviderRequestHeader,
-    V3ProviderSseStream, V3ResponsesProviderTarget, V3ResponsesStreamIntent,
-    V3Transport13ResponsesHttpRequest,
+    ResponsesTransport, V3ProviderError, V3ProviderRequestHeader, V3ProviderSseStream,
+    V3ResponsesProviderTarget, V3ResponsesStreamIntent, V3Transport13ResponsesHttpRequest,
 };
 use serde_json::Value;
 use std::collections::VecDeque;
@@ -138,7 +137,7 @@ pub async fn execute_v3_gemini_relay_runtime_with_default_transport(
     manifest: &V3Config05ManifestPublished,
     input: V3GeminiRelayRuntimeInput,
 ) -> Result<V3GeminiRelayRuntimeOutput, V3GeminiRelayRuntimeError> {
-    execute_v3_gemini_relay_runtime(manifest, input, &ReqwestResponsesTransport::default()).await
+    execute_v3_gemini_relay_runtime(manifest, input, crate::default_responses_transport()).await
 }
 
 pub async fn execute_v3_gemini_relay_runtime_with_default_transport_provider_health(
@@ -149,7 +148,7 @@ pub async fn execute_v3_gemini_relay_runtime_with_default_transport_provider_hea
     execute_v3_gemini_relay_runtime_with_provider_health(
         manifest,
         input,
-        &ReqwestResponsesTransport::default(),
+        crate::default_responses_transport(),
         provider_health,
     )
     .await

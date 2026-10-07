@@ -1437,8 +1437,8 @@ resources:
     owner_crate: routecodex-v3-lifecycle
     owner_node: V3Lifecycle03OperationLocked
     identity: [instanceId, operation]
-    allowed_writers: [acquire_operation_lock]
-    allowed_readers: [V3ManagedLifecycle::start, V3ManagedLifecycle::stop, V3ManagedLifecycle::restart]
+    allowed_writers: [acquire_operation_lock, OperationLock::drop]
+    allowed_readers: [V3ManagedLifecycle::start, V3ManagedLifecycle::stop, V3ManagedLifecycle::restart, OperationLock::drop]
     forbidden_writers: [routecodex-v3-cli, routecodex-v3-server, routecodex-v3-runtime]
     may_enter_provider_body: false
     may_enter_client_body: false

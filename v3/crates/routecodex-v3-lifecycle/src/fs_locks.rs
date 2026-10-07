@@ -115,20 +115,21 @@ pub(crate) fn acquire_operation_lock(
 ) -> Result<OperationLock, V3LifecycleError> {
     ensure_private_dir(instance_dir)?;
     let path = instance_dir.join("lifecycle.lock");
-    let mut file = OpenOptions::new()
+    let file = OpenOptions::new()
+        .read(true)
         .write(true)
-        .create_new(true)
+        .create(true)
         .mode(0o600)
-        .open(&path)
-        .map_err(|error| {
-            if error.kind() == std::io::ErrorKind::AlreadyExists {
-                V3LifecycleError::OperationLocked(operation.to_string())
-            } else {
-                V3LifecycleError::Io(error)
-            }
-        })?;
-    writeln!(file, "operation={operation} pid={}", std::process::id())?;
-    Ok(OperationLock { path })
+        .open(&path)?;
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        let error = std::io::Error::last_os_error();
+        return if error.kind() == std::io::ErrorKind::WouldBlock {
+            Err(V3LifecycleError::OperationLocked(operation.to_string()))
+        } else {
+            Err(V3LifecycleError::Io(error))
+        };
+    }
+    Ok(OperationLock { file })
 }
 
 pub(crate) fn ensure_private_dir(path: &Path) -> Result<(), V3LifecycleError> {

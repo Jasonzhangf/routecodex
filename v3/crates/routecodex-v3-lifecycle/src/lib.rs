@@ -12,6 +12,7 @@ use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::io::AsRawFd;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -269,12 +270,14 @@ pub struct V3ManagedLifecycle {
 }
 #[derive(Debug)]
 struct OperationLock {
-    path: PathBuf,
+    file: File,
 }
 
 impl Drop for OperationLock {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
+        unsafe {
+            libc::flock(self.file.as_raw_fd(), libc::LOCK_UN);
+        }
     }
 }
 

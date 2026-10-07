@@ -1,0 +1,12 @@
+{
+ "id": "v3.lifecycle_operation_lock_recovery",
+ "version": "2",
+ "inputs": [{"id": "operation-request", "schema": "Object"}],
+ "nodes": [
+  {"id": "acquire_kernel_lock", "operator": "routecodex.v3.lifecycle.acquire_operation_lock", "operator_version": "1", "inputs": ["operation-request"], "output": {"id": "locked-operation", "schema": "Object"}, "input_selector": {"include": [], "exclude": [], "predicate": null}, "output_selector": {"include": [], "exclude": [], "predicate": null}, "iterator": "Whole", "resources": {"reads": [], "writes": ["v3.lifecycle.operation_lock"]}},
+  {"id": "execute_owned_operation", "operator": "routecodex.v3.lifecycle.V3ManagedLifecycle::start", "operator_version": "1", "inputs": ["locked-operation"], "output": {"id": "operation-disposition", "schema": "Object"}, "input_selector": {"include": [], "exclude": [], "predicate": null}, "output_selector": {"include": [], "exclude": [], "predicate": null}, "iterator": "Whole", "resources": {"reads": ["v3.lifecycle.operation_lock"], "writes": []}},
+  {"id": "release_kernel_lock", "operator": "routecodex.v3.lifecycle.OperationLock::drop", "operator_version": "1", "inputs": ["operation-disposition"], "output": {"id": "operation-receipt", "schema": "Object"}, "input_selector": {"include": [], "exclude": [], "predicate": null}, "output_selector": {"include": [], "exclude": [], "predicate": null}, "iterator": "Whole", "resources": {"reads": ["v3.lifecycle.operation_lock"], "writes": ["v3.lifecycle.operation_lock"]}}
+ ],
+ "edges": [{"from": "acquire_kernel_lock", "to": "execute_owned_operation", "arc_id": "locked-operation"}, {"from": "execute_owned_operation", "to": "release_kernel_lock", "arc_id": "operation-disposition"}],
+ "outputs": ["operation-receipt"]
+}
