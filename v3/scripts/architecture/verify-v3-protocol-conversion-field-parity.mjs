@@ -29,6 +29,7 @@ const paths = {
   requestOutboundMetadata: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs',
   requestOutboundFormatExtraTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs',
   providerReqCompat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
+  providerReqReasoningEffort: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_reasoning_effort.rs',
   directPassthroughTests: 'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   responsesRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   responsesRuntimeInner: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
@@ -476,21 +477,16 @@ for (const phrase of [
   '"metadata" | "client_metadata" | "prompt_cache_key" | "store" | "text"',
 ]) requireText(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, phrase);
 forbid(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, [/MetadataCenter|metadata_center|debug_snapshot|runtime_control/i, /responses_reasoning_effort_as_anthropic_budget/, /responses_reasoning_policy_as_anthropic_system_marker/, /<routecodex_reasoning_request/, /unwrap_or_else\(\|\|\s*\{?\s*responses_reasoning_effort_as_anthropic_budget/s]);
-const targetReasoningEffortProjection = functionSlice(
-  text.providerReqCompat,
-  paths.providerReqCompat,
-  'fn project_reasoning_effort_for_selected_target',
-  'fn build_v3_provider_standard_protocol_payload_from_req07',
-);
+const targetReasoningEffortProjection = text.providerReqReasoningEffort;
 for (const phrase of [
-  'project_reasoning_effort_for_selected_target',
+  'fn project_reasoning_effort_for_selected_target',
   '"responses:deepseek-console-go"',
   'serde_json::json!({"type":"adaptive"})',
   '"xhigh" | "max" => "max"',
   '"none" | "minimal" | "low" | "medium" | "high" | "xhigh" => effort.as_str()',
   '_ => "medium"',
-]) requireText(targetReasoningEffortProjection, `${paths.providerReqCompat}::target_protocol_reasoning_effort_projection`, phrase);
-forbid(targetReasoningEffortProjection, `${paths.providerReqCompat}::target_protocol_reasoning_effort_projection`, [/thinking_budget|budget_tokens|MetadataCenter|metadata_center/i]);
+]) requireText(targetReasoningEffortProjection, `${paths.providerReqReasoningEffort}::target_protocol_reasoning_effort_projection`, phrase);
+forbid(targetReasoningEffortProjection, `${paths.providerReqReasoningEffort}::target_protocol_reasoning_effort_projection`, [/thinking_budget|budget_tokens|MetadataCenter|metadata_center/i]);
 forbid(text.anthropicCodec, `${paths.anthropicCodec}::registered_anthropic_system_extension`, [/anthropic_entry_system/]);
 for (const phrase of ['responses_metadata_as_anthropic_metadata', 'pub(super) fn validate_responses_cache_and_store_for_anthropic(', 'pub(super) fn reject_responses_reasoning_summary_for_anthropic(', 'pub(super) fn project_responses_text_as_anthropic_output_config(', 'extension.get("prompt_cache_key")', 'extension.get("store")', 'Some(false) => {}', 'Some(true) => {', 'matches!(value, "auto" | "concise" | "detailed")']) requireText(text.anthropicRequestFieldProjection, paths.anthropicRequestFieldProjection, phrase);
 for (const phrase of [

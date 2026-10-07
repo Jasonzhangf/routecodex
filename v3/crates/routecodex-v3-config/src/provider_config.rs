@@ -18,6 +18,39 @@ use std::sync::LazyLock;
 /// provider per-request 总超时默认值（毫秒）：60s。
 pub(crate) const DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS: u64 = 60_000;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum V3ReasoningEffort {
+    Low,
+    Medium,
+    High,
+    Xhigh,
+}
+
+pub(crate) fn validate_provider_protocol(
+    id: &str,
+    protocol: &str,
+    reasoning_effort: Option<V3ReasoningEffort>,
+) -> Result<(), V3ConfigError> {
+    if protocol.trim().is_empty() {
+        return Err(validation(format!("provider {id} type is empty")));
+    }
+    if !matches!(
+        protocol,
+        "responses" | "anthropic" | "gemini" | "openai_chat"
+    ) {
+        return Err(validation(format!(
+            "provider {id} declares unknown protocol {protocol}"
+        )));
+    }
+    if reasoning_effort.is_some() && !matches!(protocol, "openai_chat" | "responses") {
+        return Err(validation(format!(
+            "provider {id} reasoning_effort is unsupported for protocol {protocol}"
+        )));
+    }
+    Ok(())
+}
+
 pub(crate) fn compile_provider_directory(
     config_dir: &Path,
     referenced_models: &BTreeMap<String, BTreeSet<String>>,
@@ -114,6 +147,7 @@ pub(crate) fn compile_provider_directory(
                 health: v3.health,
                 semantic_error_policy: v3.semantic_error_policy,
                 provider_request_cleanup: v3.provider_request_cleanup,
+                reasoning_effort: v3.reasoning_effort,
                 compatibility_profile,
                 features: v3.features,
                 request_timeout_ms: provider
@@ -441,6 +475,8 @@ pub struct V2ProviderConfig {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct V2ProviderV3Config {
+    #[serde(default, rename = "reasoning_effort")]
+    pub reasoning_effort: Option<V3ReasoningEffort>,
     #[serde(default)]
     pub health: Option<V3ProviderHealthAuthoringConfig>,
     #[serde(default, alias = "semantic_error_policy")]

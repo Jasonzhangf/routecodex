@@ -424,10 +424,9 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
     if let Some(client_name) = custom_tool_names.get(name) {
         // 请求侧 custom -> function 扁平化后，provider 返回 function tool_call；
         // 按客户端声明的 custom 名归类回 custom_tool_call，保持客户端契约。
-        // provider function arguments 必须是我们发出的对象 schema；只把
-        // schema 的 input 字段恢复成原始 free-form 字符串，三个治理字段
-        // 只在 provider wire 存在，不能泄露到客户端 custom input。
-        let input = parse_v3_openai_chat_custom_tool_input(name, arguments)?;
+        // Decode the known input wrapper; preserve other model arguments for
+        // client validation and the paired tool-error recovery turn.
+        let input = parse_v3_openai_chat_custom_tool_input(arguments);
         return Ok(client_custom_tool_call(call_id, client_name, &input));
     }
     let mut item = Map::from_iter([
@@ -449,36 +448,15 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
     Ok(Value::Object(item))
 }
 
-fn parse_v3_openai_chat_custom_tool_input(
-    name: &str,
-    arguments: &str,
-) -> Result<String, V3ResponsesRelayRuntimeError> {
-    // Provider may not honor the `{"input":"..."}` Chat-freeform schema and may
-    // return the raw free-form text directly. For a governed custom tool the
-    // client contract is a raw string, so accept either shape explicitly.
-    let trimmed = arguments.trim();
-    if trimmed.is_empty() {
-        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-            format!("OpenAI Chat custom tool {name} function arguments must not be empty"),
-        ));
-    }
-    match serde_json::from_str::<Value>(trimmed) {
+fn parse_v3_openai_chat_custom_tool_input(arguments: &str) -> String {
+    match serde_json::from_str::<Value>(arguments) {
         Ok(Value::Object(parsed)) => parsed
             .get("input")
             .and_then(Value::as_str)
             .map(str::to_string)
-            .ok_or_else(|| {
-                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
-                    "OpenAI Chat custom tool {name} function arguments must contain string input"
-                ))
-            }),
-        Ok(Value::String(value)) => Ok(value),
-        Ok(_) => Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-            format!(
-                "OpenAI Chat custom tool {name} function arguments must be an object or string"
-            ),
-        )),
-        Err(_) => Ok(trimmed.to_string()),
+            .unwrap_or_else(|| arguments.to_string()),
+        Ok(Value::String(value)) => value,
+        _ => arguments.to_string(),
     }
 }
 

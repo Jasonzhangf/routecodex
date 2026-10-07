@@ -623,18 +623,11 @@ fn compile_providers(
     let mut provider_error_action_policies = Vec::new();
     for (id, provider) in authoring {
         require_id("provider", &id)?;
-        if provider.provider_type.trim().is_empty() {
-            return Err(validation(format!("provider {id} type is empty")));
-        }
-        if !matches!(
-            provider.provider_type.as_str(),
-            "responses" | "anthropic" | "gemini" | "openai_chat"
-        ) {
-            return Err(validation(format!(
-                "provider {id} declares unknown protocol {}",
-                provider.provider_type
-            )));
-        }
+        crate::provider_config::validate_provider_protocol(
+            &id,
+            &provider.provider_type,
+            provider.reasoning_effort,
+        )?;
         if provider.base_url.trim().is_empty() {
             return Err(validation(format!("provider {id} base_url is empty")));
         }
@@ -705,6 +698,7 @@ fn compile_providers(
                 concurrency: provider.concurrency,
                 health,
                 provider_request_cleanup,
+                reasoning_effort: provider.reasoning_effort,
                 compatibility_profile,
                 headers: provider.headers,
                 features: provider.features,

@@ -467,7 +467,7 @@ features:
   - npm run verify:v3-architecture-ci
 - feature_id: v3.provider_compat_profile_loading
   change_risk: high
-  owner_scope: Provider compatibility profiles, fail-fast normal-payload boundary validation, and provider-declared output-cap projection between Hub provider semantic/raw nodes and the provider wire/client semantic nodes.
+  owner_scope: Provider compatibility profiles, fail-fast normal-payload boundary validation, provider-declared output-cap projection, and provider-configurable reasoning-effort override between Hub provider semantic/raw nodes and the provider wire/client semantic nodes.
   contract:
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-function-map.yml
@@ -479,10 +479,13 @@ features:
   - Anthropic Goaichat requests preserve standard hosted web_search type/name/options and ordinary tool/history identity without synthesizing function envelopes after standard projection; client-authored extensions remain unchanged.
   - Public HTTP Responses (JSON/SSE), Chat and Messages consumers preserve the 380-tool inventory, schemas, long names, write_stdin and retired update_plan history, and complete execution plus matching follow-up with exactly one accepted upstream attempt per turn; provider switching cannot mask a shape regression.
   - When the client supplied no output limit, the provider-declared model output cap is projected into the provider wire payload; a client-supplied output limit is never overwritten on any registered provider protocol.
+  - When a provider-directory TOML declares `provider.v3.reasoning_effort`, the configured value becomes the final OpenAI Chat `reasoning_effort` or Responses `reasoning.effort` provider wire value; a configured `medium` overrides a client `xhigh`, and a configured `low` overrides the absence of a client effort.
+  - When no provider reasoning-effort policy is declared, the client/protocol/compat effort result is preserved unchanged.
   required_negative:
   - Top-level semantics, processed, and processingMetadata fail at both request and response compat entrypoints.
   - Compat does not strip, reconstruct, or route control state and does not own Chat Process or SSE semantics.
   - Compat does not own retry, provider switching or health; typed Error owns request-local compatibility handling.
+  - Unsupported provider protocols (Anthropic, Gemini) with an explicit reasoning-effort policy fail Config compile before `V3Config05ManifestPublished`; the policy value never reaches runtime or provider wire for unsupported protocols.
   - Generic chat:glm Anthropic passthrough and other provider protocols never receive Goaichat private hosted-tool fields.
   - Goaichat compatibility never adds function envelopes to native hosted declarations, adds type/function envelopes to ordinary Anthropic declarations, or restores retired historical tools to the callable inventory.
   black_box_regression:
@@ -496,6 +499,8 @@ features:
   required_gates:
   - npm run test:v3-provider-compat-profile-loading
   - npm run test:v3-goaichat-hosted-tool-history-blackbox
+  - npm run test:v3-provider-reasoning-effort-policy-blackbox
+  - npm run test:v3-provider-reasoning-effort-policy-config-failures
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries

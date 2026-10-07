@@ -1,8 +1,8 @@
 use routecodex_v3_config::{
     internal::is_v3_builtin_catalog_model, V3Config05ManifestPublished, V3ForwarderTargetManifest,
-    V3ProviderModelManifest, V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind,
-    V3RouteGroupManifest, V3RoutePoolManifest, V3RoutePoolTargetManifest, V3RouteTargetKind,
-    V3SelectionStrategy, V3WebSearchExecutionMode,
+    V3ProviderModelManifest, V3ProviderRequestCleanupAuthoringConfig, V3ReasoningEffort,
+    V3ResponsesTransportKind, V3RouteGroupManifest, V3RoutePoolManifest, V3RoutePoolTargetManifest,
+    V3RouteTargetKind, V3SelectionStrategy, V3WebSearchExecutionMode,
 };
 use routecodex_v3_provider_responses::{V3ProviderAvailabilityReader, V3ProviderSchedulingReader};
 use routecodex_v3_virtual_router::{priority_tier_indices, V3Router07OpaqueTargetHitOnce};
@@ -35,6 +35,7 @@ pub struct V3TargetCandidate {
     pub responses_transport: V3ResponsesTransportKind,
     pub websocket_v2_url: Option<String>,
     pub provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig,
+    pub reasoning_effort: Option<V3ReasoningEffort>,
     pub request_timeout_ms: u64,
     pub sse_first_frame_timeout_ms: Option<u64>,
     pub initial_concurrency_budget: u32,
@@ -766,6 +767,7 @@ impl V3TargetInterpreter {
                     .as_ref()
                     .and_then(|responses| responses.websocket_v2_url.clone()),
                 provider_request_cleanup: provider.provider_request_cleanup.clone(),
+                reasoning_effort: provider.reasoning_effort,
                 request_timeout_ms: provider.request_timeout_ms,
                 sse_first_frame_timeout_ms: provider.sse_first_frame_timeout_ms,
                 initial_concurrency_budget: provider

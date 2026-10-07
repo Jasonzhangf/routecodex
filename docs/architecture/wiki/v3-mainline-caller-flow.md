@@ -352,7 +352,7 @@ flowchart TD
 
 ## v3.provider_compat_profile.request
 
-The request provider-compat node consumes the adjacent provider-semantic payload plus the selected target capability carrier, validates the normal-payload boundary, applies the selected provider-family wire profile, and performs the registered session-preserving image compatibility projection only for a selected target without multimodal/vision capability.
+The request provider-compat node consumes the adjacent provider-semantic payload plus the selected target capability and provider-policy carrier, validates the normal-payload boundary, applies the selected provider-family wire profile, projects the provider-declared output cap, applies the provider-configurable reasoning-effort override, and performs the registered session-preserving image compatibility projection only for a selected target without multimodal/vision capability.
 
 Owner feature: `v3.provider_compat_profile_loading`
 

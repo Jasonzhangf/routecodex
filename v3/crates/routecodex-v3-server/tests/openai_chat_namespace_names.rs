@@ -20,6 +20,47 @@ const COLLIDING_PLAIN_NAME: &str =
 const COLLIDING_PLAIN_CUSTOM: &str =
     "80a662fbb9b3fbb362dcfcd35d46859f517a5ca297457df631b99265925f6296";
 
+static COUNTER_ENVIRONMENT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+struct CounterEnvironment {
+    _guard: std::sync::MutexGuard<'static, ()>,
+    previous: Option<std::ffi::OsString>,
+    directory: std::path::PathBuf,
+}
+
+impl CounterEnvironment {
+    fn new() -> Self {
+        let guard = COUNTER_ENVIRONMENT.lock().unwrap();
+        let directory = std::env::temp_dir().join(format!(
+            "rcc-chat-names-{}-{}",
+            std::process::id(),
+            test_ports::free_port()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let previous = std::env::var_os("ROUTECODEX_REQUEST_ID_COUNTER_FILE");
+        std::env::set_var(
+            "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
+            directory.join("request-id-counter.json"),
+        );
+        Self {
+            _guard: guard,
+            previous,
+            directory,
+        }
+    }
+}
+
+impl Drop for CounterEnvironment {
+    fn drop(&mut self) {
+        if let Some(previous) = &self.previous {
+            std::env::set_var("ROUTECODEX_REQUEST_ID_COUNTER_FILE", previous);
+        } else {
+            std::env::remove_var("ROUTECODEX_REQUEST_ID_COUNTER_FILE");
+        }
+        std::fs::remove_dir_all(&self.directory).unwrap();
+    }
+}
+
 async fn strict_chat(
     State(captures): State<Arc<mpsc::UnboundedSender<Value>>>,
     Json(body): Json<Value>,
@@ -152,6 +193,7 @@ async fn response_body(response: reqwest::Response, stream: bool) -> Value {
 
 #[tokio::test]
 async fn responses_chat_long_namespace_names_round_trip_on_first_attempt_json_and_sse() {
+    let _counter_environment = CounterEnvironment::new();
     std::env::set_var("V3_CHAT_NAME_TEST_KEY", "fixture-key");
     let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let upstream_addr = upstream.local_addr().unwrap();
@@ -353,4 +395,216 @@ targets = [{{ kind = "provider_model", provider = "names", model = "wire-model",
 "#
     );
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
+struct RecoveryFixture {
+    raw: std::sync::Mutex<String>,
+    turn: std::sync::atomic::AtomicUsize,
+    captures: mpsc::UnboundedSender<Value>,
+}
+
+async fn recoverable_chat_call(
+    State(state): State<Arc<RecoveryFixture>>,
+    Json(body): Json<Value>,
+) -> Response<Body> {
+    use std::sync::atomic::Ordering;
+    // Startup/recovery probes are separate from the business consumer.
+    let probe = body
+        .get("tools")
+        .and_then(Value::as_array)
+        .is_none_or(Vec::is_empty);
+    let turn = if probe {
+        2
+    } else {
+        state.turn.fetch_add(1, Ordering::SeqCst) % 3
+    };
+    if !probe {
+        state.captures.send(body.clone()).unwrap();
+    }
+    let (call_id, arguments) = if turn == 0 {
+        ("call_bad", state.raw.lock().unwrap().clone())
+    } else {
+        (
+            "call_fixed",
+            r#"{"input":"text(\"RECOVERED\");"}"#.to_string(),
+        )
+    };
+    let tool_name = body
+        .pointer("/tools/0/function/name")
+        .and_then(Value::as_str)
+        .unwrap_or("functions__exec");
+    let message = if turn == 2 {
+        json!({"role":"assistant","content":"RECOVERY_COMPLETED"})
+    } else {
+        json!({"role":"assistant","content":null,"tool_calls":[{"id":call_id,"type":"function","function":{"name":tool_name,"arguments":arguments}}]})
+    };
+    let finish = if turn == 2 { "stop" } else { "tool_calls" };
+    let usage = json!({"prompt_tokens":2,"completion_tokens":3,"total_tokens":5});
+    if body["stream"] != true {
+        return Response::builder()
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({
+                    "id":"chatcmpl-recovery","object":"chat.completion","model":"wire-model",
+                    "choices":[{"index":0,"message":message,"finish_reason":finish}],"usage":usage
+                })
+                .to_string(),
+            ))
+            .unwrap();
+    }
+    let mut events = Vec::new();
+    if turn == 2 {
+        events.push(json!({"id":"chatcmpl-recovery","object":"chat.completion.chunk","model":"wire-model","choices":[{"index":0,"delta":message,"finish_reason":finish}],"usage":usage}));
+    } else {
+        let split = arguments.len() / 2;
+        events.push(json!({"id":"chatcmpl-recovery","object":"chat.completion.chunk","model":"wire-model","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":call_id,"type":"function","function":{"name":tool_name,"arguments":&arguments[..split]}}]},"finish_reason":null}]}));
+        events.push(json!({"id":"chatcmpl-recovery","object":"chat.completion.chunk","model":"wire-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":&arguments[split..]}}]},"finish_reason":null}]}));
+        events.push(json!({"id":"chatcmpl-recovery","object":"chat.completion.chunk","model":"wire-model","choices":[{"index":0,"delta":{},"finish_reason":finish}],"usage":usage}));
+    }
+    let mut wire = events
+        .iter()
+        .map(|event| format!("data: {event}\n\n"))
+        .collect::<String>();
+    wire.push_str("data: [DONE]\n\n");
+    let pieces = wire
+        .as_bytes()
+        .chunks(11)
+        .map(|part| Ok::<_, std::io::Error>(part.to_vec()))
+        .collect::<Vec<_>>();
+    Response::builder()
+        .header("content-type", "text/event-stream")
+        .body(Body::from_stream(futures_util::stream::iter(pieces)))
+        .unwrap()
+}
+
+async fn read_recovery_response(
+    response: reqwest::Response,
+    stream: bool,
+) -> Result<Value, String> {
+    if response.status() != StatusCode::OK {
+        return Err(format!("unexpected client status {}", response.status()));
+    }
+    let text = response
+        .text()
+        .await
+        .map_err(|error| format!("client transfer failed: {error}"))?;
+    if !stream {
+        return serde_json::from_str(&text)
+            .map_err(|error| format!("client JSON: {error}; {text}"));
+    }
+    let mut completed = None;
+    for data in text.lines().filter_map(|line| line.strip_prefix("data: ")) {
+        if data == "[DONE]" {
+            continue;
+        }
+        let event: Value =
+            serde_json::from_str(data).map_err(|error| format!("client SSE JSON: {error}"))?;
+        if matches!(event["type"].as_str(), Some("error" | "response.failed")) {
+            return Err(format!("proxy emitted client error: {event}"));
+        }
+        if event["type"] == "response.completed" {
+            completed = Some(event["response"].clone());
+        }
+    }
+    completed.ok_or_else(|| format!("missing client completion: {text}"))
+}
+
+#[tokio::test]
+async fn invalid_custom_arguments_reach_client_and_recover_json_and_sse() {
+    let _counter_environment = CounterEnvironment::new();
+    std::env::set_var("V3_CUSTOM_RECOVERY_TEST_KEY", "fixture-key");
+    let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream_addr = upstream.local_addr().unwrap();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let fixture = Arc::new(RecoveryFixture {
+        raw: std::sync::Mutex::new(String::new()),
+        turn: std::sync::atomic::AtomicUsize::new(0),
+        captures: tx,
+    });
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route("/v1/chat/completions", post(recoverable_chat_call))
+        .with_state(fixture.clone());
+    let upstream_task = tokio::spawn(async move {
+        axum::serve(upstream, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    let mut compiled = manifest(test_ports::free_port(), upstream_addr.port());
+    compiled.providers.get_mut("names").unwrap().auth.entries[0].env =
+        Some("V3_CUSTOM_RECOVERY_TEST_KEY".to_string());
+    compiled
+        .providers
+        .get_mut("names")
+        .unwrap()
+        .health
+        .as_mut()
+        .unwrap()
+        .enabled = true;
+    let handle = spawn_v3_server_aggregate(compiled).await.unwrap();
+    let proxy_addr = handle.listeners[0].addr;
+    let endpoint = format!("http://{proxy_addr}/v1/responses");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(8))
+        .build()
+        .unwrap();
+    let outcome: Result<(), String> = async {
+        let cases = [
+            (r#"{"arguments":"{\"cmd\":\"DIAGNOSTIC_ONLY\"}","name":"functions__exec"}"#, None),
+            (r#"{"input":42}"#, None), (" null \n", None), ("[1,2]", None), ("", None),
+            ("  {\"input\":  \n", None), ("  text(\"ORIGINAL\");\n", None),
+            (r#"{"input":"text(\"ORIGINAL\");"}"#, Some("text(\"ORIGINAL\");")),
+            (r#""text(\"ORIGINAL\");""#, Some("text(\"ORIGINAL\");")),
+        ];
+        for stream in [false, true] {
+            for (raw, unwrapped) in cases {
+                *fixture.raw.lock().unwrap() = raw.to_string();
+                let expected = unwrapped.unwrap_or(raw);
+                let mut request = json!({"model":"name-client","stream":stream,"input":[{"role":"user","content":"Use the declared tool; correct any tool error."}],"tools":[{"type":"namespace","name":"functions","tools":[{"type":"custom","name":"exec","description":"JavaScript evaluator","format":{"type":"text"}}]}]});
+                for (turn, id, input) in [(0, "call_bad", expected), (1, "call_fixed", "text(\"RECOVERED\");")] {
+                    let sent = client.post(&endpoint).json(&request).send().await.map_err(|error| error.to_string())?;
+                    let response = read_recovery_response(sent, stream).await?;
+                    let call = response["output"].as_array().and_then(|items| items.iter().find(|item| item["type"] == "custom_tool_call")).ok_or_else(|| format!("missing client tool call: {response}"))?;
+                    if response["status"] != "completed" || call["name"] != "exec" || call["namespace"] != "functions" || call["call_id"] != id || call["input"] != input {
+                        return Err(format!("tool input/identity changed for {raw:?}: {response}"));
+                    }
+                    let wire = tokio::time::timeout(Duration::from_secs(2), rx.recv()).await.map_err(|error| error.to_string())?.ok_or("fixture capture closed")?;
+                    if turn == 1 && !wire["messages"].as_array().unwrap().iter().any(|message| message["role"] == "tool" && message["tool_call_id"] == "call_bad" && message["content"] == "Tool validation failed; correct the input.") {
+                        return Err(format!("client tool-error result was lost: {wire}"));
+                    }
+                    if turn == 1 && !wire["messages"].as_array().unwrap().iter().flat_map(|message| message["tool_calls"].as_array().into_iter().flatten()).any(|call| call["id"] == "call_bad" && serde_json::from_str::<Value>(call["function"]["arguments"].as_str().unwrap()).unwrap()["input"] == expected) {
+                        return Err(format!("original invalid input was lost from follow-up history: {wire}"));
+                    }
+                    request["input"].as_array_mut().unwrap().push(call.clone());
+                    request["input"].as_array_mut().unwrap().push(json!({"type":"custom_tool_call_output","call_id":id,"output":if turn == 0 { "Tool validation failed; correct the input." } else { "TOOL_OK" }}));
+                }
+                let sent = client.post(&endpoint).json(&request).send().await.map_err(|error| error.to_string())?;
+                let complete = read_recovery_response(sent, stream).await?;
+                if complete["status"] != "completed" || !complete.to_string().contains("RECOVERY_COMPLETED") { return Err(format!("recovery failed: {complete}")); }
+                tokio::time::timeout(Duration::from_secs(2), rx.recv()).await.map_err(|error| error.to_string())?.ok_or("fixture capture closed")?;
+                if rx.try_recv().is_ok() { return Err("extra provider attempt concealed a response error".to_string()); }
+            }
+        }
+        Ok(())
+    }.await;
+    eprintln!(
+        "business attempts={}, result={outcome:?}",
+        fixture.turn.load(std::sync::atomic::Ordering::SeqCst)
+    );
+    handle.shutdown().await;
+    let _ = shutdown_tx.send(());
+    upstream_task.await.unwrap();
+    std::env::remove_var("V3_CUSTOM_RECOVERY_TEST_KEY");
+    assert!(
+        tokio::net::TcpStream::connect(proxy_addr).await.is_err(),
+        "proxy fixture remained open"
+    );
+    assert!(
+        tokio::net::TcpStream::connect(upstream_addr).await.is_err(),
+        "provider fixture remained open"
+    );
+    assert!(outcome.is_ok(), "public recovery regression: {outcome:?}");
 }
