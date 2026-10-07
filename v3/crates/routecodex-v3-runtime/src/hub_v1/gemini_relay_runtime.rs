@@ -214,20 +214,29 @@ async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(
         None,
     )
     .await
-    .map_err(|error| match error {
+    .map_err(v3_gemini_relay_runtime_error_from_core)
+}
+
+/// 骨架错误 -> Gemini 入口错误的唯一映射。
+///
+/// `Provider` 分支按值移动原 typed 来源，保留 provider/auth/request 身份；公共失败
+/// 投影据此进入 Error 链。其余分支保持原有消息语义（不叠加 core Display 前缀）。
+fn v3_gemini_relay_runtime_error_from_core(error: V3RelayCoreError) -> V3GeminiRelayRuntimeError {
+    match error {
         V3RelayCoreError::EndpointPath(message) => V3GeminiRelayRuntimeError::EndpointPath(message),
         V3RelayCoreError::ProviderPoolExhausted {
             attempted_candidates,
         } => V3GeminiRelayRuntimeError::ProviderPoolExhausted {
             attempted_candidates,
         },
+        V3RelayCoreError::Provider(error) => V3GeminiRelayRuntimeError::Provider(error),
         // 直接取内部消息，不叠加 V3RelayCoreError 的 Display 前缀（与原实现消息一致）。
         V3RelayCoreError::Target(message)
         | V3RelayCoreError::StaticRegistry(message)
         | V3RelayCoreError::WebSearchIntercepted(message) => {
             V3GeminiRelayRuntimeError::Target(message)
         }
-    })
+    }
 }
 
 /// Gemini relay 协议 codec：协议差异的唯一收敛面（骨架驱动）。
@@ -296,7 +305,7 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
         _provider_header_overrides: Vec<V3ProviderRequestHeader>,
     ) -> Result<V3Transport13ResponsesHttpRequest, V3RelayCoreError> {
         build_v3_gemini_transport_09(request_id, target, transport_intent, body)
-            .map_err(|error| V3RelayCoreError::Target(error.to_string()))
+            .map_err(V3RelayCoreError::Provider)
     }
 
     fn project_json_response(
@@ -417,7 +426,7 @@ pub(crate) fn build_v3_gemini_transport_09(
     target: V3ResponsesProviderTarget,
     transport_intent: V3HubTransportIntent,
     body: Value,
-) -> Result<V3Transport13ResponsesHttpRequest, V3GeminiRelayRuntimeError> {
+) -> Result<V3Transport13ResponsesHttpRequest, V3ProviderError> {
     let sse_first_frame_timeout_ms = target.sse_first_frame_timeout_ms;
     let stream_intent = match transport_intent {
         V3HubTransportIntent::Json => V3ResponsesStreamIntent::Json,
@@ -457,7 +466,7 @@ pub(crate) fn build_v3_gemini_transport_09(
         target.concurrency_acquire_timeout_ms,
         sse_first_frame_timeout_ms,
     )
-    .map_err(|error| V3GeminiRelayRuntimeError::Target(error.to_string()))
+    // 直接保留 parts-builder 的 typed 构造错误（如 InvalidBaseUrl），不降级成字符串。
 }
 
 pub fn project_v3_gemini_relay_runtime_failure(
@@ -493,6 +502,11 @@ pub fn project_v3_gemini_relay_runtime_failure(
                 error.to_string(),
             ),
         },
+        // Provider 传输请求构造错误：原 typed 来源进入既有 Error owner，保留
+        // request/provider/auth 身份与 Request lane（内部 598），不伪装 network。
+        V3GeminiRelayRuntimeError::Provider(error) => {
+            crate::hooks::build_v3_provider_error_source("V3Transport13ResponsesHttpRequest", error)
+        }
         error => build_v3_error_01_source_raised(
             V3ErrorSourceKind::RuntimeFailure,
             "V3HubRuntime",
@@ -500,16 +514,33 @@ pub fn project_v3_gemini_relay_runtime_failure(
             error.to_string(),
         ),
     };
-    let (projected, trace) = error_output(
-        source,
-        if request_payload_invalid { 400 } else { 500 },
-        "none",
-        Vec::new(),
+    let provider_source = matches!(
+        &source.source_kind,
+        V3ErrorSourceKind::ProviderFailure | V3ErrorSourceKind::ProviderLocalFailure
     );
+    let (projected, trace, terminal_disposition) = if provider_source {
+        let (projected, disposition) =
+            super::relay_runtime_shared::project_unscoped_provider_failure(source);
+        let mut trace = Vec::new();
+        trace.extend(routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS);
+        (projected, trace, Some(disposition))
+    } else {
+        let (projected, trace) = error_output(
+            source,
+            if request_payload_invalid { 400 } else { 500 },
+            "none",
+            Vec::new(),
+        );
+        (
+            projected,
+            trace,
+            provider_pool_exhausted
+                .then_some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
+        )
+    };
     V3GeminiRelayRuntimeOutput {
         status: projected.status,
-        terminal_disposition: provider_pool_exhausted
-            .then_some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
+        terminal_disposition,
         client_body: V3GeminiRelayClientBody::Json(projected.body),
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
@@ -837,4 +868,134 @@ fn gemini_routing_payload(
         );
     }
     routing_body
+}
+
+#[cfg(test)]
+mod typed_provider_transport_source_tests {
+    use super::*;
+    use routecodex_v3_config::V3ResponsesTransportKind;
+    use routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS;
+    use routecodex_v3_provider_responses::{
+        V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ResponsesStreamIntent,
+    };
+    use serde_json::json;
+
+    fn gemini_transport_target(base_url: &str) -> V3ResponsesProviderTarget {
+        V3ResponsesProviderTarget {
+            provider_id: "gemini-typed-provider".to_string(),
+            provider_type: "gemini".to_string(),
+            base_url: base_url.to_string(),
+            canonical_model_id: "typed-model".to_string(),
+            wire_model: "typed-model".to_string(),
+            compatibility_profile: None,
+            headers: Default::default(),
+            auth: V3ProviderAuthHandle {
+                alias: "primary".to_string(),
+                secret: V3ProviderAuthSecretHandle::Environment(
+                    "ROUTECODEX_TYPED_TRANSPORT_TEST_KEY".to_string(),
+                ),
+            },
+            responses_transport: V3ResponsesTransportKind::Http,
+            websocket_v2_url: None,
+            provider_request_cleanup: Default::default(),
+            request_timeout_ms: 300_000,
+            sse_first_frame_timeout_ms: None,
+            initial_concurrency_budget: 8,
+            concurrency_acquire_timeout_ms: 60_000,
+        }
+    }
+
+    #[test]
+    fn gemini_transport_construction_failure_keeps_typed_provider_source_to_public_projection() {
+        let core_error = <V3GeminiRelayCodec as V3RelayProtocolCodec>::build_transport_request(
+            "req-gemini-typed-source",
+            gemini_transport_target("::not-a-url::"),
+            V3HubTransportIntent::Json,
+            json!({"contents": [{"parts": [{"text": "hello"}]}]}),
+            Vec::new(),
+        )
+        .expect_err("invalid base URL must fail gemini transport construction");
+
+        let typed_provider_error = match core_error {
+            V3RelayCoreError::Provider(error) => error,
+            other => panic!("gemini codec must keep the typed Provider source, got {other}"),
+        };
+        assert!(matches!(
+            typed_provider_error,
+            V3ProviderError::InvalidBaseUrl { .. }
+        ));
+
+        let runtime_error = v3_gemini_relay_runtime_error_from_core(V3RelayCoreError::Provider(
+            typed_provider_error,
+        ));
+        assert!(matches!(
+            &runtime_error,
+            V3GeminiRelayRuntimeError::Provider(V3ProviderError::InvalidBaseUrl { .. })
+        ));
+
+        let output = project_v3_gemini_relay_runtime_failure(runtime_error);
+        assert_eq!(
+            output.status, 598,
+            "request-stage provider construction failure must project the internal request lane"
+        );
+        let body = match &output.client_body {
+            V3GeminiRelayClientBody::Json(body) => body,
+            V3GeminiRelayClientBody::Sse(_) => panic!("construction failure must project JSON"),
+        };
+        assert_eq!(body["error"]["code"], "provider_local_runtime_error");
+        assert_ne!(body["error"]["code"], "network_error");
+        assert!(
+            body["error"].get("external_error").is_none(),
+            "no fabricated external HTTP witness: {}",
+            body["error"]
+        );
+        assert_eq!(
+            output.error_chain.as_deref(),
+            Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
+        );
+        assert_eq!(
+            output.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
+        );
+
+        // stage 由公共投影内部的同一 shared mapper 决定；这里用同一 stage 常量核对
+        // typed 来源 code/stage，避免从 Display 文本反解析控制事实。
+        let source = crate::hooks::build_v3_provider_error_source(
+            "V3Transport13ResponsesHttpRequest",
+            V3ProviderError::InvalidBaseUrl {
+                request_id: "req-gemini-typed-source".to_string(),
+                provider_id: "gemini-typed-provider".to_string(),
+                reason: "invalid url".to_string(),
+            },
+        );
+        assert_eq!(source.source_stage, "V3Transport13ResponsesHttpRequest");
+        assert_eq!(source.code, "provider_local_runtime_error");
+        assert!(source.external_error.is_none());
+    }
+
+    #[test]
+    fn gemini_transport_construction_success_keeps_url_auth_stream_and_body() {
+        let request = build_v3_gemini_transport_09(
+            "req-gemini-ok",
+            gemini_transport_target("https://gemini.example.invalid"),
+            V3HubTransportIntent::Sse,
+            json!({
+                "model": "typed-model",
+                "contents": [{"parts": [{"text": "hello"}]}],
+                "opaque_marker": {"keep": true}
+            }),
+        )
+        .expect("valid gemini transport construction");
+
+        assert_eq!(request.request_id(), "req-gemini-ok");
+        assert_eq!(request.provider_id(), "gemini-typed-provider");
+        assert_eq!(request.provider_key(), "gemini-typed-provider:primary");
+        assert!(request
+            .url()
+            .contains("/models/typed-model:streamGenerateContent"));
+        assert!(request.url().ends_with("?alt=sse"));
+        assert_eq!(request.stream_intent(), V3ResponsesStreamIntent::Sse);
+        assert!(request.body().get("model").is_none());
+        assert_eq!(request.body()["opaque_marker"]["keep"], true);
+    }
 }

@@ -626,15 +626,7 @@ pub(crate) fn responses_direct_provider_transport_hook(
         )
     })?;
     crate::hub_v1::build_v3_provider_transport_request_for_protocol(provider_protocol, wire)
-        .map_err(|error| {
-            build_v3_error_01_source_raised_internal(
-                V3ErrorSourceKind::RuntimeFailure,
-                "V3Transport13ResponsesHttpRequest",
-                "responses_provider_transport_error",
-                error,
-                V3InternalErrorCode::V3Transport13ResponsesHttpRequest,
-            )
-        })
+        .map_err(provider_error_source("V3Transport13ResponsesHttpRequest"))
 }
 
 pub(crate) fn responses_direct_response_projection_hook_with_context(
@@ -909,15 +901,7 @@ pub(crate) fn chat_direct_provider_transport_hook(
         crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
         wire,
     )
-    .map_err(|error| {
-        build_v3_error_01_source_raised_internal(
-            V3ErrorSourceKind::RuntimeFailure,
-            "V3Transport13ResponsesHttpRequest",
-            "chat_provider_transport_error",
-            error,
-            internal_error_code_for_stage("V3Transport13ResponsesHttpRequest"),
-        )
-    })
+    .map_err(provider_error_source("V3Transport13ResponsesHttpRequest"))
 }
 
 pub(crate) fn build_v3_provider_error_source(
@@ -955,7 +939,7 @@ pub(crate) fn build_v3_provider_error_source(
         V3ProviderError::InvalidBaseUrl { .. }
         | V3ProviderError::MissingAuthSecret { .. }
         | V3ProviderError::AuthSecretRead { .. } => build_v3_error_01_source_raised_internal(
-            V3ErrorSourceKind::RuntimeFailure,
+            V3ErrorSourceKind::ProviderLocalFailure,
             stage,
             "provider_local_runtime_error",
             message,
@@ -1219,4 +1203,166 @@ fn relay_sse_runtime_does_not_own_toolreason_parser() {
     assert!(!source.contains("map_v3_toolreason_stream_event_at_resp03"));
     let sse_source = include_str!("hub_v1/openai_chat_relay_runtime_sse.rs");
     assert!(!sse_source.contains("map_v3_toolreason_stream_event_at_resp03"));
+}
+
+#[cfg(test)]
+mod direct_provider_transport_tests {
+    use super::*;
+    use routecodex_v3_config::V3ResponsesTransportKind;
+    use routecodex_v3_error::{
+        V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3InternalErrorLane,
+    };
+    use routecodex_v3_provider_responses::{
+        build_v3_provider_12_responses_wire_payload, V3ProviderAuthHandle,
+        V3ProviderAuthSecretHandle, V3ResponsesProviderTarget, V3ResponsesStreamIntent,
+    };
+    use serde_json::{json, Value};
+
+    fn direct_transport_wire(
+        request_id: &str,
+        provider_id: &str,
+        provider_type: &str,
+        base_url: &str,
+        body: Value,
+    ) -> V3Provider12ResponsesWirePayload {
+        build_v3_provider_12_responses_wire_payload(
+            request_id,
+            V3ResponsesProviderTarget {
+                provider_id: provider_id.to_string(),
+                provider_type: provider_type.to_string(),
+                base_url: base_url.to_string(),
+                canonical_model_id: "typed-model".to_string(),
+                wire_model: "typed-model".to_string(),
+                compatibility_profile: None,
+                headers: Default::default(),
+                auth: V3ProviderAuthHandle {
+                    alias: "primary".to_string(),
+                    secret: V3ProviderAuthSecretHandle::Environment("K1".to_string()),
+                },
+                responses_transport: V3ResponsesTransportKind::Http,
+                websocket_v2_url: None,
+                provider_request_cleanup: Default::default(),
+                request_timeout_ms: 300_000,
+                sse_first_frame_timeout_ms: None,
+                initial_concurrency_budget: 8,
+                concurrency_acquire_timeout_ms: 60_000,
+            },
+            body,
+        )
+        .expect("test wire construction must succeed")
+    }
+
+    fn assert_local_invalid_url_source(source: V3Error01SourceRaised) {
+        assert_eq!(source.source_kind, V3ErrorSourceKind::ProviderLocalFailure);
+        assert_eq!(source.source_stage, "V3Transport13ResponsesHttpRequest");
+        assert_eq!(source.code, "provider_local_runtime_error");
+        assert!(
+            source.external_error.is_none(),
+            "local URL construction failure must not fabricate an external HTTP witness"
+        );
+        let internal = source
+            .internal_error
+            .as_ref()
+            .expect("local transport failure must keep the typed internal envelope");
+        assert_eq!(internal.internal_code, "500-160");
+        assert_eq!(internal.lane, V3InternalErrorLane::Request);
+        assert_eq!(internal.node_id, "V3Transport13ResponsesHttpRequest");
+
+        let decision = V3ErrorHandlingCenter::decide_provider(
+            V3ErrorHandlingCenterInput {
+                source,
+                action_scope: V3ErrorActionScope::None,
+                candidates_remaining: 0,
+                source_status: None,
+            },
+            false,
+            false,
+            None,
+        );
+        let projected = V3ErrorHandlingCenter::project_terminal(decision);
+        assert_eq!(projected.status, 598);
+        assert!(projected.body.pointer("/error/external_error").is_none());
+    }
+
+    #[test]
+    fn responses_direct_transport_invalid_url_is_local_request_lane_598() {
+        let wire = direct_transport_wire(
+            "req-responses-invalid-url",
+            "responses-local",
+            "responses",
+            "::not-a-url::",
+            json!({"model": "typed-model", "input": "hello"}),
+        );
+
+        let source = responses_direct_provider_transport_hook(wire)
+            .expect_err("invalid URL must fail local transport construction");
+        assert_local_invalid_url_source(source);
+    }
+
+    #[test]
+    fn chat_direct_transport_invalid_url_is_local_request_lane_598() {
+        let wire = direct_transport_wire(
+            "req-chat-invalid-url",
+            "chat-local",
+            "openai_chat",
+            "::not-a-url::",
+            json!({"model": "typed-model", "messages": [{"role": "user", "content": "hello"}]}),
+        );
+
+        let source = chat_direct_provider_transport_hook(wire)
+            .expect_err("invalid URL must fail local transport construction");
+        assert_local_invalid_url_source(source);
+    }
+
+    #[test]
+    fn responses_direct_transport_preserves_identity_stream_and_body() {
+        let body = json!({
+            "model": "typed-model",
+            "input": "hello",
+            "stream": true,
+            "opaque_marker": {"keep": true}
+        });
+        let wire = direct_transport_wire(
+            "req-responses-valid",
+            "responses-valid",
+            "responses",
+            "https://responses.invalid/v1",
+            body.clone(),
+        );
+
+        let request = responses_direct_provider_transport_hook(wire)
+            .expect("valid Responses transport construction must succeed");
+        assert_eq!(request.request_id(), "req-responses-valid");
+        assert_eq!(request.provider_id(), "responses-valid");
+        assert_eq!(request.provider_key(), "responses-valid:primary");
+        assert_eq!(request.stream_intent(), V3ResponsesStreamIntent::Sse);
+        assert_eq!(request.body(), &body);
+        assert!(request.url().ends_with("/responses"));
+    }
+
+    #[test]
+    fn chat_direct_transport_preserves_identity_stream_and_body() {
+        let body = json!({
+            "model": "typed-model",
+            "messages": [{"role": "user", "content": "hello"}],
+            "stream": true,
+            "opaque_marker": {"keep": true}
+        });
+        let wire = direct_transport_wire(
+            "req-chat-valid",
+            "chat-valid",
+            "openai_chat",
+            "https://chat.invalid/v1",
+            body.clone(),
+        );
+
+        let request = chat_direct_provider_transport_hook(wire)
+            .expect("valid Chat transport construction must succeed");
+        assert_eq!(request.request_id(), "req-chat-valid");
+        assert_eq!(request.provider_id(), "chat-valid");
+        assert_eq!(request.provider_key(), "chat-valid:primary");
+        assert_eq!(request.stream_intent(), V3ResponsesStreamIntent::Sse);
+        assert_eq!(request.body(), &body);
+        assert!(request.url().ends_with("/chat/completions"));
+    }
 }

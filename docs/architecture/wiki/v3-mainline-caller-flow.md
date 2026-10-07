@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 87 functional paths, 526 caller edges.
+Generated view: 87 functional paths, 528 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -78,7 +78,7 @@ flowchart TD
   module_v3_server -->|3 edges / 2 paths| module_v3_error
   module_v3_server -->|4 edges / 3 paths| module_v3_runtime
   module_v3_server -->|6 edges / 5 paths| module_v3_runtime__hub_v1
-  module_v3_server -->|37 edges / 20 paths| module_v3_server
+  module_v3_server -->|39 edges / 20 paths| module_v3_server
   module_v3_server -->|1 edges / 1 paths| module_v3_vendor
   module_v3_target -->|1 edges / 1 paths| module_v3_provider_responses
   module_v3_scripts -->|2 edges / 1 paths| module_docs
@@ -131,7 +131,7 @@ flowchart TD
 | v3-server | v3-error | 3 | `v3.debug_error_foundation.mainline`<br/>`v3.server.startup` |
 | v3-server | v3-runtime | 4 | `v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline` |
 | v3-server | v3-runtime::hub_v1 | 6 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.runtime_timing_observability.mainline` |
-| v3-server | v3-server | 37 | `v3.client_sse_head_commit`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.managed_restart_attempt`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_restart_handoff_skeleton`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
+| v3-server | v3-server | 39 | `v3.client_sse_head_commit`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.managed_restart_attempt`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_restart_handoff_skeleton`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
 | v3-server | v3/vendor | 1 | `v3.server.startup` |
 | v3-target | v3-provider-responses | 1 | `v3.provider_key_health_model_granularity` |
 | v3/scripts | docs | 2 | `v3.live_provider_compat.parity` |
@@ -529,7 +529,7 @@ flowchart TD
     c_10_v3_managed_restart_attempt_27["v3-runtime<br/>restore_default_provider_transport_handoff_checkpoints<br/><small>routecodex-v3-runtime/src/kernel/default_transport.rs</small>"]
   end
   subgraph c_10_v3_managed_restart_attempt_m_v3_server["v3-server"]
-    c_10_v3_managed_restart_attempt_5["v3-server<br/>V3ServerAggregateHandle::prepare_exec_attempt<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_10_v3_managed_restart_attempt_5["v3-server<br/>V3ServerAggregateHandle::prepare_exec_attempt<br/><small>routecodex-v3-server/src/executors.rs</small>"]
     c_10_v3_managed_restart_attempt_18["v3-server<br/>V3FrontTransportBroker::freeze<br/><small>routecodex-v3-server/src/restart_handoff.rs</small>"]
     c_10_v3_managed_restart_attempt_30["v3-server<br/>spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket<br/><small>routecodex-v3-server/src/lib.rs</small>"]
     c_10_v3_managed_restart_attempt_31["v3-server<br/>build_v3_server_startup_01_listener_set_from_config_05<br/><small>routecodex-v3-server/src/lib.rs</small>"]
@@ -572,7 +572,7 @@ flowchart TD
 | `v3-restart-handler-check-hooks-target` | `V3Lifecycle06LiveControlled` → `V3LifecycleRestartPrepared` | anchored | restart_managed_runtime_in_place<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small> | V3HooksSidecarSupervisor::ensure_exec_target_available<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-prepare-previous-release-transfer` | `V3Lifecycle06LiveControlled` → `V3LifecycleRestartPrepared` | anchored | V3ManagedLifecycle::restart_with_observer<br/><small>routecodex-v3-lifecycle/src/lib.rs</small> | prepare_previous_release_restart_transfer<br/><small>routecodex-v3-lifecycle/src/exec_restart.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-bind-transfer-rejection-guard` | `V3Lifecycle06LiveControlled` → `V3LifecycleRestartPrepared` | anchored | restart_managed_runtime_in_place<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small> | bind_previous_release_restart_transfer<br/><small>routecodex-v3-lifecycle/src/exec_restart.rs</small> | `v3.managed_server_lifecycle` |
-| `v3-restart-prepare-live` | `V3Lifecycle06LiveControlled` → `V3LifecycleRestartPrepared` | anchored | restart_managed_runtime_in_place<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small> | V3ServerAggregateHandle::prepare_exec_attempt<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.managed_server_lifecycle` |
+| `v3-restart-prepare-live` | `V3Lifecycle06LiveControlled` → `V3LifecycleRestartPrepared` | anchored | restart_managed_runtime_in_place<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small> | V3ServerAggregateHandle::prepare_exec_attempt<br/><small>routecodex-v3-server/src/executors.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-cleanup-exact-hooks` | `V3LifecycleRestartExecReentered` → `V3LifecycleRestartHooksReconciled` | anchored | V3ManagedLifecycle::run_managed_child_with_declaration<br/><small>routecodex-v3-lifecycle/src/lib.rs</small> | V3HooksSidecarSupervisor::cleanup_exec_owner<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-control-exchange` | `V3Lifecycle02InstanceDeclared` → `V3Lifecycle06LiveControlled` | anchored | send_restart_control<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small> | send_control_without_timeout<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-retain-hooks-cleanup-owner` | `V3LifecycleRestartExecReentered` → `V3LifecycleRestartHooksOwnerRetained` | anchored | adopt_exec_restart_declaration_change<br/><small>routecodex-v3-lifecycle/src/exec_restart.rs</small> | V3HooksSidecarSupervisor::retain_exec_owner<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small> | `v3.managed_server_lifecycle` |
@@ -580,7 +580,7 @@ flowchart TD
 | `v3-restart-gate-hooks-replacement` | `V3LifecycleRestartHooksOwnerResolved` → `V3LifecycleRestartHooksReconciled` | anchored | start_managed_hooks_sidecar_cancelable<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small> | start_configured_hooks_sidecar_with_timeout_and_cancel<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-plan-declaration` | `V3Lifecycle06LiveControlled` → `V3Lifecycle01ValidatedConfig` | anchored | control_restart_plan<br/><small>routecodex-v3-lifecycle/src/restart_plan.rs</small> | V3ManagedLifecycle::declaration<br/><small>routecodex-v3-lifecycle/src/lib.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-declaration-snapshot` | `V3Lifecycle01ValidatedConfig` → `V3Lifecycle02InstanceDeclared` | anchored | V3ManagedLifecycle::declaration<br/><small>routecodex-v3-lifecycle/src/lib.rs</small> | V3ManagedLifecycle::declaration_with_runtime<br/><small>routecodex-v3-lifecycle/src/lib.rs</small> | `v3.managed_server_lifecycle` |
-| `v3-restart-freeze-front` | `V3LifecycleRestartPrepared` → `V3RuntimeHandoffCheckpoint` | anchored | V3ServerAggregateHandle::prepare_exec_attempt<br/><small>routecodex-v3-server/src/lib.rs</small> | V3FrontTransportBroker::freeze<br/><small>routecodex-v3-server/src/restart_handoff.rs</small> | `v3.managed_server_lifecycle` |
+| `v3-restart-freeze-front` | `V3LifecycleRestartPrepared` → `V3RuntimeHandoffCheckpoint` | anchored | V3ServerAggregateHandle::prepare_exec_attempt<br/><small>routecodex-v3-server/src/executors.rs</small> | V3FrontTransportBroker::freeze<br/><small>routecodex-v3-server/src/restart_handoff.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-cleanup-rejected-artifacts` | `V3LifecycleRestartPrepared` → `V3Lifecycle06LiveControlled` | anchored | restart_managed_runtime_in_place<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small> | cleanup_rejected_restart_handoff<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-adopt-exact-artifacts` | `V3LifecycleRestartExecReentered` → `V3Lifecycle05IdentityPublished` | anchored | V3ManagedLifecycle::run_managed_child_with_declaration<br/><small>routecodex-v3-lifecycle/src/lib.rs</small> | adopt_exec_restart_declaration_change<br/><small>routecodex-v3-lifecycle/src/exec_restart.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-adopt-previous-release-transfer` | `V3LifecycleRestartExecReentered` → `V3Lifecycle05IdentityPublished` | anchored | V3ManagedLifecycle::run_managed_child_with_declaration<br/><small>routecodex-v3-lifecycle/src/lib.rs</small> | adopt_previous_release_restart_declaration_change<br/><small>routecodex-v3-lifecycle/src/exec_restart.rs</small> | `v3.managed_server_lifecycle` |
@@ -594,7 +594,7 @@ flowchart TD
 | `v3-restart-restore-provider-checkpoints` | `V3LifecycleRestartExecReentered` → `V3Lifecycle05IdentityPublished` | anchored | V3ManagedLifecycle::run_managed_child_with_declaration<br/><small>routecodex-v3-lifecycle/src/lib.rs</small> | restore_default_provider_transport_handoff_checkpoints<br/><small>routecodex-v3-runtime/src/kernel/default_transport.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-publish-child-status` | `V3LifecycleRestartExecReentered` → `V3Lifecycle06LiveControlled` | anchored | V3ManagedLifecycle::run_managed_child_with_declaration<br/><small>routecodex-v3-lifecycle/src/lib.rs</small> | write_status<br/><small>routecodex-v3-lifecycle/src/fs_locks.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-publish-adopted-starting` | `V3Lifecycle05IdentityPublished` → `V3Lifecycle04ChildSpawned` | anchored | adopt_exec_restart_declaration_change<br/><small>routecodex-v3-lifecycle/src/exec_restart.rs</small> | write_status<br/><small>routecodex-v3-lifecycle/src/fs_locks.rs</small> | `v3.managed_server_lifecycle` |
-| `v3-restart-wait-sample-persistence` | `V3LifecycleRestartPrepared` → `V3CodexSamplePersistFailureReported` | anchored | V3ServerAggregateHandle::prepare_exec_attempt<br/><small>routecodex-v3-server/src/lib.rs</small> | V3CodexSamplePersistHandle::quiesce_for_exec<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.managed_server_lifecycle` |
+| `v3-restart-wait-sample-persistence` | `V3LifecycleRestartPrepared` → `V3CodexSamplePersistFailureReported` | anchored | V3ServerAggregateHandle::prepare_exec_attempt<br/><small>routecodex-v3-server/src/executors.rs</small> | V3CodexSamplePersistHandle::quiesce_for_exec<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-drain-quiesced-samples` | `V3LifecycleRestartPrepared` → `V3CodexSamplePersistFailureReported` | anchored | V3CodexSamplePersistHandle::quiesce_for_exec<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | V3CodexSamplePersistHandle::wait_for_drain<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-start-aggregate` | `V3LifecycleRestartExecReentered` → `V3ServerStartup01ListenerSetPreflight` | anchored | V3ManagedLifecycle::run_managed_child_with_declaration<br/><small>routecodex-v3-lifecycle/src/lib.rs</small> | spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-build-listener-set` | `V3Config05ManifestPublished` → `V3ServerStartup01ListenerSetPreflight` | anchored | spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket<br/><small>routecodex-v3-server/src/lib.rs</small> | build_v3_server_startup_01_listener_set_from_config_05<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.managed_server_lifecycle` |
@@ -1917,7 +1917,7 @@ flowchart TD
 
 ## v3.error.raw_wire_evidence
 
-Terminal Responses Relay failure enqueues verbatim request, Error chain, and provider wire evidence through the Server-owned failure diagnostic side channel; the shared Debug sample worker writes it to the declared filesystem resource.
+All four Relay terminal branches observe typed Error facts before the original provider transport closeout. Terminal and ordinary Responses paths enqueue the verbatim request and Error chain through one Server-owned evidence pair; the shared Debug sample worker remains the sole filesystem writer. Optional diagnostic failures are explicit and never replace the terminal disposition with a client response.
 
 Owner feature: `v3.error.raw_wire_evidence`
 
@@ -1930,18 +1930,25 @@ flowchart TD
   end
   subgraph c_44_v3_error_raw_wire_evidence_m_v3_server["v3-server"]
     c_44_v3_error_raw_wire_evidence_0["v3-server<br/>finalize_v3_responses_relay_server_output<br/><small>routecodex-v3-server/src/live_snapshot.rs</small>"]
-    c_44_v3_error_raw_wire_evidence_1["v3-server<br/>persist_v3_error_evidence_payload<br/><small>routecodex-v3-server/src/live_snapshot.rs</small>"]
+    c_44_v3_error_raw_wire_evidence_1["v3-server<br/>persist_v3_responses_relay_terminal_error_evidence<br/><small>routecodex-v3-server/src/terminal_error_evidence.rs</small>"]
+    c_44_v3_error_raw_wire_evidence_5["v3-server<br/>pending_endpoint_after_responses_admission_inner<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small>"]
+    c_44_v3_error_raw_wire_evidence_6["v3-server<br/>project_v3_relay_terminal_diagnostics<br/><small>routecodex-v3-server/src/terminal_error_evidence.rs</small>"]
+    c_44_v3_error_raw_wire_evidence_7["v3-server<br/>persist_v3_projected_terminal_error_evidence<br/><small>routecodex-v3-server/src/terminal_error_evidence.rs</small>"]
   end
   c_44_v3_error_raw_wire_evidence_0 -->|v3-responses-relay-error-evidence-01<br/>V3Error06ClientProjected → V3ErrorEvidencePersistQueued| c_44_v3_error_raw_wire_evidence_1
   c_44_v3_error_raw_wire_evidence_2 -->|v3-responses-relay-error-evidence-02<br/>V3ErrorEvidencePersistQueued → V3ErrorEvidenceFlushOnTerminalFailure| c_44_v3_error_raw_wire_evidence_3
   c_44_v3_error_raw_wire_evidence_3 -->|v3-responses-relay-error-evidence-03<br/>V3ErrorEvidencePersistFailed → V3ErrorEvidencePersistFailureReported| c_44_v3_error_raw_wire_evidence_4
+  c_44_v3_error_raw_wire_evidence_5 -->|v3-relay-terminal-error-evidence-04<br/>V3Error06ClientProjected → V3ErrorEvidencePersistQueued| c_44_v3_error_raw_wire_evidence_6
+  c_44_v3_error_raw_wire_evidence_5 -->|v3-projected-terminal-error-evidence-05<br/>V3Error06ClientProjected → V3ErrorEvidencePersistQueued| c_44_v3_error_raw_wire_evidence_7
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-responses-relay-error-evidence-01` | `V3Error06ClientProjected` → `V3ErrorEvidencePersistQueued` | anchored | finalize_v3_responses_relay_server_output<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | persist_v3_error_evidence_payload<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | `v3.error.raw_wire_evidence` |
+| `v3-responses-relay-error-evidence-01` | `V3Error06ClientProjected` → `V3ErrorEvidencePersistQueued` | anchored | finalize_v3_responses_relay_server_output<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | persist_v3_responses_relay_terminal_error_evidence<br/><small>routecodex-v3-server/src/terminal_error_evidence.rs</small> | `v3.error.raw_wire_evidence` |
 | `v3-responses-relay-error-evidence-02` | `V3ErrorEvidencePersistQueued` → `V3ErrorEvidenceFlushOnTerminalFailure` | anchored | run_v3_codex_sample_persist_worker<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | persist_v3_codex_sample_persist_job<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.error.raw_wire_evidence` |
 | `v3-responses-relay-error-evidence-03` | `V3ErrorEvidencePersistFailed` → `V3ErrorEvidencePersistFailureReported` | anchored | persist_v3_codex_sample_persist_job<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | record_v3_codex_sample_persist_failure<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.error.raw_wire_evidence` |
+| `v3-relay-terminal-error-evidence-04` | `V3Error06ClientProjected` → `V3ErrorEvidencePersistQueued` | anchored | pending_endpoint_after_responses_admission_inner<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | project_v3_relay_terminal_diagnostics<br/><small>routecodex-v3-server/src/terminal_error_evidence.rs</small> | `v3.error.raw_wire_evidence` |
+| `v3-projected-terminal-error-evidence-05` | `V3Error06ClientProjected` → `V3ErrorEvidencePersistQueued` | anchored | pending_endpoint_after_responses_admission_inner<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | persist_v3_projected_terminal_error_evidence<br/><small>routecodex-v3-server/src/terminal_error_evidence.rs</small> | `v3.error.raw_wire_evidence` |
 
 ## v3.servertool_center.skeleton
 
@@ -2718,7 +2725,7 @@ flowchart TD
 
 ## v3.provider_admission_rescue_entrypoints
 
-Direct and Relay use one pre-transport selection boundary with atomic provider+authAlias capacity admission; full candidates are skipped request-locally without waiting, health mutation or Router reentry.
+Direct and Relay use one pre-transport selection boundary with atomic provider+authAlias capacity admission; full candidates are skipped request-locally without waiting, health mutation or Router reentry. REQ04 plan_execution owns the concrete zero-candidate terminal; REQ03 resolve_target remains only the opaque route handoff. Complete eligible-pool exhaustion never waits or resumes the current request; the independent server background probe restores later NEW requests.
 
 Owner feature: `v3.provider_global_subscription_probe`
 
@@ -2959,7 +2966,7 @@ flowchart TD
     c_69_v3_route_policy_condition_evaluation_4["v3-runtime<br/>execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
     c_69_v3_route_policy_condition_evaluation_6["v3-runtime<br/>plan_v3_responses_protocol_execution_with_provider_health<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small>"]
     c_69_v3_route_policy_condition_evaluation_7["v3-runtime<br/>V3RoutePolicyRuntimeState::commit_request<br/><small>routecodex-v3-runtime/src/route_policy.rs</small>"]
-    c_69_v3_route_policy_condition_evaluation_10["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
+    c_69_v3_route_policy_condition_evaluation_10["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_provider_failure_record_for_source_with_policy_status<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy/health_records.rs</small>"]
     c_69_v3_route_policy_condition_evaluation_12["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
     c_69_v3_route_policy_condition_evaluation_14["v3-runtime<br/>record_v3_direct_provider_failure_record<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs</small>"]
     c_69_v3_route_policy_condition_evaluation_15["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error<br/><small>routecodex-v3-runtime/src/provider_failure_global_probe.rs</small>"]
@@ -2993,7 +3000,7 @@ flowchart TD
 | `v3-route-policy-04` | `V3Router05RequestClassified` → `V3Router06RoutePoolResolved` | anchored | plan_v3_responses_protocol_execution_with_provider_health<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small> | V3VirtualRouter::resolve_route_pool_plan<br/><small>routecodex-v3-virtual-router/src/lib.rs</small> | `v3.route_policy_condition_evaluation` |
 | `v3-route-policy-05` | `V3Router05RequestClassified` → `V3RouteHistoryWindow` | anchored | V3RoutePolicyRuntimeState::commit_request<br/><small>routecodex-v3-runtime/src/route_policy.rs</small> | V3RouteHistoryWindow::record_turn<br/><small>routecodex-v3-route-classifier/src/policy.rs</small> | `v3.route_policy_condition_evaluation` |
 | `v3-provider-global-probe-relay-error-source` | `V3HubRespChatProcess03Governed` → `V3Error01SourceRaised` | anchored | execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small> | build_v3_error_01_source_raised_external<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.provider_global_subscription_probe` |
-| `v3-provider-global-probe-05` | `V3ProviderFailureRuntimeHealth` → `V3ProviderHealthStore` | anchored | V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderHealthStore::record_provider_failure_in_session_with_policy<br/><small>routecodex-v3-provider-responses/src/health.rs</small> | `v3.provider_global_subscription_probe` |
+| `v3-provider-global-probe-05` | `V3ProviderFailureRuntimeHealth` → `V3ProviderHealthStore` | anchored | V3ProviderFailureRuntimeHealth::record_provider_failure_record_for_source_with_policy_status<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy/health_records.rs</small> | V3ProviderHealthStore::record_provider_failure_in_session_with_policy<br/><small>routecodex-v3-provider-responses/src/health.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-global-probe-07` | `V3ProviderFailureRuntimeHealth` → `V3ProviderHealthStore` | anchored | V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderHealthStore::record_provider_key_success<br/><small>routecodex-v3-provider-responses/src/health.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-global-probe-08` | `V3ProviderFailureRuntimeHealth` → `V3ProviderGlobalSubscriptionFailureObservation` | anchored | record_v3_direct_provider_failure_record<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs</small> | V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error<br/><small>routecodex-v3-runtime/src/provider_failure_global_probe.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-global-probe-direct-error-classification` | `V3Error01SourceRaised` → `V3Error02Classified` | anchored | record_v3_direct_provider_failure_record<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs</small> | build_v3_error_02_classified_from_v3_error_01<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.provider_global_subscription_probe` |
@@ -3150,7 +3157,7 @@ flowchart TD
     c_74_v3_direct_sse_accept_skeleton_4["v3-runtime<br/>V3HookRegistry::direct_sse_typed_hooks<br/><small>routecodex-v3-runtime/src/hooks.rs</small>"]
   end
   subgraph c_74_v3_direct_sse_accept_skeleton_m_v3_server["v3-server"]
-    c_74_v3_direct_sse_accept_skeleton_0["v3-server<br/>pending_endpoint_after_responses_admission<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small>"]
+    c_74_v3_direct_sse_accept_skeleton_0["v3-server<br/>pending_endpoint_after_responses_admission<br/><small>routecodex-v3-server/src/executors.rs</small>"]
     c_74_v3_direct_sse_accept_skeleton_1["v3-server<br/>pending_endpoint_after_responses_admission_inner<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small>"]
     c_74_v3_direct_sse_accept_skeleton_2["v3-server<br/>v3_io_sse_body<br/><small>routecodex-v3-server/src/frame_builders.rs</small>"]
   end
@@ -3161,7 +3168,7 @@ flowchart TD
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-direct-sse-accept-skeleton-01` | `V3DirectSseAccept01ClientChannel` → `V3DirectSseAccept02RuntimeWorker` | anchored | pending_endpoint_after_responses_admission<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | pending_endpoint_after_responses_admission_inner<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | `v3.direct_sse_accept_skeleton` |
+| `v3-direct-sse-accept-skeleton-01` | `V3DirectSseAccept01ClientChannel` → `V3DirectSseAccept02RuntimeWorker` | anchored | pending_endpoint_after_responses_admission<br/><small>routecodex-v3-server/src/executors.rs</small> | pending_endpoint_after_responses_admission_inner<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | `v3.direct_sse_accept_skeleton` |
 | `v3-direct-sse-accept-skeleton-02` | `V3DirectSseAccept02RuntimeWorker` → `V3DirectSseAccept03ProjectedClientFrame` | anchored | pending_endpoint_after_responses_admission_inner<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | v3_io_sse_body<br/><small>routecodex-v3-server/src/frame_builders.rs</small> | `v3.direct_sse_accept_skeleton` |
 | `v3-direct-typed-hook-catalog-02` | `V3DirectResp14ProviderProjectionPrepared` → `V3DirectResp14TypedHookCatalog` | anchored | execute_v3_responses_direct_runtime_kernel<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | V3HookRegistry::direct_sse_typed_hooks<br/><small>routecodex-v3-runtime/src/hooks.rs</small> | `v3.responses_chat_sse_typed_tree_refactor` |
 

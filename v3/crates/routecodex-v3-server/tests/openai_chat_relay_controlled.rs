@@ -115,6 +115,7 @@ data: [DONE]
 async fn server_executes_controlled_json_sse_error_and_isolation_without_second_owner() {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var("V3_OPENAI_CHAT_CONTROLLED_KEY", "controlled-secret");
+    std::env::set_var("V3_OPENAI_CHAT_CONTROLLED_SSE_KEY", "sse-control-secret");
     let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let upstream_addr = upstream.local_addr().unwrap();
     let (captures_tx, mut captures_rx) = mpsc::unbounded_channel();
@@ -173,7 +174,7 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
     let sse_response = client
         .post(&endpoint)
         .json(&json!({
-            "model":"chat-client-alias",
+            "model":"chat-sse-client-alias",
             "messages":[{"role":"user","content":"sse"}],
             "stream":true
         }))
@@ -213,6 +214,55 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
     assert!(body.contains(r#""finish_reason":"stop""#));
     assert_eq!(body.matches("data: [DONE]").count(), 1, "{body}");
     let _sse_capture = captures_rx.recv().await.unwrap();
+    assert_eq!(
+        _sse_capture.authorization.as_deref(),
+        Some("Bearer sse-control-secret")
+    );
+
+    // Normal-routing success must run before intentional failures cool the
+    // default target. Each failure case below keeps its own provider identity.
+    let unlisted_model_response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model":"controlled.unknown-model",
+            "messages":[{"role":"user","content":"unlisted"}],
+            "stream":false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        unlisted_model_response.status(),
+        StatusCode::OK,
+        "a client model that is not a declared provider.model must fall back to normal routing"
+    );
+    let unlisted_model_body: Value = unlisted_model_response.json().await.unwrap();
+    assert_eq!(
+        unlisted_model_body["choices"][0]["message"]["content"],
+        "controlled json"
+    );
+    let unlisted_model_capture = loop {
+        let capture = tokio::time::timeout(Duration::from_secs(2), captures_rx.recv())
+            .await
+            .expect("a client model that is not a declared provider.model must reach the provider")
+            .unwrap();
+        if capture
+            .body
+            .pointer("/messages/0/content")
+            .and_then(Value::as_str)
+            == Some("unlisted")
+        {
+            break capture;
+        }
+    };
+    assert_eq!(
+        unlisted_model_capture.body["model"], "chat-wire-model",
+        "the fallback must serve the default pool target, not the requested name"
+    );
+    assert_eq!(
+        unlisted_model_capture.authorization.as_deref(),
+        Some("Bearer controlled-secret")
+    );
 
     let error_result = client
         .post(&endpoint)
@@ -246,7 +296,7 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
     let sse_error_result = client
         .post(&endpoint)
         .json(&json!({
-            "model":"chat-client-alias",
+            "model":"chat-sse-client-alias",
             "messages":[{"role":"user","content":"fail"}],
             "stream":true
         }))
@@ -295,6 +345,10 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         Some("fail")
     );
     assert!(sse_failure_capture.body.get("metadata_center").is_none());
+    assert_eq!(
+        sse_failure_capture.authorization.as_deref(),
+        Some("Bearer sse-control-secret")
+    );
 
     let isolation_response = client
         .post(&endpoint)
@@ -322,48 +376,10 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         );
     }
 
-    let unlisted_model_response = client
-        .post(&endpoint)
-        .json(&json!({
-            "model":"controlled.unknown-model",
-            "messages":[{"role":"user","content":"unlisted"}],
-            "stream":false
-        }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        unlisted_model_response.status(),
-        StatusCode::OK,
-        "a client model that is not a declared provider.model must fall back to normal routing"
-    );
-    let unlisted_model_body: Value = unlisted_model_response.json().await.unwrap();
-    assert_eq!(
-        unlisted_model_body["choices"][0]["message"]["content"],
-        "controlled json"
-    );
-    let unlisted_model_capture = loop {
-        let capture = tokio::time::timeout(Duration::from_secs(2), captures_rx.recv())
-            .await
-            .expect("a client model that is not a declared provider.model must reach the provider")
-            .unwrap();
-        if capture
-            .body
-            .pointer("/messages/0/content")
-            .and_then(Value::as_str)
-            == Some("unlisted")
-        {
-            break capture;
-        }
-    };
-    assert_eq!(
-        unlisted_model_capture.body["model"], "chat-wire-model",
-        "the fallback must serve the default pool target, not the requested name"
-    );
-
     handle.shutdown().await;
     upstream_shutdown_tx.send(()).unwrap();
     std::env::remove_var("V3_OPENAI_CHAT_CONTROLLED_KEY");
+    std::env::remove_var("V3_OPENAI_CHAT_CONTROLLED_SSE_KEY");
 }
 
 #[path = "../../../crates/routecodex-v3-runtime/tests/support/test_ports.rs"]
@@ -404,10 +420,24 @@ wire_name = "chat-wire-model"
 aliases = ["chat-client-alias"]
 supports_streaming = true
 capabilities = ["text", "tools"]
+[providers.controlled_sse]
+type = "openai_chat"
+base_url = "http://127.0.0.1:{upstream_port}/v1"
+default_model = "chat-wire-model"
+auth = {{ type = "api_key", entries = [{{ alias = "sse", env = "V3_OPENAI_CHAT_CONTROLLED_SSE_KEY" }}] }}
+[providers.controlled_sse.models.chat-wire-model]
+wire_name = "chat-wire-model"
+aliases = ["chat-sse-client-alias"]
+supports_streaming = true
+capabilities = ["text", "tools"]
 [route_groups.controlled.pools.chat_client]
 selection = {{ strategy = "priority" }}
 match = {{ precedence = 10, entry_protocol = "openai_chat", models = ["chat-client-alias"] }}
 targets = [{{ kind = "provider_model", provider = "controlled", model = "chat-wire-model", key = "controlled", priority = 1 }}]
+[route_groups.controlled.pools.chat_sse_client]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "openai_chat", models = ["chat-sse-client-alias"] }}
+targets = [{{ kind = "provider_model", provider = "controlled_sse", model = "chat-wire-model", key = "sse", priority = 1 }}]
 [route_groups.controlled.pools.default]
 selection = {{ strategy = "priority" }}
 targets = [{{ kind = "provider_model", provider = "controlled", model = "chat-wire-model", key = "controlled", priority = 1 }}]

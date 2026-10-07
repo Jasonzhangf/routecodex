@@ -306,8 +306,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:383b2116a35b192951d60f8c5df63cdd759e4fce448702d7389b8e8a9bb4b612
-    last_manual_authorization_id: auth-20260928-e12092b-error-evidence-lock
+    fingerprint: sha256:e873c6fecfe210f230677c1c566ad1bca0ff270ec6030b3b14a7001c278ebcc9
+    last_manual_authorization_id: auth-20261006-dagpipe-relay-terminal-diagnostic-owner
   - item_id: chain:v3.servertool_center.skeleton
     chain_id: v3.servertool_center.skeleton
     status: audited_locked
@@ -453,6 +453,13 @@ locked_items:
     fingerprint: sha256:487da1203d72afc7ff984d1e24ab4ee9703a739e8170ee883c23526d1abaf70e
     last_manual_authorization_id: auth-20260830-v3-execution-control-provider-global
 manual_authorizations:
+  - authorization_id: auth-20261006-dagpipe-relay-terminal-diagnostic-owner
+    item_id: chain:v3.error.raw_wire_evidence
+    approved_by: Jason
+    approved_at: '2026-10-06T18:49:57Z'
+    reason: "Records the existing user authorization for the request/response/error DAGPipe conversion, the explicit instruction to avoid silent failure, and '批准更改，继续'. The shared Server diagnostic helper records supplied typed Error facts before the existing no-response terminal; the real caller edges now bind terminal_error_evidence.rs after physical owner decomposition. The existing Debug queue remains the sole filesystem writer. Provider selection, transport disposition and client payload ownership are unchanged. This refresh records the scoped authorized change and does not claim final architecture review or live acceptance."
+    fingerprint_before: sha256:383b2116a35b192951d60f8c5df63cdd759e4fce448702d7389b8e8a9bb4b612
+    fingerprint_after: sha256:e873c6fecfe210f230677c1c566ad1bca0ff270ec6030b3b14a7001c278ebcc9
   - authorization_id: auth-20260929-v3-hooks-sidecar-chain-lock
     item_id: chain:v3.rcc_internal_hooks_sidecar
     approved_by: Jason

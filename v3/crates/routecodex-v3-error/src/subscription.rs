@@ -54,7 +54,10 @@ impl V3ProviderFailureAction {
 pub fn build_v3_provider_failure_action_from_v3_error_02(
     classified: &V3Error02Classified,
 ) -> V3ProviderFailureAction {
-    if classified.source.source_kind != V3ErrorSourceKind::ProviderFailure {
+    if !matches!(
+        classified.source.source_kind,
+        V3ErrorSourceKind::ProviderFailure | V3ErrorSourceKind::ProviderLocalFailure
+    ) {
         return V3ProviderFailureAction {
             class_code: classified.class.to_string(),
             recovery: V3ProviderRecoveryKind::NotProviderHealth,

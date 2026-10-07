@@ -2,8 +2,8 @@ use super::V3HubProviderWireProtocol;
 use routecodex_v3_provider_responses::{
     build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency,
     build_v3_transport_13_responses_http_request_from_v3_provider_12,
-    V3Provider12ResponsesWirePayload, V3ProviderRequestHeader, V3ResponsesProviderTarget,
-    V3Transport13ResponsesHttpRequest,
+    V3Provider12ResponsesWirePayload, V3ProviderError, V3ProviderRequestHeader,
+    V3ResponsesProviderTarget, V3Transport13ResponsesHttpRequest,
 };
 use std::time::Duration;
 
@@ -53,7 +53,7 @@ pub(crate) fn anthropic_messages_url(base_url: &str) -> String {
 
 pub(crate) fn build_v3_anthropic_messages_transport_request_from_v3_provider_08(
     wire: V3Provider12ResponsesWirePayload,
-) -> Result<V3Transport13ResponsesHttpRequest, String> {
+) -> Result<V3Transport13ResponsesHttpRequest, V3ProviderError> {
     build_v3_anthropic_messages_transport_request_from_v3_provider_08_with_provider_headers(
         wire,
         Vec::new(),
@@ -63,7 +63,7 @@ pub(crate) fn build_v3_anthropic_messages_transport_request_from_v3_provider_08(
 pub(crate) fn build_v3_anthropic_messages_transport_request_from_v3_provider_08_with_provider_headers(
     wire: V3Provider12ResponsesWirePayload,
     provider_headers: Vec<V3ProviderRequestHeader>,
-) -> Result<V3Transport13ResponsesHttpRequest, String> {
+) -> Result<V3Transport13ResponsesHttpRequest, V3ProviderError> {
     let request_id = wire.request_id().to_string();
     let target = wire.target().clone();
     let sse_first_frame_timeout_ms = target.sse_first_frame_timeout_ms;
@@ -83,8 +83,7 @@ pub(crate) fn build_v3_anthropic_messages_transport_request_from_v3_provider_08_
             timeout,
             target.concurrency_acquire_timeout_ms,
             sse_first_frame_timeout_ms,
-        )
-        .map_err(|error| error.to_string());
+        );
     }
     build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
         request_id,
@@ -98,24 +97,21 @@ pub(crate) fn build_v3_anthropic_messages_transport_request_from_v3_provider_08_
         target.concurrency_acquire_timeout_ms,
         sse_first_frame_timeout_ms,
     )
-    .map_err(|error| error.to_string())
 }
 
 pub(crate) fn build_v3_provider_transport_request_for_protocol(
     provider_protocol: V3HubProviderWireProtocol,
     wire: V3Provider12ResponsesWirePayload,
-) -> Result<V3Transport13ResponsesHttpRequest, String> {
+) -> Result<V3Transport13ResponsesHttpRequest, V3ProviderError> {
     match provider_protocol {
         V3HubProviderWireProtocol::Responses => {
             build_v3_transport_13_responses_http_request_from_v3_provider_12(wire)
-                .map_err(|error| error.to_string())
         }
         V3HubProviderWireProtocol::OpenAiChat => {
             build_v3_openai_chat_transport_request_from_v3_provider_08(wire)
         }
         V3HubProviderWireProtocol::Anthropic => {
             build_v3_anthropic_messages_transport_request_from_v3_provider_08(wire)
-                .map_err(|error| error.to_string())
         }
         V3HubProviderWireProtocol::Gemini => {
             let transport_intent = match wire.stream_intent() {
@@ -132,14 +128,13 @@ pub(crate) fn build_v3_provider_transport_request_for_protocol(
                 transport_intent,
                 wire.body().clone(),
             )
-            .map_err(|error| error.to_string())
         }
     }
 }
 
 fn build_v3_openai_chat_transport_request_from_v3_provider_08(
     wire: V3Provider12ResponsesWirePayload,
-) -> Result<V3Transport13ResponsesHttpRequest, String> {
+) -> Result<V3Transport13ResponsesHttpRequest, V3ProviderError> {
     let request_id = wire.request_id().to_string();
     let target = wire.target().clone();
     let sse_first_frame_timeout_ms = target.sse_first_frame_timeout_ms;
@@ -164,7 +159,6 @@ fn build_v3_openai_chat_transport_request_from_v3_provider_08(
         target.concurrency_acquire_timeout_ms,
         sse_first_frame_timeout_ms,
     )
-    .map_err(|error| error.to_string())
 }
 
 /// opencode 对 DeepSeek 系模型的标准 reasoning 回传处理（transform.ts interleaved）：
@@ -206,9 +200,207 @@ mod tests {
     use routecodex_v3_config::V3ResponsesTransportKind;
     use routecodex_v3_provider_responses::{
         build_v3_provider_12_responses_wire_payload, V3ProviderAuthHandle,
-        V3ProviderAuthSecretHandle,
+        V3ProviderAuthSecretHandle, V3ResponsesStreamIntent,
     };
     use serde_json::json;
+
+    fn typed_transport_test_target(
+        provider_id: &str,
+        provider_type: &str,
+        base_url: &str,
+        canonical_model_id: &str,
+    ) -> V3ResponsesProviderTarget {
+        V3ResponsesProviderTarget {
+            provider_id: provider_id.into(),
+            provider_type: provider_type.into(),
+            base_url: base_url.into(),
+            canonical_model_id: canonical_model_id.into(),
+            wire_model: canonical_model_id.into(),
+            compatibility_profile: None,
+            headers: Default::default(),
+            auth: V3ProviderAuthHandle {
+                alias: "primary".into(),
+                secret: V3ProviderAuthSecretHandle::Environment("K1".into()),
+            },
+            responses_transport: V3ResponsesTransportKind::Http,
+            websocket_v2_url: None,
+            provider_request_cleanup: Default::default(),
+            request_timeout_ms: 300_000,
+            sse_first_frame_timeout_ms: None,
+            initial_concurrency_budget: 8,
+            concurrency_acquire_timeout_ms: 60_000,
+        }
+    }
+
+    #[test]
+    fn protocol_transport_invalid_url_preserves_typed_provider_error_for_all_protocols() {
+        for protocol in [
+            V3HubProviderWireProtocol::Responses,
+            V3HubProviderWireProtocol::OpenAiChat,
+            V3HubProviderWireProtocol::Anthropic,
+            V3HubProviderWireProtocol::Gemini,
+        ] {
+            let target = typed_transport_test_target(
+                "typed-invalid-url-provider",
+                match protocol {
+                    V3HubProviderWireProtocol::Responses => "responses",
+                    V3HubProviderWireProtocol::OpenAiChat => "openai_chat",
+                    V3HubProviderWireProtocol::Anthropic => "anthropic",
+                    V3HubProviderWireProtocol::Gemini => "gemini",
+                },
+                "::not-a-url::",
+                "typed-model",
+            );
+            let wire = build_v3_provider_12_responses_wire_payload(
+                "req-typed-invalid-url",
+                target,
+                json!({"model": "typed-model", "input": "hello"}),
+            )
+            .unwrap();
+
+            let error = build_v3_provider_transport_request_for_protocol(protocol, wire)
+                .expect_err("invalid URL must fail transport construction");
+            match error {
+                V3ProviderError::InvalidBaseUrl {
+                    request_id,
+                    provider_id,
+                    ..
+                } => {
+                    assert_eq!(request_id, "req-typed-invalid-url");
+                    assert_eq!(provider_id, "typed-invalid-url-provider");
+                }
+                other => panic!("{protocol:?} lost typed InvalidBaseUrl: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn protocol_transport_valid_construction_keeps_url_auth_stream_and_body() {
+        for protocol in [
+            V3HubProviderWireProtocol::Responses,
+            V3HubProviderWireProtocol::OpenAiChat,
+            V3HubProviderWireProtocol::Anthropic,
+            V3HubProviderWireProtocol::Gemini,
+        ] {
+            let base_url = match protocol {
+                V3HubProviderWireProtocol::Responses => "https://responses.invalid/v1",
+                V3HubProviderWireProtocol::OpenAiChat => "https://chat.invalid/v1",
+                V3HubProviderWireProtocol::Anthropic => "https://anthropic.invalid",
+                V3HubProviderWireProtocol::Gemini => "https://gemini.invalid",
+            };
+            let target = typed_transport_test_target(
+                "typed-valid-provider",
+                match protocol {
+                    V3HubProviderWireProtocol::Responses => "responses",
+                    V3HubProviderWireProtocol::OpenAiChat => "openai_chat",
+                    V3HubProviderWireProtocol::Anthropic => "anthropic",
+                    V3HubProviderWireProtocol::Gemini => "gemini",
+                },
+                base_url,
+                "typed-model",
+            );
+            let wire = build_v3_provider_12_responses_wire_payload(
+                "req-typed-valid",
+                target,
+                json!({
+                    "model": "typed-model",
+                    "input": "hello",
+                    "stream": true,
+                    "opaque_marker": {"keep": true}
+                }),
+            )
+            .unwrap();
+
+            let request = build_v3_provider_transport_request_for_protocol(protocol, wire)
+                .expect("valid construction must succeed");
+            assert_eq!(request.request_id(), "req-typed-valid");
+            assert_eq!(request.provider_id(), "typed-valid-provider");
+            assert_eq!(request.provider_key(), "typed-valid-provider:primary");
+            match protocol {
+                V3HubProviderWireProtocol::Responses => {
+                    assert!(request.url().ends_with("/responses"));
+                }
+                V3HubProviderWireProtocol::OpenAiChat => {
+                    assert!(request.url().ends_with("/chat/completions"));
+                }
+                V3HubProviderWireProtocol::Anthropic => {
+                    assert!(request.url().ends_with("/v1/messages?beta=true"));
+                }
+                V3HubProviderWireProtocol::Gemini => {
+                    assert!(request
+                        .url()
+                        .contains("/models/typed-model:streamGenerateContent"));
+                    assert!(request.url().ends_with("?alt=sse"));
+                }
+            }
+            assert_eq!(request.stream_intent(), V3ResponsesStreamIntent::Sse);
+            assert_eq!(request.body()["opaque_marker"]["keep"], true);
+        }
+    }
+
+    #[test]
+    fn anthropic_transport_with_provider_headers_preserves_typed_invalid_url() {
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-typed-anthropic-header-error",
+            typed_transport_test_target(
+                "typed-anthropic-provider",
+                "anthropic",
+                "::not-a-url::",
+                "typed-model",
+            ),
+            json!({"model": "typed-model", "input": "hello"}),
+        )
+        .unwrap();
+
+        let error = build_v3_anthropic_messages_transport_request_from_v3_provider_08_with_provider_headers(
+            wire,
+            vec![V3ProviderRequestHeader::new(
+                "anthropic-beta",
+                "test-header",
+            )],
+        )
+        .expect_err("invalid URL must fail transport construction");
+        assert!(matches!(
+            error,
+            V3ProviderError::InvalidBaseUrl {
+                ref request_id,
+                ref provider_id,
+                ..
+            } if request_id == "req-typed-anthropic-header-error"
+                && provider_id == "typed-anthropic-provider"
+        ));
+    }
+
+    #[test]
+    fn typed_transport_preserves_missing_auth_handle_until_provider_send() {
+        let mut target = typed_transport_test_target(
+            "typed-missing-auth-provider",
+            "openai_chat",
+            "https://chat.invalid/v1",
+            "typed-model",
+        );
+        target.auth = V3ProviderAuthHandle {
+            alias: "missing-auth".into(),
+            secret: V3ProviderAuthSecretHandle::Environment("REQ09_W_MISSING_AUTH_SECRET".into()),
+        };
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-typed-missing-auth",
+            target,
+            json!({"model": "typed-model", "input": "hello"}),
+        )
+        .unwrap();
+
+        let request = build_v3_provider_transport_request_for_protocol(
+            V3HubProviderWireProtocol::OpenAiChat,
+            wire,
+        )
+        .expect("transport construction must not resolve provider auth");
+        assert_eq!(
+            request.provider_key(),
+            "typed-missing-auth-provider:missing-auth"
+        );
+        assert_eq!(request.body()["input"], "hello");
+    }
 
     #[test]
     fn unrelated_deepseek_model_keeps_malformed_arguments_at_openai_chat_transport() {

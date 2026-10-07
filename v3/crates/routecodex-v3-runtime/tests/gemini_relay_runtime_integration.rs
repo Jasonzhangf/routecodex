@@ -5,8 +5,10 @@ use routecodex_v3_provider_responses::{
     V3ProviderResp14Raw, V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
-    execute_v3_gemini_relay_runtime, execute_v3_gemini_relay_runtime_with_provider_health,
-    V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput, V3ResponsesRelayProviderHealthHandle,
+    build_v3_provider_global_probe_target, execute_v3_gemini_relay_runtime,
+    execute_v3_gemini_relay_runtime_with_provider_health, probe_v3_provider_global_target,
+    V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput, V3ProviderHealthProbeFailure,
+    V3ResponsesRelayProviderHealthHandle,
 };
 use serde_json::{json, Value};
 use std::sync::Mutex;
@@ -68,6 +70,50 @@ async fn serve_one_gemini_probe(
         .await
         .expect("provider probe response must be writable");
     String::from_utf8_lossy(&request).into_owned()
+}
+
+async fn run_real_gemini_recovery_probe(
+    provider_health: &V3ResponsesRelayProviderHealthHandle,
+    manifest: &routecodex_v3_config::V3Config05ManifestPublished,
+    provider_id: &str,
+) {
+    let store = provider_health.store();
+    let auth_alias = Some(provider_id);
+    let model_id = Some("gemini-wire");
+    let probe_keys = store
+        .provider_cooldown_probe_keys_due(u64::MAX)
+        .expect("provider cooldown probe inventory");
+    assert!(
+        probe_keys.contains(&(
+            provider_id.to_string(),
+            auth_alias.map(str::to_string),
+            model_id.map(str::to_string),
+        )),
+        "provider cooldown must require an explicit probe"
+    );
+
+    let probe_manifest = manifest.clone();
+    provider_health
+        .runtime_health()
+        .run_due_provider_health_probes(
+            u64::MAX,
+            false,
+            move |provider_id, auth_alias, model_id| {
+                let probe_manifest = probe_manifest.clone();
+                async move {
+                    let target = build_v3_provider_global_probe_target(
+                        &probe_manifest,
+                        &provider_id,
+                        auth_alias.as_deref(),
+                        model_id.as_deref(),
+                    )
+                    .map_err(V3ProviderHealthProbeFailure::Internal)?;
+                    probe_v3_provider_global_target(target).await
+                }
+            },
+        )
+        .await
+        .expect("real Gemini recovery probe must revive the cooled provider key");
 }
 
 #[path = "support/hub_v1_fixture.rs"]
@@ -883,7 +929,7 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             .providers
             .get_mut(server_id)
             .expect("probe provider must exist");
-        provider.base_url = base_url;
+        provider.base_url = base_url.clone();
         provider.auth.entries[0].env = Some("V3_GEMINI_GATE_FAILURE_PROBE_KEY".into());
         std::env::set_var("V3_GEMINI_GATE_FAILURE_PROBE_KEY", "routecodex-test-key");
 
@@ -929,8 +975,9 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
         );
 
         // Broker 内完成的 provider-attempt failure 必须关闭本次 action lane，
-        // 同时保留 provider cooldown；Front 不参与错误判定。
-        let succeeding = JsonTransport {
+        // 同时保留 provider cooldown；Front 不参与错误判定。冷却耗尽属于
+        // 当前请求的终态，不等待后续 probe 复活，也不消耗成功 transport。
+        let exhausted_transport = JsonTransport {
             captured_url: Mutex::new(None),
             captured_body: Mutex::new(None),
         };
@@ -950,16 +997,10 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             )),
             "{case} first typed failure must create an exact provider cooldown: {probe_keys:?}"
         );
-        let held_manifest = manifest.clone();
-        let held_health = provider_health.runtime_health();
-        let probe_server = tokio::spawn(serve_one_gemini_probe(
-            listener,
-            "200 OK",
-            r#"{"candidates":[]}"#,
-        ));
-        let held = tokio::spawn(async move {
+        let exhausted = tokio::time::timeout(
+            Duration::from_millis(250),
             execute_v3_gemini_relay_runtime_with_provider_health(
-                &held_manifest,
+                &manifest,
                 V3GeminiRelayRuntimeInput {
                     server_id: server_id.into(),
                     failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
@@ -968,29 +1009,58 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
                         concat!(module_path!(), ":", line!()),
                     )
                     .expect("test provider failure session scope"),
-                    request_id: format!("req-gemini-held-after-uncommitted-{case}"),
+                    request_id: format!("req-gemini-terminal-after-uncommitted-{case}"),
                     endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
                     payload: json!({
-                        "contents":[{"role":"user","parts":[{"text":"held"}]}],
+                        "contents":[{"role":"user","parts":[{"text":"terminal"}]}],
                         "stream":false
                     }),
                 },
-                &succeeding,
-                held_health,
-            )
-            .await
-        });
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        assert!(
-            !held.is_finished(),
-            "{case} cooldown-only exhaustion must hold until a rescue probe succeeds"
+                &exhausted_transport,
+                provider_health.runtime_health(),
+            ),
+        )
+        .await
+        .expect("cooldown-only exhaustion must terminate the current request")
+        .expect("cooldown-only exhaustion must reach the typed Error-chain terminal");
+        assert_eq!(exhausted.status, 502, "{case}: {exhausted:?}");
+        assert_eq!(
+            exhausted.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
+            "{case}: exhaustion must terminate without a provider response"
         );
-        revive_cooled_provider(&provider_health, server_id).await;
-        let revived = tokio::time::timeout(Duration::from_secs(2), held)
-            .await
-            .expect("held request must wake after provider recovery")
-            .expect("held request task must not panic")
-            .expect("probe-revived provider must accept the held request");
+        assert_eq!(exhausted.error_chain.as_ref().map(Vec::len), Some(6));
+        assert_eq!(
+            exhausted.node_trace.last(),
+            Some(&"V3Error06ClientProjected")
+        );
+        let exhausted_body = match exhausted.client_body {
+            V3GeminiRelayClientBody::Json(value) => value,
+            V3GeminiRelayClientBody::Sse(_) => {
+                panic!("{case} exhausted request must not produce client SSE")
+            }
+        };
+        assert!(
+            !exhausted_body.to_string().contains("partial"),
+            "{case} exhausted outcome must not revive failed-attempt bytes: {exhausted_body}"
+        );
+        assert!(
+            exhausted_transport.captured_url.lock().unwrap().is_none(),
+            "{case} exhausted request must not consume the success transport"
+        );
+        assert!(
+            exhausted_transport.captured_body.lock().unwrap().is_none(),
+            "{case} exhausted request must not consume a provider payload"
+        );
+
+        // The failed request is finished. A real recovery probe must use the
+        // Gemini provider endpoint before a fresh request can use the provider.
+        let probe_server = tokio::spawn(serve_one_gemini_probe(
+            listener,
+            "200 OK",
+            r#"{"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}]}"#,
+        ));
+        run_real_gemini_recovery_probe(&provider_health, &manifest, server_id).await;
         let probe_request = tokio::time::timeout(Duration::from_secs(2), probe_server)
             .await
             .expect("rescue probe must reach the local provider listener")
@@ -999,7 +1069,72 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             probe_request.starts_with("POST /v1beta/models/gemini-wire:generateContent HTTP/1.1"),
             "rescue probe must use the Gemini provider endpoint: {probe_request:?}"
         );
-        assert_eq!(revived.status, 200);
+
+        let fresh_transport = JsonTransport {
+            captured_url: Mutex::new(None),
+            captured_body: Mutex::new(None),
+        };
+        let fresh_payload = json!({
+            "contents":[
+                {"role":"user","parts":[{"text":"lookup weather"}]},
+                {"role":"model","parts":[{"functionCall":{"name":"lookup_weather","args":{"city":"Paris"}}}]},
+                {"role":"user","parts":[{"functionResponse":{"name":"lookup_weather","response":{"forecast":"sunny"}}}]}
+            ],
+            "tools":[{"functionDeclarations":[{"name":"lookup_weather","parameters":{"type":"object"}}]}],
+            "generationConfig":{"temperature":0.2},
+            "stream":false
+        });
+        let fresh = tokio::time::timeout(
+            Duration::from_secs(2),
+            execute_v3_gemini_relay_runtime_with_provider_health(
+                &manifest,
+                V3GeminiRelayRuntimeInput {
+                    server_id: server_id.into(),
+                    failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                        "test-server",
+                        "test-group",
+                        concat!(module_path!(), ":", line!()),
+                    )
+                    .expect("test provider failure session scope"),
+                    request_id: format!("req-gemini-fresh-after-recovery-{case}"),
+                    endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
+                    payload: fresh_payload.clone(),
+                },
+                &fresh_transport,
+                provider_health.runtime_health(),
+            ),
+        )
+        .await
+        .expect("fresh request must not wait after a successful recovery probe")
+        .expect("fresh request must use the recovered provider");
+        assert_eq!(fresh.status, 200, "{case}: {fresh:?}");
+        let fresh_client = match fresh.client_body {
+            V3GeminiRelayClientBody::Json(value) => value,
+            V3GeminiRelayClientBody::Sse(_) => panic!("{case} expected a fresh JSON response"),
+        };
+        assert_eq!(
+            fresh_client["candidates"][0]["content"]["parts"][0]["text"],
+            "controlled json"
+        );
+        let expected_fresh_url = format!("{base_url}/models/gemini-wire:generateContent");
+        assert_eq!(
+            fresh_transport.captured_url.lock().unwrap().as_deref(),
+            Some(expected_fresh_url.as_str()),
+            "{case} fresh request must consume the recovered provider transport"
+        );
+        let captured = fresh_transport
+            .captured_body
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("fresh request must capture the provider payload");
+        assert_eq!(captured["contents"], fresh_payload["contents"]);
+        assert_eq!(captured["tools"], fresh_payload["tools"]);
+        assert_eq!(
+            captured["generationConfig"],
+            fresh_payload["generationConfig"]
+        );
+        assert!(captured.get("stream").is_none(), "{captured}");
     }
 }
 

@@ -267,6 +267,7 @@ pub enum V3ErrorSourceKind {
     PathNotFound,
     PendingEndpoint,
     ProviderFailure,
+    ProviderLocalFailure,
     ProviderCompatPayloadBoundaryViolation,
     TargetPoolExhausted,
     RuntimeFailure,
@@ -536,7 +537,7 @@ impl V3Error05ExecutionDecision {
     pub fn try_into_terminal(self) -> Result<V3Error05TerminalDecision, Self> {
         let source_kind = &self.exhaustion.local_action.classified.source.source_kind;
         let valid_terminal = match source_kind {
-            V3ErrorSourceKind::ProviderFailure => {
+            V3ErrorSourceKind::ProviderFailure | V3ErrorSourceKind::ProviderLocalFailure => {
                 self.action == V3Error05ExecutionAction::ProjectTerminal
                     && self.exhaustion.route_pool_remaining_after_exclusion == 0
                     && !self.exhaustion.default_pool_available
@@ -737,7 +738,9 @@ pub fn build_v3_error_01_source_raised_external(
 
 fn validate_internal_error_source_kind(source_kind: &V3ErrorSourceKind) {
     match source_kind {
-        V3ErrorSourceKind::RuntimeFailure | V3ErrorSourceKind::SuccessControl => {}
+        V3ErrorSourceKind::RuntimeFailure
+        | V3ErrorSourceKind::ProviderLocalFailure
+        | V3ErrorSourceKind::SuccessControl => {}
         V3ErrorSourceKind::ProviderFailure => {
             panic!("ProviderFailure cannot carry a RouteCodex internal error code")
         }
@@ -757,11 +760,16 @@ fn validate_internal_error_source_kind(source_kind: &V3ErrorSourceKind) {
 }
 
 fn validate_external_error_source_kind(source_kind: &V3ErrorSourceKind) {
-    if matches!(
-        source_kind,
-        V3ErrorSourceKind::RuntimeFailure | V3ErrorSourceKind::SuccessControl
-    ) {
-        panic!("RouteCodex internal failures must use an internal error code, not an external link")
+    match source_kind {
+        V3ErrorSourceKind::ProviderLocalFailure => {
+            panic!("ProviderLocalFailure cannot carry an external error link")
+        }
+        V3ErrorSourceKind::RuntimeFailure | V3ErrorSourceKind::SuccessControl => {
+            panic!(
+                "RouteCodex internal failures must use an internal error code, not an external link"
+            )
+        }
+        _ => {}
     }
 }
 
@@ -785,6 +793,10 @@ pub fn build_v3_error_02_classified_from_v3_error_01(
         V3ErrorSourceKind::ProviderFailure => {
             ("provider_failure", "non_terminal_if_candidates_remain")
         }
+        V3ErrorSourceKind::ProviderLocalFailure => (
+            "provider_local_failure",
+            "non_terminal_if_candidates_remain",
+        ),
         V3ErrorSourceKind::ProviderCompatPayloadBoundaryViolation => (
             "provider_compat_payload_boundary_violation",
             "already_terminal",
@@ -867,7 +879,7 @@ pub fn build_v3_error_03_target_local_action_from_v3_error_02(
 ) -> V3Error03TargetLocalAction {
     let provider_failure = matches!(
         classified.source.source_kind,
-        V3ErrorSourceKind::ProviderFailure
+        V3ErrorSourceKind::ProviderFailure | V3ErrorSourceKind::ProviderLocalFailure
     );
     let client_disconnect = matches!(
         classified.source.source_kind,
@@ -909,7 +921,7 @@ pub fn build_v3_error_04_target_exhaustion_decision_with_provider_availability(
 ) -> V3Error04TargetExhaustionDecision {
     let provider_failure = matches!(
         local_action.classified.source.source_kind,
-        V3ErrorSourceKind::ProviderFailure
+        V3ErrorSourceKind::ProviderFailure | V3ErrorSourceKind::ProviderLocalFailure
     );
     let target_exhausted =
         (provider_failure && route_pool_remaining_after_exclusion == 0 && !default_pool_available)
@@ -942,7 +954,7 @@ pub fn build_v3_error_05_execution_decision_from_v3_error_04(
 ) -> V3Error05ExecutionDecision {
     let action = match exhaustion.local_action.classified.source.source_kind {
         V3ErrorSourceKind::ClientDisconnect => V3Error05ExecutionAction::ClientDisconnected,
-        V3ErrorSourceKind::ProviderFailure
+        V3ErrorSourceKind::ProviderFailure | V3ErrorSourceKind::ProviderLocalFailure
             if exhaustion.route_pool_remaining_after_exclusion > 0
                 || exhaustion.default_pool_available =>
         {
@@ -951,13 +963,18 @@ pub fn build_v3_error_05_execution_decision_from_v3_error_04(
                     .expect("reselect Error05 requires an exact recovery admission witness"),
             }
         }
-        V3ErrorSourceKind::ProviderFailure => V3Error05ExecutionAction::ProjectTerminal,
+        V3ErrorSourceKind::ProviderFailure | V3ErrorSourceKind::ProviderLocalFailure => {
+            V3Error05ExecutionAction::ProjectTerminal
+        }
         _ => V3Error05ExecutionAction::RejectNonProviderError,
     };
     V3Error05ExecutionDecision { exhaustion, action }
 }
 
 pub fn is_v3_provider_pool_exhausted(exhaustion: &V3Error04TargetExhaustionDecision) -> bool {
+    // ProviderLocalFailure is terminal on actual exhaustion, but it is a local
+    // construction failure and must keep its original internal diagnostic
+    // instead of taking the provider pool-exhausted network_error projection.
     exhaustion.target_exhausted
         && matches!(
             exhaustion.local_action.classified.source.source_kind,
@@ -991,6 +1008,7 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
             V3ErrorSourceKind::PathNotFound => 404,
             V3ErrorSourceKind::PendingEndpoint => 501,
             V3ErrorSourceKind::ProviderFailure => 502,
+            V3ErrorSourceKind::ProviderLocalFailure => 598,
             V3ErrorSourceKind::ProviderCompatPayloadBoundaryViolation => 400,
             V3ErrorSourceKind::TargetPoolExhausted => 503,
             V3ErrorSourceKind::RuntimeFailure => internal_client_status(source),
@@ -1057,23 +1075,41 @@ impl V3ErrorHandlingCenter {
         terminal: V3Error05TerminalDecision,
         witness: Option<V3ExternalHttpWitness>,
     ) -> V3ProviderTerminalDisposition {
-        debug_assert_eq!(
-            terminal
-                .execution()
-                .exhaustion
-                .local_action
-                .classified
-                .source
-                .source_kind,
-            V3ErrorSourceKind::ProviderFailure,
-        );
-        // The witness is evidence, never a client projection: exhaustion does
-        // not authorize a client error response, including a real upstream HTTP
-        // error, and the boundary records the witness as provider-private
-        // evidence before it breaks the client transport.
-        match witness {
-            Some(response) => V3ProviderTerminalDisposition::ExternalHttp(response),
-            None => V3ProviderTerminalDisposition::NoResponse,
+        let source_kind = &terminal
+            .execution()
+            .exhaustion
+            .local_action
+            .classified
+            .source
+            .source_kind;
+        match source_kind {
+            V3ErrorSourceKind::ProviderFailure => {
+                // The witness is evidence, never a client projection: exhaustion
+                // does not authorize a client error response, including a real
+                // upstream HTTP error, and the boundary records the witness as
+                // provider-private evidence before it breaks the client transport.
+                match witness {
+                    Some(response) => V3ProviderTerminalDisposition::ExternalHttp(response),
+                    None => V3ProviderTerminalDisposition::NoResponse,
+                }
+            }
+            V3ErrorSourceKind::ProviderLocalFailure => {
+                assert!(
+                    witness.is_none(),
+                    "ProviderLocalFailure cannot carry an external HTTP witness"
+                );
+                V3ProviderTerminalDisposition::NoResponse
+            }
+            _ => {
+                debug_assert!(
+                    false,
+                    "provider terminal disposition requires a provider source"
+                );
+                match witness {
+                    Some(response) => V3ProviderTerminalDisposition::ExternalHttp(response),
+                    None => V3ProviderTerminalDisposition::NoResponse,
+                }
+            }
         }
     }
 
@@ -1116,7 +1152,10 @@ impl V3ErrorHandlingCenter {
 
     pub fn handle(input: V3ErrorHandlingCenterInput) -> V3Error06ClientProjected {
         assert!(
-            input.source.source_kind != V3ErrorSourceKind::ProviderFailure,
+            !matches!(
+                input.source.source_kind,
+                V3ErrorSourceKind::ProviderFailure | V3ErrorSourceKind::ProviderLocalFailure
+            ),
             "provider failure projection requires caller-owned route/default availability proof"
         );
         let source_status = input.source_status;
@@ -1347,7 +1386,10 @@ pub fn project_v3_post_commit_sse_source(
     status: u16,
 ) -> V3Error06ClientProjected {
     let projected_status = status;
-    if matches!(source.source_kind, V3ErrorSourceKind::ProviderFailure) {
+    if matches!(
+        source.source_kind,
+        V3ErrorSourceKind::ProviderFailure | V3ErrorSourceKind::ProviderLocalFailure
+    ) {
         // 例外证明：post-commit 阶段 SSE 事件已向客户端提交（200 + 已流出的
         // 帧），物理上无法 reroute/reselect；此处硬编码 0/false/false 走完整
         // Error01-06 链用于 post-commit console 观测与标准协议 error closeout；

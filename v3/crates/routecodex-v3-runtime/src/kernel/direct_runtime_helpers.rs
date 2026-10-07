@@ -222,6 +222,20 @@ mod external_http_witness_tests {
     }
 }
 
+/// Provider-originated execution failures that the Direct runtime owns for
+/// availability-aware recovery. A real provider transport/response failure and
+/// a provider-local construction failure (invalid base URL, missing/unreadable
+/// auth secret) reach the same recovery owner so a healthy candidate can be
+/// reselected, and actual exhaustion keeps its original internal disposition.
+pub(crate) fn is_direct_recoverable_provider_failure_source(
+    source: &V3Error01SourceRaised,
+) -> bool {
+    matches!(
+        source.source_kind,
+        V3ErrorSourceKind::ProviderFailure | V3ErrorSourceKind::ProviderLocalFailure
+    )
+}
+
 pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabilityReader>(
     context: &V3DirectProviderFailurePolicyContext<'_, R>,
     selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
@@ -520,6 +534,110 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         )),
         retryable_transient: false,
     })
+}
+
+/// Typed outcome of consuming one provider-failure policy result. The Error
+/// center stays the sole decision owner; this only tells the caller whether to
+/// continue its existing attempt loop or to return an exact terminal output.
+pub(crate) enum V3DirectProviderFailureConsumption {
+    /// The caller keeps its loop and starts the next attempt.
+    Continue,
+    /// The caller returns this output unchanged.
+    Terminal(V3ResponsesDirectRuntimeOutput),
+}
+
+/// Shared post-policy consumption for the Responses Direct kernel: publish the
+/// one provider-failure observation and translate the Error05 action into
+/// either a loop continuation or the exact terminal output. Retry/reselect
+/// state is written back through the caller-owned carriers, so the attempt loop
+/// and its send accounting stay with the caller.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn consume_v3_direct_provider_failure_policy_result(
+    policy_result: V3DirectProviderFailurePolicyResult,
+    selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    transport: &str,
+    observability_status: Option<u16>,
+    terminal_witness: Option<&V3ExternalHttpWitness>,
+    terminal_provider_request_snapshot: Option<&Value>,
+    provider_failure_event_sink: Option<&V3RuntimeProviderFailureEventSink>,
+    provider_failure_events: &mut Vec<V3RuntimeProviderFailureObservation>,
+    attempts: usize,
+    retry_selected: &mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
+    pending_provider_action_recovery: &mut Option<V3Error05RecoveryAdmissionWitness>,
+    trace: &mut Vec<&'static str>,
+    hook_registry: &V3HookRegistry,
+) -> V3DirectProviderFailureConsumption {
+    if let Some(event) = policy_result.event.clone() {
+        provider_failure_events.push(event.clone());
+        publish_v3_direct_provider_failure_event(
+            provider_failure_event_sink,
+            selected,
+            "responses",
+            transport,
+            event.external_error_status,
+            provider_failure_events,
+            &event,
+            attempts,
+        );
+    }
+    match &policy_result.decision.action {
+        V3Error05ExecutionAction::WaitThenReselect { recovery } => {
+            // Health-neutral transient failures (SSE stream / hang) bypass the
+            // provider action gate and reselect immediately.
+            if !policy_result.retryable_transient {
+                *pending_provider_action_recovery = Some(recovery.clone());
+            }
+            V3DirectProviderFailureConsumption::Continue
+        }
+        V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
+            *retry_selected = policy_result.retry_selected.map(|selected| *selected);
+            // Same bypass for a transient retry of the current provider.
+            if !policy_result.retryable_transient {
+                *pending_provider_action_recovery = Some(recovery.clone());
+            }
+            V3DirectProviderFailureConsumption::Continue
+        }
+        V3Error05ExecutionAction::ProjectTerminal => {
+            let mut observability = build_v3_direct_runtime_observability(
+                selected,
+                "responses",
+                transport,
+                observability_status,
+                "failed",
+                provider_failure_events.clone(),
+            );
+            observability.attempts = Some(attempts);
+            V3DirectProviderFailureConsumption::Terminal(
+                direct_runtime_helpers_stream::provider_terminal_output(
+                    policy_result.decision,
+                    terminal_witness.cloned(),
+                    std::mem::take(trace),
+                    Some(observability),
+                    terminal_provider_request_snapshot.cloned(),
+                    None,
+                ),
+            )
+        }
+        V3Error05ExecutionAction::ClientDisconnected => {
+            V3DirectProviderFailureConsumption::Terminal(
+                projected_error_output_with_observability(
+                    V3ErrorHandlingCenter::project_terminal(policy_result.decision),
+                    std::mem::take(trace),
+                    None,
+                ),
+            )
+        }
+        V3Error05ExecutionAction::RejectNonProviderError => {
+            V3DirectProviderFailureConsumption::Terminal(error_output(
+                runtime_source(
+                    "V3Error05ExecutionDecision",
+                    "provider failure entered a non-provider Error05 lane",
+                ),
+                std::mem::take(trace),
+                hook_registry,
+            ))
+        }
+    }
 }
 
 fn build_v3_direct_provider_failure_observation(
