@@ -66,7 +66,10 @@ multi-line shell command and preserve its output:
   printf '%s\\n' 'REQ02_GCM_MARKER_END'
 
 5. Call the real read-only MCP server ${mcpServer} tool ${mcpTool} with the
-exact JSON arguments ${mcpArguments}. The callable tool name is
+exact JSON arguments ${mcpArguments}. Keep the arguments exactly as shown above.
+Do not add 'activity', 'remote_session_id', or any other field, even if an
+auxiliary skill suggests activity. Do not open a session as a substitute for
+this task's direct call. The callable tool name is
 mcp__${mcpServer}__${mcpTool}; call it directly by that exact name, once, even
 though it is not listed among your declared tools, because the ${mcpServer} MCP
 server is connected to this session and its tools are addressed as
