@@ -24,8 +24,9 @@ pub struct V3ProviderFailureAction {
     /// Typed identity of this failure. Provider health counts a consecutive
     /// failure streak only for repeated failures of the same fingerprint, so
     /// three *different* recoverable errors never add up to a cooldown.
-    /// `None` means the failure carries no typed fingerprint and only
-    /// `class_code` identifies it.
+    /// A typed fingerprint carries the upstream status/semantics; failures
+    /// without an upstream status fall back to their failure class code, so a
+    /// missing identity never merges two different classes into one streak.
     pub failure_fingerprint: Option<V3ProviderErrorFingerprint>,
     pub recovery: V3ProviderRecoveryKind,
     pub scope: V3ProviderHealthScope,
@@ -41,7 +42,7 @@ impl V3ProviderFailureAction {
     pub fn recoverable(class_code: &str) -> Self {
         Self {
             class_code: class_code.to_string(),
-            failure_fingerprint: None,
+            failure_fingerprint: class_code_fingerprint(class_code),
             recovery: V3ProviderRecoveryKind::RecoverableCounted,
             scope: V3ProviderHealthScope::GlobalProviderKey,
             score_delta_milli: -5,
@@ -78,10 +79,7 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
         .external_error
         .as_ref()
         .and_then(|error| error.status);
-    let failure_fingerprint =
-        build_v3_provider_global_error_fingerprint_from_classified(classified)
-            .ok()
-            .flatten();
+    let failure_fingerprint = build_v3_provider_failure_identity_from_classified(classified);
     // 统一错误模型：不再按状态码豁免——瞬态重试来源与 400/4xx 同样计入
     // 全局健康。可恢复类必须连续三次同类失败才进入共享冷却，避免单个 provider
     // 因一次可恢复错误被排除而耗尽路由池；账户/计费类仍按 typed irrecoverable
@@ -173,7 +171,9 @@ pub fn build_v3_provider_global_error_fingerprint(
         401 | 403 => ("account_auth", 401),
         402 => ("account_billing", 402),
         429 => ("recoverable_upstream", 429),
-        500..=599 => ("recoverable_upstream", 500),
+        // 保留真实上游状态作为身份的一部分：500 与 502 是两种可恢复错误，
+        // 交替出现不会累计成同一条连续失败序列而误冷却 provider。
+        500..=599 => ("recoverable_upstream", status),
         _ => return Ok(None),
     };
     V3ProviderErrorFingerprint::new(class, class, normalized_status, class).map(Some)
@@ -225,6 +225,31 @@ pub fn build_v3_provider_global_error_fingerprint_from_classified(
         .map(Some);
     }
     build_v3_provider_global_error_fingerprint(status)
+}
+
+/// A provider failure without an upstream status (a local decode failure, a
+/// mid-stream break, a request-local compatibility error) carries no typed
+/// fingerprint. Its failure class code is still a stable identity, so it is
+/// promoted into the fingerprint instead of degrading to `None`: an empty
+/// identity would make two unrelated classes count as one streak.
+fn class_code_fingerprint(class_code: &str) -> Option<V3ProviderErrorFingerprint> {
+    let class = class_code.trim();
+    if class.is_empty() {
+        return None;
+    }
+    V3ProviderErrorFingerprint::new("provider_class", class.to_string(), 0, class.to_string()).ok()
+}
+
+/// Typed identity of a provider failure for the health streak. The upstream
+/// status/semantics win when present; otherwise the failure class code
+/// identifies it.
+fn build_v3_provider_failure_identity_from_classified(
+    classified: &V3Error02Classified,
+) -> Option<V3ProviderErrorFingerprint> {
+    build_v3_provider_global_error_fingerprint_from_classified(classified)
+        .ok()
+        .flatten()
+        .or_else(|| class_code_fingerprint(&classified.source.code))
 }
 
 #[cfg(test)]
@@ -379,5 +404,77 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
+    }
+
+    #[test]
+    fn recoverable_failure_identity_keeps_distinct_status_and_class() {
+        // 5xx 保留真实上游状态：500 与 502 是两种可恢复错误，不能共用一条
+        // 连续失败序列。
+        let server_error = build_v3_provider_global_error_fingerprint(500)
+            .expect("500 fingerprint classification must not fail")
+            .expect("500 must reach global health");
+        let gateway_error = build_v3_provider_global_error_fingerprint(502)
+            .expect("502 fingerprint classification must not fail")
+            .expect("502 must reach global health");
+        assert_ne!(server_error, gateway_error);
+        assert_eq!(server_error.http_status, 500);
+        assert_eq!(gateway_error.http_status, 502);
+
+        // 没有上游状态的 provider 失败落到失败类别：不同类别仍是不同身份，
+        // 空身份不能把两类失败合并成一条 streak。
+        let action_a = build_v3_provider_failure_action_from_v3_error_02(
+            &crate::build_v3_error_02_classified_from_v3_error_01(
+                crate::build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::ProviderFailure,
+                    "V3ProviderResp14Raw",
+                    "provider.sse_decode",
+                    "provider local decode failure",
+                ),
+            ),
+        );
+        let action_b = build_v3_provider_failure_action_from_v3_error_02(
+            &crate::build_v3_error_02_classified_from_v3_error_01(
+                crate::build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::ProviderFailure,
+                    "ProviderReqCompat06ProviderCompat",
+                    "provider_request_compat_error",
+                    "provider request compat failure",
+                ),
+            ),
+        );
+        let (fingerprint_a, fingerprint_b) = (
+            action_a
+                .failure_fingerprint
+                .expect("class fallback identity"),
+            action_b
+                .failure_fingerprint
+                .expect("class fallback identity"),
+        );
+        assert_eq!(fingerprint_a.http_status, 0);
+        assert_ne!(fingerprint_a, fingerprint_b);
+    }
+
+    #[test]
+    fn registered_irrecoverable_code_keeps_first_failure_threshold_over_http_status() {
+        // 分类优先于状态码：已注册的不可恢复账户/计费类即使上游返回 503
+        // 也必须首次即冷却，不能被可恢复阈值覆盖成三次。
+        for (code, status) in [
+            ("insufficient_quota", 503),
+            ("invalid_api_key", 503),
+            ("quota_exceeded", 503),
+            ("account_disabled", 503),
+        ] {
+            let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
+                "V3ProviderReqOutbound09TransportRequest",
+                code,
+                status,
+            ));
+            assert_eq!(
+                action.recovery,
+                V3ProviderRecoveryKind::IrrecoverableGlobalCooldown,
+                "code={code} status={status}"
+            );
+            assert_eq!(action.failure_threshold, 0, "code={code} status={status}");
+        }
     }
 }

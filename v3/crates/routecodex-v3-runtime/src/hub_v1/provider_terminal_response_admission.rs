@@ -1,5 +1,5 @@
 use super::V3HubProviderWireProtocol;
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct V3ProviderTerminalAdmissionFailure {
@@ -71,6 +71,44 @@ pub(crate) fn responses_incomplete_reason_is_output_cap(reason: &str) -> bool {
 pub(crate) fn responses_incomplete_reason_is_admitted_terminal(reason: &str) -> bool {
     let reason = reason.trim();
     responses_incomplete_reason_is_output_cap(reason) || reason == "content_filter"
+}
+
+/// 声明的唯一 admission 例外（单 owner）：Anthropic 的 `stop_reason=refusal`
+/// 且 `stop_details.category=cyber`。
+///
+/// 这是 provider 自己声明的安全类拒答，不是 provider 故障。它与本 owner 上面
+/// 的 `refusal` 终态准入共用同一个上游形状，因此必须在这里显式声明：该例外被
+/// 产品决策为“可重试的 provider saturation”（429），会在 admission 之前被消费
+/// 并触发重选；单候选耗尽时投影 `502 network_error`。声明放在本 owner 内，是为
+/// 了让“哪些上游终态被准入、哪个被显式排除”只有一个真源，避免例外散落到调用方。
+/// 任何新增例外都必须在这里声明，而不是在调用链下游旁路本分类器。
+pub(crate) fn anthropic_cyber_refusal_is_declared_retryable_saturation(payload: &Value) -> bool {
+    let direct = payload.as_object();
+    let delta = payload.get("delta").and_then(Value::as_object);
+    [direct, delta]
+        .into_iter()
+        .flatten()
+        .any(anthropic_cyber_refusal_object_matches)
+}
+
+fn anthropic_cyber_refusal_object_matches(object: &Map<String, Value>) -> bool {
+    let stop_reason = object
+        .get("stop_reason")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .map(str::to_ascii_lowercase);
+    if stop_reason.as_deref() != Some("refusal") {
+        return false;
+    }
+    object
+        .get("stop_details")
+        .and_then(Value::as_object)
+        .and_then(|details| details.get("category"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+        == Some("cyber")
 }
 
 /// Chat output-cap terminals, including gateway aliases such as `max_tokens`,
@@ -214,6 +252,45 @@ mod tests {
                 classify_v3_provider_terminal_admission(protocol, &payload),
                 None,
                 "content_filter terminal must be admitted for {protocol:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn declares_anthropic_cyber_refusal_as_the_only_retryable_admission_exception() {
+        // 该例外是本 owner 唯一的 admission 排除项：它复用普通 `refusal` 终态
+        // 形状，但被产品决策为 429 可重试饱和度。断言它只在该形状成立，普通
+        // refusal 与其它 stop_reason 不受影响。
+        let cyber = json!({
+            "type": "message_delta",
+            "delta": {
+                "stop_reason": "refusal",
+                "stop_details": {"category": "cyber", "explanation": "cyber policy"}
+            }
+        });
+        assert!(anthropic_cyber_refusal_is_declared_retryable_saturation(
+            &cyber
+        ));
+        for payload in [
+            json!({"type": "message_delta", "delta": {"stop_reason": "refusal"}}),
+            json!({
+                "type": "message_delta",
+                "delta": {
+                    "stop_reason": "refusal",
+                    "stop_details": {"category": "harassment"}
+                }
+            }),
+            json!({
+                "type": "message_delta",
+                "delta": {
+                    "stop_reason": "end_turn",
+                    "stop_details": {"category": "cyber"}
+                }
+            }),
+        ] {
+            assert!(
+                !anthropic_cyber_refusal_is_declared_retryable_saturation(&payload),
+                "only the declared cyber refusal shape is the exception: {payload}"
             );
         }
     }

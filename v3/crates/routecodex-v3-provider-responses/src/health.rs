@@ -1152,6 +1152,8 @@ impl V3ProviderHealthStore {
             {
                 // 连续失败必须同源：只有同一个 typed fingerprint 的失败才累计
                 // streak，429/500/502 这类不同错误不会凑够阈值而误冷却 provider。
+                // 没有上游状态的失败已由分类器落到失败类别身份，不比较 class_code
+                // 之外的隐式状态。
                 let same_fingerprint = history.failure_fingerprint == action.failure_fingerprint;
                 history.failure_streak = if same_fingerprint {
                     history.failure_streak.saturating_add(1)

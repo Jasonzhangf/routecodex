@@ -51,17 +51,24 @@ pub(super) struct V3ProviderSemanticErrorProjection {
     pub(super) matched_policy: Option<V3ProviderFailureDirective>,
 }
 
+/// 投影被声明的 admission 例外（见 `provider_terminal_response_admission`
+/// 的 `anthropic_cyber_refusal_is_declared_retryable_saturation`）。
+///
+/// 形状判定由 admission owner 提供，这里只做 429 可重试饱和度的投影：不复制
+/// 第二份匹配实现，避免例外出现两个真源。
 pub(super) fn anthropic_cyber_refusal_error_from_payload(
     payload: &Value,
 ) -> Option<V3ProviderSemanticErrorProjection> {
+    if !anthropic_cyber_refusal_is_declared_retryable_saturation(payload) {
+        return None;
+    }
     let direct = payload.as_object();
     let delta = payload.get("delta").and_then(Value::as_object);
-    let candidate = [direct, delta]
+    let details = [direct, delta]
         .into_iter()
         .flatten()
-        .find(|object| anthropic_cyber_refusal_object_matches(object))?;
-    let explanation = candidate
-        .get("stop_details")
+        .find_map(|object| object.get("stop_details"));
+    let explanation = details
         .and_then(Value::as_object)
         .and_then(|details| details.get("explanation"))
         .and_then(Value::as_str)
@@ -78,26 +85,6 @@ pub(super) fn anthropic_cyber_refusal_error_from_payload(
         cooldown_ms: None,
         matched_policy: None,
     })
-}
-
-fn anthropic_cyber_refusal_object_matches(object: &Map<String, Value>) -> bool {
-    let stop_reason = object
-        .get("stop_reason")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .map(str::to_ascii_lowercase);
-    if stop_reason.as_deref() != Some("refusal") {
-        return false;
-    }
-    object
-        .get("stop_details")
-        .and_then(Value::as_object)
-        .and_then(|details| details.get("category"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .map(str::to_ascii_lowercase)
-        .as_deref()
-        == Some("cyber")
 }
 
 pub(super) fn provider_response_semantic_error_message_from_manifest(
