@@ -35,6 +35,9 @@ static TEST_LOCK: Mutex<()> = Mutex::const_new(());
 #[path = "support/image_input_blackbox.rs"]
 mod image_input_blackbox;
 
+#[path = "support/pool_empty_recovery_blackbox.rs"]
+mod pool_empty_recovery_blackbox;
+
 async fn read_raw_content_length_response(socket: &mut TcpStream) -> Vec<u8> {
     let mut wire = Vec::new();
     while !wire.ends_with(b"\r\n\r\n") {

@@ -125,8 +125,9 @@ pub(crate) async fn select_v3_expanded_target_with_admission_rescue(
                     }
                     Ok(None) => {
                         excluded.insert(v3_relay_provider_candidate_key(&selected.candidate));
-                        // Capacity is request-local selection state. It must not
-                        // trigger health recovery probes or a capacity wait.
+                        // Capacity excludes only this candidate. Preserve the
+                        // caller's recovery policy for eligible cooled peers;
+                        // never wait for the full candidate's capacity.
                         selection = select_v3_expanded_target_with_exhaustion_rescue(
                             manifest,
                             expanded.clone(),
@@ -135,7 +136,7 @@ pub(crate) async fn select_v3_expanded_target_with_admission_rescue(
                             &excluded,
                             now_ms,
                             deterministic_sample,
-                            false,
+                            allow_exhaustion_rescue_probe,
                         )
                         .await;
                     }

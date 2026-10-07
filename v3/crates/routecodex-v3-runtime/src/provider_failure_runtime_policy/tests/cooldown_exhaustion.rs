@@ -6,6 +6,95 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot, Notify};
 
+#[tokio::test]
+async fn busy_preferred_candidate_preserves_cooled_peer_recovery() {
+    let server_id = "busy_preferred_cooled_peer_recovery";
+    let first_id = "busy_preferred_cooled_peer_first";
+    let second_id = "busy_preferred_cooled_peer_second";
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut manifest =
+        global_pool_alive_manifest_with_provider_names(server_id, None, first_id, second_id);
+    manifest.providers.get_mut(first_id).unwrap().concurrency =
+        Some(routecodex_v3_config::V3ProviderConcurrencyAuthoringConfig {
+            max_in_flight: 1,
+            acquire_timeout_ms: 60_000,
+            stale_lease_ms: 300_000,
+        });
+    let second = manifest.providers.get_mut(second_id).unwrap();
+    second.base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+    second.auth.entries[0].env = Some("V3_BUSY_PREFERRED_COOLED_PEER_KEY".into());
+    std::env::set_var("V3_BUSY_PREFERRED_COOLED_PEER_KEY", "test-key");
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let scope = test_provider_failure_scope(server_id, server_id, "busy-recovery-session").unwrap();
+    let now_ms = v3_relay_provider_policy_now_epoch_ms().unwrap();
+    let expanded = match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
+        manifest: &manifest,
+        server_id,
+        failure_session_scope: &scope,
+        entry_kind: "responses",
+        endpoint_path: "/v1/responses",
+        body: &json!({"model":"client-responses","input":"hello"}),
+        request_local_excluded_candidates: &BTreeSet::new(),
+        provider_health: &health,
+        now_ms,
+        deterministic_sample: 0,
+    }) {
+        Ok(expanded) => expanded,
+        Err(_) => panic!("candidate expansion"),
+    };
+    health
+        .store
+        .record_provider_cooldown_failure(
+            second_id,
+            Some("key1"),
+            Some("gpt-test"),
+            "recoverable peer",
+            now_ms,
+            5_000,
+        )
+        .unwrap();
+    let preferred = V3TargetInterpreter::default()
+        .select_available(expanded.clone(), &health.store, now_ms)
+        .unwrap();
+    assert_eq!(preferred.candidate.provider_id, first_id);
+    let controller = V3AdaptiveConcurrencyController::process_shared();
+    let first_key = format!("{first_id}:key1");
+    controller.ensure_initial_budget(&first_key, 1).unwrap();
+    let held = controller.try_acquire_business(&first_key).unwrap();
+    let probe_server = tokio::spawn(serve_one_responses_probe(listener));
+
+    let selection = tokio::time::timeout(
+        Duration::from_secs(2),
+        select_v3_expanded_target_with_admission_rescue(
+            &manifest,
+            expanded,
+            &scope,
+            &health,
+            &BTreeSet::new(),
+            now_ms,
+            0,
+            true,
+            Some(preferred),
+        ),
+    )
+    .await
+    .expect("a busy candidate must not disable peer recovery");
+    controller.release(held.into_permit()).unwrap();
+    let V3AdmittedTargetSelectionAfterRescue::Selected(selected) = selection else {
+        probe_server.abort();
+        panic!("a recoverable cooled peer must be probed instead of reporting an empty pool");
+    };
+    assert_eq!(selected.selected.candidate.provider_id, second_id);
+    assert!(
+        health
+            .availability(first_id, Some("key1"), Some("gpt-test"), now_ms)
+            .available
+    );
+    assert_eq!(controller.snapshot(&first_key).unwrap().in_flight, 0);
+    probe_server.await.unwrap();
+    std::env::remove_var("V3_BUSY_PREFERRED_COOLED_PEER_KEY");
+}
+
 fn all_candidate_keys(expanded: &V3Target09CandidateSetExpanded) -> BTreeSet<String> {
     expanded
         .candidates

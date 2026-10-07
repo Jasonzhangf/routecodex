@@ -3181,6 +3181,7 @@ features:
   - Direct and Relay atomically admit the highest-priority health-and-capacity-eligible provider, immediately skipping full candidates without a capacity wait
   - Public `/v1/responses` switches to a spare provider while the first provider remains held; all-full pools terminate promptly without an extra upstream request
   - Concurrency exclusions are request-local and health-neutral; reselect stays inside the captured Target09 candidate set without Router reentry
+  - A full preferred candidate does not disable the caller-authorized semantic recovery of another eligible cooled candidate in Direct or Relay
   - Business leases remain bounded and release after completion, error, cancellation, or stream drop; due scheduled probes retain their separate bounded admission
   required_negative:
   - stale successful or failed probe generations cannot mutate newer provider health state
@@ -3189,7 +3190,7 @@ features:
   - zero or greater-than-30-minute provider health probe_interval_ms values fail config compilation
   - model-less auth-key cooldown state never enters provider or client payload or MetadataCenter
   - Crossing the adaptive budget cannot record provider failure health, auth-key cooldown, model cooldown, MetadataCenter state, or provider/client payload truth
-  - Capacity saturation cannot trigger health rescue probes, provider-action waits, oversubscription, or escape from an explicit provider.model pin
+  - Capacity saturation cannot trigger health rescue probes for the full candidate, provider-action waits, oversubscription, or escape from an explicit provider.model pin
   - WebSocketV2 session-slot contention cannot retain provider capacity, starve another request that owns the session, or leak its session slot or provider lease on cancellation
   required_gates:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --lib
@@ -3198,6 +3199,7 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --lib -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime runtime_policy_maps_account_and_recoverable_http_classes_to_global_health -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime cooldown_exhaustion --lib -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server pool_empty_recovery -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_provider_concurrency_ -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_direct_provider_http_error_never_reaches_the_client -- --exact --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime provider_concurrency --lib -- --nocapture
