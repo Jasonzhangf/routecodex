@@ -276,7 +276,7 @@ requireAll(text.tests, files.tests, [
   'V3HubEntryProtocol::Gemini',
   'V3HubTransportIntent::Sse',
   'data:image/png;base64,CURRENT',
-  'attachment_history_is_preserved_without_placeholder_cleanup',
+  'earlier_attachment_is_cleaned_while_inline_tool_text_and_latest_image_survive',
   'attachment_history_missing_resource_is_preserved_as_client_data',
 ]);
 requireAll(text.responseSemanticsTests, files.responseSemanticsTests, [

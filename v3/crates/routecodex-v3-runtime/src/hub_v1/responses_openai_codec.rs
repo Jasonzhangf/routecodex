@@ -1,6 +1,10 @@
 use crate::protocol_tables::{map_field as table_map_field, V3TableDirection};
 use provider_compat_core::namespace_tools::resolve_responses_tool_declarations;
 use serde_json::{json, Map, Value};
+mod tool_output;
+pub(super) use tool_output::{
+    canonical_content as responses_tool_output_content, image_url as responses_image_url,
+};
 pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
     payload: &Value,
 ) -> Result<Value, String> {
@@ -825,10 +829,7 @@ fn build_v3_openai_chat_tool_result_message(item: &Map<String, Value>) -> Result
         .get("output")
         .or_else(|| item.get("content"))
         .ok_or("Responses tool output is missing output/content before OpenAI Chat encoding")?;
-    let content = match output {
-        Value::String(text) => text.clone(),
-        other => serde_json::to_string(other).map_err(|error| error.to_string())?,
-    };
+    let content = tool_output::canonical_content(output)?;
     let item_type = item
         .get("type")
         .and_then(Value::as_str)
@@ -1262,28 +1263,8 @@ fn read_v3_trimmed_owned(text: &str) -> Option<String> {
 }
 
 fn convert_v3_responses_image_part_to_openai_chat_part(part: &Map<String, Value>) -> Value {
-    let image_url = normalize_v3_responses_image_url_for_openai_chat(part);
+    let image_url = responses_image_url(part).unwrap_or_else(|| json!({"url":null}));
     json!({"type":"image_url","image_url":image_url})
-}
-
-fn normalize_v3_responses_image_url_for_openai_chat(part: &Map<String, Value>) -> Value {
-    let source = part
-        .get("image_url")
-        .cloned()
-        .or_else(|| part.get("url").cloned())
-        .unwrap_or(Value::Null);
-
-    let mut image_url = match source {
-        Value::Object(object) => object,
-        Value::String(url) => Map::from_iter([("url".to_string(), Value::String(url))]),
-        other => Map::from_iter([("url".to_string(), other)]),
-    };
-
-    if let Some(detail) = part.get("detail").cloned() {
-        image_url.entry("detail".to_string()).or_insert(detail);
-    }
-
-    Value::Object(image_url)
 }
 
 fn v3_openai_chat_wire_role(role: &str) -> &str {

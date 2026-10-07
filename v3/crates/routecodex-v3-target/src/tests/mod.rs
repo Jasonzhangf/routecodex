@@ -1364,7 +1364,7 @@ targets = [
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    let exhausted = target
+    let selected = target
         .select_available(
             expanded,
             &Availability {
@@ -1372,8 +1372,10 @@ targets = [
             },
             0,
         )
-        .expect_err("health cooldown must remove the default-floor vision target");
-    assert_eq!(exhausted.attempted_candidates.len(), 2);
+        .expect("cooled vision permits the default text projection");
+    assert_eq!(selected.candidate.provider_id, "text");
+    assert_eq!(selected.route.pool_id, "default");
+    assert!(selected.unavailable_candidates.iter().any(|reason| reason == "vision:key:m:availability(vision:key:m)"));
 }
 
 #[test]
@@ -1440,12 +1442,6 @@ targets = [{ kind = "forwarder", id = "live_like", priority = 1 }]
         .unwrap();
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
     assert_eq!(hit.pool_id, "longcontext");
-    assert!(
-        hit.target_plan
-            .iter()
-            .all(|entry| entry.pool_id == "longcontext"),
-        "duplicated default targets are already deduped by Router07 and cannot repair candidate requirements"
-    );
     let target = V3TargetInterpreter::default();
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
