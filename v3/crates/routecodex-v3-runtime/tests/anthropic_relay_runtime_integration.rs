@@ -140,7 +140,7 @@ data: {"type":"message_stop"}
 }
 
 #[tokio::test]
-async fn anthropic_refusal_provider_terminal_is_rejected_before_success_projection() {
+async fn anthropic_refusal_provider_terminal_matches_json_terminal_projection() {
     let json_response = project_v3_anthropic_message_as_responses_response(&json!({
         "id":"msg_refusal_terminal_parity",
         "type":"message",
@@ -179,23 +179,29 @@ data: {"type":"message_stop"}
 
 "#.to_vec()),
     ]);
-    let sse_error = materialize_v3_provider_sse_as_canonical_response(
+    let sse_response = materialize_v3_provider_sse_as_canonical_response(
         V3HubProviderWireProtocol::Anthropic,
         Box::pin(stream),
     )
     .await
-    .expect_err("provider refusal must not be admitted as a successful attempt");
+    .expect("an Anthropic refusal terminal is a legal provider terminal, not a proxy error");
 
     assert_eq!(json_response["status"], "incomplete");
     assert_eq!(
         json_response["incomplete_details"]["reason"],
         "content_filter"
     );
+    // `refusal` is the model declining to answer. It is a provider terminal, so
+    // the SSE and JSON paths must project the same terminal instead of the SSE
+    // path being judged a provider failure.
+    assert_eq!(sse_response["status"], "incomplete", "{sse_response}");
+    assert_eq!(
+        sse_response["incomplete_details"]["reason"], "content_filter",
+        "{sse_response}"
+    );
     assert!(
-        sse_error
-            .to_string()
-            .contains("provider response ended before completion: content_filter"),
-        "unexpected provider materialization error: {sse_error}"
+        sse_response.to_string().contains("partial"),
+        "the provider's partial output must be preserved with its terminal: {sse_response}"
     );
 }
 

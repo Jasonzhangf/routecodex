@@ -137,6 +137,7 @@ fn put_auth_key_in_cooldown(
             Some(auth_alias),
             None,
             Some("controlled auth-key cooldown"),
+            None,
             now_ms,
             Some(routecodex_v3_provider_responses::V3ProviderFailurePolicy {
                 failure_threshold: 1,

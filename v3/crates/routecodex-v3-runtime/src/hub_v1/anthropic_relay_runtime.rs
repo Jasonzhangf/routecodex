@@ -1133,10 +1133,50 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         continue;
                     }
                 };
-                if let Some(admission) =
-                    classify_v3_provider_terminal_admission(provider_wire_protocol, &provider_value)
+                // 唯一 provider failure owner：本分支只构造 failure，随后走同一个
+                // handle_provider_failure 调用点，不新增第二条处理路径。
+                // 声明的 admission 例外必须优先于 terminal 准入：`stop_reason=refusal`
+                // + `stop_details.category=cyber` 是 provider 声明的可重试饱和度（429），
+                // 不是普通 business terminal。若直接进入准入判定，该例外会被当作已准入
+                // 终态直返客户端，丢掉 429/重选语义。该例外只属于 Anthropic provider wire，
+                // 与 Responses 侧 owner 保持同范围。
+                let declared_exception = if provider_wire_protocol
+                    == V3HubProviderWireProtocol::Anthropic
                 {
-                    let failure = provider_terminal_admission_failure(provider_status, admission);
+                    crate::hub_v1::responses_relay_runtime::responses_relay_diagnostics::anthropic_cyber_refusal_error_from_payload(
+                        &provider_value,
+                    )
+                    .map(|error| V3RelayProviderFailure {
+                        status: error.status,
+                        // 语义投影状态（429）不是上游 HTTP 状态。
+                        provider_status: None,
+                        client_response: json!({
+                            "type": "error",
+                            "error": {
+                                "type": error.code,
+                                "message": error.message,
+                            }
+                        }),
+                        source_stage: "V3ProviderRespInbound01Raw",
+                        terminal_projection: None,
+                        terminal_disposition: None,
+                        error_type_fn: extract_error_type_style,
+                        error_message_fn: extract_message_type_style,
+                    })
+                } else {
+                    None
+                };
+                let provider_failure: Option<V3RelayProviderFailure> =
+                    declared_exception.or_else(|| {
+                        classify_v3_provider_terminal_admission(
+                            provider_wire_protocol,
+                            &provider_value,
+                        )
+                        .map(|admission| {
+                            provider_terminal_admission_failure(provider_status, admission)
+                        })
+                    });
+                if let Some(failure) = provider_failure {
                     drop(_provider_action_permit.take());
                     if let Some(failure) = handle_provider_failure(
                         &failure_context,

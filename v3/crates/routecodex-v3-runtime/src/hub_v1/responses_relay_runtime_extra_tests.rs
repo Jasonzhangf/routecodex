@@ -694,21 +694,25 @@ async fn provider_sse_json_completed_wins_over_opaque_event_label() {
 }
 
 #[tokio::test]
-async fn provider_sse_content_filter_incomplete_enters_error_chain_with_usage_observation() {
+async fn provider_sse_content_filter_incomplete_is_forwarded_with_usage_observation() {
     let observation = V3RuntimeStreamObservation::default();
     let provider = Box::pin(stream::iter(vec![Ok(
             b"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_incomplete_filtered\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"content_filter\"},\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15}}}\n\n".to_vec(),
         )]));
-    let error =
+    let response =
         build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(provider, &observation)
             .await
-            .expect_err("a content_filter incomplete terminal must enter the error chain");
+            .expect("a content_filter terminal is a legal provider terminal, not a proxy error");
 
-    assert!(
-        error
-            .to_string()
-            .contains("provider response ended before completion: content_filter"),
-        "unexpected provider error: {error}"
+    assert_eq!(response["status"], "incomplete", "{response}");
+    assert_eq!(
+        response["incomplete_details"]["reason"], "content_filter",
+        "{response}"
+    );
+    assert_eq!(
+        response["usage"]["output_tokens"].as_u64(),
+        Some(5),
+        "{response}"
     );
     let snapshot = observation.snapshot().unwrap();
     assert_eq!(snapshot.response_status.as_deref(), Some("incomplete"));

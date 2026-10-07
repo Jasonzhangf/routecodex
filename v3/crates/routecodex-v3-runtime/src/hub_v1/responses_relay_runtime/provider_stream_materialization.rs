@@ -896,30 +896,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn provider_content_filter_finish_reason_is_not_materialized_as_success() {
+    async fn provider_content_filter_finish_reason_is_forwarded_as_terminal() {
         let observation = V3RuntimeStreamObservation::default();
         let provider = Box::pin(stream::iter(vec![Ok(
             b"data: {\"id\":\"chatcmpl_filter\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"content_filter\"}]}\n\n".to_vec(),
         )]));
 
-        let error = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
+        let response = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
             provider,
             &observation,
         )
         .await
-        .expect_err("a provider content-filter terminal must remain an incomplete attempt");
+        .expect("a content_filter terminal is a legal provider terminal, not a proxy error");
 
-        assert!(
-            matches!(
-                error,
-                V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure {
-                    status: 200,
-                    ref code,
-                    ref message,
-                } if code == "provider_response_incomplete_content_filter"
-                    && message.contains("provider response ended before completion: content_filter")
-            ),
-            "unexpected error: {error}"
+        assert_eq!(
+            response["choices"][0]["finish_reason"], "content_filter",
+            "{response}"
+        );
+        assert_eq!(
+            response["choices"][0]["message"]["content"], "",
+            "{response}"
         );
     }
 

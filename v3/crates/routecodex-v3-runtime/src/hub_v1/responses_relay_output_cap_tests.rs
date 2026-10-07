@@ -196,3 +196,45 @@ async fn responses_wire_output_cap_incomplete_stream_is_admitted_with_usage_obse
         "max_output_tokens incomplete terminal must record finish_reason=length"
     );
 }
+
+// provider 自己的 content_filter 终态即使没有任何可见输出，也是合法业务终态：
+// 空输出由 provider 的内容过滤器决定，不是 RouteCodex 可以裁决的 provider 失败。
+// guard 与投影必须共用同一个终态 owner，否则空内容会被判成
+// provider_empty_visible_output 并触发切换/冷却。
+#[test]
+fn openai_chat_empty_content_filter_terminal_is_not_a_provider_failure() {
+    let payload = json!({
+        "id": "chatcmpl_empty_content_filter",
+        "model": "wb-deepseek-v4.1-flash",
+        "choices": [{
+            "index": 0,
+            "finish_reason": "content_filter",
+            "message": {"role": "assistant", "content": ""}
+        }],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 0, "total_tokens": 10}
+    });
+
+    assert!(
+        responses_relay_diagnostics::provider_response_semantic_error_from_manifest(
+            None, None, &payload
+        )
+        .is_none(),
+        "an empty-content content_filter terminal must not be a provider semantic failure"
+    );
+
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &payload,
+        &json!({"tools": []}),
+    )
+    .expect("an empty-content content_filter terminal must project a Responses response");
+    assert_eq!(response["status"], "incomplete", "{response}");
+    assert_eq!(
+        response["incomplete_details"]["reason"], "content_filter",
+        "{response}"
+    );
+    assert_eq!(
+        response["output"].as_array().map(Vec::len),
+        Some(0),
+        "the provider's empty output is forwarded as-is: {response}"
+    );
+}
