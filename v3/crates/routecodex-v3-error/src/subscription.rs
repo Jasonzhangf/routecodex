@@ -445,10 +445,10 @@ mod tests {
         let (fingerprint_a, fingerprint_b) = (
             action_a
                 .failure_fingerprint
-                .expect("class fallback identity"),
+                .expect("no-status class identity"),
             action_b
                 .failure_fingerprint
-                .expect("class fallback identity"),
+                .expect("no-status class identity"),
         );
         assert_eq!(fingerprint_a.http_status, 0);
         assert_ne!(fingerprint_a, fingerprint_b);
