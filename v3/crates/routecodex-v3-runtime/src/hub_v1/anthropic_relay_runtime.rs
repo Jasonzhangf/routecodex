@@ -1133,6 +1133,55 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         continue;
                     }
                 };
+                // Direct Anthropic relay JSON 入口必须在 terminal 准入之前消费
+                // 声明的 admission 例外：`stop_reason=refusal` +
+                // `stop_details.category=cyber` 是 provider 声明的可重试饱和度
+                // （429），不是普通 business terminal。漏掉这一步会把该例外
+                // 当作已准入终态直返客户端，丢掉重选语义。
+                if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
+                    if let Some(error) =
+                        crate::hub_v1::responses_relay_diagnostics::anthropic_cyber_refusal_error_from_payload(
+                            &provider_value,
+                        )
+                    {
+                        let failure = V3RelayProviderFailure {
+                            status: error.status,
+                            // 语义投影状态（429）不是上游 HTTP 状态。
+                            provider_status: None,
+                            client_response: json!({
+                                "type": "error",
+                                "error": {
+                                    "type": error.code,
+                                    "message": error.message,
+                                }
+                            }),
+                            source_stage: "V3ProviderRespInbound01Raw",
+                            terminal_projection: None,
+                            terminal_disposition: None,
+                            error_type_fn: extract_error_type_style,
+                            error_message_fn: extract_message_type_style,
+                        };
+                        drop(_provider_action_permit.take());
+                        if let Some(failure) = handle_provider_failure(
+                            &failure_context,
+                            selected,
+                            failure,
+                            &mut V3RelayProviderFailurePolicyState {
+                                failed_candidates: &mut failed_candidates,
+                                same_candidate_retries: &mut same_candidate_retries,
+                                trace: &mut trace,
+                                last_external_http: &mut last_external_http,
+                            },
+                            &mut retry_selected,
+                            &mut pending_provider_action_recovery,
+                        )
+                        .await?
+                        {
+                            return Ok(provider_failure_output(failure, trace));
+                        }
+                        continue;
+                    }
+                }
                 if let Some(admission) =
                     classify_v3_provider_terminal_admission(provider_wire_protocol, &provider_value)
                 {

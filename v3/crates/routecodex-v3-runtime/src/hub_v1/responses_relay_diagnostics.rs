@@ -42,21 +42,22 @@ pub(super) fn openai_chat_provider_diagnostic_message(payload: &Value) -> Option
 // ---- provider 语义错误投影（从 responses_relay_runtime.rs 移入，语义不变）----
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct V3ProviderSemanticErrorProjection {
-    pub(super) status: u16,
-    pub(super) code: String,
-    pub(super) message: String,
-    pub(super) provider_global_failure: bool,
-    pub(super) cooldown_ms: Option<u64>,
-    pub(super) matched_policy: Option<V3ProviderFailureDirective>,
+pub(crate) struct V3ProviderSemanticErrorProjection {
+    pub(crate) status: u16,
+    pub(crate) code: String,
+    pub(crate) message: String,
+    pub(crate) provider_global_failure: bool,
+    pub(crate) cooldown_ms: Option<u64>,
+    pub(crate) matched_policy: Option<V3ProviderFailureDirective>,
 }
 
 /// 投影被声明的 admission 例外（见 `provider_terminal_response_admission`
 /// 的 `anthropic_cyber_refusal_is_declared_retryable_saturation`）。
 ///
 /// 形状判定由 admission owner 提供，这里只做 429 可重试饱和度的投影：不复制
-/// 第二份匹配实现，避免例外出现两个真源。
-pub(super) fn anthropic_cyber_refusal_error_from_payload(
+/// 第二份匹配实现，避免例外出现两个真源。每个真实 Anthropic 入口（Responses
+/// relay 与 direct Anthropic relay）都在自己的 terminal 准入点之前消费它。
+pub(crate) fn anthropic_cyber_refusal_error_from_payload(
     payload: &Value,
 ) -> Option<V3ProviderSemanticErrorProjection> {
     if !anthropic_cyber_refusal_is_declared_retryable_saturation(payload) {

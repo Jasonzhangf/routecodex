@@ -45,7 +45,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[path = "responses_openai_chat_conversion.rs"]
 mod responses_openai_chat_conversion;
 #[path = "responses_relay_diagnostics.rs"]
-mod responses_relay_diagnostics;
+pub(crate) mod responses_relay_diagnostics;
 #[path = "responses_relay_dry_run.rs"]
 mod responses_relay_dry_run;
 #[path = "responses_relay_failures.rs"]
