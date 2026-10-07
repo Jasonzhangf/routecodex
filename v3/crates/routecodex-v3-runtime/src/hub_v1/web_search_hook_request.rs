@@ -132,7 +132,8 @@ targets = [{ kind = "provider_model", provider = "test", model = "test-model", p
             .unwrap(),
         )
         .unwrap();
-        V3RequestExecutionControl::from_manifest(&manifest, "test").unwrap()
+        V3RequestExecutionControl::new(&manifest, "test", "req-web-search-hook", "responses")
+            .unwrap()
     }
 
     fn scope() -> V3ResponsesRelayServerToolScope {

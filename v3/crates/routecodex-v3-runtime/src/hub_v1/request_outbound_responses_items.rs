@@ -7,14 +7,116 @@ use super::super::request_outbound_mcp_names::provider_function_name;
 use super::super::request_outbound_tool_id::compact_tool_id;
 use super::{project_outbound_nested_payload_for_target_protocol, V3OutboundTargetProtocol};
 
+pub(crate) fn build_responses_input_from_chat_messages(
+    messages: &[Value],
+) -> Result<Value, String> {
+    build_responses_input_from_chat_messages_with_hosted_emissions(messages, None)
+}
+
+/// Same walk as the ordinary history encoder. A canonical message index that
+/// carries a registered current hosted event emits that complete native event
+/// once; every other message keeps the ordinary Responses item encoding. The
+/// decision is made inside this single traversal, so no message is projected as
+/// an ordinary item and then overwritten.
+pub(super) fn build_responses_input_from_chat_messages_with_hosted_emissions(
+    messages: &[Value],
+    hosted_emissions: Option<&[crate::operation_runner::HostedHistoryEmission]>,
+) -> Result<Value, String> {
+    let mut output = Vec::new();
+    for (message_index, message) in messages.iter().enumerate() {
+        if let Some(emission) = hosted_emissions.and_then(|emissions| {
+            emissions
+                .iter()
+                .find(|emission| emission.canonical_message_index == message_index)
+        }) {
+            output.push(emission.event.clone());
+            continue;
+        }
+        let Some(row) = message.as_object() else {
+            continue;
+        };
+        let role = row
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or("user")
+            .trim();
+        if role.eq_ignore_ascii_case("tool")
+            || message
+                .pointer("/routecodex_chat_extension/responses_tool_output_name")
+                .is_some()
+        {
+            if let Some(item) = chat_tool_result_to_responses_input_item(row)? {
+                output.push(item);
+            }
+            continue;
+        }
+        if role.eq_ignore_ascii_case("assistant") {
+            if let Some(reasoning) = chat_assistant_reasoning_to_responses_input_item(row) {
+                output.push(reasoning);
+            }
+            if let Some(tool_calls) = row.get("tool_calls").and_then(Value::as_array) {
+                let items = tool_calls
+                    .iter()
+                    .map(chat_tool_call_to_responses_input_item)
+                    .collect::<Result<Vec<Option<Value>>, String>>()?
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<Value>>();
+                if !items.is_empty() {
+                    output.extend(items);
+                    continue;
+                }
+            }
+        }
+        let content = row
+            .get("content")
+            .map(|content| chat_content_to_responses_content(content, role))
+            .transpose()?
+            .unwrap_or_else(|| Value::Array(Vec::new()));
+        // A canonical message whose entire content was carried by its own
+        // tool-result members keeps an empty envelope (for example an Anthropic
+        // user message that holds only `tool_result` blocks). The Responses wire
+        // has no `message` item without content, and the assistant branch above
+        // already drops the envelope when the content moved into tool calls.
+        if content.as_array().is_some_and(Vec::is_empty) {
+            continue;
+        }
+        output.push(Value::Object(Map::from_iter([
+            ("type".to_string(), Value::String("message".to_string())),
+            (
+                "role".to_string(),
+                Value::String(if role.is_empty() { "user" } else { role }.to_string()),
+            ),
+            ("content".to_string(), content),
+        ])));
+    }
+    Ok(Value::Array(output))
+}
+
+fn chat_assistant_reasoning_to_responses_input_item(row: &Map<String, Value>) -> Option<Value> {
+    let text = row
+        .get("reasoning_content")
+        .or_else(|| row.get("reasoning_text"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())?;
+    Some(json!({
+        "type": "reasoning",
+        "summary": [{"type": "summary_text", "text": text}]
+    }))
+}
+
 pub(super) fn normalize_responses_content_part_for_role(
     part: &Value,
     role: &str,
 ) -> Result<Value, String> {
-    let mut normalized = project_outbound_nested_payload_for_target_protocol(
+    let normalized = project_outbound_nested_payload_for_target_protocol(
         part,
         V3OutboundTargetProtocol::OpenAiResponses,
     )?;
+    Ok(project_responses_part_representation(normalized, role))
+}
+
+pub(super) fn project_responses_part_representation(mut normalized: Value, role: &str) -> Value {
     let is_assistant = role.eq_ignore_ascii_case("assistant");
     if let Some(row) = normalized.as_object_mut() {
         let part_type = row.get("type").and_then(Value::as_str).unwrap_or("").trim();
@@ -47,6 +149,16 @@ pub(super) fn normalize_responses_content_part_for_role(
                 "type".to_string(),
                 Value::String(responses_part_type("input_image").to_string()),
             );
+        } else if let Some(data_url) = canonical_inline_media_data_url(row) {
+            // The canonical Chat inline-media carrier has one Responses
+            // representation: an `input_image` part whose `image_url` is the
+            // data URL of the same bytes.
+            row.insert(
+                "type".to_string(),
+                Value::String(responses_part_type("input_image").to_string()),
+            );
+            row.remove("media");
+            row.insert("image_url".to_string(), Value::String(data_url));
         }
         if row.get("type").and_then(Value::as_str) == Some("input_image") {
             if let Some(url) = row
@@ -60,7 +172,23 @@ pub(super) fn normalize_responses_content_part_for_role(
             }
         }
     }
-    Ok(normalized)
+    normalized
+}
+
+/// The canonical Chat inline-media carrier is `media.inline_data` with its
+/// `media.mime_type` sibling. Both media producers declare that destination:
+/// the Anthropic `request.messages[].content[].source.data` /
+/// `source.media_type` cases (`semantic_id ...content[].media.inline_data` /
+/// `...content[].media.mime_type`) and the Gemini
+/// `request.contents[].parts[].inlineData.data` / `.mimeType` bindings
+/// (`destination: chat.messages[].content[].media.inline_data` /
+/// `media.mime_type`). The declared carrier, not an undeclared part type
+/// literal, selects the projection.
+fn canonical_inline_media_data_url(row: &Map<String, Value>) -> Option<String> {
+    let media = row.get("media")?.as_object()?;
+    let data = media.get("inline_data")?.as_str()?;
+    let mime_type = media.get("mime_type")?.as_str()?;
+    Some(format!("data:{mime_type};base64,{data}"))
 }
 
 pub(super) fn chat_content_to_responses_content(
@@ -106,11 +234,19 @@ pub(super) fn chat_tool_call_to_responses_input_item(
         return Ok(None);
     };
     let function = row.get("function").and_then(Value::as_object);
-    let responses_tool_call_type = row
-        .get("routecodex_chat_extension")
-        .and_then(|extension| extension.get("responses_tool_call_type"))
-        .and_then(Value::as_str)
-        .unwrap_or("function_call");
+    let custom = if row.get("type").and_then(Value::as_str) == Some("custom") {
+        row.get("custom").and_then(Value::as_object)
+    } else {
+        None
+    };
+    let responses_tool_call_type = if custom.is_some() {
+        "custom_tool_call"
+    } else {
+        row.get("routecodex_chat_extension")
+            .and_then(|extension| extension.get("responses_tool_call_type"))
+            .and_then(Value::as_str)
+            .unwrap_or("function_call")
+    };
     let call_id = row
         .get("call_id")
         .or_else(|| row.get("tool_call_id"))
@@ -121,8 +257,9 @@ pub(super) fn chat_tool_call_to_responses_input_item(
     let Some(call_id) = call_id else {
         return Ok(None);
     };
-    let name = function
+    let name = custom
         .and_then(|entry| entry.get("name"))
+        .or_else(|| function.and_then(|entry| entry.get("name")))
         .or_else(|| row.get("name"))
         .and_then(Value::as_str)
         .map(str::trim)
@@ -146,10 +283,16 @@ pub(super) fn chat_tool_call_to_responses_input_item(
         .unwrap_or_else(|| serde_json::to_string(&arguments).unwrap_or_else(|_| "{}".to_string()));
     if responses_tool_call_type == "custom_tool_call" {
         let item_id = responses_custom_item_id(row, call_id);
-        let input = serde_json::from_str::<Value>(&arguments_text)
-            .ok()
-            .and_then(|value| value.get("input").cloned())
-            .unwrap_or_else(|| Value::String(arguments_text.clone()));
+        let input = if let Some(custom) = custom {
+            custom.get("input").cloned().ok_or_else(|| {
+                "MalformedOutboundField target_protocol=responses path=$.input[].custom_tool_call.input".to_string()
+            })?
+        } else {
+            serde_json::from_str::<Value>(&arguments_text)
+                .ok()
+                .and_then(|value| value.get("input").cloned())
+                .unwrap_or_else(|| Value::String(arguments_text.clone()))
+        };
         return Ok(Some(Value::Object(Map::from_iter([
             (
                 "type".to_string(),
@@ -215,6 +358,34 @@ fn responses_custom_item_id(row: &Map<String, Value>, call_id: &str) -> String {
         .unwrap_or_else(|| compact_tool_id("fc_", call_id))
 }
 
+/// The Responses `function_call_output.output` is a string, and the canonical
+/// Chat tool content is either that string or a canonical content-part array.
+/// The established provider Chat shape collapses a text-only content array to
+/// its joined text; non-text content keeps its JSON encoding because the string
+/// field cannot carry the parts.
+fn responses_tool_output_text(value: &Value) -> String {
+    let Value::Array(parts) = value else {
+        return match value {
+            Value::String(text) => text.clone(),
+            other => serde_json::to_string(other).unwrap_or_default(),
+        };
+    };
+    let mut text = String::new();
+    for part in parts {
+        let Some(part) = part.as_object() else {
+            return serde_json::to_string(value).unwrap_or_default();
+        };
+        if part.get("type").and_then(Value::as_str) != Some("text") || part.len() != 2 {
+            return serde_json::to_string(value).unwrap_or_default();
+        }
+        let Some(part_text) = part.get("text").and_then(Value::as_str) else {
+            return serde_json::to_string(value).unwrap_or_default();
+        };
+        text.push_str(part_text);
+    }
+    text
+}
+
 pub(super) fn chat_tool_result_to_responses_input_item(
     row: &Map<String, Value>,
 ) -> Result<Option<Value>, String> {
@@ -240,10 +411,7 @@ pub(super) fn chat_tool_result_to_responses_input_item(
     let output = row
         .get("content")
         .or_else(|| row.get("output"))
-        .map(|value| match value {
-            Value::String(text) => text.clone(),
-            other => serde_json::to_string(other).unwrap_or_else(|_| String::new()),
-        })
+        .map(responses_tool_output_text)
         .unwrap_or_default();
     if responses_tool_output_type == "tool_search_output" {
         let call_id = call_id.ok_or_else(|| {

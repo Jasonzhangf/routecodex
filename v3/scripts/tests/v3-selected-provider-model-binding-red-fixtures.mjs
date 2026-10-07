@@ -28,15 +28,42 @@ const copied = [
 const cases = [
   {
     name: 'Direct skips shared binding',
-    path: 'v3/crates/routecodex-v3-runtime/src/hooks.rs',
-    mutate: (source) => source.replace('crate::selected_provider_model_binding::bind_v3_selected_provider_model(', 'crate::selected_provider_model_binding::removed_binding('),
+    path: 'v3/crates/routecodex-v3-runtime/src/operation_runner/operators/project_canonical_request.rs',
+    mutate: (source) => source.replace(
+      'let payload = bind_selected_provider_model(projection.payload, selected)?;',
+      'let payload = projection.payload;',
+    ),
     diagnostic: /Direct must bind selected model before Provider12 wire build/u,
   },
   {
+    name: 'Direct projection view bypasses canonical projection owner',
+    path: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_request_scope.rs',
+    mutate: (source) => source.replace(
+      '    let projection = project_canonical_request(',
+      '    let projection = removed_project_canonical_request(',
+    ),
+    diagnostic: /Direct projection view must reach project_canonical_request/u,
+  },
+  {
+    name: 'Direct binding overwrites the bound projection payload',
+    path: 'v3/crates/routecodex-v3-runtime/src/operation_runner/operators/project_canonical_request.rs',
+    mutate: (source) => source.replace(
+      '            let payload = bind_selected_provider_model(projection.payload, selected)?;\n            (payload, projection.declarations, Vec::new())',
+      '            let payload = bind_selected_provider_model(projection.payload, selected)?;\n            let payload = request_view.payload.clone();\n            (payload, projection.declarations, Vec::new())',
+    ),
+    diagnostic: /Direct bind owner must not reload through \/request_view\\\.payload\//u,
+  },
+  {
     name: 'Relay skips shared binding',
-    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
-    mutate: (source) => source.replace('bind_v3_selected_provider_model(provider_protocol_payload, selected)', 'Ok(V3SelectedProviderModelBinding::from_unbound(provider_protocol_payload))'),
+    path: 'v3/crates/routecodex-v3-runtime/src/operation_runner/operators/project_canonical_request.rs',
+    mutate: (source) => source.replace('bind_v3_selected_provider_model(payload, selected)', 'Ok(V3SelectedProviderModelBinding::from_unbound(payload))'),
     diagnostic: /Relay protocol payload builder must call the shared selected-model owner/u,
+  },
+  {
+    name: 'Provider compat bypasses bound standard payload',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
+    mutate: (source) => source.replace('input.standard_payload().clone()', 'input.previous.previous.governed_payload().clone()'),
+    diagnostic: /ProviderReqCompat06 must receive the bound protocol payload/u,
   },
   {
     name: 'Provider wire silently repairs stale model',

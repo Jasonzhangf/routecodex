@@ -2209,17 +2209,13 @@ fn anthropic_client_metadata_projects_user_id_consumes_registered_local_context_
 #[test]
 fn anthropic_public_metadata_projects_user_id_and_consumes_response_context() {
     let mut exact = base_chat_for_field_projection();
-    exact["routecodex_chat_extension"] = json!({
-        "responses_request":{"metadata":{"user_id":"public-user"}}
-    });
+    exact["metadata"] = json!({"user_id":"public-user"});
     let wire = encode_v3_responses_semantic_as_anthropic_request(exact)
         .expect("exact public metadata.user_id must project");
     assert_eq!(wire["metadata"], json!({"user_id":"public-user"}));
 
     let mut unsupported = base_chat_for_field_projection();
-    unsupported["routecodex_chat_extension"] = json!({
-        "responses_request":{"metadata":{"tenant":"tenant-1"}}
-    });
+    unsupported["metadata"] = json!({"tenant":"tenant-1"});
     let wire = encode_v3_responses_semantic_as_anthropic_request(unsupported)
         .expect("public metadata without an Anthropic slot stays response projection context");
     assert!(wire.get("metadata").is_none(), "{wire}");
@@ -2274,13 +2270,9 @@ fn anthropic_consumes_registered_responses_cache_verbosity_store_false_and_rejec
 #[test]
 fn anthropic_consumes_arbitrary_responses_metadata_without_provider_wire_leak() {
     let mut request = base_chat_for_field_projection();
-    request["routecodex_chat_extension"] = json!({
-        "responses_request": {
-            "metadata": {
-                "client_owned": "audit-20260803",
-                "trace_label": "client-data"
-            }
-        }
+    request["metadata"] = json!({
+        "client_owned": "audit-20260803",
+        "trace_label": "client-data"
     });
 
     let wire = encode_v3_responses_semantic_as_anthropic_request(request.clone())

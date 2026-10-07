@@ -23,6 +23,27 @@ fn anthropic_request() -> serde_json::Value {
     })
 }
 
+fn invocation_for(
+    request_id: &str,
+    entry: V3HubEntryProtocol,
+) -> routecodex_v3_runtime::operation_runner::RequestInvocationContext {
+    let protocol = match entry {
+        V3HubEntryProtocol::Responses => "responses",
+        V3HubEntryProtocol::Anthropic => "anthropic",
+        V3HubEntryProtocol::Gemini => "gemini",
+        V3HubEntryProtocol::OpenAiChat => "openai_chat",
+    };
+    routecodex_v3_runtime::operation_runner::RequestInvocationContext::new(
+        routecodex_v3_runtime::operation_runner::V3RequestContextHandle::new(
+            request_id.to_string(),
+            protocol.to_string(),
+        ),
+        format!("{request_id}-entry"),
+        format!("{request_id}-attempt"),
+        routecodex_v3_runtime::operation_runner::RequestOriginKind::ClientEntry,
+    )
+}
+
 fn response04(
     payload: serde_json::Value,
     entry_protocol: V3HubEntryProtocol,
@@ -53,8 +74,11 @@ fn anthropic_entry_req_inbound_hook_normalizes_to_chat_extension_before_req04() 
         V3HubTransportIntent::Json,
     );
 
-    let normalized =
-        run_v3_anthropic_relay_runtime_req_inbound(raw).expect("Anthropic Relay req_inbound hook");
+    let normalized = run_v3_anthropic_relay_runtime_req_inbound(
+        raw,
+        &invocation_for("anthropic-entry", V3HubEntryProtocol::Anthropic),
+    )
+    .expect("Anthropic Relay req_inbound hook");
 
     assert_eq!(normalized.payload()["model"], payload["model"]);
     assert!(
@@ -65,7 +89,11 @@ fn anthropic_entry_req_inbound_hook_normalizes_to_chat_extension_before_req04() 
     assert_eq!(normalized.payload()["messages"][0]["role"], "system");
     assert_eq!(normalized.payload()["messages"][0]["content"], "be exact");
     assert_eq!(normalized.payload()["messages"][1]["role"], "user");
-    assert_eq!(normalized.payload()["messages"][1]["content"], "hello");
+    assert_eq!(
+        normalized.payload()["messages"][1]["content"],
+        json!([{"type":"text","text":"hello"}]),
+        "REQ02 preserves the Anthropic text block as canonical Chat content parts"
+    );
     assert_eq!(normalized.payload()["messages"][2]["role"], "assistant");
     assert_eq!(
         normalized.payload()["messages"][2]["tool_calls"][0]["id"],
@@ -73,18 +101,20 @@ fn anthropic_entry_req_inbound_hook_normalizes_to_chat_extension_before_req04() 
     );
     assert_eq!(
         normalized.payload()["messages"][2]["tool_calls"][0]["function"],
-        json!({"name":"lookup","arguments":"{\"q\":\"x\"}"})
+        json!({"name":"lookup","arguments":{"q":"x"}}),
+        "REQ02 preserves the Anthropic tool_use input value (opaque_tool_payload)"
     );
-    assert_eq!(normalized.payload()["messages"][3]["role"], "tool");
-    assert_eq!(
-        normalized.payload()["messages"][3]["tool_call_id"],
-        "toolu_1"
-    );
-    assert_eq!(normalized.payload()["messages"][3]["content"], "ok");
-    assert_eq!(
-        normalized.payload()["messages"][3]["routecodex_chat_extension"],
-        json!({"responses_tool_output_type":"function_call_output"})
-    );
+    // The Anthropic tool_result block becomes a Chat role:tool message; a REQ02
+    // structural carrier message may precede it, so locate the tool result by
+    // role + call id rather than by a fixed index.
+    let tool_message = normalized.payload()["messages"]
+        .as_array()
+        .expect("canonical Chat messages")
+        .iter()
+        .find(|message| message["role"] == "tool")
+        .expect("Anthropic tool_result must survive as a Chat tool message");
+    assert_eq!(tool_message["tool_call_id"], "toolu_1");
+    assert_eq!(tool_message["content"], "ok");
     assert_eq!(normalized.payload()["reasoning_thinking_mode"], "enabled");
     assert_eq!(normalized.payload()["reasoning_budget_tokens"], 1024);
     assert!(
@@ -180,7 +210,11 @@ fn wrong_entry_execution_and_provider_wire_combinations_fail_explicitly() {
                 V3HubTransportIntent::Json,
             );
             assert_eq!(
-                run_v3_anthropic_relay_runtime_req_inbound(raw).unwrap_err(),
+                run_v3_anthropic_relay_runtime_req_inbound(
+                    raw,
+                    &invocation_for("anthropic-wrong-axis", entry),
+                )
+                .unwrap_err(),
                 expected
             );
         }
@@ -219,7 +253,10 @@ fn side_channel_fields_fail_at_both_protocol_hook_boundaries() {
             V3HubTransportIntent::Json,
         );
         assert!(matches!(
-            run_v3_anthropic_relay_runtime_req_inbound(raw),
+            run_v3_anthropic_relay_runtime_req_inbound(
+                raw,
+                &invocation_for("anthropic-side-channel", V3HubEntryProtocol::Anthropic),
+            ),
             Err(V3AnthropicRelayProtocolHookError::Codec(_))
         ));
 

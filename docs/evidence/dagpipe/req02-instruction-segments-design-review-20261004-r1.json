@@ -1,0 +1,27 @@
+{
+  "contract_version": "1",
+  "scope": {
+    "mode": "uncommitted",
+    "commit": "51b2971c4f9ebdba12080e018bf014c8237942cd",
+    "base": null
+  },
+  "module_boundary_evidence": [
+    {
+      "module": "REQ02 instruction 归一与来源关联设计",
+      "owner": "routecodex-v3-runtime 的 REQ02 field operator library；本轮仅审设计文档",
+      "paths": "唯一变更为新增 docs/design/v3-req02-lossless-instruction-segments.md；拟实施范围限定 operation_runner/operators 的 instruction library/records/helpers/profiles 与共享 inverse/history helper；未修改代码、配置、图或运行时。",
+      "edges": "设计入口为已捕获客户端 JSON 与请求资源；注册 transform 遍历语义文本叶子，生成 scalar 或有序 text-part array，并记录每个实际 destination；当前业务值与来源关联进入既有处理及投影链。已只读核对父候选 req02-main322-20261004：process_instructions/process_system_instruction 收集文本，flush_system_instructions 使用换行拼接，finalize_instruction_source_mappings 将多个来源指向同一 content，支持文档所述归一断边。设计要求具体叶子关联、同步既有 system history 贡献、删除不复活旧值，避免从最终字符串猜测来源。",
+      "resources": "业务文本与 opaque siblings 保留在 data plane；typed inverse/history 仅持有来源身份和路径引用。沿用既有 request_inverse_context、explicit_history_pairing 和 RuntimeRequestFinalizer 生命周期；instruction 算子不拥有重试或释放。本轮只读，未创建运行时资源或修改其他工作树。",
+      "gates": "git diff --cached --check 无报错；已核对项目 AGENTS.md、rcc-dev-skills、DAGPipe README、既有请求 graph 及 operation-runner owner/caller bindings。文档明确为编码前设计候选，未声称实施完成；本轮单文件设计审查不要求新增 graph 或执行 build/install/restart/live。后续实施验收要求公开 runner 到 projection 的黑盒、独立叶子修改/删除、opaque sibling 修改及现有回归 suites。文档引用的 32/32、86/86 不作为本轮已验证实现证据。"
+    },
+    {
+      "module": "registered Direct inverse/history projection 与标准 Outbound 消费契约",
+      "owner": "registered Direct history projection 与既有标准 Outbound owner；Runtime/Error/SSE 保留各自生命周期职责",
+      "paths": "docs/design/v3-req02-lossless-instruction-segments.md:48 起声明消费边界；共享 project_canonical_paths 只解析结构路径和当前值；REQ06 完整 Operator 明确排除，必要 text-part consumer 补链由父协调唯一 owner。",
+      "edges": "来源关联加当前 canonical/opaque 值进入 registered Direct projection，按原形重组对应字段；标准 Outbound 按目标支持的 scalar/array 形状消费，scalar 连接既有 text parts，不重复插入换行或重跑 Inbound。Relay 业务修改仍由 Chat Process 所有，Direct 修改仍由注册操作所有；投影结果交回既有流水线。既有请求 graph 已包含 normalize_request_losslessly 到 project_standard_provider_request 的数据及 inverse-context 资源边，本设计未新增跨功能回边。",
+      "resources": "原形用于结构和关联，不授权回放旧业务值；设计禁止新增 raw registry、Shadow Chat、备用旧链或业务 payload 中的控制载体。错误、重试、取消和终态交由既有 typed Runtime/Error/SSE owner，不引入客户端错误投影、成功包装或 instruction 自有释放路径。",
+      "gates": "设计要求公开 normalization-to-projection consumer、四协议 scalar/多段/合并来源、CRLF/内部换行/空段/长文本/尾标记字节验证，以及 scalar/array target 行为验证；这些是后续实施条件，当前未提供或声称运行结果。真实 HTTP/WS JSON/SSE、客户端工具完整回合、安装重启、live、实现 review 与集成回执明确保留为后续交付门禁。当前审查结论仅覆盖设计文档契约，不证明投影实现或生产接线。"
+    }
+  ],
+  "findings": []
+}

@@ -56,6 +56,7 @@ targets = [
         Some("wrapped_provider_error".to_string()),
         "transient SSE body without a configured response policy".to_string(),
         None,
+        None,
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
@@ -118,6 +119,7 @@ async fn unmatched_transient_reselect_keeps_returned_recovery_witness_admissible
         200,
         Some("wrapped_provider_error".to_string()),
         "transient SSE body without a configured response policy".to_string(),
+        None,
         None,
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,

@@ -24,15 +24,18 @@ const paths = {
   responsesOpenaiCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs',
   clientMetadataProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs',
   requestOutboundFormat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
+  requestOutboundChatMessages: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_openai_chat_messages.rs',
   requestOutboundResponsesItems: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_responses_items.rs',
   requestOutboundToolProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs',
   requestOutboundMetadata: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs',
   requestOutboundFormatExtraTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs',
+  projectCanonicalRequest: 'v3/crates/routecodex-v3-runtime/src/operation_runner/operators/project_canonical_request.rs',
   providerReqCompat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
   providerReqReasoningEffort: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_reasoning_effort.rs',
   directPassthroughTests: 'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   responsesRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   responsesRuntimeInner: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
+  responsesRuntimeInnerResponseInterpretation: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner_response_interpretation.rs',
   responsesRuntimeTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests.rs',
   responsesRuntimeTestsExtra: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_extra_tests.rs',
   responsesRelayDryRun: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs',
@@ -44,6 +47,7 @@ const paths = {
   anthropicProjectionContext: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs',
   anthropicCodecToolProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs',
   responsesToAnthropicCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs',
+  responsesToolProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_tool_projection.rs',
   anthropicRequestFieldProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs',
   anthropicProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs',
   geminiCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs',
@@ -122,12 +126,18 @@ const requestFieldProjectionModules = YAML.parse(text.requestFieldProjectionModu
 
 requireText(text.responsesRelayTypes, `${paths.responsesRelayTypes}::client_input_error_type`, 'ClientInboundCanonical(String)');
 requireText(text.responsesRelayDryRun, `${paths.responsesRelayDryRun}::client_input_error_projection`, 'V3ResponsesRelayRuntimeError::ClientInboundCanonical(message)');
-requireText(text.responsesRuntimeInner, `${paths.responsesRuntimeInner}::provider_response_projection_error`, 'V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(');
+// The provider-response projection error mapping moved verbatim out of
+// responses_relay_runtime_inner.rs into the response-interpretation companion
+// (R53-F split); the anchor follows the new owner file.
+requireText(text.responsesRuntimeInnerResponseInterpretation, `${paths.responsesRuntimeInnerResponseInterpretation}::provider_response_projection_error`, 'V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(');
 requireText(text.webSearchSidecar, `${paths.webSearchSidecar}::internal_sidecar_error`, 'WebSearchSidecarControlError::Message(format!(');
 requireText(text.webSearchSidecar, `${paths.webSearchSidecar}::internal_sidecar_error_message`, 'web_search hooks sidecar task failed: {error}');
 requireText(text.responsesRuntimeTestsExtra, `${paths.responsesRuntimeTestsExtra}::error_origin_reverse_tests`, 'provider_response_projection_failure_projects_internal_599');
 requireText(text.responsesRuntimeTestsExtra, `${paths.responsesRuntimeTestsExtra}::error_origin_reverse_tests`, 'internal_web_search_canonicalization_failure_is_not_client_invalid_request');
 forbid(text.responsesRuntimeInner, `${paths.responsesRuntimeInner}::no_shared_client_error_variant`, [/V3ResponsesRelayRuntimeError::InboundCanonical\(/u]);
+// The same invariant now also covers the response-interpretation companion that
+// owns the moved relay response projection code.
+forbid(text.responsesRuntimeInnerResponseInterpretation, `${paths.responsesRuntimeInnerResponseInterpretation}::no_shared_client_error_variant`, [/V3ResponsesRelayRuntimeError::InboundCanonical\(/u]);
 forbid(text.webSearchSidecar, `${paths.webSearchSidecar}::no_shared_client_error_variant`, [/V3ResponsesRelayRuntimeError::InboundCanonical\(/u]);
 
 for (const phrase of [
@@ -165,7 +175,7 @@ if (requestFieldProjectionManifest?.status !== 'design' || requestFieldProjectio
 }
 const projectionSemantics = new Map((requestFieldProjectionManifest?.semantic_registry ?? []).map((entry) => [entry?.semantic_id, entry]));
 for (const [semanticId, chatStorage, projections] of [
-  ['request.metadata', 'routecodex_chat_extension.responses_request.metadata', { responses: 'metadata_openai_limits', openai_chat: 'metadata_openai_limits', anthropic: 'user_id_to_provider_wire_other_keys_to_response_projection_context', gemini: 'unmapped' }],
+  ['request.metadata', 'metadata', { responses: 'metadata_openai_limits', openai_chat: 'metadata_openai_limits', anthropic: 'user_id_to_provider_wire_other_keys_to_response_projection_context', gemini: 'unmapped' }],
   ['request.client_metadata', 'routecodex_chat_extension.responses_request.client_metadata', { responses: 'client_metadata', openai_chat: 'user_id_projection_other_fields_unmapped', anthropic: 'user_id_projection_other_fields_unmapped', gemini: 'unmapped' }],
   ['request.prompt_cache_key', 'routecodex_chat_extension.responses_request.prompt_cache_key', { responses: 'prompt_cache_key', openai_chat: 'prompt_cache_key', anthropic: 'unmapped', gemini: 'unmapped' }],
   ['request.store', 'routecodex_chat_extension.responses_request.store', { responses: 'store', openai_chat: 'store', anthropic: 'false_consumed_true_unsupported', gemini: 'unmapped' }],
@@ -290,16 +300,15 @@ for (const phrase of [
 const reqInbound02 = functionSlice(
   text.reqInbound02,
   paths.reqInbound02,
-  'pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01',
-  'pub fn build_v3_hub_req_inbound_02_responses_chat_canonical_from_v3_hub_req_inbound_01',
+  'pub fn build_v3_hub_req_inbound_02_from_request_invocation',
+  '#[cfg(test)]',
 );
 for (const phrase of [
-  'if input.entry_protocol == V3HubEntryProtocol::Responses',
-  'build_v3_chat_canonical_request_from_responses_payload_for_req_inbound',
-  'if input.entry_protocol == V3HubEntryProtocol::Anthropic',
-  'encode_v3_anthropic_request_as_responses_semantic',
-  'Anthropic inbound Chat canonicalization failed',
-  'semantic_protocol: V3HubRequestSemanticProtocol::Chat',
+  'execute_v3_operation_runner_request_normalize_losslessly',
+  'invocation.request_handle()',
+  'RequestNormalizationEntry::RawEntry',
+  'RequestNormalizationEntry::AlreadyCanonical',
+  'build_v3_hub_req_inbound_02_from_canonical',
 ]) requireText(reqInbound02, `${paths.reqInbound02}::all_inbound_to_chat_canonical`, phrase);
 forbid(reqInbound02, `${paths.reqInbound02}::all_inbound_to_chat_canonical_no_control_rebuild`, [
   /MetadataCenter|metadata_center|runtime_control|selected_target|provider_protocol/i,
@@ -354,7 +363,7 @@ for (const phrase of [
 ]) requireText(text.requestOutboundFormat, paths.requestOutboundFormat, phrase);
 requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::explicit_outbound_projection`, 'project_outbound_payload_for_target_protocol');
 requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::explicit_outbound_projection`, 'ControlFieldLeak target_protocol={}');
-forbid(text.requestOutboundFormat, `${paths.requestOutboundFormat}::no_silent_strip_projector`, [
+forbid(`${text.requestOutboundFormat}\n${text.requestOutboundChatMessages}`, `${paths.requestOutboundFormat}+${paths.requestOutboundChatMessages}::no_silent_strip_projector`, [
   /strip_private_fields/,
   /!is_provider_outbound_control_key\(key\)\s*&&\s*!key\.starts_with\('_'\)/,
   /row\.remove\("client_metadata"\);\s*if\s*let\s*Some\(max_output_tokens\)/,
@@ -396,7 +405,8 @@ requireText(text.requestFieldProjectionManifest, `${paths.requestFieldProjection
 requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormatExtraTests}::openai_chat_registered_client_metadata_local_context`, 'openai_chat_wire_consumes_registered_codex_client_metadata_as_local_context');
 requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormatExtraTests}::responses_client_metadata_target_validation_lock`, 'codex_client_metadata_does_not_reach_responses_wire');
 requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::responses_reasoning_projection`, 'fn project_openai_responses_reasoning_extensions_to_reasoning');
-requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::openai_chat_max_output_tokens_mapping`, 'row.entry("max_completion_tokens".to_string())');
+requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::openai_chat_message_projection_owner`, 'include!("request_outbound_openai_chat_messages.rs");');
+requireText(text.requestOutboundChatMessages, `${paths.requestOutboundChatMessages}::openai_chat_max_output_tokens_mapping`, 'row.entry("max_completion_tokens".to_string())');
 for (const phrase of [
   'openai_chat_provider_wire_consumes_registered_codex_client_metadata_as_local_context',
   'openai_chat_function_tool_redacted_schema_placeholders_pass_through',
@@ -474,7 +484,7 @@ for (const phrase of [
   'anthropic_request_system_extension',
   'project_responses_text_as_anthropic_output_config',
   '$.request.client_metadata',
-  '"metadata" | "client_metadata" | "prompt_cache_key" | "store" | "text"',
+  '"client_metadata" | "prompt_cache_key" | "store" | "text"',
 ]) requireText(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, phrase);
 forbid(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, [/MetadataCenter|metadata_center|debug_snapshot|runtime_control/i, /responses_reasoning_effort_as_anthropic_budget/, /responses_reasoning_policy_as_anthropic_system_marker/, /<routecodex_reasoning_request/, /unwrap_or_else\(\|\|\s*\{?\s*responses_reasoning_effort_as_anthropic_budget/s]);
 const targetReasoningEffortProjection = text.providerReqReasoningEffort;
@@ -499,7 +509,7 @@ for (const phrase of [
   'v3.custom_tool.anthropic_string_input_wrapper.v1',
   'input_schema',
   '"additionalProperties":false',
-]) requireText(text.responsesToAnthropicCodec, `${paths.responsesToAnthropicCodec}::anthropic_custom_declaration_projection`, phrase);
+]) requireText(text.responsesToolProjection, `${paths.responsesToolProjection}::anthropic_custom_declaration_projection`, phrase);
 requireText(text.anthropicCodecTests, `${paths.anthropicCodecTests}::malformed_chat_tool_arguments`, 'chat_malformed_tool_call_arguments_keep_pair_with_reversible_anthropic_input');
 requireText(text.anthropicCodecTests, `${paths.anthropicCodecTests}::malformed_responses_function_arguments`, 'responses_malformed_function_call_arguments_keep_pair_with_reversible_anthropic_input');
 for (const phrase of [
@@ -541,7 +551,7 @@ for (const testName of [
 for (const phrase of [
   'if object.get("type").and_then(Value::as_str) == Some("custom")',
   '.get("custom")',
-  'custom_tool_names.get(name)',
+  'let Some(client_name) = custom_tool_names.get(call.name) else {',
   '.get("input")',
   '"type":"custom_tool_call"',
 ]) requireText(chatToResponses, `${paths.responsesOpenaiChatConversion}::chat_to_responses_projection`, phrase);
@@ -578,37 +588,57 @@ requireText(openaiChatExtensionProjection, `${paths.requestOutboundFormat}::regi
 const providerReqCompat = functionSlice(
   text.providerReqCompat,
   paths.providerReqCompat,
-  'fn build_v3_provider_standard_protocol_payload_from_req07',
-  '#[cfg(test)]',
+  'pub(super) fn apply_v3_provider_req_compat(',
+  'fn project_v3_images_for_selected_target_session_compat',
 );
 for (const phrase of [
-  'V3HubProviderWireProtocol::Anthropic',
-  'let (source, anthropic_drops) =',
-  'build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops(',
-  'encode_v3_responses_semantic_as_anthropic_request(source)',
-  'input.provider_semantic_payload()',
-  'input.entry_protocol()',
+  'input.standard_payload().clone()',
+  'input.standard_projection_drops().to_vec()',
+  'apply_v3_provider_req_compat_to_provider_payload(',
+  'input.selected_target()',
 ]) requireText(providerReqCompat, `${paths.providerReqCompat}::anthropic_chat_extension_surface`, phrase);
 forbid(providerReqCompat, `${paths.providerReqCompat}::anthropic_chat_extension_surface`, [/fallback/i, /original_responses_payload|MetadataCenter|metadata_center|runtime_control/i]);
+forbid(providerReqCompat, `${paths.providerReqCompat}::standard_projection_has_one_owner`, [
+  /build_v3_provider_standard_protocol_payload_from_req07/,
+  /build_v3_anthropic_provider_request_source_from_chat_canonical/,
+  /encode_v3_responses_semantic_as_anthropic_request/,
+]);
 
 const anthropicProviderRequestSource = functionSlice(
   text.requestOutboundFormat,
   paths.requestOutboundFormat,
-  'pub(crate) fn build_v3_anthropic_provider_request_source_from_chat_canonical',
-  '#[derive(Debug, Clone, Copy, PartialEq, Eq)]',
+  'pub(crate) fn build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops',
+  'pub(crate) fn build_v3_anthropic_provider_request_source_from_chat_canonical(',
 );
 for (const phrase of [
-  'V3HubEntryProtocol::Responses',
-  'if payload.get("messages").and_then(Value::as_array).is_some()',
-  'Responses entry to Anthropic provider wire requires governed Chat extension messages',
-  'V3HubEntryProtocol::Anthropic | V3HubEntryProtocol::OpenAiChat',
-  'Anthropic provider wire requires governed Chat/Anthropic messages',
+  'Inbound has already normalized every entry to Chat',
+  'if payload.get("messages").and_then(Value::as_array).is_none()',
+  'Anthropic provider wire requires governed Chat messages',
+  'project_outbound_payload_for_target_protocol_with_drops(payload, V3OutboundTargetProtocol::Anthropic)',
 ]) requireText(anthropicProviderRequestSource, `${paths.requestOutboundFormat}::anthropic_provider_request_source`, phrase);
 forbid(anthropicProviderRequestSource, `${paths.requestOutboundFormat}::anthropic_provider_request_source`, [/fallback/i, /original_responses_payload|build_v3_responses_original_input_surface|MetadataCenter|metadata_center|runtime_control/i]);
 forbid(anthropicProviderRequestSource, `${paths.requestOutboundFormat}::anthropic_provider_request_source_no_raw_input_branch`, [
   /payload\.get\("input"\)\.and_then\(Value::as_array\)\.is_some\(\)/,
   /normalize_responses_payload_for_provider_standard\(payload\)/,
   /Responses input/,
+  /entry_protocol/,
+]);
+const canonicalStandardSource = functionSlice(
+  text.projectCanonicalRequest,
+  paths.projectCanonicalRequest,
+  'V3HubProviderWireProtocol::Anthropic => {',
+  'V3HubProviderWireProtocol::Gemini => {',
+);
+requireOrder(canonicalStandardSource, `${paths.projectCanonicalRequest}::canonical_standard_source`, [
+  'project_canonical_standard_view(canonical)?',
+  'build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops(',
+  '&standard_view',
+]);
+forbid(canonicalStandardSource, `${paths.projectCanonicalRequest}::canonical_standard_source_no_entry_dispatch`, [
+  /V3HubEntryProtocol/,
+  /entry_protocol/,
+  /build_v3_anthropic_provider_request_source_from_chat_canonical(?:_for_selected)?\(/,
+  /normalize_responses_payload_for_provider_standard/,
 ]);
 const openAiChatStandardRequest = functionSlice(
   text.requestOutboundFormat,
@@ -899,7 +929,7 @@ const providerCompatErrorEdge = (providerActionGateChain?.edges ?? []).find(
 for (const [key, expected] of [
   ['from_node', 'ProviderReqCompat06ProviderCompat'],
   ['to_node', 'V3Error05ExecutionDecision'],
-  ['caller_symbol', 'execute_v3_responses_relay_runtime_inner'],
+  ['caller_symbol', 'execute_v3_responses_relay_runtime_resident'],
   ['caller_file', paths.responsesRuntimeInner],
   ['callee_symbol', 'handle_v3_responses_relay_provider_failure'],
   ['callee_file', paths.responsesRuntime],

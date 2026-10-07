@@ -4,6 +4,7 @@ mod compaction_request;
 mod console;
 mod debug_runtime_degradation;
 mod endpoint_handlers;
+mod endpoint_trace;
 mod executors;
 mod frame_builders;
 mod listener_accept;
@@ -12,25 +13,25 @@ mod live_snapshot_projections;
 mod metadata_center;
 mod models_catalog;
 mod request_id;
+mod request_identity;
 mod responses_direct_server_outcome;
 mod restart_closeout;
 mod restart_handoff;
 mod scope_metadata;
 mod session_admission;
+mod terminal_error_evidence;
 mod websocket;
 mod webui_observability;
 mod webui_observability_endpoints;
 
 use compaction_request::classify_v3_request_purpose;
 use console::*;
-use endpoint_handlers::{
-    allocate_v3_console_request_id, allocate_v3_console_request_identity,
-    format_v3_request_id_entry, format_v3_request_id_token,
-    merge_v3_direct_handoff_provider_failure_events, merge_v3_protocol_plan_trace,
-    merge_v3_relay_handoff_provider_failure_events_into_direct_frame,
-    next_v3_console_request_identity, pending_endpoint_after_responses_admission,
+use endpoint_trace::{
+    is_provider_request_dry_run, merge_v3_direct_handoff_provider_failure_events,
+    merge_v3_protocol_plan_trace, merge_v3_relay_handoff_provider_failure_events_into_direct_frame,
+    prepend_v3_protocol_plan_trace_to_foundation_output,
     prepend_v3_protocol_plan_trace_to_responses_relay_output,
-    prepend_v3_relay_handoff_trace_to_direct_frame,
+    prepend_v3_relay_handoff_trace_to_direct_frame, resolve_v3_dry_run_target_label,
 };
 pub use executors::*;
 pub(crate) use frame_builders::*;
@@ -41,9 +42,14 @@ use request_id::{
     format_v3_tm, v3_request_id_clock_now, V3AllocatedRequestIdentity, V3RequestCounterState,
     V3RequestIdCounter,
 };
+use request_identity::{
+    allocate_v3_console_request_id, allocate_v3_console_request_identity,
+    format_v3_request_id_entry, format_v3_request_id_token, next_v3_console_request_identity,
+};
 pub use restart_handoff::*;
 pub(crate) use routecodex_v3_runtime::V3RequestPurpose;
 pub(crate) use scope_metadata::*;
+pub(crate) use terminal_error_evidence::*;
 use websocket::{responses_websocket_endpoint, responses_websocket_session};
 use webui_observability::V3WebuiObservability;
 
@@ -64,7 +70,8 @@ use futures_util::{stream, StreamExt};
 use libc::EINTR;
 use listener_accept::{run_v3_listener_accept_loop, V3ListenerAcceptState};
 use responses_direct_server_outcome::{
-    execute_responses_direct_server_outcome, V3ResponsesDirectServerOutcome,
+    client_entry, execute_responses_direct_server_outcome, relay_entry, V3DirectEntry,
+    V3ResponsesDirectServerOutcome,
 };
 use routecodex_v3_config::{
     collect_v3_route_group_catalog_model_refs, resolve_routecodex_package_version_from_executable,
@@ -95,6 +102,7 @@ use routecodex_v3_runtime::{
     execute_v3_anthropic_relay_runtime_with_default_transport_client_headers_provider_health,
     execute_v3_foundation_pending_runtime, execute_v3_gemini_relay_runtime_with_default_transport,
     execute_v3_gemini_relay_runtime_with_default_transport_provider_health,
+    execute_v3_openai_chat_relay_handoff_runtime_with_default_transport_provider_health_and_request_control,
     execute_v3_openai_chat_relay_runtime_with_default_transport,
     execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health,
     execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_execution_mode,
@@ -118,8 +126,8 @@ use routecodex_v3_runtime::{
     V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput, V3HubExecutionMode,
     V3OpenAiChatClientStream, V3OpenAiChatCommittedStream, V3OpenAiChatRelayClientBody,
     V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3ProviderHealthProbeFailure,
-    V3RelayProviderSnapshots, V3RequestExecutionControl, V3Resp15ClientPayload,
-    V3ResponsesDirectRuntimeSharedState, V3ResponsesDirectServerToolScope,
+    V3RelayEntryOrigin, V3RelayProviderSnapshots, V3RelayRuntimeEntry, V3RequestExecutionControl,
+    V3Resp15ClientPayload, V3ResponsesDirectRuntimeSharedState, V3ResponsesDirectServerToolScope,
     V3ResponsesDirectServerToolState, V3ResponsesProtocolExecutionPlan, V3ResponsesRelayClientBody,
     V3ResponsesRelayClientStream, V3ResponsesRelayDryRunOutcome,
     V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayProviderSnapshotCapture,
@@ -291,40 +299,6 @@ pub fn build_v3_server_startup_01_listener_set_from_config_05(
 const V3_EXEC_INFLIGHT_DRAIN: std::time::Duration = std::time::Duration::from_secs(5);
 
 impl V3ServerAggregateHandle {
-    pub async fn prepare_exec_attempt(&self) -> Result<V3ServerExecPreparation, String> {
-        self.flush_runtime_persistence();
-        let codex_sample_exec_guard = match self.codex_sample_persist_worker.as_ref() {
-            Some(worker) => match tokio::time::timeout(
-                std::time::Duration::from_secs(1),
-                worker.quiesce_for_exec(),
-            )
-            .await
-            {
-                Ok(Ok(guard)) => Some(guard),
-                Ok(Err(error)) => {
-                    return Err(format!(
-                        "codex sample persistence preparation failed: {error}"
-                    ))
-                }
-                Err(_) => {
-                    return Err(
-                        "codex sample persistence preparation timed out; worker retained".into(),
-                    )
-                }
-            },
-            None => None,
-        };
-        let codex_sample_persist_failures = codex_sample_exec_guard
-            .as_ref()
-            .map(|guard| guard.persist_failures())
-            .unwrap_or_default();
-        Ok(V3ServerExecPreparation {
-            front_checkpoints: self.front_transport_broker.freeze(Instant::now()),
-            codex_sample_persist_failures,
-            _codex_sample_exec_guard: codex_sample_exec_guard,
-        })
-    }
-
     pub fn front_transport_broker(&self) -> &V3FrontTransportBroker {
         &self.front_transport_broker
     }
@@ -1223,7 +1197,7 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
             let error06_error_class = projected.error_class;
             let error06_health_action = projected.health_action.clone();
             let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
-            if let Some(response) = record_and_emit_v3_error_projection(
+            record_and_emit_v3_error_projection(
                 &state,
                 &trace_scope,
                 V3ErrorProjectionConsoleInput {
@@ -1248,9 +1222,7 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
                     // external link, so this lane records "not exposed".
                     upstream_request_id: None,
                 },
-            ) {
-                return response;
-            }
+            );
             let frame = if entry_protocol == "responses" {
                 project_v3_responses_error_frame_for_request_if_sse(frame, &request_headers, None)
             } else {
@@ -1365,8 +1337,10 @@ fn emit_relay_error_chain_if_any(
     error_chain: Option<&[&'static str]>,
     body: Option<&Value>,
     request_console_project_path: Option<&str>,
-) -> Option<Response<Body>> {
-    let error_chain = error_chain?;
+) {
+    let Some(error_chain) = error_chain else {
+        return;
+    };
     record_and_emit_v3_error_projection(
         state,
         trace_scope,
@@ -1384,14 +1358,14 @@ fn emit_relay_error_chain_if_any(
             health_action: None,
             upstream_request_id: None,
         },
-    )
+    );
 }
 
 fn record_and_emit_v3_error_projection(
     state: &V3ListenerState,
     trace_scope: &routecodex_v3_debug::V3DebugTraceScope,
     input: V3ErrorProjectionConsoleInput<'_>,
-) -> Option<Response<Body>> {
+) {
     if let Err(error) = state.debug.record_node_event(
         trace_scope,
         "V3Error06ClientProjected",
@@ -1402,10 +1376,20 @@ fn record_and_emit_v3_error_projection(
             "body": input.body
         })),
     ) {
-        return Some(foundation_output_response(project_v3_debug_failure(
-            "V3Error06ClientProjected",
-            error,
-        )));
+        // The node-event sink is an optional Debug side channel. A rejected
+        // write must never replace the caller's typed terminal with a client
+        // Error06 response, so it is reported out of band with the original
+        // cause and request identity, then the existing console/WebUI
+        // projection still runs. The Debug sample store owns persistence
+        // failures; no second failure store is created here.
+        let line = format_v3_console_timed_content(
+            "[error-projection]",
+            &format!(
+                "req={} endpoint={} node=V3Error06ClientProjected error={error}",
+                input.request_id, input.endpoint
+            ),
+        );
+        append_v3_human_console_line(state, &line);
     }
     emit_v3_error_console_line_for_state(
         state,
@@ -1440,7 +1424,6 @@ fn record_and_emit_v3_error_projection(
         );
         append_v3_human_console_line(state, &line);
     }
-    None
 }
 
 fn request_accepts_sse(headers: &HeaderMap) -> bool {

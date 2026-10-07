@@ -71,9 +71,8 @@ for (const node of nodes) {
 }
 
 const builders = [
-  'build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01',
-  'build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01',
-  'build_v3_hub_req_inbound_02_responses_chat_canonical_from_v3_hub_req_inbound_01',
+  'build_v3_hub_req_inbound_02_from_canonical',
+  'build_v3_hub_req_inbound_02_from_request_invocation',
   'build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02',
   'build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04',
   'build_v3_hub_req_target_06_from_v3_hub_req_execution_05',

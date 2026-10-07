@@ -1,0 +1,2 @@
+[verify:v3-protocol-conversion-field-parity] failed
+- docs/architecture/v3-mainline-call-map.yml: ProviderReqCompat06 typed failure edge caller_symbol must be execute_v3_responses_relay_runtime_inner

@@ -24,7 +24,7 @@ const REQUIRED_GATES = [
 
 const NODE_OWNERS = [
   ['V3HubReqInbound01ClientRaw', 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_01_client_raw.rs', 'build_v3_hub_req_inbound_01_client_raw'],
-  ['V3HubReqInbound02Normalized', 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs', 'build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01'],
+  ['V3HubReqInbound02Normalized', 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs', 'build_v3_hub_req_inbound_02_from_canonical'],
   ['V3HubReqChatProcess04Governed', 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs', 'build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02'],
   ['V3HubReqExecution05Planned', 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_execution_05_planned.rs', 'build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04'],
   ['V3HubReqTarget06Resolved', 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_target_06_resolved.rs', 'build_v3_hub_req_target_06_from_v3_hub_req_execution_05'],
@@ -50,7 +50,7 @@ const SHARED_HELPERS = [
 ];
 
 const EXPECTED_FIXED_EDGES = new Map([
-  ['v3-hub-req-01', ['V3HubReqInbound01ClientRaw', 'V3HubReqInbound02Normalized', 'build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01']],
+  ['v3-hub-req-01', ['V3HubReqInbound01ClientRaw', 'V3HubReqInbound02Normalized', 'build_v3_hub_req_inbound_02_from_canonical']],
   ['v3-hub-req-02', ['V3HubReqInbound02Normalized', 'V3HubReqChatProcess04Governed', 'build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02']],
   ['v3-hub-req-03', ['V3HubReqChatProcess04Governed', 'V3HubReqExecution05Planned', 'build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04']],
   ['v3-hub-req-04', ['V3HubReqExecution05Planned', 'V3HubReqTarget06Resolved', 'build_v3_hub_req_target_06_from_v3_hub_req_execution_05']],
@@ -84,6 +84,22 @@ function read(file) {
     fail(`${file}: cannot read: ${error.message}`);
     return '';
   }
+}
+
+// Rust sources may splice a same-module fragment with include!("..."); the
+// REQ02 file-size ratchet split e.g. hub_v1/anthropic_relay_runtime.rs that way.
+// The including file owns every symbol its included fragments define, so a
+// definition found in an included fragment counts for the including file and a
+// call-map binding keeps naming its pre-split module owner.
+function includedFragmentMatches(file, pattern) {
+  const source = read(file);
+  const directive = /include!\s*\(\s*"([^"]+)"\s*\)/gu;
+  let match;
+  while ((match = directive.exec(source)) !== null) {
+    const fragment = path.join(path.dirname(file), match[1]);
+    if (fs.existsSync(abs(fragment)) && pattern.test(read(fragment))) return true;
+  }
+  return false;
 }
 
 function parseYaml(file) {
@@ -141,7 +157,11 @@ function fnDefinitionPattern(symbol) {
 }
 
 function filesMatching(pattern) {
-  return sourceFiles.filter((file) => fs.existsSync(abs(file)) && pattern.test(read(file)));
+  return sourceFiles.filter(
+    (file) =>
+      fs.existsSync(abs(file)) &&
+      (pattern.test(read(file)) || includedFragmentMatches(file, pattern))
+  );
 }
 
 function typeDefinitionFiles(symbol) {

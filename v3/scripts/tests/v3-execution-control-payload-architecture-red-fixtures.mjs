@@ -218,7 +218,7 @@ const cases = [
   },
   {
     name: 'Responses production replay creates an independent default budget',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner_response_interpretation.rs',
     marker: '                    attempt_budget.clone(),\n',
     replacement: '                    crate::nodes::V3AttemptBudget::process_default(),\n',
     diagnostic: /every Responses production projection must reuse the request attempt budget/u,
@@ -250,6 +250,20 @@ const cases = [
     marker: '"responses_relay_response_execution_control_error"',
     replacement: '"provider_response_sse_event_invalid"',
     diagnostic: /Responses local replay failure must project response-stage 599/u,
+  },
+  {
+    name: 'Anthropic request control uses server identity as request identity',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
+    marker: 'V3RequestExecutionControl::new(\n        manifest,\n        &input.server_id,\n        &input.request_id,\n',
+    replacement: 'V3RequestExecutionControl::new(\n        manifest,\n        &input.server_id,\n        &input.server_id,\n',
+    diagnostic: /Anthropic Relay must create one request execution control/u,
+  },
+  {
+    name: 'Anthropic resident replaces request attempt budget with process default',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
+    marker: '    let attempt_budget = request_execution_control.attempt_budget();\n',
+    replacement: '    let attempt_budget = crate::nodes::V3AttemptBudget::process_default();\n',
+    diagnostic: /Anthropic Relay must create one request execution control/u,
   },
   {
     name: 'Anthropic provider send skips request attempt admission',

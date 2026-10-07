@@ -456,13 +456,29 @@ fn anthropic_dotted_custom_name_survives_request_entry_and_hooks() {
         V3HubInvocationSource::Client,
         V3HubTransportIntent::Sse,
     );
+    let invocation = crate::operation_runner::RequestInvocationContext::new(
+        crate::operation_runner::V3RequestContextHandle::new(
+            "anthropic-dotted-custom-name".to_string(),
+            "responses".to_string(),
+        ),
+        "anthropic-dotted-custom-name-entry".to_string(),
+        "anthropic-dotted-custom-name-attempt".to_string(),
+        crate::operation_runner::RequestOriginKind::ClientEntry,
+    );
     let normalized =
-        super::super::build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(raw)
+        super::super::build_v3_hub_req_inbound_02_from_request_invocation(raw, &invocation)
             .expect("Responses entry canonicalization");
     assert_eq!(
-        normalized.payload()["messages"][1]["tool_calls"][0]["routecodex_chat_extension"]
-            ["responses_tool_call_type"],
-        "custom_tool_call"
+        normalized.payload()["messages"][1]["tool_calls"][0]["type"],
+        "custom"
+    );
+    assert_eq!(
+        normalized.payload()["messages"][1]["tool_calls"][0]["custom"]["name"],
+        "mcp__mcpx.exec"
+    );
+    assert_eq!(
+        normalized.payload()["messages"][1]["tool_calls"][0]["custom"]["input"],
+        "pwd"
     );
     let governed = super::super::compile_v3_hub_relay_request_hooks()
         .run_from_normalized(
@@ -471,21 +487,15 @@ fn anthropic_dotted_custom_name_survives_request_entry_and_hooks() {
         )
         .expect("request hooks");
     let semantic = governed.payload_arc().as_ref();
-    assert_eq!(
-        semantic["messages"][1]["tool_calls"][0]["routecodex_chat_extension"]
-            ["responses_tool_call_type"],
-        "custom_tool_call"
-    );
+    assert_eq!(semantic["messages"][1]["tool_calls"][0]["type"], "custom");
+    let standard_view = crate::operation_runner::project_canonical_standard_view(semantic)
+        .expect("registered Outbound working view");
     let source = super::super::request_outbound_format::build_v3_anthropic_provider_request_source_from_chat_canonical(
-        semantic,
+        &standard_view,
         V3HubEntryProtocol::Responses,
     )
     .expect("Anthropic outbound source");
-    assert_eq!(
-        source["messages"][1]["tool_calls"][0]["routecodex_chat_extension"]
-            ["responses_tool_call_type"],
-        "custom_tool_call"
-    );
+    assert_eq!(source["messages"][1]["tool_calls"][0]["type"], "custom");
     let wire =
         super::super::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request(source)
             .expect("Anthropic wire projection");
@@ -523,4 +533,160 @@ async fn responses_provider_sse_unknown_response_event_fails_instead_of_discardi
     assert!(error
         .to_string()
         .contains("response.reasoning_summary.delta is unsupported"));
+}
+
+#[test]
+fn openai_chat_provider_reasoning_content_projects_replay_content_before_tool_call() {
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &json!({
+            "id": "chatcmpl_reasoning_content",
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "Need inspect before running the tool.",
+                    "tool_calls": [{
+                        "id": "call_reasoning_exec",
+                        "type": "custom",
+                        "custom": {
+                            "name": "exec",
+                            "input": "pwd"
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        }),
+        &json!({
+            "tools": [{"type":"custom","name":"exec"}]
+        }),
+    )
+    .expect("OpenAI Chat response must project reasoning to Responses");
+
+    assert_eq!(response["status"], "completed");
+    assert_eq!(response["output"][0]["type"], "reasoning");
+    assert_eq!(
+            response["output"][0]["summary"][0]["text"], "Need inspect before running the tool.",
+            "OpenAI Chat reasoning_content must become replay-safe Responses reasoning.summary before tool calls"
+        );
+    assert_eq!(
+        response["output"][0]["content"][0]["text"], "Need inspect before running the tool.",
+        "OpenAI Chat reasoning_content must also populate replay-safe Responses reasoning.content"
+    );
+    assert_eq!(response["output"][1]["type"], "custom_tool_call");
+    assert_eq!(response["output"][1]["call_id"], "call_reasoning_exec");
+}
+
+#[test]
+fn openai_chat_custom_tool_response_round_trips_to_responses_custom_call() {
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &json!({
+            "id": "chatcmpl_apply_patch",
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "call_apply_patch",
+                        "type": "custom",
+                        "custom": {
+                            "name": "apply_patch",
+                            "input": "*** Begin Patch\n*** End Patch"
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        }),
+        &json!({
+            "tools": [{
+                "type":"custom",
+                "name":"apply_patch",
+                "format":{"type":"grammar","syntax":"lark","definition":"start: patch"}
+            }]
+        }),
+    )
+    .expect("Chat function projection must reverse to the declared Responses custom tool");
+
+    assert_eq!(response["status"], "completed");
+    assert_eq!(response["output"][0]["type"], "custom_tool_call");
+    assert_eq!(response["output"][0]["name"], "apply_patch");
+    assert_eq!(
+        response["output"][0]["input"],
+        "*** Begin Patch\n*** End Patch"
+    );
+}
+
+#[test]
+fn openai_chat_function_tool_call_with_custom_declared_name_round_trips_as_custom_call() {
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &json!({
+            "id": "chatcmpl_apply_patch_flattened",
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "call_apply_patch_2",
+                        "type": "function",
+                        "function": {
+                            "name": "apply_patch",
+                            "arguments": "{\"input\":\"*** Begin Patch\\n*** End Patch\",\"reason\":\"修改目标文件\",\"goal_alignment_confidence\":100,\"model_id\":\"gpt-test\"}"
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        }),
+        &json!({
+            "tools": [{"type":"custom","name":"apply_patch"}]
+        }),
+    )
+    .expect("flattened function tool_call must reverse to the declared Responses custom tool");
+
+    assert_eq!(response["status"], "completed");
+    assert_eq!(response["output"][0]["type"], "custom_tool_call");
+    assert_eq!(response["output"][0]["name"], "apply_patch");
+    assert_eq!(
+        response["output"][0]["input"],
+        "*** Begin Patch\n*** End Patch"
+    );
+}
+
+#[test]
+fn openai_chat_provider_structured_reasoning_keeps_summary_encrypted_and_replay_content() {
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &json!({
+            "id": "chatcmpl_structured_reasoning",
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "visible answer",
+                    "reasoning": {
+                        "summary": [{"type":"summary_text","text":"safe summary"}],
+                        "content": [{"type":"reasoning_text","text":"private chain"}],
+                        "encrypted_content": "enc-opaque"
+                    }
+                },
+                "finish_reason": "stop"
+            }]
+        }),
+        &json!({"tools":[]}),
+    )
+    .expect("OpenAI Chat structured reasoning must project to Responses");
+
+    assert_eq!(response["status"], "completed");
+    assert_eq!(response["output"][0]["type"], "reasoning");
+    assert_eq!(response["output"][0]["summary"][0]["text"], "safe summary");
+    assert_eq!(response["output"][0]["encrypted_content"], "enc-opaque");
+    assert_eq!(
+        response["output"][0]["content"][0]["text"], "safe summary",
+        "Responses reasoning item must carry replay-safe plaintext content"
+    );
+    assert_eq!(response["output"][1]["type"], "output_text");
+    assert_eq!(response["output"][1]["text"], "visible answer");
+    assert!(
+        !response.to_string().contains("private chain"),
+        "private reasoning.content must not be serialized into the client payload: {response}"
+    );
 }

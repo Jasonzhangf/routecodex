@@ -13,8 +13,13 @@ semantic_matrix: docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml
 metadata_center:
   scope: one_client_request_and_its_provider_attempts
   kind: typed_identity_and_field_provenance_control_not_protocol_metadata_or_business_payload
-  slots: [inbound_inverse_context, attempt_projection_context, attempt_declaration_map, explicit_history_pairing, response_field_provenance, response_tool_call_binding]
+  slots: [inbound_inverse_context, current_field_associations, attempt_projection_context, attempt_declaration_map, explicit_history_pairing, response_field_provenance, response_tool_call_binding]
   writer_policy: each_slot_has_the_single_node_writer_declared_below
+  creation: RuntimeRequestGraphEntry creates request-local fixed typed slots before first normalization or planning using the real requestId; Server and its metadata plan carry the same opaque handle and do not own or reconstruct slots
+  identities: requestId associates client request and response; invocationId is unique per graph execution and used as SDK execution_id; attemptId associates actual provider projection and response
+  original_pair: client_entry RawEntry publishes inverse/history together once; retry/internal_followup AlreadyCanonical preserves the original pair without rebuilding it from governed/native payload
+  current_field_associations: GovernChatRequest is the sole writer; first client entry seeds the initial destinations from the immutable original inverse before editing; registered field edits move or remove typed current destinations with actual elements; reentry preserves current layout; no values or model/name/schema inference
+  finalizer_guard: one non-Clone Runtime guard moves with the actual JSON/error output or SSE stream; handle clones do not finalize; consumption, SSE EOF/Drop, cancel, future drop, and HTTP/WS disconnect release attempt scope before request scope
   attempt_policy: failed_attempt_slots_are_released_by_typed_attempt_cleanup_before_next_candidate; successful_attempt_slots_are_released_after_final_client_projection_or_after_servertool_sidecar_execution; terminal_client_error_cancel_or_disconnect_release_attempt_slots_before_request_finalizer; request_inverse_context_and_explicit_history_pairing_remain_until_runtime_request_finalizer
   finalizer: runtime_request_finalizer_is_the_sole_request_cleanup_owner_and_runs_only_on_final_client_commit_terminal_client_error_cancel_or_disconnect; terminal_client_error_cancel_and_disconnect_run_attempt_cleanup_before_request_finalizer; retry_and_servertool_followup_do_not_trigger_request_scope_release
   forbidden: [request_body, response_body, provider_wire, protocol_metadata, history_values, debug_snapshot, cross_request_tool_binding]
@@ -138,6 +143,7 @@ typed_resources:
     producer: RuntimeRequestGraphEntry
     readers:
     - normalize_v3_operation_runner_request_losslessly
+    - govern_v3_operation_runner_chat_request
     legal_values: [client_entry, retry, internal_followup]
     identity: [requestId, invocationId, originKind]
     lifetime: immutable invocation-scoped typed control resource; RuntimeRequestGraphEntry creates client_entry, retry, or internal_followup before every request graph invocation; scope ends naturally when the graph invocation returns, with no MetadataCenter slot and no cross-invocation storage to clean
@@ -149,13 +155,24 @@ typed_resources:
     resource: v3.operation_runner.request_inverse_context
     storage: metadata_center.inbound_inverse_context
     producer: normalize_v3_operation_runner_request_losslessly
-    readers: [normalize_v3_operation_runner_request_losslessly, project_v3_operation_runner_standard_provider_request, inverse_project_v3_operation_runner_client_response]
+    readers: [normalize_v3_operation_runner_request_losslessly, govern_v3_operation_runner_chat_request, project_v3_operation_runner_standard_provider_request, inverse_project_v3_operation_runner_client_response]
     content: immutable original client entry-protocol field provenance and actual current request tool identities with source paths and encoding; remains valid across retry and internal servertool follow-up
     internal_origin_rule: never rebuilt from an internal follow-up payload; request graph re-entry reads the preserved slot and does not replace it
     client_entry_rule: initialized only when request_origin_kind=client_entry
     retry_internal_followup_rule: read and preserved when request_origin_kind=retry or internal_followup; never overwritten from follow-up payload
     payload_rule: business arguments and outputs remain in canonical payload
     release: runtime_request_finalizer
+  current_field_associations:
+    resource: v3.operation_runner.current_field_associations
+    storage: metadata_center.current_field_associations
+    producer: govern_v3_operation_runner_chat_request
+    readers: [govern_v3_operation_runner_chat_request, project_v3_operation_runner_standard_provider_request]
+    content: stable original FieldMapping references and current structural destination paths only; no business values
+    client_entry_rule: first governance seeds normalization output destinations before registered edits; Direct registers pass-through associations without rewriting payload
+    retry_internal_followup_rule: preserve current layout and immutable original pair; never seed from original destinations again
+    edit_rule: registered structural operations move or delete references with the actual data element and publish data plus associations together
+    payload_rule: typed reference paths only; never serialized into payload or reconstructed from names schemas models or logs
+    release: runtime_request_finalizer_after_attempt_cleanup
   attempt_projection_context:
     resource: v3.operation_runner.attempt_projection_context
     storage: metadata_center.attempt_projection_context

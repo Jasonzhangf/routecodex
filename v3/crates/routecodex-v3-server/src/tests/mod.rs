@@ -810,6 +810,7 @@ fn relay_provider_snapshots_are_persisted_verbatim_in_codex_samples() {
         }),
         protocol_direct_handoff: None,
         terminal_disposition: None,
+        request_finalizer: None,
     };
 
     assert!(capture_v3_responses_relay_provider_snapshots(
@@ -874,6 +875,7 @@ fn relay_missing_provider_snapshot_does_not_project_client_failure() {
         provider_snapshots: None,
         protocol_direct_handoff: None,
         terminal_disposition: None,
+        request_finalizer: None,
     };
     let mut snapshots = Some(routecodex_v3_runtime::V3RelayProviderSnapshots {
         provider_request: None,
@@ -918,6 +920,7 @@ fn anthropic_relay_client_response_is_persisted_in_codex_samples() {
         stream_observation: None,
         provider_snapshots: None,
         terminal_disposition: None,
+        request_finalizer: None,
     };
 
     assert!(capture_v3_anthropic_relay_response(
@@ -979,6 +982,7 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
         stream_observation: None,
         protocol_relay_handoff: None,
         terminal_disposition: None,
+        request_finalizer: None,
     };
     assert!(capture_v3_responses_direct_provider_snapshots(
         &state,
@@ -1027,6 +1031,7 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
         stream_observation: None,
         protocol_relay_handoff: None,
         terminal_disposition: None,
+        request_finalizer: None,
     };
     assert!(capture_v3_responses_direct_provider_snapshots(
         &state,
@@ -1066,6 +1071,7 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
         stream_observation: Some(V3RuntimeStreamObservation::default()),
         protocol_relay_handoff: None,
         terminal_disposition: None,
+        request_finalizer: None,
     };
     assert!(capture_v3_responses_direct_provider_snapshots(
         &state,
@@ -1200,6 +1206,7 @@ fn direct_to_relay_handoff_preserves_failure_event_order() {
         provider_snapshots: None,
         protocol_direct_handoff: None,
         terminal_disposition: None,
+        request_finalizer: None,
     };
 
     merge_v3_direct_handoff_provider_failure_events(&mut output, vec![direct_event]);
@@ -2745,6 +2752,7 @@ fn openai_chat_relay_internal_error_returns_typed_no_response() {
         stream_observation: None,
         provider_snapshots: None,
         terminal_disposition: None,
+        request_finalizer: None,
     };
     let response = openai_chat_relay_output_response(output, None, Duration::from_secs(1), false);
     assert!(
@@ -3665,6 +3673,7 @@ fn recovered_provider_attempts_do_not_fabricate_missing_relay_snapshot_errors() 
         provider_snapshots: None,
         protocol_direct_handoff: None,
         terminal_disposition: None,
+        request_finalizer: None,
     };
     assert!(
         capture_v3_responses_relay_provider_snapshots(
@@ -3689,6 +3698,7 @@ fn recovered_provider_attempts_do_not_fabricate_missing_relay_snapshot_errors() 
         provider_snapshots: None,
         protocol_direct_handoff: None,
         terminal_disposition: None,
+        request_finalizer: None,
     };
     assert!(
         capture_v3_responses_relay_provider_snapshots(
@@ -3978,7 +3988,7 @@ fn error_projection_appends_human_console_failure_line() {
         .start_trace("server", "req-error-console", "exec-error-console")
         .unwrap();
 
-    let response = record_and_emit_v3_error_projection(
+    record_and_emit_v3_error_projection(
         &state,
         &trace_scope,
         V3ErrorProjectionConsoleInput {
@@ -4002,7 +4012,6 @@ fn error_projection_appends_human_console_failure_line() {
         },
     );
 
-    assert!(response.is_none());
     let rows = state.webui_observability.rows().unwrap();
     let row = rows
         .get(&format!("{}:req-error-console", state.server.port))
@@ -4152,6 +4161,7 @@ async fn responses_relay_output_accepts_runtime_sealed_sse() {
         provider_snapshots: None,
         protocol_direct_handoff: None,
         terminal_disposition: None,
+        request_finalizer: None,
     };
 
     let response =
@@ -4191,6 +4201,7 @@ async fn responses_relay_json_error_returns_typed_no_response() {
         provider_snapshots: None,
         protocol_direct_handoff: None,
         terminal_disposition: None,
+        request_finalizer: None,
     };
 
     let response = responses_relay_output_response(output, None, None, true);
@@ -4533,6 +4544,7 @@ async fn anthropic_relay_output_consumes_typed_sealed_sse_body() {
         stream_observation: None,
         provider_snapshots: None,
         terminal_disposition: None,
+        request_finalizer: None,
     };
 
     let response = anthropic_relay_output_response(output, false);

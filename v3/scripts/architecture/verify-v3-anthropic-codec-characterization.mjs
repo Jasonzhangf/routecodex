@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { attachProviderActionGateHelpers } from './v3-provider-action-gate-lib.mjs';
 
 const root = process.cwd();
 const sourcePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs';
@@ -10,6 +11,8 @@ const source = [
 ].join('\n');
 const tests = readFileSync(resolve(root, 'v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs'), 'utf8');
 const failures = [];
+const { maskCommentsAndStrings } = attachProviderActionGateHelpers({ root, failures, files: {} });
+const executableSource = maskCommentsAndStrings(source);
 
 function fail(message) { failures.push(message); }
 function requireAll(text, owner, phrases) {
@@ -70,10 +73,13 @@ requireNear(source, sourcePath, '"request.messages[].content[].image.source.medi
 forbidNear(source, sourcePath, '"request.messages[].content[].image.source.url"', 'ChatInlineMediaData');
 forbidNear(source, sourcePath, '"request.messages[].content[].image.source.data"', 'ChatMediaMimeType');
 
+forbidAll(executableSource, sourcePath, [
+  /Gemini/, /OpenAiChat/,
+]);
 forbidAll(source, sourcePath, [
   /compile_v3_hub_v1_static_registry/, /compile_v3_hub_relay_(?:request|response)_hooks/,
   /V3HubStaticHookRegistry/, /V3HubRelay(?:Request|Response)Hook/, /routecodex-v3-server/,
-  /Gemini/, /OpenAiChat/, /fallback/i, /provider[_-]?family/i,
+  /fallback/i, /provider[_-]?family/i,
   /metadata_center[\s\S]{0,120}payload\s*:/,
   /object_clone_without_internal_fields/,
 ]);

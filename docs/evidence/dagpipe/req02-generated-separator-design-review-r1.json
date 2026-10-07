@@ -1,0 +1,27 @@
+{
+  "contract_version": "1",
+  "scope": {
+    "mode": "uncommitted",
+    "commit": "3d2fa062c9933a48e726591f78a32f2e30aee67b",
+    "base": null
+  },
+  "module_boundary_evidence": [
+    {
+      "module": "REQ02 instruction normalization 与生成分隔符来源设计",
+      "owner": "REQ02 SystemInstructionBuilder / shared field operator instruction owner",
+      "paths": "当前变更仅新增 docs/design/v3-req02-generated-instruction-separator.md；产品代码未修改。已核对父候选 docs/design/v3-req02-lossless-instruction-segments.md 及 v3/crates/routecodex-v3-runtime/src/operation_runner/operators/field_operator_instructions.rs。",
+      "edges": "设计入口为已捕获的 instruction 来源；SystemInstructionBuilder 在实际生成 separator 时记录 typed FieldMapping，随后由 CurrentFieldAssociations 按 mapping index 跟踪当前 destination，再由 shared inverse/helper 消费。原 source leaf mappings 保持独立；来源识别不依赖文本搜索。当前树与父候选的 v3.operation_runner.request.graph.json 均通过 dagpipe graph validate；父候选图包含 normalization 写入 inverse context、Chat governance 更新 current associations、standard projection 读取二者的资源边。",
+      "resources": "复用不可变原 pair、FieldMapping 与 CurrentFieldAssociations；generated semantics 不携带业务文本，不进入 payload metadata，不新增 raw registry 或第二套位置状态。Remove/Insert/Move 复用既有编辑合同；Replace 后读取当前业务值。请求失败、取消和资源释放继续由既有 Runtime/Error/SSE owner 处理，instruction 算子不修改 provider 或连接状态。",
+      "gates": "本次为单文件编码前设计审查，实现黑盒、build、install、restart 与交付门禁不作为当前文档验收要求。git diff --cached --check 通过。父候选 .execution/gemini-parent-r15-builtin-red.log 确认公开 SDK consumer 4 passed / 1 failed，失败输出包含新增换行 part；该失败还包含 builtin/opaque declaration 丢失，文档明确要求后续完整回归保留这些来源。本设计列出原始换行、generated separator、Insert/Move/Remove/Replace、当前贡献修改、Direct 与跨协议字节回归及反向撤回再红的实现验收条件；未将设计审查等同实现完成。"
+    },
+    {
+      "module": "标准 Outbound instruction projection / Gemini native emitter 设计",
+      "owner": "标准 Outbound emitter；shared instruction inverse/helper 提供来源消费规则",
+      "paths": "本次仅审 docs/design/v3-req02-generated-instruction-separator.md 中的投影合同；后续范围限定必要的 shared instruction inverse/helper、既有 typed mapping 消费与 Gemini 标准 instruction emitter。",
+      "edges": "当前 canonical Chat parts → shared 来源消费规则 → 标准目标 instruction 投影 → 既有 Runtime 终态。native parts 投影只取消具有 generated mapping 且当前完整形状仍为 builder 固定编码的贡献；客户端原始换行、新插入换行和被修改的贡献保留。投影顺序来自当前 Chat parts，opaque siblings 跟随当前 typed 来源；跨协议 scalar/text join 消费全部 canonical parts。设计禁止重放原 source parts 顺序、恢复完整 raw 请求或调用 Direct 整请求 facade。",
+      "resources": "Outbound 读取当前业务数据及 typed inverse/current association；不取得路由、重试、provider health 或客户端连接所有权。要求物理删除被替换的无来源全量 native instruction part 投影分支，避免新旧双路径。成功结果交回既有流水线；真实失败与取消仍沿原 typed Error/Runtime 边终止并释放请求资源。",
+      "gates": "设计要求公开 REQ01 capture → REQ02 SDK normalization → Relay projection consumer 验证原生多段对象等价、当前顺序与内容、opaque sibling 关联、删除不复活及跨协议完整连接字节。完整 HTTP/WS 与实际客户端工具回合证据仍是后续实现 review/接线门禁。本次未修改 parser、emitter 或工具 dispatch，未以父候选的未完成实现作为当前设计交付结论。"
+    }
+  ],
+  "findings": []
+}
