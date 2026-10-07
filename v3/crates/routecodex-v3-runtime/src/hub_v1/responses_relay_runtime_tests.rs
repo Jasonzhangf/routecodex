@@ -554,70 +554,6 @@ fn anthropic_provider_signature_delta_without_string_fails_explicitly() {
         .contains("Anthropic codec malformed reasoning content"));
 }
 
-fn glmrelay_error_policy_manifest() -> V3Config05ManifestPublished {
-    compile_v3_config_05_manifest(
-            parse_v3_config_02_authoring(
-                r#"
-version = 3
-
-[[error.provider_error_action_policy]]
-policy_id = "glmrelay_openai_200_diagnostic_zero_usage"
-[error.provider_error_action_policy.scope]
-provider_id = "glmrelay_openai"
-provider_type = "openai_chat"
-[error.provider_error_action_policy.match]
-http_status = 200
-[error.provider_error_action_policy.match.sse]
-finish_reason = "stop"
-usage_total_tokens = 0
-content_contains_any = ["mac超负荷运载，应该是挂了"]
-[error.provider_error_action_policy.action]
-kind = "periodic_recovery"
-reason_code = "provider_diagnostic_zero_usage"
-retry_mode = "reselect_before_client_projection"
-cooldown_ms = 300000
-disable_scope = "provider_model"
-
-[[error.provider_error_action_policy]]
-policy_id = "glmrelay_openai_invalid_field_type_200"
-[error.provider_error_action_policy.scope]
-provider_id = "glmrelay_openai"
-provider_type = "openai_chat"
-[error.provider_error_action_policy.match]
-http_status = 200
-content_contains_any = ["Type invalid, should be set"]
-[[error.provider_error_action_policy.path]]
-step = "project"
-status = 400
-reason_code = "provider_invalid_field_type"
-public_code = "provider_invalid_field_type"
-message_mode = "code_only"
-
-[servers.s]
-bind = "127.0.0.1"
-port = 5555
-routing_group = "g"
-endpoints = ["responses"]
-
-[providers.glmrelay_openai]
-type = "openai_chat"
-base_url = "https://glm-relayapi.top/v1"
-default_model = "glm-5.2"
-auth = { type = "api_key", entries = [{ alias = "key1", env = "GLM_TEST_KEY" }] }
-
-[providers.glmrelay_openai.models."glm-5.2"]
-capabilities = ["text", "reasoning", "tools"]
-
-[route_groups.g.pools.default]
-selection = { strategy = "priority" }
-targets = [{ kind = "provider_model", provider = "glmrelay_openai", model = "glm-5.2", key = "key1", priority = 1 }]
-"#,
-            )
-            .expect("config authoring"),
-        )
-        .expect("manifest")
-}
-
 #[test]
 fn target_selection_sample_is_stable_per_request_and_spans_weighted_buckets() {
     let request_id = "openai-responses-router-gpt-5.5-20260722T143237284-597520-4987";
@@ -1024,8 +960,8 @@ fn usage_summary_preserves_minimax_anthropic_top_level_cache_fields() {
 }
 
 #[test]
-fn openai_chat_zero_output_upstream_diagnostic_is_provider_error() {
-    let error = build_v3_responses_provider_response_from_openai_chat_payload(
+fn openai_chat_zero_usage_diagnostic_text_preserves_business_output() {
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
         &json!({
             "id": "chatcmpl_zero_output_diagnostic",
             "model": "glm-5.2",
@@ -1049,18 +985,16 @@ fn openai_chat_zero_output_upstream_diagnostic_is_provider_error() {
             "tools": [{"type":"function","function":{"name":"exec_command"}}]
         }),
     )
-    .expect_err("zero-output upstream diagnostic must be provider failure, not success");
-
-    assert!(
-        error
-            .to_string()
-            .contains("zero-output upstream diagnostic"),
-        "wrong error: {error}"
+    .expect("diagnostic-looking content is provider business output");
+    assert_eq!(response["status"], "completed");
+    assert_eq!(
+        response["output_text"],
+        "upstream returned zero output tokens, input_tokens=76100"
     );
 }
 
 #[tokio::test]
-async fn openai_chat_zero_output_stream_diagnostic_is_provider_error() {
+async fn openai_chat_zero_usage_stream_preserves_business_output() {
     let observation = V3RuntimeStreamObservation::default();
     let raw_sse = concat!(
             "data: {\"id\":\"chatcmpl_zero_output_stream\",\"object\":\"chat.completion.chunk\",\"created\":1784812451,\"model\":\"glm-5.2\",\"choices\":[{\"delta\":{\"reasoning_content\":\"Let me rethink this one step at a time.\\n\",\"role\":\"assistant\"},\"finish_reason\":null,\"index\":0}],\"usage\":null}\n\n",
@@ -1077,19 +1011,17 @@ async fn openai_chat_zero_output_stream_diagnostic_is_provider_error() {
     .await
     .expect("stream diagnostic materializes before semantic projection");
 
-    let error = build_v3_responses_provider_response_from_openai_chat_payload(
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
         &provider_payload,
         &json!({
             "tools": [{"type":"function","function":{"name":"exec_command"}}]
         }),
     )
-    .expect_err("stream zero-output upstream diagnostic must remain a provider failure");
-
-    assert!(
-        error
-            .to_string()
-            .contains("zero-output upstream diagnostic"),
-        "wrong error: {error}"
+    .expect("diagnostic-looking stream content is business output");
+    assert_eq!(response["status"], "completed");
+    assert_eq!(
+        response["output_text"],
+        "upstream returned zero output tokens, input_tokens=76100"
     );
     assert_eq!(
         observation
@@ -1102,7 +1034,7 @@ async fn openai_chat_zero_output_stream_diagnostic_is_provider_error() {
 }
 
 #[tokio::test]
-async fn openai_chat_reasoning_only_stop_stream_is_not_a_successful_response() {
+async fn openai_chat_reasoning_only_stop_stream_preserves_reasoning() {
     let observation = V3RuntimeStreamObservation::default();
     let raw_sse = concat!(
         "data: {\"id\":\"chatcmpl_reasoning_only\",\"object\":\"chat.completion.chunk\",\"created\":1784812451,\"model\":\"grok-4.6\",\"choices\":[{\"delta\":{\"reasoning_content\":\"internal reasoning only\",\"role\":\"assistant\"},\"finish_reason\":null,\"index\":0}],\"usage\":null}\n\n",
@@ -1118,26 +1050,17 @@ async fn openai_chat_reasoning_only_stop_stream_is_not_a_successful_response() {
     .await
     .expect("reasoning-only terminal stream must materialize before semantic validation");
 
-    let projection = responses_relay_diagnostics::provider_response_semantic_error_from_manifest(
-        None,
-        None,
-        &provider_payload,
-    )
-    .expect("reasoning-only stop must be a provider semantic failure");
-    assert_eq!(projection.status, 502);
-    assert_eq!(projection.code, "provider_empty_visible_output");
-
-    let error = build_v3_responses_provider_response_from_openai_chat_payload(
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
         &provider_payload,
         &json!({
             "tools": [{"type":"function","function":{"name":"exec_command"}}]
         }),
     )
-    .expect_err("reasoning-only stop must not become a successful client response");
-
-    assert!(
-        error.to_string().contains("no visible model output"),
-        "wrong error: {error}"
+    .expect("reasoning-only output is representable");
+    assert_eq!(response["status"], "completed");
+    assert_eq!(
+        response["output"][0]["content"][0]["text"],
+        "internal reasoning only"
     );
 }
 
@@ -1172,8 +1095,7 @@ fn openai_chat_visible_zero_output_text_with_real_usage_remains_success() {
 }
 
 #[test]
-fn openai_chat_upstream_overload_diagnostic_is_provider_error() {
-    let manifest = glmrelay_error_policy_manifest();
+fn openai_chat_zero_usage_overload_text_preserves_business_output() {
     let provider_payload = json!({
         "id": "chatcmpl_overload_diagnostic",
         "model": "glm-5.2",
@@ -1186,37 +1108,17 @@ fn openai_chat_upstream_overload_diagnostic_is_provider_error() {
         }],
         "usage": {"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}
     });
-    let projection = responses_relay_diagnostics::provider_response_semantic_error_from_manifest(
-        Some(&manifest),
-        Some("glmrelay_openai"),
-        &provider_payload,
-    )
-    .expect("configured diagnostic policy must match");
-    assert_eq!(
-        projection
-            .matched_policy
-            .as_ref()
-            .map(V3ProviderFailureDirective::policy)
-            .map(|policy| policy.policy_id.as_str()),
-        Some("glmrelay_openai_200_diagnostic_zero_usage")
-    );
-    let error = build_v3_responses_provider_response_from_openai_chat_payload_with_manifest(
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
         &provider_payload,
         &json!({"tools": [{"type":"function","function":{"name":"exec_command"}}]}),
-        Some(&manifest),
-        Some("glmrelay_openai"),
     )
-    .expect_err("upstream overload diagnostic must be provider failure, not success content");
-
-    assert!(
-        error.to_string().contains("provider_diagnostic_zero_usage"),
-        "wrong error: {error}"
-    );
+    .expect("overload-looking text is business output");
+    assert_eq!(response["status"], "completed");
+    assert_eq!(response["output_text"], "mac超负荷运载，应该是挂了");
 }
 
 #[tokio::test]
-async fn openai_chat_stream_overload_diagnostic_policy_is_provider_error() {
-    let manifest = glmrelay_error_policy_manifest();
+async fn openai_chat_zero_usage_overload_stream_preserves_business_output() {
     let observation = V3RuntimeStreamObservation::default();
     let raw_sse = concat!(
             "data: {\"id\":\"chatcmpl_overload_stream\",\"object\":\"chat.completion.chunk\",\"created\":1784865608,\"model\":\"glm-5.2\",\"choices\":[{\"delta\":{\"reasoning_content\":\"checking\\n\",\"role\":\"assistant\"},\"finish_reason\":null,\"index\":0}],\"usage\":null}\n\n",
@@ -1233,23 +1135,17 @@ async fn openai_chat_stream_overload_diagnostic_policy_is_provider_error() {
     .await
     .expect("stream diagnostic materializes before semantic policy");
 
-    let error = build_v3_responses_provider_response_from_openai_chat_payload_with_manifest(
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
         &provider_payload,
         &json!({"tools": [{"type":"function","function":{"name":"exec_command"}}]}),
-        Some(&manifest),
-        Some("glmrelay_openai"),
     )
-    .expect_err("configured stream diagnostic must remain a provider failure");
-
-    assert!(
-        error.to_string().contains("provider_diagnostic_zero_usage"),
-        "wrong error: {error}"
-    );
+    .expect("overload-looking stream content is business output");
+    assert_eq!(response["status"], "completed");
+    assert_eq!(response["output_text"], "mac超负荷运载，应该是挂了");
 }
 
 #[test]
-fn glmrelay_invalid_field_type_diagnostic_is_mapped_to_400_policy() {
-    let manifest = glmrelay_error_policy_manifest();
+fn openai_chat_invalid_field_type_text_preserves_business_output() {
     let provider_payload = json!({
         "id": "chatcmpl_invalid_field_type",
         "model": "glm-5.2",
@@ -1262,20 +1158,15 @@ fn glmrelay_invalid_field_type_diagnostic_is_mapped_to_400_policy() {
         }],
         "usage": {"prompt_tokens": 12, "completion_tokens": 1, "total_tokens": 13}
     });
-    let projection = responses_relay_diagnostics::provider_response_semantic_error_from_manifest(
-        Some(&manifest),
-        Some("glmrelay_openai"),
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
         &provider_payload,
+        &json!({"tools":[]}),
     )
-    .expect("invalid field type diagnostic must be provider failure");
-    assert_eq!(projection.code, "provider_invalid_field_type");
+    .expect("error-looking text is business output");
+    assert_eq!(response["status"], "completed");
     assert_eq!(
-        projection
-            .matched_policy
-            .as_ref()
-            .map(V3ProviderFailureDirective::policy)
-            .map(|policy| policy.policy_id.as_str()),
-        Some("glmrelay_openai_invalid_field_type_200")
+        response["output_text"],
+        "field Tools[8].Type invalid, should be set"
     );
 }
 

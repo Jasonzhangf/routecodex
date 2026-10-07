@@ -58,6 +58,7 @@ const files = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_provider_tests.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs',
   'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   'v3/crates/routecodex-v3-runtime/tests/responses_relay_field_parity_integration.rs',
@@ -1003,10 +1004,10 @@ const cases = [
   },
   {
     name: 'Resp03 registered incomplete terminal regression is removed',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs',
-    from: 'responses_resp03_accepts_registered_incomplete_terminal_and_rejects_malformed_details',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_provider_tests.rs',
+    from: 'responses_resp03_accepts_incomplete_terminal_with_optional_or_opaque_details',
     to: 'responses_resp03_incomplete_terminal_regression_removed',
-    diagnostic: /responses_resp03_accepts_registered_incomplete_terminal_and_rejects_malformed_details/u,
+    diagnostic: /responses_resp03_accepts_incomplete_terminal_with_optional_or_opaque_details/u,
   },
   {
     name: 'Focused Responses continuation namespace gate is unwired from parity CI',

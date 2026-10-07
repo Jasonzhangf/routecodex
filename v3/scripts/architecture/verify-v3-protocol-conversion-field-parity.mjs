@@ -844,7 +844,7 @@ for (const [owner, body, phrases] of [
   ['v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs', readFileSync(repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs'), 'utf8'), ['"container_upload" => Ok(Self::ContainerUpload),']],
   [paths.anthropicTests, text.anthropicTests, ['anthropic_max_tokens_is_admitted_as_incomplete_not_a_provider_failure']],
   ['v3/crates/routecodex-v3-runtime/tables/finish_reason_map.json', readFileSync(repoPath('v3/crates/routecodex-v3-runtime/tables/finish_reason_map.json'), 'utf8'), ['"hub": "content_filter"', '"anthropic": "refusal"']],
-  ['v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs', readFileSync(repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs'), 'utf8'), ['responses_resp03_accepts_registered_incomplete_terminal_and_rejects_malformed_details']],
+  ['v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_provider_tests.rs', readFileSync(repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_provider_tests.rs'), 'utf8'), ['responses_resp03_accepts_incomplete_terminal_with_optional_or_opaque_details']],
   [paths.fieldMatrix, text.fieldMatrix, ['    - SSE transport']],
 ]) for (const phrase of phrases) requireText(body, owner, phrase);
 

@@ -211,6 +211,17 @@ impl V3OpenAiChatSseMaterializedChoice {
                 }
             }
         }
+        for extension in &choice.delta_extensions {
+            if let Some(text) = extension.value.as_str() {
+                match extension.name.as_str() {
+                    "content" => self.content.push_str(text),
+                    "reasoning_content" | "reasoning" => self.reasoning_content.push_str(text),
+                    "refusal" => self.refusal.push_str(text),
+                    "role" => self.role = Some(text.to_owned()),
+                    _ => {}
+                }
+            }
+        }
         Ok(())
     }
 
@@ -738,25 +749,6 @@ fn classify_choice(choice: &Value) -> Result<V3OpenAiChatSseChoice, V3OpenAiChat
         .get("tool_calls")
         .and_then(Value::as_array)
         .is_some_and(|calls| !calls.is_empty());
-    // A tool-call delta may carry the Resp03 toolreason projection in the
-    // same delta. Keep the reasoning field as an extension in that shape;
-    // otherwise the tool-call semantic branch would consume the call and
-    // silently drop the co-located reasoning projection.
-    let delta_extensions = if has_tool_calls {
-        object_extensions(delta_object, &["content", "refusal", "tool_calls"])
-    } else {
-        object_extensions(
-            delta_object,
-            &[
-                "content",
-                "reasoning_content",
-                "reasoning",
-                "refusal",
-                "role",
-                "tool_calls",
-            ],
-        )
-    };
     let semantic_delta = if has_tool_calls {
         let tool_calls = delta_object
             .get("tool_calls")
@@ -796,6 +788,17 @@ fn classify_choice(choice: &Value) -> Result<V3OpenAiChatSseChoice, V3OpenAiChat
     } else {
         V3OpenAiChatSseDelta::Empty
     };
+    // Only the primary semantic field is consumed. Co-located fields remain
+    // available to both wire projection and complete-response materialization.
+    let consumed: &[&str] = match &semantic_delta {
+        V3OpenAiChatSseDelta::Text(_) => &["content"],
+        V3OpenAiChatSseDelta::Reasoning(_) => &["reasoning_content", "reasoning"],
+        V3OpenAiChatSseDelta::Refusal(_) => &["refusal"],
+        V3OpenAiChatSseDelta::Role(_) => &["role"],
+        V3OpenAiChatSseDelta::ToolCall(_) | V3OpenAiChatSseDelta::ToolCalls(_) => &["tool_calls"],
+        V3OpenAiChatSseDelta::Empty => &[],
+    };
+    let delta_extensions = object_extensions(delta_object, consumed);
     let extensions = object_extensions(object, &["index", "delta", "finish_reason"]);
     let finish_reason = match object.get("finish_reason") {
         None | Some(Value::Null) => None,

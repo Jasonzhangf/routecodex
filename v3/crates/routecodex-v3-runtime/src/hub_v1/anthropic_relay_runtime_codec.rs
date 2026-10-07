@@ -52,10 +52,13 @@ pub fn project_v3_responses_json_as_anthropic_message(
             Some("message") => {
                 if let Some(parts) = item.get("content").and_then(Value::as_array) {
                     for part in parts {
-                        if part.get("type").and_then(Value::as_str) == Some("output_text") {
-                            if let Some(text) = part.get("text").and_then(Value::as_str) {
-                                content.push(json!({"type":"text","text":text}));
-                            }
+                        let text = match part.get("type").and_then(Value::as_str) {
+                            Some("output_text") => part.get("text"),
+                            Some("refusal") => part.get("refusal"),
+                            _ => None,
+                        };
+                        if let Some(text) = text.and_then(Value::as_str) {
+                            content.push(json!({"type":"text","text":text}));
                         }
                     }
                 }
@@ -138,7 +141,6 @@ pub fn project_v3_openai_chat_completion_as_anthropic_message(
     if let Some(thinking) = message
         .get("reasoning_content")
         .and_then(Value::as_str)
-        .map(str::trim)
         .filter(|value| !value.is_empty())
     {
         content.push(json!({"type":"thinking","thinking":thinking}));
@@ -146,14 +148,13 @@ pub fn project_v3_openai_chat_completion_as_anthropic_message(
     if let Some(text) = message
         .get("content")
         .and_then(Value::as_str)
-        .map(str::trim)
         .filter(|value| !value.is_empty())
     {
         content.push(json!({"type":"text","text":text}));
-    } else if let Some(refusal) = message
+    }
+    if let Some(refusal) = message
         .get("refusal")
         .and_then(Value::as_str)
-        .map(str::trim)
         .filter(|value| !value.is_empty())
     {
         content.push(json!({"type":"text","text":refusal}));
@@ -210,6 +211,7 @@ fn openai_chat_stop_reason_as_anthropic_stop_reason(choice: &Value, tool_calls: 
     }
     let stop_reason = Value::String(match choice.get("finish_reason").and_then(Value::as_str) {
         Some("length" | "max_tokens") => "max_tokens".to_string(),
+        Some("content_filter") => "refusal".to_string(),
         _ => "end_turn".to_string(),
     });
     stop_reason
@@ -280,7 +282,6 @@ fn project_v3_anthropic_message_as_sse_events(
                 let thinking = part
                     .get("thinking")
                     .and_then(Value::as_str)
-                    .map(str::trim)
                     .filter(|value| !value.is_empty())
                     .ok_or(V3AnthropicCodecError::MalformedField {
                         field: "reasoning content",
@@ -462,21 +463,15 @@ fn responses_stop_reason_as_anthropic_stop_reason(
             }
         }
     }
-    match object.get("status").and_then(Value::as_str) {
-        Some("incomplete") => match object
+    match (
+        object.get("status").and_then(Value::as_str),
+        object
             .get("incomplete_details")
-            .and_then(Value::as_object)
             .and_then(|details| details.get("reason"))
-            .and_then(Value::as_str)
-        {
-            // Responses content filtering is a refusal, not an output-cap stop.
-            // Preserve that meaning at the Anthropic boundary.
-            Some("content_filter") => "refusal",
-            Some("max_output_tokens") => "max_tokens",
-            // Keep malformed/unknown incomplete terminals conservative. The typed
-            // Responses terminal owner normally rejects them before projection.
-            _ => "max_tokens",
-        },
+            .and_then(Value::as_str),
+    ) {
+        (Some("incomplete"), Some("content_filter")) => "refusal",
+        (Some("incomplete"), Some("max_output_tokens")) => "max_tokens",
         _ => "end_turn",
     }
 }
@@ -510,6 +505,184 @@ mod tests {
         .expect("a legal Responses max_output_tokens terminal must project");
 
         assert_eq!(message["stop_reason"], "max_tokens");
+    }
+
+    #[test]
+    fn responses_terminal_projection_preserves_content_filter_text_usage_and_tools() {
+        for (status, reason, expected) in [
+            ("completed", None, "end_turn"),
+            ("incomplete", Some("content_filter"), "refusal"),
+            ("incomplete", Some("max_output_tokens"), "max_tokens"),
+            ("incomplete", Some("provider_specific_reason"), "end_turn"),
+        ] {
+            for with_tools in [false, true] {
+                let mut response = json!({
+                    "id":"resp_native", "model":"model", "status":status,
+                    "output":[{"type":"message","role":"assistant","content":[
+                        {"type":"output_text","text":" retained text "}
+                    ]}],
+                    "usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}
+                });
+                if let Some(reason) = reason {
+                    response["incomplete_details"] = json!({"reason":reason});
+                }
+                if with_tools {
+                    response["output"].as_array_mut().unwrap().push(json!({
+                        "type":"function_call", "call_id":"call_native", "name":"lookup",
+                        "arguments":"{\"q\":\"retained\"}"
+                    }));
+                }
+                let message = project_v3_responses_json_as_anthropic_message(&response).unwrap();
+                assert_eq!(
+                    message["stop_reason"],
+                    if with_tools { "tool_use" } else { expected }
+                );
+                assert_eq!(message["id"], "msg_native");
+                assert_eq!(message["model"], "model");
+                assert_eq!(message["content"][0]["text"], " retained text ");
+                assert_eq!(message["usage"]["input_tokens"], 3);
+                assert_eq!(message["usage"]["output_tokens"], 2);
+                if with_tools {
+                    assert_eq!(message["content"][1]["id"], "call_native");
+                    assert_eq!(message["content"][1]["input"], json!({"q":"retained"}));
+                }
+                let events = project_v3_responses_json_as_anthropic_events(&response).unwrap();
+                let terminal = events
+                    .iter()
+                    .find(|event| event["event"] == "message_delta")
+                    .unwrap();
+                assert_eq!(
+                    terminal["data"]["delta"]["stop_reason"],
+                    message["stop_reason"]
+                );
+                assert_eq!(response["status"], status);
+                if let Some(reason) = reason {
+                    assert_eq!(response["incomplete_details"]["reason"], reason);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn responses_refusal_projection_preserves_mixed_and_pure_refusal_text() {
+        for with_text in [false, true] {
+            let mut response = json!({
+                "id":"resp_native", "status":"completed",
+                "output":[{"type":"message","role":"assistant","content":[
+                    {"type":"refusal","refusal":" NATIVE_REFUSAL "}
+                ]}]
+            });
+            if with_text {
+                response["output"][0]["content"]
+                    .as_array_mut()
+                    .unwrap()
+                    .insert(0, json!({"type":"output_text","text":" retained text "}));
+            }
+            let message = project_v3_responses_json_as_anthropic_message(&response).unwrap();
+            assert_eq!(
+                message["content"].as_array().unwrap().len(),
+                if with_text { 2 } else { 1 }
+            );
+            assert_eq!(
+                message["content"][usize::from(with_text)]["text"],
+                " NATIVE_REFUSAL "
+            );
+            if with_text {
+                assert_eq!(message["content"][0]["text"], " retained text ");
+            }
+        }
+    }
+
+    #[test]
+    fn chat_wire_terminal_projection_preserves_native_consumer_incomplete_and_refusal() {
+        for (case, finish, expected_stop) in [
+            ("plain", "stop", "end_turn"),
+            ("incomplete", "content_filter", "refusal"),
+            ("refusal", "stop", "end_turn"),
+        ] {
+            let message = if case == "refusal" {
+                json!({"role":"assistant","content":null,"refusal":"NATIVE_REFUSAL"})
+            } else {
+                json!({"role":"assistant","content":"NATIVE_OK"})
+            };
+            let response = json!({"id":"chat_native", "object":"chat.completion", "model":"model",
+                "choices":[{"index":0,"message":message,"finish_reason":finish}],
+                "usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}});
+            for intent in [V3HubTransportIntent::Json, V3HubTransportIntent::Sse] {
+                let projected = project_v3_anthropic_client_response_for_provider(
+                    &response,
+                    V3HubProviderWireProtocol::OpenAiChat,
+                    intent,
+                )
+                .unwrap();
+                if intent == V3HubTransportIntent::Json {
+                    assert_eq!(projected["stop_reason"], expected_stop);
+                    assert_eq!(
+                        projected["content"][0]["text"],
+                        if case == "refusal" {
+                            "NATIVE_REFUSAL"
+                        } else {
+                            "NATIVE_OK"
+                        }
+                    );
+                    assert_eq!(projected["usage"]["input_tokens"], 3);
+                    assert_eq!(projected["usage"]["output_tokens"], 2);
+                } else {
+                    let events = projected["events"].as_array().unwrap();
+                    let terminal = events
+                        .iter()
+                        .find(|event| event["event"] == "message_delta")
+                        .unwrap();
+                    assert_eq!(terminal["data"]["delta"]["stop_reason"], expected_stop);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn chat_wire_projection_preserves_colocated_text_refusal_and_reasoning_verbatim() {
+        for (thinking, text, refusal) in [
+            (" reasoning \n", " partial answer ", " cannot continue "),
+            (" \t", " \n", "\t "),
+        ] {
+            let mut response = json!({
+                "id":"chatcmpl-mixed", "model":"model",
+                "choices":[{"message":{
+                    "role":"assistant", "reasoning_content":thinking,
+                    "content":text, "refusal":refusal,
+                    "tool_calls":[{"id":"call_mixed", "type":"function", "function":{
+                        "name":"lookup", "arguments":"{\"q\":\"retained\"}"
+                    }}]
+                }, "finish_reason":"content_filter"}],
+                "usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}
+            });
+            let message = project_v3_openai_chat_completion_as_anthropic_message(&response)
+                .expect("co-located Chat business fields must project");
+            let tool = json!({
+                "type":"tool_use", "id":"call_mixed", "name":"lookup",
+                "input":{"q":"retained"}
+            });
+            assert_eq!(
+                message["content"],
+                json!([
+                    {"type":"thinking","thinking":thinking},
+                    {"type":"text","text":text},
+                    {"type":"text","text":refusal},
+                    tool
+                ])
+            );
+            assert_eq!(message["id"], "msg_mixed");
+            assert_eq!(message["model"], "model");
+            assert_eq!(message["stop_reason"], "tool_use");
+            assert_eq!(message["usage"]["input_tokens"], 3);
+            assert_eq!(message["usage"]["output_tokens"], 2);
+            response["choices"][0]["message"]["reasoning_content"] = json!("");
+            response["choices"][0]["message"]["content"] = json!("");
+            response["choices"][0]["message"]["refusal"] = json!("");
+            let empty = project_v3_openai_chat_completion_as_anthropic_message(&response)
+                .expect("empty Chat strings must leave the tool intact");
+            assert_eq!(empty["content"], json!([tool]));
+        }
     }
 
     #[test]

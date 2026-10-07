@@ -834,7 +834,7 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
 }
 
 #[tokio::test]
-async fn uncommitted_sse_failure_enters_error_chain_and_provider_cooldown() {
+async fn uncommitted_sse_repeat_failure_enters_error_chain_and_provider_cooldown() {
     let server_id = "gemini_gate_failure";
     let cases = [
         (
@@ -889,57 +889,90 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
 
         let provider_health =
             V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
-        // A recoverable provider-attempt failure is counted into provider health
-        // but must not cool the provider before three consecutive same-class
-        // failures, so drive three identical attempts before checking cooldown.
-        for attempt in 0..3 {
-            let failing = StaticSseTransport {
-                chunks: Mutex::new(Some(chunks.clone())),
-            };
-            let first = execute_v3_gemini_relay_runtime_with_provider_health(
-                &manifest,
-                V3GeminiRelayRuntimeInput {
-                    server_id: server_id.into(),
-                    failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                        "test-server",
-                        "test-group",
-                        concat!(module_path!(), ":", line!()),
-                    )
-                    .expect("test provider failure session scope"),
-                    request_id: format!("req-gemini-uncommitted-failure-{case}-{attempt}"),
-                    endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
-                    payload: json!({
-                        "contents":[{"role":"user","parts":[{"text":"stream"}]}],
-                        "stream":true
-                    }),
-                },
-                &failing,
-                provider_health.runtime_health(),
-            )
-            .await
-            .expect("provider attempt failure must reach terminal Error06");
-            assert_eq!(first.status, 502, "{case} attempt {attempt}: {first:?}");
-            assert_eq!(first.error_chain.as_ref().map(Vec::len), Some(6));
-            assert_eq!(first.node_trace.last(), Some(&"V3Error06ClientProjected"));
-            let client_error = match first.client_body {
-                V3GeminiRelayClientBody::Json(value) => value,
-                V3GeminiRelayClientBody::Sse(_) => {
-                    panic!("{case} failed provider attempt must not produce client SSE")
-                }
-            };
-            assert!(
-                !client_error.to_string().contains("partial"),
-                "{case} failed-attempt bytes crossed the Broker boundary: {client_error}"
-            );
-        }
+        let failing = StaticSseTransport {
+            chunks: Mutex::new(Some(chunks.clone())),
+        };
+        let first = execute_v3_gemini_relay_runtime_with_provider_health(
+            &manifest,
+            V3GeminiRelayRuntimeInput {
+                server_id: server_id.into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
+                request_id: format!("req-gemini-uncommitted-failure-{case}"),
+                endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
+                payload: json!({
+                    "contents":[{"role":"user","parts":[{"text":"stream"}]}],
+                    "stream":true
+                }),
+            },
+            &failing,
+            provider_health.runtime_health(),
+        )
+        .await
+        .expect("provider attempt failure must reach terminal Error06");
+        assert_eq!(first.status, 502, "{case}: {first:?}");
+        assert_eq!(first.error_chain.as_ref().map(Vec::len), Some(6));
+        assert_eq!(first.node_trace.last(), Some(&"V3Error06ClientProjected"));
+        let client_error = match first.client_body {
+            V3GeminiRelayClientBody::Json(value) => value,
+            V3GeminiRelayClientBody::Sse(_) => {
+                panic!("{case} failed provider attempt must not produce client SSE")
+            }
+        };
+        assert!(
+            !client_error.to_string().contains("partial"),
+            "{case} failed-attempt bytes crossed the Broker boundary: {client_error}"
+        );
 
-        // Broker 内完成的 provider-attempt failure 必须关闭本次 action lane，
-        // 连续三次同类失败后保留 provider cooldown；Front 不参与错误判定。
+        assert!(provider_health
+            .store()
+            .provider_cooldown_probe_keys_due(u64::MAX)
+            .expect("isolated failure probe inventory")
+            .is_empty());
+        assert!(
+            provider_health
+                .store()
+                .availability(server_id, Some(server_id), Some("gemini-wire"), u64::MAX)
+                .available,
+            "{case} isolated provider failure must remain eligible"
+        );
+        let repeated = execute_v3_gemini_relay_runtime_with_provider_health(
+            &manifest,
+            V3GeminiRelayRuntimeInput {
+                server_id: server_id.into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    format!("gemini-repeat-{case}"),
+                )
+                .expect("repeated failure session scope"),
+                request_id: format!("req-gemini-uncommitted-repeat-{case}"),
+                endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
+                payload: json!({
+                    "contents":[{"role":"user","parts":[{"text":"stream"}]}],
+                    "stream":true
+                }),
+            },
+            &StaticSseTransport {
+                chunks: Mutex::new(Some(chunks)),
+            },
+            provider_health.runtime_health(),
+        )
+        .await
+        .expect("repeated provider failure must reach the typed error chain");
+        assert_eq!(repeated.status, 502, "{case}: {repeated:?}");
+        assert_eq!(repeated.error_chain.as_ref().map(Vec::len), Some(6));
+        // The second actual failed attempt admits provider cooldown. The
+        // recovery probe then owns eligibility for subsequent requests.
         let succeeding = JsonTransport {
             captured_url: Mutex::new(None),
             captured_body: Mutex::new(None),
         };
-        // Three consecutive typed provider-attempt failures isolate the exact
+        // Repeated typed provider-attempt failures isolate the exact
         // provider/key/model. Keep the provider held until its recovery probe
         // succeeds; probe failures are control-plane recovery traffic and do
         // not count as request attempts.
@@ -953,7 +986,7 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
                 Some(server_id.to_string()),
                 Some("gemini-wire".to_string()),
             )),
-            "{case} first typed failure must create an exact provider cooldown: {probe_keys:?}"
+            "{case} second typed failure must create an exact provider cooldown: {probe_keys:?}"
         );
         let held_manifest = manifest.clone();
         let held_health = provider_health.runtime_health();
@@ -1067,9 +1100,13 @@ async fn validated_terminal_sse_releases_action_lane_for_a_fresh_request() {
             .to_vec(),
         ])),
     };
-    // Broker 已把失败 attempt 写入 provider cooldown；probe 通过后，完整终态成功
-    // 会在 Runtime 返回 committed stream 前释放 Error05 action lane。
-    revive_cooled_provider(&provider_health, server_id).await;
+    // A single recoverable failure keeps this provider eligible. A complete
+    // successful attempt releases the Error05 action lane without a probe.
+    assert!(provider_health
+        .store()
+        .provider_cooldown_probe_keys_due(u64::MAX)
+        .expect("provider cooldown probe inventory")
+        .is_empty());
     let successful = execute_v3_gemini_relay_runtime_with_provider_health(
         &manifest,
         V3GeminiRelayRuntimeInput {

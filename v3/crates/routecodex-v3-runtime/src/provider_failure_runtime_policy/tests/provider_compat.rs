@@ -258,12 +258,12 @@ async fn relay_generic_provider_http_400_excludes_provider_family_and_records_he
         "request_local_provider_compat"
     );
     assert_eq!(result.event.health_record.failure_count, 1);
-    // A recoverable 400 is counted into provider health but must not cool the
-    // provider before three consecutive same-class failures; the request-local
-    // candidate exclusion above is what exhausts this single attempt.
+    assert_eq!(result.event.health_record.state, "healthy");
+    assert!(result.event.health_record.cooldown_until_ms.is_none());
     assert!(
-        result.event.health_record.cooldown_until_ms.is_none(),
-        "one recoverable 400 must not cool the provider yet"
+        health
+            .availability("first", Some("key"), Some("test"), u64::MAX)
+            .available
     );
     assert_eq!(result.event.action, "terminal_route_and_default_exhausted");
     assert!(result.retry_selected.is_none());

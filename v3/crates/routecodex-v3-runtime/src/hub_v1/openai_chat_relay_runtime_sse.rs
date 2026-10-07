@@ -98,45 +98,10 @@ fn project_anthropic_sse_as_openai_chat_stream(
             let request_id = request_id.clone();
             let session_id = session_id.clone();
             async move {
-            loop {
-                if let Some(frame) = pending.pop_front() {
-                    return Some((
-                        Ok(frame),
-                        (
-                            provider,
-                            decoder,
-                            transducer,
-                            toolreason,
-                            pending,
-                            done_seen,
-                            finished,
-                            compatibility_profile,
-                            web_search_execution_mode,
-                            web_search_center_state,
-                            retain_response_cipher,
-                            provider_outcome,
-                        ),
-                    ));
-            }
-                if finished {
-                    return None;
-                }
-                let Some(chunk) = provider.next().await else {
-                    finished = true;
-                    let decoder_to_finish = std::mem::replace(
-                        &mut decoder,
-                        routecodex_v3_sse::SseIncrementalDecoder::new(
-                            routecodex_v3_sse::SseTransportLimits::default(),
-                        ),
-                    );
-                    let decoder_result = decoder_to_finish
-                        .finish()
-                        .map_err(|error| error.to_string());
-                    let result = decoder_result.and_then(|_| transducer.finish());
-                    if let Err(error) = result {
-                        let recorded = provider_outcome.record_failure(&error).await;
+                loop {
+                    if let Some(frame) = pending.pop_front() {
                         return Some((
-                            Err(recorded.map(|_| error).unwrap_or_else(|record| record)),
+                            Ok(frame),
                             (
                                 provider,
                                 decoder,
@@ -153,29 +118,25 @@ fn project_anthropic_sse_as_openai_chat_stream(
                             ),
                         ));
                     }
-                    // Anthropic Messages wire 无 [DONE] 定义（标准流以 message_stop
-                    // 结束；transducer.finish() 成功即 message_stop + terminal
-                    // finish_reason 已到达）。MEMORY 合同（08-08）："[DONE]" 由网关在
-                    // 客户端侧补发 transport sentinel，不是 provider 必发——缺失不记
-                    // provider-health 失败。
-                    if !done_seen {
-                        done_seen = true;
-                        pending.push_back(b"data: [DONE]\n\n".to_vec());
+                    if finished {
+                        return None;
                     }
-                    crate::hub_v1::finalize_v3_toolreason_observation_at_resp03_with_context(
-                        &toolreason.tool_names,
-                        &mut toolreason.pending_reasons,
-                        &mut toolreason.reason_emitted,
-                        crate::hub_v1::V3ToolreasonObservationContext {
-                            session_id: Some(session_id.as_str()),
-                            request_id: Some(request_id.as_str()),
-                        },
-                    );
-                    match provider_outcome.record_success() {
-                        Ok(()) => {}
-                        Err(error) => {
+                    let Some(chunk) = provider.next().await else {
+                        finished = true;
+                        let decoder_to_finish = std::mem::replace(
+                            &mut decoder,
+                            routecodex_v3_sse::SseIncrementalDecoder::new(
+                                routecodex_v3_sse::SseTransportLimits::default(),
+                            ),
+                        );
+                        let decoder_result = decoder_to_finish
+                            .finish()
+                            .map_err(|error| error.to_string());
+                        let result = decoder_result.and_then(|_| transducer.finish());
+                        if let Err(error) = result {
+                            let recorded = provider_outcome.record_failure(&error).await;
                             return Some((
-                                Err(error),
+                                Err(recorded.map(|_| error).unwrap_or_else(|record| record)),
                                 (
                                     provider,
                                     decoder,
@@ -192,29 +153,68 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                 ),
                             ));
                         }
-                    }
-                    return match pending.pop_front() {
-                        Some(frame) => Some((
-                            Ok(frame),
-                            (
-                                provider,
-                                decoder,
-                                transducer,
-                                toolreason,
-                                pending,
-                                done_seen,
-                                finished,
-                                compatibility_profile,
-                                web_search_execution_mode,
-                                web_search_center_state,
-                                retain_response_cipher,
-                                provider_outcome,
-                            ),
-                        )),
-                        None => None,
+                        // Anthropic Messages wire 无 [DONE] 定义（标准流以 message_stop
+                        // 结束；transducer.finish() 成功即 message_stop + terminal
+                        // finish_reason 已到达）。MEMORY 合同（08-08）："[DONE]" 由网关在
+                        // 客户端侧补发 transport sentinel，不是 provider 必发——缺失不记
+                        // provider-health 失败。
+                        if !done_seen {
+                            done_seen = true;
+                            pending.push_back(b"data: [DONE]\n\n".to_vec());
+                        }
+                        crate::hub_v1::finalize_v3_toolreason_observation_at_resp03_with_context(
+                            &toolreason.tool_names,
+                            &mut toolreason.pending_reasons,
+                            &mut toolreason.reason_emitted,
+                            crate::hub_v1::V3ToolreasonObservationContext {
+                                session_id: Some(session_id.as_str()),
+                                request_id: Some(request_id.as_str()),
+                            },
+                        );
+                        match provider_outcome.record_success() {
+                            Ok(()) => {}
+                            Err(error) => {
+                                return Some((
+                                    Err(error),
+                                    (
+                                        provider,
+                                        decoder,
+                                        transducer,
+                                        toolreason,
+                                        pending,
+                                        done_seen,
+                                        finished,
+                                        compatibility_profile,
+                                        web_search_execution_mode,
+                                        web_search_center_state,
+                                        retain_response_cipher,
+                                        provider_outcome,
+                                    ),
+                                ));
+                            }
+                        }
+                        return match pending.pop_front() {
+                            Some(frame) => Some((
+                                Ok(frame),
+                                (
+                                    provider,
+                                    decoder,
+                                    transducer,
+                                    toolreason,
+                                    pending,
+                                    done_seen,
+                                    finished,
+                                    compatibility_profile,
+                                    web_search_execution_mode,
+                                    web_search_center_state,
+                                    retain_response_cipher,
+                                    provider_outcome,
+                                ),
+                            )),
+                            None => None,
+                        };
                     };
-                };
-                let result = match &chunk {
+                    let result = match &chunk {
                     Err(error @ V3ProviderError::ClientDisconnect { .. }) => {
                         // client disconnect 是健康中性事件（客户端断开导致
                         // provider 流中止）：禁止写 provider 失败/冷却，与
@@ -276,15 +276,6 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                 }
                                 let event: Value = serde_json::from_str(data)
                                     .map_err(|error| error.to_string())?;
-                                if let Some(failure) = classify_v3_provider_terminal_admission(
-                                    V3HubProviderWireProtocol::Anthropic,
-                                    &event,
-                                ) {
-                                    return Err(format!(
-                                        "provider emitted {}: {}",
-                                        failure.code, failure.message
-                                    ));
-                                }
                                 for mut payload in transducer.push_event(event)? {
                                     let governed = project_sse_event_payload(
                                         request_id.as_str(),
@@ -308,16 +299,35 @@ fn project_anthropic_sse_as_openai_chat_stream(
                             Ok(())
                         }),
                 };
-                match result {
-                    Ok(()) if !pending.is_empty() => {
-                        continue;
-                    }
-                    Ok(_) => continue,
-                    Err(error) => {
-                        finished = true;
-                        if error.starts_with("ROUTECODEX_GOVERNANCE_REJECTED") {
+                    match result {
+                        Ok(()) if !pending.is_empty() => {
+                            continue;
+                        }
+                        Ok(_) => continue,
+                        Err(error) => {
+                            finished = true;
+                            if error.starts_with("ROUTECODEX_GOVERNANCE_REJECTED") {
+                                return Some((
+                                    Err(error),
+                                    (
+                                        provider,
+                                        decoder,
+                                        transducer,
+                                        toolreason,
+                                        pending,
+                                        done_seen,
+                                        finished,
+                                        compatibility_profile,
+                                        web_search_execution_mode,
+                                        web_search_center_state,
+                                        retain_response_cipher,
+                                        provider_outcome,
+                                    ),
+                                ));
+                            }
+                            let recorded = provider_outcome.record_failure(&error).await;
                             return Some((
-                                Err(error),
+                                Err(recorded.map(|_| error).unwrap_or_else(|record| record)),
                                 (
                                     provider,
                                     decoder,
@@ -334,27 +344,9 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                 ),
                             ));
                         }
-                        let recorded = provider_outcome.record_failure(&error).await;
-                        return Some((
-                            Err(recorded.map(|_| error).unwrap_or_else(|record| record)),
-                            (
-                                provider,
-                                decoder,
-                                transducer,
-                                toolreason,
-                                pending,
-                                done_seen,
-                                finished,
-                                compatibility_profile,
-                                web_search_execution_mode,
-                                web_search_center_state,
-                                retain_response_cipher,
-                                provider_outcome,
-                            ),
-                        ));
                     }
                 }
             }
-        }}
+        },
     ))
 }

@@ -882,7 +882,14 @@ pub(crate) async fn send_restart_control(
     snapshot_stages: Option<String>,
     sse_dump: bool,
     transfer: Option<&mut PreviousReleaseRestartGuard>,
+    deadline: tokio::time::Instant,
 ) -> Result<ControlResponse, V3LifecycleError> {
+    if tokio::time::Instant::now() >= deadline {
+        return Err(V3LifecycleError::Timeout(format!(
+            "control challenge {}",
+            control_declaration.instance_id
+        )));
+    }
     let published: V3ManagedInstanceDeclaration = read_json(&instance_dir.join("instance.json"))?;
     let target_change =
         !same_instance_declaration_except_executable_path(&published, target_declaration);
@@ -916,8 +923,8 @@ pub(crate) async fn send_restart_control(
     if let Some(transfer) = transfer {
         transfer.retain_until_adoption();
     }
-    tokio::time::timeout(
-        CONTROL_TIMEOUT,
+    tokio::time::timeout_at(
+        deadline,
         send_control_without_timeout(
             instance_dir,
             control_declaration,

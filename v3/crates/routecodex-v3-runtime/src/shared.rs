@@ -362,25 +362,6 @@ async fn project_provider_raw_to_client_payload_inner(
                 &request_id,
             )?;
         }
-        if let Some(failure) = crate::hub_v1::classify_v3_provider_terminal_admission(
-            compat_plan.provider_protocol,
-            &parsed,
-        ) {
-            return Err(build_v3_error_01_source_raised_external(
-                V3ErrorSourceKind::ProviderFailure,
-                "V3ProviderResp14Raw",
-                failure.code.clone(),
-                failure.message.clone(),
-                V3ExternalErrorLink {
-                    kind: V3ExternalErrorKind::Provider,
-                    status: Some(status),
-                    code: Some(failure.code),
-                    provider_id: Some(provider_id),
-                    upstream_request_id: None,
-                    message: Some(failure.message),
-                },
-            ));
-        }
         (V3ProviderAttemptBody::Json(parsed), None)
     } else {
         return Err(build_v3_error_01_source_raised_external(
@@ -556,7 +537,6 @@ async fn guard_initial_direct_sse_provider_failure_with_timeout(
                 provider_id,
                 frame.frame().fields(),
                 compatibility_profile,
-                should_start_client_stream,
                 provider_protocol,
             )? == DirectSseInitialFrameAction::StartClientStream
             {
@@ -575,7 +555,6 @@ fn direct_sse_frame_provider_failure_source(
     provider_id: &str,
     fields: &[SseField],
     _compatibility_profile: Option<&str>,
-    business_output_seen: bool,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
 ) -> Result<DirectSseInitialFrameAction, V3Error01SourceRaised> {
     let data = normalize_v3_provider_sse_json_data_for_event_name(provider_protocol, fields)
@@ -637,18 +616,9 @@ fn direct_sse_frame_provider_failure_source(
             Ok(DirectSseInitialFrameAction::ContinueBuffering)
         }
         V3ProviderResponsesJsonFrameOutcome::StartClientStream
-        | V3ProviderResponsesJsonFrameOutcome::Terminal => {
+        | V3ProviderResponsesJsonFrameOutcome::Terminal
+        | V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput => {
             Ok(DirectSseInitialFrameAction::StartClientStream)
-        }
-        V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput if business_output_seen => {
-            Ok(DirectSseInitialFrameAction::StartClientStream)
-        }
-        V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput => {
-            Err(build_v3_provider_sse_json_error(
-                provider_id,
-                "provider_response_sse_empty",
-                "provider SSE completed before content or tool output".to_string(),
-            ))
         }
         V3ProviderResponsesJsonFrameOutcome::Failure { code, message } => Err(
             build_v3_provider_sse_json_error(provider_id, &code, message),
@@ -1416,6 +1386,25 @@ pub(crate) async fn project_provider_raw_to_client_payload(
 mod tests {
     use super::*;
     use routecodex_v3_provider_responses::V3ProviderResponseHeader;
+
+    #[tokio::test]
+    async fn direct_sse_preserves_empty_successful_terminals() {
+        for (protocol, wire) in [
+            (crate::hub_v1::V3HubProviderWireProtocol::Responses,
+             b"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_empty\",\"status\":\"completed\",\"output\":[]}}\n\n".as_slice()),
+            (crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+             b"data: {\"id\":\"chat_empty\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n".as_slice()),
+            (crate::hub_v1::V3HubProviderWireProtocol::Anthropic,
+             b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".as_slice()),
+        ] {
+            let source: V3ProviderSseStream = Box::pin(stream::iter([Ok(wire.to_vec())]));
+            let mut accepted = guard_initial_direct_sse_provider_failure_with_timeout(
+                "provider", source, std::time::Duration::from_secs(1), None, protocol,
+            ).await.expect("empty successful terminal must remain representable");
+            assert_eq!(accepted.next().await.unwrap().unwrap(), wire);
+            assert!(accepted.next().await.is_none());
+        }
+    }
 
     #[test]
     fn direct_sse_frame_interval_timeout_uses_provider_cold_start_budget() {

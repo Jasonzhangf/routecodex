@@ -1406,6 +1406,10 @@ pub fn project_v3_pending_endpoint_error(
 }
 
 mod sse_disposition;
+/// Consecutive real failures required by the default recoverable health policy.
+/// Authentication and explicitly terminal policies retain their own threshold.
+pub const V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD: u32 = 2;
+
 mod subscription;
 #[cfg(test)]
 mod tests;

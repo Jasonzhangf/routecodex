@@ -1,4 +1,40 @@
 use super::*;
+
+#[test]
+fn chat_sse_co_located_refusal_survives_materialization() {
+    for delta in [
+        json!({"content":"partial text","refusal":"provider declined"}),
+        json!({"reasoning_content":"partial reasoning","refusal":"provider declined"}),
+        json!({"role":"assistant","content":" partial text ","reasoning_content":" partial reasoning ","refusal":" provider declined "}),
+        json!({"tool_calls":[{"index":0,"id":"call_opaque","type":"function","function":{"name":"lookup","arguments":"not JSON {"}}],"refusal":"provider declined"}),
+        json!({"content":"partial text","reasoning_content":"partial reasoning","tool_calls":[{"index":0,"id":"call_opaque","type":"function","function":{"name":"lookup","arguments":"not JSON {"}}],"refusal":"provider declined"}),
+    ] {
+        let mut reducer = V3OpenAiChatSseReducerState::default();
+        reducer.apply_chunk(&json!({"id":"chat_refusal","object":"chat.completion.chunk","model":"wire-test","choices":[{"index":0,"delta":delta,"finish_reason":null}]})).unwrap();
+        reducer.apply_chunk(&json!({"id":"chat_refusal","object":"chat.completion.chunk","model":"wire-test","choices":[{"index":0,"delta":{},"finish_reason":"content_filter"}]})).unwrap();
+        let completion = reducer.materialize_completion().unwrap();
+        let message = &completion["choices"][0]["message"];
+        assert_eq!(message["refusal"], delta["refusal"], "{delta}");
+        assert_eq!(completion["choices"][0]["finish_reason"], "content_filter");
+        if let Some(text) = delta.get("content") {
+            assert_eq!(&message["content"], text);
+        }
+        if let Some(reasoning) = delta.get("reasoning_content") {
+            assert_eq!(&message["reasoning_content"], reasoning);
+        }
+        if let Some(role) = delta.get("role") {
+            assert_eq!(&message["role"], role);
+        }
+        if delta.get("tool_calls").is_some() {
+            assert_eq!(message["tool_calls"][0]["id"], "call_opaque");
+            assert_eq!(message["tool_calls"][0]["function"]["name"], "lookup");
+            assert_eq!(
+                message["tool_calls"][0]["function"]["arguments"],
+                "not JSON {"
+            );
+        }
+    }
+}
 use serde_json::json;
 
 struct RewriteChatHook {

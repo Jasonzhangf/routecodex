@@ -101,6 +101,7 @@ impl ResponsesTransport for AnthropicCyberRefusalThenSuccessTransport {
             let frames: Vec<Result<Vec<u8>, V3ProviderError>> = vec![
                 Ok("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_refusal\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}\n\n".as_bytes().to_vec()),
                 Ok("event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"refusal\",\"stop_details\":{\"type\":\"refusal\",\"category\":\"cyber\",\"explanation\":\"policy\"}}}\n\n".as_bytes().to_vec()),
+                Ok(b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec()),
             ];
             return Ok(V3ProviderResp14Raw::from_sse(
                 request.request_id().to_string(),
@@ -679,7 +680,8 @@ async fn responses_relay_claude_anthropic_provider_uses_claude_code_prompt_and_h
 }
 
 #[tokio::test]
-async fn responses_relay_anthropic_cyber_refusal_sse_is_terminal_when_route_exhausted() {
+async fn responses_relay_anthropic_cyber_refusal_sse_preserves_business_terminal() {
+    use futures_util::StreamExt;
     let transport = AnthropicCyberRefusalThenSuccessTransport {
         attempts: Mutex::new(0),
     };
@@ -709,35 +711,23 @@ async fn responses_relay_anthropic_cyber_refusal_sse_is_terminal_when_route_exha
     .await
     .unwrap();
 
-    // RetrySame is a config compatibility enum only; production never grants a
-    // same-candidate retry, and this pool declares a single target so
-    // reselection cannot yield another attempt either.
     assert_eq!(*transport.attempts.lock().unwrap(), 1);
-    assert_eq!(output.status, 502);
+    assert_eq!(output.status, 200);
     let observability = output.observability.as_ref().expect("observability");
-    assert_eq!(observability.provider_failure_events.len(), 1);
-    let failure = &observability.provider_failure_events[0];
-    assert_eq!(failure.status, 429);
-    assert_eq!(
-        failure.error_type.as_deref(),
-        Some("ANTHROPIC_CYBER_REFUSAL")
-    );
-    assert!(failure
-        .message
-        .contains("Anthropic cyber refusal is treated as retryable provider saturation"));
-    let V3ResponsesRelayClientBody::Json(body) = output.client_body else {
-        panic!("route exhaustion must project a typed JSON terminal error")
+    assert!(observability.provider_failure_events.is_empty());
+    let V3ResponsesRelayClientBody::Sse(body) = output.client_body else {
+        panic!("provider terminal must reach the requested SSE client channel")
     };
-    assert_eq!(body["error"]["code"], "network_error");
-    assert!(
-        output.node_trace.contains(&"V3Error06ClientProjected"),
-        "single-candidate pool must project the provider failure terminally: {:?}",
-        output.node_trace
-    );
+    let chunks = body.collect::<Vec<_>>().await;
+    let text = String::from_utf8(chunks.into_iter().flatten().collect()).unwrap();
+    assert!(text.contains("response.incomplete"), "{text}");
+    assert!(text.contains("content_filter"), "{text}");
+    assert!(output.error_chain.is_none());
+    assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
 }
 
 #[tokio::test]
-async fn responses_relay_anthropic_cyber_refusal_json_keeps_retryable_saturation_semantics() {
+async fn responses_relay_anthropic_cyber_refusal_json_preserves_business_terminal() {
     let transport = AnthropicCyberRefusalJsonTransport {
         attempts: Mutex::new(0),
     };
@@ -768,18 +758,17 @@ async fn responses_relay_anthropic_cyber_refusal_json_keeps_retryable_saturation
     .unwrap();
 
     assert_eq!(*transport.attempts.lock().unwrap(), 1);
-    assert_eq!(output.status, 502);
+    assert_eq!(output.status, 200);
     let observability = output.observability.as_ref().expect("observability");
-    assert_eq!(observability.provider_failure_events.len(), 1);
-    let failure = &observability.provider_failure_events[0];
-    assert_eq!(failure.status, 429);
-    assert_eq!(
-        failure.error_type.as_deref(),
-        Some("ANTHROPIC_CYBER_REFUSAL")
-    );
-    assert!(failure
-        .message
-        .contains("Anthropic cyber refusal is treated as retryable provider saturation"));
+    assert!(observability.provider_failure_events.is_empty());
+    let V3ResponsesRelayClientBody::Json(body) = output.client_body else {
+        panic!("provider terminal must reach the requested JSON client channel")
+    };
+    assert_eq!(body["status"], "incomplete");
+    assert_eq!(body["incomplete_details"]["reason"], "content_filter");
+    assert!(body.to_string().contains("refused"), "{body}");
+    assert!(output.error_chain.is_none());
+    assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
 }
 
 #[tokio::test]

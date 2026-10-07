@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Notify;
 
 #[test]
-fn post_commit_sse_failures_enter_provider_cooldown_after_three_same_errors() {
+fn post_commit_sse_failures_enter_provider_cooldown_after_two_same_errors() {
     let manifest = target_resolution_manifest("post_commit_sse_single_retryable");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let session = test_provider_failure_scope(
@@ -21,7 +21,7 @@ fn post_commit_sse_failures_enter_provider_cooldown_after_three_same_errors() {
         "Responses SSE event must be a JSON object",
     );
 
-    for attempt in 0..3 {
+    for attempt in 0..2 {
         health
             .record_post_commit_provider_stream_failure_from_source(
                 &session,
@@ -44,10 +44,10 @@ fn post_commit_sse_failures_enter_provider_cooldown_after_three_same_errors() {
             );
         assert_eq!(
             projection.available,
-            attempt < 2,
+            attempt == 0,
             "one recoverable post-commit SSE failure must not exclude the provider; attempt={attempt}"
         );
-        if attempt == 2 {
+        if attempt == 1 {
             assert!(projection
                 .blocked_scopes
                 .iter()

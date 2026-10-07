@@ -1,6 +1,6 @@
 # V3 Provider Key Health Scoring and Cooldown Design
 
-> 2026-09-21 policy amendment, revised 2026-10-06: the prior threshold/fixed-cadence examples in this historical design are superseded by the current runtime contract. Three consecutive same-fingerprint recoverable provider failures cool the exact provider+auth key+model identity; a single recoverable failure only counts into health, because with one configured provider an immediate exclusion exhausts the route pool. The typed irrecoverable account/billing classes still cool on their first occurrence. Recovery uses the provider-owned ladder `5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s`; continuous failure and failed probes advance it, while successful semantic probe resets it to 5s. Provider health remains the sole owner; probe failure is expected and must not block startup or other sessions.
+> 2026-10-07 policy amendment: the prior threshold/fixed-cadence examples in this historical design are superseded by the current runtime contract. An isolated recoverable failure records its exact provider+auth key+model same-fingerprint streak without global cooldown. The default threshold is two consecutive failures; real success clears the streak. Explicit terminal authentication/account and manual-disable policies keep their declared scope and threshold. Recovery after cooldown begins uses the provider-owned ladder `5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s`; continuous failure and failed probes advance it, while successful semantic probe resets it to 5s. Provider health remains the sole owner; probe failure is expected and must not block startup or other sessions.
 
 状态：design / source-controlled runtime pending live replay
 
@@ -432,7 +432,7 @@ HealthNeutral
 
 - classification produces exactly one recovery kind;
 - irrecoverable action immediately creates global cooldown;
-- three consecutive same-fingerprint recoverable provider failures cool the exact provider+auth key+model identity; a single recoverable failure counts into health without excluding the provider;
+- an isolated recoverable failure leaves the exact provider+auth key+model identity available; the default second consecutive same-fingerprint failure creates cooldown, and real success resets the streak;
 - recoverable failures still subtract 5 from the score, while continuous failure streak and meaningful failure-rate bands choose the adaptive 5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s cooldown/probe step;
 - health-neutral event changes neither score nor streak;
 - success adds +1 in the rolling score epoch and clears failure streak;

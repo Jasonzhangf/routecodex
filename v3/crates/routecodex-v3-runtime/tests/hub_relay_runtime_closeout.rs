@@ -1727,7 +1727,7 @@ async fn responses_relay_provider_response_decode_error_reselects_next_candidate
     );
     assert_eq!(provider_event.failure_count, 1);
     // A single recoverable decode failure is counted but does not cool the
-    // provider; three consecutive same-class failures are required.
+    // provider; two consecutive same-class failures are required.
     assert_eq!(provider_event.health_state, "healthy");
     assert!(provider_event.cooldown_until_ms.is_none());
 
@@ -1738,8 +1738,8 @@ async fn responses_relay_provider_response_decode_error_reselects_next_candidate
 }
 
 #[tokio::test]
-async fn responses_relay_content_filter_incomplete_commits_partial_output_without_reselect() {
-    let server_id = "responses_content_filter";
+async fn responses_relay_content_filter_incomplete_preserves_output_without_reselect() {
+    let server_id = "responses_incomplete_exhaustion";
     let manifest = responses_reselect_manifest_for_scope(server_id);
     let transport = ResponsesIncompleteExhaustionTransport {
         provider_ids: Mutex::new(Vec::new()),
@@ -1764,22 +1764,16 @@ async fn responses_relay_content_filter_incomplete_commits_partial_output_withou
         &transport,
     )
     .await
-    .expect("a content_filter response.incomplete is a legal provider terminal");
+    .expect("representable incomplete output must reach client projection");
 
-    // `content_filter` is the provider's own content filter doing its job, so the
-    // terminal is business data: it is forwarded to the client instead of being
-    // judged a provider failure. Exactly one candidate is attempted and no error
-    // chain is opened.
+    assert_eq!(output.status, 200);
     assert_eq!(
         transport.provider_ids.lock().unwrap().as_slice(),
-        ["limited"],
-        "an admitted content_filter terminal must not reselect"
+        ["limited"]
     );
-    assert_eq!(output.status, 200, "{output:?}");
-    assert!(output.error_chain.is_none(), "{output:?}");
     let body = match output.client_body {
         V3ResponsesRelayClientBody::Json(value) => value,
-        V3ResponsesRelayClientBody::Sse(_) => panic!("expected JSON client body"),
+        V3ResponsesRelayClientBody::Sse(_) => panic!("expected JSON provider output"),
     };
     assert_eq!(body["status"], "incomplete", "{body}");
     assert_eq!(
@@ -1788,8 +1782,12 @@ async fn responses_relay_content_filter_incomplete_commits_partial_output_withou
     );
     assert!(
         body.to_string().contains("partial-must-not-commit"),
-        "the provider's partial output must reach the client with its terminal: {body}"
+        "{body}"
     );
+    assert_eq!(body["usage"]["input_tokens"], 10, "{body}");
+    assert_eq!(body["usage"]["output_tokens"], 2, "{body}");
+    assert_eq!(body["usage"]["total_tokens"], 12, "{body}");
+    assert!(output.error_chain.is_none());
 }
 
 #[tokio::test]
@@ -2097,50 +2095,51 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
     )
     .expect("test provider failure session scope");
 
-    // A recoverable provider failure is counted into shared provider health but
-    // must not cool the provider before three consecutive same-class failures.
-    for turn in 1..=3u32 {
-        let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
-            &manifest,
-            V3ResponsesRelayRuntimeInput {
-                server_id: server_id.into(),
-                failure_session_scope: failure_session_scope.clone(),
-                request_id: format!("req-responses-context-reselect-seed-{turn}"),
-                payload: json!({
-                    "model":"client-responses",
-                    "input":"same large payload",
-                    "stream":false
-                }),
-            },
-            &transport,
-            &provider_health,
-            V3ResponsesRelayRetryPolicy {
-                same_candidate_retries: 3,
-            },
-        )
-        .await
-        .unwrap();
-        assert_eq!(output.status, 200);
-        assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
-        let observability = output
-            .observability
-            .as_ref()
-            .expect("successful reroute must keep provider failure observability");
-        assert_eq!(
-            observability.provider_key.as_deref(),
-            Some("minimax:key1:MiniMax-M3")
-        );
-        assert_eq!(observability.provider_failure_events.len(), 1);
-        let event = &observability.provider_failure_events[0];
-        assert_eq!(event.failure_count, turn);
-        if turn < 3 {
-            assert_eq!(event.health_state, "healthy", "turn {turn}");
-            assert!(event.cooldown_until_ms.is_none(), "turn {turn}");
-        } else {
-            assert_eq!(event.health_state, "cooldown", "turn {turn}");
-            assert!(event.cooldown_until_ms.is_some(), "turn {turn}");
-        }
-    }
+    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+        &manifest,
+        V3ResponsesRelayRuntimeInput {
+            server_id: server_id.into(),
+            failure_session_scope: failure_session_scope.clone(),
+            request_id: "req-responses-context-reselect-first".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":"same large payload",
+                "stream":false
+            }),
+        },
+        &transport,
+        &provider_health,
+        V3ResponsesRelayRetryPolicy {
+            same_candidate_retries: 3,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(output.status, 200);
+    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    let observability = output
+        .observability
+        .as_ref()
+        .expect("successful reroute must keep provider failure observability");
+    assert_eq!(
+        observability.provider_key.as_deref(),
+        Some("minimax:key1:MiniMax-M3")
+    );
+    assert_eq!(observability.provider_failure_events.len(), 1);
+    assert_eq!(observability.provider_failure_events[0].failure_count, 1);
+    assert_eq!(
+        observability.provider_failure_events[0].health_state,
+        "healthy"
+    );
+    assert!(observability.provider_failure_events[0]
+        .cooldown_until_ms
+        .is_none());
+    assert!(
+        provider_health
+            .store()
+            .availability("limited", Some("key1"), Some("gpt-5.5"), u64::MAX)
+            .available
+    );
 
     for turn in 1..=3 {
         let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
@@ -2164,7 +2163,10 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
         .await
         .unwrap();
         assert_eq!(output.status, 200);
-        assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
+        assert_eq!(
+            output.node_trace.contains(&"V3TargetLocalReselected"),
+            turn == 1
+        );
         let observability = output
             .observability
             .as_ref()
@@ -2173,6 +2175,18 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
             observability.provider_key.as_deref(),
             Some("minimax:key1:MiniMax-M3")
         );
+        if turn == 1 {
+            assert_eq!(observability.provider_failure_events.len(), 1);
+            assert_eq!(observability.provider_failure_events[0].failure_count, 2);
+            assert_eq!(
+                observability.provider_failure_events[0].health_state,
+                "cooldown"
+            );
+            assert!(observability.provider_failure_events[0]
+                .cooldown_until_ms
+                .is_some());
+            continue;
+        }
         assert_eq!(observability.attempts, Some(1));
         assert!(observability
             .unavailable_candidates
@@ -2192,10 +2206,7 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
         .collect();
     assert_eq!(
         provider_sequence,
-        vec![
-            "limited", "minimax", "limited", "minimax", "limited", "minimax", "minimax", "minimax",
-            "minimax"
-        ]
+        vec!["limited", "minimax", "limited", "minimax", "minimax", "minimax"]
     );
 }
 

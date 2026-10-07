@@ -140,7 +140,7 @@ data: {"type":"message_stop"}
 }
 
 #[tokio::test]
-async fn anthropic_refusal_provider_terminal_matches_json_terminal_projection() {
+async fn anthropic_refusal_provider_terminal_preserves_json_and_sse_output() {
     let json_response = project_v3_anthropic_message_as_responses_response(&json!({
         "id":"msg_refusal_terminal_parity",
         "type":"message",
@@ -184,7 +184,7 @@ data: {"type":"message_stop"}
         Box::pin(stream),
     )
     .await
-    .expect("an Anthropic refusal terminal is a legal provider terminal, not a proxy error");
+    .expect("provider refusal must remain representable output");
 
     assert_eq!(json_response["status"], "incomplete");
     assert_eq!(

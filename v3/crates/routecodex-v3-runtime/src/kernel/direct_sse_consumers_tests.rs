@@ -256,7 +256,11 @@ fn direct_consumer_projects_chat_chunk_from_typed_tree_and_preserves_extension()
         .unwrap();
     assert_eq!(
         consumer.consume(&mut object).unwrap(),
-        SseObjectConsumerAction::RewriteData
+        SseObjectConsumerAction::Pass
+    );
+    assert_eq!(
+        object.data_value().unwrap()["choices"][0]["delta"]["role"],
+        "assistant"
     );
     assert_eq!(
         object.data_value().unwrap()["choices"][0]["delta"]["content"],

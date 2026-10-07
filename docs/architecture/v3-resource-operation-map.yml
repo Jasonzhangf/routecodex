@@ -1218,7 +1218,7 @@ resources:
       health_window: latest 100 calls for this provider+authAlias+model
       score_contract: clamp(configured_priority + sum(deltas), 0, 150)
       deltas: { normal_http: 1, recoverable_including_502: -5, account_401_403: -20 }
-      cooldown_condition: a recoverable typed provider failure blocks the exact providerId+authAlias+model identity only after three consecutive failures of the same typed fingerprint; typed irrecoverable account/billing classes (401..403) block on their first occurrence; the dynamic cooldown/probe ladder is selected from the continuous same-fingerprint failure streak and meaningful observed failure rate
+      cooldown_condition: an isolated recoverable failure does not block the exact providerId+authAlias+model identity; the default second consecutive same-fingerprint failure creates cooldown, real success clears the streak, and explicit terminal policies retain their declared threshold; the dynamic cooldown/probe ladder is selected from continuous same-fingerprint failure streak and meaningful observed failure rate
       revival_rule: only a successful provider transport probe may remove cooldown state
       exhaustion_rescue_rule: the complete candidate set may force one single-flight probe per continuous cooldown block; only a successful probe resets that generation
       generation_state: rescueProbeAttempted remains attached to the providerId+authAlias cooldown block until a successful probe removes the block
@@ -1254,7 +1254,7 @@ resources:
       cross_session: shared
       cross_model_same_key: shared
       sibling_keys: isolated
-      cooldown_condition: a recoverable typed provider failure blocks the providerId+authAlias auth-key identity only after three consecutive failures of the same typed fingerprint; typed irrecoverable account/billing classes (401..403) block on their first occurrence
+      cooldown_condition: a recoverable typed provider failure blocks the providerId+authAlias auth-key identity after its declared threshold of consecutive failures of the same typed fingerprint, default two; typed irrecoverable account/billing classes (401..403) block on their first occurrence
       cooldown_deadline: provider-owned adaptive ladder 5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s
       revival_rule: only a due auth-key probe success clears the auth-key cooldown and consecutive failure counts
       dry_run_rule: dry-run never acquires or sends an auth-key health probe

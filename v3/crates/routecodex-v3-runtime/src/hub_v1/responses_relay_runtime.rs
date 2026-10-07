@@ -44,8 +44,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[path = "responses_openai_chat_conversion.rs"]
 mod responses_openai_chat_conversion;
-#[path = "responses_relay_diagnostics.rs"]
-pub(crate) mod responses_relay_diagnostics;
 #[path = "responses_relay_dry_run.rs"]
 mod responses_relay_dry_run;
 #[path = "responses_relay_failures.rs"]
@@ -110,8 +108,7 @@ use responses_relay_failures::{
     is_v3_responses_provider_response_failure, provider_failure_output,
     provider_failure_output_with_observation, provider_http_failure,
     provider_request_relay_failure, provider_response_hook_failure,
-    provider_response_stream_failure, provider_runtime_failure, provider_semantic_failure,
-    provider_terminal_admission_failure, server_routing_group,
+    provider_response_stream_failure, provider_runtime_failure, server_routing_group,
     terminalize_v3_responses_relay_provider_failure,
 };
 use responses_relay_json_hooks::*;
@@ -123,7 +120,6 @@ const V3_RESPONSES_RELAY_PROVIDER_EVENT_FAILED_MESSAGE: &str =
 const V3_RESPONSES_RELAY_PROVIDER_EVENT_CODEC_OWNER: &str = "ProviderRespInbound01Raw -> V3HubRespInbound02Normalized (Responses event codec; SSE transport is opaque framing)";
 const V3_RESPONSES_RELAY_SSE_CLIENT_FRAME_PROJECTION_OWNER: &str =
     "V3HubRespOutbound05ClientSemantic -> V3ServerRespOutbound06ClientFrame";
-const V3_ANTHROPIC_CYBER_REFUSAL_CODE: &str = "ANTHROPIC_CYBER_REFUSAL";
 pub async fn execute_v3_responses_relay_runtime_with_default_transport(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
