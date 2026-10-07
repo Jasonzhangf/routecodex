@@ -405,11 +405,15 @@ impl V3TargetInterpreter {
         let candidate_count = eligible.len().max(1);
         // A text-only default candidate may project images only after every
         // captured, available vision candidate has been exhausted.
-        if expanded.route.request_capabilities.iter().any(|capability| {
-            matches!(capability.as_str(), "multimodal" | "vision")
-        }) && eligible.iter().any(|(_, candidate, _, _, _, _)| {
-            candidate_has_required_capability(&candidate.model_capabilities, "multimodal")
-        }) {
+        if expanded
+            .route
+            .request_capabilities
+            .iter()
+            .any(|capability| matches!(capability.as_str(), "multimodal" | "vision"))
+            && eligible.iter().any(|(_, candidate, _, _, _, _)| {
+                candidate_has_required_capability(&candidate.model_capabilities, "multimodal")
+            })
+        {
             eligible.retain(|(_, candidate, _, _, _, _)| {
                 candidate_has_required_capability(&candidate.model_capabilities, "multimodal")
             });

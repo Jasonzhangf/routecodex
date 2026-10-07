@@ -1375,7 +1375,10 @@ targets = [
         .expect("cooled vision permits the default text projection");
     assert_eq!(selected.candidate.provider_id, "text");
     assert_eq!(selected.route.pool_id, "default");
-    assert!(selected.unavailable_candidates.iter().any(|reason| reason == "vision:key:m:availability(vision:key:m)"));
+    assert!(selected
+        .unavailable_candidates
+        .iter()
+        .any(|reason| reason == "vision:key:m:availability(vision:key:m)"));
 }
 
 #[test]
