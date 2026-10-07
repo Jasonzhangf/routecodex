@@ -25,6 +25,9 @@ mod provider_compat;
 #[path = "auth_key_policy_tests.rs"]
 mod auth_key_policy;
 
+#[path = "matched_policy_fingerprint_tests.rs"]
+mod matched_policy_fingerprint;
+
 #[path = "tests/probe_recovery.rs"]
 mod probe_recovery;
 

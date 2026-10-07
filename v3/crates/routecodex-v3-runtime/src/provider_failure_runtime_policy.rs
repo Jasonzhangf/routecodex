@@ -6,12 +6,11 @@ use routecodex_v3_config::{
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
     build_v3_error_02_classified_from_v3_error_01,
-    build_v3_provider_failure_action_from_v3_error_02,
-    build_v3_provider_global_error_fingerprint_from_classified,
-    build_v3_provider_global_failure_policy, is_v3_provider_pool_exhausted, V3Error01SourceRaised,
-    V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected,
-    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
-    V3ExternalErrorKind, V3ExternalErrorLink, V3ProviderFailureSessionScope, V3ProviderHealthScope,
+    build_v3_provider_failure_action_from_v3_error_02, build_v3_provider_global_failure_policy,
+    is_v3_provider_pool_exhausted, V3Error01SourceRaised, V3Error05ExecutionDecision,
+    V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected, V3ErrorActionScope,
+    V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3ExternalErrorKind,
+    V3ExternalErrorLink, V3ProviderFailureSessionScope, V3ProviderHealthScope,
 };
 use routecodex_v3_provider_responses::{
     adaptive_concurrency::{V3AdaptiveConcurrencyController, V3AdaptiveConcurrencyLease},
@@ -766,9 +765,10 @@ impl V3ProviderFailureRuntimeHealth {
                     auth_alias,
                     model_id,
                     reason,
-                    build_v3_provider_global_error_fingerprint_from_classified(&classified)
-                        .ok()
-                        .flatten(),
+                    // 必须传 failure_action 的完整身份指纹：它带 source.code
+                    // 兜底，而全局分类指纹只认 HTTP 状态码。缺状态码时两类不同
+                    // 的 provider 本地错误会塌进同一个 None 桶，累加触发冷却。
+                    failure_action.failure_fingerprint.clone(),
                     now_ms,
                     Some(policy),
                 )
