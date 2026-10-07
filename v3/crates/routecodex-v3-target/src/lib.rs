@@ -210,9 +210,11 @@ impl V3TargetInterpreter {
                 ) {
                     Ok(expanded) => {
                         for candidate in expanded {
-                            let key = format!(
-                                "{}:{}:{}",
-                                candidate.provider_id, candidate.auth_alias, candidate.model_id
+                            let key = (
+                                candidate.provider_id.clone(),
+                                candidate.auth_alias.clone(),
+                                candidate.model_id.clone(),
+                                candidate_satisfies_required_capabilities(&candidate),
                             );
                             if let Some(index) = candidate_indices.get(&key).copied() {
                                 merge_candidate_route_provenance(
@@ -241,11 +243,13 @@ impl V3TargetInterpreter {
                 continue;
             };
             let mut required_capabilities = route_required_capabilities.clone();
-            // The default tier follows hosted search when that tier is
-            // unavailable. Its provider need not implement the hosted tool;
-            // Outbound removes that tool for a non-search-capable target.
+            // The default tier is reached after capability tiers are absent or
+            // exhausted. ProviderReqCompat projects retained images to the
+            // session placeholder for a selected text-only target.
             if entry.pool_id == "default" {
-                required_capabilities.retain(|capability| capability != "web_search");
+                required_capabilities.retain(|capability| {
+                    !matches!(capability.as_str(), "web_search" | "multimodal" | "vision")
+                });
             }
             let mut visited = BTreeSet::new();
             match self.expand_route_target(
@@ -264,9 +268,11 @@ impl V3TargetInterpreter {
             ) {
                 Ok(expanded) => {
                     for candidate in expanded {
-                        let key = format!(
-                            "{}:{}:{}",
-                            candidate.provider_id, candidate.auth_alias, candidate.model_id
+                        let key = (
+                            candidate.provider_id.clone(),
+                            candidate.auth_alias.clone(),
+                            candidate.model_id.clone(),
+                            candidate_satisfies_required_capabilities(&candidate),
                         );
                         if let Some(index) = candidate_indices.get(&key).copied() {
                             merge_candidate_route_provenance(&mut candidates[index], &candidate);
@@ -394,7 +400,24 @@ impl V3TargetInterpreter {
                 ));
             }
         }
+        // The attempt budget includes the text candidates that become
+        // selectable after the available vision candidates fail.
         let candidate_count = eligible.len().max(1);
+        // A text-only default candidate may project images only after every
+        // captured, available vision candidate has been exhausted.
+        if expanded
+            .route
+            .request_capabilities
+            .iter()
+            .any(|capability| matches!(capability.as_str(), "multimodal" | "vision"))
+            && eligible.iter().any(|(_, candidate, _, _, _, _)| {
+                candidate_has_required_capability(&candidate.model_capabilities, "multimodal")
+            })
+        {
+            eligible.retain(|(_, candidate, _, _, _, _)| {
+                candidate_has_required_capability(&candidate.model_capabilities, "multimodal")
+            });
+        }
         // A route pool can encode its configured tiers as target priority.
         // Plan tier index orders separate pools; scheduled priority orders the
         // tiers inside one pool. Near-limit is only a same-tier demotion, so it

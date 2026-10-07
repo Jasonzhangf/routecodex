@@ -1,8 +1,5 @@
-//! VR 当前轮图片路由红测（真实故障 20260815）。
-//!
-//! 同一 session 首轮发图命中 multimodal 后，后续纯文本轮仍命中 multimodal
-//! （minimax_anthropic）——VR 必须只看当前轮：历史轮图片（含已归一化占位）
-//! 不得再产生 multimodal/vision 能力。chat / responses / gemini 三入口同契约。
+//! 最后一个真实图片载体驱动视觉路由；后续纯文本不改变图片边界。
+//! Chat、Responses、Gemini 共用该规则；已清理的占位不产生视觉能力。
 
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_error::V3ProviderFailureSessionScope;
@@ -49,10 +46,7 @@ targets = [{ kind = "provider_model", provider = "mm", model = "MiniMax-M3", key
 }
 
 #[test]
-fn v3_routing_facts_ignore_history_images_when_current_turn_is_text_only() {
-    // 真实故障 20260815：同一 session 首轮发图命中 multimodal 后，后续
-    // 纯文本轮仍命中 multimodal（minimax_anthropic）——VR 必须只看当前轮：
-    // 历史轮图片（含已归一化占位）不得再产生 multimodal/vision 能力。
+fn v3_routing_facts_keep_latest_chat_image_after_text_only_turn() {
     let raw = build_v3_server_03_http_request_raw(
         "server".to_string(),
         V3ProviderFailureSessionScope::new("server", "default", "request").expect("failure scope"),
@@ -84,17 +78,15 @@ fn v3_routing_facts_ignore_history_images_when_current_turn_is_text_only() {
     );
 
     assert!(
-        !facts.capabilities.contains("multimodal"),
-        "history image must not route multimodal on a text-only current turn; caps={:?}",
+        facts.capabilities.contains("multimodal"),
+        "latest image must route multimodal after a text-only turn; caps={:?}",
         facts.capabilities
     );
-    assert!(!facts.capabilities.contains("vision"));
+    assert!(facts.capabilities.contains("vision"));
 }
 
 #[test]
-fn v3_routing_facts_ignore_history_images_on_responses_text_only_current_turn() {
-    // 与 chat 同一根因：responses 入口历史轮 input_image 不得在纯文本
-    // 当前轮驱动 multimodal/vision。
+fn v3_routing_facts_keep_latest_responses_image_after_text_only_turn() {
     let request = json!({
         "model": "deepseek-v4-flash",
         "input": [
@@ -124,17 +116,15 @@ fn v3_routing_facts_ignore_history_images_on_responses_text_only_current_turn() 
     );
 
     assert!(
-        !facts.capabilities.contains("multimodal"),
-        "responses history image must not route multimodal on text-only turn; caps={:?}",
+        facts.capabilities.contains("multimodal"),
+        "latest responses image must route multimodal after a text-only turn; caps={:?}",
         facts.capabilities
     );
-    assert!(!facts.capabilities.contains("vision"));
+    assert!(facts.capabilities.contains("vision"));
 }
 
 #[test]
-fn v3_routing_facts_ignore_history_images_on_gemini_text_only_current_turn() {
-    // gemini 入口 contents 同样只认当前轮：历史轮 inline_data 图片不得在
-    // 纯文本当前轮驱动 multimodal/vision。
+fn v3_routing_facts_keep_latest_gemini_image_after_text_only_turn() {
     let request = json!({
         "model": "gemini-2.5-flash",
         "contents": [
@@ -157,17 +147,16 @@ fn v3_routing_facts_ignore_history_images_on_gemini_text_only_current_turn() {
     );
 
     assert!(
-        !facts.capabilities.contains("multimodal"),
-        "gemini history image must not route multimodal on text-only turn; caps={:?}",
+        facts.capabilities.contains("multimodal"),
+        "latest gemini image must route multimodal after a text-only turn; caps={:?}",
         facts.capabilities
     );
-    assert!(!facts.capabilities.contains("vision"));
+    assert!(facts.capabilities.contains("vision"));
 }
 
 #[test]
 fn v3_routing_facts_current_turn_gemini_image_routes_multimodal() {
-    // 正向：gemini 当前轮 inline_data 图片仍必须驱动 multimodal，防止
-    // "只看当前轮" 修复误伤当前轮图片路由。
+    // 当前消息的真实图片也必须驱动 multimodal。
     let request = json!({
         "model": "gemini-2.5-flash",
         "contents": [
@@ -196,7 +185,7 @@ fn v3_routing_facts_current_turn_gemini_image_routes_multimodal() {
 }
 
 #[test]
-fn v3_responses_trailing_tool_output_images_do_not_route_multimodal() {
+fn v3_responses_trailing_tool_output_images_route_multimodal() {
     let cases = [
         (
             "function_call_output",
@@ -232,12 +221,12 @@ fn v3_responses_trailing_tool_output_images_do_not_route_multimodal() {
             TEST_LONGCONTEXT_THRESHOLD_TOKENS,
         );
 
-        assert_ne!(
+        assert_eq!(
             facts.route_classification.route_name, "multimodal",
-            "trailing {output_type} image must not activate multimodal: {:?}",
+            "latest {output_type} image must activate multimodal: {:?}",
             facts.route_classification
         );
-        assert!(!facts.capabilities.contains("multimodal"));
-        assert!(!facts.capabilities.contains("vision"));
+        assert!(facts.capabilities.contains("multimodal"));
+        assert!(facts.capabilities.contains("vision"));
     }
 }

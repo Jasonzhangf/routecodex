@@ -419,7 +419,8 @@ fn matched_pool_and_default_floor_are_captured_before_one_hit() {
         .iter()
         .map(|entry| entry.target_id.as_deref())
         .collect::<Vec<_>>();
-    assert_eq!(ids, vec![Some("a"), Some("c"), Some("b")]);
+    assert_eq!(ids, vec![Some("a"), Some("c"), Some("a"), Some("b")]);
+    assert_eq!(hit.target_plan[2].pool_id, "default");
     assert_eq!(hit.pool_id, "tools");
     assert_eq!(hit.hit_count, 1);
 }

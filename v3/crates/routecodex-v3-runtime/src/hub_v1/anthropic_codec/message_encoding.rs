@@ -82,7 +82,7 @@ pub(super) fn encode_anthropic_messages_as_responses_semantic(
                                 &role,
                                 &mut message_content,
                             );
-                            encoded.push(json!({"type":"function_call_output","call_id":part.get("tool_use_id").cloned().unwrap_or(Value::Null),"output":anthropic_tool_result_output_as_responses_semantic(part.get("content"))}));
+                            encoded.push(json!({"type":"function_call_output","call_id":part.get("tool_use_id").cloned().unwrap_or(Value::Null),"output":anthropic_tool_result_output_as_responses_semantic(part.get("content"))?}));
                         }
                         _ => {}
                     }
@@ -108,10 +108,25 @@ pub(super) fn push_responses_message_content(
     }
 }
 
-pub(super) fn anthropic_tool_result_output_as_responses_semantic(content: Option<&Value>) -> Value {
-    match content {
+pub(super) fn anthropic_tool_result_output_as_responses_semantic(
+    content: Option<&Value>,
+) -> Result<Value, V3AnthropicCodecError> {
+    Ok(match content {
         Some(Value::String(text)) => Value::String(text.clone()),
         Some(Value::Array(parts)) => {
+            if parts
+                .iter()
+                .any(|part| part.get("type").and_then(Value::as_str) == Some("image"))
+            {
+                let parts = parts
+                    .iter()
+                    .map(|part| {
+                        anthropic_content_part_as_responses_message_part(part)
+                            .unwrap_or_else(|| Ok(part.clone()))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                return Ok(Value::Array(parts));
+            }
             let text = parts
                 .iter()
                 .filter_map(|part| part.get("text").and_then(Value::as_str))
@@ -127,7 +142,7 @@ pub(super) fn anthropic_tool_result_output_as_responses_semantic(content: Option
             Value::String(serde_json::to_string(value).unwrap_or_else(|_| "null".into()))
         }
         None => Value::String(String::new()),
-    }
+    })
 }
 
 pub(super) fn system_as_responses_instructions(value: &Value) -> Option<String> {

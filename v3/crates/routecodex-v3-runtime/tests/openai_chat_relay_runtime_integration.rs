@@ -3783,7 +3783,7 @@ async fn openai_chat_entry_mode_b_web_search_intercepted_must_fail_fast_not_sile
 }
 
 #[test]
-fn routing_image_attachment_is_current_turn_only_not_history() {
+fn routing_latest_image_attachment_survives_text_only_turns() {
     let chat_history_image_then_text = json!({
         "model": "deepseek-v4-flash",
         "messages": [
@@ -3822,7 +3822,7 @@ fn routing_image_attachment_is_current_turn_only_not_history() {
             "chat history image + current text",
             &chat_history_image_then_text,
             "openai_chat",
-            false,
+            true,
         ),
         (
             "chat current turn image",
@@ -3834,7 +3834,7 @@ fn routing_image_attachment_is_current_turn_only_not_history() {
             "responses history image + current text",
             &responses_history_image_then_text,
             "responses",
-            false,
+            true,
         ),
     ];
     for (label, body, entry, expect_multimodal) in cases {

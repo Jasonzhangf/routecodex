@@ -1340,6 +1340,8 @@ features:
   - Router cannot import Provider availability and Target cannot mutate Provider health
   - P5 Runtime stops before Provider send and only full selected-target exhaustion enters Error01-Error06
   - Request image/media facts survive trailing tool/function outputs and are carried to Target as multimodal/vision requirements
+  - The default tier may omit media requirements only as the last tier after multimodal tiers are absent or exhausted; ProviderReqCompat then projects images to deterministic session placeholders for a selected text-only target
+  - Router preserves default opaque entries with their distinct capability contract; Target deduplicates only equally eligible candidates and selects an available captured vision candidate before text-only default projection
   - Request tool facts survive top-level tools and Responses additional_tools; Codex coding tools and tool_search calls become routing facts, while web_search requires strict current-turn keyword intent or an explicit model call and never activates from a declaration alone
   - Target candidate capability checks keep route separate from capability: only web_search/search and multimodal/vision can produce capability_mismatch; tools/tool_outputs/reasoning/thinking/coding/longcontext
       never hard-reject a candidate
@@ -1354,6 +1356,7 @@ features:
   - Schedule adjustments apply only within the selected route pool and never bypass provider health/cooldown or enter request, provider, client, metadata, or debug control payloads
   required_gates:
   - npm run test:v3-p5-router-target
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server image_input_blackbox
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target context_admission_filters_over_limit_candidates -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target -- --nocapture
   - 'cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime nodes::tests:': -- --nocapture
@@ -1742,13 +1745,14 @@ features:
   - docs/architecture/v3-mainline-call-map.yml
   required_unit:
   - current-turn typed facts classify deterministically.
-  - historical messages and prior tool content cannot alter route facts.
+  - normalized historical image placeholders cannot create multimodal route facts; the latest retained image carrier survives text-only reminders.
   - business text and tool arguments cannot create routing/control state.
   required_reverse:
-  - changing only history leaves route classification unchanged.
+  - changing only earlier image carriers leaves route classification unchanged after history normalization.
   - changing only request prose leaves route/control facts unchanged.
   required_gates:
   - npm run test:route-classifier-semantics
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server image_input_blackbox
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - git diff --check
@@ -1759,7 +1763,7 @@ features:
   status: runtime_active_live_verified_5520
   change_risk: high
   owner_kind: rust_v3_protocol_codec_field_parity
-  owner_scope: Lossless V2/V3 field parity for the supported V3 Relay protocol conversion paths and same-protocol Responses Direct provider wire preservation without server/SSE/MetadataCenter repair owners.
+  owner_scope: Lossless field parity for V3 Relay protocol conversion and Responses Direct; structured latest user/tool images survive across Chat, Responses and Anthropic. Chat projects tool images to adjacent user content, Responses to function_call_output.output and Anthropic to tool_result.content, without server/SSE/MetadataCenter repair owners.
   compatibility_exceptions:
   - compatibility_id: v3.responses_inbound.codex_builtin_integer_schema
     status: source_controlled
@@ -3101,7 +3105,7 @@ features:
   status: active_normalization_and_session_compat_projection
   change_risk: medium
   owner_kind: rust_project_v3_req_inbound_normalization
-  owner_scope: ReqInbound history image normalization plus typed-target-gated session compatibility projection for selected non-multimodal targets; multimodal targets preserve image bytes.
+  owner_scope: ReqInbound preserves the latest image-bearing carrier despite later text-only reminders and cleans earlier images; typed-target-gated session compatibility projects images only for selected non-multimodal targets.
   owner_modules:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/history_image_cleanup.rs
   required_gates:
@@ -3109,9 +3113,10 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib hooks::tests::direct_responses_projection_preserves_current_image_for_selected_target
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib multimodal_target_preserves_image_bytes_for_session_semantics
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib non_multimodal_target_projects_image_to_session_placeholder
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server image_input_blackbox
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-error --lib transient_stage_code_classifier
   completion_rule:
-    source: Relay runtime lib tests pass (normalize_v3_history_image_placeholders explicitly exempted as semantic normalization, not history repair).
+    source: Runtime tests and public HTTP image_input_blackbox cases pass for Chat, Responses and Anthropic; latest images and tool identity survive with multimodal available, older images are placeholders, and empty/exhausted multimodal routes permit current-image placeholders.
 - feature_id: v3.direct_runtime_kernel_core
   status: active_skeleton
   change_risk: critical

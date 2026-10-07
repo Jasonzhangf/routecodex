@@ -1304,6 +1304,36 @@ fn normalize_openai_chat_messages_payload(
             *content = Value::Array(normalized_parts);
         }
     }
+    // Chat tool results represent text only. Keep the result and call identity,
+    // and carry images after the complete consecutive tool-result group.
+    let mut projected_messages = Vec::with_capacity(messages.len());
+    let mut images = Vec::new();
+    for mut message in std::mem::take(messages) {
+        if message.get("role").and_then(Value::as_str) == Some("tool") {
+            if let Some(content) = message.get_mut("content") {
+                if let Some(parts) = content.as_array_mut() {
+                    parts.retain(|part| {
+                        if part.get("type").and_then(Value::as_str) == Some("image_url") {
+                            images.push(part.clone());
+                            false
+                        } else {
+                            true
+                        }
+                    });
+                    if parts.is_empty() {
+                        *content = Value::String(String::new());
+                    }
+                }
+            }
+        } else if !images.is_empty() {
+            projected_messages.push(json!({"role":"user","content":std::mem::take(&mut images)}));
+        }
+        projected_messages.push(message);
+    }
+    if !images.is_empty() {
+        projected_messages.push(json!({"role":"user","content":images}));
+    }
+    *messages = projected_messages;
     project_openai_chat_provider_tools_for_web_search_mode_recording(
         &mut normalized,
         model_id,
