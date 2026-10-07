@@ -1,5 +1,8 @@
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
-use routecodex_v3_error::{V3ProviderErrorFingerprint, V3ProviderFailureSessionScope};
+use routecodex_v3_error::{
+    build_v3_provider_global_error_fingerprint, V3ProviderErrorFingerprint,
+    V3ProviderFailureSessionScope,
+};
 use routecodex_v3_provider_responses::{
     V3ProviderFailureAction, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
     V3ProviderHealthStore, V3ProviderKeyHealthStore, V3ProviderRecoveryKind,
@@ -758,4 +761,58 @@ fn different_recoverable_fingerprints_do_not_add_up_to_one_cooldown() {
     assert_eq!(third.failure_streak, 3);
     assert!(third.cooldown, "three same-fingerprint failures must cool");
     assert!(!third.available);
+}
+
+// 生产 builder 身份回归：5xx 保留真实上游状态，500 与 502 不能共用一条
+// 连续失败序列；没有上游状态的失败落到失败类别，不同类别同样不同源。
+#[test]
+fn production_failure_actions_keep_distinct_5xx_and_class_identities() {
+    let store = V3ProviderKeyHealthStore::default();
+    let server_error = build_v3_provider_global_error_fingerprint(500)
+        .expect("500 fingerprint classification")
+        .expect("500 must reach global health");
+    let gateway_error = build_v3_provider_global_error_fingerprint(502)
+        .expect("502 fingerprint classification")
+        .expect("502 must reach global health");
+    assert_ne!(server_error, gateway_error);
+
+    let mut action = V3ProviderFailureAction::recoverable("provider_http_error");
+    action.failure_threshold = 3;
+    for (offset, status) in [0_u64, 1, 2].into_iter().zip([500_u16, 502, 500]) {
+        action.failure_fingerprint = Some(
+            build_v3_provider_global_error_fingerprint(status)
+                .expect("fingerprint classification")
+                .expect("status must reach global health"),
+        );
+        let projection = store
+            .record_provider_failure_action("provider-a", "key-a", "model-a", &action, offset)
+            .expect("alternating 5xx failure");
+        assert_eq!(
+            projection.failure_streak, 1,
+            "alternating 500/502 must restart the streak: offset={offset}"
+        );
+        assert!(!projection.cooldown, "alternating 500/502 must never cool");
+    }
+
+    // 类别回退身份：本地 decode 失败与 request compat 失败没有上游状态，但
+    // 类别不同，不能合并成一条 streak。
+    let mut sse_decode = V3ProviderFailureAction::recoverable("provider.sse_decode");
+    let mut compat = V3ProviderFailureAction::recoverable("provider_request_compat_error");
+    sse_decode.failure_threshold = 3;
+    compat.failure_threshold = 3;
+    assert_ne!(sse_decode.failure_fingerprint, compat.failure_fingerprint);
+    assert_eq!(
+        sse_decode.failure_fingerprint.as_ref().unwrap().http_status,
+        0
+    );
+    for (offset, action) in [(10_u64, &sse_decode), (11, &compat), (12, &sse_decode)] {
+        let projection = store
+            .record_provider_failure_action("provider-b", "key-b", "model-b", action, offset)
+            .expect("mixed-class failure");
+        assert_eq!(
+            projection.failure_streak, 1,
+            "mixed classes must restart the streak"
+        );
+        assert!(!projection.cooldown);
+    }
 }
