@@ -445,12 +445,10 @@ async fn namespace_mcp_opaque_arguments_and_result_are_preserved_without_parsing
         body.clone(),
     )
     .unwrap();
-    assert_eq!(wire.body()["tools"][0]["type"], "function");
-    assert_eq!(wire.body()["tools"][0]["name"], "mcpx__runtime_read");
     assert_eq!(
-        wire.body()["tools"][0]["parameters"],
-        body["tools"][0]["tools"][0]["parameters"],
-        "namespace flattening must preserve the public schema"
+        wire.body()["tools"],
+        body["tools"],
+        "wire must preserve an already-compatible namespace declaration; standard projection owns namespace flattening"
     );
     assert_eq!(
         wire.body()["input"][0]["arguments"],
@@ -486,8 +484,8 @@ async fn namespace_mcp_opaque_arguments_and_result_are_preserved_without_parsing
     assert_eq!(observed["input"][0]["arguments"], mcp_arguments);
     assert_eq!(observed["input"][1]["output"], mcp_result);
     assert_eq!(
-        observed["input"][0]["name"], "mcpx__runtime_read",
-        "only the callable name may be rewritten by namespace projection"
+        observed["input"][0]["name"], "mcpx.runtime_read",
+        "wire must not rewrite callable names owned by namespace projection"
     );
     assert_eq!(
         observed["input"][0]["call_id"], "call_mcp_byte_exact",
