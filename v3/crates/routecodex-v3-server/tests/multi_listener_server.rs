@@ -8202,7 +8202,7 @@ async fn debug_endpoints_project_shared_runtime_state_and_dry_run_no_send() {
         "dry run snapshot session must be released after response projection"
     );
 
-    while let Some(extra) = captures.recv().now_or_never() {
+    if let Some(extra) = captures.recv().now_or_never() {
         panic!("debug success provider must receive exactly one request: {extra:?}");
     }
     handle.shutdown().await;
