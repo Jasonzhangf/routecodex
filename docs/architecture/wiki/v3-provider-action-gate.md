@@ -148,6 +148,10 @@ Review locks:
   `handle_v3_responses_relay_provider_failure`, then
   `run_v3_relay_provider_failure_policy`; they cannot return directly as provider-bound
   request errors or bypass typed Error05 admission.
+- The Responses, Anthropic, and shared Relay lifecycle wrappers only carry request
+  scope and delegate to their `*_resident` function. Provider failure, recovery,
+  permit, and success bindings remain anchored to the resident bodies, so a wrapper
+  call cannot substitute for a broken resident edge.
 - The machine gate requires the exact frozen edge set, resolves every declared symbol in
   its declared source, verifies each caller body invokes its callee, and compares every
   map edge endpoint/status/symbol/source field with this lifecycle manifest.

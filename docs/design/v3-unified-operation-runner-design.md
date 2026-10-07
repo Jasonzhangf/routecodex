@@ -149,8 +149,8 @@ mapping truth.
 | normalize_request_losslessly | `routecodex-v3-runtime` (Inbound/Chat Process lossless boundary) | client-json | canonical-request | request_origin_kind read; request_inverse_context and explicit_history_pairing written only for client_entry, read/preserved for retry/internal_followup | canonical-request produced | typed source failure to ErrorErr01 | inverse context owned by this node; Config has no mapping defaults |
 | resolve_target | `routecodex-v3-runtime` (Virtual Router) | canonical-request | selected-target | hub.resolved_target written | selected-target produced | typed source failure to ErrorErr01 | target identity is typed resource, not payload |
 | plan_execution | `routecodex-v3-runtime` (Target Interpreter) | canonical-request, selected-target | execution-plan | execution_mode written | execution-plan produced | typed source failure to ErrorErr01 | mode is typed control resource; Config cannot select mode |
-| govern_chat_request | `routecodex-v3-runtime` (Chat Process Req04) | execution-plan | governed-request | tool_thinking_turn_context written; explicit_history_pairing read | governed-request produced | typed source failure to ErrorErr01 | tool declaration domains separated; applies the declared historical-image placeholder policy exactly once while preserving current-turn images; no payload control truth |
-| project_standard_provider_request | `routecodex-v3-runtime` (Outbound) | governed-request | standard-provider-request | request_inverse_context and explicit_history_pairing read; attempt_projection_context and attempt_declaration_map written | standard-provider-request produced | typed source failure to ErrorErr01 | projection runs through registered field operators and typed config; tables are baseline only |
+| govern_chat_request | `routecodex-v3-runtime` (Chat Process Req04) | execution-plan | governed-request | tool_thinking_turn_context and current_field_associations written; explicit_history_pairing, request_origin_kind and immutable request_inverse_context read | governed-request produced | typed source failure to ErrorErr01 | tool declaration domains separated; registered structural edits carry current sources with actual elements; applies the declared historical-image placeholder policy exactly once while preserving current-turn images; Direct only registers pass-through sources; no payload control truth |
+| project_standard_provider_request | `routecodex-v3-runtime` (Outbound) | governed-request | standard-provider-request | request_inverse_context, explicit_history_pairing and current_field_associations read; attempt_projection_context and attempt_declaration_map written | standard-provider-request produced | typed source failure to ErrorErr01 | projection runs through registered field operators and typed config; actual emission records current source references; tables are baseline only |
 | adjust_provider_private_request | `routecodex-v3-runtime` (Compat) | standard-provider-request | compatible-provider-request | provider_wire_payload read/write | compatible-provider-request produced | typed source failure to ErrorErr01 | compat is registered operator@version, not description |
 | encode_provider_wire | `routecodex-v3-runtime` (Provider wire codec) | compatible-provider-request | provider-wire | provider_wire_payload read | provider-wire produced | typed source failure to ErrorErr01 | codec has no retry loop |
 | construct_transport_request | `routecodex-v3-runtime` (Provider transport) | provider-wire | transport-request | provider.transport_request produced | transport-request produced | typed source failure to ErrorErr01 | one transport exit; network failures remain provider/Error chain |
@@ -345,8 +345,9 @@ Every request graph invocation receives an immutable typed control resource
 `internal_followup`, keyed by `requestId`, `invocationId`, and `originKind`. The Runtime runner
 entry (`RuntimeRequestGraphEntry` in the architecture maps) is the single producer and creates the
 origin before every request graph invocation, including each retry and servertool re-entry, without
-putting it in the request payload. `normalize_request_losslessly` is its only graph reader and
-reads this resource before it touches canonical request construction.
+putting it in the request payload. `normalize_request_losslessly` reads this resource before
+canonical construction; `govern_chat_request` reads it to seed current field associations on
+the first entry and preserve the current layout on reentry. These are the only graph readers.
 `request_origin_kind` has no MetadataCenter slot and no cross-invocation storage; its scope ends
 when the graph invocation returns, and RuntimeRequestFinalizer does not consume or release it.
 
@@ -357,6 +358,26 @@ existing request-scoped `request_inverse_context` and `explicit_history_pairing`
 them. Both request-scoped slots are released only at `RuntimeRequestFinalizer`. The request graph
 resource edges and architecture maps bind this rule explicitly; no payload-carried origin marker or
 fallback shortcut is introduced. The schema gap is closed by this typed resource binding.
+
+### REQ02 resource effects clarification (2026-10-02)
+
+The incremental consumer contract is detailed in
+[`v3-req02-cutover-consumer-contract.md`](v3-req02-cutover-consumer-contract.md).
+It is a pending design amendment; the effects-only review does not admit its new consumer,
+Direct hook, identity, or lifecycle interfaces. Applicable maps and independent design review
+must bind these interfaces before dependent product implementation.
+
+REQ02 consumes the `client-json` data ARC and produces `canonical-request`; its business payload
+is not also mirrored into a `v3.request.normal_payload` resource. Its resource effects read the
+published field configuration, invocation origin, preserved inverse context, and preserved
+history pairing, and write only the original-client inverse/history pair on initialization.
+The history resource map includes REQ02 as a reader because retry and internal follow-up preserve
+both slots as one request-scoped association. This clarifies the existing normalization contract;
+it does not connect the pending operator or change any later node's implementation status.
+The same data contract applies to downstream declarations: target resolution reads the canonical
+request ARC, and standard provider projection reads its governed request ARC. Neither declares a
+read of a separate normal-payload mirror. Legacy active V3 resource-map bindings remain legacy
+bindings until their callers are replaced; they are not hidden producers for this new graph.
 
 ## Main tool-semantic fixes already merged
 
@@ -629,8 +650,8 @@ types without another capture or payload rewrite:
 Anthropic and Gemini Direct are not current supported branches; the first node preserves their
 existing pending/unsupported behavior and does not add protocol capability. The HTTP dispatcher
 and WebSocket handler are alternate Server transports into one Runtime operation, not separate
-field-mapping implementations. `request_origin_kind` is consumed only at request normalization and
-is never encoded into the captured JSON.
+field-mapping implementations. `request_origin_kind` is consumed only at request normalization
+and current-source governance, and is never encoded into the captured JSON.
 
 The first delivery must:
 

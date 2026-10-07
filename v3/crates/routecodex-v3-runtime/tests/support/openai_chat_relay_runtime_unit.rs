@@ -440,9 +440,13 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
     ) {
         std::env::set_var("ROUTECODEX_V3_TEST_KEY", "test-secret");
         let manifest = test_relay_manifest();
-        let request_execution_control =
-            crate::nodes::V3RequestExecutionControl::from_manifest(&manifest, "test")
-                .expect("request execution control");
+        let request_execution_control = crate::nodes::V3RequestExecutionControl::new(
+            &manifest,
+            "test",
+            "req-openai-chat-relay-handoff",
+            "openai_chat",
+        )
+        .expect("request execution control");
         request_execution_control
             .attempt_budget()
             .admit_transport_attempt()
@@ -472,6 +476,7 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
             V3RelayProviderFailureRetryPolicy::default(),
             V3HubExecutionMode::Relay,
+            V3RelayRuntimeEntry::client_entry(),
             Some(request_execution_control),
             None,
         )
@@ -483,5 +488,136 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             transport.sends.load(std::sync::atomic::Ordering::Acquire),
             0
         );
+    }
+}
+
+#[cfg(test)]
+mod typed_provider_transport_source_tests {
+    use super::*;
+    use routecodex_v3_config::V3ResponsesTransportKind;
+    use routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS;
+    use routecodex_v3_provider_responses::{
+        V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ResponsesStreamIntent,
+    };
+    use serde_json::json;
+
+    fn openai_chat_transport_target(base_url: &str) -> V3ResponsesProviderTarget {
+        V3ResponsesProviderTarget {
+            provider_id: "openai-chat-typed-provider".to_string(),
+            provider_type: "openai_chat".to_string(),
+            base_url: base_url.to_string(),
+            canonical_model_id: "typed-model".to_string(),
+            wire_model: "typed-model".to_string(),
+            compatibility_profile: None,
+            headers: Default::default(),
+            auth: V3ProviderAuthHandle {
+                alias: "primary".to_string(),
+                secret: V3ProviderAuthSecretHandle::Environment(
+                    "ROUTECODEX_TYPED_TRANSPORT_TEST_KEY".to_string(),
+                ),
+            },
+            responses_transport: V3ResponsesTransportKind::Http,
+            websocket_v2_url: None,
+            provider_request_cleanup: Default::default(),
+            request_timeout_ms: 300_000,
+            sse_first_frame_timeout_ms: None,
+            initial_concurrency_budget: 8,
+            concurrency_acquire_timeout_ms: 60_000,
+        }
+    }
+
+    #[test]
+    fn openai_chat_transport_construction_success_keeps_url_auth_stream_and_body() {
+        let request = <V3OpenAiChatRelayCodec as V3RelayProtocolCodec>::build_transport_request(
+            "req-openai-chat-ok",
+            openai_chat_transport_target("https://openai-chat.example.invalid"),
+            V3HubTransportIntent::Sse,
+            json!({
+                "model": "typed-model",
+                "stream": true,
+                "messages": [{"role": "user", "content": "hello"}],
+                "opaque_marker": {"keep": true}
+            }),
+            Vec::new(),
+        )
+        .expect("valid openai chat transport construction");
+
+        assert_eq!(request.request_id(), "req-openai-chat-ok");
+        assert_eq!(request.provider_id(), "openai-chat-typed-provider");
+        assert_eq!(request.provider_key(), "openai-chat-typed-provider:primary");
+        assert!(request.url().ends_with("/chat/completions"));
+        assert_eq!(request.stream_intent(), V3ResponsesStreamIntent::Sse);
+        assert_eq!(request.body()["model"], "typed-model");
+        assert_eq!(request.body()["messages"][0]["content"], "hello");
+        assert_eq!(request.body()["opaque_marker"]["keep"], true);
+    }
+
+    #[test]
+    fn openai_chat_transport_construction_failure_keeps_typed_provider_source_to_public_projection()
+    {
+        let core_error = <V3OpenAiChatRelayCodec as V3RelayProtocolCodec>::build_transport_request(
+            "req-openai-chat-typed-source",
+            openai_chat_transport_target("::not-a-url::"),
+            V3HubTransportIntent::Json,
+            json!({"model": "typed-model", "messages": [{"role": "user", "content": "hello"}]}),
+            Vec::new(),
+        )
+        .expect_err("invalid base URL must fail openai chat transport construction");
+
+        let typed_provider_error = match core_error {
+            V3RelayCoreError::Provider(error) => error,
+            other => panic!("openai chat codec must keep the typed Provider source, got {other}"),
+        };
+        assert!(matches!(
+            typed_provider_error,
+            V3ProviderError::InvalidBaseUrl { .. }
+        ));
+
+        let runtime_error = v3_openai_chat_relay_runtime_error_from_core(
+            V3RelayCoreError::Provider(typed_provider_error),
+        );
+        assert!(matches!(
+            &runtime_error,
+            V3OpenAiChatRelayRuntimeError::Provider(V3ProviderError::InvalidBaseUrl { .. })
+        ));
+
+        let output = project_v3_openai_chat_relay_runtime_failure(runtime_error);
+        assert_eq!(
+            output.status, 598,
+            "request-stage provider construction failure must project the internal request lane"
+        );
+        let body = match &output.client_body {
+            V3OpenAiChatRelayClientBody::Json(body) => body,
+            V3OpenAiChatRelayClientBody::Sse(_) => panic!("construction failure must project JSON"),
+        };
+        assert_eq!(body["error"]["code"], "provider_local_runtime_error");
+        assert_ne!(body["error"]["code"], "network_error");
+        assert!(
+            body["error"].get("external_error").is_none(),
+            "no fabricated external HTTP witness: {}",
+            body["error"]
+        );
+        assert_eq!(
+            output.error_chain.as_deref(),
+            Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
+        );
+        assert_eq!(
+            output.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
+        );
+
+        // stage 由公共投影内部的同一 shared mapper 决定；这里用同一 stage 常量核对
+        // typed 来源 code/stage，避免从 Display 文本反解析控制事实。
+        let source = crate::hooks::build_v3_provider_error_source(
+            "V3Transport13ResponsesHttpRequest",
+            V3ProviderError::InvalidBaseUrl {
+                request_id: "req-openai-chat-typed-source".to_string(),
+                provider_id: "openai-chat-typed-provider".to_string(),
+                reason: "invalid url".to_string(),
+            },
+        );
+        assert_eq!(source.source_stage, "V3Transport13ResponsesHttpRequest");
+        assert_eq!(source.code, "provider_local_runtime_error");
+        assert!(source.external_error.is_none());
     }
 }

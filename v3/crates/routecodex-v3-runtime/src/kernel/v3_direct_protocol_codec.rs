@@ -78,11 +78,35 @@ pub trait V3DirectProtocolCodec {
     fn server_id(standardized: &Self::Standardized) -> &str;
     fn endpoint(standardized: &Self::Standardized) -> &str;
     fn request_id(standardized: &Self::Standardized) -> &str;
+    fn execution_id(standardized: &Self::Standardized) -> &str;
     fn body(standardized: &Self::Standardized) -> &serde_json::Value;
+    fn replace_body(standardized: &mut Self::Standardized, body: serde_json::Value);
     fn tool_thinking_turn_context(
         standardized: &Self::Standardized,
     ) -> &crate::hub_v1::V3ToolThinkingTurnContext;
     fn policy_target(policy: &Self::Policy) -> &V3Target10ConcreteProviderSelected;
+
+    /// Build the registered Direct native working view from the current
+    /// canonical request and the same request-local original pair.
+    fn build_request_projection_view(
+        standardized: &Self::Standardized,
+        selected: &V3Target10ConcreteProviderSelected,
+        request_execution_control: &crate::nodes::V3RequestExecutionControl,
+        attempt_id: &str,
+    ) -> Result<crate::kernel::V3DirectRequestProjectionView, V3Error01SourceRaised> {
+        let invocation = crate::operation_runner::RequestInvocationContext::new(
+            request_execution_control.request_context().clone(),
+            format!("{}:direct-entry", Self::request_id(standardized)),
+            attempt_id.to_string(),
+            crate::operation_runner::RequestOriginKind::ClientEntry,
+        );
+        crate::kernel::build_v3_direct_request_projection_view(
+            Self::body(standardized),
+            selected,
+            &invocation,
+            attempt_id,
+        )
+    }
 
     fn router_facts(
         standardized: &Self::Standardized,
@@ -97,8 +121,14 @@ pub trait V3DirectProtocolCodec {
     fn run_request_projection(
         policy: &Self::Policy,
         request_key_catalog: &V3DirectRequestKeyHookCatalog,
-        drop_context: &crate::projection_drop_log::V3ProjectionDropContext,
-    ) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised>;
+        request_view: &crate::kernel::V3DirectRequestProjectionView,
+    ) -> Result<
+        (
+            V3Provider12ResponsesWirePayload,
+            crate::operation_runner::AttemptContext,
+        ),
+        V3Error01SourceRaised,
+    >;
 
     fn run_provider_transport(
         wire: V3Provider12ResponsesWirePayload,
@@ -242,8 +272,14 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
     fn request_id(standardized: &Self::Standardized) -> &str {
         &standardized.request_id
     }
+    fn execution_id(standardized: &Self::Standardized) -> &str {
+        &standardized.execution_id
+    }
     fn body(standardized: &Self::Standardized) -> &serde_json::Value {
         &standardized.body
+    }
+    fn replace_body(standardized: &mut Self::Standardized, body: serde_json::Value) {
+        standardized.body = body;
     }
     fn tool_thinking_turn_context(
         standardized: &Self::Standardized,
@@ -277,12 +313,18 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
     fn run_request_projection(
         policy: &Self::Policy,
         request_key_catalog: &V3DirectRequestKeyHookCatalog,
-        drop_context: &crate::projection_drop_log::V3ProjectionDropContext,
-    ) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
-        crate::hooks::responses_direct_request_projection_hook_with_key_catalog_and_drop_context(
+        request_view: &crate::kernel::V3DirectRequestProjectionView,
+    ) -> Result<
+        (
+            V3Provider12ResponsesWirePayload,
+            crate::operation_runner::AttemptContext,
+        ),
+        V3Error01SourceRaised,
+    > {
+        crate::hooks::responses_direct_request_projection_hook_with_key_catalog_and_view(
             policy,
             request_key_catalog,
-            drop_context,
+            request_view,
         )
     }
 
@@ -361,18 +403,8 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
         if crate::hub_v1::is_v3_tool_thinking_output_continuation(&standardized.body) {
             return Ok(false);
         }
-        let current_payload_start = crate::hub_v1::current_v3_tool_thinking_payload_start(
-            &standardized.body,
-        )
-        .map_err(|error| {
-            build_v3_error_01_source_raised_internal(
-                V3ErrorSourceKind::RuntimeFailure,
-                "V3Req04StandardizedResponses",
-                "direct_tool_thinking_req04_current_boundary_missing",
-                error,
-                V3InternalErrorCode::V3Req04StandardizedResponses,
-            )
-        })?;
+        let current_payload_start =
+            crate::hub_v1::current_v3_tool_thinking_payload_start(&standardized.body);
         standardized.tool_thinking_turn_context =
             crate::hub_v1::compile_v3_tool_thinking_turn_context_at_req04(
                 &mut standardized.body,
@@ -444,8 +476,14 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
     fn request_id(standardized: &Self::Standardized) -> &str {
         &standardized.request_id
     }
+    fn execution_id(standardized: &Self::Standardized) -> &str {
+        &standardized.execution_id
+    }
     fn body(standardized: &Self::Standardized) -> &serde_json::Value {
         &standardized.body
+    }
+    fn replace_body(standardized: &mut Self::Standardized, body: serde_json::Value) {
+        standardized.body = body;
     }
     fn tool_thinking_turn_context(
         standardized: &Self::Standardized,
@@ -473,12 +511,18 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
     fn run_request_projection(
         policy: &Self::Policy,
         request_key_catalog: &V3DirectRequestKeyHookCatalog,
-        drop_context: &crate::projection_drop_log::V3ProjectionDropContext,
-    ) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
-        crate::hooks::chat_direct_request_projection_hook_with_key_catalog_and_drop_context(
+        request_view: &crate::kernel::V3DirectRequestProjectionView,
+    ) -> Result<
+        (
+            V3Provider12ResponsesWirePayload,
+            crate::operation_runner::AttemptContext,
+        ),
+        V3Error01SourceRaised,
+    > {
+        crate::hooks::chat_direct_request_projection_hook_with_key_catalog_and_view(
             policy,
             request_key_catalog,
-            drop_context,
+            request_view,
         )
     }
 
@@ -540,18 +584,8 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
         if standardized.tool_thinking_turn_context.enabled_flag() {
             return Ok(true);
         }
-        let current_payload_start = crate::hub_v1::current_v3_tool_thinking_payload_start(
-            &standardized.body,
-        )
-        .map_err(|error| {
-            build_v3_error_01_source_raised_internal(
-                V3ErrorSourceKind::RuntimeFailure,
-                "V3Req04StandardizedChat",
-                "direct_tool_thinking_req04_current_boundary_missing",
-                error,
-                V3InternalErrorCode::V3Req04StandardizedChat,
-            )
-        })?;
+        let current_payload_start =
+            crate::hub_v1::current_v3_tool_thinking_payload_start(&standardized.body);
         standardized.tool_thinking_turn_context =
             crate::hub_v1::compile_v3_tool_thinking_turn_context_at_req04(
                 &mut standardized.body,

@@ -58,6 +58,7 @@ pub(crate) fn provider_http_failure(
     V3ResponsesRelayProviderFailure {
         status,
         provider_status: Some(status),
+        original_source: None,
         policy_error_type,
         policy_error_message,
         provider_id: provider_id.to_string(),
@@ -74,16 +75,47 @@ pub(crate) fn provider_runtime_failure(
     provider_id: &str,
     observability: Option<V3RuntimeObservability>,
 ) -> V3ResponsesRelayProviderFailure {
-    if let V3ProviderError::InternalTransport { lane, .. } = &error {
-        let source_stage = match lane {
-            routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Request => {
-                "V3ProviderReqOutbound09TransportRequest"
-            }
-            routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Response => {
-                "V3ProviderRespInbound01Raw"
-            }
-        };
+    let internal_source = match &error {
+        V3ProviderError::InternalTransport { lane, .. } => {
+            let source_stage = match lane {
+                routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Request => {
+                    "V3ProviderReqOutbound09TransportRequest"
+                }
+                routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Response => {
+                    "V3ProviderRespInbound01Raw"
+                }
+            };
+            Some(source_stage)
+        }
+        V3ProviderError::InvalidBaseUrl { .. }
+        | V3ProviderError::MissingAuthSecret { .. }
+        | V3ProviderError::AuthSecretRead { .. } => Some("V3Transport13ResponsesHttpRequest"),
+        _ => None,
+    };
+    if let Some(source_stage) = internal_source {
         let source = crate::hooks::build_v3_provider_error_source(source_stage, error);
+        let policy_error_type = source.code.clone();
+        let policy_error_message = source.message.clone();
+        if matches!(
+            source.source_kind,
+            routecodex_v3_error::V3ErrorSourceKind::ProviderLocalFailure
+        ) {
+            return V3ResponsesRelayProviderFailure {
+                // The local typed policy owns terminal status only after real
+                // candidate exhaustion; this 598 is an internal diagnostic marker.
+                status: 598,
+                provider_status: None,
+                original_source: Some(source),
+                policy_error_type,
+                policy_error_message,
+                provider_id: provider_id.to_string(),
+                source_stage,
+                observability,
+                terminal_projection: None,
+                terminal_disposition: None,
+                matched_policy: None,
+            };
+        }
         let projected =
             V3ErrorHandlingCenter::project_terminal(V3ErrorHandlingCenter::decide_provider(
                 V3ErrorHandlingCenterInput {
@@ -100,7 +132,8 @@ pub(crate) fn provider_runtime_failure(
             status: projected.status,
             // Internal transport handoff failure: no upstream HTTP response exists.
             provider_status: None,
-            policy_error_type: "provider_internal_transport_error".to_string(),
+            original_source: None,
+            policy_error_type,
             policy_error_message: projected.error_detail.clone(),
             provider_id: provider_id.to_string(),
             source_stage,
@@ -154,6 +187,7 @@ pub(crate) fn provider_runtime_failure(
     V3ResponsesRelayProviderFailure {
         status,
         provider_status,
+        original_source: None,
         policy_error_type,
         policy_error_message: policy_error_message.clone(),
         provider_id: provider_id.to_string(),
@@ -180,6 +214,7 @@ pub(crate) fn provider_semantic_failure(
         // (`V3ProviderSemanticErrorProjection` uses 200/429/502 to select the
         // Error05 lane); it is not an upstream HTTP status, so record none.
         provider_status: None,
+        original_source: None,
         policy_error_type,
         policy_error_message,
         provider_id: provider_id.to_string(),
@@ -202,6 +237,7 @@ pub(crate) fn provider_terminal_admission_failure(
         // Callers pass the raw status of the HTTP response that carried the
         // inadmissible body, so this IS a real upstream HTTP status.
         provider_status: Some(status),
+        original_source: None,
         policy_error_type: failure.code,
         policy_error_message: failure.message,
         provider_id: provider_id.to_string(),
@@ -228,6 +264,7 @@ pub(crate) fn provider_response_stream_relay_failure(
             status,
             // Synthesized stream-semantic status (see `provider_semantic_failure`).
             provider_status: None,
+            original_source: None,
             policy_error_type: code.clone(),
             policy_error_message: message.clone(),
             provider_id: provider_id.to_string(),
@@ -261,6 +298,7 @@ fn provider_response_codec_relay_failure(
         // Internal response codec failure: the 502 is the client projection, not
         // an upstream HTTP status.
         provider_status: None,
+        original_source: None,
         policy_error_type: "provider_response_event_codec_failure".to_string(),
         policy_error_message: format!("provider response event codec failed: {reason}"),
         provider_id: provider_id.to_string(),
@@ -335,12 +373,9 @@ pub(crate) fn provider_request_relay_failure(
             format!("V3 Responses Relay provider wire encoding failed: {message}"),
             None,
         ),
-        V3ResponsesRelayRuntimeError::Provider(error) => (
-            "V3ProviderReqOutbound08WirePayload",
-            "provider_request_wire_error",
-            error.to_string(),
-            None,
-        ),
+        V3ResponsesRelayRuntimeError::Provider(error) => {
+            return Ok(provider_runtime_failure(error, provider_id, observability));
+        }
         other => return Err(other),
     };
     Ok(V3ResponsesRelayProviderFailure {
@@ -349,6 +384,7 @@ pub(crate) fn provider_request_relay_failure(
             .map_or(502, |projection| projection.status),
         // Request-stage compat/wire failures happen before any upstream response.
         provider_status: None,
+        original_source: None,
         policy_error_type: error_type.to_string(),
         policy_error_message: message.clone(),
         provider_id: provider_id.to_string(),
@@ -365,12 +401,15 @@ pub(crate) fn terminalize_v3_responses_relay_provider_failure(
     last_external_http: Option<routecodex_v3_error::V3ExternalHttpWitness>,
 ) -> V3ResponsesRelayProviderFailure {
     if failure.terminal_projection.is_none() {
-        let source = routecodex_v3_error::build_v3_error_01_source_raised(
-            routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
-            failure.source_stage,
-            &failure.policy_error_type,
-            &failure.policy_error_message,
-        );
+        let source = match failure.original_source.clone() {
+            Some(source) => source,
+            None => routecodex_v3_error::build_v3_error_01_source_raised(
+                routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+                failure.source_stage,
+                &failure.policy_error_type,
+                &failure.policy_error_message,
+            ),
+        };
         let terminal = V3ErrorHandlingCenter::decide_provider(
             V3ErrorHandlingCenterInput {
                 source,
@@ -480,6 +519,7 @@ pub(crate) fn provider_response_hook_failure(
                 status: 502,
                 // Internal response-hook codec failure: no upstream HTTP status.
                 provider_status: None,
+                original_source: None,
                 policy_error_type: "provider_response_event_codec_failure".to_string(),
                 policy_error_message: message,
                 provider_id: provider_id.to_string(),
@@ -533,6 +573,7 @@ pub(crate) fn provider_failure_output_with_observation(
         finalized_response: None,
         provider_snapshots: None,
         protocol_direct_handoff: None,
+        request_finalizer: None,
     }
 }
 
@@ -573,6 +614,7 @@ pub(crate) fn error_output(
         finalized_response: None,
         provider_snapshots: None,
         protocol_direct_handoff: None,
+        request_finalizer: None,
     }
 }
 
@@ -749,6 +791,119 @@ mod tests {
         assert_eq!(failure.status, 598);
         assert!(failure.terminal_projection.is_some());
         assert_eq!(failure.policy_error_type, "provider_request_compat_error");
+    }
+
+    #[test]
+    fn request_adapter_local_constructor_preserves_request_lane_without_external_witness() {
+        let failure = provider_request_relay_failure(
+            V3ResponsesRelayRuntimeError::Provider(V3ProviderError::InvalidBaseUrl {
+                request_id: "req-invalid-base-url".to_string(),
+                provider_id: "provider-1".to_string(),
+                reason: "invalid base URL".to_string(),
+            }),
+            "provider-1",
+            None,
+        )
+        .expect("request adapter must classify local constructor errors");
+
+        assert_eq!(failure.status, 598);
+        assert_eq!(failure.provider_status, None);
+        assert_eq!(failure.source_stage, "V3Transport13ResponsesHttpRequest");
+        assert_eq!(failure.policy_error_type, "provider_local_runtime_error");
+        // The typed local source is the only truth: the helper must not prebuild
+        // a terminal projection.
+        assert!(failure.original_source.is_some());
+        assert!(failure.terminal_projection.is_none());
+
+        // The shared terminalizer builds the projection from the same typed
+        // source after exhaustion; it must not fabricate an external witness.
+        let failure = terminalize_v3_responses_relay_provider_failure(failure, None);
+        let projection = failure
+            .terminal_projection
+            .expect("internal request failure must retain its existing projection");
+        assert_eq!(projection.status, 598);
+        assert_eq!(
+            projection.body["error"]["code"],
+            "provider_local_runtime_error"
+        );
+        assert!(
+            projection.body.pointer("/error/external_error").is_none(),
+            "local constructor failure must not claim an external HTTP witness: {}",
+            projection.body
+        );
+    }
+
+    #[test]
+    fn request_adapter_local_auth_constructor_variants_use_typed_source() {
+        for error in [
+            V3ProviderError::MissingAuthSecret {
+                request_id: "req-missing-auth".to_string(),
+                provider_id: "provider-1".to_string(),
+                auth_alias: "key-1".to_string(),
+            },
+            V3ProviderError::AuthSecretRead {
+                request_id: "req-auth-read".to_string(),
+                provider_id: "provider-1".to_string(),
+                auth_alias: "key-1".to_string(),
+                reason: "synthetic typed source".to_string(),
+            },
+        ] {
+            let failure = provider_request_relay_failure(
+                V3ResponsesRelayRuntimeError::Provider(error),
+                "provider-1",
+                None,
+            )
+            .expect("synthetic local auth source must stay in the request adapter");
+
+            assert_eq!(failure.status, 598);
+            assert_eq!(failure.provider_status, None);
+            assert_eq!(failure.source_stage, "V3Transport13ResponsesHttpRequest");
+            assert_eq!(failure.policy_error_type, "provider_local_runtime_error");
+        }
+    }
+
+    #[test]
+    fn internal_transport_request_and_response_lanes_keep_existing_codes() {
+        let request = provider_request_relay_failure(
+            V3ResponsesRelayRuntimeError::Provider(V3ProviderError::InternalTransport {
+                request_id: "req-internal-request".to_string(),
+                provider_id: "provider-1".to_string(),
+                lane: routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Request,
+                reason: "request lane failure".to_string(),
+            }),
+            "provider-1",
+            None,
+        )
+        .expect("internal request transport failure must stay typed");
+        assert_eq!(request.status, 598);
+        assert_eq!(request.provider_status, None);
+        assert_eq!(
+            request.source_stage,
+            "V3ProviderReqOutbound09TransportRequest"
+        );
+        assert_eq!(
+            request.policy_error_type,
+            "provider_internal_transport_error"
+        );
+
+        let response = provider_request_relay_failure(
+            V3ResponsesRelayRuntimeError::Provider(V3ProviderError::InternalTransport {
+                request_id: "req-internal-response".to_string(),
+                provider_id: "provider-1".to_string(),
+                lane: routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Response,
+                reason: "response lane failure".to_string(),
+            }),
+            "provider-1",
+            None,
+        )
+        .expect("internal response transport failure must stay typed");
+        assert_eq!(response.status, 599);
+        assert_eq!(response.provider_status, None);
+        assert_eq!(response.source_stage, "V3ProviderRespInbound01Raw");
+        assert_eq!(
+            response.policy_error_type,
+            "provider_internal_transport_error"
+        );
     }
 
     #[test]

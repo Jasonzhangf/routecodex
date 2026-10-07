@@ -11,6 +11,7 @@ const repoRoot = process.cwd();
 const verifierRelative = 'v3/scripts/architecture/verify-v3-static-hook-registry.mjs';
 const targetFile = 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs';
 const hookFile = 'v3/crates/routecodex-v3-runtime/src/hub_v1/resource_hooks.rs';
+const reqInbound02File = 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs';
 const fixtures = [
   ['dynamic hook', '\nfn dynamic_hook_discovery() {}\n', /dynamic hook/],
   ['missing-hook fallback', '\nfn default_hook_fallback() {}\n', /fallback/],
@@ -21,6 +22,8 @@ const fixtures = [
   ['missing entry hook', '', /missing static entry hook for V3HubReqInbound01ClientRaw/, hookFile, (source) => source.replace(/    static_hook\(\s*V3HubFixedNode::V3HubReqInbound01ClientRaw,\s*V3HubHookPhase::Entry,?\s*\),\n/, '')],
   ['runtime config read', '\nfn read_config_file() { let _ = std::fs::read_to_string("config.v3.toml"); }\n', /must not read config files/, hookFile],
   ['json round-trip clone', '\nfn clone_payload(value: &serde_json::Value) { let _ = serde_json::to_string(value); }\n', /forbidden JSON round-trip/, hookFile],
+  ['missing admitted canonical builder', '', /adjacent builder build_v3_hub_req_inbound_02_from_canonical count=0, expected 1/, reqInbound02File, (source) => source.replace(/pub fn build_v3_hub_req_inbound_02_from_canonical\([\s\S]*?\n\}\n\n/, '')],
+  ['duplicate admitted canonical builder', '', /adjacent builder build_v3_hub_req_inbound_02_from_canonical count=2, expected 1/, reqInbound02File, (source) => source.replace(/\n(\s*)pub fn build_v3_hub_req_inbound_02_from_request_invocation\b/, '\n$1pub fn build_v3_hub_req_inbound_02_from_canonical(\n    mut input: V3HubReqInbound01ClientRaw,\n    canonical: Value,\n) -> V3HubReqInbound02Normalized {\n    input.payload.0 = Arc::new(canonical);\n    V3HubReqInbound02Normalized {\n        previous: input,\n        semantic_protocol: V3HubRequestSemanticProtocol::Chat,\n        canonicalized_from_responses: true,\n        memory_raw_capture_guidance_injected: false,\n    }\n}\n\n$1pub fn build_v3_hub_req_inbound_02_from_request_invocation')],
 ];
 const failures = [];
 for (const fixture of fixtures) {

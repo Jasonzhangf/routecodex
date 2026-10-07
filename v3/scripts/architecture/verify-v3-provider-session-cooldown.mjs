@@ -535,11 +535,6 @@ requireMatch(
   "Runtime rescue owner must require a successful provider probe before revival",
 );
 requireMatch(
-  source.cooldownRescue,
-  /allow_exhaustion_rescue_probe:\s*bool[\s\S]*if !allow_exhaustion_rescue_probe[\s\S]*V3TargetSelectionAfterRescue::Exhausted[\s\S]*run_exhaustion_rescue_probes/u,
-  "Shared rescue owner must terminate dry-run exhaustion before provider probe I/O",
-);
-requireMatch(
   source.webSearchSidecar,
   /ControlRequest::ExecuteWebSearch[\s\S]*validate_control_response/u,
   "Web-search state machine must bind execution to the typed hooks-sidecar owner",

@@ -1,8 +1,10 @@
 #!/usr/bin/env node
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-const root = process.cwd();
+const root = existsSync(resolve(process.cwd(), 'v3/crates'))
+  ? process.cwd()
+  : resolve(process.cwd(), '..');
 const sourcePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_hooks.rs';
 const source = readFileSync(resolve(root, sourcePath), 'utf8');
 const hub = readFileSync(resolve(root, 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs'), 'utf8');
@@ -45,9 +47,10 @@ requireAll(source, sourcePath, [
   'V3HubReqInbound01ClientRaw',
   'V3HubReqInbound02Normalized',
   'V3HubRespOutbound05ClientSemantic',
-  'build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01',
+  'build_v3_hub_req_inbound_02_from_request_invocation',
+  'RequestInvocationContext',
+  'build_v3_hub_req_inbound_02_from_request_invocation(raw, invocation)',
   'build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03',
-  'encode_v3_anthropic_request_as_responses_semantic',
   'validate_v3_anthropic_hub_response_payload_for_client_projection',
   'entry_protocol != V3HubEntryProtocol::Anthropic',
   'execution != V3HubExecutionMode::Relay',
@@ -57,6 +60,8 @@ requireAll(source, sourcePath, [
   'ProviderWireProtocolNotResponses',
 ]);
 forbidAll(source, sourcePath, [
+  /build_v3_hub_req_inbound_02_(?:from_v3_hub_req_inbound_01|result_from_v3_hub_req_inbound_01)/,
+  /encode_v3_anthropic_request_as_responses_semantic/,
   /characterize_v3_anthropic_hub_semantic_to_provider_wire/,
   /characterize_v3_anthropic_provider_raw_to_hub_response_semantic/,
   /V3AnthropicRelayReqInboundNormalized|V3AnthropicRelayClientProjection/,

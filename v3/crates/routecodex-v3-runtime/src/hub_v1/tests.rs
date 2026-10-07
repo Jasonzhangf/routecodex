@@ -1,5 +1,65 @@
 use super::*;
+use crate::operation_runner::{
+    execute_v3_operation_runner_request_normalize_losslessly, RequestInvocationContext,
+    RequestNormalizationEntry, RequestOriginKind, V3RequestContextHandle,
+};
 use serde_json::json;
+
+fn relay_request_handle(
+    request_id: &str,
+    entry_protocol: V3HubEntryProtocol,
+    raw: serde_json::Value,
+) -> (V3RequestContextHandle, serde_json::Value) {
+    let entry_protocol_id = match entry_protocol {
+        V3HubEntryProtocol::Responses => "responses",
+        V3HubEntryProtocol::Anthropic => "anthropic",
+        V3HubEntryProtocol::Gemini => "gemini",
+        V3HubEntryProtocol::OpenAiChat => "openai_chat",
+    };
+    let handle = V3RequestContextHandle::new(request_id.to_string(), entry_protocol_id.to_string());
+    let invocation = RequestInvocationContext::new(
+        handle.clone(),
+        format!("{request_id}-invocation"),
+        format!("{request_id}-entry"),
+        RequestOriginKind::ClientEntry,
+    );
+    let canonical = execute_v3_operation_runner_request_normalize_losslessly(
+        &handle,
+        &invocation,
+        RequestNormalizationEntry::RawEntry(raw),
+    )
+    .expect("real SDK normalize must publish the original pair");
+    let pair = handle
+        .original_pair()
+        .expect("real SDK normalize must publish the original pair");
+    handle
+        .publish_current_field_associations(
+            crate::operation_runner::CurrentFieldAssociations::from_normalization(
+                &pair.inverse_context,
+            ),
+        )
+        .expect("fixture must publish current field associations");
+    (handle, canonical)
+}
+
+fn governed_chain_from_canonical(
+    entry_protocol: V3HubEntryProtocol,
+    raw: serde_json::Value,
+    canonical: serde_json::Value,
+    execution_mode: V3HubExecutionMode,
+) -> V3HubReqExecution05Planned {
+    let req02 = build_v3_hub_req_inbound_02_from_canonical(
+        build_v3_hub_req_inbound_01_client_raw(
+            raw,
+            entry_protocol,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        ),
+        canonical,
+    );
+    let req04 = build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02(req02);
+    build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(req04, execution_mode)
+}
 
 fn build_v3_openai_chat_provider_payload_from_responses_payload(
     payload: &serde_json::Value,
@@ -239,16 +299,16 @@ fn openai_responses_provider_wire_drops_top_logprobs_when_logprobs_disabled() {
 
 #[test]
 fn all_adjacent_builders_form_the_fixed_typed_topology() {
-    let req01 = build_v3_hub_req_inbound_01_client_raw(
-        json!({"messages":[{"role":"user","content":"x"}]}),
+    let raw = json!({"messages":[{"role":"user","content":"x"}]});
+    let (handle, canonical) = relay_request_handle(
+        "all-adjacent-builders",
         V3HubEntryProtocol::OpenAiChat,
-        V3HubInvocationSource::Client,
-        V3HubTransportIntent::Json,
+        raw.clone(),
     );
-    let req02 = build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(req01);
-    let req04 = build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02(req02);
-    let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
-        req04,
+    let req05 = governed_chain_from_canonical(
+        V3HubEntryProtocol::OpenAiChat,
+        raw,
+        canonical.clone(),
         V3HubExecutionMode::Direct,
     );
     let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
@@ -293,8 +353,13 @@ fn all_adjacent_builders_form_the_fixed_typed_topology() {
     );
     let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
         req06,
+        &canonical,
+        &handle,
+        V3HubExecutionMode::Direct,
+        "all-adjacent-builders-attempt",
         V3HubProviderWireProtocol::OpenAiChat,
-    );
+    )
+    .unwrap();
     let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();
     let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat.node);
     let _req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
@@ -316,18 +381,18 @@ fn all_adjacent_builders_form_the_fixed_typed_topology() {
 }
 
 #[test]
-fn direct_req_compat_projects_chat_to_selected_provider_protocol() {
-    let req01 = build_v3_hub_req_inbound_01_client_raw(
-        json!({"messages":[{"role":"user","content":"direct"}],"tools":[{"type":"tool_search","name":"tool_search"}]}),
+fn cross_protocol_relay_projects_chat_to_selected_responses_provider() {
+    let raw = json!({"messages":[{"role":"user","content":"direct"}],"tools":[{"type":"tool_search","name":"tool_search"}]});
+    let (handle, canonical) = relay_request_handle(
+        "direct-req-compat",
         V3HubEntryProtocol::OpenAiChat,
-        V3HubInvocationSource::Client,
-        V3HubTransportIntent::Json,
+        raw.clone(),
     );
-    let req02 = build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(req01);
-    let req04 = build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02(req02);
-    let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
-        req04,
-        V3HubExecutionMode::Direct,
+    let req05 = governed_chain_from_canonical(
+        V3HubEntryProtocol::OpenAiChat,
+        raw,
+        canonical.clone(),
+        V3HubExecutionMode::Relay,
     );
     let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
         req05,
@@ -371,8 +436,13 @@ fn direct_req_compat_projects_chat_to_selected_provider_protocol() {
     );
     let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
         req06,
+        &canonical,
+        &handle,
+        V3HubExecutionMode::Relay,
+        "direct-req-compat-attempt",
         V3HubProviderWireProtocol::Responses,
-    );
+    )
+    .unwrap();
     let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();
     let payload = req_compat.provider_semantic_payload();
     assert!(
@@ -380,30 +450,30 @@ fn direct_req_compat_projects_chat_to_selected_provider_protocol() {
             .get("input")
             .and_then(serde_json::Value::as_array)
             .is_some(),
-        "direct selected mode must project adjacent Chat payload to selected Responses provider protocol: {payload}"
+        "cross-protocol Relay must project Chat payload to selected Responses provider protocol: {payload}"
     );
     assert!(
         payload.get("messages").is_none(),
-        "direct selected mode must not cross-node pass Chat payload into Responses provider wire: {payload}"
+        "cross-protocol Relay must not pass Chat payload into Responses provider wire: {payload}"
     );
     assert_eq!(payload["tools"][0]["type"], "tool_search");
 }
 
 #[test]
 fn provider_req_compat_loads_selected_target_profile() {
-    let req01 = build_v3_hub_req_inbound_01_client_raw(
-        json!({
-            "model": "MiniMax-M3",
-            "input": [{"role": "user", "content": "hi"}]
-        }),
+    let raw = json!({
+        "model": "MiniMax-M3",
+        "input": [{"role": "user", "content": "hi"}]
+    });
+    let (handle, canonical) = relay_request_handle(
+        "provider-req-compat-profile",
         V3HubEntryProtocol::Responses,
-        V3HubInvocationSource::Client,
-        V3HubTransportIntent::Json,
+        raw.clone(),
     );
-    let req02 = build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(req01);
-    let req04 = build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02(req02);
-    let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
-        req04,
+    let req05 = governed_chain_from_canonical(
+        V3HubEntryProtocol::Responses,
+        raw,
+        canonical.clone(),
         V3HubExecutionMode::Relay,
     );
     let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
@@ -448,8 +518,13 @@ fn provider_req_compat_loads_selected_target_profile() {
     );
     let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
         req06,
+        &canonical,
+        &handle,
+        V3HubExecutionMode::Relay,
+        "provider-req-compat-profile-attempt",
         V3HubProviderWireProtocol::Responses,
-    );
+    )
+    .unwrap();
     let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();
     assert_eq!(req_compat.profile().as_str(), "chat:minimax");
     let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat.node);
@@ -886,16 +961,12 @@ fn project_v3_output_cap_wire(
         V3HubProviderWireProtocol::Anthropic => "anthropic",
         V3HubProviderWireProtocol::Gemini => "gemini",
     };
-    let req01 = build_v3_hub_req_inbound_01_client_raw(
-        client_payload,
+    let (handle, canonical) =
+        relay_request_handle("output-cap-fixture", entry_protocol, client_payload.clone());
+    let req05 = governed_chain_from_canonical(
         entry_protocol,
-        V3HubInvocationSource::Client,
-        V3HubTransportIntent::Json,
-    );
-    let req02 = build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(req01);
-    let req04 = build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02(req02);
-    let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
-        req04,
+        client_payload,
+        canonical.clone(),
         V3HubExecutionMode::Relay,
     );
     let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
@@ -903,7 +974,15 @@ fn project_v3_output_cap_wire(
         V3HubTargetResolution::Routed,
         v3_output_cap_test_candidate(wire_model, entry_protocol, declared_max_tokens),
     );
-    let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_protocol);
+    let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
+        req06,
+        &canonical,
+        &handle,
+        V3HubExecutionMode::Relay,
+        "output-cap-attempt",
+        provider_protocol,
+    )
+    .expect("standard outbound projection must succeed before provider output-cap compat");
     build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
         .expect("provider compat projection must succeed")
         .provider_semantic_payload()

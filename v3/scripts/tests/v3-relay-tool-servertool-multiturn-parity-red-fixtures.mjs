@@ -38,6 +38,7 @@ const copyPaths = [
   'docs/architecture/v3-verification-map.yml',
   'docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md',
   'v3/crates/routecodex-v3-server/src/frame_builders.rs',
+  'v3/crates/routecodex-v3-server/tests/req02_field_fold_http.rs',
   'package.json',
 ];
 
@@ -156,9 +157,9 @@ const cases = [
   {
     name: 'focused parity test removed',
     file: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs',
-    marker: 'request_governance_rejects_orphan_output_wrong_kind_and_missing_call_id',
+    marker: 'request_governance_rejects_orphan_output_and_preserves_missing_call_id',
     mutation: 'request_governance_missing_negative_case',
-    diagnostic: /request_governance_rejects_orphan_output_wrong_kind_and_missing_call_id/,
+    diagnostic: /request_governance_rejects_orphan_output_and_preserves_missing_call_id/,
   },
   {
     name: 'Responses HTTP additional_tools transport lift revived',

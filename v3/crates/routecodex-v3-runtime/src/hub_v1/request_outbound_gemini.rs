@@ -2,7 +2,329 @@
 //
 // The gemini top-level whitelist is Gemini-shaped, while the inbound payload
 // carries Chat semantics. Only fields with an exact Gemini equivalent are
-// consumed here; target-unsupported semantics fail before provider wire build.
+// consumed here; the declared target whitelist owns unsupported fields.
+
+use crate::operation_runner::NativeContainerRole;
+
+pub(crate) fn build_v3_gemini_standard_request_from_chat_canonical_with_declarations(
+    canonical: &Value,
+    inverse: &crate::operation_runner::RequestInverseContext,
+    current: &crate::operation_runner::CurrentFieldAssociations,
+    model_capabilities: &[String],
+) -> Result<(Value, Vec<V3ProjectionDropRecord>, Vec<crate::operation_runner::ToolMappingReference>), String> {
+    use provider_compat_core::namespace_tools::{
+        flatten_namespace_tool_for_provider_with_sources, namespace_tool_name_map,
+    };
+    let sources = provider_tool_declaration_sources(canonical)?;
+    let hosted_emissions =
+        crate::operation_runner::project_hosted_history_emissions(canonical, inverse, current)?;
+    let mut hosted_by_message = std::collections::BTreeMap::new();
+    for emission in hosted_emissions {
+        hosted_by_message.insert(emission.canonical_message_index, emission);
+    }
+    let mut observer = StandardOutboundDeclarationObserver::new(inverse, current);
+    let mut declarations = Vec::new();
+    let mut names = std::collections::HashMap::new();
+    let native_tools = crate::operation_runner::project_registered_native_gemini_tools(canonical, inverse, current)?;
+    for (source_path, tool) in sources.into_iter().filter(|_| native_tools.is_none()) {
+        if let Some(namespace_names) = namespace_tool_name_map(&tool)? {
+            names.extend(namespace_names);
+        }
+        if let Some(projection) = flatten_namespace_tool_for_provider_with_sources("gemini", &tool)? {
+            for (emission, flattened) in projection.sources.iter().zip(projection.tools) {
+                let mut path = source_path.clone();
+                for index in &emission.source_child_indices {
+                    path.push_str(&format!(".tools[{index}]"));
+                }
+                emit_gemini_declaration(&flattened, &path, &mut declarations, &mut observer, canonical, inverse, current)?;
+            }
+        } else {
+            emit_gemini_declaration(&tool, &source_path, &mut declarations, &mut observer, canonical, inverse, current)?;
+        }
+    }
+    let mut source = crate::operation_runner::project_canonical_standard_view(canonical)?;
+    let row = source.as_object_mut().ok_or("Gemini standard projection requires an object")?;
+    if let Some(native) = row.get_mut("routecodex_chat_extension")
+        .and_then(Value::as_object_mut).and_then(|extension| extension.remove("gemini_request")) {
+        let native = native.as_object().ok_or("Gemini native extension requires an object")?;
+        merge_gemini_native_extension(row, native)?;
+    }
+    let messages = row.remove("messages").ok_or("Gemini standard projection requires Chat messages")?;
+    let messages = messages.as_array().ok_or("Gemini standard projection requires a message array")?;
+    let mut contents = Vec::new();
+    let mut system_parts = Vec::new();
+    let mut calls = std::collections::HashMap::new();
+    for message in messages {
+        if let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) {
+            for call in tool_calls {
+                if let Some(id) = call.get("id").and_then(Value::as_str) {
+                    let function = call.get("function").or_else(|| call.get("custom"))
+                        .ok_or("Gemini tool call requires a function or custom representation")?;
+                    calls.insert(id.to_owned(), gemini_emitted_call_name(function, call, &names)?);
+                }
+            }
+        }
+    }
+    for (message_index, message) in messages.iter().enumerate() {
+        if matches!(message.get("type").and_then(Value::as_str), Some("additional_tools" | "tool_search_output")) {
+            continue;
+        }
+        if let Some(emission) = hosted_by_message.get(&message_index) {
+            let Some(name) = emission
+                .chat_assistant
+                .pointer("/tool_calls/0/function/name")
+                .and_then(Value::as_str)
+            else {
+                continue;
+            };
+            let mut call = json!({"name": name, "args": emission.arguments});
+            if !emission.identity.is_empty() {
+                call["id"] = json!(emission.identity);
+            }
+            contents.push(json!({"role":"model","parts":[{"functionCall":call}]}));
+            let mut response = json!({"name": name, "response": emission.event});
+            if !emission.identity.is_empty() {
+                response["id"] = json!(emission.identity);
+            }
+            contents.push(json!({"role":"user","parts":[{"functionResponse":response}]}));
+            continue;
+        }
+        let role = message.get("role").and_then(Value::as_str).unwrap_or("user");
+        let mut parts = Vec::new();
+        if role == "tool" {
+            let id = message.get("tool_call_id").and_then(Value::as_str);
+            let name = id.and_then(|id| calls.get(id).cloned())
+                .or_else(|| message.get("name").and_then(Value::as_str).map(str::to_owned))
+                .ok_or("Gemini functionResponse requires its paired function name")?;
+            let mut response = json!({"name":name,"response":message.get("content").cloned().unwrap_or(Value::Null)});
+            if let Some(id) = id { response["id"] = json!(id); }
+            let mut part = json!({"functionResponse":response});
+            if inverse.entry_protocol == "gemini" {
+                crate::operation_runner::restore_standard_projection_siblings(
+                    &mut part, canonical, inverse, current,
+                    &format!("chat.messages[{message_index}]"),
+                    NativeContainerRole::ToolResultPart,
+                    &["functionResponse.id", "functionResponse.name", "functionResponse.response"],
+                )?;
+            }
+            parts.push(part);
+        } else {
+            if let Some(content) = message.get("content").filter(|content| !content.is_null()) {
+                let content_parts = gemini_standard_content_parts(content)?;
+                for (part_index, mut part) in content_parts.into_iter().enumerate() {
+                    let current_path = if content.is_string() {
+                        format!("chat.messages[{message_index}].content")
+                    } else {
+                        format!("chat.messages[{message_index}].content[{part_index}]")
+                    };
+                    if matches!(role, "system" | "developer") && content.as_array()
+                        .is_some_and(|parts| crate::operation_runner::is_unchanged_native_instruction_separator(
+                            inverse, current, &current_path, &parts[part_index])) {
+                        continue;
+                    }
+                    if inverse.entry_protocol == "gemini" {
+                        crate::operation_runner::restore_standard_projection_siblings(
+                            &mut part, canonical, inverse, current, &current_path,
+                            NativeContainerRole::ContentPart,
+                            &["text", "inlineData.data", "inlineData.mimeType", "fileData.fileUri", "fileData.mimeType"],
+                        )?;
+                    }
+                    parts.push(part);
+                }
+            }
+            if let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) {
+                for (call_index, call) in tool_calls.iter().enumerate() {
+                    let function = call.get("function").or_else(|| call.get("custom"))
+                        .ok_or("Gemini tool call requires a function or custom representation")?;
+                    let name = gemini_emitted_call_name(function, call, &names)?;
+                    let args = if call.get("type").and_then(Value::as_str) == Some("custom") {
+                        json!({"input":function.get("input").cloned().unwrap_or(Value::Null)})
+                    } else {
+                        match function.get("arguments") {
+                            Some(Value::String(arguments)) => serde_json::from_str(arguments)
+                                .map_err(|error| format!("Gemini functionCall JSON arguments: {error}"))?,
+                            Some(arguments) => arguments.clone(),
+                            None => json!({}),
+                        }
+                    };
+                    let mut projected = json!({"name":name,"args":args});
+                    if let Some(id) = call.get("id").filter(|id| !id.is_null()) { projected["id"] = id.clone(); }
+                    let mut part = json!({"functionCall":projected});
+                    if inverse.entry_protocol == "gemini" {
+                        crate::operation_runner::restore_standard_projection_siblings(
+                            &mut part, canonical, inverse, current,
+                            &format!("chat.messages[{message_index}].tool_calls[{call_index}]"),
+                            NativeContainerRole::FunctionCallPart,
+                            &["functionCall.id", "functionCall.name", "functionCall.args"],
+                        )?;
+                    }
+                    parts.push(part);
+                }
+            }
+        }
+        if matches!(role, "system" | "developer") {
+            system_parts.extend(parts);
+        } else if !parts.is_empty() {
+            let mut content = json!({"role":if role == "assistant" {"model"} else {"user"},"parts":parts});
+            if inverse.entry_protocol == "gemini" {
+                crate::operation_runner::restore_standard_projection_siblings(
+                    &mut content, canonical, inverse, current,
+                    &format!("chat.messages[{message_index}]"),
+                    NativeContainerRole::Message,
+                    &["role", "parts"],
+                )?;
+            }
+            contents.push(content);
+        }
+    }
+    row.insert("contents".into(), Value::Array(contents));
+    if !system_parts.is_empty() {
+        let mut instruction = json!({"parts":system_parts});
+        crate::operation_runner::restore_standard_transform_siblings(
+            &mut instruction, canonical, inverse, current,
+            "v3.gemini_system_instruction_to_chat_system.v1", &["parts"],
+        )?;
+        row.insert("systemInstruction".into(), instruction);
+    }
+    row.remove("tools");
+    let native_mappings = if let Some((tools, mappings)) = native_tools {
+        row.insert("tools".into(), tools);
+        Some(mappings)
+    } else {
+        if !declarations.is_empty() { row.insert("tools".into(), json!([{"functionDeclarations":declarations}])); }
+        None
+    };
+    for (chat_field, gemini_field) in [
+        ("temperature", "temperature"), ("top_p", "topP"), ("top_k", "topK"),
+        ("max_tokens", "maxOutputTokens"), ("max_completion_tokens", "maxOutputTokens"),
+        ("stop", "stopSequences"), ("seed", "seed"), ("n", "candidateCount"),
+    ] {
+        if let Some(mut value) = row.remove(chat_field) {
+            if chat_field == "stop" && value.is_string() { value = json!([value]); }
+            let config = row.entry("generationConfig").or_insert_with(|| json!({}))
+                .as_object_mut().ok_or("Gemini generationConfig requires an object")?;
+            config.insert(gemini_field.into(), value);
+            if inverse.entry_protocol == "gemini" {
+                crate::operation_runner::restore_standard_projection_siblings(
+                    row.get_mut("generationConfig").expect("generation config just emitted"),
+                    canonical, inverse, current, &format!("chat.{chat_field}"),
+                    NativeContainerRole::GenerationConfig,
+                    &["temperature", "topP", "topK", "maxOutputTokens", "stopSequences", "seed", "candidateCount", "thinkingConfig"],
+                )?;
+            }
+        }
+    }
+    // Gemini's selected wire model is carried by the transport URL.
+    row.remove("model");
+    let (payload, drops) = project_outbound_payload_for_selected_target_protocol_with_drops(
+        &source, V3OutboundTargetProtocol::Gemini, model_capabilities,
+    )?;
+    Ok((payload, drops, native_mappings.unwrap_or_else(|| observer.into_mappings())))
+}
+
+/// Restore the lossless `gemini_request` native extension onto the Gemini wire row.
+///
+/// Most entries are original Gemini top-level fields and are restored verbatim.
+/// `process_generation_config` preserves an unknown `generationConfig` child under
+/// the flat key `generationConfig.<child>` (the inbound mapping quotes that key, so
+/// it is one literal extension key). Re-nesting it under `generationConfig` is the
+/// inverse of that inbound step; leaving it at the top level would hand the Gemini
+/// top-level whitelist a key it cannot represent, so the projection would drop a
+/// field the client asked for (for example `thinkingConfig`).
+fn merge_gemini_native_extension(
+    row: &mut Map<String, Value>,
+    native: &Map<String, Value>,
+) -> Result<(), String> {
+    for (key, value) in native {
+        match key.strip_prefix("generationConfig.") {
+            Some(child) => {
+                row.entry("generationConfig".to_string())
+                    .or_insert_with(|| Value::Object(Map::new()))
+                    .as_object_mut()
+                    .ok_or("Gemini generationConfig requires an object")?
+                    .insert(child.to_string(), value.clone());
+            }
+            None => {
+                row.insert(key.clone(), value.clone());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn emit_gemini_declaration(
+    tool: &Value,
+    source_path: &str,
+    declarations: &mut Vec<Value>,
+    observer: &mut StandardOutboundDeclarationObserver<'_>,
+    canonical: &Value,
+    inverse: &crate::operation_runner::RequestInverseContext,
+    current: &crate::operation_runner::CurrentFieldAssociations,
+) -> Result<(), String> {
+    let function = tool.get("function").unwrap_or(tool);
+    let Some(name) = function.get("name").and_then(Value::as_str) else {
+        return Err(format!("Gemini function declaration has no name at {source_path}"));
+    };
+    let mut declaration = Map::new();
+    declaration.insert("name".into(), json!(provider_compat_core::namespace_tools::normalize_provider_function_name(name)));
+    for key in ["description", "parameters", "response", "responseJsonSchema", "behavior"] {
+        if let Some(value) = function.get(key) { declaration.insert(key.into(), value.clone()); }
+    }
+    if tool.get("type").and_then(Value::as_str) == Some("custom") {
+        declaration.insert("parameters".into(), provider_compat_core::namespace_tools::openai_chat_freeform_custom_tool_parameters());
+    }
+    let mut declaration = Value::Object(declaration);
+    if inverse.entry_protocol == "gemini" {
+        crate::operation_runner::restore_standard_projection_siblings(
+            &mut declaration, canonical, inverse, current, source_path,
+            NativeContainerRole::ToolDeclaration,
+            &["name", "description", "parameters", "parametersJsonSchema", "response", "responseJsonSchema", "behavior"],
+        )?;
+    }
+    let destination = format!("tools[0].functionDeclarations[{}]", declarations.len());
+    declarations.push(declaration.clone());
+    observer.note_emitted_at(&destination, source_path, &declaration, None);
+    Ok(())
+}
+
+fn gemini_emitted_call_name(
+    function: &Value,
+    call: &Value,
+    names: &std::collections::HashMap<String, String>,
+) -> Result<String, String> {
+    let name = function.get("name").and_then(Value::as_str).ok_or("Gemini tool call requires a name")?;
+    let namespace = call.get("namespace").or_else(|| function.get("namespace")).and_then(Value::as_str);
+    let qualified = namespace.map(|namespace| format!("{namespace}.{name}")).unwrap_or_else(|| name.to_owned());
+    Ok(names.get(&qualified).or_else(|| names.get(name)).cloned()
+        .unwrap_or_else(|| provider_compat_core::namespace_tools::normalize_provider_function_name(&qualified)))
+}
+
+fn gemini_standard_content_parts(content: &Value) -> Result<Vec<Value>, String> {
+    if let Some(text) = content.as_str() { return Ok(vec![json!({"text":text})]); }
+    let parts = content.as_array().ok_or("Gemini message content requires text or parts")?;
+    parts.iter().map(|part| {
+        match part.get("type").and_then(Value::as_str) {
+            Some("text" | "input_text" | "output_text") => Ok(json!({"text":part["text"]})),
+            Some("media") => {
+                let mut inline = json!({"data":part["media"]["inline_data"]});
+                if let Some(mime) = part.pointer("/media/mime_type") { inline["mimeType"] = mime.clone(); }
+                Ok(json!({"inlineData":inline}))
+            }
+            Some("image_url" | "input_image") => {
+                let image = &part["image_url"];
+                let url = image.as_str().or_else(|| image.get("url").and_then(Value::as_str))
+                    .ok_or("Gemini image requires a URL")?;
+                if let Some(data) = url.strip_prefix("data:") {
+                    let (header, bytes) = data.split_once(',').ok_or("Gemini image data URL requires a comma")?;
+                    let mime = header.strip_suffix(";base64").ok_or("Gemini inline image requires base64 data")?;
+                    Ok(json!({"inlineData":{"mimeType":mime,"data":bytes}}))
+                } else { Ok(json!({"fileData":{"fileUri":url}})) }
+            }
+            Some("file") => Ok(json!({"fileData":{"fileUri":part["file"]["file_url"],"mimeType":part["file"]["mime_type"]}})),
+            _ => Ok(part.clone()),
+        }
+    }).collect()
+}
 
 fn project_gemini_compatible_fields(source: &mut Value) -> Result<(), String> {
     project_gemini_compatible_fields_inner(source)

@@ -5,6 +5,37 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+pub(crate) fn pending_endpoint_after_responses_admission(
+    state: Arc<V3ListenerState>,
+    front_connection_identity: Option<V3FrontConnectionIdentity>,
+    request_headers: HeaderMap,
+    method: String,
+    path: String,
+    started_at: Instant,
+    entry_protocol: String,
+    execution_mode: V3EntryProtocolExecutionMode,
+    pending_owner_symbol: Option<String>,
+    request_purpose: V3RequestPurpose,
+    payload: Value,
+) -> std::pin::Pin<Box<impl std::future::Future<Output = Response<Body>> + Send>> {
+    // Avoid a second poll frame for the large protocol-dispatch future.
+    Box::pin(
+        crate::endpoint_handlers::pending_endpoint_after_responses_admission_inner(
+            state,
+            front_connection_identity,
+            request_headers,
+            method,
+            path,
+            started_at,
+            entry_protocol,
+            execution_mode,
+            pending_owner_symbol,
+            request_purpose,
+            payload,
+        ),
+    )
+}
+
 pub(crate) fn collect_anthropic_relay_client_headers(
     headers: &HeaderMap,
 ) -> Result<Vec<V3AnthropicRelayClientHeader>, String> {
@@ -262,19 +293,31 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
             );
         }
         let relay_trace = handoff.node_trace;
+        // Direct-to-Relay handoff: the Direct phase already ran REQ02 and
+        // selected the target. Move the canonical Value and the captured target
+        // resources into the Relay entry; the payload is never re-normalized and
+        // the Virtual Router is not re-entered.
+        let relay_entry = routecodex_v3_runtime::V3RelayRuntimeEntry::direct_relay_handoff(
+            handoff.target,
+            handoff.expanded,
+            handoff.request_local_excluded_candidates,
+            handoff.observability_accumulator,
+        );
+        let direct_handoff_events = handoff.provider_failure_events;
         let request_execution_control = handoff.request_execution_control;
         let route_policy_pending = handoff.route_policy_pending;
         let relay_result =
-            execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_execution_mode_and_request_control(
+            execute_v3_openai_chat_relay_handoff_runtime_with_default_transport_provider_health_and_request_control(
                 &state.manifest,
                 V3OpenAiChatRelayRuntimeInput {
                     server_id: state.server.id.clone(),
                     failure_session_scope: provider_failure_session_scope,
                     request_id: request_id.clone(),
-                    payload,
+                    payload: handoff.canonical_request,
                 },
                 state.provider_health.runtime_health(),
                 V3HubExecutionMode::Relay,
+                relay_entry,
                 request_execution_control,
                 route_policy_pending,
             )
@@ -283,6 +326,14 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
             Ok(output) => output,
             Err(error) => project_v3_openai_chat_relay_runtime_failure(error),
         };
+        if !direct_handoff_events.is_empty() {
+            let observability = relay_output
+                .observability
+                .get_or_insert_with(Default::default);
+            let mut merged = direct_handoff_events;
+            merged.append(&mut observability.provider_failure_events);
+            observability.provider_failure_events = merged;
+        }
         if let Some(disposition) = relay_output.terminal_disposition.take() {
             return provider_terminal_response(
                 state,
@@ -530,4 +581,40 @@ pub(crate) fn anthropic_relay_output_response(
     builder
         .body(body)
         .expect("typed V3 Anthropic Relay response")
+}
+
+impl V3ServerAggregateHandle {
+    pub async fn prepare_exec_attempt(&self) -> Result<V3ServerExecPreparation, String> {
+        self.flush_runtime_persistence();
+        let codex_sample_exec_guard = match self.codex_sample_persist_worker.as_ref() {
+            Some(worker) => match tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                worker.quiesce_for_exec(),
+            )
+            .await
+            {
+                Ok(Ok(guard)) => Some(guard),
+                Ok(Err(error)) => {
+                    return Err(format!(
+                        "codex sample persistence preparation failed: {error}"
+                    ))
+                }
+                Err(_) => {
+                    return Err(
+                        "codex sample persistence preparation timed out; worker retained".into(),
+                    )
+                }
+            },
+            None => None,
+        };
+        let codex_sample_persist_failures = codex_sample_exec_guard
+            .as_ref()
+            .map(|guard| guard.persist_failures())
+            .unwrap_or_default();
+        Ok(V3ServerExecPreparation {
+            front_checkpoints: self.front_transport_broker.freeze(Instant::now()),
+            codex_sample_persist_failures,
+            _codex_sample_exec_guard: codex_sample_exec_guard,
+        })
+    }
 }

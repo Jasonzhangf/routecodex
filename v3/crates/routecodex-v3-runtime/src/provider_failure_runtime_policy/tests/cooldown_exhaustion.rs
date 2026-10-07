@@ -1,10 +1,6 @@
 use super::*;
 use serde_json::json;
-use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
-use tokio::sync::{mpsc, oneshot, Notify};
 
 fn all_candidate_keys(expanded: &V3Target09CandidateSetExpanded) -> BTreeSet<String> {
     expanded
@@ -72,84 +68,6 @@ fn acquire_rescue_probe(
         .expect("rescue probe must be acquired")
 }
 
-async fn serve_one_responses_probe(listener: TcpListener) {
-    let (mut socket, _) = listener
-        .accept()
-        .await
-        .expect("provider probe listener must accept one request");
-    let mut request = Vec::new();
-    let mut chunk = [0_u8; 4096];
-    loop {
-        let read = tokio::time::timeout(Duration::from_secs(1), socket.read(&mut chunk))
-            .await
-            .expect("provider probe request headers must arrive")
-            .expect("provider probe request must be readable");
-        if read == 0 {
-            break;
-        }
-        request.extend_from_slice(&chunk[..read]);
-        if request.windows(4).any(|window| window == b"\r\n\r\n") {
-            break;
-        }
-    }
-    let body = r#"{"status":"completed"}"#;
-    let response = format!(
-        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-        body.len()
-    );
-    socket
-        .write_all(response.as_bytes())
-        .await
-        .expect("provider probe response must be writable");
-}
-
-async fn serve_two_gated_responses_probes(
-    listener: TcpListener,
-    arrivals: mpsc::UnboundedSender<()>,
-    release: oneshot::Receiver<()>,
-) {
-    let mut sockets = Vec::with_capacity(2);
-    for _ in 0..2 {
-        let (mut socket, _) = listener
-            .accept()
-            .await
-            .expect("provider probe listener must accept both requests");
-        let mut request = Vec::new();
-        let mut chunk = [0_u8; 4096];
-        loop {
-            let read = tokio::time::timeout(Duration::from_secs(1), socket.read(&mut chunk))
-                .await
-                .expect("provider probe request headers must arrive")
-                .expect("provider probe request must be readable");
-            if read == 0 {
-                break;
-            }
-            request.extend_from_slice(&chunk[..read]);
-            if request.windows(4).any(|window| window == b"\r\n\r\n") {
-                break;
-            }
-        }
-        arrivals
-            .send(())
-            .expect("probe test must observe both requests");
-        sockets.push(socket);
-    }
-    release
-        .await
-        .expect("test must release both provider probes");
-    let body = r#"{"status":"completed"}"#;
-    let response = format!(
-        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-        body.len()
-    );
-    for mut socket in sockets {
-        socket
-            .write_all(response.as_bytes())
-            .await
-            .expect("provider probe response must be writable");
-    }
-}
-
 #[test]
 fn request_local_provider_failure_excludes_all_auth_keys_for_provider() {
     let scope = "request_local_provider_exclusion";
@@ -196,28 +114,12 @@ fn request_local_provider_failure_excludes_all_auth_keys_for_provider() {
 }
 
 #[tokio::test]
-async fn fresh_cooldown_only_exhaustion_runs_one_rescue_probe_and_resumes_same_request() {
-    let server_id = "fresh_cooldown_only_exhaustion";
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("provider probe listener must bind");
-    let base_url = format!(
-        "http://{}/v1",
-        listener
-            .local_addr()
-            .expect("provider probe listener address")
-    );
-    let mut manifest = global_pool_alive_manifest(server_id);
-    let provider = manifest.providers.get_mut("first").expect("first provider");
-    provider.base_url = base_url;
-    provider.auth.entries[0].env = Some("ROUTECODEX_V3_FRESH_COOLDOWN_PROBE_KEY".into());
-    std::env::set_var(
-        "ROUTECODEX_V3_FRESH_COOLDOWN_PROBE_KEY",
-        "routecodex-test-key",
-    );
+async fn fresh_cooldown_only_exhaustion_is_terminal_without_waiting() {
+    let server_id = "fresh_cooldown_only_exhaustion_terminal";
+    let manifest = global_pool_alive_manifest(server_id);
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let failure_session_scope =
-        test_provider_failure_scope(server_id, server_id, "fresh-cooldown-session")
+        test_provider_failure_scope(server_id, server_id, "fresh-cooldown-terminal-session")
             .expect("failure session scope");
     let expanded = match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
         manifest: &manifest,
@@ -235,10 +137,10 @@ async fn fresh_cooldown_only_exhaustion_runs_one_rescue_probe_and_resumes_same_r
         Err(_) => panic!("expanded candidates failed"),
     };
     put_all_candidates_in_provider_cooldown(&health, &expanded);
-    let probe_server = tokio::spawn(serve_one_responses_probe(listener));
+    let generation_before = health.store.availability_generation();
 
     let selection = tokio::time::timeout(
-        Duration::from_secs(2),
+        Duration::from_millis(250),
         select_v3_expanded_target_with_exhaustion_rescue(
             &manifest,
             expanded,
@@ -251,45 +153,26 @@ async fn fresh_cooldown_only_exhaustion_runs_one_rescue_probe_and_resumes_same_r
         ),
     )
     .await
-    .expect("fresh cooldown exhaustion must not wait forever");
-    match selection {
-        V3TargetSelectionAfterRescue::Selected(_) => {}
-        _ => panic!("successful fresh rescue probe must resume the same request"),
-    }
-    tokio::time::timeout(Duration::from_secs(1), probe_server)
-        .await
-        .expect("fresh cooldown exhaustion must run a rescue probe")
-        .expect("provider probe task must not panic");
+    .expect("a fully cooled eligible pool must terminate without waiting");
+
+    assert!(
+        matches!(selection, V3TargetSelectionAfterRescue::Exhausted(_)),
+        "complete cooldown-only exhaustion must return terminal exhaustion, not resume"
+    );
+    assert_eq!(
+        health.store.availability_generation(),
+        generation_before,
+        "the exhausted request must not run a request-owned rescue probe"
+    );
 }
 
 #[tokio::test]
-async fn stale_rescue_probe_completion_does_not_abort_reselection_of_next_provider() {
-    let server_id = "stale_rescue_probe_completion";
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("provider probe listener must bind");
-    let base_url = format!(
-        "http://{}/v1",
-        listener
-            .local_addr()
-            .expect("provider probe listener address")
-    );
-    let mut manifest = global_pool_alive_manifest(server_id);
-    for provider_id in ["first", "second"] {
-        let provider = manifest
-            .providers
-            .get_mut(provider_id)
-            .expect("configured provider");
-        provider.base_url = base_url.clone();
-        provider.auth.entries[0].env = Some("ROUTECODEX_V3_STALE_RESCUE_PROBE_KEY".into());
-    }
-    std::env::set_var(
-        "ROUTECODEX_V3_STALE_RESCUE_PROBE_KEY",
-        "routecodex-test-key",
-    );
+async fn probe_recovery_after_terminal_exhaustion_does_not_resume_the_exhausted_request() {
+    let server_id = "terminal_exhaustion_no_resume";
+    let manifest = global_pool_alive_manifest(server_id);
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let failure_session_scope =
-        test_provider_failure_scope(server_id, server_id, "stale-rescue-session")
+        test_provider_failure_scope(server_id, server_id, "terminal-no-resume-session")
             .expect("failure session scope");
     let expanded = match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
         manifest: &manifest,
@@ -308,37 +191,38 @@ async fn stale_rescue_probe_completion_does_not_abort_reselection_of_next_provid
     };
     put_all_candidates_in_provider_cooldown(&health, &expanded);
     let stale_candidate = expanded.candidates[0].clone();
-    let (arrivals_tx, mut arrivals_rx) = mpsc::unbounded_channel();
-    let (release_tx, release_rx) = oneshot::channel();
-    let probe_server = tokio::spawn(serve_two_gated_responses_probes(
-        listener,
-        arrivals_tx,
-        release_rx,
-    ));
-    let selection_manifest = manifest.clone();
-    let selection_expanded = expanded.clone();
-    let selection_scope = failure_session_scope.clone();
-    let selection_health = health.clone();
-    let selection = tokio::spawn(async move {
+    let next_candidate = expanded.candidates[1].clone();
+
+    let exhausted = tokio::time::timeout(
+        Duration::from_millis(250),
         select_v3_expanded_target_with_exhaustion_rescue(
-            &selection_manifest,
-            selection_expanded,
-            &selection_scope,
-            &selection_health,
+            &manifest,
+            expanded.clone(),
+            &failure_session_scope,
+            &health,
             &BTreeSet::new(),
             20_001,
             0,
             true,
-        )
-        .await
-    });
-    for _ in 0..2 {
-        tokio::time::timeout(Duration::from_secs(10), arrivals_rx.recv())
-            .await
-            .expect("both provider rescue probes must start")
-            .expect("probe arrival channel must stay open");
+        ),
+    )
+    .await
+    .expect("complete exhaustion must terminate without waiting");
+    match exhausted {
+        V3TargetSelectionAfterRescue::Exhausted(exhausted) => assert!(
+            !exhausted.attempted_candidates.is_empty(),
+            "terminal exhaustion must record the attempted candidates"
+        ),
+        V3TargetSelectionAfterRescue::Selected(_) => {
+            panic!("a fully cooled eligible pool must not select a candidate")
+        }
+        V3TargetSelectionAfterRescue::Failed(source) => {
+            panic!("complete exhaustion must not raise a source failure: {source:?}")
+        }
     }
 
+    // A newer failure for the stale candidate plus an external successful probe
+    // for the next candidate must not resume the request that already terminated.
     health
         .store
         .record_provider_failure_action(
@@ -349,375 +233,217 @@ async fn stale_rescue_probe_completion_does_not_abort_reselection_of_next_provid
             20_002,
         )
         .expect("newer provider failure must advance health generation");
-    release_tx
-        .send(())
-        .expect("both probes must be released after the generation advances");
-
-    let selection = tokio::time::timeout(Duration::from_secs(2), selection)
-        .await
-        .expect("stale probe completion must not hold target reselection")
-        .expect("selection task must not panic");
-    match selection {
-        V3TargetSelectionAfterRescue::Selected(selected) => assert_ne!(
-            selected.candidate.provider_id, stale_candidate.provider_id,
-            "newer failure must keep the stale-probe provider excluded and select the next provider"
-        ),
-        V3TargetSelectionAfterRescue::Failed(source) => {
-            panic!("stale rescue probe must not fail target reselection: {source:?}")
-        }
-        V3TargetSelectionAfterRescue::Exhausted(_) => {
-            panic!("successful next-provider probe must prevent pool exhaustion")
-        }
-    }
-    tokio::time::timeout(Duration::from_secs(1), probe_server)
-        .await
-        .expect("both rescue probes must finish")
-        .expect("provider probe server must not panic");
-}
-
-#[tokio::test]
-async fn cooldown_only_exhaustion_waits_for_successful_rescue_probe() {
-    let server_id = "cooldown_only_exhaustion";
-    let manifest = global_pool_alive_manifest(server_id);
-    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let failure_session_scope =
-        test_provider_failure_scope(server_id, server_id, "cooldown-only-session")
-            .expect("failure session scope");
-    let expanded = match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
-        manifest: &manifest,
-        server_id,
-        failure_session_scope: &failure_session_scope,
-        entry_kind: "responses",
-        endpoint_path: "/v1/responses",
-        body: &json!({"model":"client-responses","input":"hello"}),
-        request_local_excluded_candidates: &BTreeSet::new(),
-        provider_health: &health,
-        now_ms: 20_001,
-        deterministic_sample: 0,
-    }) {
-        Ok(expanded) => expanded,
-        Err(_) => panic!("expanded candidates failed"),
-    };
-    put_all_candidates_in_provider_cooldown(&health, &expanded);
-    let first = expanded.candidates[0].clone();
-    let second = expanded.candidates[1].clone();
-    let excluded_key = v3_relay_provider_candidate_key(&first);
-    let first_permit = acquire_rescue_probe(
+    let next_permit = acquire_rescue_probe(
         &health,
-        &first.provider_id,
-        &first.auth_alias,
-        &first.model_id,
+        &next_candidate.provider_id,
+        &next_candidate.auth_alias,
+        &next_candidate.model_id,
     );
-    let second_permit = acquire_rescue_probe(
-        &health,
-        &second.provider_id,
-        &second.auth_alias,
-        &second.model_id,
-    );
-
-    let selection_started = Arc::new(Notify::new());
-    let selection = {
-        let health = health.clone();
-        let failure_session_scope = failure_session_scope.clone();
-        let selection_started = selection_started.clone();
-        let request_local_excluded_candidates = BTreeSet::from([excluded_key.clone()]);
-        tokio::spawn(async move {
-            let task = select_v3_expanded_target_with_exhaustion_rescue(
-                &manifest,
-                expanded,
-                &failure_session_scope,
-                &health,
-                &request_local_excluded_candidates,
-                20_001,
-                0,
-                true,
-            );
-            selection_started.notify_one();
-            task.await
-        })
-    };
-    selection_started.notified().await;
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    assert!(
-        !selection.is_finished(),
-        "cooldown-only exhaustion must hold the request until a rescue probe succeeds"
-    );
-
     health
         .store
         .complete_provider_cooldown_probe_success_at_generation(
-            &first.provider_id,
-            Some(&first.auth_alias),
-            Some(&first.model_id),
-            20_001,
-            Some(first_permit.expected_generation()),
+            next_permit.provider_id(),
+            next_permit.auth_alias(),
+            next_permit.model_id(),
+            20_002,
+            Some(next_permit.expected_generation()),
         )
-        .expect("first rescue probe success");
-
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    assert!(
-        !selection.is_finished(),
-        "a successful probe must not revive a candidate excluded by an earlier request-local failure"
-    );
-
-    health
-        .store
-        .complete_provider_cooldown_probe_success_at_generation(
-            &second.provider_id,
-            Some(&second.auth_alias),
-            Some(&second.model_id),
-            20_001,
-            Some(second_permit.expected_generation()),
-        )
-        .expect("second rescue probe success");
-
-    let selection = tokio::time::timeout(Duration::from_millis(500), selection)
-        .await
-        .expect("selection must wake after rescue probe success")
-        .expect("selection task must not panic");
-    match selection {
-        V3TargetSelectionAfterRescue::Selected(selected) => assert_ne!(
-            v3_relay_provider_candidate_key(&selected.candidate),
-            excluded_key,
-            "successful rescue probe must recover a different candidate without reviving a request-local failure"
-        ),
-        _ => panic!("successful rescue probe must make a candidate selectable"),
-    }
-}
-
-#[tokio::test]
-async fn cooldown_only_exhaustion_probe_failure_keeps_waiting_for_later_recovery() {
-    let server_id = "cooldown_only_exhaustion_failure";
-    let manifest = global_pool_alive_manifest(server_id);
-    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let failure_session_scope =
-        test_provider_failure_scope(server_id, server_id, "cooldown-only-failure-session")
-            .expect("failure session scope");
-    let expanded = match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
-        manifest: &manifest,
-        server_id,
-        failure_session_scope: &failure_session_scope,
-        entry_kind: "responses",
-        endpoint_path: "/v1/responses",
-        body: &json!({"model":"client-responses","input":"hello"}),
-        request_local_excluded_candidates: &BTreeSet::new(),
-        provider_health: &health,
-        now_ms: 20_001,
-        deterministic_sample: 0,
-    }) {
-        Ok(expanded) => expanded,
-        Err(_) => panic!("expanded candidates failed"),
-    };
-    put_all_candidates_in_provider_cooldown(&health, &expanded);
-    let first = expanded.candidates[0].clone();
-    let second = expanded.candidates[1].clone();
-    let excluded_key = v3_relay_provider_candidate_key(&first);
-    let first_permit = acquire_rescue_probe(
-        &health,
-        &first.provider_id,
-        &first.auth_alias,
-        &first.model_id,
-    );
-    let second_permit = acquire_rescue_probe(
-        &health,
-        &second.provider_id,
-        &second.auth_alias,
-        &second.model_id,
-    );
-
-    let selection_started = Arc::new(Notify::new());
-    let selection = {
-        let health = health.clone();
-        let failure_session_scope = failure_session_scope.clone();
-        let selection_started = selection_started.clone();
-        let request_local_excluded_candidates = BTreeSet::from([excluded_key.clone()]);
-        tokio::spawn(async move {
-            let task = select_v3_expanded_target_with_exhaustion_rescue(
-                &manifest,
-                expanded,
-                &failure_session_scope,
-                &health,
-                &request_local_excluded_candidates,
-                20_001,
-                0,
-                true,
-            );
-            selection_started.notify_one();
-            task.await
-        })
-    };
-    selection_started.notified().await;
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    assert!(
-        !selection.is_finished(),
-        "failed rescue probes must keep the request held"
-    );
-
-    health
-        .store
-        .complete_provider_cooldown_probe_failure_at_generation(
-            &first.provider_id,
-            Some(&first.auth_alias),
-            Some(&first.model_id),
-            20_001,
-            Some(first_permit.expected_generation()),
-        )
-        .expect("first rescue probe failure");
-
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    assert!(
-        !selection.is_finished(),
-        "one failed probe must not terminate while another probe is in flight"
-    );
-
-    health
-        .store
-        .complete_provider_cooldown_probe_success_at_generation(
-            &second.provider_id,
-            Some(&second.auth_alias),
-            Some(&second.model_id),
-            20_001,
-            Some(second_permit.expected_generation()),
-        )
-        .expect("second rescue probe success");
-
-    let selection = tokio::time::timeout(Duration::from_millis(500), selection)
-        .await
-        .expect("selection must wake after a later rescue probe succeeds")
-        .expect("selection task must not panic");
-    match selection {
-        V3TargetSelectionAfterRescue::Selected(selected) => assert_ne!(
-            v3_relay_provider_candidate_key(&selected.candidate),
-            excluded_key,
-            "recovery must not revive a candidate excluded by an earlier request-local failure"
-        ),
-        _ => panic!("a later successful rescue probe must resume the held request"),
-    }
-}
-
-#[tokio::test]
-async fn cooldown_only_exhaustion_retries_when_next_probe_is_due() {
-    let server_id = "cooldown_only_exhaustion_due_retry";
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("provider probe listener must bind");
-    let base_url = format!(
-        "http://{}/v1",
-        listener
-            .local_addr()
-            .expect("provider probe listener address")
-    );
-    let mut manifest = global_pool_alive_manifest(server_id);
-    let provider = manifest.providers.get_mut("first").expect("first provider");
-    provider.base_url = base_url;
-    provider.auth.entries[0].env = Some("ROUTECODEX_V3_DUE_RETRY_PROBE_KEY".into());
-    std::env::set_var("ROUTECODEX_V3_DUE_RETRY_PROBE_KEY", "routecodex-test-key");
-    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let failure_session_scope =
-        test_provider_failure_scope(server_id, server_id, "cooldown-due-retry-session")
-            .expect("failure session scope");
-    let expanded = match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
-        manifest: &manifest,
-        server_id,
-        failure_session_scope: &failure_session_scope,
-        entry_kind: "responses",
-        endpoint_path: "/v1/responses",
-        body: &json!({"model":"client-responses","input":"hello"}),
-        request_local_excluded_candidates: &BTreeSet::new(),
-        provider_health: &health,
-        now_ms: 20_001,
-        deterministic_sample: 0,
-    }) {
-        Ok(expanded) => expanded,
-        Err(_) => panic!("expanded candidates failed"),
-    };
-    put_all_candidates_in_provider_cooldown(&health, &expanded);
-    let second = expanded.candidates[1].clone();
-    let second_permit = acquire_rescue_probe(
-        &health,
-        &second.provider_id,
-        &second.auth_alias,
-        &second.model_id,
-    );
-    let probe_server = tokio::spawn(serve_one_responses_probe(listener));
-
-    let selection = tokio::spawn({
-        let health = health.clone();
-        let failure_session_scope = failure_session_scope.clone();
-        async move {
-            select_v3_expanded_target_with_exhaustion_rescue(
-                &manifest,
-                expanded,
-                &failure_session_scope,
-                &health,
-                &BTreeSet::new(),
-                20_001,
-                0,
-                true,
-            )
-            .await
-        }
-    });
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    assert!(
-        !selection.is_finished(),
-        "the first rescue probe must complete before the due retry"
-    );
-    health
-        .store
-        .complete_provider_cooldown_probe_failure_at_generation(
-            &second.provider_id,
-            Some(&second.auth_alias),
-            Some(&second.model_id),
-            20_001,
-            Some(second_permit.expected_generation()),
-        )
-        .expect("first rescue probe failure");
-
-    let selection = tokio::time::timeout(Duration::from_secs(7), selection)
-        .await
-        .expect("the held request must retry when the provider-owned next probe becomes due")
-        .expect("selection task must not panic");
-    assert!(
-        matches!(selection, V3TargetSelectionAfterRescue::Selected(_)),
-        "the due retry probe must resume the held request"
-    );
-    tokio::time::timeout(Duration::from_secs(1), probe_server)
-        .await
-        .expect("the due retry must reach the provider listener")
-        .expect("provider probe task must not panic");
-}
-
-#[tokio::test]
-async fn cooldown_only_exhaustion_bounds_rescue_wait_with_residence_deadline() {
-    let server_id = "cooldown_only_exhaustion_rescue_deadline";
-    let manifest = global_pool_alive_manifest_with_rescue_timeout(server_id, Some(100));
-    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let failure_session_scope = test_provider_failure_scope(
-        server_id,
-        server_id,
-        "cooldown-only-rescue-deadline-session",
-    )
-    .expect("failure session scope");
-    let expanded = match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
-        manifest: &manifest,
-        server_id,
-        failure_session_scope: &failure_session_scope,
-        entry_kind: "responses",
-        endpoint_path: "/v1/responses",
-        body: &json!({"model":"client-responses","input":"hello"}),
-        request_local_excluded_candidates: &BTreeSet::new(),
-        provider_health: &health,
-        now_ms: 20_001,
-        deterministic_sample: 0,
-    }) {
-        Ok(expanded) => expanded,
-        Err(_) => panic!("expanded candidates failed"),
-    };
-    put_all_candidates_in_provider_cooldown(&health, &expanded);
+        .expect("external rescue probe success");
 
     let selection = tokio::time::timeout(
-        Duration::from_secs(2),
+        Duration::from_millis(250),
+        select_v3_expanded_target_with_exhaustion_rescue(
+            &manifest,
+            expanded,
+            &failure_session_scope,
+            &health,
+            &BTreeSet::new(),
+            20_002,
+            0,
+            true,
+        ),
+    )
+    .await
+    .expect("a new selection must not wait after external recovery");
+    match selection {
+        V3TargetSelectionAfterRescue::Selected(selected) => assert_eq!(
+            selected.candidate.provider_id, next_candidate.provider_id,
+            "the recovered next provider must serve the new selection only"
+        ),
+        _ => panic!("external recovery must restore admission for a new request"),
+    }
+}
+
+#[tokio::test]
+async fn request_local_exclusion_is_preserved_across_terminal_exhaustion() {
+    let server_id = "terminal_exhaustion_request_local_exclusion";
+    let manifest = global_pool_alive_manifest(server_id);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let failure_session_scope =
+        test_provider_failure_scope(server_id, server_id, "terminal-exclusion-session")
+            .expect("failure session scope");
+    let expanded = match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
+        manifest: &manifest,
+        server_id,
+        failure_session_scope: &failure_session_scope,
+        entry_kind: "responses",
+        endpoint_path: "/v1/responses",
+        body: &json!({"model":"client-responses","input":"hello"}),
+        request_local_excluded_candidates: &BTreeSet::new(),
+        provider_health: &health,
+        now_ms: 20_001,
+        deterministic_sample: 0,
+    }) {
+        Ok(expanded) => expanded,
+        Err(_) => panic!("expanded candidates failed"),
+    };
+    put_all_candidates_in_provider_cooldown(&health, &expanded);
+    let excluded_candidate = expanded.candidates[0].clone();
+    let excluded_key = v3_relay_provider_candidate_key(&excluded_candidate);
+    let request_local_excluded_candidates = BTreeSet::from([excluded_key.clone()]);
+
+    let selection = tokio::time::timeout(
+        Duration::from_millis(250),
+        select_v3_expanded_target_with_exhaustion_rescue(
+            &manifest,
+            expanded.clone(),
+            &failure_session_scope,
+            &health,
+            &request_local_excluded_candidates,
+            20_001,
+            0,
+            true,
+        ),
+    )
+    .await
+    .expect("cooldown-only exhaustion with a request-local exclusion must not wait");
+    assert!(
+        matches!(selection, V3TargetSelectionAfterRescue::Exhausted(_)),
+        "a request-local excluded candidate must not be revived by waiting"
+    );
+
+    for candidate in &expanded.candidates {
+        let permit = acquire_rescue_probe(
+            &health,
+            &candidate.provider_id,
+            &candidate.auth_alias,
+            &candidate.model_id,
+        );
+        health
+            .store
+            .complete_provider_cooldown_probe_success_at_generation(
+                permit.provider_id(),
+                permit.auth_alias(),
+                permit.model_id(),
+                20_001,
+                Some(permit.expected_generation()),
+            )
+            .expect("external rescue probe success");
+    }
+
+    let selection = tokio::time::timeout(
+        Duration::from_millis(250),
+        select_v3_expanded_target_with_exhaustion_rescue(
+            &manifest,
+            expanded,
+            &failure_session_scope,
+            &health,
+            &request_local_excluded_candidates,
+            20_001,
+            0,
+            true,
+        ),
+    )
+    .await
+    .expect("a new selection must not wait after external recovery");
+    match selection {
+        V3TargetSelectionAfterRescue::Selected(selected) => assert_ne!(
+            v3_relay_provider_candidate_key(&selected.candidate),
+            excluded_key,
+            "external recovery must not revive a request-local excluded candidate"
+        ),
+        _ => panic!("the non-excluded candidate must be selectable after recovery"),
+    }
+}
+
+#[tokio::test]
+async fn cooldown_only_exhaustion_probe_failure_keeps_a_new_request_terminal() {
+    let server_id = "cooldown_only_exhaustion_failure_terminal";
+    let manifest = global_pool_alive_manifest(server_id);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let failure_session_scope =
+        test_provider_failure_scope(server_id, server_id, "cooldown-failure-terminal-session")
+            .expect("failure session scope");
+    let expanded = match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
+        manifest: &manifest,
+        server_id,
+        failure_session_scope: &failure_session_scope,
+        entry_kind: "responses",
+        endpoint_path: "/v1/responses",
+        body: &json!({"model":"client-responses","input":"hello"}),
+        request_local_excluded_candidates: &BTreeSet::new(),
+        provider_health: &health,
+        now_ms: 20_001,
+        deterministic_sample: 0,
+    }) {
+        Ok(expanded) => expanded,
+        Err(_) => panic!("expanded candidates failed"),
+    };
+    put_all_candidates_in_provider_cooldown(&health, &expanded);
+    let second = expanded.candidates[1].clone();
+
+    let first_selection = tokio::time::timeout(
+        Duration::from_millis(250),
+        select_v3_expanded_target_with_exhaustion_rescue(
+            &manifest,
+            expanded.clone(),
+            &failure_session_scope,
+            &health,
+            &BTreeSet::new(),
+            20_001,
+            0,
+            true,
+        ),
+    )
+    .await
+    .expect("a fully cooled eligible pool must terminate without waiting");
+    assert!(matches!(
+        first_selection,
+        V3TargetSelectionAfterRescue::Exhausted(_)
+    ));
+
+    // An external management probe failure must preserve the cooldown and must
+    // not turn a later request into a held wait.
+    let second_permit = acquire_rescue_probe(
+        &health,
+        &second.provider_id,
+        &second.auth_alias,
+        &second.model_id,
+    );
+    health
+        .store
+        .complete_provider_cooldown_probe_failure_at_generation(
+            second_permit.provider_id(),
+            second_permit.auth_alias(),
+            second_permit.model_id(),
+            20_001,
+            Some(second_permit.expected_generation()),
+        )
+        .expect("external rescue probe failure");
+    assert!(
+        !health
+            .availability(
+                &second.provider_id,
+                Some(&second.auth_alias),
+                Some(&second.model_id),
+                20_001,
+            )
+            .available,
+        "a failed management probe must preserve the provider cooldown"
+    );
+
+    let next_selection = tokio::time::timeout(
+        Duration::from_millis(250),
         select_v3_expanded_target_with_exhaustion_rescue(
             &manifest,
             expanded,
@@ -730,10 +456,163 @@ async fn cooldown_only_exhaustion_bounds_rescue_wait_with_residence_deadline() {
         ),
     )
     .await
-    .expect("cooldown-only rescue must honor its configured residence deadline");
+    .expect("a still-cooled pool must terminate without waiting");
+    assert!(
+        matches!(next_selection, V3TargetSelectionAfterRescue::Exhausted(_)),
+        "a failed management probe must not hold a later request"
+    );
+}
+
+#[tokio::test]
+async fn cooldown_only_exhaustion_never_retries_on_due_probe() {
+    let server_id = "cooldown_only_exhaustion_no_due_retry";
+    let manifest = global_pool_alive_manifest(server_id);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let failure_session_scope =
+        test_provider_failure_scope(server_id, server_id, "cooldown-no-due-retry-session")
+            .expect("failure session scope");
+    let expanded = match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
+        manifest: &manifest,
+        server_id,
+        failure_session_scope: &failure_session_scope,
+        entry_kind: "responses",
+        endpoint_path: "/v1/responses",
+        body: &json!({"model":"client-responses","input":"hello"}),
+        request_local_excluded_candidates: &BTreeSet::new(),
+        provider_health: &health,
+        now_ms: 20_001,
+        deterministic_sample: 0,
+    }) {
+        Ok(expanded) => expanded,
+        Err(_) => panic!("expanded candidates failed"),
+    };
+    put_all_candidates_in_provider_cooldown(&health, &expanded);
+    let first = expanded.candidates[0].clone();
+
+    // A due probe is owned by the health store, never by the request.
+    let due_deadline_ms = health
+        .store
+        .provider_cooldown_probe_next_deadline_ms(
+            &first.provider_id,
+            Some(&first.auth_alias),
+            Some(&first.model_id),
+        )
+        .expect("background probe deadline")
+        .expect("a cooled provider must schedule a background probe");
+    let due_permit = health
+        .store
+        .acquire_provider_cooldown_probe_if_due(
+            &first.provider_id,
+            Some(&first.auth_alias),
+            Some(&first.model_id),
+            due_deadline_ms,
+        )
+        .expect("background due probe acquisition")
+        .expect("the scheduled background probe must become due");
+    let generation_before = health.store.availability_generation();
+
+    let selection = tokio::time::timeout(
+        Duration::from_millis(250),
+        select_v3_expanded_target_with_exhaustion_rescue(
+            &manifest,
+            expanded,
+            &failure_session_scope,
+            &health,
+            &BTreeSet::new(),
+            due_deadline_ms,
+            0,
+            true,
+        ),
+    )
+    .await
+    .expect("a due background probe must not hold the request");
     assert!(
         matches!(selection, V3TargetSelectionAfterRescue::Exhausted(_)),
-        "cooldown-only rescue must return terminal exhaustion after the residence deadline"
+        "the request must terminate instead of retrying the due background probe"
+    );
+    assert_eq!(
+        health.store.availability_generation(),
+        generation_before,
+        "the request must not run the due background probe itself"
+    );
+
+    health
+        .store
+        .complete_provider_cooldown_probe_failure_at_generation(
+            due_permit.provider_id(),
+            due_permit.auth_alias(),
+            due_permit.model_id(),
+            due_deadline_ms,
+            Some(due_permit.expected_generation()),
+        )
+        .expect("background probe failure");
+    assert!(
+        !health
+            .availability(
+                &first.provider_id,
+                Some(&first.auth_alias),
+                Some(&first.model_id),
+                due_deadline_ms,
+            )
+            .available,
+        "a failed background probe must preserve the cooldown"
+    );
+}
+
+#[tokio::test]
+async fn residence_timeout_config_does_not_hold_selection() {
+    let server_id = "cooldown_exhaustion_residence_timeout_ignored";
+    let manifest = global_pool_alive_manifest_with_rescue_timeout(server_id, Some(5_000));
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let failure_session_scope =
+        test_provider_failure_scope(server_id, server_id, "residence-timeout-ignored-session")
+            .expect("failure session scope");
+    let expanded = match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
+        manifest: &manifest,
+        server_id,
+        failure_session_scope: &failure_session_scope,
+        entry_kind: "responses",
+        endpoint_path: "/v1/responses",
+        body: &json!({"model":"client-responses","input":"hello"}),
+        request_local_excluded_candidates: &BTreeSet::new(),
+        provider_health: &health,
+        now_ms: 20_001,
+        deterministic_sample: 0,
+    }) {
+        Ok(expanded) => expanded,
+        Err(_) => panic!("expanded candidates failed"),
+    };
+    put_all_candidates_in_provider_cooldown(&health, &expanded);
+    let generation_before = health.store.availability_generation();
+
+    let started = std::time::Instant::now();
+    let selection = tokio::time::timeout(
+        Duration::from_secs(1),
+        select_v3_expanded_target_with_exhaustion_rescue(
+            &manifest,
+            expanded,
+            &failure_session_scope,
+            &health,
+            &BTreeSet::new(),
+            20_001,
+            0,
+            true,
+        ),
+    )
+    .await
+    .expect("a configured residence timeout must not hold the exhausted request");
+    assert!(
+        matches!(selection, V3TargetSelectionAfterRescue::Exhausted(_)),
+        "complete exhaustion must be terminal even with a residence timeout configured"
+    );
+    assert!(
+        started.elapsed() < Duration::from_millis(1_000),
+        "the request must not wait for the residence timeout"
+    );
+    assert_eq!(
+        health.store.availability_generation(),
+        generation_before,
+        "the request must not run a rescue probe while terminating"
     );
 }
 
@@ -784,12 +663,12 @@ async fn request_local_exclusion_without_cooldown_probe_success_stays_terminal()
 }
 
 #[tokio::test]
-async fn auth_key_cooldown_holds_selection_until_probe_recovery() {
-    let server_id = "auth_key_cooldown_with_provider_probe";
+async fn auth_key_cooldown_exhaustion_is_terminal() {
+    let server_id = "auth_key_cooldown_terminal";
     let manifest = global_pool_alive_manifest(server_id);
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let failure_session_scope =
-        test_provider_failure_scope(server_id, server_id, "auth-key-with-provider-probe")
+        test_provider_failure_scope(server_id, server_id, "auth-key-terminal-session")
             .expect("failure session scope");
     let expanded = match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
         manifest: &manifest,
@@ -820,91 +699,42 @@ async fn auth_key_cooldown_holds_selection_until_probe_recovery() {
         None,
         "the auth-key probe must retain its model-less identity"
     );
+    let generation_before = health.store.availability_generation();
 
-    let selection = tokio::spawn({
-        let health = health.clone();
-        let failure_session_scope = failure_session_scope.clone();
-        async move {
-            select_v3_expanded_target_with_exhaustion_rescue(
-                &manifest,
-                expanded,
-                &failure_session_scope,
-                &health,
-                &BTreeSet::new(),
-                25_001,
-                0,
-                true,
-            )
-            .await
-        }
-    });
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    assert!(
-        !selection.is_finished(),
-        "auth-key cooldown-only exhaustion must hold for probe recovery"
-    );
-
-    health
-        .store
-        .complete_provider_cooldown_probe_failure_at_generation(
-            first_permit.provider_id(),
-            first_permit.auth_alias(),
-            first_permit.model_id(),
+    let selection = tokio::time::timeout(
+        Duration::from_millis(250),
+        select_v3_expanded_target_with_exhaustion_rescue(
+            &manifest,
+            expanded,
+            &failure_session_scope,
+            &health,
+            &BTreeSet::new(),
             25_001,
-            Some(first_permit.expected_generation()),
-        )
-        .expect("failed auth-key probe");
-    tokio::time::sleep(Duration::from_millis(50)).await;
+            0,
+            true,
+        ),
+    )
+    .await
+    .expect("auth-key cooldown-only exhaustion must not wait");
     assert!(
-        !selection.is_finished(),
-        "a failed auth-key probe must keep the request held for the next probe"
+        matches!(selection, V3TargetSelectionAfterRescue::Exhausted(_)),
+        "auth-key cooldown-only exhaustion must be terminal"
     );
-    let retry_deadline_ms = health
-        .store
-        .provider_cooldown_probe_next_deadline_ms("first", Some("key1"), Some("gpt-test"))
-        .expect("auth-key retry deadline")
-        .expect("failed auth-key probe must schedule a retry");
-    let retry = health
-        .store
-        .acquire_provider_cooldown_probe_if_due(
-            "first",
-            Some("key1"),
-            Some("gpt-test"),
-            retry_deadline_ms,
-        )
-        .expect("auth-key retry probe acquisition")
-        .expect("the model candidate must resolve the next auth-key probe deadline");
-    health
-        .store
-        .complete_provider_cooldown_probe_success_at_generation(
-            retry.provider_id(),
-            retry.auth_alias(),
-            retry.model_id(),
-            retry_deadline_ms,
-            Some(retry.expected_generation()),
-        )
-        .expect("successful auth-key retry probe");
-    let selection = tokio::time::timeout(Duration::from_millis(500), selection)
-        .await
-        .expect("selection must wake after auth-key probe success")
-        .expect("selection task must not panic");
-    assert!(
-        matches!(selection, V3TargetSelectionAfterRescue::Selected(_)),
-        "successful auth-key retry probe must resume the held request"
+    assert_eq!(
+        health.store.availability_generation(),
+        generation_before,
+        "the exhausted request must not run a request-owned auth-key probe"
     );
 }
 
 #[tokio::test]
-async fn auth_key_cooldown_holds_selection_until_successful_probe_recovery() {
-    let server_id = "auth_key_cooldown_with_successful_provider_probe";
+async fn auth_key_cooldown_probe_recovery_restores_only_a_new_selection() {
+    let server_id = "auth_key_cooldown_new_selection";
     let manifest = global_pool_alive_manifest(server_id);
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let failure_session_scope = test_provider_failure_scope(
-        server_id,
-        server_id,
-        "auth-key-with-successful-provider-probe",
-    )
-    .expect("failure session scope");
+    let failure_session_scope =
+        test_provider_failure_scope(server_id, server_id, "auth-key-new-selection-session")
+            .expect("failure session scope");
     let expanded = match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
         manifest: &manifest,
         server_id,
@@ -928,35 +758,32 @@ async fn auth_key_cooldown_holds_selection_until_successful_probe_recovery() {
         .acquire_provider_cooldown_probe_if_due("first", Some("key1"), Some("gpt-test"), 25_001)
         .expect("auth-key due probe acquisition")
         .expect("the model candidate must acquire the model-less auth-key probe");
-    assert_eq!(first_permit.auth_alias(), Some("key1"));
     assert_eq!(
         first_permit.model_id(),
         None,
         "the auth-key probe must retain its model-less identity"
     );
 
-    let selection = tokio::spawn({
-        let health = health.clone();
-        let failure_session_scope = failure_session_scope.clone();
-        async move {
-            select_v3_expanded_target_with_exhaustion_rescue(
-                &manifest,
-                expanded,
-                &failure_session_scope,
-                &health,
-                &BTreeSet::new(),
-                25_001,
-                0,
-                true,
-            )
-            .await
-        }
-    });
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    let exhausted = tokio::time::timeout(
+        Duration::from_millis(250),
+        select_v3_expanded_target_with_exhaustion_rescue(
+            &manifest,
+            expanded.clone(),
+            &failure_session_scope,
+            &health,
+            &BTreeSet::new(),
+            25_001,
+            0,
+            true,
+        ),
+    )
+    .await
+    .expect("auth-key cooldown-only exhaustion must not wait");
     assert!(
-        !selection.is_finished(),
-        "auth-key cooldown-only exhaustion must hold for successful probe recovery"
+        matches!(exhausted, V3TargetSelectionAfterRescue::Exhausted(_)),
+        "auth-key cooldown-only exhaustion must be terminal"
     );
+
     health
         .store
         .complete_provider_cooldown_probe_success_at_generation(
@@ -967,14 +794,32 @@ async fn auth_key_cooldown_holds_selection_until_successful_probe_recovery() {
             Some(first_permit.expected_generation()),
         )
         .expect("successful auth-key probe");
-    let selection = tokio::time::timeout(Duration::from_millis(500), selection)
-        .await
-        .expect("a successful auth-key probe must resume the held request")
-        .expect("selection task must not panic");
-    assert!(
-        matches!(selection, V3TargetSelectionAfterRescue::Selected(_)),
-        "successful auth-key probe recovery must make the candidate selectable"
-    );
+
+    let selection = tokio::time::timeout(
+        Duration::from_millis(250),
+        select_v3_expanded_target_with_exhaustion_rescue(
+            &manifest,
+            expanded,
+            &failure_session_scope,
+            &health,
+            &BTreeSet::new(),
+            25_001,
+            0,
+            true,
+        ),
+    )
+    .await
+    .expect("a new selection must not wait after auth-key probe recovery");
+    match selection {
+        V3TargetSelectionAfterRescue::Selected(selected) => {
+            assert_eq!(selected.candidate.provider_id, "first");
+            assert_eq!(
+                selected.candidate.auth_alias, "key1",
+                "auth-key probe recovery must restore the exact auth-key identity"
+            );
+        }
+        _ => panic!("a successful auth-key probe must restore admission for a new request"),
+    }
 }
 
 #[tokio::test]

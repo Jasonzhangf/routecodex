@@ -104,6 +104,11 @@ function profileParamsFor(profiles, operatorKey, direction) {
   return profiles.get(`${operatorKey}:${direction}`);
 }
 
+function parseOptionalType(expected) {
+  const match = /^optional\(([^()]+)\)$/u.exec(String(expected ?? ''));
+  return match ? match[1] : null;
+}
+
 function checkTypedParams(profile, params, failures, label) {
   if (!profile) return;
   const allowed = new Set(Object.keys(profile));
@@ -112,8 +117,23 @@ function checkTypedParams(profile, params, failures, label) {
     if (expected === 'resource' || String(expected).startsWith('resource(')) {
       continue;
     }
+    const optionalType = parseOptionalType(expected);
+    const requiredType = optionalType ?? expected;
+    if (optionalType) {
+      if (value === undefined) continue;
+      if (typeof value !== 'string' || !value.trim()) {
+        failures.push(`${label} param ${name} must be a non-empty ${optionalType}`);
+      }
+      continue;
+    }
     if (value === undefined || value === null || value === '') {
       failures.push(`${label} missing typed param ${name}`);
+      continue;
+    }
+    if (requiredType === 'array' || requiredType === 'array(string)') {
+      if (!Array.isArray(value) || value.length === 0 || value.some((item) => !isNonEmptyString(item))) {
+        failures.push(`${label} param ${name} must be a non-empty array of non-empty strings`);
+      }
       continue;
     }
     if (typeof value === 'number') continue;
@@ -121,16 +141,16 @@ function checkTypedParams(profile, params, failures, label) {
       failures.push(`${label} param ${name} is not typed (${typeof value}: ${value})`);
       continue;
     }
-    if (!expected) continue;
-    if (expected === 'string' || expected === 'typed' || expected === 'set' || expected === 'resource') {
+    if (!requiredType) continue;
+    if (requiredType === 'string' || requiredType === 'typed' || requiredType === 'set' || requiredType === 'resource') {
       if (!value.trim()) failures.push(`${label} param ${name} must be non-empty`);
       continue;
     }
-    if (/^enum\(/u.test(expected)) {
-      const allowed = stripEnum(expected);
+    if (/^enum\(/u.test(requiredType)) {
+      const allowed = stripEnum(requiredType);
       const actual = stripEnum(value);
       if (allowed.length && !actual.some((item) => allowed.includes(item))) {
-        failures.push(`${label} param ${name} value ${value} not allowed by profile ${expected}`);
+        failures.push(`${label} param ${name} value ${value} not allowed by profile ${requiredType}`);
       }
       continue;
     }
@@ -360,6 +380,62 @@ for (const row of fieldProfiles?.extension_path_consumers ?? []) {
 }
 
 const normalizedProtocol = (protocol) => protocol === 'openai_chat_extension' ? 'openai_chat' : protocol;
+const directionNames = new Set(['client_request_to_chat', 'chat_to_provider', 'provider_response_to_chat', 'chat_to_client_response']);
+const requestDirections = new Set(['client_request_to_chat', 'chat_to_provider']);
+const responseDirections = new Set(['provider_response_to_chat', 'chat_to_client_response']);
+function requiredDirections(section) {
+  return section === 'response_fields' || section === 'output_fields'
+    ? responseDirections
+    : requestDirections;
+}
+
+function isNonEmptyString(value) {
+  return typeof value === 'string' && value.trim() !== '';
+}
+
+function validateDirectionBinding(row, bindingDirection, binding, rowLabel) {
+  const bindingLabel = row?.structure_only === true
+    ? `${rowLabel} structure_only direction_binding ${bindingDirection}`
+    : `${rowLabel} direction_binding ${bindingDirection}`;
+  if (!directionNames.has(bindingDirection)) {
+    failures.push(`${fieldProfilesRel}: ${bindingLabel} has unknown direction ${bindingDirection}`);
+    return;
+  }
+  if (!requiredDirections(row?.section).has(bindingDirection)) {
+    failures.push(`${fieldProfilesRel}: ${bindingLabel} is not applicable to section ${row?.section ?? ''}`);
+  }
+  for (const required of ['source', 'destination', 'operator']) {
+    if (!isNonEmptyString(binding?.[required])) {
+      failures.push(`${fieldProfilesRel}: ${bindingLabel} missing ${required}`);
+    }
+  }
+  if (!isNonEmptyString(binding?.operator)) return;
+  if (!fieldOperatorLibrary.has(binding.operator)) {
+    failures.push(`${fieldProfilesRel}: ${bindingLabel} operator ${binding.operator} is not a registered field_operator_library entry`);
+    return;
+  }
+  const bindingProfile = profileParamsFor(typedOperatorProfiles, binding.operator, bindingDirection);
+  if (!bindingProfile) {
+    failures.push(`${fieldProfilesRel}: ${bindingLabel} operator ${binding.operator} has no typed_operator_profile`);
+    return;
+  }
+  if (row?.structure_only === true) {
+    if (!isNonEmptyString(binding.transform_id)) {
+      failures.push(`${fieldProfilesRel}: ${bindingLabel} must declare typed transform_id`);
+    }
+    const scalarOperator = row?.scalar_consumer?.[bindingDirection];
+    if (scalarOperator && binding.operator !== scalarOperator) {
+      failures.push(`${fieldProfilesRel}: ${bindingLabel} operator ${binding.operator} must match scalar_consumer.${bindingDirection} ${scalarOperator}`);
+    }
+  } else {
+    const consumerOperator = row?.consumers?.[bindingDirection];
+    if (binding.operator !== consumerOperator) {
+      failures.push(`${fieldProfilesRel}: ${bindingLabel} operator ${binding.operator} must match consumers.${bindingDirection} ${consumerOperator ?? ''}`);
+    }
+  }
+  checkTypedParams(bindingProfile, binding, failures, `${fieldProfilesRel}: ${bindingLabel}`);
+}
+
 const standardBindingKeys = new Set();
 for (const row of fieldProfiles?.path_consumers ?? []) {
   standardBindingKeys.add(`${normalizedProtocol(row?.protocol)}:${normalizedPath(row?.path)}`);
@@ -377,7 +453,6 @@ const bindingContract = fieldProfiles?.binding_contract;
 if (!bindingContract) {
   failures.push(`${fieldProfilesRel}: missing binding_contract`);
 } else {
-  const directionNames = new Set(['client_request_to_chat', 'chat_to_provider', 'provider_response_to_chat', 'chat_to_client_response']);
   for (const binding of bindingContract?.direction_bindings ?? []) {
     const direction = binding?.direction ?? '';
     if (!directionNames.has(direction)) failures.push(`${fieldProfilesRel}: binding_contract direction_bindings has unknown direction ${direction}`);
@@ -401,7 +476,16 @@ for (const [inventory, rows] of [
     if (row?.structure_only === true && row?.parent_owned !== true) {
       failures.push(`${fieldProfilesRel}: ${label} structure_only row must set parent_owned true`);
     }
-    if (row?.parent_owned === true && row?.structure_only === true && Object.keys(row?.consumers ?? {}).length === 0) continue;
+    const directionBindings = row?.params?.direction_bindings;
+    if (directionBindings !== undefined) {
+      if (!directionBindings || typeof directionBindings !== 'object' || Array.isArray(directionBindings)) {
+        failures.push(`${fieldProfilesRel}: ${label} direction_bindings must be an object`);
+      } else {
+        for (const [bindingDirection, binding] of Object.entries(directionBindings)) {
+          validateDirectionBinding(row, bindingDirection, binding, label);
+        }
+      }
+    }
     for (const [direction, operatorKey] of Object.entries(row?.consumers ?? {})) {
       const params = row?.params ?? {};
       if (Object.prototype.hasOwnProperty.call(params, 'direction')) {
@@ -417,23 +501,10 @@ for (const [inventory, rows] of [
       if (row?.structure_only === true && Object.keys(row?.consumers ?? {}).length > 0) {
         failures.push(`${fieldProfilesRel}: ${label} structure_only row must not declare consumers`);
       }
-      const bindings = row?.params?.direction_bindings;
-      if (bindings) {
-        for (const [bindingDirection, binding] of Object.entries(bindings)) {
-          const key = `${label} direction_binding ${bindingDirection}`;
-          for (const required of ['source', 'destination', 'operator']) {
-            if (!binding?.[required]) failures.push(`${fieldProfilesRel}: ${key} missing ${required}`);
-          }
-          if (binding?.operator !== row?.consumers?.[bindingDirection]) {
-            failures.push(`${fieldProfilesRel}: ${key} operator ${binding?.operator ?? ''} must match consumers.${bindingDirection} ${row?.consumers?.[bindingDirection] ?? ''}`);
-          }
-          checkTypedParams(profile, binding, failures, `${fieldProfilesRel}: ${key}`);
-        }
-        if (!bindings[direction]) {
-          failures.push(`${fieldProfilesRel}: ${label} direction ${direction} missing direction_binding for operator ${operatorKey}`);
-        }
-      } else {
-        checkTypedParams(profile, params, failures, `${fieldProfilesRel}: ${label} direction ${direction} operator ${operatorKey}`);
+      if (!directionBindings || !Object.prototype.hasOwnProperty.call(directionBindings, direction)) {
+        const rowOperatorParams = { ...params };
+        delete rowOperatorParams.direction_bindings;
+        checkTypedParams(profile, rowOperatorParams, failures, `${fieldProfilesRel}: ${label} direction ${direction} operator ${operatorKey}`);
       }
     }
   }
@@ -496,14 +567,6 @@ for (const ref of seenArcRefs) {
   if (!arcSchemaRegistry.has(ref)) {
     failures.push(`${fieldProfilesRel}: graph schema_ref ${ref} has no arc_schema_registry entry`);
   }
-}
-
-const requestDirections = new Set(['client_request_to_chat', 'chat_to_provider']);
-const responseDirections = new Set(['provider_response_to_chat', 'chat_to_client_response']);
-function requiredDirections(section) {
-  return section === 'response_fields' || section === 'output_fields'
-    ? responseDirections
-    : requestDirections;
 }
 
 const allShapeRows = [];
@@ -818,6 +881,83 @@ for (const row of allShapeRows) {
     }
   }
 }
+
+// Hosted-history typed configuration admission. The configured case is an
+// explicit typed recipe on a `request_input_shape_branch@1` union parent.
+// Authoring enums, duplicate cases and source-member registration are rejected
+// here; business payloads are never validated by this gate.
+const hostedHistoryEncodings = {
+  non_object_argument_encoding: new Set(['value_member']),
+  absent_argument_encoding: new Set(['empty_object']),
+  canonical_encoding: new Set(['single_hosted_event_extension']),
+  provider_chat_encoding: new Set(['adjacent_call_and_complete_event_result']),
+  provider_anthropic_encoding: new Set(['assistant_native_hosted_blocks']),
+  provider_gemini_encoding: new Set(['adjacent_call_and_complete_event_result']),
+  native_result_encoding: new Set(['current_event_outcome_members']),
+  inverse_encoding: new Set(['current_source_event_value']),
+};
+const hostedHistoryCaseFields = [
+  'discriminator_value',
+  'function_name',
+  'generated_identity_prefix',
+  'canonical_extension_key',
+  'native_call_block_type',
+  'native_result_block_type',
+];
+function validateHostedHistoryCases(row) {
+  const cases = row?.params?.hosted_history_cases;
+  if (cases === undefined) return;
+  const key = `${row.protocol || ''}:${row.section || ''}:${row.path || ''}`;
+  if (!Array.isArray(cases) || cases.length === 0) {
+    failures.push(`${fieldProfilesRel}: ${key} hosted_history_cases must be a non-empty array`);
+    return;
+  }
+  const seenDiscriminator = new Set();
+  const seenExtensionKey = new Set();
+  for (const entry of cases) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      failures.push(`${fieldProfilesRel}: ${key} hosted_history_cases entry must be an object`);
+      continue;
+    }
+    const label = `${key} hosted_history_cases case ${entry.discriminator_value ?? '<missing>'}`;
+    for (const field of hostedHistoryCaseFields) {
+      if (!isNonEmptyString(entry[field])) {
+        failures.push(`${fieldProfilesRel}: ${label} must declare a non-empty ${field}`);
+      }
+    }
+    for (const [field, allowed] of Object.entries(hostedHistoryEncodings)) {
+      if (!isNonEmptyString(entry[field]) || !allowed.has(entry[field])) {
+        failures.push(`${fieldProfilesRel}: ${label} ${field} ${entry[field] ?? '<missing>'} is not an admitted encoding`);
+      }
+    }
+    for (const field of ['identity_paths', 'argument_paths']) {
+      const value = entry[field];
+      if (!Array.isArray(value) || value.length === 0 || value.some((member) => !isNonEmptyString(member))) {
+        failures.push(`${fieldProfilesRel}: ${label} must declare non-empty ${field}`);
+        continue;
+      }
+      for (const member of value) {
+        const sourcePath = `${row.path}[].${member}`;
+        if (!sourcePathExists(row.protocol, sourcePath)) {
+          failures.push(`${fieldProfilesRel}: ${label} source member ${sourcePath} is not in source inventory`);
+        }
+      }
+    }
+    if (isNonEmptyString(entry.discriminator_value)) {
+      if (seenDiscriminator.has(entry.discriminator_value)) {
+        failures.push(`${fieldProfilesRel}: ${label} duplicate discriminator case`);
+      }
+      seenDiscriminator.add(entry.discriminator_value);
+    }
+    if (isNonEmptyString(entry.canonical_extension_key)) {
+      if (seenExtensionKey.has(entry.canonical_extension_key)) {
+        failures.push(`${fieldProfilesRel}: ${label} duplicate canonical_extension_key`);
+      }
+      seenExtensionKey.add(entry.canonical_extension_key);
+    }
+  }
+}
+for (const row of allShapeRows) validateHostedHistoryCases(row);
 
 for (const row of allShapeRows) {
   if (row?.structure_only !== true || row?.union_shape !== true) continue;
@@ -1198,6 +1338,8 @@ for (const fold of foldOperators) {
     failures.push(`${fieldProfilesRel}: fold ${fold} not in operator_registry or field_operator_library`);
   }
 }
+const foldOwners = new Map();
+const foldFinalizers = new Map();
 for (const fold of fieldProfiles?.fold_contract?.registered_folds ?? []) {
   if (!fold?.finalize_operator || !fold?.finalize_position) {
     failures.push(`${fieldProfilesRel}: fold ${fold?.operator}@${fold?.operator_version} must declare one finalize operator and position`);
@@ -1207,6 +1349,72 @@ for (const fold of fieldProfiles?.fold_contract?.registered_folds ?? []) {
   if (!operatorRegistry.has(finalizeKey) && !fieldOperatorLibrary.has(finalizeKey)) {
     failures.push(`${fieldProfilesRel}: fold ${fold.operator}@${fold.operator_version} finalize_operator ${finalizeKey} not in operator_registry or field_operator_library`);
   }
+  if (fold.operator !== 'routecodex.v3.field.fold_history_merge') continue;
+  const label = `${fold.operator}@${fold.operator_version}`;
+  const protocol = fold.protocol;
+  if (!isNonEmptyString(protocol)) {
+    failures.push(`${fieldProfilesRel}: fold ${label} must declare protocol`);
+    continue;
+  }
+  const destination = fold.params?.destination;
+  if (destination !== 'chat.messages') {
+    failures.push(`${fieldProfilesRel}: fold ${label} destination must be chat.messages`);
+  }
+  const sourceOrder = fold.params?.source_order;
+  if (!Array.isArray(sourceOrder) || sourceOrder.length === 0) {
+    failures.push(`${fieldProfilesRel}: fold ${label} source_order must be a non-empty array`);
+  } else {
+    const uniqueSources = new Set();
+    for (const source of sourceOrder) {
+      if (!isNonEmptyString(source)) {
+        failures.push(`${fieldProfilesRel}: fold ${label} source_order entries must be non-empty strings`);
+        continue;
+      }
+      if (uniqueSources.has(source)) {
+        failures.push(`${fieldProfilesRel}: fold ${label} source_order contains duplicate entry ${source}`);
+      }
+      uniqueSources.add(source);
+      if (!sourcePathExists(protocol, source)) {
+        failures.push(`${fieldProfilesRel}: fold ${label} input source ${source} is not in protocol ${protocol} inventory`);
+      }
+    }
+    const inputPaths = Array.isArray(fold.input_paths) ? fold.input_paths : [];
+    const uniqueInputs = new Set(inputPaths);
+    if (uniqueInputs.size !== inputPaths.length) {
+      failures.push(`${fieldProfilesRel}: fold ${label} input_paths contains duplicate entry`);
+    }
+    if (uniqueSources.size !== uniqueInputs.size || [...uniqueSources].some((source) => !uniqueInputs.has(source))) {
+      failures.push(`${fieldProfilesRel}: fold ${label} source_order must contain exactly the declared input_paths`);
+    }
+  }
+  if (fold.params?.equivalence_policy !== 'canonical_exact_or_declared_text_or_empty_assistant_tool_content') {
+    failures.push(`${fieldProfilesRel}: fold ${label} unknown equivalence_policy ${fold.params?.equivalence_policy ?? ''}`);
+  }
+  if (fold.params?.conflict_policy !== 'preserve_distinct_in_source_order') {
+    failures.push(`${fieldProfilesRel}: fold ${label} unknown conflict_policy ${fold.params?.conflict_policy ?? ''}`);
+  }
+  if (finalizeKey !== 'routecodex.v3.field.fold_finalize@1') {
+    failures.push(`${fieldProfilesRel}: fold ${label} finalize_operator must be routecodex.v3.field.fold_finalize@1`);
+  }
+  if (fold.finalize_position !== 'after_all_fold_input_paths') {
+    failures.push(`${fieldProfilesRel}: fold ${label} finalize_position must be after_all_fold_input_paths`);
+  }
+  const foldProfile = profileParamsFor(typedOperatorProfiles, label, fold.direction);
+  if (!foldProfile) {
+    failures.push(`${fieldProfilesRel}: fold ${label} has no typed operator profile for ${fold.direction}`);
+  } else {
+    checkTypedParams(foldProfile, fold.params, failures, `${fieldProfilesRel}: fold ${label}`);
+  }
+  const ownerKey = `${fold.direction}:${protocol}`;
+  if (foldOwners.has(ownerKey)) {
+    failures.push(`${fieldProfilesRel}: fold ${label} duplicate fold ownership for ${ownerKey}`);
+  }
+  foldOwners.set(ownerKey, label);
+  const finalizerKey = `${protocol}:${destination ?? ''}`;
+  if (foldFinalizers.has(finalizerKey)) {
+    failures.push(`${fieldProfilesRel}: fold ${label} more than one finalizer for destination ${destination ?? ''}`);
+  }
+  foldFinalizers.set(finalizerKey, finalizeKey);
 }
 
 const lifecycleManifest = loadYaml('docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');

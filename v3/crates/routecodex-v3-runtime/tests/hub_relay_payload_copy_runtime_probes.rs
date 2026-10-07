@@ -19,6 +19,20 @@ fn request_raw(payload: Value) -> routecodex_v3_runtime::V3HubReqInbound01Client
     )
 }
 
+fn request_invocation(
+    request_id: &str,
+) -> routecodex_v3_runtime::operation_runner::RequestInvocationContext {
+    routecodex_v3_runtime::operation_runner::RequestInvocationContext::new(
+        routecodex_v3_runtime::operation_runner::V3RequestContextHandle::new(
+            request_id.to_string(),
+            "responses".to_string(),
+        ),
+        format!("{request_id}-entry"),
+        format!("{request_id}-attempt"),
+        routecodex_v3_runtime::operation_runner::RequestOriginKind::ClientEntry,
+    )
+}
+
 fn response_raw(
     payload: Value,
     transport: V3HubTransportIntent,
@@ -51,6 +65,7 @@ fn relay_json_moves_one_business_payload_through_req04() {
         .run(
             request_raw(payload),
             &V3HubServertoolRequestProfile::disabled(),
+            &request_invocation("relay-json-copy-probe"),
         )
         .expect("Relay JSON request probe");
 
@@ -60,10 +75,7 @@ fn relay_json_moves_one_business_payload_through_req04() {
         V3HubRequestSemanticProtocol::Chat
     );
     assert_eq!(observed["model"], json!("client-alias"));
-    assert_eq!(
-        observed["routecodex_chat_extension"]["responses_request"]["metadata"],
-        json!({"client_owned": true})
-    );
+    assert_eq!(observed["metadata"], json!({"client_owned": true}));
     assert!(
         observed.get("input").is_none(),
         "ReqInbound02 must move Responses input into Chat canonical messages before Req04"

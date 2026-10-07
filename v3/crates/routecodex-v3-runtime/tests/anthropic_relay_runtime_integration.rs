@@ -510,9 +510,11 @@ async fn anthropic_structured_system_extension_is_not_silently_flattened_for_res
             .is_some_and(|message| message.contains("UnmappedOutboundFields")),
         "structured Anthropic system semantics must fail explicitly when Responses has no exact field: {output:?}"
     );
+    // Outbound owns the Responses standard request build (Runtime Ownership), so R43 raises this
+    // failure inside the Req07 facade. The request never reaches ProviderReqCompat06ProviderCompat.
     assert!(output
         .node_trace
-        .contains(&"ProviderReqCompat06ProviderCompat"));
+        .contains(&"V3HubReqOutbound07ProviderSemantic"));
     assert!(!output.node_trace.contains(&"V3TargetPolicyRetriedSame"));
     assert!(!output
         .node_trace

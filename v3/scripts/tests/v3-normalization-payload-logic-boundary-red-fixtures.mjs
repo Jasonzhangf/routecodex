@@ -84,8 +84,8 @@ const fixtures = [
   {
     name: 'ReqInbound tool governance',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs',
-    from: 'V3HubReqInbound02Normalized {\n            previous: input,',
-    to: 'let _tool_calls = "tool_calls";\n        V3HubReqInbound02Normalized {\n            previous: input,',
+    from: 'V3HubReqInbound02Normalized {\n        previous: input,',
+    to: 'let _tool_calls = "tool_calls";\n    V3HubReqInbound02Normalized {\n        previous: input,',
     diagnostic: /ReqInbound02 entry normalization/,
   },
   {
@@ -138,11 +138,11 @@ const fixtures = [
     diagnostic: /ReqChatProcess protocol conversion boundary/,
   },
   {
-    name: 'Anthropic Relay inbound codec removed',
+    name: 'Anthropic Relay registered SDK entry removed',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_hooks.rs',
-    from: 'let payload = encode_v3_anthropic_request_as_responses_semantic(payload)?;',
-    to: 'let payload = payload;',
-    diagnostic: /Anthropic Relay request protocol codec boundary|missing encode_v3_anthropic_request_as_responses_semantic/,
+    from: 'build_v3_hub_req_inbound_02_from_request_invocation(raw, invocation)',
+    to: 'build_v3_hub_req_inbound_02_from_canonical(raw, serde_json::json!({}))',
+    diagnostic: /Anthropic Relay request protocol codec boundary/,
   },
 ];
 

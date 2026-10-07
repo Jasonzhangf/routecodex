@@ -4,7 +4,7 @@ use super::{
     V3HubRelayResponseHookProfile, V3HubRespInbound02Normalized, V3ServerToolName,
     V3WebSearchCenterPhase, V3WebSearchCenterState,
 };
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use servertool_core::cli_contract::{
     build_client_exec_cli_projection_output, parse_servertool_cli_projection_tool_arguments,
     ServertoolCliProjectionToolArgumentsInput,
@@ -197,17 +197,19 @@ fn wrap_v3_custom_tools_at_req04(
     Ok(names)
 }
 
-pub(crate) fn current_v3_tool_thinking_payload_start(payload: &Value) -> Result<usize, String> {
+pub(crate) fn current_v3_tool_thinking_payload_start(payload: &Value) -> usize {
     for field in ["messages", "input"] {
         let Some(items) = payload.get(field).and_then(Value::as_array) else {
             continue;
         };
+        // A legal tool follow-up can contain only calls and outputs. In that
+        // case the whole array is the current turn, so the boundary is zero.
         return items
             .iter()
             .rposition(|item| item.get("role").and_then(Value::as_str) == Some("user"))
-            .ok_or_else(|| format!("Responses {field} array has no current user message"));
+            .unwrap_or(0);
     }
-    Ok(0)
+    0
 }
 
 pub(crate) fn is_v3_tool_thinking_output_continuation(payload: &Value) -> bool {
@@ -386,6 +388,71 @@ fn payload_declares_web_search_tool(payload: &Value) -> bool {
                     })
             })
         })
+}
+
+/// Search options a Responses `input[]` `web_search` declaration carries into
+/// its canonical `tools[]` declaration.
+const V3_RESPONSES_WEB_SEARCH_OPTION_KEYS: [&str; 4] = [
+    "search_context_size",
+    "user_location",
+    "external_web_access",
+    "search_content_types",
+];
+
+/// Relay request Chat Process: materialize the hosted-tool declarations a
+/// Responses client sent as `input[]` items into canonical `tools[]`.
+///
+/// Inbound stays lossless, so such an `input[]` declaration item reaches the
+/// Chat Process as its lossless canonical carrier, which is not chat history.
+/// The Relay Chat Process is the single owner that turns that declaration into
+/// the canonical tool surface that the web_search capability and the provider
+/// wire projection consume. Direct never runs this node, so a Direct request
+/// keeps the client payload untouched.
+pub(crate) fn lift_v3_responses_input_hosted_declarations(payload: &mut Value) {
+    let Some(object) = payload.as_object_mut() else {
+        return;
+    };
+    let declarations = collect_v3_responses_input_hosted_declarations(object.get("messages"));
+    if declarations.is_empty() {
+        return;
+    }
+    match object.get_mut("tools") {
+        Some(Value::Array(tools)) => tools.extend(declarations),
+        // A malformed non-array `tools` field keeps its lossless raw value.
+        Some(_) => {}
+        None => {
+            object.insert("tools".to_string(), Value::Array(declarations));
+        }
+    }
+}
+
+fn collect_v3_responses_input_hosted_declarations(messages: Option<&Value>) -> Vec<Value> {
+    let mut declarations = Vec::new();
+    for message in messages.and_then(Value::as_array).into_iter().flatten() {
+        match message.get("type").and_then(Value::as_str) {
+            Some("web_search") => declarations.push(v3_responses_web_search_declaration(message)),
+            Some("additional_tools") => {
+                if let Some(tools) = message.get("tools").and_then(Value::as_array) {
+                    declarations.extend(tools.iter().cloned());
+                }
+            }
+            _ => {}
+        }
+    }
+    declarations
+}
+
+/// The canonical declaration of a Responses `input[]` `web_search` item: the
+/// hosted `web_search` tool plus the search options the client declared.
+fn v3_responses_web_search_declaration(message: &Value) -> Value {
+    let mut declaration = Map::new();
+    declaration.insert("type".to_string(), Value::String("web_search".to_string()));
+    for key in V3_RESPONSES_WEB_SEARCH_OPTION_KEYS {
+        if let Some(value) = message.get(key) {
+            declaration.insert(key.to_string(), value.clone());
+        }
+    }
+    Value::Object(declaration)
 }
 
 pub struct V3ServerToolResponseHookOutcome {
@@ -862,5 +929,69 @@ mod web_search_hook_contract_tests {
                 title: Some("Example".to_string()),
             }]
         );
+    }
+}
+
+#[cfg(test)]
+mod tool_thinking_boundary_tests {
+    use super::*;
+
+    #[test]
+    fn current_v3_tool_thinking_payload_start_accepts_legal_call_output_followup() {
+        let payload = json!({
+            "input": [
+                {
+                    "type": "function_call",
+                    "call_id": "exec-call",
+                    "name": "exec",
+                    "arguments": "printf '%s' 'literal $() and `bytes`'"
+                },
+                {
+                    "type": "custom_tool_call",
+                    "call_id": "patch-call",
+                    "name": "apply_patch",
+                    "input": "*** Begin Patch\n*** Add File: /tmp/exact-path\n+literal\n*** End Patch\n"
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "exec-call",
+                    "output": "complete output"
+                },
+                {
+                    "type": "custom_tool_call_output",
+                    "call_id": "patch-call",
+                    "output": "patch applied"
+                }
+            ]
+        });
+
+        assert_eq!(current_v3_tool_thinking_payload_start(&payload), 0);
+    }
+
+    #[test]
+    fn current_v3_tool_thinking_payload_start_uses_last_user_position() {
+        let payload = json!({
+            "messages": [
+                {"role": "user", "content": "first"},
+                {"role": "assistant", "content": "reply"},
+                {"role": "user", "content": "latest"}
+            ]
+        });
+
+        assert_eq!(current_v3_tool_thinking_payload_start(&payload), 2);
+    }
+
+    #[test]
+    fn current_v3_tool_thinking_payload_start_allows_empty_array() {
+        let payload = json!({"input": []});
+
+        assert_eq!(current_v3_tool_thinking_payload_start(&payload), 0);
+    }
+
+    #[test]
+    fn current_v3_tool_thinking_payload_start_allows_no_array() {
+        let payload = json!({"model": "client-model"});
+
+        assert_eq!(current_v3_tool_thinking_payload_start(&payload), 0);
     }
 }

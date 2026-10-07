@@ -1,8 +1,8 @@
 // feature: 唯一登记的历史 payload 清理例外 —— 历史图片统一占位清理
 //
 // 规则（Jason 2026-10-06）：
-// - 所有请求在 inbound 归一化阶段统一执行（Relay ReqInbound02 + Direct
-//   V3Req04StandardizedResponses 共用本纯函数）。
+// - Relay 的 registered Chat Process hook 与 Direct 的 registered request hook
+//   共用本纯函数；Inbound 归一化保持原始请求及 immutable inverse pair。
 // - 仅清理最后一条图片载体之前的图片；最后一条消息/工具结果中的图片全部保留。
 //   后续纯文本提醒不改变图片边界；保留的图片驱动 multimodal 路由。
 // - 历史图片 part 原位替换为统一固定文本占位符 {"type":"text","text":"[Image]"}
@@ -304,7 +304,34 @@ fn is_v3_embedded_image_carrier(map: &serde_json::Map<String, Value>) -> bool {
             .as_str()
             .is_some_and(|value| value.trim().to_ascii_lowercase().starts_with("data:image/"));
     }
-    false
+    match map.get("type").and_then(Value::as_str) {
+        Some("media") => {
+            let Some(media) = map.get("media").and_then(Value::as_object) else {
+                return false;
+            };
+            is_v3_image_mime(media.get("mime_type"))
+                && is_v3_non_empty_string(media.get("inline_data"))
+        }
+        Some("file") => {
+            let Some(file) = map.get("file").and_then(Value::as_object) else {
+                return false;
+            };
+            is_v3_image_mime(file.get("mime_type")) && is_v3_non_empty_string(file.get("file_url"))
+        }
+        _ => false,
+    }
+}
+
+fn is_v3_image_mime(value: Option<&Value>) -> bool {
+    value
+        .and_then(Value::as_str)
+        .is_some_and(|mime| mime.trim().to_ascii_lowercase().starts_with("image/"))
+}
+
+fn is_v3_non_empty_string(value: Option<&Value>) -> bool {
+    value
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty())
 }
 
 fn normalize_responses_content_parts(item: &mut Value) {

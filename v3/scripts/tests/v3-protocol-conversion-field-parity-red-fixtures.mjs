@@ -9,6 +9,9 @@ import { spawnSync } from 'node:child_process';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const require = createRequire(import.meta.url);
 const yamlPackage = dirname(require.resolve('yaml/package.json'));
+const auditedExtensionCount = require('yaml').parse(readFileSync(
+  resolve(repo, 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml'), 'utf8',
+)).audit_truth_contract.audited_status_counts.extension_declared;
 const files = [
   'docs/goals/v3-protocol-conversion-field-parity-test-design.md',
   'docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md',
@@ -34,14 +37,17 @@ const files = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_openai_chat_messages.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_responses_items.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_reasoning_effort.rs',
+  'v3/crates/routecodex-v3-runtime/src/operation_runner/operators/project_canonical_request.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner_response_interpretation.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_extra_tests.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs',
@@ -54,6 +60,7 @@ const files = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_tool_projection.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
@@ -98,10 +105,17 @@ const cases = [
   },
   {
     name: 'Provider response projection is collapsed into the client inbound error variant',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner_response_interpretation.rs',
     from: 'V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(\n                                    error.to_string(),\n                                )',
     to: 'V3ResponsesRelayRuntimeError::InboundCanonical(error.to_string())',
     diagnostic: /no_shared_client_error_variant|InboundCanonical/u,
+  },
+  {
+    name: 'Parsed tool call loses its original custom declaration lookup',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs',
+    from: 'let Some(client_name) = custom_tool_names.get(call.name) else {',
+    to: 'let Some(client_name) = custom_tool_names.get("unrelated_tool") else {',
+    diagnostic: /chat_to_responses_projection|custom_tool_names/u,
   },
   {
     name: 'Internal web search canonicalization is collapsed into the client inbound error variant',
@@ -459,8 +473,8 @@ const cases = [
   {
     name: 'Audit truth status count drifts from matrix',
     file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
-    from: '    extension_declared: 226\n',
-    to: '    extension_declared: 225\n',
+    from: `    extension_declared: ${auditedExtensionCount}\n`,
+    to: `    extension_declared: ${auditedExtensionCount + 1}\n`,
     diagnostic: /audited_status_counts\.extension_declared|must equal current_impl count/u,
   },
   {
@@ -572,10 +586,17 @@ const cases = [
 
   {
     name: 'Responses max_output_tokens sent directly to OpenAI Chat wire',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_openai_chat_messages.rs',
     from: 'row.entry("max_completion_tokens".to_string())\n                .or_insert(max_output_tokens);',
     to: 'row.insert("max_output_tokens".to_string(), max_output_tokens);',
     diagnostic: /max_output_tokens|max_completion_tokens/,
+  },
+  {
+    name: 'OpenAI Chat message projection detaches its included owner',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
+    from: 'include!("request_outbound_openai_chat_messages.rs");',
+    to: '// message projection owner detached',
+    diagnostic: /openai_chat_message_projection_owner/u,
   },
   {
     name: 'OpenAI Chat response model dropped before Responses projection',
@@ -592,18 +613,36 @@ const cases = [
     diagnostic: /created/,
   },
   {
-    name: 'Anthropic provider compat drops original Responses reasoning surface',
+    name: 'Provider compat bypasses projected standard payload',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
-    from: 'build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops(',
-    to: 'build_v3_anthropic_provider_request_source_removed(',
-    diagnostic: /anthropic_original_responses_surface|build_v3_anthropic_provider_request_source_from_chat_canonical|Anthropic/u,
+    from: 'input.standard_payload().clone()',
+    to: 'input.chat_canonical().clone()',
+    diagnostic: /anthropic_chat_extension_surface|standard_payload/u,
   },
   {
-    name: 'Anthropic provider request source resurrects raw Responses input branch',
+    name: 'Anthropic provider request source resurrects raw Responses input shortcut',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
-    from: 'Err("Responses entry to Anthropic provider wire requires governed Chat extension messages".to_string())',
-    to: 'if payload.get("input").and_then(Value::as_array).is_some() {\n                return Ok(normalize_responses_payload_for_provider_standard(payload));\n            }\n            Err("Responses entry to Anthropic provider wire requires governed Chat extension messages".to_string())',
+    // Anchor on the function's unique leading comment instead of the projection
+    // call: rustfmt reflowed that call across lines, while the comment is stable.
+    // The injected shortcut is still the same raw Responses input branch, and it
+    // still lands inside the anthropic provider request source slice.
+    from: '    // Inbound has already normalized every entry to Chat. Standard Outbound',
+    to: '    if payload.get("input").and_then(Value::as_array).is_some() {\n        return Ok(normalize_responses_payload_for_provider_standard(payload));\n    }\n    // Inbound has already normalized every entry to Chat. Standard Outbound',
     diagnostic: /anthropic_provider_request_source_no_raw_input_branch|payload\.get\("input"\)|normalize_responses_payload_for_provider_standard/u,
+  },
+  {
+    name: 'Anthropic provider request source is dispatched by original entry protocol',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
+    from: 'pub(crate) fn build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops(\n    payload: &Value,\n) -> Result<(Value, Vec<V3ProjectionDropRecord>), String>',
+    to: 'pub(crate) fn build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops(\n    payload: &Value,\n    entry_protocol: V3HubEntryProtocol,\n) -> Result<(Value, Vec<V3ProjectionDropRecord>), String>',
+    diagnostic: /canonical_standard_source_no_entry_dispatch|entry_protocol/u,
+  },
+  {
+    name: 'Anthropic canonical projection stops consuming the Chat standard view',
+    file: 'v3/crates/routecodex-v3-runtime/src/operation_runner/operators/project_canonical_request.rs',
+    from: '                    &standard_view,\n                    )?',
+    to: '                    canonical,\n                    )?',
+    diagnostic: /canonical_standard_source|standard_view/u,
   },
   {
     name: 'OpenAI Chat outbound resurrects raw Responses rebuild',
@@ -620,11 +659,11 @@ const cases = [
     diagnostic: /responses_outbound_requires_chat_canonical|normalize_responses_payload_for_provider_standard|payload\.get\("input"\)/u,
   },
   {
-    name: 'ReqInbound drops Anthropic inbound to Chat canonicalization',
+    name: 'ReqInbound bypasses the shared SDK normalization operator',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs',
-    from: 'if input.entry_protocol == V3HubEntryProtocol::Anthropic {',
-    to: 'if false && input.entry_protocol == V3HubEntryProtocol::Anthropic {',
-    diagnostic: /all_inbound_to_chat_canonical|Anthropic inbound Chat canonicalization|encode_v3_anthropic_request_as_responses_semantic/u,
+    from: 'let canonical = execute_v3_operation_runner_request_normalize_losslessly(',
+    to: 'let canonical = execute_retired_protocol_normalizer(',
+    diagnostic: /all_inbound_to_chat_canonical|execute_v3_operation_runner_request_normalize_losslessly/u,
   },
   {
     name: 'Chat extension payload projection is rebuilt from MetadataCenter',
@@ -772,6 +811,19 @@ const cases = [
     diagnostic: /ProviderReqCompat06 typed failure edge|V3Error05ExecutionDecision/u,
   },
   {
+    name: 'Provider compat failure caller regresses to wrapper guard',
+    file: 'docs/architecture/v3-mainline-call-map.yml',
+    from: `step_id: v3-provider-action-gate-01
+      from_node: ProviderReqCompat06ProviderCompat
+      to_node: V3Error05ExecutionDecision
+      caller_symbol: execute_v3_responses_relay_runtime_resident`,
+    to: `step_id: v3-provider-action-gate-01
+      from_node: ProviderReqCompat06ProviderCompat
+      to_node: V3Error05ExecutionDecision
+      caller_symbol: execute_v3_responses_relay_runtime_inner`,
+    diagnostic: /ProviderReqCompat06 typed failure edge caller_symbol must be execute_v3_responses_relay_runtime_resident/u,
+  },
+  {
     name: 'OpenAI Chat malformed arguments exact preservation replaced by JSON-string rewrapping',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs',
     from: 'arguments.to_string()',
@@ -869,7 +921,7 @@ const cases = [
   },
   {
     name: 'Provider outbound silently deletes unsupported client metadata',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_openai_chat_messages.rs',
     from: 'if let Some(max_output_tokens) = row.remove("max_output_tokens") {',
     to: 'row.remove("client_metadata");\n        if let Some(max_output_tokens) = row.remove("max_output_tokens") {',
     diagnostic: /client_metadata|no_silent_strip_projector/u,

@@ -27,7 +27,10 @@ pub fn openai_chat_namespace_wire_names(
             let suffix = format!("_{collision}");
             alias = format!("{}{}", &base[..64 - suffix.len()], suffix);
         }
-        aliases.insert(name, alias);
+        // The emitter emits the hashed wire form for over-length names, so key
+        // the alias by that wire form. The unhashed `name` only selects the
+        // length threshold and the alias suffix.
+        aliases.insert(base, alias);
     }
     aliases
 }
@@ -453,10 +456,39 @@ fn collect_namespace_tool_names(
     Ok(())
 }
 
+/// One flattened provider tool together with the index path of the namespace
+/// child that produced it. `source_child_indices` is accumulated explicitly
+/// during the recursive traversal, so a nested namespace child carries every
+/// child index from the outer namespace down to the emitting leaf. These are
+/// structural indices only; the emitted tool value is never modified.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NamespaceToolEmission {
+    pub source_child_indices: Vec<usize>,
+    pub destination_index: usize,
+}
+
+/// Flattening result: the unchanged provider tools plus, for each of them, the
+/// namespace child that emitted it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NamespaceToolProjection {
+    pub tools: Vec<Value>,
+    pub sources: Vec<NamespaceToolEmission>,
+}
+
 pub fn flatten_namespace_tool_for_provider(
     protocol: &str,
     tool: &Value,
 ) -> Result<Option<Vec<Value>>, String> {
+    Ok(
+        flatten_namespace_tool_for_provider_with_sources(protocol, tool)?
+            .map(|projection| projection.tools),
+    )
+}
+
+pub fn flatten_namespace_tool_for_provider_with_sources(
+    protocol: &str,
+    tool: &Value,
+) -> Result<Option<NamespaceToolProjection>, String> {
     let Some(namespace) = tool.as_object() else {
         return Ok(None);
     };
@@ -477,15 +509,33 @@ pub fn flatten_namespace_tool_for_provider(
             format!("provider namespace tool {namespace_name} requires non-empty tools")
         })?;
 
-    let mut flattened = Vec::with_capacity(children.len());
+    let mut projection = NamespaceToolProjection {
+        tools: Vec::with_capacity(children.len()),
+        sources: Vec::new(),
+    };
+    let mut child_index_path = Vec::new();
     flatten_namespace_children(
         protocol,
         &namespace_name,
         children,
         &format!("provider namespace tool {namespace_name}"),
-        &mut flattened,
+        &mut projection,
+        &mut child_index_path,
     )?;
-    Ok(Some(flattened))
+    Ok(Some(projection))
+}
+
+fn push_flattened_namespace_tool(
+    projection: &mut NamespaceToolProjection,
+    source_child_indices: &[usize],
+    tool: Value,
+) {
+    let destination_index = projection.tools.len();
+    projection.tools.push(tool);
+    projection.sources.push(NamespaceToolEmission {
+        source_child_indices: source_child_indices.to_vec(),
+        destination_index,
+    });
 }
 
 fn flatten_namespace_children(
@@ -493,13 +543,15 @@ fn flatten_namespace_children(
     namespace_name: &str,
     children: &[Value],
     path: &str,
-    flattened: &mut Vec<Value>,
+    projection: &mut NamespaceToolProjection,
+    child_index_path: &mut Vec<usize>,
 ) -> Result<(), String> {
     for (index, child) in children.iter().enumerate() {
         let child = child
             .as_object()
             .ok_or_else(|| format!("{path}.tools[{index}] must be an object"))?;
-        match child.get("type").and_then(Value::as_str) {
+        child_index_path.push(index);
+        let result = match child.get("type").and_then(Value::as_str) {
             Some("namespace") => {
                 let nested_name = child
                     .get("name")
@@ -521,33 +573,32 @@ fn flatten_namespace_children(
                     &qualified_namespace,
                     nested_children,
                     &nested_path,
-                    flattened,
-                )?;
+                    projection,
+                    child_index_path,
+                )
             }
-            Some("function") => {
-                flatten_namespace_function(
-                    protocol,
-                    namespace_name,
-                    child,
-                    &format!("{path}.tools[{index}]"),
-                    flattened,
-                )?;
-            }
-            Some("custom") => {
-                flatten_namespace_custom(
-                    protocol,
-                    namespace_name,
-                    child,
-                    &format!("{path}.tools[{index}]"),
-                    flattened,
-                )?;
-            }
-            _ => {
-                return Err(format!(
-                    "{path}.tools[{index}].type must be namespace, function, or custom"
-                ));
-            }
-        }
+            Some("function") => flatten_namespace_function(
+                protocol,
+                namespace_name,
+                child,
+                &format!("{path}.tools[{index}]"),
+                projection,
+                child_index_path,
+            ),
+            Some("custom") => flatten_namespace_custom(
+                protocol,
+                namespace_name,
+                child,
+                &format!("{path}.tools[{index}]"),
+                projection,
+                child_index_path,
+            ),
+            _ => Err(format!(
+                "{path}.tools[{index}].type must be namespace, function, or custom"
+            )),
+        };
+        child_index_path.pop();
+        result?;
     }
     Ok(())
 }
@@ -557,7 +608,8 @@ fn flatten_namespace_custom(
     namespace_name: &str,
     child: &Map<String, Value>,
     child_path: &str,
-    flattened: &mut Vec<Value>,
+    projection: &mut NamespaceToolProjection,
+    child_index_path: &mut Vec<usize>,
 ) -> Result<(), String> {
     for key in child.keys() {
         if !matches!(key.as_str(), "type" | "name" | "description" | "format") {
@@ -605,14 +657,18 @@ fn flatten_namespace_custom(
             }
         }
     }
-    flattened.push(build_provider_function_tool(
-        protocol,
-        namespace_name,
-        name,
-        description,
-        Some(openai_chat_freeform_custom_tool_parameters()),
-        None,
-    ));
+    push_flattened_namespace_tool(
+        projection,
+        child_index_path,
+        build_provider_function_tool(
+            protocol,
+            namespace_name,
+            name,
+            description,
+            Some(openai_chat_freeform_custom_tool_parameters()),
+            None,
+        ),
+    );
     Ok(())
 }
 
@@ -630,7 +686,8 @@ fn flatten_namespace_function(
     namespace_name: &str,
     child: &Map<String, Value>,
     child_path: &str,
-    flattened: &mut Vec<Value>,
+    projection: &mut NamespaceToolProjection,
+    child_index_path: &mut Vec<usize>,
 ) -> Result<(), String> {
     let function = match child.get("function") {
         Some(Value::Object(function)) => Some(function),
@@ -670,14 +727,18 @@ fn flatten_namespace_function(
         "a boolean",
         Value::is_boolean,
     )?;
-    flattened.push(build_provider_function_tool(
-        protocol,
-        namespace_name,
-        child_name,
-        description,
-        parameters,
-        strict,
-    ));
+    push_flattened_namespace_tool(
+        projection,
+        child_index_path,
+        build_provider_function_tool(
+            protocol,
+            namespace_name,
+            child_name,
+            description,
+            parameters,
+            strict,
+        ),
+    );
     Ok(())
 }
 
@@ -717,6 +778,11 @@ fn build_provider_function_tool(
         } else {
             format!("{namespace_name}__{name}")
         };
+    let qualified_name = if protocol == "openai-chat" {
+        openai_chat_namespace_wire_name(&qualified_name)
+    } else {
+        qualified_name
+    };
     function.insert("name".to_string(), Value::String(qualified_name));
     if let Some(description) = description {
         function.insert("description".to_string(), description);
@@ -728,6 +794,13 @@ fn build_provider_function_tool(
         function.insert("strict".to_string(), strict);
     }
 
+    provider_function_tool_envelope(protocol, function)
+}
+
+/// The single owner of the flat-vs-nested provider function-tool rule: the
+/// Responses wire declares a function tool flat, every other protocol nests the
+/// function members under `function`.
+fn provider_function_tool_envelope(protocol: &str, function: Map<String, Value>) -> Value {
     let mut output = Map::new();
     output.insert("type".to_string(), Value::String("function".to_string()));
     if protocol == "openai-responses" {
@@ -736,6 +809,29 @@ fn build_provider_function_tool(
         output.insert("function".to_string(), Value::Object(function));
     }
     Value::Object(output)
+}
+
+/// Projects a canonical Chat function tool (`{"type":"function","function":{...}}`)
+/// into the target protocol's declared function-tool shape. The canonical
+/// extension slot and any function member that is not a declared function-tool
+/// field stay out of the provider declaration. Returns `None` when the value is
+/// not a canonical Chat function tool, so hosted and custom declarations keep
+/// their own representation and a repeated call is a no-op.
+pub fn provider_function_tool_from_canonical(protocol: &str, tool: &Value) -> Option<Value> {
+    let function = tool.get("function").and_then(Value::as_object)?;
+    let name = function
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|name| !name.is_empty())?;
+    let mut declared = Map::new();
+    declared.insert("name".to_string(), Value::String(name.to_string()));
+    for key in ["description", "parameters", "strict"] {
+        if let Some(value) = function.get(key) {
+            declared.insert(key.to_string(), value.clone());
+        }
+    }
+    Some(provider_function_tool_envelope(protocol, declared))
 }
 
 #[cfg(test)]
@@ -812,6 +908,48 @@ mod tests {
             flattened[1]["function"]["name"],
             "multi_agent_v1__wait_agent"
         );
+    }
+
+    #[test]
+    fn projects_canonical_function_tool_into_the_provider_envelope() {
+        let canonical = json!({
+            "type": "function",
+            "function": {
+                "name": "lookup",
+                "description": "Lookup docs",
+                "parameters": {"type": "object"}
+            },
+            "extension": {"raw_declaration": {"name": "lookup"}}
+        });
+
+        let responses =
+            provider_function_tool_from_canonical("openai-responses", &canonical).unwrap();
+        assert_eq!(responses["type"], "function");
+        assert_eq!(responses["name"], "lookup");
+        assert_eq!(responses["description"], "Lookup docs");
+        assert_eq!(responses["parameters"]["type"], "object");
+        assert!(responses.get("function").is_none());
+        assert!(responses.get("extension").is_none());
+
+        let chat = provider_function_tool_from_canonical("openai-chat", &canonical).unwrap();
+        assert_eq!(chat["type"], "function");
+        assert_eq!(chat["function"]["name"], "lookup");
+        assert!(chat.get("name").is_none());
+    }
+
+    #[test]
+    fn canonical_function_tool_projection_leaves_other_declarations_untouched() {
+        // Hosted and custom declarations keep their own provider representation,
+        // and an already projected tool is not a canonical Chat function tool.
+        // The projection therefore cannot run twice on the same wire value.
+        let hosted = json!({"type": "web_search"});
+        assert!(provider_function_tool_from_canonical("openai-responses", &hosted).is_none());
+
+        let custom = json!({"type": "custom", "name": "apply_patch", "format": {"type": "text"}});
+        assert!(provider_function_tool_from_canonical("openai-responses", &custom).is_none());
+
+        let flat = json!({"type": "function", "name": "lookup", "parameters": {"type": "object"}});
+        assert!(provider_function_tool_from_canonical("openai-responses", &flat).is_none());
     }
 
     #[test]

@@ -8,7 +8,7 @@ use axum::{
     routing::post,
     Router,
 };
-use futures_util::{future::join_all, SinkExt, StreamExt};
+use futures_util::{future::join_all, FutureExt, SinkExt, StreamExt};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
@@ -793,6 +793,71 @@ retention = {{ raw_requests = 8, raw_responses = 8, events = 64 }}
 selection = {{ strategy = "priority" }}
 match = {{ precedence = 10, models = ["client-test"] }}
 targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
+fn debug_shared_runtime_state_manifest(
+    port_a: u16,
+    port_b: u16,
+    failure_base_url: &str,
+    success_base_url: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let direct_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" }"#;
+    let relay_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "relay", protocol_profile_owner = "v3.hub_relay_runtime_closeout", implemented = true, forbidden_reentry_behavior = "Debug shared-state success must enter the responses relay runtime.", runtime_owner_symbol = "execute_v3_responses_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs" }"#;
+    let hub_v1_declaration = HUB_V1_TEST_DECLARATION.replace(direct_binding, relay_binding);
+    let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let source = format!(
+        r#"
+version = 3
+{hub_v1_declaration}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["responses"]
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["responses"]
+{hub_v1_server_execution}
+[providers.test]
+type = "responses"
+base_url = "{failure_base_url}"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_TEST_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.test.models.test]
+[providers.debug_success_relay]
+type = "responses"
+base_url = "{success_base_url}"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "DEBUG_SHARED_RUNTIME_RELAY_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+responses = {{ process = "chat", streaming = "always" }}
+[providers.debug_success_relay.models.test]
+wire_name = "debug-success-test"
+aliases = ["debug-shared-runtime-test"]
+capabilities = ["text", "tools"]
+supports_streaming = true
+supports_thinking = true
+thinking = "optional"
+max_tokens = 4096
+max_context_tokens = 128000
+[debug]
+log_console = false
+snapshots = true
+dry_run = true
+retention = {{ raw_requests = 8, raw_responses = 8, events = 128 }}
+[route_groups.default.pools.debug_shared_runtime_success]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, models = ["debug-shared-runtime-test"] }}
+targets = [{{ kind = "provider_model", provider = "debug_success_relay", model = "test", key = "key", priority = 1 }}]
 [route_groups.default.pools.default]
 selection = {{ strategy = "priority" }}
 targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
@@ -7916,9 +7981,18 @@ async fn anthropic_messages_relay_provider_request_dry_run_header_returns_final_
 #[tokio::test]
 async fn debug_endpoints_project_shared_runtime_state_and_dry_run_no_send() {
     let _test_guard = TEST_LOCK.lock().await;
-    let handle = spawn_v3_server_aggregate(manifest(free_port(), free_port()))
-        .await
-        .unwrap();
+    let (success_base_url, mut captures, success_shutdown) =
+        start_controlled_responses_relay_upstream().await;
+    std::env::set_var("DEBUG_SHARED_RUNTIME_RELAY_KEY", "debug-shared-runtime-key");
+    std::env::remove_var("V3_TEST_KEY");
+    let handle = spawn_v3_server_aggregate(debug_shared_runtime_state_manifest(
+        free_port(),
+        free_port(),
+        "http://127.0.0.1:9/v1",
+        &success_base_url,
+    ))
+    .await
+    .unwrap();
     let listener = &handle.listeners[0];
     let client = reqwest::Client::new();
     let runtime_error = client
@@ -7935,6 +8009,23 @@ async fn debug_endpoints_project_shared_runtime_state_and_dry_run_no_send() {
         "runtime error must remain off the client response"
     );
 
+    let live_response = client
+        .post(format!("http://{}/v1/responses", listener.addr))
+        .json(&serde_json::json!({
+            "model": "debug-shared-runtime-test",
+            "input": "debug live success",
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    let live_status = live_response.status();
+    let live_body = live_response.text().await.unwrap();
+    let live_capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .expect("controlled relay upstream must receive the successful request")
+        .expect("controlled relay upstream channel must stay open");
+
     let status: serde_json::Value = client
         .get(format!("http://{}/_routecodex/debug/status", listener.addr))
         .send()
@@ -7943,8 +8034,23 @@ async fn debug_endpoints_project_shared_runtime_state_and_dry_run_no_send() {
         .json()
         .await
         .unwrap();
+
+    assert_eq!(live_status, StatusCode::OK, "{live_body}");
+    let live_json: Value = serde_json::from_str(&live_body).unwrap();
+    assert_eq!(live_json["status"], "completed");
+    assert_eq!(live_json["output_text"], "ok");
+    assert_eq!(live_capture.body["model"], "debug-success-test");
+    assert_eq!(
+        live_capture.body["input"][0]["content"][0]["text"],
+        "debug live success"
+    );
+    assert_eq!(
+        live_capture.authorization.as_deref(),
+        Some("Bearer debug-shared-runtime-key")
+    );
+
     assert!(status["debug"]["event_count"].as_u64().unwrap() >= 3);
-    assert_eq!(status["debug"]["raw_request_count"], 1);
+    assert_eq!(status["debug"]["raw_request_count"], 2);
     assert!(
         status["debug"]["snapshot_count"].as_u64().unwrap() > 0,
         "snapshots=true must record live /v1/responses node snapshots"
@@ -8098,7 +8204,13 @@ async fn debug_endpoints_project_shared_runtime_state_and_dry_run_no_send() {
         retained_dry_run_snapshots.is_empty(),
         "dry run snapshot session must be released after response projection"
     );
+
+    if let Some(extra) = captures.recv().now_or_never() {
+        panic!("debug success provider must receive exactly one request: {extra:?}");
+    }
     handle.shutdown().await;
+    success_shutdown.send(()).unwrap();
+    std::env::remove_var("DEBUG_SHARED_RUNTIME_RELAY_KEY");
 }
 
 #[tokio::test]

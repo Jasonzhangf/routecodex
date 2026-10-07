@@ -1,0 +1,35 @@
+{
+  "contract_version": "1",
+  "scope": {
+    "mode": "uncommitted",
+    "commit": "b436b68bcad0a809e9722e6fa179ee8ccc414e3c",
+    "base": null
+  },
+  "module_boundary_evidence": [
+    {
+      "module": "REQ02 请求归一化设计及 DAGPipe 数据/资源声明",
+      "owner": "v3.unified_operation_runner_design；RuntimeRequestGraphEntry 拥有请求图入口，normalize_v3_operation_runner_request_losslessly 拥有原始 inverse/history pair 的初始化",
+      "paths": "docs/architecture/dagpipe/v3.operation_runner.request.graph.json；docs/architecture/v3-resource-operation-map.yml；docs/architecture/v3-mainline-call-map.yml；docs/design/v3-unified-operation-runner-design.md；docs/design/v3-req02-cutover-consumer-contract.md",
+      "edges": "REQ01 已捕获 client-json → 编译并执行 REQ02 单节点 slice → canonical-request → 既有下游 consumer。当前修订移除 REQ02、resolve_target 和标准投影对 normal_payload 镜像的声明，业务数据分别经 client-json、canonical-request、governed-request ARC 传递；REQ02 重入读取原始 inverse/history pair。请求图保持单一 source-request 输入与 transport-request 输出，Error 图独立接收失败；REQ02 与后续接线明确 pending，不将静态图登记视为 runtime 执行。",
+      "resources": "REQ02 读取 published_manifest、invocation origin 和保留的 inverse/history pair；首次 client_entry + RawEntry 成对发布原始请求关联，retry/internal_followup + AlreadyCanonical 保持原 pair。业务参数与结果保留在 canonical payload，typed slots 保存身份、路径、encoding 与配对引用。资源 map 已补 REQ02 对 explicit_history_pairing 的读取权限，与修改后的图和 caller map 一致。",
+      "gates": "本次只读执行 dagpipe graph validate，结果为有效 DAG，9 nodes、9 edges、9 waves；verify-v3-operation-runner-dagpipe.mjs、verify-v3-resource-map.mjs、verify-architecture-mainline-call-map.mjs 和 git diff --check 均通过。上述结果证明当前设计声明及静态绑定，不证明 SDK 新 Operator、真实 caller 或 live 代理行为。现有 effects-only review receipt 明确限制其准入范围，未将其用于新增 consumer 接口的实现验收。"
+    },
+    {
+      "module": "REQ02 Direct/Relay、标准投影与响应 consumer 增量合同",
+      "owner": "Runtime 拥有归一化入口；入口/Direct worker 独占 kernel.rs 与 direct_execution_control.rs 的调用参数和 handle 接线；Chat Process、标准 Outbound、registered Direct hooks 及既有 response owners 分别保留各自语义责任；REQ06 helper 由外部任务独占",
+      "paths": "docs/design/v3-req02-cutover-consumer-contract.md；docs/architecture/v3-function-map.yml；docs/architecture/v3-mainline-call-map.yml；docs/architecture/v3-verification-map.yml；docs/architecture/wiki/v3-mainline-caller-flow.md；docs/architecture/wiki/html/v3-mainline-caller-flow.html",
+      "edges": "HTTP pending_endpoint_after_responses_admission_inner 与 Responses WS handle_responses_websocket_message_with_mode → Runtime REQ02 → canonical consumer；Relay builder 消费新输出并删除旧归一化分支；Gemini Chat Process 消费 canonical messages/tools 与扩展；Direct 通过 registered projection/view hook 生成 native 工作视图；标准 Outbound 使用 REQ06-owned project_canonical_request；既有 JSON/SSE response owners 读取成功 attempt 与原始请求关联，恢复 namespace、name、function/custom 类型和 call/result 配对。合同禁止 raw-standardized 旁路、重新归一化、只检查不消费输出及 accessor-only 响应接线。",
+      "resources": "核对当前 direct_execution_control.rs，resolve_v3_direct_request_execution_control 仍仅复用或创建既有 execution control；当前 execution_control.rs 仍仅携带 attempt budget，Server metadata_center.rs 仍为 execution plan carrier，因此新增接口属于待实施合同。function map 已允许真实 factory caller kernel.rs 及 adapter direct_execution_control.rs，合同将二者交给同一 entry/Direct worker，避免重复 factory 或跨 worker 写入。投影 helper 返回 provider payload 与 typed attempt context，两者分离；响应读取成功 attempt，不从 governed/native payload 重建原始身份。",
+      "gates": "verification map 要求四协议、支持的 Direct/Relay、HTTP/WS、JSON/SSE、未知嵌套值、完整 exec/apply_patch/MCP 参数与结果、真实客户端工具执行及 follow-up、图片政策、retry/followup/handoff。当前变更无运行时代码或输入接受域实现变化，未将基线 HTTP/WS 或工具能力结果冒充 REQ02 行为验证；实际 consumer、工具回合、build/install/restart/replay 仍明确 pending。R2 的 10 个设计文件 SHA256 全部核对成功，包含当前生成的 Markdown/HTML；对应 caller-flow 同步检查证据绑定这些输入。"
+    },
+    {
+      "module": "请求/attempt 生命周期、配置 gate 设计与任务证据边界",
+      "owner": "Runtime factory 拥有请求资源创建；RuntimeRequestFinalizer 拥有唯一请求释放；标准 projection owner 发布 attempt context；配置 gate worker 拥有 verifier/fixtures；字段 profile worker 拥有显式请求方向配置；父编排负责集成及本任务资源收口",
+      "paths": "docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml；docs/design/v3-req02-cutover-consumer-contract.md；docs/goals/dagpipe-req02-cutover-notes-20261002.md；docs/goals/dagpipe-req02-sequential-cutover-20261002.md；docs/goals/req02-resource-runner-worker-20261003.md；docs/goals/req02-config-gate-worker-20261003.md；docs/goals/req02-profile-worker-r2-20261003.md；docs/evidence/dagpipe；.execution",
+      "edges": "真实 requestId → Runtime request-local 固定 slots → 原始 pair 一次发布 → attempt projection → 成功响应消费 → attempt cleanup → request finalizer。invocationId 用于独立 SDK execution，attemptId 关联实际投影；retry/followup 仅释放 attempt scope。唯一 non-Clone guard 随实际 JSON/error 输出或 SSE stream 移动，覆盖消费、EOF/Drop、cancel、future drop 与 HTTP/WS disconnect。配置设计明确逐 direction 使用自身 operator@version + direction 的 typed profile，optional(string) 缺省合法而有值必须为非空字符串，保留必需参数、consumer/source 授权及未知方向等 compile 失败边界。",
+      "resources": "可 Clone opaque handle 不承担 finalization，业务值不进入 slots，无跨请求 registry 或第二 MetadataCenter。失败 attempt 在下一 candidate 前释放，成功 attempt 在其响应投影消费后释放；Server 残留 handle clone 不延长已终止资源有效期。任务文档限定外置独占 worktree、文件归属及父编排 cleanup，活动或阻塞资源保留，保护既有 dirty 主树、旧候选和共享 runtime；本次审查未创建或修改任务资源。",
+      "gates": "阶段笔记记录 R1/R2 finding、定点修订、输入版本、哈希、失败原因与下一步；生成面重验原因包括 map 输入变化及 admission 重建期间的不完整 snapshot，未发现以无失效原因的重复验证阻塞交付。资源 runner 与配置 gate 任务均要求新增独立设计准入后才启动，提供具体红测、公开 runner/consumer 验证、终态释放与负例命令。实现后的测试、真实入口、安装/重启、独立架构 review、main/remote 等价与资源清理仍是后续交付条件；当前设计审查不将这些未完成节点判为已完成。"
+    }
+  ],
+  "findings": []
+}

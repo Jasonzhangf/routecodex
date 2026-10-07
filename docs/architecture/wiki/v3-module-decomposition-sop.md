@@ -1,6 +1,70 @@
 # V3 Module Decomposition SOP（巨型文件拆解标准作业程序）
 
 Status: partial execution; scoped changes recorded below.
+Scoped split (2026-10-06): `kernel/direct_request_scope.rs` also owns
+`execute_v3_direct_runtime_kernel_core_with_request_control`, moved out of
+`kernel/v3_direct_core.rs`. The main file was 1520 lines and is now 1484; the
+existing include companion is now 224. The moved function body was verified
+byte-verbatim before targeted formatting; the public path, generic signature,
+body semantics and caller order are unchanged. The
+symbol is not bound in the four architecture maps, so no mapped caller anchor
+changed.
+Scoped split (2026-10-06): `hub_v1/anthropic_codec/responses_tool_projection.rs` owns the
+Responses tool-declaration and tool-choice projection cluster moved out of
+`hub_v1/anthropic_codec/responses_to_anthropic.rs`
+(`responses_tools_for_anthropic_wire`, `responses_tool_as_anthropic_tool`,
+`responses_custom_tool_as_anthropic_compatibility_tool`,
+`responses_web_search_tool_as_anthropic_tool`,
+`responses_tool_choice_as_anthropic_tool_choice`). The main file sat exactly on the 1500-line
+gate, and the rustfmt normalization pass pushed it to 1501; it is now 1217 and the companion is
+290. The companion is a real module declared with `mod responses_tool_projection;` plus
+`use responses_tool_projection::{...}` from `anthropic_codec.rs`, the same pattern the sibling
+companions in that directory use, so the moved body needs only `use super::*;` and the
+`pub(crate) use` re-export keeps `request_outbound_format.rs` and
+`tool_declaration_projection.rs` on their existing paths. The move is region-verbatim apart from
+the companion header, a `#[cfg(test)]` import for the two names only the main file's test module
+uses, and one redundant blank separator at EOF; function bodies, visibility, node order and
+protocol behavior are unchanged.
+Scoped split (2026-10-06): `operation_runner/operators/field_operator_records.rs` also owns
+`RequestNormalizer::extension_value`, moved verbatim out of
+`operation_runner/operators/field_operator_library.rs`, which is the one production file
+sitting exactly on the 1500-line gate. The method joins the other extension helpers in the
+same `impl RequestNormalizer` (`insert_extension_value`, `take_extension_object`) and stays
+`pub(super)`, so the caller path in `field_operator_library::normalize` is preserved. The
+library file was 1500 lines and is now 1494 (11 lines moved out, 5 added for the R53
+Responses `input[]` hosted-declaration flush); `field_operator_records.rs` was 598 and is now
+612. The body is unchanged, so function semantics and every caller path are preserved.
+Scoped split (2026-10-06): `hub_v1/responses_relay_runtime_inner.rs` keeps the relay
+request/attempt phase and splices `hub_v1/responses_relay_runtime_inner_response_interpretation.rs`
+with `include!`. The companion owns the provider-response interpretation match
+(`match provider_raw.into_body()`: success, failure and retry closeout). The main file was
+1504 lines after the REQ02 Relay-to-Direct origin field and is now 646; the companion is
+861. The moved block stays byte-verbatim inside one block expression of the same module,
+so function bodies, visibility and every caller path are preserved.
+Scoped split (2026-10-06): `operation_runner/operators/field_operator_history.rs` also owns
+`RequestNormalizer::record_responses_tool_result_item`, moved out of
+`operation_runner/operators/field_operator_library.rs`, which sat exactly on the 1500-line
+gate before the R53 work. The method joins the Responses output recording helper already in
+that module (`record_responses_output_fields`, which keeps the R53 tool-result status domain
+check) and stays `pub(super)`, so the caller path in
+`field_operator_library::process_responses_item` is preserved. The library file was 1494
+lines on this tip and is now 1415 (100 lines moved out, 21 added for the R53 fallible item
+path); `field_operator_history.rs` was 538 and is now 652. The moved construction is
+unchanged apart from the two early `return`s becoming the single function tail, so function
+semantics and every caller path are preserved.
+Scoped split (2026-10-06): `hub_v1/anthropic_relay_runtime_helpers.rs` also owns the four
+post-response helpers moved out of `hub_v1/anthropic_relay_runtime.rs`
+(`anthropic_relay_client_headers_as_provider_request_headers`,
+`publish_anthropic_successful_attempt_view`,
+`record_provider_success_after_response_governance`,
+`anthropic_provider_stream_failure_from_closeout_error`). The main file was 1506 lines
+after the REQ02 branch combined with main PR #349 and is now 1414; the companion is 692.
+The helpers stay private to the same module because the companion is spliced with
+`include!`, so function bodies, visibility and every caller path are preserved verbatim.
+Scoped split (2026-10-05): `kernel/direct_request_scope.rs` also owns
+`canonical_body_from_captured`, the single call that replaces the raw standardized
+body with the REQ02 canonical request. Kernel keeps request lifecycle orchestration
+and stays inside the 1500-line gate. Function bodies and caller paths are preserved.
 Scoped split (2026-10-03): `live_snapshot_projections.rs` holds foundation response
 snapshot capture and runtime observability projections from main PR #325. Snapshot
 session helpers and diagnostic body selectors remain in `live_snapshot.rs`, which

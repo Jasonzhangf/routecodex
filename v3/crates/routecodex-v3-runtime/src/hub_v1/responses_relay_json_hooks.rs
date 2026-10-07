@@ -1,4 +1,5 @@
 use super::*;
+use crate::operation_runner::ResponseProjectionView;
 use serde_json::Value;
 
 pub(crate) struct V3ResponsesRelayJsonResponseHookInput<'a> {
@@ -13,6 +14,10 @@ pub(crate) struct V3ResponsesRelayJsonResponseHookInput<'a> {
     pub(crate) provider_protocol: V3HubProviderWireProtocol,
     pub(crate) source_provider_protocol: V3HubProviderWireProtocol,
     pub(crate) projection_context: &'a V3AnthropicResponsesProjectionContext,
+    /// Successful attempt view for the current provider attempt. The typed view
+    /// is the only source of emitted -> original tool identity; the governed
+    /// request body remains the source of business metadata and diagnostics.
+    pub(crate) successful_attempt_view: &'a ResponseProjectionView,
     pub(crate) provider_response_transport_intent: V3HubTransportIntent,
     pub(crate) compatibility_profile: Option<&'a str>,
     pub(crate) web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
@@ -70,10 +75,10 @@ pub(crate) fn run_json_response_hooks(
     trace.push("ProviderRespCompat02ProviderCompat");
     if input.provider_protocol == V3HubProviderWireProtocol::OpenAiChat {
         let converted =
-            build_v3_responses_provider_response_from_openai_chat_payload_with_manifest(
+            build_v3_responses_provider_response_from_openai_chat_payload_with_manifest_and_successful_attempt(
                 resp02.provider_payload(),
-                input.provider_semantic_body,
-                Some(input.manifest),
+                input.successful_attempt_view,
+                input.manifest,
                 input.provider_id,
             )?;
         resp02.set_responses_semantic_payload(normalize_v3_responses_json_document(

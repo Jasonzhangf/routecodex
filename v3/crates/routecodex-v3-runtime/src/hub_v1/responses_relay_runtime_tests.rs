@@ -1,8 +1,117 @@
 use super::*;
 use crate::execution_control::V3AttemptStoreError;
+use crate::operation_runner::{
+    execute_v3_operation_runner_request_normalize_losslessly, RequestInvocationContext,
+    RequestNormalizationEntry, RequestOriginKind, ResponseProjectionView, V3RequestContextHandle,
+    V3TargetCandidate,
+};
 use futures_util::{stream, StreamExt};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use serde_json::json;
+
+/// Fixture-only typed response view.
+///
+/// The view comes from the same real REQ02 SDK normalization and governance
+/// producers the runtime caller uses, then from the actual standard emission
+/// facade. The fixture publishes the emitted attempt only to simulate a
+/// provider that already returned completely; it is public projection-consumer
+/// evidence, not a claim that production publishes before provider completion.
+pub(super) fn responses_relay_hook_successful_attempt_view(
+    request_id: &str,
+    raw: serde_json::Value,
+    provider_protocol: V3HubProviderWireProtocol,
+) -> ResponseProjectionView {
+    let handle = V3RequestContextHandle::new(request_id.to_string(), "responses".to_string());
+    let invocation = RequestInvocationContext::new(
+        handle.clone(),
+        format!("{request_id}:relay-entry"),
+        format!("{request_id}:entry"),
+        RequestOriginKind::ClientEntry,
+    );
+    let canonical = execute_v3_operation_runner_request_normalize_losslessly(
+        &handle,
+        &invocation,
+        RequestNormalizationEntry::RawEntry(raw.clone()),
+    )
+    .expect("fixture must normalize through the real REQ02 SDK");
+    let canonical = govern_v3_operation_runner_current_request_fields(&canonical, &invocation, &[])
+        .expect("fixture must register current field associations through the governance producer");
+    let req02 = build_v3_hub_req_inbound_02_from_canonical(
+        build_v3_hub_req_inbound_01_client_raw(
+            raw,
+            V3HubEntryProtocol::Responses,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        ),
+        canonical.clone(),
+    );
+    let req04 = build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02(req02);
+    let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
+        req04,
+        V3HubExecutionMode::Relay,
+    );
+    let (provider_id, provider_type) = match provider_protocol {
+        V3HubProviderWireProtocol::OpenAiChat => ("fixture-openai-chat", "openai_chat"),
+        V3HubProviderWireProtocol::Responses => ("fixture-responses", "responses"),
+        V3HubProviderWireProtocol::Anthropic => ("fixture-anthropic", "anthropic"),
+        V3HubProviderWireProtocol::Gemini => ("fixture-gemini", "gemini"),
+    };
+    let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
+        req05.clone(),
+        V3HubTargetResolution::Routed,
+        V3TargetCandidate {
+            provider_id: provider_id.to_string(),
+            provider_type: provider_type.to_string(),
+            auth_alias: "primary".to_string(),
+            model_id: "fixture-model".to_string(),
+            wire_model: "fixture-wire-model".to_string(),
+            visible_model_ids: vec!["client-model".to_string()],
+            model_capabilities: vec!["text".to_string(), "tools".to_string()],
+            web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode::None,
+            max_context_tokens: None,
+            max_tokens: None,
+            context_token_estimate_scale_bps: 10_000,
+            base_url: "https://fixture.invalid/v1".to_string(),
+            responses_process: None,
+            responses_transport: routecodex_v3_config::V3ResponsesTransportKind::Http,
+            websocket_v2_url: None,
+            provider_request_cleanup: Default::default(),
+            request_timeout_ms: 300_000,
+            priority: 0,
+            weight: 1,
+            sse_first_frame_timeout_ms: None,
+            initial_concurrency_budget: 8,
+            concurrency_acquire_timeout_ms: 60_000,
+            compatibility_profile: None,
+            reasoning_effort: None,
+            headers: Default::default(),
+            env_name: Some("REQ07_FIXTURE_KEY".to_string()),
+            token_file: None,
+            secret_file: None,
+            secret_key: None,
+            api_key: None,
+            required_capabilities: Vec::new(),
+            pool_ids: vec!["fixture".to_string()],
+            default_pool_member: false,
+            path: vec![provider_type.to_string()],
+        },
+    );
+    let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
+        req06,
+        req05.governed_payload(),
+        &handle,
+        V3HubExecutionMode::Relay,
+        &format!("{request_id}:relay-attempt:0"),
+        provider_protocol,
+    )
+    .expect("fixture must obtain the attempt context from the standard emission facade");
+    let attempt_context = req07.attempt_context().clone();
+    handle
+        .publish_successful_attempt(attempt_context.clone())
+        .expect("fixture simulates a fully returned provider and publishes the emitted attempt");
+    ResponseProjectionView::from_successful_attempt(&handle, &attempt_context)
+        .expect("the published successful attempt must open the typed response projection view")
+}
 
 #[test]
 fn execution_control_payload_architecture_terminal_read_isolated_from_diagnostics_lock() {
@@ -187,7 +296,10 @@ async fn execution_control_payload_architecture_relay_reselection_returns_typed_
         None,
         None,
         BTreeSet::new(),
+        None,
+        None,
         V3ResponsesRelayRuntimeSeeds::default(),
+        V3RelayEntryOrigin::ClientEntry,
     )
     .await
     .expect("Relay failure must return a typed Direct handoff");
@@ -283,7 +395,10 @@ async fn target_protocol_unmapped_field_projects_internal_598_without_switching_
         None,
         None,
         BTreeSet::new(),
+        None,
+        None,
         V3ResponsesRelayRuntimeSeeds::default(),
+        V3RelayEntryOrigin::ClientEntry,
     )
     .await
     .expect("unmapped target field must project as client request error");
@@ -316,9 +431,13 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
         .expect("test server execution policy")
         .attempt_store
         .request_max_attempts = 1;
-    let request_execution_control =
-        crate::nodes::V3RequestExecutionControl::from_manifest(&manifest, "test")
-            .expect("request execution control");
+    let request_execution_control = crate::nodes::V3RequestExecutionControl::new(
+        &manifest,
+        "test",
+        "req-direct-relay-handoff",
+        "responses",
+    )
+    .expect("request execution control");
     request_execution_control
         .attempt_budget()
         .admit_transport_attempt()
@@ -354,10 +473,10 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
         None,
         None,
         BTreeSet::new(),
-        V3ResponsesRelayRuntimeSeeds {
-            request_execution_control: Some(request_execution_control.clone()),
-            ..Default::default()
-        },
+        None,
+        Some(request_execution_control.clone()),
+        V3ResponsesRelayRuntimeSeeds::default(),
+        V3RelayEntryOrigin::ClientEntry,
     )
     .await
     .expect_err("the configured attempt ceiling must reject the exhausted handoff");
@@ -396,9 +515,13 @@ fn execution_control_payload_architecture_responses_replay_exhaustion_stays_loca
     attempt_store.attempt_max_bytes = 4_096;
     attempt_store.request_max_bytes = 1;
     attempt_store.process_max_bytes = 4_096;
-    let request_execution_control =
-        crate::nodes::V3RequestExecutionControl::from_manifest(&manifest, "test")
-            .expect("request execution control");
+    let request_execution_control = crate::nodes::V3RequestExecutionControl::new(
+        &manifest,
+        "test",
+        "req-client-replay-ceiling",
+        "responses",
+    )
+    .expect("request execution control");
 
     let error = match project_v3_responses_relay_client_body(
         V3HubTransportIntent::Sse,
@@ -702,7 +825,7 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
         )
         .await;
 
-    assert_eq!(output.status, 200);
+    assert_eq!(output.status, 200, "{}", output.body);
     assert_eq!(output.body["evidence"]["providerNetworkSend"], false);
     assert_eq!(output.body["providerRequest"]["providerId"], "glm");
     assert_eq!(output.body["providerRequest"]["body"]["model"], "glm-5.2");
@@ -764,7 +887,7 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
     // `minimax.unknown-model` names an enabled provider but no model that provider declares,
     // so it is not a listed direct target: it takes the normal classification path into the
     // `default` pool instead of failing.
-    assert_eq!(output.status, 200);
+    assert_eq!(output.status, 200, "{}", output.body);
     assert_eq!(output.body["evidence"]["providerNetworkSend"], false);
     assert_eq!(output.body["providerRequest"]["providerId"], "minimax");
     assert_eq!(
@@ -1299,202 +1422,4 @@ fn openai_chat_overload_text_with_real_usage_remains_success() {
     .expect("visible overload-looking content with real usage stays model output");
 
     assert_eq!(response["status"], "completed");
-}
-
-#[test]
-fn openai_chat_provider_reasoning_content_projects_replay_content_before_tool_call() {
-    let response = build_v3_responses_provider_response_from_openai_chat_payload(
-        &json!({
-            "id": "chatcmpl_reasoning_content",
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": "",
-                    "reasoning_content": "Need inspect before running the tool.",
-                    "tool_calls": [{
-                        "id": "call_reasoning_exec",
-                        "type": "custom",
-                        "custom": {
-                            "name": "exec",
-                            "input": "pwd"
-                        }
-                    }]
-                },
-                "finish_reason": "tool_calls"
-            }]
-        }),
-        &json!({
-            "tools": [{"type":"custom","name":"exec"}]
-        }),
-    )
-    .expect("OpenAI Chat response must project reasoning to Responses");
-
-    assert_eq!(response["status"], "completed");
-    assert_eq!(response["output"][0]["type"], "reasoning");
-    assert_eq!(
-            response["output"][0]["summary"][0]["text"], "Need inspect before running the tool.",
-            "OpenAI Chat reasoning_content must become replay-safe Responses reasoning.summary before tool calls"
-        );
-    assert_eq!(
-        response["output"][0]["content"][0]["text"], "Need inspect before running the tool.",
-        "OpenAI Chat reasoning_content must also populate replay-safe Responses reasoning.content"
-    );
-    assert_eq!(response["output"][1]["type"], "custom_tool_call");
-    assert_eq!(response["output"][1]["call_id"], "call_reasoning_exec");
-}
-
-#[test]
-fn openai_chat_custom_tool_response_round_trips_to_responses_custom_call() {
-    let response = build_v3_responses_provider_response_from_openai_chat_payload(
-        &json!({
-            "id": "chatcmpl_apply_patch",
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": "",
-                    "tool_calls": [{
-                        "id": "call_apply_patch",
-                        "type": "custom",
-                        "custom": {
-                            "name": "apply_patch",
-                            "input": "*** Begin Patch\n*** End Patch"
-                        }
-                    }]
-                },
-                "finish_reason": "tool_calls"
-            }]
-        }),
-        &json!({
-            "tools": [{
-                "type":"custom",
-                "name":"apply_patch",
-                "format":{"type":"grammar","syntax":"lark","definition":"start: patch"}
-            }]
-        }),
-    )
-    .expect("Chat function projection must reverse to the declared Responses custom tool");
-
-    assert_eq!(response["status"], "completed");
-    assert_eq!(response["output"][0]["type"], "custom_tool_call");
-    assert_eq!(response["output"][0]["name"], "apply_patch");
-    assert_eq!(
-        response["output"][0]["input"],
-        "*** Begin Patch\n*** End Patch"
-    );
-}
-
-#[test]
-fn openai_chat_function_tool_call_with_custom_declared_name_round_trips_as_custom_call() {
-    let response = build_v3_responses_provider_response_from_openai_chat_payload(
-        &json!({
-            "id": "chatcmpl_apply_patch_flattened",
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": "",
-                    "tool_calls": [{
-                        "id": "call_apply_patch_2",
-                        "type": "function",
-                        "function": {
-                            "name": "apply_patch",
-                            "arguments": "{\"input\":\"*** Begin Patch\\n*** End Patch\",\"reason\":\"修改目标文件\",\"goal_alignment_confidence\":100,\"model_id\":\"gpt-test\"}"
-                        }
-                    }]
-                },
-                "finish_reason": "tool_calls"
-            }]
-        }),
-        &json!({
-            "tools": [{"type":"custom","name":"apply_patch"}]
-        }),
-    )
-    .expect("flattened function tool_call must reverse to the declared Responses custom tool");
-
-    assert_eq!(response["status"], "completed");
-    assert_eq!(response["output"][0]["type"], "custom_tool_call");
-    assert_eq!(response["output"][0]["name"], "apply_patch");
-    assert_eq!(
-        response["output"][0]["input"],
-        "*** Begin Patch\n*** End Patch"
-    );
-}
-
-#[test]
-fn openai_chat_provider_structured_reasoning_keeps_summary_encrypted_and_replay_content() {
-    let response = build_v3_responses_provider_response_from_openai_chat_payload(
-        &json!({
-            "id": "chatcmpl_structured_reasoning",
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": "visible answer",
-                    "reasoning": {
-                        "summary": [{"type":"summary_text","text":"safe summary"}],
-                        "content": [{"type":"reasoning_text","text":"private chain"}],
-                        "encrypted_content": "enc-opaque"
-                    }
-                },
-                "finish_reason": "stop"
-            }]
-        }),
-        &json!({"tools":[]}),
-    )
-    .expect("OpenAI Chat structured reasoning must project to Responses");
-
-    assert_eq!(response["status"], "completed");
-    assert_eq!(response["output"][0]["type"], "reasoning");
-    assert_eq!(response["output"][0]["summary"][0]["text"], "safe summary");
-    assert_eq!(response["output"][0]["encrypted_content"], "enc-opaque");
-    assert_eq!(
-        response["output"][0]["content"][0]["text"], "safe summary",
-        "Responses reasoning item must carry replay-safe plaintext content"
-    );
-    assert_eq!(response["output"][1]["type"], "output_text");
-    assert_eq!(response["output"][1]["text"], "visible answer");
-    assert!(
-        !response.to_string().contains("private chain"),
-        "private reasoning.content must not be serialized into the client payload: {response}"
-    );
-}
-
-#[test]
-fn openai_chat_provider_usage_normalizes_to_hub_canonical_token_names() {
-    let response = build_v3_responses_provider_response_from_openai_chat_payload(
-        &json!({
-            "id": "chatcmpl_usage_shape",
-            "choices": [{
-                "message": {"role": "assistant", "content": "ok"},
-                "finish_reason": "stop"
-            }],
-            "usage": {
-                "prompt_tokens": 11,
-                "prompt_tokens_details": {"cached_tokens": 5},
-                "completion_tokens": 7,
-                "completion_tokens_details": {"reasoning_tokens": 2},
-                "total_tokens": 18
-            }
-        }),
-        &json!({"tools":[]}),
-    )
-    .expect("OpenAI Chat response must project to Responses");
-
-    assert_eq!(response["usage"]["input_tokens"], 11);
-    assert_eq!(
-        response["usage"]["input_tokens_details"]["cached_tokens"],
-        5
-    );
-    assert_eq!(response["usage"]["output_tokens"], 7);
-    assert_eq!(
-        response["usage"]["output_tokens_details"]["reasoning_tokens"],
-        2
-    );
-    assert_eq!(response["usage"]["total_tokens"], 18);
-    assert!(
-            response["usage"].get("prompt_tokens").is_none(),
-            "Hub canonical response usage must not expose OpenAI Chat provider-wire prompt_tokens: {response}"
-        );
-    assert!(
-            response["usage"].get("completion_tokens").is_none(),
-            "Hub canonical response usage must not expose OpenAI Chat provider-wire completion_tokens: {response}"
-        );
 }

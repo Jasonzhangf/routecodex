@@ -1,16 +1,15 @@
 use super::{
     apply_v3_web_search_request_hook_at_req04,
     build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02,
-    build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01, find_v3_hub_side_channel_key,
-    govern_v3_servertool_request_at_req04, V3HubEntryProtocol, V3HubReqChatProcess04Governed,
-    V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized, V3HubRequestSemanticProtocol,
-    V3ToolThinkingTurnContext, V3WebSearchCenterState,
+    build_v3_hub_req_inbound_02_from_request_invocation, find_v3_hub_side_channel_key,
+    govern_v3_servertool_request_at_req04, lift_v3_responses_input_hosted_declarations,
+    V3HubEntryProtocol, V3HubReqChatProcess04Governed, V3HubReqInbound01ClientRaw,
+    V3HubReqInbound02Normalized, V3HubRequestSemanticProtocol, V3ToolThinkingTurnContext,
+    V3WebSearchCenterState,
 };
+use crate::operation_runner::RequestInvocationContext;
 use serde_json::Value;
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-};
+use std::{collections::BTreeSet, sync::Arc};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum V3HubServertoolRequestProfile {
@@ -119,8 +118,6 @@ pub enum V3HubRelayRequestError {
     MalformedToolOutput { index: usize },
     #[error("orphan tool output at input index {index}: call_id {call_id}")]
     OrphanToolOutput { index: usize, call_id: String },
-    #[error("tool output kind mismatch at input index {index}: call_id {call_id}")]
-    ToolOutputKindMismatch { index: usize, call_id: String },
     #[error("current-turn payload boundary is invalid: start {start}, len {len}")]
     CurrentPayloadBoundaryInvalid { start: usize, len: usize },
     #[error("side-channel field leaked into normal request payload: {key}")]
@@ -135,12 +132,6 @@ pub enum V3HubRelayRequestError {
     ToolThinkingSchemaInvalid { reason: String },
     #[error("memory raw capture guidance injection failed at Req04: {reason}")]
     MemoryRawCaptureGuidanceInjectionFailed { reason: String },
-    #[error("{protocol} tool identity is invalid at item {index}: {reason}")]
-    ProtocolToolIdentityInvalid {
-        protocol: &'static str,
-        index: usize,
-        reason: &'static str,
-    },
 }
 
 #[derive(Debug)]
@@ -192,10 +183,16 @@ pub fn compile_v3_hub_relay_request_hooks() -> V3HubRelayRequestHooks {
 }
 
 impl V3HubRelayRequestHooks {
+    /// Consume an already-captured client request through the registered REQ02
+    /// SDK graph under the Runtime's invocation identity, then run the Chat
+    /// Process nodes. `run` never normalizes the raw wire itself: the
+    /// `RequestInvocationContext` carries the real request handle and origin so
+    /// the single REQ02 owner performs lossless normalization.
     pub fn run(
         &self,
         raw: V3HubReqInbound01ClientRaw,
         profile: &V3HubServertoolRequestProfile,
+        invocation: &RequestInvocationContext,
     ) -> Result<V3HubRelayRequestOutcome, V3HubRelayRequestError> {
         if let Some(key) = find_v3_hub_side_channel_key(&raw.payload.0) {
             return Err(V3HubRelayRequestError::SideChannelLeaked { key });
@@ -205,7 +202,7 @@ impl V3HubRelayRequestHooks {
             V3HubRelayRequestHookEvent::Req01Exit,
             V3HubRelayRequestHookEvent::Req02Entry,
         ];
-        let normalized = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(raw)
+        let normalized = build_v3_hub_req_inbound_02_from_request_invocation(raw, invocation)
             .map_err(|reason| V3HubRelayRequestError::ReqInboundInvalid { reason })?;
         events.push(V3HubRelayRequestHookEvent::Req02Exit);
         self.run_from_normalized_with_events(normalized, profile, events)
@@ -244,6 +241,14 @@ impl V3HubRelayRequestHooks {
             })?;
             normalized.memory_raw_capture_guidance_injected = true;
         }
+        // Req04 owns the Relay request payload rewrite: the Responses `input[]`
+        // hosted declarations the client sent become canonical `tools[]` here,
+        // not in the shared lossless inbound normalizer that Direct also uses.
+        if normalized.entry_protocol() == V3HubEntryProtocol::Responses {
+            lift_v3_responses_input_hosted_declarations(Arc::make_mut(
+                &mut normalized.previous.payload.0,
+            ));
+        }
         let (web_search_state, tool_thinking_turn_context) = govern_v3_servertool_request_at_req04(
             Arc::make_mut(&mut normalized.previous.payload.0),
             current_payload_start,
@@ -253,22 +258,11 @@ impl V3HubRelayRequestHooks {
             ),
             profile.tool_thinking_enabled(),
         )?;
-        if govern_protocol_tool_identity_at_req04(
-            normalized.entry_protocol(),
-            normalized.payload(),
-        )? {
-            events.push(V3HubRelayRequestHookEvent::Req04ProtocolToolIdentityGoverned);
-        }
-        let govern_chat_messages_tool_outputs = normalized.canonicalized_from_responses
-            || matches!(
-                normalized.entry_protocol(),
-                V3HubEntryProtocol::OpenAiChat | V3HubEntryProtocol::Gemini
-            );
         let tool_output_count = govern_tool_outputs_at_req04(
             Arc::make_mut(&mut normalized.previous.payload.0),
-            govern_chat_messages_tool_outputs,
             current_payload_start,
         )?;
+        events.push(V3HubRelayRequestHookEvent::Req04ProtocolToolIdentityGoverned);
         events.push(V3HubRelayRequestHookEvent::Req04ToolGoverned);
         run_servertool_profile(profile, &mut events)?;
         let governed = build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02(normalized);
@@ -284,146 +278,29 @@ impl V3HubRelayRequestHooks {
     }
 }
 
-fn govern_protocol_tool_identity_at_req04(
-    entry_protocol: V3HubEntryProtocol,
-    payload: &Value,
-) -> Result<bool, V3HubRelayRequestError> {
-    match entry_protocol {
-        V3HubEntryProtocol::OpenAiChat => {
-            let Some(messages) = payload.get("messages").and_then(Value::as_array) else {
-                return Ok(false);
-            };
-            govern_openai_chat_tool_identity_at_req04(messages)?;
-            Ok(true)
-        }
-        V3HubEntryProtocol::Gemini => {
-            let Some(contents) = payload.get("contents").and_then(Value::as_array) else {
-                return Ok(false);
-            };
-            govern_gemini_tool_identity_at_req04(contents)?;
-            Ok(true)
-        }
-        V3HubEntryProtocol::Responses | V3HubEntryProtocol::Anthropic => Ok(false),
-    }
-}
-
-fn govern_openai_chat_tool_identity_at_req04(
-    messages: &[Value],
-) -> Result<(), V3HubRelayRequestError> {
-    let mut declared = BTreeSet::new();
-    for (index, message) in messages.iter().enumerate() {
-        if let Some(calls) = message.get("tool_calls") {
-            let calls =
-                calls
-                    .as_array()
-                    .ok_or(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
-                        protocol: "openai_chat",
-                        index,
-                        reason: "tool_calls must be an array",
-                    })?;
-            for call in calls {
-                let id = call
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .filter(|id| !id.is_empty())
-                    .ok_or(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
-                        protocol: "openai_chat",
-                        index,
-                        reason: "tool_calls.id is required",
-                    })?;
-                if !declared.insert(id.to_owned()) {
-                    return Err(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
-                        protocol: "openai_chat",
-                        index,
-                        reason: "duplicate tool_calls.id",
-                    });
-                }
-            }
-        }
-        if message.get("role").and_then(Value::as_str) == Some("tool") {
-            let id = message
-                .get("tool_call_id")
-                .and_then(Value::as_str)
-                .filter(|id| !id.is_empty())
-                .ok_or(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
-                    protocol: "openai_chat",
-                    index,
-                    reason: "tool_call_id is required",
-                })?;
-            if !declared.contains(id) {
-                return Err(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
-                    protocol: "openai_chat",
-                    index,
-                    reason: "orphan tool_call_id",
-                });
-            }
-        }
-    }
-    Ok(())
-}
-
-fn govern_gemini_tool_identity_at_req04(contents: &[Value]) -> Result<(), V3HubRelayRequestError> {
-    let mut declared = BTreeSet::new();
-    for (index, content) in contents.iter().enumerate() {
-        let Some(parts) = content.get("parts").and_then(Value::as_array) else {
-            continue;
-        };
-        for part in parts {
-            if let Some(function_call) = part.get("functionCall") {
-                let name = function_call
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .filter(|name| !name.is_empty())
-                    .ok_or(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
-                        protocol: "gemini",
-                        index,
-                        reason: "functionCall.name is required",
-                    })?;
-                declared.insert(name.to_owned());
-            }
-            if let Some(function_response) = part.get("functionResponse") {
-                let name = function_response
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .filter(|name| !name.is_empty())
-                    .ok_or(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
-                        protocol: "gemini",
-                        index,
-                        reason: "functionResponse.name is required",
-                    })?;
-                if !declared.contains(name) {
-                    return Err(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
-                        protocol: "gemini",
-                        index,
-                        reason: "orphan functionResponse.name",
-                    });
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
+// Tool output admission is identity-only: a tool result is accepted when its
+// non-empty call id names a tool call present in the same request. The declared
+// or original result kind is never an admission fact. It stays business data in
+// the typed inverse/history records and the `routecodex_chat_extension` carrier.
+// This keeps representable cross-kind pairs (for example a `function` call with
+// a `custom_tool_call_output` result) forwardable, pinned by the public
+// regression `mixed_source_output_kind_preserves_representable_http_pair_without_name_rules`.
 fn govern_tool_outputs_at_req04(
     payload: &mut Value,
-    govern_chat_messages: bool,
     current_payload_start: usize,
 ) -> Result<usize, V3HubRelayRequestError> {
     if payload.get("input").and_then(Value::as_array).is_none()
         && payload.get("messages").and_then(Value::as_array).is_some()
-        && govern_chat_messages
     {
         return govern_chat_tool_outputs_at_req04(payload, current_payload_start);
     }
-    let mut expected_outputs = BTreeMap::new();
+    let mut call_ids = BTreeSet::new();
     if let Some(messages) = payload.get("messages").and_then(Value::as_array) {
         for message in messages.iter().skip(current_payload_start) {
             if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
                 for call in calls {
-                    if let Some((call_id, expected_kind)) =
-                        expected_tool_call_output_from_chat_call(call)
-                    {
-                        expected_outputs.insert(call_id, expected_kind);
+                    if let Some(call_id) = tool_call_id_from_chat_call(call) {
+                        call_ids.insert(call_id);
                     }
                 }
             }
@@ -434,29 +311,23 @@ fn govern_tool_outputs_at_req04(
     };
     let mut output_count = 0;
     for (index, item) in input.iter_mut().enumerate().skip(current_payload_start) {
-        if let Some((call_id, expected_kind)) = expected_tool_call_output_from_item(item) {
-            expected_outputs.insert(call_id, expected_kind);
+        if let Some(call_id) = tool_call_id_from_input_item(item) {
+            call_ids.insert(call_id);
             continue;
         }
-        let actual_kind = match item.get("type").and_then(Value::as_str) {
-            Some("function_call_output") => V3HubRelayActualToolOutputKind::Function,
-            Some("custom_tool_call_output") => V3HubRelayActualToolOutputKind::Custom,
-            _ => continue,
-        };
+        if !matches!(
+            item.get("type").and_then(Value::as_str),
+            Some("function_call_output" | "custom_tool_call_output")
+        ) {
+            continue;
+        }
         output_count += 1;
         let call_id = item
             .get("call_id")
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
             .ok_or(V3HubRelayRequestError::MalformedToolOutput { index })?;
-        if let Some(expected_kind) = expected_outputs.get(call_id) {
-            if !expected_kind.matches_actual(actual_kind) {
-                return Err(V3HubRelayRequestError::ToolOutputKindMismatch {
-                    index,
-                    call_id: call_id.to_owned(),
-                });
-            }
-        } else {
+        if !call_ids.contains(call_id) {
             return Err(V3HubRelayRequestError::OrphanToolOutput {
                 index,
                 call_id: call_id.to_owned(),
@@ -466,142 +337,49 @@ fn govern_tool_outputs_at_req04(
     Ok(output_count)
 }
 
+// Canonical Chat results carry no identity requirement: native Gemini and other
+// no-ID protocols represent a result as `role: "tool"` content, and remote
+// continuation or partial history does not name a local call counterpart. The
+// preserved ids and names stay business data in canonical messages plus the
+// typed inverse records, so this consumer only reads the canonical messages and
+// counts tool results from the current-history offset. It is not admission: it
+// invents no id, rejects no value and changes no payload.
 fn govern_chat_tool_outputs_at_req04(
-    payload: &mut Value,
+    payload: &Value,
     current_payload_start: usize,
 ) -> Result<usize, V3HubRelayRequestError> {
-    let mut expected_outputs = BTreeMap::new();
-    let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) else {
+    let Some(messages) = payload.get("messages").and_then(Value::as_array) else {
         return Ok(0);
     };
-    for message in messages.iter().skip(current_payload_start) {
-        if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
-            for call in calls {
-                if let Some((call_id, expected_kind)) =
-                    expected_tool_call_output_from_chat_call(call)
-                {
-                    expected_outputs.insert(call_id, expected_kind);
-                }
-            }
-        }
-    }
-    let mut output_count = 0usize;
-    for (index, message) in messages.iter_mut().enumerate().skip(current_payload_start) {
-        if message.get("role").and_then(Value::as_str) != Some("tool") {
-            continue;
-        }
-        output_count = output_count.saturating_add(1);
-        let call_id = message
-            .get("tool_call_id")
-            .or_else(|| message.get("call_id"))
-            .or_else(|| message.get("id"))
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-            .ok_or(V3HubRelayRequestError::MalformedToolOutput { index })?;
-        let expected_kind = expected_outputs.get(call_id).copied().ok_or_else(|| {
-            V3HubRelayRequestError::OrphanToolOutput {
-                index,
-                call_id: call_id.to_owned(),
-            }
-        })?;
-        let actual_kind = actual_chat_tool_output_kind(message);
-        if !expected_kind.matches_actual(actual_kind) {
-            return Err(V3HubRelayRequestError::ToolOutputKindMismatch {
-                index,
-                call_id: call_id.to_owned(),
-            });
-        }
-    }
+    let output_count = messages
+        .iter()
+        .skip(current_payload_start)
+        .filter(|message| message.get("role").and_then(Value::as_str) == Some("tool"))
+        .count();
     Ok(output_count)
 }
 
-fn actual_chat_tool_output_kind(message: &Value) -> V3HubRelayActualToolOutputKind {
-    match message
-        .pointer("/routecodex_chat_extension/responses_tool_output_type")
-        .and_then(Value::as_str)
-    {
-        Some("custom_tool_call_output") => V3HubRelayActualToolOutputKind::Custom,
-        _ => V3HubRelayActualToolOutputKind::Function,
-    }
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum V3HubRelayExpectedToolOutputKind {
-    Function,
-    Custom,
-    ApplyPatch,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum V3HubRelayActualToolOutputKind {
-    Function,
-    Custom,
-}
-
-impl V3HubRelayExpectedToolOutputKind {
-    fn matches_actual(self, actual: V3HubRelayActualToolOutputKind) -> bool {
-        matches!(
-            (self, actual),
-            (
-                V3HubRelayExpectedToolOutputKind::Function,
-                V3HubRelayActualToolOutputKind::Function
-            ) | (
-                V3HubRelayExpectedToolOutputKind::Custom,
-                V3HubRelayActualToolOutputKind::Custom
-            ) | (V3HubRelayExpectedToolOutputKind::ApplyPatch, _)
-        )
-    }
-}
-
-fn expected_tool_call_output_from_chat_call(
-    call: &Value,
-) -> Option<(String, V3HubRelayExpectedToolOutputKind)> {
-    let call_id = call
-        .get("id")
+fn tool_call_id_from_chat_call(call: &Value) -> Option<String> {
+    call.get("id")
         .or_else(|| call.get("call_id"))
         .or_else(|| call.get("tool_call_id"))
         .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())?;
-    let name = call
-        .get("name")
-        .or_else(|| call.pointer("/function/name"))
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let expected_kind = if name.eq_ignore_ascii_case("apply_patch") {
-        V3HubRelayExpectedToolOutputKind::ApplyPatch
-    } else if call
-        .pointer("/routecodex_chat_extension/responses_tool_call_type")
-        .and_then(Value::as_str)
-        == Some("custom_tool_call")
-    {
-        V3HubRelayExpectedToolOutputKind::Custom
-    } else {
-        V3HubRelayExpectedToolOutputKind::Function
-    };
-    Some((call_id.to_owned(), expected_kind))
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
 }
 
-fn expected_tool_call_output_from_item(
-    item: &Value,
-) -> Option<(String, V3HubRelayExpectedToolOutputKind)> {
-    let expected_kind = match item.get("type").and_then(Value::as_str) {
-        Some("custom_tool_call") => V3HubRelayExpectedToolOutputKind::Custom,
-        Some("function_call" | "tool_call") => V3HubRelayExpectedToolOutputKind::Function,
-        _ => return None,
-    };
-    let call_id = item
-        .get("call_id")
+fn tool_call_id_from_input_item(item: &Value) -> Option<String> {
+    if !matches!(
+        item.get("type").and_then(Value::as_str),
+        Some("custom_tool_call" | "function_call" | "tool_call" | "apply_patch_call")
+    ) {
+        return None;
+    }
+    item.get("call_id")
         .or_else(|| item.get("id"))
         .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())?;
-    let expected_kind = if read_tool_call_name_at_req04(item)
-        .as_deref()
-        .is_some_and(|name| name.eq_ignore_ascii_case("apply_patch"))
-    {
-        V3HubRelayExpectedToolOutputKind::ApplyPatch
-    } else {
-        expected_kind
-    };
-    Some((call_id.to_owned(), expected_kind))
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
 }
 
 fn read_tool_call_name_at_req04(item: &Value) -> Option<String> {

@@ -1,12 +1,6 @@
-use super::request_outbound_format::{
-    project_outbound_payload_for_selected_target_protocol_with_drops, V3OutboundTargetProtocol,
-};
+use super::ProviderReqCompat06Projected;
 use super::{
-    build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops,
-    build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording,
-    build_v3_openai_responses_standard_request_for_selected_target_with_drops,
-    classify_v3_provider_compat_error, encode_v3_responses_semantic_as_anthropic_request,
-    provider_protocol_compat_id, ProviderReqCompat06Projected, V3HubOpaquePayload,
+    classify_v3_provider_compat_error, provider_protocol_compat_id, V3HubOpaquePayload,
     V3HubProviderWireProtocol, V3HubReqOutbound07ProviderSemantic, V3ProviderCompatError,
     V3ProviderCompatProfileId,
 };
@@ -16,11 +10,7 @@ use provider_compat_core::req_outbound_stage3_compat::{
 use serde_json::Value;
 
 use crate::hub_v1::{count_v3_payload_image_refs, normalize_v3_all_images_to_placeholder};
-use crate::projection_drop_log::{V3ProjectionDropContext, V3ProjectionDropRecord};
-use crate::selected_provider_model_binding::{
-    bind_v3_selected_provider_model, V3SelectedProviderModelBinding,
-};
-
+use crate::projection_drop_log::V3ProjectionDropRecord;
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProviderReqCompat06ProviderCompat {
     pub(crate) previous: V3HubReqOutbound07ProviderSemantic,
@@ -50,8 +40,8 @@ pub(super) fn apply_v3_provider_req_compat(
     input: &V3HubReqOutbound07ProviderSemantic,
     profile: &V3ProviderCompatProfileId,
 ) -> Result<(Value, Vec<V3ProjectionDropRecord>), V3ProviderCompatError> {
-    let (payload, drops) = build_v3_provider_standard_protocol_payload_from_req07(input)
-        .map_err(|reason| classify_v3_provider_compat_error("request_protocol", profile, reason))?;
+    let payload = input.standard_payload().clone();
+    let drops = input.standard_projection_drops().to_vec();
     let payload = apply_v3_provider_req_compat_to_provider_payload(
         payload,
         input.selected_target(),
@@ -160,64 +150,6 @@ use provider_req_compat_06_output_cap::project_provider_declared_output_cap;
 mod provider_req_compat_06_reasoning_effort;
 use provider_req_compat_06_reasoning_effort::project_reasoning_effort_for_selected_target;
 
-fn build_v3_provider_standard_protocol_payload_from_req07(
-    input: &V3HubReqOutbound07ProviderSemantic,
-) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
-    let selected = input.selected_target();
-    let mut drops = Vec::new();
-    let provider_protocol_payload = match input.provider_protocol {
-        V3HubProviderWireProtocol::OpenAiChat => {
-            let (payload, openai_chat_drops) =
-                build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording(
-                    input.provider_semantic_payload(),
-                    selected.web_search_execution_mode,
-                    selected
-                        .model_capabilities
-                        .iter()
-                        .any(|capability| capability == "web_search"),
-                    &V3ProjectionDropContext::disabled(),
-                )?;
-            drops.extend(openai_chat_drops);
-            payload
-        }
-        V3HubProviderWireProtocol::Responses => {
-            let (payload, responses_drops) =
-                build_v3_openai_responses_standard_request_for_selected_target_with_drops(
-                    input.provider_semantic_payload(),
-                    selected
-                        .model_capabilities
-                        .iter()
-                        .any(|capability| capability == "web_search"),
-                )?;
-            drops.extend(responses_drops);
-            payload
-        }
-        V3HubProviderWireProtocol::Anthropic => {
-            let (source, anthropic_drops) =
-                build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops(
-                    input.provider_semantic_payload(),
-                    input.entry_protocol(),
-                )?;
-            drops.extend(anthropic_drops);
-            encode_v3_responses_semantic_as_anthropic_request(source)
-                .map_err(|error| error.to_string())?
-        }
-        V3HubProviderWireProtocol::Gemini => {
-            let (payload, gemini_drops) =
-                project_outbound_payload_for_selected_target_protocol_with_drops(
-                    input.provider_semantic_payload(),
-                    V3OutboundTargetProtocol::Gemini,
-                    &selected.model_capabilities,
-                )?;
-            drops.extend(gemini_drops);
-            payload
-        }
-    };
-    let payload = bind_v3_selected_provider_model(provider_protocol_payload, selected)
-        .map(V3SelectedProviderModelBinding::into_payload)?;
-    Ok((payload, drops))
-}
-
 #[path = "provider_req_compat_06_deepseek.rs"]
 mod provider_req_compat_06_deepseek;
 use provider_req_compat_06_deepseek::{
@@ -233,11 +165,14 @@ mod tests {
     use crate::hub_v1::{
         build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02,
         build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04,
-        build_v3_hub_req_inbound_01_client_raw,
-        build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01,
+        build_v3_hub_req_inbound_01_client_raw, build_v3_hub_req_inbound_02_from_canonical,
         build_v3_hub_req_outbound_07_from_v3_hub_req_target_06,
         build_v3_hub_req_target_06_from_v3_hub_req_execution_05, V3HubEntryProtocol,
         V3HubExecutionMode, V3HubInvocationSource, V3HubTargetResolution, V3HubTransportIntent,
+    };
+    use crate::operation_runner::{
+        execute_v3_operation_runner_request_normalize_losslessly, RequestInvocationContext,
+        RequestNormalizationEntry, RequestOriginKind, V3RequestContextHandle,
     };
     use routecodex_v3_config::{
         V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind, V3WebSearchExecutionMode,
@@ -290,10 +225,49 @@ mod tests {
         }
     }
 
+    /// Build a real request-scoped handle through the registered REQ02 SDK
+    /// graph, then publish the current field associations the Req07 facade
+    /// consumes. No legacy normalizer and no control facts reconstructed from
+    /// the payload.
+    fn request_handle_and_canonical(
+        request_id: &str,
+        entry_protocol: V3HubEntryProtocol,
+        raw: serde_json::Value,
+    ) -> Result<(V3RequestContextHandle, serde_json::Value), String> {
+        let entry_protocol_id = match entry_protocol {
+            V3HubEntryProtocol::Responses => "responses",
+            V3HubEntryProtocol::Anthropic => "anthropic",
+            V3HubEntryProtocol::Gemini => "gemini",
+            V3HubEntryProtocol::OpenAiChat => "openai_chat",
+        };
+        let handle =
+            V3RequestContextHandle::new(request_id.to_string(), entry_protocol_id.to_string());
+        let invocation = RequestInvocationContext::new(
+            handle.clone(),
+            format!("{request_id}-invocation"),
+            format!("{request_id}-entry"),
+            RequestOriginKind::ClientEntry,
+        );
+        let canonical = execute_v3_operation_runner_request_normalize_losslessly(
+            &handle,
+            &invocation,
+            RequestNormalizationEntry::RawEntry(raw),
+        )
+        .map_err(|error| error.to_string())?;
+        let pair = handle.original_pair()?;
+        handle.publish_current_field_associations(
+            crate::operation_runner::CurrentFieldAssociations::from_normalization(
+                &pair.inverse_context,
+            ),
+        )?;
+        Ok((handle, canonical))
+    }
+
     fn relay_req07(
         provider_protocol: V3HubProviderWireProtocol,
     ) -> V3HubReqOutbound07ProviderSemantic {
-        let req01 = build_v3_hub_req_inbound_01_client_raw(
+        relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
             json!({
                 "model": "client-route-alias",
                 "input": [{
@@ -302,22 +276,8 @@ mod tests {
                     "content": [{"type": "input_text", "text": "hello"}]
                 }]
             }),
-            V3HubEntryProtocol::Responses,
-            V3HubInvocationSource::Client,
-            V3HubTransportIntent::Json,
-        );
-        let req02 = build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(req01);
-        let req04 = build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02(req02);
-        let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
-            req04,
-            V3HubExecutionMode::Relay,
-        );
-        let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
-            req05,
-            V3HubTargetResolution::Routed,
-            selected_candidate(provider_protocol),
-        );
-        build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_protocol)
+            provider_protocol,
+        )
     }
 
     fn relay_req07_for_entry(
@@ -325,13 +285,56 @@ mod tests {
         payload: serde_json::Value,
         provider_protocol: V3HubProviderWireProtocol,
     ) -> V3HubReqOutbound07ProviderSemantic {
-        let req01 = build_v3_hub_req_inbound_01_client_raw(
-            payload,
+        relay_req07_for_entry_result(entry_protocol, payload, provider_protocol).unwrap()
+    }
+
+    fn relay_req07_for_entry_result(
+        entry_protocol: V3HubEntryProtocol,
+        payload: serde_json::Value,
+        provider_protocol: V3HubProviderWireProtocol,
+    ) -> Result<V3HubReqOutbound07ProviderSemantic, String> {
+        relay_req07_for_entry_with_selected_result(
             entry_protocol,
-            V3HubInvocationSource::Client,
-            V3HubTransportIntent::Json,
+            payload,
+            provider_protocol,
+            |_selected| {},
+        )
+    }
+
+    fn relay_req07_for_entry_with_selected(
+        entry_protocol: V3HubEntryProtocol,
+        payload: serde_json::Value,
+        provider_protocol: V3HubProviderWireProtocol,
+        mutate_selected: impl FnOnce(&mut V3TargetCandidate),
+    ) -> V3HubReqOutbound07ProviderSemantic {
+        relay_req07_for_entry_with_selected_result(
+            entry_protocol,
+            payload,
+            provider_protocol,
+            mutate_selected,
+        )
+        .unwrap()
+    }
+
+    fn relay_req07_for_entry_with_selected_result(
+        entry_protocol: V3HubEntryProtocol,
+        payload: serde_json::Value,
+        provider_protocol: V3HubProviderWireProtocol,
+        mutate_selected: impl FnOnce(&mut V3TargetCandidate),
+    ) -> Result<V3HubReqOutbound07ProviderSemantic, String> {
+        let mut selected = selected_candidate(provider_protocol);
+        mutate_selected(&mut selected);
+        let (handle, canonical) =
+            request_handle_and_canonical("req07-compat-fixture", entry_protocol, payload.clone())?;
+        let req02 = build_v3_hub_req_inbound_02_from_canonical(
+            build_v3_hub_req_inbound_01_client_raw(
+                payload,
+                entry_protocol,
+                V3HubInvocationSource::Client,
+                V3HubTransportIntent::Json,
+            ),
+            canonical.clone(),
         );
-        let req02 = build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(req01);
         let req04 = build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02(req02);
         let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
             req04,
@@ -340,9 +343,16 @@ mod tests {
         let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
             req05,
             V3HubTargetResolution::Routed,
-            selected_candidate(provider_protocol),
+            selected,
         );
-        build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_protocol)
+        build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
+            req06,
+            &canonical,
+            &handle,
+            V3HubExecutionMode::Relay,
+            "req07-compat-attempt",
+            provider_protocol,
+        )
     }
 
     #[test]
@@ -393,7 +403,7 @@ mod tests {
 
     #[test]
     fn minimax_anthropic_effort_uses_registered_provider_compat() {
-        let mut req07 = relay_req07_for_entry(
+        let req07 = relay_req07_for_entry_with_selected(
             V3HubEntryProtocol::Responses,
             json!({
                 "model": "client-route-alias",
@@ -401,9 +411,11 @@ mod tests {
                 "reasoning": {"effort": "medium"}
             }),
             V3HubProviderWireProtocol::Anthropic,
+            |selected| {
+                selected.provider_id = "minimax_anthropic".to_string();
+                selected.compatibility_profile = Some("chat:minimax".to_string());
+            },
         );
-        req07.previous.selected_target.provider_id = "minimax_anthropic".to_string();
-        req07.previous.selected_target.compatibility_profile = Some("chat:minimax".to_string());
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("MiniMax Anthropic compat must produce adaptive thinking");
@@ -419,7 +431,7 @@ mod tests {
 
     #[test]
     fn gemini_provider_req_rejects_reasoning_effort_without_selected_reasoning_capability() {
-        let req07 = relay_req07_for_entry(
+        let error = relay_req07_for_entry_result(
             V3HubEntryProtocol::OpenAiChat,
             json!({
                 "model": "client-route-alias",
@@ -427,25 +439,17 @@ mod tests {
                 "reasoning_effort": "high"
             }),
             V3HubProviderWireProtocol::Gemini,
-        );
-
-        let error = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
-            .expect_err("Gemini provider send must validate selected target capabilities");
-        assert_eq!(
-            error.classification(),
-            crate::hub_v1::V3ProviderCompatErrorClassification::RequestPayloadInvalid
-        );
+        )
+        .expect_err("Gemini provider send must validate selected target capabilities");
         assert!(
-            error
-                .to_string()
-                .contains("paths=$.reasoning_effort missing_capability=reasoning"),
+            error.contains("paths=$.reasoning_effort missing_capability=reasoning"),
             "{error}"
         );
     }
 
     #[test]
     fn gemini_provider_req_projects_reasoning_effort_with_selected_reasoning_capability() {
-        let mut req07 = relay_req07_for_entry(
+        let req07 = relay_req07_for_entry_with_selected(
             V3HubEntryProtocol::OpenAiChat,
             json!({
                 "model": "client-route-alias",
@@ -453,12 +457,10 @@ mod tests {
                 "reasoning_effort": "high"
             }),
             V3HubProviderWireProtocol::Gemini,
+            |selected| {
+                selected.model_capabilities.push("reasoning".to_string());
+            },
         );
-        req07
-            .previous
-            .selected_target
-            .model_capabilities
-            .push("reasoning".to_string());
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("selected Gemini target with reasoning capability must accept effort");
@@ -472,7 +474,7 @@ mod tests {
 
     #[test]
     fn deepseek_openai_chat_thinking_tool_choice_is_omitted_on_provider_wire() {
-        let mut req07 = relay_req07_for_entry(
+        let req07 = relay_req07_for_entry_with_selected(
             V3HubEntryProtocol::OpenAiChat,
             json!({
                 "model": "client-route-alias",
@@ -482,10 +484,12 @@ mod tests {
                 "tool_choice": "required"
             }),
             V3HubProviderWireProtocol::OpenAiChat,
+            |selected| {
+                selected.provider_type = "openai_chat".to_string();
+                selected.model_id = "deepseek-v4-flash".to_string();
+                selected.wire_model = "deepseek-v4-flash".to_string();
+            },
         );
-        req07.previous.selected_target.provider_type = "openai_chat".to_string();
-        req07.previous.selected_target.model_id = "deepseek-v4-flash".to_string();
-        req07.previous.selected_target.wire_model = "deepseek-v4-flash".to_string();
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("DeepSeek thinking tool choice must remain provider-valid");
@@ -497,7 +501,7 @@ mod tests {
 
     #[test]
     fn deepseek_generic_compat_loads_without_provider_profile() {
-        let mut req07 = relay_req07_for_entry(
+        let req07 = relay_req07_for_entry_with_selected(
             V3HubEntryProtocol::OpenAiChat,
             json!({
                 "model": "client-route-alias",
@@ -506,11 +510,13 @@ mod tests {
                 "tool_choice": "auto"
             }),
             V3HubProviderWireProtocol::OpenAiChat,
+            |selected| {
+                selected.provider_type = "openai_chat".to_string();
+                selected.model_id = "deepseek-v4-flash".to_string();
+                selected.wire_model = "deepseek-v4-flash".to_string();
+                selected.compatibility_profile = None;
+            },
         );
-        req07.previous.selected_target.provider_type = "openai_chat".to_string();
-        req07.previous.selected_target.model_id = "deepseek-v4-flash".to_string();
-        req07.previous.selected_target.wire_model = "deepseek-v4-flash".to_string();
-        req07.previous.selected_target.compatibility_profile = None;
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("model-family DeepSeek compat must not depend on provider profile");
@@ -522,7 +528,7 @@ mod tests {
 
     #[test]
     fn deepseek_v41_openai_chat_wraps_malformed_history_arguments() {
-        let mut req07 = relay_req07_for_entry(
+        let req07 = relay_req07_for_entry_with_selected(
             V3HubEntryProtocol::OpenAiChat,
             json!({
                 "model": "client-route-alias",
@@ -544,12 +550,13 @@ mod tests {
                 }]
             }),
             V3HubProviderWireProtocol::OpenAiChat,
+            |selected| {
+                selected.provider_type = "openai_chat".to_string();
+                selected.model_id = "deepseek-v4.1-flash".to_string();
+                selected.wire_model = "deepseek-v4.1-flash".to_string();
+                selected.compatibility_profile = Some("chat:deepseek-max".to_string());
+            },
         );
-        req07.previous.selected_target.provider_type = "openai_chat".to_string();
-        req07.previous.selected_target.model_id = "deepseek-v4.1-flash".to_string();
-        req07.previous.selected_target.wire_model = "deepseek-v4.1-flash".to_string();
-        req07.previous.selected_target.compatibility_profile =
-            Some("chat:deepseek-max".to_string());
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("DeepSeek v4.1 must receive provider-local argument compatibility");
@@ -565,7 +572,7 @@ mod tests {
 
     #[test]
     fn openai_chat_profile_with_deepseek_v41_wraps_malformed_history_arguments() {
-        let mut req07 = relay_req07_for_entry(
+        let req07 = relay_req07_for_entry_with_selected(
             V3HubEntryProtocol::OpenAiChat,
             json!({
                 "model": "client-route-alias",
@@ -587,11 +594,13 @@ mod tests {
                 }]
             }),
             V3HubProviderWireProtocol::OpenAiChat,
+            |selected| {
+                selected.provider_type = "openai_chat".to_string();
+                selected.model_id = "deepseek-v4.1-flash".to_string();
+                selected.wire_model = "deepseek-v4.1-flash".to_string();
+                selected.compatibility_profile = Some("chat:openai".to_string());
+            },
         );
-        req07.previous.selected_target.provider_type = "openai_chat".to_string();
-        req07.previous.selected_target.model_id = "deepseek-v4.1-flash".to_string();
-        req07.previous.selected_target.wire_model = "deepseek-v4.1-flash".to_string();
-        req07.previous.selected_target.compatibility_profile = Some("chat:openai".to_string());
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("chat:openai DeepSeek v4.1 must receive provider-local argument compatibility");
@@ -607,7 +616,7 @@ mod tests {
 
     #[test]
     fn deepseek_openai_chat_thinking_tool_choice_object_is_omitted_on_provider_wire() {
-        let mut req07 = relay_req07_for_entry(
+        let req07 = relay_req07_for_entry_with_selected(
             V3HubEntryProtocol::OpenAiChat,
             json!({
                 "model": "client-route-alias",
@@ -617,10 +626,12 @@ mod tests {
                 "tool_choice": {"type":"required"}
             }),
             V3HubProviderWireProtocol::OpenAiChat,
+            |selected| {
+                selected.provider_type = "openai_chat".to_string();
+                selected.model_id = "deepseek-v4-flash".to_string();
+                selected.wire_model = "deepseek-v4-flash".to_string();
+            },
         );
-        req07.previous.selected_target.provider_type = "openai_chat".to_string();
-        req07.previous.selected_target.model_id = "deepseek-v4-flash".to_string();
-        req07.previous.selected_target.wire_model = "deepseek-v4-flash".to_string();
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("DeepSeek thinking object tool choice must remain provider-valid");
@@ -632,7 +643,7 @@ mod tests {
 
     #[test]
     fn deepseek_openai_chat_type_alias_omits_thinking_tool_choice_provider_field() {
-        let mut req07 = relay_req07_for_entry(
+        let req07 = relay_req07_for_entry_with_selected(
             V3HubEntryProtocol::OpenAiChat,
             json!({
                 "model": "client-route-alias",
@@ -642,10 +653,12 @@ mod tests {
                 "tool_choice": "required"
             }),
             V3HubProviderWireProtocol::OpenAiChat,
+            |selected| {
+                selected.provider_type = "openai-chat-completions".to_string();
+                selected.model_id = "deepseek-v4-flash".to_string();
+                selected.wire_model = "deepseek-v4-flash".to_string();
+            },
         );
-        req07.previous.selected_target.provider_type = "openai-chat-completions".to_string();
-        req07.previous.selected_target.model_id = "deepseek-v4-flash".to_string();
-        req07.previous.selected_target.wire_model = "deepseek-v4-flash".to_string();
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("DeepSeek provider type alias must use provider-valid tool choice");
@@ -657,7 +670,7 @@ mod tests {
 
     #[test]
     fn deepseek_openai_chat_non_thinking_projects_required_tool_choice() {
-        let mut req07 = relay_req07_for_entry(
+        let req07 = relay_req07_for_entry_with_selected(
             V3HubEntryProtocol::OpenAiChat,
             json!({
                 "model": "client-route-alias",
@@ -667,10 +680,12 @@ mod tests {
                 "tool_choice": "required"
             }),
             V3HubProviderWireProtocol::OpenAiChat,
+            |selected| {
+                selected.provider_type = "openai_chat".to_string();
+                selected.model_id = "deepseek-v4-flash".to_string();
+                selected.wire_model = "deepseek-v4-flash".to_string();
+            },
         );
-        req07.previous.selected_target.provider_type = "openai_chat".to_string();
-        req07.previous.selected_target.model_id = "deepseek-v4-flash".to_string();
-        req07.previous.selected_target.wire_model = "deepseek-v4-flash".to_string();
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("non-thinking DeepSeek request must use provider-valid tool choice");
@@ -682,7 +697,7 @@ mod tests {
 
     #[test]
     fn deepseek_openai_chat_without_reasoning_projects_required_tool_choice() {
-        let mut req07 = relay_req07_for_entry(
+        let req07 = relay_req07_for_entry_with_selected(
             V3HubEntryProtocol::OpenAiChat,
             json!({
                 "model": "client-route-alias",
@@ -691,11 +706,13 @@ mod tests {
                 "tool_choice": "required"
             }),
             V3HubProviderWireProtocol::OpenAiChat,
+            |selected| {
+                selected.provider_type = "openai_chat".to_string();
+                selected.compatibility_profile = Some("chat:openai".to_string());
+                selected.model_id = "deepseek-v4.1-flash".to_string();
+                selected.wire_model = "DeepSeek-V4.1-Flash".to_string();
+            },
         );
-        req07.previous.selected_target.provider_type = "openai_chat".to_string();
-        req07.previous.selected_target.compatibility_profile = Some("chat:openai".to_string());
-        req07.previous.selected_target.model_id = "deepseek-v4.1-flash".to_string();
-        req07.previous.selected_target.wire_model = "DeepSeek-V4.1-Flash".to_string();
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("OpenAI Chat DeepSeek V4.1 request must use provider-valid tool choice");
@@ -710,15 +727,14 @@ mod tests {
     }
 
     #[test]
-    fn anthropic_entry_current_responses_semantic_input_encodes_to_anthropic_provider_wire() {
+    fn anthropic_entry_current_native_messages_encode_to_anthropic_provider_wire() {
         let req07 = relay_req07_for_entry(
             V3HubEntryProtocol::Anthropic,
             json!({
                 "model": "client-route-alias",
-                "input": [{
-                    "type":"message",
+                "messages": [{
                     "role":"user",
-                    "content":[{"type":"input_text","text":"hello"}]
+                    "content":[{"type":"text","text":"hello"}]
                 }],
                 "stream": false
             }),
@@ -786,8 +802,16 @@ mod tests {
         assert!(payload.get("input").is_none());
         assert_eq!(payload["messages"][0]["role"], "user");
         assert_eq!(payload["messages"][1]["role"], "assistant");
-        assert_eq!(payload["messages"][1]["content"][0]["type"], "text");
-        assert_eq!(payload["messages"][1]["content"][1]["type"], "tool_use");
+        assert_eq!(
+            payload["messages"][1]["content"],
+            json!([{
+                "type": "tool_use",
+                "id": "call_lookup",
+                "name": "lookup",
+                "input": {"query": "routecodex"}
+            }]),
+            "a tool-only message must retain the complete call without fabricating empty text"
+        );
         assert_eq!(payload["messages"][2]["role"], "user");
         assert_eq!(payload["messages"][2]["content"][0]["type"], "tool_result");
     }
@@ -901,7 +925,7 @@ mod tests {
 
     #[test]
     fn responses_store_true_fails_when_anthropic_cannot_preserve_remote_storage_semantics() {
-        let req07 = relay_req07_for_entry(
+        let error = relay_req07_for_entry_result(
             V3HubEntryProtocol::Responses,
             json!({
                 "model": "client-route-alias",
@@ -909,16 +933,14 @@ mod tests {
                 "store": true
             }),
             V3HubProviderWireProtocol::Anthropic,
-        );
-
-        let error = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
-            .expect_err("Anthropic wire must not silently strip store=true");
-        assert!(error.reason.contains("store"), "{error:?}");
+        )
+        .expect_err("Anthropic wire must not silently strip store=true");
+        assert!(error.contains("store"), "{error}");
     }
 
     #[test]
     fn responses_unsupported_verbosity_fails_at_anthropic_adjacent_codec() {
-        let req07 = relay_req07_for_entry(
+        let error = relay_req07_for_entry_result(
             V3HubEntryProtocol::Responses,
             json!({
                 "model": "client-route-alias",
@@ -926,11 +948,9 @@ mod tests {
                 "text": {"verbosity": "extreme"}
             }),
             V3HubProviderWireProtocol::Anthropic,
-        );
-
-        let error = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
-            .expect_err("unsupported Responses verbosity must fail before Anthropic wire");
-        assert!(error.reason.contains("verbosity"), "{error:?}");
+        )
+        .expect_err("unsupported Responses verbosity must fail before Anthropic wire");
+        assert!(error.contains("verbosity"), "{error}");
     }
 
     #[test]
@@ -958,7 +978,7 @@ mod tests {
 
     #[test]
     fn deepseek_profile_maps_summary_derived_medium_to_official_high_domain() {
-        let mut req07 = relay_req07_for_entry(
+        let req07 = relay_req07_for_entry_with_selected(
             V3HubEntryProtocol::Responses,
             json!({
                 "model": "client-route-alias",
@@ -966,9 +986,10 @@ mod tests {
                 "reasoning": {"summary": "auto"}
             }),
             V3HubProviderWireProtocol::OpenAiChat,
+            |selected| {
+                selected.compatibility_profile = Some("chat:deepseek-max".to_string());
+            },
         );
-        req07.previous.selected_target.compatibility_profile =
-            Some("chat:deepseek-max".to_string());
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("summary-derived medium must use the DeepSeek high projection");
@@ -981,7 +1002,7 @@ mod tests {
 
     #[test]
     fn deepseek_max_profile_maps_explicit_xhigh_to_official_max_domain() {
-        let mut req07 = relay_req07_for_entry(
+        let req07 = relay_req07_for_entry_with_selected(
             V3HubEntryProtocol::Responses,
             json!({
                 "model": "client-route-alias",
@@ -989,9 +1010,10 @@ mod tests {
                 "reasoning": {"effort": "xhigh", "summary": "detailed"}
             }),
             V3HubProviderWireProtocol::OpenAiChat,
+            |selected| {
+                selected.compatibility_profile = Some("chat:deepseek-max".to_string());
+            },
         );
-        req07.previous.selected_target.compatibility_profile =
-            Some("chat:deepseek-max".to_string());
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("explicit xhigh must use the official DeepSeek max projection");
@@ -1004,7 +1026,7 @@ mod tests {
 
     #[test]
     fn deepseek_max_profile_maps_explicit_ultra_to_max() {
-        let mut req07 = relay_req07_for_entry(
+        let req07 = relay_req07_for_entry_with_selected(
             V3HubEntryProtocol::Responses,
             json!({
                 "model": "client-route-alias",
@@ -1012,9 +1034,10 @@ mod tests {
                 "reasoning": {"effort": "ultra", "summary": "detailed"}
             }),
             V3HubProviderWireProtocol::OpenAiChat,
+            |selected| {
+                selected.compatibility_profile = Some("chat:deepseek-max".to_string());
+            },
         );
-        req07.previous.selected_target.compatibility_profile =
-            Some("chat:deepseek-max".to_string());
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("explicit ultra must use the official DeepSeek max projection");
@@ -1027,7 +1050,7 @@ mod tests {
 
     #[test]
     fn openai_chat_deepseek_v4_model_maps_official_effort_domain() {
-        let mut req07 = relay_req07_for_entry(
+        let req07 = relay_req07_for_entry_with_selected(
             V3HubEntryProtocol::Responses,
             json!({
                 "model": "client-route-alias",
@@ -1035,10 +1058,12 @@ mod tests {
                 "reasoning": {"effort": "medium"}
             }),
             V3HubProviderWireProtocol::OpenAiChat,
+            |selected| {
+                selected.compatibility_profile = Some("chat:openai".to_string());
+                selected.model_id = "deepseek-v4.1-flash".to_string();
+                selected.wire_model = "DeepSeek-V4.1-Flash".to_string();
+            },
         );
-        req07.previous.selected_target.compatibility_profile = Some("chat:openai".to_string());
-        req07.previous.selected_target.model_id = "deepseek-v4.1-flash".to_string();
-        req07.previous.selected_target.wire_model = "DeepSeek-V4.1-Flash".to_string();
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("OpenAI Chat DeepSeek model must use the official DeepSeek high projection");
@@ -1052,7 +1077,7 @@ mod tests {
     #[test]
     fn deepseek_max_profile_maps_lower_effort_values_to_high() {
         for effort in ["minimal", "low", "medium", "unknown"] {
-            let mut req07 = relay_req07_for_entry(
+            let req07 = relay_req07_for_entry_with_selected(
                 V3HubEntryProtocol::Responses,
                 json!({
                     "model": "client-route-alias",
@@ -1060,9 +1085,10 @@ mod tests {
                     "reasoning": {"effort": effort, "summary": "detailed"}
                 }),
                 V3HubProviderWireProtocol::OpenAiChat,
+                |selected| {
+                    selected.compatibility_profile = Some("chat:deepseek-max".to_string());
+                },
             );
-            req07.previous.selected_target.compatibility_profile =
-                Some("chat:deepseek-max".to_string());
 
             let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
                 .expect("DeepSeek lower/unknown effort must project to the registered high value");
@@ -1076,7 +1102,7 @@ mod tests {
 
     #[test]
     fn deepseek_max_profile_merges_explicit_medium_with_detailed_summary() {
-        let mut req07 = relay_req07_for_entry(
+        let req07 = relay_req07_for_entry_with_selected(
             V3HubEntryProtocol::Responses,
             json!({
                 "model": "client-route-alias",
@@ -1084,9 +1110,10 @@ mod tests {
                 "reasoning": {"effort": "medium", "summary": "detailed"}
             }),
             V3HubProviderWireProtocol::OpenAiChat,
+            |selected| {
+                selected.compatibility_profile = Some("chat:deepseek-max".to_string());
+            },
         );
-        req07.previous.selected_target.compatibility_profile =
-            Some("chat:deepseek-max".to_string());
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("explicit effort and summary must use the registered higher-level merge");
@@ -1099,7 +1126,7 @@ mod tests {
 
     #[test]
     fn opencode_go_zen_provider_compat_projects_medium_to_supported_low_effort() {
-        let mut req07 = relay_req07_for_entry(
+        let req07 = relay_req07_for_entry_with_selected(
             V3HubEntryProtocol::Responses,
             json!({
                 "model": "client-route-alias",
@@ -1107,12 +1134,13 @@ mod tests {
                 "reasoning": {"effort": "medium"}
             }),
             V3HubProviderWireProtocol::OpenAiChat,
+            |selected| {
+                selected.provider_id = "opencode-go-zen".to_string();
+                selected.model_id = "x-preview-f-free".to_string();
+                selected.wire_model = "x-preview-f-free".to_string();
+                selected.compatibility_profile = Some("compat:passthrough".to_string());
+            },
         );
-        req07.previous.selected_target.provider_id = "opencode-go-zen".to_string();
-        req07.previous.selected_target.model_id = "x-preview-f-free".to_string();
-        req07.previous.selected_target.wire_model = "x-preview-f-free".to_string();
-        req07.previous.selected_target.compatibility_profile =
-            Some("compat:passthrough".to_string());
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("OpenCode Zen provider compat must emit a supported effort value");
@@ -1122,7 +1150,7 @@ mod tests {
             "low"
         );
 
-        let mut responses_req07 = relay_req07_for_entry(
+        let responses_req07 = relay_req07_for_entry_with_selected(
             V3HubEntryProtocol::Responses,
             json!({
                 "model": "client-route-alias",
@@ -1130,14 +1158,13 @@ mod tests {
                 "reasoning": {"effort": "max"}
             }),
             V3HubProviderWireProtocol::Responses,
+            |selected| {
+                selected.provider_id = "opencode-go-zen".to_string();
+                selected.model_id = "x-preview-f-free".to_string();
+                selected.wire_model = "x-preview-f-free".to_string();
+                selected.compatibility_profile = Some("compat:passthrough".to_string());
+            },
         );
-        responses_req07.previous.selected_target.provider_id = "opencode-go-zen".to_string();
-        responses_req07.previous.selected_target.model_id = "x-preview-f-free".to_string();
-        responses_req07.previous.selected_target.wire_model = "x-preview-f-free".to_string();
-        responses_req07
-            .previous
-            .selected_target
-            .compatibility_profile = Some("compat:passthrough".to_string());
 
         let responses_compat =
             build_provider_req_compat_06_from_v3_hub_req_outbound_07(responses_req07)
@@ -1150,7 +1177,7 @@ mod tests {
 
     #[test]
     fn opencode_go_zen_provider_compat_projects_none_to_supported_low_effort() {
-        let mut req07 = relay_req07_for_entry(
+        let req07 = relay_req07_for_entry_with_selected(
             V3HubEntryProtocol::Responses,
             json!({
                 "model": "client-route-alias",
@@ -1158,12 +1185,13 @@ mod tests {
                 "reasoning": {"effort": "none"}
             }),
             V3HubProviderWireProtocol::Responses,
+            |selected| {
+                selected.provider_id = "opencode-go-zen".to_string();
+                selected.model_id = "x-preview-f-free".to_string();
+                selected.wire_model = "x-preview-f-free".to_string();
+                selected.compatibility_profile = Some("compat:passthrough".to_string());
+            },
         );
-        req07.previous.selected_target.provider_id = "opencode-go-zen".to_string();
-        req07.previous.selected_target.model_id = "x-preview-f-free".to_string();
-        req07.previous.selected_target.wire_model = "x-preview-f-free".to_string();
-        req07.previous.selected_target.compatibility_profile =
-            Some("compat:passthrough".to_string());
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("OpenCode Zen must receive a provider-supported effort value");
@@ -1176,7 +1204,7 @@ mod tests {
 
     #[test]
     fn openai_chat_relay_projects_responses_web_search_with_image_to_local_servertool_function() {
-        let mut req07 = relay_req07_for_entry(
+        let req07 = relay_req07_for_entry_with_selected(
             V3HubEntryProtocol::Responses,
             json!({
                 "model": "client-route-alias",
@@ -1189,14 +1217,12 @@ mod tests {
                 }]
             }),
             V3HubProviderWireProtocol::OpenAiChat,
+            |selected| {
+                selected.web_search_execution_mode =
+                    V3WebSearchExecutionMode::MetadataCenterLocalSearch;
+                selected.model_capabilities.push("web_search".to_string());
+            },
         );
-        req07.previous.selected_target.web_search_execution_mode =
-            V3WebSearchExecutionMode::MetadataCenterLocalSearch;
-        req07
-            .previous
-            .selected_target
-            .model_capabilities
-            .push("web_search".to_string());
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).expect(
             "Mode B OpenAI Chat relay must project built-in web search to local websearch function",
@@ -1224,7 +1250,7 @@ mod tests {
 
     #[test]
     fn minimax_openai_chat_profile_accepts_local_websearch_function_projection() {
-        let mut req07 = relay_req07_for_entry(
+        let req07 = relay_req07_for_entry_with_selected(
             V3HubEntryProtocol::Responses,
             json!({
                 "model": "client-route-alias",
@@ -1236,15 +1262,13 @@ mod tests {
                 }]
             }),
             V3HubProviderWireProtocol::OpenAiChat,
+            |selected| {
+                selected.web_search_execution_mode =
+                    V3WebSearchExecutionMode::ServertoolSearchBackend;
+                selected.model_capabilities.push("web_search".to_string());
+                selected.compatibility_profile = Some("chat:minimax".to_string());
+            },
         );
-        req07.previous.selected_target.web_search_execution_mode =
-            V3WebSearchExecutionMode::ServertoolSearchBackend;
-        req07
-            .previous
-            .selected_target
-            .model_capabilities
-            .push("web_search".to_string());
-        req07.previous.selected_target.compatibility_profile = Some("chat:minimax".to_string());
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("MiniMax Chat compat must accept Mode B local websearch function");
@@ -1264,17 +1288,20 @@ mod tests {
             V3HubProviderWireProtocol::Gemini,
         ] {
             let req07 = relay_req07(protocol);
-            assert_eq!(
-                req07.provider_semantic_payload()["model"],
-                "client-route-alias",
-                "client route model remains routing input before the shared binding block"
-            );
+            // Gemini carries the selected model in its transport URL; the
+            // other protocols carry it in the standard request body.
+            let expected_model = if protocol == V3HubProviderWireProtocol::Gemini {
+                Value::Null
+            } else {
+                json!("provider-wire-model")
+            };
+            assert_eq!(req07.provider_semantic_payload()["model"], expected_model);
 
             let req_compat =
                 build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();
             assert_eq!(
                 req_compat.provider_semantic_payload()["model"],
-                "provider-wire-model",
+                expected_model,
                 "{protocol:?} compat must consume route-selected provider model truth"
             );
             assert_ne!(
@@ -1324,46 +1351,6 @@ mod tests {
                 .as_object()
                 .unwrap()
                 .contains_key("model_id")
-        );
-    }
-
-    #[test]
-    fn multimodal_target_preserves_image_bytes_for_session_semantics() {
-        let mut payload = json!({
-            "messages": [{"role": "user", "content": [{
-                "type": "image_url",
-                "image_url": {"url": VALID_1X1_PNG_DATA_URL}
-            }]}]
-        });
-        project_v3_images_for_selected_target_session_compat(
-            &mut payload,
-            &[
-                "text".to_string(),
-                "multimodal".to_string(),
-                "vision".to_string(),
-            ],
-        );
-        assert_eq!(
-            payload["messages"][0]["content"][0]["image_url"]["url"],
-            VALID_1X1_PNG_DATA_URL
-        );
-    }
-
-    #[test]
-    fn non_multimodal_target_projects_image_to_session_placeholder() {
-        let mut payload = json!({
-            "messages": [{"role": "user", "content": [{
-                "type": "image_url",
-                "image_url": {"url": VALID_1X1_PNG_DATA_URL}
-            }]}]
-        });
-        project_v3_images_for_selected_target_session_compat(
-            &mut payload,
-            &["text".to_string(), "tools".to_string()],
-        );
-        assert_eq!(
-            payload["messages"][0]["content"][0],
-            json!({"type": "text", "text": "[Image]"})
         );
     }
 

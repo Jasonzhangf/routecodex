@@ -1,12 +1,39 @@
 use super::*;
+use crate::operation_runner::{ResponseProjectionView, ToolDeclarationReference};
 use provider_compat_core::namespace_tools::namespace_tool_name_map;
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+
+#[cfg(test)]
+#[path = "responses_openai_chat_conversion_tests.rs"]
+mod responses_openai_chat_conversion_tests;
 
 #[derive(Clone, Debug)]
 pub(crate) struct V3ClientCustomToolName {
     name: String,
     namespace: Option<String>,
+}
+
+enum V3ResponsesToolIdentity<'a> {
+    Legacy {
+        custom_tool_names: &'a BTreeMap<String, V3ClientCustomToolName>,
+        mcp_tool_identities: &'a HashMap<String, (String, String)>,
+    },
+    SuccessfulAttempt(&'a ResponseProjectionView),
+}
+
+#[derive(Clone, Copy)]
+enum V3OpenAIChatToolCallRepresentation {
+    Custom,
+    Function,
+}
+
+struct V3OpenAIChatToolCall<'a> {
+    call_id: &'a str,
+    name: &'a str,
+    arguments: &'a str,
+    namespace: Option<&'a Value>,
+    representation: V3OpenAIChatToolCallRepresentation,
 }
 
 fn client_custom_tool_call(
@@ -44,6 +71,67 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
     manifest: Option<&V3Config05ManifestPublished>,
     provider_id: Option<&str>,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
+    let aliases = super::request_outbound_mcp_names::openai_chat_namespace_wire_aliases(
+        provider_semantic_body,
+    )
+    .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
+    let custom_tool_names = collect_v3_responses_custom_tool_names(provider_semantic_body)
+        .into_iter()
+        .map(|(name, identity)| {
+            let name = aliases.get(&name).cloned().unwrap_or(name);
+            (name, identity)
+        })
+        .collect();
+    let mcp_tool_identities = super::request_outbound_mcp_names::responses_mcp_dispatch_identities(
+        provider_semantic_body,
+    )
+    .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?
+    .into_iter()
+    .map(|(name, identity)| (aliases.get(&name).cloned().unwrap_or(name), identity))
+    .collect();
+    build_v3_responses_provider_response_from_openai_chat_payload_core(
+        payload,
+        manifest,
+        provider_id,
+        V3ResponsesToolIdentity::Legacy {
+            custom_tool_names: &custom_tool_names,
+            mcp_tool_identities: &mcp_tool_identities,
+        },
+    )
+}
+
+pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with_manifest_and_successful_attempt(
+    payload: &Value,
+    view: &ResponseProjectionView,
+    manifest: &V3Config05ManifestPublished,
+    provider_id: Option<&str>,
+) -> Result<Value, V3ResponsesRelayRuntimeError> {
+    build_v3_responses_provider_response_from_openai_chat_payload_core(
+        payload,
+        Some(manifest),
+        provider_id,
+        V3ResponsesToolIdentity::SuccessfulAttempt(view),
+    )
+}
+
+pub fn project_v3_openai_chat_response_as_responses_with_successful_attempt(
+    payload: &Value,
+    view: &ResponseProjectionView,
+) -> Result<Value, V3ResponsesRelayRuntimeError> {
+    build_v3_responses_provider_response_from_openai_chat_payload_core(
+        payload,
+        None,
+        None,
+        V3ResponsesToolIdentity::SuccessfulAttempt(view),
+    )
+}
+
+fn build_v3_responses_provider_response_from_openai_chat_payload_core(
+    payload: &Value,
+    manifest: Option<&V3Config05ManifestPublished>,
+    provider_id: Option<&str>,
+    tool_identity: V3ResponsesToolIdentity<'_>,
+) -> Result<Value, V3ResponsesRelayRuntimeError> {
     if let Some(message) =
         responses_relay_diagnostics::openai_chat_provider_diagnostic_message(payload)
     {
@@ -75,24 +163,6 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
     let mut output = Vec::new();
     let mut output_text_parts = Vec::new();
     let mut finish_reason = None;
-    let aliases = super::request_outbound_mcp_names::openai_chat_namespace_wire_aliases(
-        provider_semantic_body,
-    )
-    .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
-    let custom_tool_names = collect_v3_responses_custom_tool_names(provider_semantic_body)
-        .into_iter()
-        .map(|(name, identity)| {
-            let name = aliases.get(&name).cloned().unwrap_or(name);
-            (name, identity)
-        })
-        .collect();
-    let mcp_tool_identities = super::request_outbound_mcp_names::responses_mcp_dispatch_identities(
-        provider_semantic_body,
-    )
-    .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?
-    .into_iter()
-    .map(|(name, identity)| (aliases.get(&name).cloned().unwrap_or(name), identity))
-    .collect();
     for choice in choices {
         if finish_reason.is_none() {
             finish_reason = choice
@@ -114,11 +184,12 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
             }
             if let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) {
                 for call in tool_calls {
-                    output.push(build_v3_responses_function_call_from_openai_chat_tool_call(
-                        call,
-                        &custom_tool_names,
-                        &mcp_tool_identities,
-                    )?);
+                    output.push(
+                        build_v3_responses_function_call_from_openai_chat_tool_call_with_identity(
+                            call,
+                            &tool_identity,
+                        )?,
+                    );
                 }
             }
         }
@@ -337,8 +408,40 @@ pub(crate) use crate::hub_v1::usage_normalization::project_v3_responses_usage_fr
 pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
     call: &Value,
     custom_tool_names: &BTreeMap<String, V3ClientCustomToolName>,
-    mcp_tool_identities: &std::collections::HashMap<String, (String, String)>,
+    mcp_tool_identities: &HashMap<String, (String, String)>,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
+    build_v3_responses_function_call_from_openai_chat_tool_call_with_identity(
+        call,
+        &V3ResponsesToolIdentity::Legacy {
+            custom_tool_names,
+            mcp_tool_identities,
+        },
+    )
+}
+
+fn build_v3_responses_function_call_from_openai_chat_tool_call_with_identity(
+    call: &Value,
+    identity: &V3ResponsesToolIdentity<'_>,
+) -> Result<Value, V3ResponsesRelayRuntimeError> {
+    let parsed = parse_v3_openai_chat_tool_call(call)?;
+    match identity {
+        V3ResponsesToolIdentity::Legacy {
+            custom_tool_names,
+            mcp_tool_identities,
+        } => project_v3_openai_chat_tool_call_with_legacy_identity(
+            &parsed,
+            custom_tool_names,
+            mcp_tool_identities,
+        ),
+        V3ResponsesToolIdentity::SuccessfulAttempt(view) => {
+            project_v3_openai_chat_tool_call_with_successful_attempt(&parsed, view)
+        }
+    }
+}
+
+fn parse_v3_openai_chat_tool_call(
+    call: &Value,
+) -> Result<V3OpenAIChatToolCall<'_>, V3ResponsesRelayRuntimeError> {
     let object = call.as_object().ok_or_else(|| {
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
             "OpenAI Chat tool_call must be an object before Responses projection".to_string(),
@@ -363,8 +466,8 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
                 V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                     "OpenAI Chat custom tool_call.custom must be an object before Responses projection"
                         .to_string(),
-                )
-            })?;
+                    )
+                })?;
         let name = custom
             .get("name")
             .and_then(Value::as_str)
@@ -375,19 +478,19 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
                         .to_string(),
                 )
             })?;
-        let Some(client_name) = custom_tool_names.get(name) else {
-            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-                "OpenAI Chat custom tool response requires an active governed custom declaration"
-                    .to_string(),
-            ));
-        };
         let input = custom.get("input").and_then(Value::as_str).ok_or_else(|| {
             V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                 "OpenAI Chat custom tool input must be a string before Responses projection"
                     .to_string(),
             )
         })?;
-        return Ok(client_custom_tool_call(call_id, client_name, input));
+        return Ok(V3OpenAIChatToolCall {
+            call_id,
+            name,
+            arguments: input,
+            namespace: custom.get("namespace"),
+            representation: V3OpenAIChatToolCallRepresentation::Custom,
+        });
     }
     let function = object
         .get("function")
@@ -412,33 +515,64 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
         .get("arguments")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    if name == "tool_search" {
-        let arguments = parse_v3_openai_chat_tool_call_arguments_object(name, arguments)?;
-        return Ok(json!({
-            "type":"tool_search_call",
-            "call_id":call_id,
-            "execution":"client",
-            "arguments":arguments
-        }));
+    Ok(V3OpenAIChatToolCall {
+        call_id,
+        name,
+        arguments,
+        namespace: function.get("namespace"),
+        representation: V3OpenAIChatToolCallRepresentation::Function,
+    })
+}
+
+fn project_v3_openai_chat_tool_call_with_legacy_identity(
+    call: &V3OpenAIChatToolCall<'_>,
+    custom_tool_names: &BTreeMap<String, V3ClientCustomToolName>,
+    mcp_tool_identities: &HashMap<String, (String, String)>,
+) -> Result<Value, V3ResponsesRelayRuntimeError> {
+    if matches!(
+        call.representation,
+        V3OpenAIChatToolCallRepresentation::Custom
+    ) {
+        let Some(client_name) = custom_tool_names.get(call.name) else {
+            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                "OpenAI Chat custom tool response requires an active governed custom declaration"
+                    .to_string(),
+            ));
+        };
+        return Ok(client_custom_tool_call(
+            call.call_id,
+            client_name,
+            call.arguments,
+        ));
     }
-    if let Some(client_name) = custom_tool_names.get(name) {
+    if call.name == "tool_search" {
+        let arguments = parse_v3_openai_chat_tool_call_arguments_object(call.name, call.arguments)?;
+        return Ok(project_v3_responses_tool_search_call(
+            call.call_id,
+            arguments,
+        ));
+    }
+    if let Some(client_name) = custom_tool_names.get(call.name) {
         // 请求侧 custom -> function 扁平化后，provider 返回 function tool_call；
         // 按客户端声明的 custom 名归类回 custom_tool_call，保持客户端契约。
         // Decode the known input wrapper; preserve other model arguments for
         // client validation and the paired tool-error recovery turn.
-        let input = parse_v3_openai_chat_custom_tool_input(arguments);
-        return Ok(client_custom_tool_call(call_id, client_name, &input));
+        let input = parse_v3_openai_chat_custom_tool_input(call.arguments);
+        return Ok(client_custom_tool_call(call.call_id, client_name, &input));
     }
     let mut item = Map::from_iter([
         (
             "type".to_string(),
             Value::String("function_call".to_string()),
         ),
-        ("call_id".to_string(), Value::String(call_id.to_string())),
-        ("name".to_string(), Value::String(name.to_string())),
+        (
+            "call_id".to_string(),
+            Value::String(call.call_id.to_string()),
+        ),
+        ("name".to_string(), Value::String(call.name.to_string())),
         (
             "arguments".to_string(),
-            Value::String(arguments.to_string()),
+            Value::String(call.arguments.to_string()),
         ),
     ]);
     super::request_outbound_mcp_names::restore_responses_mcp_namespace(
@@ -448,7 +582,623 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
     Ok(Value::Object(item))
 }
 
-fn parse_v3_openai_chat_custom_tool_input(arguments: &str) -> String {
+fn project_v3_openai_chat_tool_call_with_successful_attempt(
+    call: &V3OpenAIChatToolCall<'_>,
+    view: &ResponseProjectionView,
+) -> Result<Value, V3ResponsesRelayRuntimeError> {
+    let mapping = view
+        .attempt()
+        .declarations
+        .tool_mappings
+        .iter()
+        .find(|mapping| mapping.emitted_name.as_deref() == Some(call.name));
+    let Some(mapping) = mapping else {
+        return Ok(current_representable_openai_chat_tool_call(
+            call.call_id,
+            call.name,
+            call.arguments,
+            call.namespace,
+            matches!(
+                call.representation,
+                V3OpenAIChatToolCallRepresentation::Custom
+            ),
+        ));
+    };
+    let declaration = view
+        .request_inverse_context()
+        .tool_declarations
+        .iter()
+        .find(|declaration| declaration.record_id == mapping.declaration_record_id)
+        .ok_or_else(|| {
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
+                "successful attempt tool mapping references missing declaration record `{}`",
+                mapping.declaration_record_id
+            ))
+        })?;
+    if declaration.kind == "tool_search" {
+        let arguments = parse_v3_openai_chat_tool_call_arguments_object(call.name, call.arguments)?;
+        return Ok(project_v3_responses_tool_search_call(
+            call.call_id,
+            arguments,
+        ));
+    }
+    let Some(original_name) = declaration.name.as_deref() else {
+        return Ok(current_representable_openai_chat_tool_call(
+            call.call_id,
+            call.name,
+            call.arguments,
+            call.namespace,
+            matches!(
+                call.representation,
+                V3OpenAIChatToolCallRepresentation::Custom
+            ),
+        ));
+    };
+
+    if declaration.kind == "custom" {
+        let input = match call.representation {
+            V3OpenAIChatToolCallRepresentation::Custom => call.arguments.to_string(),
+            V3OpenAIChatToolCallRepresentation::Function => {
+                if mapping.emitted_kind != "function" {
+                    // The declaration reached the provider natively, so this
+                    // function call is not this runtime's free-form envelope.
+                    // Keep the provider-representable call; the free-form
+                    // response projection owns the declared custom identity.
+                    return Ok(current_representable_openai_chat_tool_call(
+                        call.call_id,
+                        call.name,
+                        call.arguments,
+                        call.namespace,
+                        false,
+                    ));
+                }
+                parse_v3_openai_chat_custom_tool_input(call.arguments)
+            }
+        };
+        let mut item = json!({
+            "type":"custom_tool_call",
+            "call_id":call.call_id,
+            "name":original_name,
+            "input":input
+        });
+        insert_declared_namespace(&mut item, declaration);
+        return Ok(item);
+    }
+
+    let mut item = json!({
+        "type":"function_call",
+        "call_id":call.call_id,
+        "name":original_name,
+        "arguments":call.arguments
+    });
+    insert_declared_namespace(&mut item, declaration);
+    Ok(item)
+}
+
+/// Responses' client-executed tool-search call has no function name field.
+/// Both provider codecs use this standard representation; typed consumers
+/// select it from the original declaration kind, not the emitted tool name.
+pub(crate) fn project_v3_responses_tool_search_call(call_id: &str, arguments: Value) -> Value {
+    json!({
+        "type": "tool_search_call", "call_id": call_id,
+        "execution": "client", "arguments": arguments
+    })
+}
+
+fn parse_v3_responses_output_tool_call(
+    object: &Map<String, Value>,
+) -> Option<V3OpenAIChatToolCall<'_>> {
+    let type_name = object.get("type").and_then(Value::as_str)?;
+    let call_id = object
+        .get("call_id")
+        .or_else(|| object.get("id"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())?;
+    let name = object
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())?;
+    match type_name {
+        "function_call" => {
+            let arguments = object.get("arguments").and_then(Value::as_str)?;
+            Some(V3OpenAIChatToolCall {
+                call_id,
+                name,
+                arguments,
+                namespace: None,
+                representation: V3OpenAIChatToolCallRepresentation::Function,
+            })
+        }
+        "custom_tool_call" => {
+            let input = object.get("input").and_then(Value::as_str)?;
+            Some(V3OpenAIChatToolCall {
+                call_id,
+                name,
+                arguments: input,
+                namespace: None,
+                representation: V3OpenAIChatToolCallRepresentation::Custom,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Restore already-normalized Responses `output[]` tool identities from the
+/// successful attempt view. Unknown or already-restored siblings are left
+/// untouched; mapped items use the same unified call resolver as the
+/// OpenAI Chat path.
+pub(crate) fn restore_v3_responses_normalized_tool_identities_with_successful_attempt(
+    provider_value: &mut Value,
+    view: &ResponseProjectionView,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    let Some(items) = provider_value
+        .get_mut("output")
+        .and_then(Value::as_array_mut)
+    else {
+        return Ok(());
+    };
+    for item in items {
+        let Some(object) = item.as_object_mut() else {
+            continue;
+        };
+        let Some(call) = parse_v3_responses_output_tool_call(object) else {
+            continue;
+        };
+        let known = view
+            .attempt()
+            .declarations
+            .tool_mappings
+            .iter()
+            .any(|mapping| mapping.emitted_name.as_deref() == Some(call.name));
+        if !known {
+            continue;
+        }
+        let restored = project_v3_openai_chat_tool_call_with_successful_attempt(&call, view)?;
+        merge_v3_responses_tool_call_identity(object, &restored)?;
+    }
+    Ok(())
+}
+
+/// Original declaration kind recorded for one emitted tool name by the same
+/// successful attempt traversal that produced the emission.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum V3DeclaredToolKind {
+    Function,
+    Custom,
+}
+
+/// Resolve the declared kind for an emitted tool name from the successful
+/// attempt. The declaration record association is authoritative; the emitted
+/// name, model and schema never participate in identity inference.
+pub(crate) fn declared_tool_kind_for_emitted_name(
+    view: &ResponseProjectionView,
+    emitted_name: &str,
+) -> Option<V3DeclaredToolKind> {
+    let mapping = view
+        .attempt()
+        .declarations
+        .tool_mappings
+        .iter()
+        .find(|mapping| mapping.emitted_name.as_deref() == Some(emitted_name))?;
+    let declaration = view
+        .request_inverse_context()
+        .tool_declarations
+        .iter()
+        .find(|declaration| declaration.record_id == mapping.declaration_record_id)?;
+    Some(if declaration.kind == "custom" {
+        V3DeclaredToolKind::Custom
+    } else {
+        V3DeclaredToolKind::Function
+    })
+}
+
+/// True when the successful attempt emitted this declaration to the provider as
+/// a flattened function carrying the free-form `{"input": ...}` envelope. A
+/// declared custom tool is emitted that way for every provider protocol except
+/// a native Responses custom declaration, and only that flattened form holds
+/// this runtime's envelope inside the provider's `arguments`/`input` bytes.
+pub(crate) fn declared_custom_tool_emitted_as_function_envelope(
+    view: &ResponseProjectionView,
+    emitted_name: &str,
+) -> bool {
+    let Some(mapping) = view
+        .attempt()
+        .declarations
+        .tool_mappings
+        .iter()
+        .find(|mapping| mapping.emitted_name.as_deref() == Some(emitted_name))
+    else {
+        return false;
+    };
+    if mapping.emitted_kind != "function" {
+        return false;
+    }
+    view.request_inverse_context()
+        .tool_declarations
+        .iter()
+        .any(|declaration| {
+            declaration.record_id == mapping.declaration_record_id && declaration.kind == "custom"
+        })
+}
+
+/// Invert one already-normalized Responses `output[]` item from the successful
+/// attempt view. Only identity (`type`/`name`/`namespace`) and the declared
+/// argument envelope change; `call_id`/`id` and all other siblings stay intact.
+///
+/// `complete` marks an item carrying the terminal `arguments`/`input`. A
+/// partial streamed item restores identity only and never parses a partial
+/// envelope as a complete declared input.
+pub(crate) fn restore_v3_responses_output_item_identity_with_successful_attempt(
+    item: &mut Value,
+    view: &ResponseProjectionView,
+    complete: bool,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    let Some(object) = item.as_object_mut() else {
+        return Ok(());
+    };
+    let Some(call) = parse_v3_responses_output_tool_call(object) else {
+        return Ok(());
+    };
+    let call_id = call.call_id.to_string();
+    let emitted_name = call.name.to_string();
+    let arguments = call.arguments.to_string();
+    let representation = call.representation;
+    let known = view
+        .attempt()
+        .declarations
+        .tool_mappings
+        .iter()
+        .any(|mapping| mapping.emitted_name.as_deref() == Some(emitted_name.as_str()));
+    if !known {
+        return Ok(());
+    }
+    if !complete {
+        restore_v3_responses_partial_item_identity(object, view, &emitted_name, representation)?;
+        return Ok(());
+    }
+    let call = V3OpenAIChatToolCall {
+        call_id: &call_id,
+        name: &emitted_name,
+        arguments: &arguments,
+        namespace: None,
+        representation,
+    };
+    let restored = project_v3_openai_chat_tool_call_with_successful_attempt(&call, view)?;
+    merge_v3_responses_tool_call_identity(object, &restored)?;
+    Ok(())
+}
+
+fn restore_v3_responses_partial_item_identity(
+    object: &mut Map<String, Value>,
+    view: &ResponseProjectionView,
+    emitted_name: &str,
+    representation: V3OpenAIChatToolCallRepresentation,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    let Some(mapping) = view
+        .attempt()
+        .declarations
+        .tool_mappings
+        .iter()
+        .find(|mapping| mapping.emitted_name.as_deref() == Some(emitted_name))
+    else {
+        return Ok(());
+    };
+    let declaration = view
+        .request_inverse_context()
+        .tool_declarations
+        .iter()
+        .find(|declaration| declaration.record_id == mapping.declaration_record_id)
+        .ok_or_else(|| {
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
+                "successful attempt tool mapping references missing declaration record `{}`",
+                mapping.declaration_record_id
+            ))
+        })?;
+    let original_name = declaration
+        .name
+        .clone()
+        .unwrap_or_else(|| emitted_name.to_string());
+    object.insert("name".to_string(), Value::String(original_name));
+    match declaration.namespace.clone() {
+        Some(namespace) => {
+            object.insert("namespace".to_string(), namespace);
+        }
+        None => {
+            object.remove("namespace");
+        }
+    }
+    // The client-facing type is the declared contract, not the provider wire
+    // representation: a declared custom tool that reached the provider as a
+    // flattened function still carries this runtime's free-form `{"input": ...}`
+    // envelope, so a partial provider `function_call` is already a client
+    // custom call.
+    let custom_client = match representation {
+        V3OpenAIChatToolCallRepresentation::Custom => true,
+        V3OpenAIChatToolCallRepresentation::Function => {
+            declaration.kind == "custom" && mapping.emitted_kind == "function"
+        }
+    };
+    if custom_client {
+        object.insert(
+            "type".to_string(),
+            Value::String("custom_tool_call".to_string()),
+        );
+        if let Some(arguments) = object.remove("arguments") {
+            object.insert("input".to_string(), arguments);
+        }
+    } else {
+        object.insert(
+            "type".to_string(),
+            Value::String("function_call".to_string()),
+        );
+        if let Some(input) = object.remove("input") {
+            object.insert("arguments".to_string(), input);
+        }
+    }
+    Ok(())
+}
+
+/// Restore native Chat calls with the same declaration resolver used by
+/// Responses. Only the identity and its declared argument envelope change.
+pub(crate) fn restore_v3_chat_tool_identities_with_successful_attempt(
+    provider_value: &mut Value,
+    view: &ResponseProjectionView,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    let Some(choices) = provider_value
+        .get_mut("choices")
+        .and_then(Value::as_array_mut)
+    else {
+        return Ok(());
+    };
+    for choice in choices {
+        let Some(calls) = choice
+            .get_mut("message")
+            .and_then(|message| message.get_mut("tool_calls"))
+            .and_then(Value::as_array_mut)
+        else {
+            continue;
+        };
+        for call in calls {
+            // A native partial or invalid model call still passes through.
+            // Only a complete representable call enters identity inversion.
+            let tool = call.get("function").or_else(|| call.get("custom"));
+            let call_id = call
+                .get("id")
+                .or_else(|| call.get("call_id"))
+                .or_else(|| call.get("tool_call_id"));
+            let argument_field = if call.get("type").and_then(Value::as_str) == Some("custom") {
+                "input"
+            } else {
+                "arguments"
+            };
+            if !call_id
+                .and_then(Value::as_str)
+                .is_some_and(|id| !id.trim().is_empty())
+                || tool
+                    .and_then(|tool| tool.get(argument_field))
+                    .and_then(Value::as_str)
+                    .is_none()
+            {
+                continue;
+            }
+            let name = call
+                .get("function")
+                .or_else(|| call.get("custom"))
+                .and_then(|tool| tool.get("name"))
+                .and_then(Value::as_str);
+            if !view
+                .attempt()
+                .declarations
+                .tool_mappings
+                .iter()
+                .any(|mapping| mapping.emitted_name.as_deref() == name && name.is_some())
+            {
+                continue;
+            }
+            let restored = project_v3_openai_chat_tool_call_with_successful_attempt(
+                &parse_v3_openai_chat_tool_call(call)?,
+                view,
+            )?;
+            let is_custom = restored["type"] == "custom_tool_call";
+            let (kind, other, arguments) = if is_custom {
+                ("custom", "function", "input")
+            } else {
+                ("function", "custom", "arguments")
+            };
+            let object = call.as_object_mut().expect("parsed Chat call is an object");
+            object.insert("type".to_string(), Value::String(kind.to_string()));
+            object.remove(other);
+            let tool = object.entry(kind).or_insert_with(|| json!({}));
+            tool["name"] = restored["name"].clone();
+            tool[arguments] = restored[arguments].clone();
+            if let Some(namespace) = restored.get("namespace") {
+                tool["namespace"] = namespace.clone();
+            } else if let Some(tool) = tool.as_object_mut() {
+                tool.remove("namespace");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Invert one already-projected OpenAI Chat tool call from the successful
+/// attempt view. `custom_input` is the already-decoded declared free-form input
+/// for a custom call; function calls keep their exact argument bytes.
+pub(crate) fn restore_v3_chat_streamed_tool_call_identity_with_successful_attempt(
+    call: &mut Value,
+    view: &ResponseProjectionView,
+    emitted_name: &str,
+    custom_input: Option<&str>,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    let Some(object) = call.as_object_mut() else {
+        return Ok(());
+    };
+    let Some(mapping) = view
+        .attempt()
+        .declarations
+        .tool_mappings
+        .iter()
+        .find(|mapping| mapping.emitted_name.as_deref() == Some(emitted_name))
+    else {
+        return Ok(());
+    };
+    let declaration = view
+        .request_inverse_context()
+        .tool_declarations
+        .iter()
+        .find(|declaration| declaration.record_id == mapping.declaration_record_id)
+        .ok_or_else(|| {
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
+                "successful attempt tool mapping references missing declaration record `{}`",
+                mapping.declaration_record_id
+            ))
+        })?;
+    let original_name = declaration
+        .name
+        .clone()
+        .unwrap_or_else(|| emitted_name.to_string());
+    if declaration.kind == "custom" {
+        let mut custom = Map::new();
+        custom.insert("name".to_string(), Value::String(original_name));
+        if let Some(namespace) = declaration.namespace.clone() {
+            custom.insert("namespace".to_string(), namespace);
+        }
+        custom.insert(
+            "input".to_string(),
+            Value::String(custom_input.unwrap_or_default().to_string()),
+        );
+        object.insert("type".to_string(), Value::String("custom".to_string()));
+        object.remove("function");
+        object.insert("custom".to_string(), Value::Object(custom));
+    } else {
+        object.insert("type".to_string(), Value::String("function".to_string()));
+        if let Some(function) = object.get_mut("function").and_then(Value::as_object_mut) {
+            function.insert("name".to_string(), Value::String(original_name));
+            match declaration.namespace.clone() {
+                Some(namespace) => {
+                    function.insert("namespace".to_string(), namespace);
+                }
+                None => {
+                    function.remove("namespace");
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn restore_v3_responses_provider_representation_tool_identities_with_successful_attempt(
+    provider_value: &mut Value,
+    view: &ResponseProjectionView,
+    provider_wire_protocol: V3HubProviderWireProtocol,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    if provider_wire_protocol != V3HubProviderWireProtocol::Responses {
+        return Ok(());
+    }
+    restore_v3_responses_normalized_tool_identities_with_successful_attempt(provider_value, view)
+}
+
+fn merge_v3_responses_tool_call_identity(
+    object: &mut Map<String, Value>,
+    restored: &Value,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    let restored = restored.as_object().ok_or_else(|| {
+        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            "successful attempt tool projection must be an object".to_string(),
+        )
+    })?;
+    let restored_type = restored
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                "successful attempt tool projection omitted type".to_string(),
+            )
+        })?;
+    let restored_name = restored.get("name").cloned().ok_or_else(|| {
+        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            "successful attempt tool projection omitted name".to_string(),
+        )
+    })?;
+
+    object.insert("type".to_string(), Value::String(restored_type.to_string()));
+    object.insert("name".to_string(), restored_name);
+    match restored.get("namespace") {
+        Some(namespace) => {
+            object.insert("namespace".to_string(), namespace.clone());
+        }
+        None => {
+            object.remove("namespace");
+        }
+    }
+
+    match restored_type {
+        "custom_tool_call" => {
+            let input = restored.get("input").cloned().ok_or_else(|| {
+                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                    "successful attempt custom tool projection omitted input".to_string(),
+                )
+            })?;
+            object.insert("input".to_string(), input);
+            object.remove("arguments");
+        }
+        "function_call" => {
+            let arguments = restored.get("arguments").cloned().ok_or_else(|| {
+                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                    "successful attempt function tool projection omitted arguments".to_string(),
+                )
+            })?;
+            object.insert("arguments".to_string(), arguments);
+            object.remove("input");
+        }
+        other => {
+            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                format!("unsupported successful attempt tool projection type `{other}`"),
+            ))
+        }
+    }
+
+    Ok(())
+}
+
+fn insert_declared_namespace(item: &mut Value, declaration: &ToolDeclarationReference) {
+    if let Some(namespace) = &declaration.namespace {
+        item["namespace"] = namespace.clone();
+    }
+}
+
+fn current_representable_openai_chat_tool_call(
+    call_id: &str,
+    provider_name: &str,
+    provider_arguments: &str,
+    provider_namespace: Option<&Value>,
+    provider_is_custom: bool,
+) -> Value {
+    let mut item = if provider_is_custom {
+        json!({
+            "type":"custom_tool_call",
+            "call_id":call_id,
+            "name":provider_name,
+            "input":provider_arguments
+        })
+    } else {
+        json!({
+            "type":"function_call",
+            "call_id":call_id,
+            "name":provider_name,
+            "arguments":provider_arguments
+        })
+    };
+    if let Some(namespace) = provider_namespace {
+        item["namespace"] = namespace.clone();
+    }
+    item
+}
+
+pub(crate) fn parse_v3_openai_chat_custom_tool_input(arguments: &str) -> String {
+    // Provider may not honor the `{"input":"..."}` Chat-freeform schema and may
+    // return the raw free-form text directly. For a governed custom tool the
+    // client contract is a raw string, so accept either shape explicitly.
     match serde_json::from_str::<Value>(arguments) {
         Ok(Value::Object(parsed)) => parsed
             .get("input")
