@@ -129,10 +129,12 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
     // hang. The presence of tool calls is carried by `output`, not by `status`.
     // Only an explicit truncation is a non-success terminal, and it must use the
     // Responses `incomplete` shape rather than a Chat `finish_reason` field.
-    // 截断词表复用唯一 owner：guard 与投影必须认同一组 reason，否则 `max_tokens`
-    // 等网关别名会被 guard 豁免、却在这里落成 `completed` 的空成功响应。
+    // 合法终态词表复用唯一 owner：guard 与投影必须认同一组 reason，否则
+    // `max_tokens` 等网关别名会被 guard 豁免、却在这里落成 `completed` 的空成功
+    // 响应；`content_filter` 是 provider 自己的内容过滤器完成的终态，同样必须用
+    // Responses `incomplete` 形状表示，而不是伪造的空 `completed`。
     let status = match finish_reason.as_deref() {
-        Some(reason) if openai_chat_finish_reason_is_output_cap(reason) => "incomplete",
+        Some(reason) if openai_chat_finish_reason_is_admitted_terminal(reason) => "incomplete",
         _ => "completed",
     };
     let mut response = Map::new();
@@ -159,10 +161,11 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
         );
     }
     if status == "incomplete" {
-        response.insert(
-            "incomplete_details".to_string(),
-            json!({"reason": "max_output_tokens"}),
-        );
+        let reason = match finish_reason.as_deref() {
+            Some("content_filter") => "content_filter",
+            _ => "max_output_tokens",
+        };
+        response.insert("incomplete_details".to_string(), json!({"reason": reason}));
     }
     if let Some(usage) = payload
         .get("usage")

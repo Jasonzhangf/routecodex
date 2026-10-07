@@ -1,5 +1,8 @@
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
-use routecodex_v3_error::V3ProviderFailureSessionScope;
+use routecodex_v3_error::{
+    build_v3_provider_global_error_fingerprint, V3ProviderErrorFingerprint,
+    V3ProviderFailureSessionScope,
+};
 use routecodex_v3_provider_responses::{
     V3ProviderFailureAction, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
     V3ProviderHealthStore, V3ProviderKeyHealthStore, V3ProviderRecoveryKind,
@@ -89,7 +92,7 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "a", pr
 }
 
 #[test]
-fn recoverable_failure_cools_immediately_without_changing_score_contract() {
+fn recoverable_failure_cools_after_three_same_failures_without_changing_score_contract() {
     let store = V3ProviderKeyHealthStore::default();
     let action = V3ProviderFailureAction::recoverable("transport");
 
@@ -98,9 +101,21 @@ fn recoverable_failure_cools_immediately_without_changing_score_contract() {
         .expect("first failure");
     assert_eq!(first.score_milli, 95);
     assert_eq!(first.success_streak, 0);
-    assert!(!first.available);
-    assert!(first.cooldown);
-    assert_eq!(first.cooldown_until_ms, Some(5_100));
+    // A single recoverable failure is counted into health but must not exclude
+    // the provider: three consecutive same-fingerprint failures are required.
+    assert!(first.available);
+    assert!(!first.cooldown);
+    assert_eq!(first.cooldown_until_ms, None);
+
+    store
+        .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 101)
+        .expect("second failure");
+    let third = store
+        .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 102)
+        .expect("third failure");
+    assert!(!third.available);
+    assert!(third.cooldown);
+    assert_eq!(third.cooldown_until_ms, Some(5_102));
 }
 
 #[test]
@@ -125,6 +140,7 @@ fn dynamic_probe_ladder_starts_at_5s_after_the_first_cooldown() {
                 Some("key-a"),
                 Some("model-a"),
                 Some("transport"),
+                None,
                 now_ms,
                 Some(policy),
             )
@@ -140,6 +156,81 @@ fn dynamic_probe_ladder_starts_at_5s_after_the_first_cooldown() {
             .provider_cooldown_probe_keys_due(5_100)
             .expect("probe due query"),
         vec![("provider-a".into(), Some("key-a".into()), None,)]
+    );
+}
+
+#[test]
+fn mixed_recoverable_auth_key_fingerprints_do_not_cool_until_three_same_failures() {
+    // auth-key 连续失败身份只含 (provider, auth_alias)，不含 model：
+    // 1) 不同指纹必须各自重启连续计数，混合指纹永远不得相加触发冷却；
+    // 2) 同一 auth alias 下跨模型的三次同指纹失败仍属于同一身份，必须冷却。
+    let store = V3ProviderHealthStore::default();
+    let session = V3ProviderFailureSessionScope::new("server-a", "group-a", "session-a")
+        .expect("session scope");
+    let policy = V3ProviderFailurePolicy {
+        failure_threshold: 3,
+        cooldown_ms: 5_000,
+        probe_interval_ms: 5_000,
+        max_probe_interval_ms: None,
+        long_probe_backoff: false,
+        until_restart: false,
+        cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
+    };
+    let fingerprint = |status: u16| {
+        build_v3_provider_global_error_fingerprint(status)
+            .expect("classification")
+            .expect("fingerprint")
+    };
+    let record = |model_id: &'static str, status: u16, now_ms: u64| {
+        store
+            .record_provider_failure_in_session_with_policy(
+                &session,
+                "provider-a",
+                Some("key-a"),
+                Some(model_id),
+                Some("transport"),
+                Some(fingerprint(status)),
+                now_ms,
+                Some(policy),
+            )
+            .expect("recoverable failure")
+    };
+    // 500 / 502 / 503 各一次：每次换指纹都重启连续计数，三次都是"第 1 次"，
+    // 不得凑成一次 auth-key 冷却。
+    record("model-a", 500, 100);
+    record("model-b", 502, 101);
+    record("model-c", 503, 102);
+    for model_id in ["model-a", "model-b", "model-c"] {
+        assert!(
+            store
+                .availability_for_session(
+                    &session,
+                    "provider-a",
+                    Some("key-a"),
+                    Some(model_id),
+                    102,
+                )
+                .available,
+            "{model_id} must stay available: distinct recoverable fingerprints must not sum into a cooldown"
+        );
+    }
+    assert!(
+        store
+            .provider_cooldown_probe_keys_due(102)
+            .expect("probe due query")
+            .is_empty(),
+        "no auth-key cooldown probe may be scheduled before three same-fingerprint failures"
+    );
+    // 同一 500 指纹、三个不同模型各一次：auth-key 身份不含 model，三次同指纹
+    // 连续失败必须冷却整把 key。
+    record("model-a", 500, 200);
+    record("model-b", 500, 201);
+    record("model-c", 500, 202);
+    assert!(
+        !store
+            .availability_for_session(&session, "provider-a", Some("key-a"), Some("model-a"), 202)
+            .available,
+        "three same-fingerprint failures across models of one auth alias must cool the key"
     );
 }
 
@@ -298,21 +389,20 @@ fn health_score_uses_configured_priority_as_its_baseline() {
 }
 
 #[test]
-fn one_502_enters_cooldown_immediately() {
+fn three_502_failures_enter_cooldown() {
     let store = V3ProviderHealthStore::default();
     store
         .scheduling_projection("p", "k", "m", 100, 1, 100)
         .expect("initial projection");
-    let result = store
-        .record_provider_failure_action(
-            "p",
-            "k",
-            "m",
-            &V3ProviderFailureAction::recoverable("provider_502"),
-            101,
-        )
-        .expect("502 failure");
-    assert!(result.cooldown);
+    let action = V3ProviderFailureAction::recoverable("provider_502");
+
+    let first = store
+        .record_provider_failure_action("p", "k", "m", &action, 101)
+        .expect("first 502 failure");
+    assert!(
+        !first.cooldown,
+        "a single recoverable 502 must not cool the provider"
+    );
     assert_eq!(
         store
             .scheduling_projection("p", "k", "m", 100, 1, 102)
@@ -320,6 +410,15 @@ fn one_502_enters_cooldown_immediately() {
             .score_milli,
         95
     );
+
+    store
+        .record_provider_failure_action("p", "k", "m", &action, 102)
+        .expect("second 502 failure");
+    let third = store
+        .record_provider_failure_action("p", "k", "m", &action, 103)
+        .expect("third 502 failure");
+    assert!(third.cooldown);
+    assert_eq!(third.cooldown_until_ms, Some(5_103));
 }
 
 #[test]
@@ -518,6 +617,7 @@ fn recoverable_key_probe_is_single_flight_and_global_probe_is_not_duplicated() {
         cooldown_ms: 60_000,
         long_probe_backoff: false,
         class_code: "invalid_api_key".to_string(),
+        failure_fingerprint: None,
     };
     store
         .record_provider_failure_action("provider-b", "key-b", "model-b", &irrecoverable, 100)
@@ -641,6 +741,7 @@ fn account_error_reaches_cooldown_at_zero() {
         cooldown_ms: 60_000,
         long_probe_backoff: false,
         class_code: "invalid_api_key".to_string(),
+        failure_fingerprint: None,
     };
     for now_ms in 100..105 {
         store
@@ -679,4 +780,114 @@ fn score_and_cooldown_are_isolated_per_provider_key_and_model() {
     assert!(same_key_different_model.available);
     assert_eq!(same_key_different_model.score_milli, 1);
     assert!(!cooled_key.available);
+}
+
+fn typed_failure_fingerprint(status: u16) -> V3ProviderErrorFingerprint {
+    V3ProviderErrorFingerprint::new(
+        "recoverable_upstream",
+        "recoverable_upstream",
+        status,
+        "recoverable_upstream",
+    )
+    .expect("typed fingerprint")
+}
+
+#[test]
+fn different_recoverable_fingerprints_do_not_add_up_to_one_cooldown() {
+    // Three *same* errors are required: recoverable failures with different typed
+    // fingerprints each start their own consecutive-failure streak and must never
+    // be summed into one cooldown.
+    let store = V3ProviderKeyHealthStore::default();
+    let mut action = V3ProviderFailureAction::recoverable("provider_http_error");
+    action.failure_threshold = 3;
+
+    for (offset, status) in [429_u16, 500, 502].into_iter().enumerate() {
+        action.failure_fingerprint = Some(typed_failure_fingerprint(status));
+        let projection = store
+            .record_provider_failure_action(
+                "provider-a",
+                "key-a",
+                "model-a",
+                &action,
+                100 + offset as u64,
+            )
+            .expect("recoverable failure");
+        assert_eq!(projection.failure_streak, 1, "status={status}");
+        assert!(
+            !projection.cooldown,
+            "a different fingerprint must not extend the streak: status={status}"
+        );
+        assert!(projection.cooldown_until_ms.is_none(), "status={status}");
+        assert!(projection.available, "status={status}");
+    }
+
+    // The same fingerprint three times in a row still cools the exact identity.
+    action.failure_fingerprint = Some(typed_failure_fingerprint(503));
+    for now_ms in 200..202 {
+        let projection = store
+            .record_provider_failure_action("provider-a", "key-a", "model-a", &action, now_ms)
+            .expect("same-fingerprint failure");
+        assert!(!projection.cooldown, "now_ms={now_ms}");
+        assert!(projection.available, "now_ms={now_ms}");
+    }
+    let third = store
+        .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 202)
+        .expect("third same-fingerprint failure");
+    assert_eq!(third.failure_streak, 3);
+    assert!(third.cooldown, "three same-fingerprint failures must cool");
+    assert!(!third.available);
+}
+
+// 生产 builder 身份回归：5xx 保留真实上游状态，500 与 502 不能共用一条
+// 连续失败序列；没有上游状态的失败落到失败类别，不同类别同样不同源。
+#[test]
+fn production_failure_actions_keep_distinct_5xx_and_class_identities() {
+    let store = V3ProviderKeyHealthStore::default();
+    let server_error = build_v3_provider_global_error_fingerprint(500)
+        .expect("500 fingerprint classification")
+        .expect("500 must reach global health");
+    let gateway_error = build_v3_provider_global_error_fingerprint(502)
+        .expect("502 fingerprint classification")
+        .expect("502 must reach global health");
+    assert_ne!(server_error, gateway_error);
+
+    let mut action = V3ProviderFailureAction::recoverable("provider_http_error");
+    action.failure_threshold = 3;
+    for (offset, status) in [0_u64, 1, 2].into_iter().zip([500_u16, 502, 500]) {
+        action.failure_fingerprint = Some(
+            build_v3_provider_global_error_fingerprint(status)
+                .expect("fingerprint classification")
+                .expect("status must reach global health"),
+        );
+        let projection = store
+            .record_provider_failure_action("provider-a", "key-a", "model-a", &action, offset)
+            .expect("alternating 5xx failure");
+        assert_eq!(
+            projection.failure_streak, 1,
+            "alternating 500/502 must restart the streak: offset={offset}"
+        );
+        assert!(!projection.cooldown, "alternating 500/502 must never cool");
+    }
+
+    // 类别回退身份：本地 decode 失败与 request compat 失败没有上游状态，但
+    // 类别不同，不能合并成一条 streak。
+    let mut sse_decode = V3ProviderFailureAction::recoverable("provider.sse_decode");
+    let mut compat = V3ProviderFailureAction::recoverable("provider_request_compat_error");
+    sse_decode.failure_threshold = 3;
+    compat.failure_threshold = 3;
+    assert_ne!(sse_decode.failure_fingerprint, compat.failure_fingerprint);
+    assert_eq!(
+        sse_decode.failure_fingerprint.as_ref().unwrap().http_status,
+        0
+    );
+    for (offset, action) in [(10_u64, &sse_decode), (11, &compat), (12, &sse_decode)] {
+        let projection = store
+            .record_provider_failure_action("provider-b", "key-b", "model-b", action, offset)
+            .expect("mixed-class failure");
+        assert_eq!(
+            projection.failure_streak, 1,
+            "mixed classes must restart the streak"
+        );
+        assert!(!projection.cooldown);
+    }
 }

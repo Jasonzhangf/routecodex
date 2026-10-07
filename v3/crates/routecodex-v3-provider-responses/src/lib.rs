@@ -38,7 +38,8 @@ pub use raw_response::{
     V3ProviderResponseHeader, V3ProviderSseStream,
 };
 pub use routecodex_v3_error::{
-    V3ProviderFailureAction, V3ProviderHealthScope, V3ProviderRecoveryKind,
+    V3ProviderErrorFingerprint, V3ProviderFailureAction, V3ProviderHealthScope,
+    V3ProviderRecoveryKind,
 };
 pub use transport::{
     build_v3_anthropic_provider_request_header,

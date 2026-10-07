@@ -67,7 +67,7 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
 }
 
 #[test]
-fn runtime_policy_blocks_account_errors_on_first_failure() {
+fn runtime_policy_blocks_account_errors_immediately_and_recoverable_after_three() {
     let manifest = account_threshold_manifest();
     for status in [401, 403] {
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -140,7 +140,11 @@ fn runtime_policy_blocks_account_errors_on_first_failure() {
                 200 + index,
             )
             .unwrap();
-        assert_eq!(record.state, "cooldown");
+        assert_eq!(
+            record.state,
+            if index == 2 { "cooldown" } else { "healthy" },
+            "a recoverable 500 must not cool the provider before three same-class failures; index={index}"
+        );
         assert_eq!(record.failure_count, index as u32 + 1);
     }
     assert!(
@@ -351,7 +355,7 @@ fn account_http_403_policy_blocks_auth_key_on_first_failure_in_runtime_bridge() 
 }
 
 #[test]
-fn anthropic_response_body_decode_failure_cools_only_failed_model_on_first_failure() {
+fn anthropic_response_body_decode_failure_cools_only_failed_model_after_three_same_errors() {
     let mut authoring = parse_v3_config_02_authoring(
         r#"
 version = 3
@@ -401,38 +405,43 @@ targets = [
     )
     .expect("failure session scope");
 
-    let record = health
-        .record_provider_failure_record_with_policy(
-            Some(policy),
-            &manifest,
-            &session,
-            "cc-anthropic",
-            Some("anthropic"),
-            Some("key1"),
-            Some("opus-5"),
-            Some("error decoding response body"),
-            "V3ProviderRespInbound01Raw",
-            502,
-            Some("provider_runtime_error"),
-            "provider cc-anthropic response body failed: error decoding response body",
-            100,
-        )
-        .expect("first Anthropic body decode failure must be recorded");
-
-    assert_eq!(record.state, "cooldown");
-    assert_eq!(record.failure_count, 1);
-    assert!(
-        !health
+    for attempt in 0..3 {
+        let now_ms = 100 + attempt as u64;
+        let record = health
+            .record_provider_failure_record_with_policy(
+                Some(policy),
+                &manifest,
+                &session,
+                "cc-anthropic",
+                Some("anthropic"),
+                Some("key1"),
+                Some("opus-5"),
+                Some("error decoding response body"),
+                "V3ProviderRespInbound01Raw",
+                502,
+                Some("provider_runtime_error"),
+                "provider cc-anthropic response body failed: error decoding response body",
+                now_ms,
+            )
+            .expect("Anthropic body decode failure must be recorded");
+        assert_eq!(record.failure_count, attempt + 1);
+        let model_available = health
             .store()
-            .scheduling_projection("cc-anthropic", "key1", "opus-5", 100, 1, 101)
+            .scheduling_projection("cc-anthropic", "key1", "opus-5", 100, 1, now_ms)
             .expect("Anthropic scheduling projection")
-            .available
-    );
-    assert!(
-        health
-            .store()
-            .scheduling_projection("cc-anthropic", "key1", "sonnet-5", 100, 1, 101)
-            .expect("sibling model scheduling projection")
-            .available
-    );
+            .available;
+        assert_eq!(
+            model_available,
+            attempt < 2,
+            "a recoverable response-body decode failure must not cool the model before three same-class failures; attempt={attempt}"
+        );
+        assert!(
+            health
+                .store()
+                .scheduling_projection("cc-anthropic", "key1", "sonnet-5", 100, 1, now_ms)
+                .expect("sibling model scheduling projection")
+                .available,
+            "the sibling model must stay available on every attempt"
+        );
+    }
 }
