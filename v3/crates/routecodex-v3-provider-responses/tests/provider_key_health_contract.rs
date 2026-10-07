@@ -160,6 +160,81 @@ fn dynamic_probe_ladder_starts_at_5s_after_the_first_cooldown() {
 }
 
 #[test]
+fn mixed_recoverable_auth_key_fingerprints_do_not_cool_until_three_same_failures() {
+    // auth-key 连续失败身份只含 (provider, auth_alias)，不含 model：
+    // 1) 不同指纹必须各自重启连续计数，混合指纹永远不得相加触发冷却；
+    // 2) 同一 auth alias 下跨模型的三次同指纹失败仍属于同一身份，必须冷却。
+    let store = V3ProviderHealthStore::default();
+    let session = V3ProviderFailureSessionScope::new("server-a", "group-a", "session-a")
+        .expect("session scope");
+    let policy = V3ProviderFailurePolicy {
+        failure_threshold: 3,
+        cooldown_ms: 5_000,
+        probe_interval_ms: 5_000,
+        max_probe_interval_ms: None,
+        long_probe_backoff: false,
+        until_restart: false,
+        cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
+    };
+    let fingerprint = |status: u16| {
+        build_v3_provider_global_error_fingerprint(status)
+            .expect("classification")
+            .expect("fingerprint")
+    };
+    let record = |model_id: &'static str, status: u16, now_ms: u64| {
+        store
+            .record_provider_failure_in_session_with_policy(
+                &session,
+                "provider-a",
+                Some("key-a"),
+                Some(model_id),
+                Some("transport"),
+                Some(fingerprint(status)),
+                now_ms,
+                Some(policy),
+            )
+            .expect("recoverable failure")
+    };
+    // 500 / 502 / 503 各一次：每次换指纹都重启连续计数，三次都是"第 1 次"，
+    // 不得凑成一次 auth-key 冷却。
+    record("model-a", 500, 100);
+    record("model-b", 502, 101);
+    record("model-c", 503, 102);
+    for model_id in ["model-a", "model-b", "model-c"] {
+        assert!(
+            store
+                .availability_for_session(
+                    &session,
+                    "provider-a",
+                    Some("key-a"),
+                    Some(model_id),
+                    102,
+                )
+                .available,
+            "{model_id} must stay available: distinct recoverable fingerprints must not sum into a cooldown"
+        );
+    }
+    assert!(
+        store
+            .provider_cooldown_probe_keys_due(102)
+            .expect("probe due query")
+            .is_empty(),
+        "no auth-key cooldown probe may be scheduled before three same-fingerprint failures"
+    );
+    // 同一 500 指纹、三个不同模型各一次：auth-key 身份不含 model，三次同指纹
+    // 连续失败必须冷却整把 key。
+    record("model-a", 500, 200);
+    record("model-b", 500, 201);
+    record("model-c", 500, 202);
+    assert!(
+        !store
+            .availability_for_session(&session, "provider-a", Some("key-a"), Some("model-a"), 202)
+            .available,
+        "three same-fingerprint failures across models of one auth alias must cool the key"
+    );
+}
+
+#[test]
 fn session_scoped_recoverable_failures_do_not_create_global_key_cooldown() {
     let store = V3ProviderKeyHealthStore::default();
     let action = V3ProviderFailureAction::recoverable_session("transport");

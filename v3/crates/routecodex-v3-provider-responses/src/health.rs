@@ -587,12 +587,8 @@ impl V3ProviderHealthStore {
             }) {
                 let failure_count = state
                     .auth_key_consecutive_failures
-                    .iter()
-                    .filter(|(key, _)| {
-                        key.provider_id == provider_id && key.auth_alias.as_deref() == auth_alias
-                    })
-                    .map(|(_, failure)| failure.failure_count)
-                    .sum();
+                    .get(&auth_key)
+                    .map_or(0, |failure| failure.failure_count);
                 return Ok(V3ProviderFailureRecord {
                     scope_label,
                     provider_key,
@@ -603,7 +599,7 @@ impl V3ProviderHealthStore {
                 });
             }
             state.auth_key_cooldowns.remove(&auth_key);
-            let record_reason = {
+            let (record_reason, auth_key_failure_count) = {
                 let failure = state
                     .auth_key_consecutive_failures
                     .entry(auth_key.clone())
@@ -622,16 +618,12 @@ impl V3ProviderHealthStore {
                 if let Some(reason) = reason.filter(|value| !value.trim().is_empty()) {
                     failure.reason = Some(reason.to_string());
                 }
-                failure.reason.clone()
+                (failure.reason.clone(), failure.failure_count)
             };
-            let failure_count = state
-                .auth_key_consecutive_failures
-                .iter()
-                .filter(|(key, _)| {
-                    key.provider_id == provider_id && key.auth_alias.as_deref() == auth_alias
-                })
-                .map(|(_, failure)| failure.failure_count)
-                .sum();
+            // auth-key 身份只含 (provider, auth_alias)，不含 model。阈值必须用
+            // 本身份的连续失败计数，而不是汇总连续失败表里的匹配条目；否则
+            // 一旦表里出现同 alias 的多条目，各条目重置成 1 也会相加凑够阈值。
+            let failure_count = auth_key_failure_count;
             // Adaptive history stays provider-owned. The first failure cools
             // immediately, and the exact key's continuous failure level
             // determines the next cooldown step.
