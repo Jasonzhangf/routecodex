@@ -463,7 +463,20 @@ fn responses_stop_reason_as_anthropic_stop_reason(
         }
     }
     match object.get("status").and_then(Value::as_str) {
-        Some("incomplete") => "max_tokens",
+        Some("incomplete") => match object
+            .get("incomplete_details")
+            .and_then(Value::as_object)
+            .and_then(|details| details.get("reason"))
+            .and_then(Value::as_str)
+        {
+            // Responses content filtering is a refusal, not an output-cap stop.
+            // Preserve that meaning at the Anthropic boundary.
+            Some("content_filter") => "refusal",
+            Some("max_output_tokens") => "max_tokens",
+            // Keep malformed/unknown incomplete terminals conservative. The typed
+            // Responses terminal owner normally rejects them before projection.
+            _ => "max_tokens",
+        },
         _ => "end_turn",
     }
 }
@@ -471,6 +484,33 @@ fn responses_stop_reason_as_anthropic_stop_reason(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn responses_content_filter_projects_to_anthropic_refusal() {
+        let message = project_v3_responses_json_as_anthropic_message(&json!({
+            "id": "resp_filter",
+            "status": "incomplete",
+            "incomplete_details": {"reason": "content_filter"},
+            "output": [],
+        }))
+        .expect("a legal Responses content_filter terminal must project");
+
+        assert_eq!(message["stop_reason"], "refusal");
+        assert_eq!(message["content"], json!([]));
+    }
+
+    #[test]
+    fn responses_max_output_tokens_projects_to_anthropic_max_tokens() {
+        let message = project_v3_responses_json_as_anthropic_message(&json!({
+            "id": "resp_limit",
+            "status": "incomplete",
+            "incomplete_details": {"reason": "max_output_tokens"},
+            "output": [],
+        }))
+        .expect("a legal Responses max_output_tokens terminal must project");
+
+        assert_eq!(message["stop_reason"], "max_tokens");
+    }
 
     #[test]
     fn anthropic_sse_projection_rejects_tool_use_without_input() {
