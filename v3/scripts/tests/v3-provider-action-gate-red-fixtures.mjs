@@ -167,10 +167,10 @@ const cases = [
     name: 'Responses Relay incomplete exhaustion loses side-channel usage coverage',
     path: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs',
     mutate: (source) => source.replace(
-      'responses_relay_incomplete_exhaustion_keeps_typed_terminal_error',
+      'responses_relay_content_filter_incomplete_exhaustion_keeps_typed_terminal_error',
       'responses_relay_incomplete_exhaustion_has_no_typed_terminal_contract',
     ),
-    diagnostic: /missing active Rust test responses_relay_incomplete_exhaustion_keeps_typed_terminal_error/u,
+    diagnostic: /missing active Rust test responses_relay_content_filter_incomplete_exhaustion_keeps_typed_terminal_error/u,
   },
   {
     name: 'terminal transition is removed',
@@ -182,10 +182,10 @@ const cases = [
     name: 'terminal Error06 projection bypasses the failure gate',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
     mutate: (source) => source.replace(
-      'record_failure_and_wait_for_terminal_projection',
+      'record_failure_and_commit_terminal_projection',
       'project_terminal_without_wait',
     ),
-    diagnostic: /missing record_failure_and_wait_for_terminal_projection/u,
+    diagnostic: /missing record_failure_and_commit_terminal_projection/u,
   },
   {
     name: 'V3 admitted action permit loses explicit drop ownership',
@@ -321,28 +321,37 @@ const cases = [
     name: 'V3 terminal admission caller stops invoking atomic commit',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
     mutate: (source) => source.replace(
-      'if self.commit_terminal_admission(&key, &admission)?',
-      'if self.bypass_terminal_admission_commit(&key, &admission)?',
+      'if !Self::commit_terminal_generation_locked(',
+      'if !Self::bypass_terminal_generation_locked(',
     ),
-    diagnostic: /does not call V3ProviderActionGate::commit_terminal_admission/u,
+    diagnostic: /does not call V3ProviderActionGate::commit_terminal_generation_locked/u,
+  },
+  {
+    name: 'V3 terminal projection revokes an active exact-key provider permit',
+    path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
+    mutate: (source) => source.replace(
+      '!require_admission && *active_key == *key && state.admitted_generation.is_some()',
+      'false',
+    ),
+    diagnostic: /missing !require_admission && \*active_key == \*key && state\.admitted_generation\.is_some\(\)/u,
   },
   {
     name: 'V3 terminal admission leaves only a commented atomic commit',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
     mutate: (source) => source.replace(
-      'if self.commit_terminal_admission(&key, &admission)?',
-      'if self.bypass_terminal_admission_commit(&key, &admission)? { /* self.commit_terminal_admission(&key, &admission)? */ return Ok(admission); } else if false',
+      'if !Self::commit_terminal_generation_locked(',
+      'if !Self::bypass_terminal_generation_locked( /* Self::commit_terminal_generation_locked( */',
     ),
-    diagnostic: /does not call V3ProviderActionGate::commit_terminal_admission/u,
+    diagnostic: /does not call V3ProviderActionGate::commit_terminal_generation_locked/u,
   },
   {
     name: 'V3 terminal admission shadows the atomic commit symbol',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
     mutate: (source) => source.replace(
-      'if self.commit_terminal_admission(&key, &admission)?',
-      'let commit_terminal_admission = || true;\n            if commit_terminal_admission()',
+      'if !Self::commit_terminal_generation_locked(',
+      'let commit_terminal_generation_locked = || true;\n        if !commit_terminal_generation_locked() {',
     ),
-    diagnostic: /shadows declared callee V3ProviderActionGate::commit_terminal_admission/u,
+    diagnostic: /shadows declared callee V3ProviderActionGate::commit_terminal_generation_locked/u,
   },
   {
     name: 'V3 terminal admission calls the right method name on the wrong receiver',
@@ -350,13 +359,17 @@ const cases = [
     mutate: (source) => source
       .replace(
         'impl V3ProviderActionGate {\n',
-        'struct UnrelatedGate;\nimpl UnrelatedGate {\n    fn commit_terminal_admission(&self, _key: &V3ProviderActionGateKey, _admission: &V3ProviderActionAdmission) -> Result<bool, String> { Ok(true) }\n}\n\nimpl V3ProviderActionGate {\n',
+        'struct UnrelatedGate;\nimpl UnrelatedGate {\n    fn commit_terminal_generation(&self, _key: &V3ProviderActionGateKey, _generation: u64, _require_admission: bool) -> Result<bool, String> { Ok(true) }\n}\n\nimpl V3ProviderActionGate {\n',
       )
       .replace(
-        'if self.commit_terminal_admission(&key, &admission)?',
-        'if UnrelatedGate.commit_terminal_admission(&key, &admission)?',
+        'impl V3ProviderActionGate {\n',
+        'struct UnrelatedGate;\nimpl UnrelatedGate {\n    fn commit_terminal_generation_locked(_states: &mut HashMap<V3ProviderActionGateKey, V3ProviderActionGateState>, _key: &V3ProviderActionGateKey, _generation: u64, _require_admission: bool, _now: Instant) -> Result<bool, String> { Ok(true) }\n}\n\nimpl V3ProviderActionGate {\n',
+      )
+      .replace(
+        'if !Self::commit_terminal_generation_locked(',
+        'if !UnrelatedGate::commit_terminal_generation_locked(',
       ),
-    diagnostic: /does not call V3ProviderActionGate::commit_terminal_admission/u,
+    diagnostic: /does not call V3ProviderActionGate::commit_terminal_generation_locked/u,
   },
   {
     name: 'V3 manifest endpoint drifts from map',
@@ -462,7 +475,7 @@ const cases = [
     name: 'Responses Relay target projection error bypasses request-local fail-fast',
     path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
     mutate: (source) => source.replace(
-      'let req_compat = match build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07) {\n            Ok(req_compat) => req_compat,\n            Err(error) => {\n                handle_provider_request_failure!(V3ResponsesRelayRuntimeError::ProviderCompat(\n                    error\n                ));\n            }\n        };',
+      'let req_compat = match build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07) {\n            Ok(projected) => record_projected_drops(&projection_drop_context, projected),\n            Err(error) => {\n                handle_provider_request_failure!(V3ResponsesRelayRuntimeError::ProviderCompat(\n                    error\n                ));\n            }\n        };',
       'let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();',
     ),
     diagnostic: /ProviderReqCompat06ProviderCompat request-local fail-fast branch is missing/u,

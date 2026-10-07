@@ -24,7 +24,7 @@ use routecodex_v3_target::{
     V3Target09CandidateSetExpanded, V3Target10ConcreteProviderSelected, V3TargetCandidate,
     V3TargetExhaustion, V3TargetInterpreter,
 };
-use routecodex_v3_virtual_router::V3VirtualRouter;
+use routecodex_v3_virtual_router::{V3Router07OpaqueTargetHitOnce, V3VirtualRouter};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
@@ -278,8 +278,7 @@ pub(crate) struct V3RelayProviderFailurePolicyState<'state> {
     pub(crate) failed_candidates: &'state mut BTreeSet<String>,
     pub(crate) same_candidate_retries: &'state mut BTreeMap<String, usize>,
     pub(crate) trace: &'state mut Vec<&'static str>,
-    pub(crate) last_eligible_external_http:
-        &'state mut Option<routecodex_v3_error::V3EligibleExternalHttpResponse>,
+    pub(crate) last_external_http: &'state mut Option<routecodex_v3_error::V3ExternalHttpWitness>,
 }
 
 pub(crate) struct V3RelayProviderTargetResolutionInput<'input> {
@@ -907,7 +906,7 @@ impl V3ProviderFailureRuntimeHealth {
         )
     }
 
-    pub(crate) async fn wait_for_terminal_provider_projection_in_scope(
+    pub(crate) fn record_terminal_provider_projection_in_scope(
         &self,
         failure_session_scope: &V3ProviderFailureSessionScope,
         provider_id: &str,
@@ -916,29 +915,11 @@ impl V3ProviderFailureRuntimeHealth {
         error_family: &str,
     ) -> Result<V3ProviderActionAdmission, String> {
         self.action_gate
-            .record_failure_and_wait(V3ProviderActionGateKey::new(
+            .record_failure_and_commit_terminal_projection(V3ProviderActionGateKey::new(
                 failure_session_scope,
                 v3_relay_provider_candidate_key_parts(provider_id, auth_alias, model_id),
                 error_family,
             )?)
-            .await
-    }
-
-    pub(crate) async fn wait_for_provider_action_failure_in_scope(
-        &self,
-        failure_session_scope: &V3ProviderFailureSessionScope,
-        provider_id: &str,
-        auth_alias: Option<&str>,
-        model_id: Option<&str>,
-        error_family: &str,
-    ) -> Result<V3ProviderActionAdmission, String> {
-        self.action_gate
-            .record_failure_and_wait(V3ProviderActionGateKey::new(
-                failure_session_scope,
-                v3_relay_provider_candidate_key_parts(provider_id, auth_alias, model_id),
-                error_family,
-            )?)
-            .await
     }
 
     pub(crate) fn record_post_commit_provider_stream_failure(
@@ -1454,14 +1435,13 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     );
     let admission = context
         .provider_health
-        .wait_for_terminal_provider_projection_in_scope(
+        .record_terminal_provider_projection_in_scope(
             &context.failure_session_scope,
             &selected.candidate.provider_id,
             Some(&selected.candidate.auth_alias),
             Some(&selected.candidate.model_id),
             error_type.as_deref().unwrap_or("provider_failure"),
-        )
-        .await?;
+        )?;
     Ok(V3RelayProviderFailurePolicyResult {
         terminal_projection: terminal_projection_for(&decision, matched_policy),
         terminal_disposition: terminal_disposition_for(&decision, state),
@@ -1489,7 +1469,7 @@ fn terminal_disposition_for(
     decision.clone().try_into_terminal().ok().map(|terminal| {
         V3ErrorHandlingCenter::provider_terminal_disposition(
             terminal,
-            state.last_eligible_external_http.clone(),
+            state.last_external_http.clone(),
         )
     })
 }
@@ -1656,73 +1636,95 @@ pub(crate) fn expand_v3_relay_target_plan_for_selected(
         .map_err(|error| error.to_string())
 }
 
+/// REQ03 routing owner: build request facts, classify the request, resolve the
+/// route-pool plan, and hit one opaque target. This helper owns only the opaque
+/// target decision. It never reads provider health, never expands concrete
+/// candidates, and never selects a provider; `build_v3_relay_target_candidates`
+/// runs Target expansion after this returns.
+pub(crate) fn resolve_v3_relay_opaque_target_once(
+    manifest: &V3Config05ManifestPublished,
+    server_id: &str,
+    entry_kind: &str,
+    endpoint_path: &str,
+    body: &Value,
+    deterministic_sample: u64,
+) -> Result<V3Router07OpaqueTargetHitOnce, V3Error01SourceRaised> {
+    let facts = crate::build_v3_router_request_facts_for_entry_with_manifest(
+        body,
+        entry_kind,
+        crate::configured_v3_longcontext_threshold_tokens(manifest, server_id),
+        manifest,
+    );
+    let router = V3VirtualRouter::process_shared();
+    let classified = router
+        .classify_request_with_facts(manifest, server_id, endpoint_path, facts)
+        .map_err(|error| {
+            target_resolution_source(
+                "V3Router05RequestClassified",
+                "target_resolution_classification_failed",
+                error,
+            )
+        })?;
+    let plan = router
+        .resolve_route_pool_plan(manifest, classified)
+        .map_err(|error| {
+            crate::shared::v3_route_plan_error_source(
+                "V3Router06RoutePoolResolved",
+                "target_resolution_route_plan_failed",
+                error,
+            )
+        })?;
+    router
+        .hit_opaque_target_plan_once(plan, deterministic_sample)
+        .map_err(|error| {
+            target_resolution_source(
+                "V3Router07OpaqueTargetHitOnce",
+                "target_resolution_opaque_target_failed",
+                error,
+            )
+        })
+}
+
+/// REQ04 Target expansion owner: consume one real opaque target hit and expand
+/// it through the existing Target interpreter. This helper does not classify
+/// the request or hit the Router again. It also does not read health, probe,
+/// select a concrete provider, or decide execution mode.
+pub(crate) fn expand_v3_relay_target_candidates_from_opaque_hit(
+    manifest: &V3Config05ManifestPublished,
+    hit: V3Router07OpaqueTargetHitOnce,
+    deterministic_sample: u64,
+) -> Result<V3Target09CandidateSetExpanded, V3Error01SourceRaised> {
+    let target = V3TargetInterpreter::default();
+    let kind = target.classify_kind(hit);
+    target
+        .expand_candidates(manifest, kind, deterministic_sample)
+        .map_err(|error| {
+            target_resolution_source(
+                "V3Target09CandidateSetExpanded",
+                "target_resolution_candidate_expansion_failed",
+                error,
+            )
+        })
+}
+
 fn build_v3_relay_target_candidates(
     input: &V3RelayProviderTargetResolutionInput<'_>,
 ) -> Result<V3Target09CandidateSetExpanded, V3RelayProviderTargetResolution> {
-    let facts = crate::build_v3_router_request_facts_for_entry_with_manifest(
-        input.body,
-        input.entry_kind,
-        crate::configured_v3_longcontext_threshold_tokens(input.manifest, input.server_id),
-        input.manifest,
-    );
-    let router = V3VirtualRouter::process_shared();
-    let classified = match router.classify_request_with_facts(
+    let hit = resolve_v3_relay_opaque_target_once(
         input.manifest,
         input.server_id,
+        input.entry_kind,
         input.endpoint_path,
-        facts,
-    ) {
-        Ok(classified) => classified,
-        Err(error) => {
-            return Err(V3RelayProviderTargetResolution::Failed(
-                target_resolution_source(
-                    "V3Router05RequestClassified",
-                    "target_resolution_classification_failed",
-                    error,
-                ),
-            ));
-        }
-    };
-    let plan = match router.resolve_route_pool_plan(input.manifest, classified) {
-        Ok(plan) => plan,
-        Err(error) => {
-            return Err(V3RelayProviderTargetResolution::Failed(
-                crate::shared::v3_route_plan_error_source(
-                    "V3Router06RoutePoolResolved",
-                    "target_resolution_route_plan_failed",
-                    error,
-                ),
-            ));
-        }
-    };
-    let hit = match router.hit_opaque_target_plan_once(plan, input.deterministic_sample) {
-        Ok(hit) => hit,
-        Err(error) => {
-            return Err(V3RelayProviderTargetResolution::Failed(
-                target_resolution_source(
-                    "V3Router07OpaqueTargetHitOnce",
-                    "target_resolution_opaque_target_failed",
-                    error,
-                ),
-            ));
-        }
-    };
-    let target = V3TargetInterpreter::default();
-    let kind = target.classify_kind(hit);
-    let expanded = match target.expand_candidates(input.manifest, kind, input.deterministic_sample)
-    {
-        Ok(expanded) => expanded,
-        Err(error) => {
-            return Err(V3RelayProviderTargetResolution::Failed(
-                target_resolution_source(
-                    "V3Target09CandidateSetExpanded",
-                    "target_resolution_candidate_expansion_failed",
-                    error,
-                ),
-            ));
-        }
-    };
-    Ok(expanded)
+        input.body,
+        input.deterministic_sample,
+    )
+    .map_err(V3RelayProviderTargetResolution::Failed)?;
+    expand_v3_relay_target_candidates_from_opaque_hit(
+        input.manifest,
+        hit,
+        input.deterministic_sample,
+    )
+    .map_err(V3RelayProviderTargetResolution::Failed)
 }
 
 pub(crate) fn resolve_v3_relay_target_outcome(
@@ -1807,3 +1809,11 @@ include!("provider_failure_runtime_policy_configured.rs");
 /// provider 内部失败重试，与入口（direct/relay/chat）无关。
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "provider_failure_runtime_policy/req03_opaque_owner_tests.rs"]
+mod req03_opaque_owner_tests;
+
+#[cfg(test)]
+#[path = "provider_failure_runtime_policy/req04_target_owner_tests.rs"]
+mod req04_target_owner_tests;

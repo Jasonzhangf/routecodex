@@ -28,6 +28,9 @@ mod auth_key_policy;
 #[path = "tests/probe_recovery.rs"]
 mod probe_recovery;
 
+#[path = "tests/responses_probe_terminal.rs"]
+mod responses_probe_terminal;
+
 // 归一化优先级基线：隔离自适应分数阻断，让用例专测阈值语义。
 fn normalize_global_pool_priorities(manifest: &mut V3Config05ManifestPublished) {
     for target in manifest
@@ -842,7 +845,7 @@ async fn target_resolution_failure_projects_itself_instead_of_prior_provider_429
         failed_candidates: &mut failed_candidates,
         same_candidate_retries: &mut same_candidate_retries,
         trace: &mut trace,
-        last_eligible_external_http: &mut None,
+        last_external_http: &mut None,
     };
 
     let result = run_v3_relay_provider_failure_policy(
@@ -1102,7 +1105,7 @@ async fn transport_error_switches_provider_family() {
         failed_candidates: &mut failed_candidates,
         same_candidate_retries: &mut same_candidate_retries,
         trace: &mut trace,
-        last_eligible_external_http: &mut None,
+        last_external_http: &mut None,
     };
 
     let result = run_v3_relay_provider_failure_policy(
@@ -1207,7 +1210,7 @@ message_mode = "code_only"
         failed_candidates: &mut failed_candidates,
         same_candidate_retries: &mut same_candidate_retries,
         trace: &mut trace,
-        last_eligible_external_http: &mut None,
+        last_external_http: &mut None,
     };
 
     let result = run_v3_relay_provider_failure_policy(
@@ -1332,7 +1335,7 @@ targets = [
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
-            last_eligible_external_http: &mut None,
+            last_external_http: &mut None,
         },
     )
     .await
@@ -1386,7 +1389,7 @@ async fn provider_response_event_codec_failure_never_retries_same_candidate() {
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
-            last_eligible_external_http: &mut None,
+            last_external_http: &mut None,
         },
     )
     .await

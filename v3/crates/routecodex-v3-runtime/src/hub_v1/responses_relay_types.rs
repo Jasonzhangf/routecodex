@@ -40,10 +40,22 @@ pub struct V3ResponsesRelayRuntimeOutput {
 pub struct V3ResponsesProtocolDirectHandoff {
     pub request_payload: Value,
     pub plan: V3ResponsesProtocolExecutionPlan,
+    pub route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
+    pub route_policy_scope: Option<crate::route_policy::V3RoutePolicyScope>,
     pub node_trace: Vec<&'static str>,
     pub provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
     pub observability_accumulator: V3RuntimeObservabilityAccumulator,
     pub request_execution_control: crate::nodes::V3RequestExecutionControl,
+}
+
+/// Carry-over inputs that seed a Relay run from an upstream Direct/protocol plan
+/// or Direct handoff. Grouped so the call sites stay compact.
+#[derive(Default)]
+pub struct V3ResponsesRelayRuntimeSeeds {
+    pub route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
+    pub route_policy_scope: Option<crate::route_policy::V3RoutePolicyScope>,
+    pub observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
+    pub request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
 }
 
 pub enum V3ResponsesRelayDryRunOutcome {
@@ -276,8 +288,7 @@ impl V3ProviderFailureDirective {
 }
 
 pub(crate) struct V3ResponsesRelayProviderRetryState<'state> {
-    pub(crate) last_eligible_external_http:
-        &'state mut Option<routecodex_v3_error::V3EligibleExternalHttpResponse>,
+    pub(crate) last_external_http: &'state mut Option<routecodex_v3_error::V3ExternalHttpWitness>,
     pub(crate) failed_candidates: &'state mut BTreeSet<String>,
     pub(crate) same_candidate_retries: &'state mut BTreeMap<String, usize>,
     pub(crate) retry_selected:
@@ -755,6 +766,11 @@ impl V3LiveSnapProviderSnapshotRecorder {
                 provider_id,
                 ..
             }
+            | V3ProviderError::ResponseBodyUnreadable {
+                request_id,
+                provider_id,
+                ..
+            }
             | V3ProviderError::InternalTransport {
                 request_id,
                 provider_id,
@@ -791,6 +807,10 @@ impl V3LiveSnapProviderSnapshotRecorder {
                 ..
             }
             | V3ProviderError::ClientDisconnect {
+                request_id,
+                provider_id,
+            }
+            | V3ProviderError::ConcurrencyBusy {
                 request_id,
                 provider_id,
             } => self.record_transport_provider_error(attempt, request_id, provider_id, error),
@@ -1082,8 +1102,6 @@ pub enum V3ResponsesRelayRuntimeError {
     Target(String),
     #[error("V3 Responses Relay provider pool exhausted after {attempted_candidates:?}")]
     ProviderPoolExhausted { attempted_candidates: Vec<String> },
-    #[error("V3 Responses Relay requested direct provider model not found: {0}")]
-    ModelNotFound(String),
     #[error("V3 Responses Relay provider contract failed: {0}")]
     Provider(#[from] V3ProviderError),
     #[error("V3 Responses Relay provider compat failed: {0}")]

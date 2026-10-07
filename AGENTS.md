@@ -4,7 +4,26 @@
 
 - RouteCodex is a transparent proxy. Its primary product goal is to increase the success rate of forwarding real client requests and returning real provider responses. For any parseable request or response, local validation must not impose narrower rules than the actual target protocol and reject traffic that the provider or client can handle.
 - Preserve request, response, tool name, arguments, call ID, history, and matched tool result across the complete round trip. An invalid tool call returned by a model and the client's corresponding error result remain paired and are forwarded into the next turn so the model can correct itself; they are not grounds for a proxy-generated 502.
-- Validation may diagnose and classify, but it must not become an extra admission boundary for otherwise forwardable business payload. Unrepresentable protocol data and genuine transport failures follow their declared protocol/error paths with truthful status and evidence; no invented rejection, silent truncation, or success-wrapped error is permitted.
+- Validation may diagnose and classify, but it must not become an extra admission boundary for otherwise forwardable business payload. Unrepresentable protocol data and genuine failures remain truthful in internal typed error resources and diagnostic evidence; the client error-response prohibition below applies without exception. No invented rejection, silent truncation, or success-wrapped error is permitted.
+
+## Mandatory: No Client Error Responses, Across Every Model Entry
+
+- **所有模型入口一视同仁：无论任何原因，哪怕路由池完全耗尽，都不得向客户端发送任何错误响应、错误状态码或协议错误事件。** 这是客户端交付边界的硬约束；内部必须保留真实错误，不能把失败伪装成成功。
+- **Under no circumstances may RouteCodex send an error response to a model client.** This includes DSH/OpenAI Chat (`/v1/chat/completions`), Codex/OpenAI Responses (`/v1/responses`, including WebSocket and `/v1/responses/compact`), Claude Code/Anthropic Messages (`/v1/messages`), and Gemini generateContent wherever enabled. Streaming/nonstreaming and Direct/Relay follow the same rule. The named clients are examples, not exclusions for other model routes.
+- **Route-pool exhaustion is not an exception.** Provider HTTP errors, provider protocol/error events, SSE decoding or malformed-stream errors, network/TLS disconnects, response-header or body timeouts, retry/attempt/residence limits, cooldown, unavailable candidates, routing/configuration failures, malformed requests, and internal request/response failures must never become client error responses. Neither an upstream error nor a proxy-generated error may cross this boundary. Error DAGs terminate at internal typed outcomes; any edge carrying an error into a client business response is an architecture violation.
+- Forbidden client output includes every HTTP error status (including `400`, `401`, `403`, `429`, `500`, `502`, `598`, and `599`), error JSON/envelopes, Chat error chunks, Responses `error`/`response.failed` events or failed response objects, Anthropic `event: error`, SSE comments carrying internal failure/provider/retry control facts, and WebSocket error messages or application error codes. Wrapping an error in HTTP `200`, a fabricated completion, or a successful business response is also forbidden.
+- Provider attempts and recovery are internal. While a declared request-eligible candidate remains, the typed Error chain owns cooldown, recovery probes, re-selection, and bounded retry; no attempt may independently commit a client failure or close an otherwise recoverable client stream. Exhaustion and cancellation are typed lifecycle outcomes, never client error payloads. If a request cannot complete, terminate its transport without an error response or a fabricated successful terminal event; streaming framing must make an incomplete transfer observable without carrying error semantics.
+- Preserve the actual cause, internal classification/status, attempt identity, provider/auth-key/model binding, and exhaustion evidence in typed control/error resources and authorized diagnostics. Never copy those control facts into request/response business payloads. Client cancellation remains request-local and health-neutral. One failing session must not terminate or poison other sessions or the listener.
+- HTTP framework parsing failures before application admission follow the same boundary: automatic `400`/`431` responses are forbidden, including after a successful keep-alive request. Server/Front owns this transport boundary; it must not identify errors by inspecting opaque business-body bytes or disable keep-alive to avoid the path. Application-authorized management responses are separate control-plane traffic.
+- **Required regression coverage:** real public HTTP/stream/WebSocket consumers must cover every enabled model entry, Direct and Relay where applicable, provider HTTP `4xx`/`5xx`, network disconnect/timeouts, internal errors, eligible-candidate recovery, full route-pool exhaustion, and malformed HTTP framing on fresh and reused connections. Assert zero client error statuses/payloads/events, truthful successful recovery, correct incomplete-transfer behavior at terminal failure, and continued success of an independent session. Preserve opaque and multi-flush successful bodies, interim HTTP heads, and upgraded WebSocket traffic. Unit tests or source-pattern checks alone do not satisfy this gate.
+
+## Mandatory: Runtime Lifecycle — Only `rcc restart`, Never stop/start
+
+- **禁止把 `rcc stop` + `rcc start`（或 `rcc start --restart`）当作重启手段。** 需要让新构建生效时，只调用一次 `rcc restart`（或 `rcc restart --port <locator-port>`），由**原进程/原 supervisor 在原 session 内**重新拉起 server child。
+- **`rcc stop`、`rcc start --snap`、`rcc restart` 均须人类明确批准。** 未取得明确批准不得对 live runtime 执行任何 lifecycle 动作；live runtime 存在时 `rcc restart` 只允许调用一次，禁止自行 spawn `start --restart` 接管。
+- 4444/7777 承载用户与其他 agent 的实时流量。任何 lifecycle 动作前必须先说明将造成的中断并取得批准；禁止 `pkill`、`killall`、`kill $(...)`。
+- 依据：`docs/loops/runtime-lifecycle/gate-matrix.md`（Blackbox 层）与 `docs/design/server-runtime-lifecycle-ssot.md`（`rcc restart` 第 6、9、10 条）。
+- 反例（2026-10-04）：用 stop+start 代替 `rcc restart`，导致 4444 中断并触发 supervisor 二次拉起，用户明确抗议。禁止重犯。
 
 ## Project Truth
 
@@ -25,11 +44,12 @@
 - Relay payload rewriting is owned only by request/response Chat Process. Direct payload rewriting is owned only by registered Direct hooks. No other stage rewrites payloads.
 - Outbound projects canonical Chat plus extensions into the target standard protocol. It forwards business fields without a known compatible mapping as opaque original values, preserving their inverse association; allowlists and denylists may choose a known mapping, but may not discard or locally reject business fields.
 - Provider Compat performs only provider-private adjustments after standard outbound projection and before or after provider transport as declared. It is not a second Chat Process or a general Outbound implementation.
+- Request-shape regressions require a real public-entry black-box test that asserts the selected provider accepts the first attempt, preserves tools and paired history, and completes actual client tool execution plus follow-up. A final client 200 after provider switching does not prove shape compatibility. Cover the failing combination of hosted declarations and tool history; a fixture that unconditionally returns 200 cannot lock this regression. Explicit gateway profiles and their required tests are bound in `docs/architecture/v3-verification-map.yml`.
 - No guessed repair, fallback, downgrade, silent drop, hidden history rewrite, or success-wrapped error.
 - Control state uses typed control resources or Error chain only. Business payload cannot carry or reconstruct it.
 - Request, response, and error graphs remain separate.
-- Internal request-stage failures project `598`; internal response-stage failures project `599`. A provider transport failure without an eligible upstream response terminates the current client connection without a fabricated status. A nonstreaming client observes zero response bytes. A streaming (SSE) client observes an aborted transfer, because a header-less close there is indistinguishable from a normal end of stream: the response head plus one SSE comment frame reach the transport, then the body fails so the transfer never carries a valid final chunk, and the client classifies a transport failure and retries the same request. Neither boundary emits a client payload, `response.failed` or `response.completed`, and RouteCodex never fabricates a client `502`. Eligible upstream HTTP failures retain their real status and compatible error semantics through typed Error projection; upstream HTTP `502` is ineligible for client projection. Candidate switching and provider health remain in the typed Error chain.
-- SSE is the client communication boundary and is decoupled from Provider. Provider attempts are fully buffered before any client response is committed; provider errors enter the Error chain independently of client response projection.
+- Internal request/response classifications and upstream status codes belong to internal typed Error resources and diagnostics only. They never authorize a client HTTP status, error payload, or terminal failure event; the no-client-error contract above also covers complete route-pool exhaustion. Candidate switching and provider health remain in the typed Error chain.
+- SSE is the client communication boundary and is decoupled from Provider. The Server may establish the client SSE transport channel and transport-only keepalives before the runtime outcome exists; that transport accept is not a semantic client commit, and the Runtime still fully buffers every provider attempt before any provider payload byte is projected. Provider errors enter the Error chain independently of client response projection: a client never receives a provider error payload on the committed client channel, the Error chain records and prints the cause, and candidate switching stays inside the Runtime before any client payload is committed.
 - Provider startup probes are advisory: a failed or unavailable probe must never block listener startup, terminate the server, or count as a business/provider transport attempt. A provider request failure is request-local and must not terminate other sessions or the aggregate server; recovery and client projection stay in the typed Error chain. When Target10 selects a later route tier, it probes each preceding tier's cooled, request-eligible candidate once before committing to that fallback; probe failure preserves cooldown and never blocks the request.
 - Repeated provider transport/runtime failures are not closed by `switch_provider` alone. The first confirmed repeat pattern must become a typed provider policy/config change that removes the failed provider key from subsequent candidate selection until a successful probe restores it; the fix requires a regression test and live same-entry evidence.
 - Provider health is aggressively adaptive for typed provider-health failures: each such failure immediately cools its exact provider+auth key+model identity; the first recovery probe is due after 5 seconds, and consecutive failures/probe failures advance the shared 5s → 10s → 30s → 60s → 120s → 900s → 1800s ladder per identity. A successful semantic probe resets the ladder; failed probes remain expected, preserve cooldown, and never block startup or other sessions. Declared request-local provider compatibility failures exclude only the failed candidate for that request and remain health-neutral; an unconfirmed cause does not create a new cooldown or health exemption.
@@ -45,8 +65,8 @@
 - Virtual Router: classify and select one opaque route target.
 - Target Interpreter: expand candidates and reselect only inside selected target.
 - Provider: wire construction, auth, transport, and provider health mutation.
-- SSE: all client-facing communication, transport framing, and projection of committed client payload or typed terminal error.
-- Error: classify source failure, plan action, decide exhaustion, project client error.
+- SSE: client-facing transport framing and projection of committed successful business payloads; terminate an uncompletable transport without error semantics or fabricated success.
+- Error: classify source failure, plan recovery, decide exhaustion, and publish typed internal outcomes; never project an error response to a model client.
 - Debug: logs, snapshots, dry-run, replay; never business truth.
 - Direct: default for a same-protocol target unless configuration explicitly selects Relay; all payload rewrites occur inside registered Direct hooks.
 - Relay: selected for cross-protocol execution or by explicit configuration; all payload rewrites occur inside Chat Process.
@@ -120,18 +140,21 @@ bug intake/dedup -> issue-owned clean worktree at latest origin/main
 -> minimal owner-scoped fix -> fetch/combine latest origin/main -> candidate commit + exact SHA
 -> mapped tests/build + author debug + real-entry E2E or scoped consumer verification
 -> when runtime-impacting: install/restart candidate, check health/replay, audit Codex samples
--> independent Codex and AGY architecture reviews on that exact validated candidate
--> recheck origin/main -> merge reviewed candidate into clean main -> push
+-> applicable PR CI PASS -> recheck origin/main -> merge validated candidate into clean main -> push
 -> candidate/main equivalence + remote receipt
 -> post-merge verification: runtime path rebuild/install/restart -> health -> real-entry replay -> sample audit; otherwise scoped consumer check
+-> independent Codex and AGY architecture reviews bound to the delivered main content and verified candidate
 -> issue-owner cleanup of its worktree/playground and temporary resources
 -> one bug disposition receipt: solved or open
 ```
 
-Before merge, a newer `origin/main` or any candidate change invalidates the
-bound validation/review evidence. Record that attempt as `open`; continue from a
-new candidate attempt for the same bug ID and rerun affected gates, E2E, and
-reviews. Do not create a cross-attempt back-edge or reuse stale evidence.
+**项目交付顺序：作者验证和适用 CI 通过后，先合并到 main、从 main 重建安装并重启、完成真实入口验收，再等待并完成独立架构 review。** Review pending does not block this main/runtime sequence; it does block defect closure and any claim of complete delivery. Required repository checks and Git protection remain enforced. A blocking review finding requires an owner-scoped repair and affected verification; a confirmed regression caused by the delivered change follows the traceable revert/rebuild/restart/replay recovery contract.
+
+Before merge, a newer `origin/main` or any candidate change invalidates only
+evidence whose bound inputs changed. Record the new candidate under the same
+bug ID and rerun affected gates and E2E. Bind post-delivery reviews to that
+exact candidate and prove its content equivalent to delivered main; do not
+reuse a stale review as PASS for changed scope.
 
 `solved` requires every applicable test/build/E2E and runtime gate, both
 required architecture reviews, merge and remote receipts, candidate/main

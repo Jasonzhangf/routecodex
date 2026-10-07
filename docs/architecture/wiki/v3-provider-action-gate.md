@@ -123,10 +123,9 @@ Review locks:
   post-terminal parse failures record provider failure and leave the next action gated.
 - Terminal exhaustion is not success: old waiters re-evaluate selection/Error05, and
   the next provider action remains serialized behind a new five-second generation.
-  Error06 projection itself consumes the same gate admission: an isolated terminal
-  provider error waits at least one second, sustained terminal projections remain
-  five seconds apart, and a concurrent routing-group success cannot release a stale
-  provider error directly to the client.
+  Terminal handling never authorizes a model-client error response; AGENTS.md's
+  mandatory all-entry no-client-error contract applies even on exhaustion. A concurrent
+  routing-group success cannot turn a stale failure into client output.
 - A fresh request bypasses an unrelated recovery lane.
 - Client disconnect is health-neutral and does not enter this gate.
 - SSE transport/decode/malformed-event/EOF/hang is also provider-health-neutral. Before
@@ -136,10 +135,9 @@ Review locks:
 - FIFO waiter tickets preserve deterministic order; cancelling one waiter removes only
   that ticket.
 - Only a typed terminal Error05 exhaustion decision may construct Error06.
-- Terminal admission waits through
-  `record_failure_and_wait_for_terminal_projection`, then
-  `commit_terminal_admission` atomically verifies the admitted generation and advances
-  the lane group.
+- Terminal Error06 projection records and commits its failure generation without
+  waiting for provider action admission. The commit advances the lane group so later
+  provider actions retain the storm-control delay.
 - Runtime does not pass that commit result as a typed witness into
   `terminal_projection_for`. The machine map therefore stops at
   `V3ProviderActionGateTerminalCommitted` and does not fabricate a

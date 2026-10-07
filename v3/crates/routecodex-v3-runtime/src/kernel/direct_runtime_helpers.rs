@@ -1,3 +1,50 @@
+fn v3_direct_retired_continuation_error(body: &Value) -> Option<V3Error01SourceRaised> {
+    body.get("previous_response_id")
+        .is_some_and(|value| !value.is_null())
+        .then(|| {
+            runtime_source(
+                "V3HubReqInbound02Normalized",
+                "Responses continuation is retired: previous_response_id is unsupported",
+            )
+        })
+}
+
+fn v3_direct_admit_pinned_target(
+    selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    last_external_http: &Option<V3ExternalHttpWitness>,
+    trace: &[&'static str],
+    hook_registry: &V3HookRegistry,
+) -> Result<
+    (
+        routecodex_v3_target::V3Target10ConcreteProviderSelected,
+        Option<V3RuntimeProviderAdmission>,
+    ),
+    V3ResponsesDirectRuntimeOutput,
+> {
+    match try_admit_v3_selected_target(&selected) {
+        Ok(Some(admission)) => Ok((selected, Some(admission))),
+        Ok(None) => Err(
+            direct_runtime_helpers_stream::target_exhausted_output_with_observability(
+                build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::TargetPoolExhausted,
+                    "V3Target10ConcreteProviderSelected",
+                    "provider_concurrency_busy",
+                    "pinned provider concurrency is full",
+                ),
+                last_external_http.clone(),
+                trace.to_vec(),
+                hook_registry,
+                None,
+            ),
+        ),
+        Err(reason) => Err(error_output(
+            runtime_source("V3Target10ConcreteProviderSelected", reason),
+            trace.to_vec(),
+            hook_registry,
+        )),
+    }
+}
+
 fn v3_direct_selected_available_for_send(
     selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
     expanded: Option<&routecodex_v3_target::V3Target09CandidateSetExpanded>,
@@ -136,32 +183,13 @@ fn record_v3_direct_provider_success(
         .map_err(|error| runtime_source("V3ProviderHealthStateMutated", error))
 }
 
-fn eligible_external_http_from_provider_error(
-    error: &V3ProviderError,
-) -> Option<V3EligibleExternalHttpResponse> {
-    let V3ProviderError::HttpStatus { response } = error else {
-        return None;
-    };
-    if response.body_read_failure.is_some() {
-        return None;
-    }
-    V3EligibleExternalHttpResponse::new(
-        response.status,
-        response
-            .headers
-            .iter()
-            .map(|header| (header.name.clone(), header.value.clone()))
-            .collect(),
-        response.body.clone(),
-    )
-}
-
 #[cfg(test)]
 mod external_http_witness_tests {
     use super::*;
+    use crate::hub_v1::external_http_witness_from_provider_error;
 
     #[test]
-    fn direct_retains_exact_real_http_error_and_excludes_upstream_502() {
+    fn direct_retains_exact_real_http_error_including_upstream_502() {
         let response = routecodex_v3_provider_responses::V3ProviderHttpFailure {
             request_id: "request".into(),
             provider_id: "provider".into(),
@@ -176,17 +204,21 @@ mod external_http_witness_tests {
         let error = V3ProviderError::HttpStatus {
             response: Box::new(response.clone()),
         };
-        let witness = eligible_external_http_from_provider_error(&error).unwrap();
+        let witness = external_http_witness_from_provider_error(&error).unwrap();
         assert_eq!(witness.status(), 429);
         assert_eq!(witness.headers()[0].1, b"text/html; charset=utf-8");
         assert_eq!(witness.body(), response.body);
+        // An upstream 502 is real evidence even though it never reaches a client.
         let upstream_502 = V3ProviderError::HttpStatus {
             response: Box::new(routecodex_v3_provider_responses::V3ProviderHttpFailure {
                 status: 502,
+                body: b"bad gateway".to_vec(),
                 ..response
             }),
         };
-        assert!(eligible_external_http_from_provider_error(&upstream_502).is_none());
+        let witness = external_http_witness_from_provider_error(&upstream_502).unwrap();
+        assert_eq!(witness.status(), 502);
+        assert_eq!(witness.body(), b"bad gateway");
     }
 }
 
@@ -442,18 +474,16 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         ));
     }
     if context.provider_pinned && health_record.state == "cooldown" {
-        let mut admission = context
+        context
             .provider_health
-            .wait_for_provider_action_failure_in_scope(
+            .record_provider_action_failure_in_scope(
                 context.failure_session_scope,
                 &selected.candidate.provider_id,
                 Some(&selected.candidate.auth_alias),
                 Some(&selected.candidate.model_id),
                 &source.code,
             )
-            .await
             .map_err(|error| runtime_source("V3ProviderActionGateAdmission", error))?;
-        drop(admission.take_permit());
     }
     let admission = if request_local_scope
         == crate::provider_failure_runtime_policy::V3RequestLocalProviderFailureScope::Candidate
@@ -463,14 +493,13 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         Some(
             context
                 .provider_health
-                .wait_for_terminal_provider_projection_in_scope(
+                .record_terminal_provider_projection_in_scope(
                     context.failure_session_scope,
                     &selected.candidate.provider_id,
                     Some(&selected.candidate.auth_alias),
                     Some(&selected.candidate.model_id),
                     &source.code,
                 )
-                .await
                 .map_err(|error| runtime_source("V3ProviderActionGateAdmission", error))?,
         )
     };

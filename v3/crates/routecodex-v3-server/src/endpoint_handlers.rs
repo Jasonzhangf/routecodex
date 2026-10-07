@@ -54,25 +54,33 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         Err(response) => return *response,
     };
     let request_id = request_identity.request_id.clone();
+    // One allocation: every terminal branch records this same request identity.
+    let terminal_evidence = V3ProviderTerminalEvidence {
+        entry_protocol: &entry_protocol,
+        endpoint: &path,
+        request_id: &request_id,
+    };
     let toolreason_observation_session_id =
         resolve_v3_console_log_identity_from_parts(&request_headers, &payload, &request_id)
             .session_id;
     let responses_entry_facts =
         (entry_protocol == "responses").then(|| V3ResponsesEntryFacts::project(&payload));
     let requested_stream = v3_request_wants_sse(&request_headers, &payload);
-    let execution_id = state.debug.next_execution_id(&state.server.id);
-    let trace_scope = match state
-        .debug
-        .start_trace(&state.server.id, &request_id, &execution_id)
-    {
-        Ok(scope) => scope,
-        Err(error) => {
-            return foundation_output_response(project_v3_debug_failure(
-                "V3Server03HttpRequestRaw",
-                error,
-            ));
-        }
-    };
+    let (execution_id, trace_scope) =
+        match crate::client_transport_observation::start_v3_client_trace(
+            &state,
+            front_connection_identity,
+            &request_id,
+            toolreason_observation_session_id.clone(),
+        ) {
+            Ok(trace) => trace,
+            Err(error) => {
+                return foundation_output_response(project_v3_debug_failure(
+                    "V3Server03HttpRequestRaw",
+                    error,
+                ));
+            }
+        };
     if let Err(error) = state.debug.record_node_event(
         &trace_scope,
         "V3Server03HttpRequestRaw",
@@ -178,9 +186,34 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         ) {
             Ok(plan) => plan,
             Err(failure) => {
-                let frame = build_v3_server_16_http_frame_from_v3_error_06(
-                    project_v3_protocol_execution_plan_failure(failure),
-                );
+                let node_trace = failure.node_trace.clone();
+                let projected = project_v3_protocol_execution_plan_failure(failure);
+                if projected.pool_exhausted {
+                    // A selection-time pool exhaustion is a provider terminal:
+                    // no candidate was admitted, so there is no upstream
+                    // response to witness and the client boundary is the
+                    // transport break. The Error06 body stays provider-private
+                    // evidence on disk, never a client payload.
+                    if let Some(response) = persist_v3_projected_terminal_error_evidence(
+                        &state,
+                        &entry_protocol,
+                        &path,
+                        &request_id,
+                        &payload,
+                        &node_trace,
+                        &projected,
+                    ) {
+                        return response;
+                    }
+                    return provider_terminal_response(
+                        &state,
+                        front_connection_identity,
+                        routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+                        requested_stream,
+                        terminal_evidence,
+                    );
+                }
+                let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
                 return responses_direct_output_response(
                     project_v3_responses_error_frame_for_request_if_sse(
                         frame,
@@ -546,6 +579,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 front_connection_identity,
                 disposition,
                 requested_stream,
+                terminal_evidence,
             );
         }
         if output.error_chain.is_some() {
@@ -654,6 +688,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 front_connection_identity,
                 disposition,
                 requested_stream,
+                terminal_evidence,
             );
         }
         if let Some(response) = emit_relay_error_chain_if_any(
@@ -769,6 +804,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 front_connection_identity,
                 disposition,
                 requested_stream,
+                terminal_evidence,
             );
         }
         if let Some(response) = emit_relay_error_chain_if_any(
@@ -886,8 +922,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     Some(plan.decision.target.clone()),
                     Some(plan.expanded.clone()),
                     BTreeSet::new(),
-                    None,
-                    None,
+                    plan.relay_runtime_seeds(),
                 )
                 .await
                 {
@@ -915,8 +950,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     None,
                     None,
                     BTreeSet::new(),
-                    None,
-                    None,
+                    V3ResponsesRelayRuntimeSeeds::default(),
                 )
                 .await
                 {
@@ -938,8 +972,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     Some(plan.decision.target.clone()),
                     Some(plan.expanded.clone()),
                     BTreeSet::new(),
-                    None,
-                    None,
+                    plan.relay_runtime_seeds(),
                 )
                 .await
                 {
@@ -964,8 +997,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     None,
                     None,
                     BTreeSet::new(),
-                    None,
-                    None,
+                    V3ResponsesRelayRuntimeSeeds::default(),
                 )
                 .await
                 {
@@ -975,8 +1007,8 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             }
         };
         if let Some(disposition) = output.terminal_disposition.take() {
-            // A provider terminal disposition returns the provider's own HTTP
-            // response verbatim, so this path never reaches the relay closeout
+            // A provider terminal disposition ends the client transport without
+            // a client payload, so this path never reaches the relay closeout
             // below. The chain and status are still real typed facts: persist
             // the error evidence and project the chain first, otherwise a
             // request that really failed keeps an observability row whose every
@@ -1008,6 +1040,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 front_connection_identity,
                 disposition,
                 requested_stream,
+                terminal_evidence,
             );
         }
         if output.protocol_direct_handoff.is_some() {
@@ -1046,6 +1079,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         front_connection_identity,
                         disposition,
                         requested_stream,
+                        terminal_evidence,
                     );
                 }
                 V3ResponsesDirectServerOutcome::DirectFrame(mut frame) => {
@@ -1151,6 +1185,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                             front_connection_identity,
                             disposition,
                             requested_stream,
+                            terminal_evidence,
                         );
                     }
                     prepend_v3_protocol_plan_trace_to_responses_relay_output(
@@ -1232,6 +1267,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     front_connection_identity,
                     disposition,
                     requested_stream,
+                    terminal_evidence,
                 )
             }
             V3ResponsesDirectServerOutcome::DirectFrame(mut frame) => {
@@ -1336,8 +1372,8 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 if let Some(disposition) = output.terminal_disposition.clone() {
                     // Third and last Responses terminal-disposition site: same
                     // entry, same defect, so the real typed chain and the
-                    // on-disk evidence are recorded before the provider's own
-                    // response is returned verbatim.
+                    // on-disk evidence are recorded before the client transport
+                    // is broken without a payload.
                     if let Some(response) = persist_v3_responses_relay_terminal_error_evidence(
                         &state,
                         &entry_protocol,
@@ -1365,6 +1401,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         front_connection_identity,
                         disposition,
                         requested_stream,
+                        terminal_evidence,
                     );
                 }
                 finalize_v3_responses_relay_server_output(

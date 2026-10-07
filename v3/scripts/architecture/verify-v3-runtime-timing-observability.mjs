@@ -308,7 +308,7 @@ requireMatch(
 );
 requireMatch(
   directServerOutcome,
-  /Some\(handoff\.observability_accumulator\)[\s\S]*Some\(next_handoff\.observability_accumulator\)/,
+  /(Some\(handoff\.observability_accumulator\)|handoff\.relay_runtime_seeds\(\))[\s\S]*Some\(next_handoff\.observability_accumulator\)/,
   "Server must move the opaque accumulator through Direct-to-Relay and nested Relay-to-Direct handoffs",
 );
 requireMatch(
@@ -373,8 +373,8 @@ requireMatch(
 );
 requireMatch(
   serverExecutors,
-  /project_v3_responses_relay_stream_error_frame_if_requested/,
-  "Relay SSE error projection must use the Relay-owned projector",
+  /return model_no_response_output/,
+  "Relay failures must return typed no-response intent without projecting an SSE error",
 );
 const directSseFinishRuntimeCalls =
   directSseOutcomeWrapper.match(/\.finish_runtime\(\)/g) ?? [];

@@ -1,3 +1,6 @@
+use crate::client_transport_observation::{
+    V3ClientResponseObservation, V3ClientTransportObservation,
+};
 use crate::restart_closeout::V3FrontTransportCloseoutState;
 use crate::V3MetadataCenterExecutionPlan;
 use axum::body::Body;
@@ -307,6 +310,7 @@ impl V3FrontRequestLeaseRegistry {
 /// reconstructs a lease from payload/log data.
 #[derive(Debug, Clone, Default)]
 pub struct V3FrontTransportBroker {
+    observation_sink: Option<routecodex_v3_debug::V3DebugRuntime>,
     generation: Arc<Mutex<u64>>,
     next_connection_id: Arc<Mutex<u64>>,
     checkpoints: Arc<Mutex<BTreeMap<V3FrontRequestLeaseKey, V3BrokerCheckpoint>>>,
@@ -325,6 +329,7 @@ struct V3BrokerCheckpoint {
 impl V3FrontTransportBroker {
     pub fn new(generation: u64) -> Self {
         Self {
+            observation_sink: None,
             generation: Arc::new(Mutex::new(generation)),
             next_connection_id: Arc::new(Mutex::new(0)),
             checkpoints: Arc::new(Mutex::new(BTreeMap::new())),
@@ -333,6 +338,14 @@ impl V3FrontTransportBroker {
             client_sockets: Arc::new(Mutex::new(BTreeMap::new())),
             client_connections: Arc::new(Mutex::new(BTreeMap::new())),
         }
+    }
+
+    pub(crate) fn with_client_observation(
+        mut self,
+        sink: routecodex_v3_debug::V3DebugRuntime,
+    ) -> Self {
+        self.observation_sink = Some(sink);
+        self
     }
 
     pub fn generation(&self) -> u64 {
@@ -799,7 +812,7 @@ impl V3FrontTransportBroker {
     }
 }
 
-fn v3_front_epoch_ms() -> u64 {
+pub(crate) fn v3_front_epoch_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis().min(u64::MAX as u128) as u64)
@@ -952,53 +965,129 @@ impl V3StableFrontConnection {
     }
 }
 
+/// Write one response frame to the client socket and record the transport write.
+///
+/// The Front write worker and its close flush share this single write path so the
+/// observation, closeout state, and error lane stay identical on both.
+async fn write_front_response_frame(
+    write_half: &mut OwnedWriteHalf,
+    observation: &V3ClientTransportObservation,
+    closeout_state: &V3FrontTransportCloseoutState,
+    frame: &[u8],
+    response_observation: &V3ClientResponseObservation,
+) -> bool {
+    if let Err(error) = write_half.write_all(frame).await {
+        observation.emit(
+            "write_failure",
+            response_observation,
+            None,
+            Some(error.to_string()),
+        );
+        closeout_state.close();
+        return false;
+    }
+    if let Err(error) = write_half.flush().await {
+        observation.emit(
+            "flush_failure",
+            response_observation,
+            None,
+            Some(error.to_string()),
+        );
+        closeout_state.close();
+        return false;
+    }
+    observation.wrote(response_observation, frame.len());
+    closeout_state.mark_transport_wrote();
+    true
+}
+
+/// Bound for writing the response frames that are already queued when a close
+/// signal arrives. The bound keeps a client that stopped reading from holding a
+/// restart replacement open.
+const V3_FRONT_CLOSE_FLUSH: std::time::Duration = std::time::Duration::from_millis(500);
+
 /// Production Front socket owner for the HTTP adapter.
 #[derive(Clone, Debug)]
 pub struct V3StableFrontSocket {
-    write_tx: mpsc::Sender<Vec<u8>>,
+    write_tx: mpsc::Sender<(Vec<u8>, V3ClientResponseObservation)>,
+    observation: Arc<V3ClientTransportObservation>,
     close_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
     closeout_state: Arc<V3FrontTransportCloseoutState>,
 }
 
 impl V3StableFrontSocket {
-    fn spawn(mut write_half: OwnedWriteHalf) -> Self {
-        let (write_tx, mut write_rx) = mpsc::channel::<Vec<u8>>(32);
+    pub(crate) fn observe_request_trace(
+        &self,
+        trace: routecodex_v3_debug::V3DebugTraceScope,
+        session: String,
+    ) {
+        self.observation.bind_trace(trace, session);
+    }
+    fn spawn(
+        mut write_half: OwnedWriteHalf,
+        observation: Arc<V3ClientTransportObservation>,
+    ) -> Self {
+        let (write_tx, mut write_rx) = mpsc::channel::<(Vec<u8>, V3ClientResponseObservation)>(32);
         let (close_tx, mut close_rx) = oneshot::channel();
         let closeout_state = V3FrontTransportCloseoutState::new();
         let worker_closeout_state = Arc::clone(&closeout_state);
+        let worker_observation = Arc::clone(&observation);
         tokio::spawn(async move {
             let mut close_requested = false;
+            let mut flush_queued_before_close = false;
             loop {
                 tokio::select! {
                     biased;
                     close = &mut close_rx, if !close_requested => {
                         if close.is_ok() {
-                            if let Some(frame) = worker_closeout_state.take_frame() {
-                                let _ = write_half.write_all(&frame).await;
-                                let _ = write_half.flush().await;
-                            }
+                            flush_queued_before_close = true;
                             break;
                         }
                         close_requested = true;
                     },
                     frame = write_rx.recv() => {
-                        let Some(frame) = frame else { break };
-                        if write_half.write_all(&frame).await.is_err() {
-                            worker_closeout_state.close();
+                        let Some((frame, response_observation)) = frame else { break };
+                        if !write_front_response_frame(
+                            &mut write_half,
+                            &worker_observation,
+                            &worker_closeout_state,
+                            &frame,
+                            &response_observation,
+                        )
+                        .await
+                        {
                             break;
                         }
-                        if write_half.flush().await.is_err() {
-                            worker_closeout_state.close();
-                            break;
-                        }
-                        worker_closeout_state.mark_transport_wrote();
                     }
                 }
             }
+            if flush_queued_before_close {
+                // The close branch is biased, so a close signal would otherwise drop
+                // the response tail that reached the write queue but not the socket.
+                // Flush those frames under a bound, then close.
+                let _ = tokio::time::timeout(V3_FRONT_CLOSE_FLUSH, async {
+                    while let Ok((frame, response_observation)) = write_rx.try_recv() {
+                        if !write_front_response_frame(
+                            &mut write_half,
+                            &worker_observation,
+                            &worker_closeout_state,
+                            &frame,
+                            &response_observation,
+                        )
+                        .await
+                        {
+                            break;
+                        }
+                    }
+                })
+                .await;
+            }
             let _ = write_half.shutdown().await;
+            worker_observation.emit("socket_closed", &worker_observation.current(), None, None);
         });
         Self {
             write_tx,
+            observation,
             close_tx: Arc::new(Mutex::new(Some(close_tx))),
             closeout_state,
         }
@@ -1006,10 +1095,6 @@ impl V3StableFrontSocket {
 
     fn mark_request_started(&self) {
         self.closeout_state.mark_request_started();
-    }
-
-    pub(crate) fn set_exec_closeout_frame(&self, frame: Vec<u8>) {
-        self.closeout_state.set_frame(frame);
     }
 
     fn close_for_exec_replacement(&self) {
@@ -1037,8 +1122,8 @@ impl V3StableFrontSocket {
     }
 
     /// Commit a restart closeout that was deferred because a streaming terminal had
-    /// not written its response head yet. Signalling the closeout lets the write
-    /// worker deliver the `503` frame instead of leaving the client with zero bytes.
+    /// not written its response head yet. Signalling the closeout terminates the
+    /// transport without emitting an error frame or fabricated successful terminal.
     fn commit_deferred_restart_closeout(&self) -> bool {
         if self.closeout_state.commit_deferred_restart_closeout() {
             self.signal_close();
@@ -1098,7 +1183,7 @@ impl AsyncWrite for V3FrontHttpIo {
         match sender.try_reserve() {
             Ok(permit) => {
                 let length = data.len();
-                permit.send(data.to_vec());
+                permit.send((data.to_vec(), self.front_socket.observation.current()));
                 std::task::Poll::Ready(Ok(length))
             }
             Err(mpsc::error::TrySendError::Full(_)) => {
@@ -1140,8 +1225,13 @@ where
         + 'static,
     S::Future: Future<Output = Result<Response<Body>, Infallible>> + Send + 'static,
 {
+    let observation = V3ClientTransportObservation::new(
+        front_transport_broker.observation_sink.clone(),
+        connection_identity,
+        stream.local_addr()?.port(),
+    );
     let (read_half, write_half) = stream.into_split();
-    let front_socket = V3StableFrontSocket::spawn(write_half);
+    let front_socket = V3StableFrontSocket::spawn(write_half, Arc::clone(&observation));
     front_transport_broker
         .register_front_socket(connection_identity, front_socket.clone())
         .map_err(std::io::Error::other)?;
@@ -1151,15 +1241,23 @@ where
         let front_socket = request_front_socket.clone();
         async move {
             front_socket.mark_request_started();
+            front_socket
+                .observation
+                .admitted(request.uri().path().to_owned());
             let (parts, body) = request.into_parts();
             let mut request = Request::from_parts(parts, Body::new(body));
             request.extensions_mut().insert(ConnectInfo(remote_addr));
             request.extensions_mut().insert(connection_identity);
-            request.extensions_mut().insert(front_socket);
-            service.call(request).await
+            request.extensions_mut().insert(front_socket.clone());
+            let response = service.call(request).await?;
+            front_socket
+                .observation
+                .prepared(response.status().as_u16(), front_socket.is_closed());
+            Ok::<_, Infallible>(response)
         }
     });
     let connection = hyper::server::conn::http1::Builder::new()
+        .automatic_error_responses(false)
         .serve_connection(
             TokioIo::new(V3FrontHttpIo {
                 read_half,
@@ -1180,6 +1278,12 @@ where
             result.map_err(std::io::Error::other)
         },
     };
+    observation.emit(
+        "http_connection_end",
+        &observation.current(),
+        None,
+        result.as_ref().err().map(ToString::to_string),
+    );
     front_transport_broker.release_connection(connection_identity);
     result
 }

@@ -11,7 +11,10 @@ use routecodex_v3_runtime::{
     execute_v3_responses_relay_runtime, V3HubEntryProtocol, V3HubProviderWireProtocol,
     V3HubTransportIntent,
 };
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+
+static NEXT_PROVIDER_FIXTURE_ID: AtomicUsize = AtomicUsize::new(1);
 
 struct ProviderProjectionJsonTransport {
     captures: Mutex<Vec<(String, serde_json::Value)>>,
@@ -47,8 +50,11 @@ impl routecodex_v3_provider_responses::ResponsesTransport for ProviderProjection
 }
 
 fn manifest_openai_chat_wire() -> routecodex_v3_config::V3Config05ManifestPublished {
-    routecodex_v3_config::compile_v3_config_05_manifest(
-        routecodex_v3_config::parse_v3_config_02_authoring(
+    manifest_provider_wire("openai_chat")
+}
+
+fn manifest_provider_wire(protocol: &str) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let mut authoring = routecodex_v3_config::parse_v3_config_02_authoring(
             r#"
 version = 3
 [servers.chatwire]
@@ -75,10 +81,26 @@ capabilities = ["text", "tools", "reasoning", "web_search"]
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "chatwire", model = "chat-wire-model", key = "controlled", priority = 1 }]
 "#,
-        )
-        .unwrap(),
     )
-    .unwrap()
+    .unwrap();
+    // Each fixture owns its credential concurrency identity in the shared runtime.
+    let auth_alias = format!(
+        "controlled-{}",
+        NEXT_PROVIDER_FIXTURE_ID.fetch_add(1, Ordering::Relaxed)
+    );
+    let provider = authoring.providers.get_mut("chatwire").unwrap();
+    provider.provider_type = protocol.to_owned();
+    provider.auth.entries[0].alias = auth_alias.clone();
+    authoring
+        .route_groups
+        .get_mut("chatwire")
+        .unwrap()
+        .pools
+        .get_mut("default")
+        .unwrap()
+        .targets[0]
+        .key = Some(auth_alias);
+    routecodex_v3_config::compile_v3_config_05_manifest(authoring).unwrap()
 }
 
 fn responses_relay_input(
@@ -100,6 +122,278 @@ fn responses_relay_input(
 
 fn provider_projection_body(capture: &(String, serde_json::Value)) -> &serde_json::Value {
     &capture.1
+}
+
+fn normalization_transport() -> ProviderProjectionJsonTransport {
+    ProviderProjectionJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        response: serde_json::json!({
+            "id":"chatcmpl-normalization",
+            "object":"chat.completion",
+            "model":"chat-wire-model",
+            "choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]
+        }),
+    }
+}
+
+#[tokio::test]
+async fn responses_openai_chat_field_parity_dual_text_history_reaches_wire_once() {
+    for messages in [
+        serde_json::json!([{"role":"user","content":"hi"}]),
+        serde_json::Value::Null,
+    ] {
+        let transport = normalization_transport();
+        let result = execute_v3_responses_relay_runtime(
+            &manifest_openai_chat_wire(),
+            responses_relay_input(
+                "req-dual-text-normalization",
+                serde_json::json!({"input":"hi","messages":messages,"tools":[],"stream":false}),
+            ),
+            &transport,
+        )
+        .await
+        .expect("equivalent optional history must reach provider wire once");
+        assert!(result.error_chain.is_none());
+        let captures = transport.captures.lock().unwrap();
+        assert_eq!(captures.len(), 1);
+        let body = provider_projection_body(&captures[0]);
+        assert!(
+            body.get("input").is_none(),
+            "raw input cannot reach Chat wire"
+        );
+        assert_eq!(body["messages"].as_array().unwrap().len(), 1);
+        assert_eq!(body["messages"][0]["role"], "user");
+        assert_eq!(body["messages"][0]["content"], "hi");
+    }
+}
+
+#[tokio::test]
+async fn responses_openai_chat_field_parity_legacy_tool_output_normalizes_before_wire() {
+    for (name, output_type, repeated_result) in [
+        ("lookup", "function_call_output", false),
+        ("apply_patch", "custom_tool_call_output", false),
+        ("apply_patch", "custom_tool_call_output", true),
+    ] {
+        let transport = normalization_transport();
+        let arguments = "{\"q\":\"preserve exact arguments\"}";
+        let output = "tool failure remains data\r\nexpected line";
+        let mut messages = vec![serde_json::json!({"role":"assistant","tool_calls":[{
+            "id":"call_legacy","type":"function",
+            "function":{"name":name,"arguments":arguments}
+        }]})];
+        if repeated_result {
+            messages.push(
+                serde_json::json!({"role":"tool","tool_call_id":"call_legacy","content":output}),
+            );
+        }
+        let result = execute_v3_responses_relay_runtime(
+            &manifest_openai_chat_wire(),
+            responses_relay_input(
+                "req-legacy-tool-normalization",
+                serde_json::json!({
+                    "messages":messages,
+                    "input":[{"type":output_type,"call_id":"call_legacy","output":output}],
+                    "stream":false
+                }),
+            ),
+            &transport,
+        )
+        .await
+        .expect("legacy paired tool result must normalize into Chat before projection");
+        assert!(result.error_chain.is_none());
+        let captures = transport.captures.lock().unwrap();
+        assert_eq!(captures.len(), 1);
+        let body = provider_projection_body(&captures[0]);
+        assert!(body.get("input").is_none());
+        let messages = body["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["tool_calls"][0]["id"], "call_legacy");
+        assert_eq!(messages[0]["tool_calls"][0]["function"]["name"], name);
+        assert_eq!(
+            messages[0]["tool_calls"][0]["function"]["arguments"],
+            arguments
+        );
+        assert_eq!(messages[1]["role"], "tool");
+        assert_eq!(messages[1]["tool_call_id"], "call_legacy");
+        assert_eq!(messages[1]["content"], output);
+    }
+}
+
+#[tokio::test]
+async fn responses_openai_chat_field_parity_normalization_preserves_failure_boundaries() {
+    // Non-array `tools` is deliberately NOT in this failure-boundary list. It is an
+    // openai_chat field that cannot be represented compatibly, so stage-3 output
+    // projection drops it, records the drop and continues the request instead of
+    // failing it; `non_array_tools_is_dropped_recorded_and_request_continues` pins
+    // that path. The remaining entries are genuine request contradictions whose
+    // boundary must stay visible.
+    for (payload, expected) in [
+        (
+            serde_json::json!({"input":"hi","messages":[{"role":"user","content":"different"}]}),
+            "conflicting input and messages",
+        ),
+        (
+            serde_json::json!({"messages":[{"role":"assistant","tool_calls":[{"id":"call_known","type":"function","function":{"name":"lookup","arguments":"{}"}}]}],"input":[{"type":"function_call_output","call_id":"call_orphan","output":"unpaired"}]}),
+            "orphan tool output",
+        ),
+        (
+            serde_json::json!({"messages":[{"role":"assistant","tool_calls":[{"id":"call_known","type":"function","function":{"name":"lookup","arguments":"{}"}}]}],"input":[{"type":"custom_tool_call_output","call_id":"call_known","output":"wrong kind"}]}),
+            "tool output kind mismatch",
+        ),
+        (
+            serde_json::json!({"messages":[{"role":"assistant","tool_calls":[{"id":"call_known","type":"function","function":{"name":"lookup","arguments":"{}"}}]},{"role":"tool","tool_call_id":"call_known","content":"old"}],"input":[{"type":"function_call_output","call_id":"call_known","output":"different"}]}),
+            "conflicting tool output",
+        ),
+    ] {
+        let transport = normalization_transport();
+        let result = execute_v3_responses_relay_runtime(
+            &manifest_openai_chat_wire(),
+            responses_relay_input("req-normalization-negative", payload),
+            &transport,
+        )
+        .await;
+        let message = match result {
+            Err(error) => error.to_string(),
+            Ok(output) => {
+                assert_eq!(output.status, 598);
+                assert!(output.error_chain.is_some());
+                let routecodex_v3_runtime::V3ResponsesRelayClientBody::Json(body) =
+                    output.client_body
+                else {
+                    panic!("JSON negative request must project a JSON error");
+                };
+                body["error"]["message"]
+                    .as_str()
+                    .expect("explicit client error")
+                    .to_owned()
+            }
+        };
+        assert!(message.contains(expected), "{message}");
+        assert!(
+            !message.contains("UnmappedOutboundFields target_protocol=openai_chat paths=$.input"),
+            "{message}"
+        );
+        assert!(transport.captures.lock().unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn responses_openai_chat_field_parity_equivalent_tool_histories_merge_annotations() {
+    let transport = normalization_transport();
+    let result = execute_v3_responses_relay_runtime(
+        &manifest_openai_chat_wire(),
+        responses_relay_input("req-dual-tool-history", serde_json::json!({
+            "messages":[
+                {"role":"assistant","tool_calls":[{"id":"call_full","type":"function","function":{"name":"lookup","arguments":"{}"}}]},
+                {"role":"tool","tool_call_id":"call_full","content":"done"}
+            ],
+            "input":[
+                {"type":"function_call","id":"fc_source","call_id":"call_full","name":"lookup","arguments":"{}"},
+                {"type":"function_call_output","id":"fco_source","call_id":"call_full","output":"done"}
+            ],
+            "stream":false
+        })),
+        &transport,
+    ).await.expect("equivalent complete tool history must merge codec annotations");
+    assert_eq!(result.status, 200);
+    assert!(result.error_chain.is_none());
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    let body = provider_projection_body(&captures[0]);
+    assert!(body.get("input").is_none());
+    assert_eq!(body["messages"].as_array().unwrap().len(), 2);
+    assert_eq!(body["messages"][0]["tool_calls"][0]["id"], "call_full");
+    assert_eq!(body["messages"][1]["content"], "done");
+}
+
+#[tokio::test]
+async fn responses_openai_chat_field_parity_tool_output_extra_fields_roundtrip_then_drop_on_chat_wire(
+) {
+    let payload = serde_json::json!({
+        "messages":[{"role":"assistant","tool_calls":[{"id":"call_extra","type":"function","function":{"name":"lookup","arguments":"{}"}}]}],
+        "input":[{"type":"function_call_output","id":"fco_extra","status":"completed","call_id":"call_extra","output":"done","opaque_business":{"ticket":42}}],
+        "stream":false
+    });
+    let transport = ProviderProjectionJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        response: serde_json::json!({"id":"resp-extra","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}),
+    };
+    let result = execute_v3_responses_relay_runtime(
+        &manifest_provider_wire("responses"),
+        responses_relay_input("req-extra-roundtrip", payload.clone()),
+        &transport,
+    )
+    .await
+    .expect("opaque Responses fields must roundtrip to a Responses target");
+    assert_eq!(result.status, 200);
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    let items = provider_projection_body(&captures[0])["input"]
+        .as_array()
+        .unwrap();
+    let output = items
+        .iter()
+        .find(|item| item["type"] == "function_call_output")
+        .unwrap();
+    assert_eq!(output["call_id"], "call_extra");
+    assert_eq!(output["output"], "done");
+    assert_eq!(output["id"], "fc_fco_extra");
+    assert_eq!(output["status"], "completed");
+    assert_eq!(output["opaque_business"], serde_json::json!({"ticket":42}));
+    drop(captures);
+
+    let transport = normalization_transport();
+    let result = execute_v3_responses_relay_runtime(
+        &manifest_openai_chat_wire(),
+        responses_relay_input("req-extra-unmapped", payload),
+        &transport,
+    )
+    .await
+    .expect("unrepresentable target field must drop, not fail the request");
+    assert_eq!(result.status, 200);
+    assert!(result.error_chain.is_none());
+    // The Responses-only extra-field carrier has no openai_chat representation:
+    // stage-3 projection drops it (recorded on the independent drop channel) and
+    // the request continues to the provider instead of projecting 598.
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    let body = provider_projection_body(&captures[0]);
+    assert!(
+        !body
+            .to_string()
+            .contains("responses_tool_output_extra_fields"),
+        "{body}"
+    );
+}
+
+#[tokio::test]
+async fn responses_openai_chat_field_parity_named_tool_output_extra_fields_roundtrip() {
+    let transport = ProviderProjectionJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        response: serde_json::json!({"id":"resp-named-extra","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}),
+    };
+    let result = execute_v3_responses_relay_runtime(
+        &manifest_provider_wire("responses"),
+        responses_relay_input("req-named-extra-roundtrip", serde_json::json!({
+            "input":[{"type":"function_call_output","name":"lookup","namespace":"client","output":"done","opaque_business":{"ticket":42}}],
+            "stream":false
+        })),
+        &transport,
+    ).await.expect("named result fields must survive Responses projection");
+    assert_eq!(result.status, 200);
+    let captures = transport.captures.lock().unwrap();
+    let items = provider_projection_body(&captures[0])["input"]
+        .as_array()
+        .unwrap();
+    let output = items
+        .iter()
+        .find(|item| item["type"] == "function_call_output")
+        .expect("named result must retain its registered dispatch identity");
+    assert_eq!(output["name"], "lookup");
+    assert_eq!(output["namespace"], "client");
+    assert_eq!(output["output"], "done");
+    assert_eq!(output["opaque_business"], serde_json::json!({"ticket":42}));
+    assert!(output.get("call_id").is_none());
 }
 
 #[test]

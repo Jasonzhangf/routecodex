@@ -65,6 +65,7 @@ fn direct_policy_with_models(
                 model_capabilities: vec!["text".to_string()],
                 web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode::None,
                 max_context_tokens: None,
+                max_tokens: None,
                 context_token_estimate_scale_bps: 10_000,
                 base_url: "https://provider.invalid/v1".to_string(),
                 responses_process: None,
@@ -458,6 +459,7 @@ fn chat_direct_codec_consumes_the_registered_key_catalog() {
     let wire = <crate::kernel::V3ChatDirectCodec as crate::kernel::V3DirectProtocolCodec>::run_request_projection(
             &policy,
             &catalog,
+            &crate::projection_drop_log::V3ProjectionDropContext::disabled(),
         )
         .expect("Chat codec must consume the adjacent typed key catalog");
     assert!(wire.body()["messages"][0]["content"]

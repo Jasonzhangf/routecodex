@@ -1,6 +1,7 @@
 use crate::attempt_store::{V3AttemptStorePolicyAuthoringConfig, V3AttemptStorePolicyManifest};
 use crate::memory_raw_capture::{V3MemoryRawCaptureAuthoringConfig, V3MemoryRawCaptureManifest};
 use crate::provider_priority_schedule::V3ProviderPriorityScheduleAuthoringConfig;
+use crate::runtime_config::{V3RuntimeAuthoringConfig, V3RuntimeManifest};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -34,6 +35,8 @@ pub struct V3Config02AuthoringParsed {
     pub admin_webui: V3AdminWebuiAuthoringConfig,
     #[serde(default)]
     pub memory_raw_capture: V3MemoryRawCaptureAuthoringConfig,
+    #[serde(default, skip_serializing_if = "V3RuntimeAuthoringConfig::is_default")]
+    pub runtime: V3RuntimeAuthoringConfig,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -243,6 +246,11 @@ pub struct V3DebugAuthoringConfig {
     pub log_console: bool,
     #[serde(default)]
     pub log_file: Option<String>,
+    /// 独立的 stage-3 出站投影丢弃日志（append-only JSONL）。刻意与
+    /// `log_file` 分离：丢弃证据不得混入 debug 日志。未配置时默认落在
+    /// `log_file` 同目录的 `projection-drops.jsonl`。
+    #[serde(default)]
+    pub projection_drop_log_file: Option<String>,
     #[serde(default)]
     pub snapshots: bool,
     #[serde(default)]
@@ -773,6 +781,8 @@ pub enum V3StreamingPolicy {
 #[serde(deny_unknown_fields)]
 pub struct V3ProviderConcurrencyAuthoringConfig {
     pub max_in_flight: u32,
+    /// Retained for compatibility with existing provider config files. Business request
+    /// admission never waits for provider capacity, so this value does not control it.
     pub acquire_timeout_ms: u64,
     pub stale_lease_ms: u64,
 }
@@ -945,6 +955,7 @@ pub struct V3Config04ResourceRegistryBuilt {
     pub error: V3ErrorManifest,
     pub admin_webui: Option<V3AdminWebuiManifest>,
     pub memory_raw_capture: V3MemoryRawCaptureManifest,
+    pub runtime: V3RuntimeManifest,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -998,19 +1009,16 @@ impl V3HubV1Manifest {
 /// without interpreting provider internals itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum V3DirectModelResolution {
-    /// Not a direct route (no dot, or the segment before the first dot is not
-    /// an enabled provider id) — fall back to normal classification.
+    /// Not a direct route: no dot, the segment before the first dot is not an
+    /// enabled provider id, or the provider declares no such model or alias.
+    /// The request falls back to normal classification — the same path the
+    /// `auto` and virtual entry names take.
     NotDirect,
     /// Resolved to an enabled provider and canonical model id.
     Resolved {
         provider_id: String,
         model_id: String,
         model_capabilities: Vec<String>,
-    },
-    /// The provider exists but declares no such model or alias.
-    UnknownModel {
-        provider_id: String,
-        model_id: String,
     },
 }
 
@@ -1044,6 +1052,9 @@ impl V3Config05ManifestPublished {
 
     /// Splits `requested` on its first `.` and resolves the leading segment
     /// against enabled providers, mapping model aliases to the canonical id.
+    /// An enabled provider that declares no such model is `NotDirect`: an
+    /// unlisted model name must fall back to normal classification, never fail
+    /// the request.
     pub fn resolve_direct_provider_model(&self, requested: &str) -> V3DirectModelResolution {
         let requested = requested.trim();
         let Some((provider_id, model_part)) = requested.split_once('.') else {
@@ -1067,10 +1078,7 @@ impl V3Config05ManifestPublished {
                 model_id: model.id.clone(),
                 model_capabilities: model.capabilities.clone(),
             },
-            None => V3DirectModelResolution::UnknownModel {
-                provider_id: provider_id.to_string(),
-                model_id: model_part.to_string(),
-            },
+            None => V3DirectModelResolution::NotDirect,
         }
     }
 
@@ -1268,6 +1276,8 @@ pub struct V3ForwarderTargetManifest {
 pub struct V3DebugManifest {
     pub log_console: bool,
     pub log_file: Option<String>,
+    /// 独立的 stage-3 出站投影丢弃日志路径（append-only JSONL）。
+    pub projection_drop_log_file: Option<String>,
     pub snapshots: bool,
     pub codex_samples: bool,
     pub snapshot_stages: Option<String>,

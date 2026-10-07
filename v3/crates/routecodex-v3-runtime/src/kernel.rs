@@ -13,6 +13,7 @@ use crate::hub_v1::{
 };
 use crate::nodes::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
+use crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key;
 use crate::provider_failure_runtime_policy::{
     admit_v3_selected_target_after_recovery, select_v3_expanded_target_with_admission_rescue,
     select_v3_target_with_session_then_global, try_admit_v3_selected_target, V3AdmitAfterRecovery,
@@ -28,12 +29,11 @@ use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_debug::{V3DebugError, V3DebugRuntime, V3DryRunFixture};
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
-    is_v3_retryable_transient_source, V3EligibleExternalHttpResponse, V3Error01SourceRaised,
-    V3Error05ExecutionAction, V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness,
-    V3Error06ClientProjected, V3ErrorActionScope, V3ErrorHandlingCenter,
-    V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
-    V3ProviderFailureSessionScope, V3ProviderTerminalDisposition, V3_ERROR_CHAIN_NODE_IDS,
-    V3_TRANSIENT_TRANSPORT_HANG_CODE,
+    is_v3_retryable_transient_source, V3Error01SourceRaised, V3Error05ExecutionAction,
+    V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected,
+    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
+    V3ExternalErrorKind, V3ExternalErrorLink, V3ExternalHttpWitness, V3ProviderFailureSessionScope,
+    V3ProviderTerminalDisposition, V3_ERROR_CHAIN_NODE_IDS, V3_TRANSIENT_TRANSPORT_HANG_CODE,
 };
 use routecodex_v3_provider_responses::{
     ReqwestResponsesTransport, ResponsesTransport, V3ProviderAvailabilityProjection,
@@ -91,7 +91,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
     )
     .await
 }
-
 async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     T: ResponsesTransport + ?Sized,
 >(
@@ -116,6 +115,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         initial_selected_target,
         initial_expanded,
         initial_request_local_excluded_candidates,
+        initial_route_policy_scope,
+        initial_route_policy_pending,
         initial_protocol_decision,
         initial_plan_trace,
         provider_health_neutral,
@@ -126,6 +127,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         request_execution_control,
     } = state;
 
+    // stage-3 丢弃记录要写「客户端原始值」，必须在 Req04 归一化之前取句柄：
+    // `standardized.body` 之后会被 control prepare 与 before-send 改写。
+    let client_original_body = std::sync::Arc::new(raw.body.clone());
     let mut standardized = match build_v3_req_04_standardized_responses_from_v3_server_03(raw) {
         Ok(standardized) => standardized,
         Err(error) => {
@@ -148,24 +152,11 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     };
     let attempt_budget = request_execution_control.attempt_budget();
     if let Some(plan_trace) = initial_plan_trace {
-        // Router05..Target09 already ran in the Server-side protocol plan;
-        // splice those nodes so the client-visible trace stays identical to
-        // the unplanned path without re-entering the Router.
+        // Reuse the Server's Router05..Target09 trace without re-entering the Router.
         trace.extend(plan_trace);
     }
-    let previous_response_id = standardized
-        .body
-        .get("previous_response_id")
-        .is_some_and(|value| !value.is_null());
-    if previous_response_id {
-        return error_output(
-            runtime_source(
-                "V3HubReqInbound02Normalized",
-                "Responses continuation is retired: previous_response_id is unsupported",
-            ),
-            trace,
-            &hook_registry,
-        );
+    if let Some(source) = v3_direct_retired_continuation_error(&standardized.body) {
+        return error_output(source, trace, &hook_registry);
     }
     if let Err(message) = validate_initial_direct_plan(
         initial_selected_target.is_some(),
@@ -186,13 +177,16 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     let mut pinned_selected = None;
     let initial_selected_target_present = initial_selected_target.is_some();
     let route_policy_state = crate::route_policy::V3RoutePolicyRuntimeState::process_shared();
-    let mut route_policy_scope = crate::route_policy::V3RoutePolicyScope::without_conversation(
-        &standardized.server_id,
-        direct_failure_session_scope.routing_group(),
-        direct_failure_session_scope.session_id(),
-        &standardized.server_id,
-    )
-    .with_conversation(direct_failure_session_scope.session_id());
+    let mut route_policy_pending = initial_route_policy_pending;
+    let mut route_policy_scope = initial_route_policy_scope.unwrap_or_else(|| {
+        crate::route_policy::V3RoutePolicyScope::without_conversation(
+            &standardized.server_id,
+            direct_failure_session_scope.routing_group(),
+            direct_failure_session_scope.session_id(),
+            &standardized.server_id,
+        )
+        .with_conversation(direct_failure_session_scope.session_id())
+    });
     let expanded = if let Some(initial_expanded) = initial_expanded {
         // Server-side protocol plan already ran Router05..Target09; reuse its
         // candidate set for in-Target reselection instead of re-entering the
@@ -221,12 +215,13 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             &standardized.body,
             &classified.facts.route_classification.route_name,
         );
-        let classified = match route_policy_state.evaluate_request(
+        let (classified, pending) = match route_policy_state.evaluate_request(
             manifest,
             classified,
             route_policy_scope.clone(),
             &standardized.request_id,
             route_policy_observation,
+            now_epoch_ms,
         ) {
             Ok(value) => value,
             Err(error) => {
@@ -237,6 +232,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 )
             }
         };
+        route_policy_pending = Some(pending);
         let request_is_compaction = standardized.request_purpose.is_compaction()
             || standardized
                 .endpoint
@@ -307,18 +303,17 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     let standardized_request_id = standardized.request_id.clone();
     let standardized_server_id = standardized.server_id.clone();
     let commit_route_policy = |_receipt: &V3AttemptSuccessReceipt| -> Result<(), String> {
-        route_policy_state.commit_request(
-            &route_policy_scope,
-            &standardized_request_id,
-            &route_policy_policies,
-        )
+        match route_policy_pending.as_ref() {
+            Some(pending) => pending.commit(&route_policy_policies, now_epoch_ms),
+            None => Ok(()),
+        }
     };
     let mut failed_candidates = initial_request_local_excluded_candidates;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
     let mut initial_selected_target = initial_selected_target;
     let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
-    let mut last_external_http = None::<V3EligibleExternalHttpResponse>;
+    let mut last_external_http = None::<V3ExternalHttpWitness>;
     let mut send_attempts = 0usize;
     let mut provider_request_snapshot = None;
     let mut pending_provider_action_recovery = None;
@@ -388,15 +383,14 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     }
                 }
             } else if let Some(selected) = preferred {
-                match try_admit_v3_selected_target(&selected) {
-                    Ok(admission) => (selected, Some(admission)),
-                    Err(reason) => {
-                        return error_output(
-                            runtime_source("V3Target10ConcreteProviderSelected", reason),
-                            trace,
-                            &hook_registry,
-                        )
-                    }
+                match v3_direct_admit_pinned_target(
+                    selected,
+                    &last_external_http,
+                    &trace,
+                    &hook_registry,
+                ) {
+                    Ok(value) => value,
+                    Err(output) => return output,
                 }
             } else {
                 return error_output(
@@ -457,6 +451,13 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     provider_action_permit_target = Some(selected.candidate.clone());
                     selected_admission = match admit_v3_selected_target_after_recovery(&selected) {
                         V3AdmitAfterRecovery::Admitted(admission) => Some(admission),
+                        V3AdmitAfterRecovery::Busy => {
+                            failed_candidates
+                                .insert(v3_relay_provider_candidate_key(&selected.candidate));
+                            drop(provider_action_permit.take());
+                            provider_action_permit_target = None;
+                            continue;
+                        }
                         V3AdmitAfterRecovery::Failed(reason) => {
                             return error_output(
                                 runtime_source("V3Target10ConcreteProviderSelected", reason),
@@ -643,6 +644,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 decision.target,
                 captured_target_09,
                 failed_candidates.clone(),
+                route_policy_pending.clone(),
+                Some(route_policy_scope.clone()),
                 trace,
                 provider_failure_events.clone(),
                 accumulator.with_additional_attempts(send_attempts),
@@ -689,7 +692,20 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         let policy = hook_registry.run_route(selected, &standardized);
         trace.push("V3ResponsesDirect11Policy");
 
-        let wire = match hook_registry.run_request_projection(&policy) {
+        // stage-3 丢弃上下文：请求身份 + 入口端口 + 客户端原始 payload 句柄 +
+        // 独立丢弃日志路径。
+        let projection_drop_context = crate::projection_drop_log::V3ProjectionDropContext::new(
+            standardized_request_id.clone(),
+            standardized
+                .port
+                .map(|port| port.to_string())
+                .unwrap_or_default(),
+            manifest.debug.projection_drop_log_file.clone(),
+            client_original_body.clone(),
+        );
+        let wire = match hook_registry
+            .run_request_projection_with_drop_context(&policy, &projection_drop_context)
+        {
             Ok(value) => value,
             Err(source) => {
                 return error_output(source, trace, &hook_registry);
@@ -791,8 +807,23 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             })
         }) {
             Ok(raw) => raw,
+            Err(V3ProviderError::ConcurrencyBusy { .. }) => {
+                if let Err(error) = runtime_timing.finish_external() {
+                    return error_output(
+                        runtime_source("V3RuntimeTimingExternal", error),
+                        trace,
+                        &hook_registry,
+                    );
+                }
+                failed_candidates.insert(v3_relay_provider_candidate_key(&policy.target.candidate));
+                drop(provider_action_permit.take());
+                provider_action_permit_target = None;
+                continue;
+            }
             Err(error) => {
-                if let Some(witness) = eligible_external_http_from_provider_error(&error) {
+                if let Some(witness) =
+                    crate::hub_v1::external_http_witness_from_provider_error(&error)
+                {
                     last_external_http = Some(witness);
                 }
                 if let Err(timing_error) = runtime_timing.finish_external() {
@@ -923,6 +954,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         };
         let provider_response_is_stream =
             provider_raw.body_kind() == V3ProviderResponseBodyKind::Sse;
+        // The upstream answered: from this instant its head is real evidence,
+        // whatever the body turns out to be. Recorded before the body is
+        // interpreted so a stream whose payload never decodes is never reported
+        // as if no response had arrived. A branch below that can read a body
+        // replaces this with the fuller witness.
+        last_external_http = Some(crate::hub_v1::external_http_witness_head(&provider_raw));
         if !provider_response_is_stream {
             if let Err(error) = runtime_timing.finish_external() {
                 return error_output(
@@ -935,7 +972,11 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         let provider_status = provider_raw.status();
         trace.push("V3ProviderResp14Raw");
         if let Some(body) = provider_raw.json_body() {
-            if let Some(witness) = V3EligibleExternalHttpResponse::new(
+            // The real upstream response is retained even when it is not
+            // eligible for client projection (bug `705d624` keeps HTTP 502 out
+            // of any client response). Evidence capture is decoupled from that
+            // rule, so the status and body are never dropped.
+            last_external_http = Some(V3ExternalHttpWitness::new(
                 provider_status,
                 provider_raw
                     .headers()
@@ -943,9 +984,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     .map(|header| (header.name.clone(), header.value.clone()))
                     .collect(),
                 body.to_vec(),
-            ) {
-                last_external_http = Some(witness);
-            }
+            ));
         }
 
         let direct_response_compat_context =

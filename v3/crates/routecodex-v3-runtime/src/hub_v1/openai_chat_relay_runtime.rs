@@ -111,8 +111,6 @@ pub enum V3OpenAiChatRelayRuntimeError {
     Target(String),
     #[error("V3 OpenAI Chat provider pool exhausted after {attempted_candidates:?}")]
     ProviderPoolExhausted { attempted_candidates: Vec<String> },
-    #[error("V3 OpenAI Chat requested direct provider model not found: {0}")]
-    ModelNotFound(String),
     #[error("V3 OpenAI Chat provider contract failed: {0}")]
     Provider(#[from] V3ProviderError),
     #[error("V3 OpenAI Chat provider compat failed: {0}")]
@@ -171,6 +169,7 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport_provide
     provider_health: V3ProviderFailureRuntimeHealth,
     execution_mode: V3HubExecutionMode,
     request_execution_control: crate::nodes::V3RequestExecutionControl,
+    route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
 ) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
     execute_v3_openai_chat_relay_runtime_inner(
         manifest,
@@ -180,6 +179,7 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport_provide
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         execution_mode,
         Some(request_execution_control),
+        route_policy_pending,
     )
     .await
 }
@@ -231,6 +231,7 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_provider_health_and_execu
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         execution_mode,
         None,
+        None,
     )
     .await
 }
@@ -243,6 +244,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
     retry_policy: V3RelayProviderFailureRetryPolicy,
     execution_mode: V3HubExecutionMode,
     request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
+    route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
 ) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
     // 统一 relay 主循环骨架（大骨架）：生命周期与编排在 execute_v3_relay_runtime_core，
     // 协议差异收敛在 V3OpenAiChatRelayCodec。
@@ -263,12 +265,10 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
         Vec::new(),
         true,
         request_execution_control,
+        route_policy_pending,
     )
     .await
     .map_err(|error| match error {
-        V3RelayCoreError::ModelNotFound(message) => {
-            V3OpenAiChatRelayRuntimeError::ModelNotFound(message)
-        }
         // 治理层拦截（Mode B web-search）必须保留原变体：fail-fast 投影语义
         // 由 server 端 `project_v3_openai_chat_relay_runtime_failure` 区分。
         V3RelayCoreError::WebSearchIntercepted(_) => {
@@ -299,12 +299,6 @@ pub fn project_v3_openai_chat_relay_runtime_failure(
         V3OpenAiChatRelayRuntimeError::ProviderPoolExhausted { .. }
     );
     let source = match error {
-        V3OpenAiChatRelayRuntimeError::ModelNotFound(message) => build_v3_error_01_source_raised(
-            V3ErrorSourceKind::ModelNotFound,
-            "V3Target10ConcreteProviderSelected",
-            "direct_model_not_found",
-            message,
-        ),
         V3OpenAiChatRelayRuntimeError::ProviderPoolExhausted {
             attempted_candidates,
         } => provider_pool_exhausted_source(
@@ -1094,6 +1088,16 @@ fn project_responses_sse_as_openai_chat_stream(
                             crate::hub_v1::normalize_v3_responses_function_call_arguments(
                                 &mut normalized,
                             )?;
+                            // The terminal-admission owner decides which
+                            // Responses terminals are valid partial output for
+                            // the Responses client projection. It does not
+                            // govern `response.incomplete` on this entry: the
+                            // Chat codec owns that terminal and projects BOTH
+                            // legal reasons (`max_output_tokens` -> `length`,
+                            // `content_filter` -> `content_filter`) as Chat
+                            // final frames, per its own documented contract.
+                            // Asking the owner here would turn a legal
+                            // `content_filter` terminal into a stream error.
                             if normalized.get("type").and_then(Value::as_str)
                                 != Some("response.incomplete")
                             {

@@ -921,7 +921,7 @@ pub(crate) fn error_output_with_observability(
 
 pub(crate) fn target_exhausted_output_with_observability(
     source: V3Error01SourceRaised,
-    witness: Option<V3EligibleExternalHttpResponse>,
+    witness: Option<V3ExternalHttpWitness>,
     node_trace: Vec<&'static str>,
     hook_registry: &V3HookRegistry,
     observability: Option<V3RuntimeObservability>,
@@ -979,7 +979,7 @@ pub(crate) fn projected_error_output_with_observability_and_snapshots(
 
 pub(crate) fn provider_terminal_output(
     decision: V3Error05ExecutionDecision,
-    witness: Option<V3EligibleExternalHttpResponse>,
+    witness: Option<V3ExternalHttpWitness>,
     node_trace: Vec<&'static str>,
     observability: Option<V3RuntimeObservability>,
     provider_request_snapshot: Option<serde_json::Value>,
@@ -1028,12 +1028,11 @@ mod target_exhaustion_disposition_tests {
 
     #[test]
     fn direct_target_exhaustion_keeps_prior_real_upstream_http_response() {
-        let witness = V3EligibleExternalHttpResponse::new(
+        let witness = V3ExternalHttpWitness::new(
             429,
             vec![("content-type".into(), b"application/json".to_vec())],
             br#"{"error":"limit"}"#.to_vec(),
-        )
-        .unwrap();
+        );
         let source = routecodex_v3_error::build_v3_error_01_source_raised(
             V3ErrorSourceKind::TargetPoolExhausted,
             "V3Target10ConcreteProviderSelected",
@@ -1078,12 +1077,11 @@ mod target_exhaustion_disposition_tests {
             no_response.terminal_disposition,
             Some(V3ProviderTerminalDisposition::NoResponse)
         );
-        let witness = V3EligibleExternalHttpResponse::new(
+        let witness = V3ExternalHttpWitness::new(
             429,
             vec![("content-type".into(), b"application/json".to_vec())],
             br#"{"error":"limited"}"#.to_vec(),
-        )
-        .unwrap();
+        );
         let external = provider_terminal_output(
             decision,
             Some(witness.clone()),
@@ -1130,6 +1128,8 @@ pub(crate) fn relay_handoff_output(
     target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
     request_local_excluded_candidates: BTreeSet<String>,
+    route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
+    route_policy_scope: Option<crate::route_policy::V3RoutePolicyScope>,
     node_trace: Vec<&'static str>,
     provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
     observability_accumulator: V3RuntimeObservabilityAccumulator,
@@ -1157,6 +1157,8 @@ pub(crate) fn relay_handoff_output(
             target,
             expanded,
             request_local_excluded_candidates,
+            route_policy_pending,
+            route_policy_scope,
             node_trace,
             provider_failure_events,
             observability_accumulator,

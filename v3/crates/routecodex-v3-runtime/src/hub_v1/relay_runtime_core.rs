@@ -13,6 +13,7 @@
 use super::*;
 use crate::nodes::{V3AttemptStoreError, V3CommittedClientSseBuilder, V3RequestExecutionControl};
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
+use crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key;
 use crate::provider_failure_runtime_policy::{
     admit_v3_selected_target_after_recovery, resolve_v3_relay_target_outcome_with_admission_rescue,
     v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
@@ -24,7 +25,7 @@ use crate::provider_failure_runtime_policy::{
 use crate::runtime_timing::V3RuntimeTimingState;
 use futures_util::StreamExt;
 use routecodex_v3_config::{V3Config05ManifestPublished, V3WebSearchExecutionMode};
-use routecodex_v3_error::{V3ErrorSourceKind, V3ProviderFailureSessionScope};
+use routecodex_v3_error::V3ProviderFailureSessionScope;
 use routecodex_v3_provider_responses::{
     ResponsesTransport, V3ProviderError, V3ProviderRequestHeader, V3ProviderResponseBody,
     V3ProviderSseStream, V3ResponsesProviderTarget, V3Transport13ResponsesHttpRequest,
@@ -307,14 +308,9 @@ fn observe_v3_provider_sse(
     }))
 }
 
-/// Relay provider attempt 总等待窗口：从 provider manifest 的 `request_timeout_ms` 读取，
-/// 未配置时 serde default 为 300_000ms（5 分钟）。深上下文 provider 可通过
-/// `timeout = 900000` 覆盖为更长窗口。超时后归一化为 Transport 错误进入错误链。
-pub(crate) fn v3_relay_transport_response_timeout_from_ms(
-    request_timeout_ms: Option<u64>,
-) -> std::time::Duration {
-    std::time::Duration::from_millis(request_timeout_ms.filter(|&ms| ms > 0).unwrap_or(300_000))
-}
+pub(crate) use super::relay_runtime_shared::{
+    v3_provider_sse_idle_timeout, v3_relay_transport_response_timeout_from_ms,
+};
 
 pub(crate) fn v3_relay_transport_response_timeout(
     manifest: &V3Config05ManifestPublished,
@@ -353,20 +349,6 @@ mod response_header_timeout_contract_tests {
     }
 }
 
-/// The published provider SSE timeout intentionally covers both the first frame
-/// and the maximum inter-frame idle interval for relay streams.
-pub(crate) fn v3_provider_sse_idle_timeout(
-    manifest: &V3Config05ManifestPublished,
-    provider_id: &str,
-) -> Result<std::time::Duration, String> {
-    manifest.providers.get(provider_id).and_then(|provider| provider.sse_first_frame_timeout_ms)
-        .filter(|timeout_ms| *timeout_ms > 0).map(std::time::Duration::from_millis)
-        .ok_or_else(|| {
-            format!(
-                "published provider SSE first-frame/inter-frame timeout is missing for provider {provider_id}"
-            )
-        })
-}
 use std::fmt;
 
 /// 骨架内部错误（协议入口负责映射到自身错误类型）。
@@ -374,7 +356,6 @@ use std::fmt;
 pub enum V3RelayCoreError {
     StaticRegistry(String),
     EndpointPath(String),
-    ModelNotFound(String),
     Target(String),
     ProviderPoolExhausted {
         attempted_candidates: Vec<String>,
@@ -389,7 +370,6 @@ impl fmt::Display for V3RelayCoreError {
         match self {
             V3RelayCoreError::StaticRegistry(message) => write!(f, "static registry: {message}"),
             V3RelayCoreError::EndpointPath(message) => write!(f, "endpoint path: {message}"),
-            V3RelayCoreError::ModelNotFound(message) => write!(f, "model not found: {message}"),
             V3RelayCoreError::Target(message) => write!(f, "target: {message}"),
             V3RelayCoreError::ProviderPoolExhausted {
                 attempted_candidates,
@@ -558,6 +538,7 @@ pub async fn execute_v3_relay_runtime_core<C, T>(
     provider_header_overrides: Vec<V3ProviderRequestHeader>,
     allow_exhaustion_rescue_probe: bool,
     initial_request_execution_control: Option<V3RequestExecutionControl>,
+    route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
 ) -> Result<C::Output, V3RelayCoreError>
 where
     C: V3RelayProtocolCodec,
@@ -588,6 +569,12 @@ where
         transport_intent,
     );
     trace.push("V3HubReqInbound01ClientRaw");
+    // stage-3 丢弃上下文：ReqInbound02 会用 canonical 覆盖 `payload`，此处先保留
+    // 客户端原始 payload 的 Arc 句柄。
+    let raw = std::sync::Arc::clone(&req01.payload.0);
+    let drop_ctx = crate::projection_drop_log::V3ProjectionDropContext::from_manifest(
+        manifest, server_id, request_id, raw,
+    );
     C::validate_client_payload(&req01.payload.0)?;
     let req02 = C::req_inbound_02(req01)?;
     trace.push("V3HubReqInbound02Normalized");
@@ -617,7 +604,7 @@ where
     let mut provider_action_permit: Option<V3ProviderActionPermit> = None;
     let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> = None;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
-    let mut last_eligible_external_http = None;
+    let mut last_external_http = None;
     let request_execution_control = match initial_request_execution_control {
         Some(control) => control,
         None => V3RequestExecutionControl::from_manifest(manifest, server_id).map_err(|error| {
@@ -665,11 +652,6 @@ where
                 V3RelayProviderAdmittedTargetResolution::Selected(selected) => {
                     (selected.selected, Some(selected.admission))
                 }
-                V3RelayProviderAdmittedTargetResolution::Failed(source)
-                    if source.source_kind == V3ErrorSourceKind::ModelNotFound =>
-                {
-                    return Err(V3RelayCoreError::ModelNotFound(source.message.clone()));
-                }
                 V3RelayProviderAdmittedTargetResolution::Failed(source) => {
                     return Err(V3RelayCoreError::Target(format!(
                         "{}: {}",
@@ -685,7 +667,7 @@ where
                         format!("selected target exhausted after {attempted_candidates:?}"),
                     );
                     return Ok(C::assemble_failure_output(
-                        terminalize_provider_failure(failure, last_eligible_external_http.clone()),
+                        terminalize_provider_failure(failure, last_external_http.clone()),
                         trace,
                     ));
                 }
@@ -731,7 +713,7 @@ where
                         failed_candidates: &mut failed_candidates,
                         same_candidate_retries: &mut same_candidate_retries,
                         trace: &mut trace,
-                        last_eligible_external_http: &mut last_eligible_external_http,
+                        last_external_http: &mut last_external_http,
                     },
                     &mut retry_selected,
                     &mut pending_provider_action_recovery,
@@ -765,7 +747,7 @@ where
                         failed_candidates: &mut failed_candidates,
                         same_candidate_retries: &mut same_candidate_retries,
                         trace: &mut trace,
-                        last_eligible_external_http: &mut last_eligible_external_http,
+                        last_external_http: &mut last_external_http,
                     },
                     &mut retry_selected,
                     &mut pending_provider_action_recovery,
@@ -779,7 +761,7 @@ where
             }};
         }
         let req_compat = match build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07) {
-            Ok(req_compat) => req_compat,
+            Ok(projected) => record_projected_drops(&drop_ctx, projected),
             Err(error) => handle_provider_request_failure!(
                 "ProviderReqCompat06ProviderCompat",
                 "provider_request_compat_error",
@@ -849,6 +831,13 @@ where
                         V3AdmitAfterRecovery::Admitted(admission) => {
                             selected_admission = Some(admission)
                         }
+                        V3AdmitAfterRecovery::Busy => {
+                            failed_candidates
+                                .insert(v3_relay_provider_candidate_key(&selected.candidate));
+                            drop(provider_action_permit.take());
+                            provider_action_permit_target = None;
+                            continue;
+                        }
                         V3AdmitAfterRecovery::Failed(reason) => {
                             return Err(V3RelayCoreError::Target(reason))
                         }
@@ -914,14 +903,19 @@ where
                     })
                 }) {
                 Ok(raw) => raw,
+                Err(V3ProviderError::ConcurrencyBusy { .. }) => {
+                    runtime_timing
+                        .finish_external()
+                        .map_err(V3RelayCoreError::Target)?;
+                    failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
+                    drop(provider_action_permit.take());
+                    provider_action_permit_target = None;
+                    continue;
+                }
                 Err(V3ProviderError::HttpStatus { response }) => {
-                    if let Some(witness) =
-                        crate::hub_v1::relay_runtime_shared::eligible_external_http_witness(
-                            &response,
-                        )
-                    {
-                        last_eligible_external_http = Some(witness);
-                    }
+                    last_external_http = Some(
+                        crate::hub_v1::relay_runtime_shared::external_http_witness(&response),
+                    );
                     let failure = if response.body_read_failure.is_some() {
                         crate::hub_v1::relay_runtime_shared::provider_http_body_read_failure(
                             &response,
@@ -944,7 +938,7 @@ where
                             failed_candidates: &mut failed_candidates,
                             same_candidate_retries: &mut same_candidate_retries,
                             trace: &mut trace,
-                            last_eligible_external_http: &mut last_eligible_external_http,
+                            last_external_http: &mut last_external_http,
                         },
                         &mut retry_selected,
                         &mut pending_provider_action_recovery,
@@ -957,6 +951,11 @@ where
                     continue;
                 }
                 Err(error) => {
+                    if let Some(witness) =
+                        crate::hub_v1::external_http_witness_from_provider_error(&error)
+                    {
+                        last_external_http = Some(witness);
+                    }
                     let failure = provider_runtime_failure(error, &selected_target_provider_id);
                     let _ = runtime_timing.finish_external();
                     drop(provider_action_permit.take());
@@ -968,7 +967,7 @@ where
                             failed_candidates: &mut failed_candidates,
                             same_candidate_retries: &mut same_candidate_retries,
                             trace: &mut trace,
-                            last_eligible_external_http: &mut last_eligible_external_http,
+                            last_external_http: &mut last_external_http,
                         },
                         &mut retry_selected,
                         &mut pending_provider_action_recovery,
@@ -981,6 +980,12 @@ where
                     continue;
                 }
             };
+        // The upstream answered: from this instant its head is real evidence,
+        // whatever the body turns out to be. Recorded before the body is
+        // interpreted so a stream whose payload never decodes is never reported
+        // as if no response had arrived. A branch that can read a body replaces
+        // this with the fuller witness.
+        last_external_http = Some(crate::hub_v1::external_http_witness_head(&provider_raw));
         if let Err(timing_error) = runtime_timing.finish_external() {
             return Err(V3RelayCoreError::Target(timing_error));
         }
@@ -1007,7 +1012,7 @@ where
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
                                 trace: &mut trace,
-                                last_eligible_external_http: &mut last_eligible_external_http,
+                                last_external_http: &mut last_external_http,
                             },
                             &mut retry_selected,
                             &mut pending_provider_action_recovery,
@@ -1019,10 +1024,7 @@ where
                         }
                         if attempt_budget.residence_deadline() <= std::time::Instant::now() {
                             return Ok(C::assemble_failure_output(
-                                terminalize_provider_failure(
-                                    failure,
-                                    last_eligible_external_http.clone(),
-                                ),
+                                terminalize_provider_failure(failure, last_external_http.clone()),
                                 trace,
                             ));
                         }
@@ -1047,7 +1049,7 @@ where
                             failed_candidates: &mut failed_candidates,
                             same_candidate_retries: &mut same_candidate_retries,
                             trace: &mut trace,
-                            last_eligible_external_http: &mut last_eligible_external_http,
+                            last_external_http: &mut last_external_http,
                         },
                         &mut retry_selected,
                         &mut pending_provider_action_recovery,
@@ -1099,7 +1101,7 @@ where
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
                                 trace: &mut trace,
-                                last_eligible_external_http: &mut last_eligible_external_http,
+                                last_external_http: &mut last_external_http,
                             },
                             &mut retry_selected,
                             &mut pending_provider_action_recovery,
@@ -1143,6 +1145,11 @@ where
                         .finish_runtime()
                         .map_err(|timing_error| V3RelayCoreError::Target(timing_error))?,
                 );
+                if let Some(pending) = route_policy_pending.as_ref() {
+                    pending
+                        .commit_manifest_now(manifest)
+                        .map_err(V3RelayCoreError::Target)?;
+                }
                 return Ok(C::assemble_json_output(
                     client_response,
                     trace,
@@ -1214,7 +1221,7 @@ where
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
                                 trace: &mut trace,
-                                last_eligible_external_http: &mut last_eligible_external_http,
+                                last_external_http: &mut last_external_http,
                             },
                             &mut retry_selected,
                             &mut pending_provider_action_recovery,
@@ -1228,10 +1235,7 @@ where
                             || attempt_budget.residence_deadline() <= std::time::Instant::now()
                         {
                             return Ok(C::assemble_failure_output(
-                                terminalize_provider_failure(
-                                    failure,
-                                    last_eligible_external_http.clone(),
-                                ),
+                                terminalize_provider_failure(failure, last_external_http.clone()),
                                 trace,
                             ));
                         }
@@ -1296,7 +1300,7 @@ where
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
                                 trace: &mut trace,
-                                last_eligible_external_http: &mut last_eligible_external_http,
+                                last_external_http: &mut last_external_http,
                             },
                             &mut retry_selected,
                             &mut pending_provider_action_recovery,
@@ -1413,7 +1417,7 @@ where
                             failed_candidates: &mut failed_candidates,
                             same_candidate_retries: &mut same_candidate_retries,
                             trace: &mut trace,
-                            last_eligible_external_http: &mut last_eligible_external_http,
+                            last_external_http: &mut last_external_http,
                         },
                         &mut retry_selected,
                         &mut pending_provider_action_recovery,
@@ -1427,10 +1431,7 @@ where
                         attempt_budget.residence_deadline() <= std::time::Instant::now();
                     if deadline_expired {
                         return Ok(C::assemble_failure_output(
-                            terminalize_provider_failure(
-                                failure,
-                                last_eligible_external_http.clone(),
-                            ),
+                            terminalize_provider_failure(failure, last_external_http.clone()),
                             trace,
                         ));
                     }
@@ -1472,6 +1473,11 @@ where
                         .finish_runtime()
                         .map_err(|timing_error| V3RelayCoreError::Target(timing_error))?,
                 );
+                if let Some(pending) = route_policy_pending.as_ref() {
+                    pending
+                        .commit_manifest_now(manifest)
+                        .map_err(V3RelayCoreError::Target)?;
+                }
                 return Ok(C::assemble_sse_output(
                     committed_sse,
                     trace,

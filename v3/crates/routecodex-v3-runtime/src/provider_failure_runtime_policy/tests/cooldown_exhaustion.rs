@@ -1286,7 +1286,7 @@ async fn later_tier_selection_does_not_wait_for_probe_transport_admission() {
 }
 
 #[tokio::test]
-async fn pinned_over_budget_candidate_stays_selected_without_admission_reselection() {
+async fn busy_preferred_candidate_reselects_later_tier_without_capacity_wait() {
     let server_id = "pinned_busy_candidate_reselect";
     let first_provider = "pinned_busy_first";
     let mut manifest =
@@ -1365,22 +1365,32 @@ async fn pinned_over_budget_candidate_stays_selected_without_admission_reselecti
         .try_acquire_business(&first_key)
         .expect("first provider busy lease");
 
-    let selected = select_v3_expanded_target_with_admission_rescue(
-        &manifest,
-        expanded,
-        &scope,
-        &health,
-        &BTreeSet::new(),
-        20_001,
-        0,
-        false,
-        Some(preferred),
+    let selected = tokio::time::timeout(
+        std::time::Duration::from_millis(500),
+        select_v3_expanded_target_with_admission_rescue(
+            &manifest,
+            expanded,
+            &scope,
+            &health,
+            &BTreeSet::new(),
+            20_001,
+            0,
+            false,
+            Some(preferred),
+        ),
     )
-    .await;
+    .await
+    .expect("busy preferred admission must not wait for capacity");
     let V3AdmittedTargetSelectionAfterRescue::Selected(selected) = selected else {
-        panic!("an over-budget preferred provider must remain selected");
+        panic!("a full preferred provider must select the available later tier");
     };
-    assert_eq!(selected.selected.candidate.provider_id, first_provider);
+    assert_eq!(selected.selected.candidate.provider_id, "second");
+    assert_eq!(controller.snapshot(&first_key).unwrap().in_flight, 1);
+    assert!(
+        health
+            .availability(first_provider, Some("key1"), Some("gpt-test"), 20_001)
+            .available
+    );
     drop(selected);
     controller
         .release(active_business_lease.into_permit())

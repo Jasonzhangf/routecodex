@@ -109,6 +109,13 @@ config check
   -> status reports stopped
 ```
 
+`managed_child_applies_configured_fd_limit_before_hooks_sidecar` in
+`v3/crates/routecodex-v3-cli/tests/managed_lifecycle.rs` starts the real CLI with a lowered
+parent `RLIMIT_NOFILE` soft limit, configures `[runtime] fd_limit`, and reads the limit inherited
+by the managed child's hooks sidecar. It proves the config value reaches the managed process; a
+private helper unit test is not sufficient. Run it with
+`npm run test:v3-managed-server-lifecycle`.
+
 The test invokes the actual CLI binary; it does not call lifecycle internals or Server spawn APIs.
 State, process argv, logs, and evidence are scanned for the controlled secret.
 The user-facing parse shape is the old-style top-level command set:

@@ -409,6 +409,22 @@ impl ControlServer {
     pub fn serve_forever(self) -> std::io::Result<()> {
         self.listener.set_nonblocking(true)?;
         let running = Arc::new(AtomicBool::new(true));
+        let orphan_running = Arc::clone(&running);
+        let _orphan_watchdog = std::thread::spawn(move || {
+            let Some(expected_parent_pid) = std::env::var("ROUTECODEX_HOOKSD_PARENT_PID")
+                .ok()
+                .and_then(|value| value.parse::<libc::pid_t>().ok())
+            else {
+                return;
+            };
+            while orphan_running.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_secs(1));
+                if unsafe { libc::getppid() } != expected_parent_pid {
+                    orphan_running.store(false, Ordering::Relaxed);
+                    return;
+                }
+            }
+        });
         let timer = {
             let running = Arc::clone(&running);
             let core = Arc::clone(&self.core);

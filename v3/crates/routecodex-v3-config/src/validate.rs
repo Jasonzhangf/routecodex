@@ -1,4 +1,5 @@
 use crate::memory_raw_capture::compile_memory_raw_capture;
+use crate::runtime_config::compile_runtime;
 use crate::types::*;
 use crate::{
     compile_v3_http_sse_keepalive_ms_from_environment, looks_like_secret_literal, validation,
@@ -71,6 +72,7 @@ pub(crate) fn build_resource_registry(
         error: compile_error(authoring.error, provider_error_action_policies)?,
         admin_webui,
         memory_raw_capture: compile_memory_raw_capture(authoring.memory_raw_capture)?,
+        runtime: compile_runtime(authoring.runtime)?,
     })
 }
 pub(crate) fn publish_manifest(
@@ -1650,12 +1652,13 @@ fn validate_auth_alias_ref(
 pub(crate) fn compile_debug(
     authoring: V3DebugAuthoringConfig,
 ) -> Result<V3DebugManifest, V3ConfigError> {
-    if authoring
-        .log_file
-        .as_deref()
-        .is_some_and(|path| path.trim().is_empty())
-    {
+    let debug_log_file = authoring.log_file.as_deref();
+    if debug_log_file.is_some_and(|p| p.trim().is_empty()) {
         return Err(validation("debug log_file cannot be empty"));
+    }
+    let debug_drop_log_file = authoring.projection_drop_log_file.as_deref();
+    if debug_drop_log_file.is_some_and(|p| p.trim().is_empty()) {
+        return Err(validation("debug projection_drop_log_file cannot be empty"));
     }
     let snapshot_stages = authoring
         .snapshot_stages
@@ -1664,6 +1667,7 @@ pub(crate) fn compile_debug(
     Ok(V3DebugManifest {
         log_console: authoring.log_console,
         log_file: authoring.log_file,
+        projection_drop_log_file: authoring.projection_drop_log_file,
         snapshots: authoring.snapshots,
         // Preserve the explicit authoring authorization; the runtime still
         // decides which lifecycle stages may write samples.

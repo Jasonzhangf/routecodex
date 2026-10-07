@@ -105,6 +105,9 @@ where
     let accumulator = V3RuntimeObservabilityAccumulator::start();
     let runtime_timing = accumulator.timing();
     let mut trace = vec!["V3Config05ManifestPublished", "V3Server03HttpRequestRaw"];
+    // stage-3 丢弃记录要写「客户端原始值」，必须在 codec 标准化之前取句柄：
+    // `standardized` 之后还会被 before-send prepare 改写。
+    let client_original_body = std::sync::Arc::new(raw.body.clone());
     let mut standardized = match C::build_standardized(raw) {
         Ok(standardized) => standardized,
         Err(error) => {
@@ -163,12 +166,13 @@ where
         C::body(&standardized),
         &classified.facts.route_classification.route_name,
     );
-    let classified = match route_policy_state.evaluate_request(
+    let (classified, route_policy_pending) = match route_policy_state.evaluate_request(
         manifest,
         classified,
         route_policy_scope.clone(),
         C::request_id(&standardized),
         route_policy_observation,
+        now_epoch_ms,
     ) {
         Ok(value) => value,
         Err(error) => {
@@ -179,6 +183,7 @@ where
             )
         }
     };
+    let route_policy_pending = route_policy_pending;
     trace.push("V3Router05RequestClassified");
     let route_policy_group_id = classified.routing_group_id.clone();
     let plan = match router.resolve_route_pool_plan(manifest, classified) {
@@ -224,7 +229,7 @@ where
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
     let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
-    let mut last_external_http = None::<V3EligibleExternalHttpResponse>;
+    let mut last_external_http = None::<V3ExternalHttpWitness>;
     let mut send_attempts = 0usize;
     let mut pending_provider_action_recovery = None;
     let mut provider_request_snapshot = None;
@@ -353,6 +358,8 @@ where
                 decision.target,
                 expanded.clone(),
                 failed_candidates.clone(),
+                Some(route_policy_pending.clone()),
+                Some(route_policy_scope.clone()),
                 trace,
                 provider_failure_events.clone(),
                 accumulator.with_additional_attempts(send_attempts),
@@ -381,7 +388,24 @@ where
         };
         let policy = C::run_route(selected.clone(), &standardized);
         trace.push(C::POLICY_STAGE);
-        let wire = match C::run_request_projection(&policy, request_key_catalog) {
+        // stage-3 丢弃上下文：请求身份 + 入口端口 + 客户端原始 payload 句柄 +
+        // 独立丢弃日志路径。客户端原始 payload 在此保留为 Arc 句柄向下传递，
+        // 使 stage 3 只看到 canonical payload 时仍能记录 source_value。
+        let projection_drop_context = crate::projection_drop_log::V3ProjectionDropContext::new(
+            C::request_id(&standardized).to_string(),
+            manifest
+                .servers
+                .get(C::server_id(&standardized))
+                .map(|server| server.port.to_string())
+                .unwrap_or_default(),
+            manifest.debug.projection_drop_log_file.clone(),
+            client_original_body.clone(),
+        );
+        let wire = match C::run_request_projection(
+            &policy,
+            request_key_catalog,
+            &projection_drop_context,
+        ) {
             Ok(value) => value,
             Err(source) => {
                 return error_output(
@@ -437,6 +461,12 @@ where
                     provider_action_permit_target = Some(selected.candidate.clone());
                     selected_admission = match admit_v3_selected_target_after_recovery(&selected) {
                         V3AdmitAfterRecovery::Admitted(admission) => Some(admission),
+                        V3AdmitAfterRecovery::Busy => {
+                            failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
+                            drop(provider_action_permit.take());
+                            provider_action_permit_target = None;
+                            continue;
+                        }
                         V3AdmitAfterRecovery::Failed(reason) => {
                             return error_output(
                                 runtime_source("V3Target10ConcreteProviderSelected", reason),
@@ -517,8 +547,17 @@ where
         };
         let provider_raw = match transport.send(transport_request).await {
             Ok(raw) => raw,
+            Err(V3ProviderError::ConcurrencyBusy { .. }) => {
+                if let Err(error) = runtime_timing.finish_external() {
+                    return error_output(runtime_source("V3RuntimeTimingExternal", error), trace, &crate::hooks::register_responses_direct_hooks());
+                }
+                failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
+                drop(provider_action_permit.take());
+                provider_action_permit_target = None;
+                continue;
+            }
             Err(error) => {
-                if let Some(witness) = eligible_external_http_from_provider_error(&error) {
+                if let Some(witness) = crate::hub_v1::external_http_witness_from_provider_error(&error) {
                     last_external_http = Some(witness);
                 }
                 if let Err(timing_error) = runtime_timing.finish_external() {
@@ -656,6 +695,12 @@ where
             }
         };
         trace.push("V3ProviderResp14Raw");
+        // The upstream answered: from this instant its head is real evidence,
+        // whatever the body turns out to be. Recorded before the body is
+        // interpreted so a stream whose payload never decodes is never reported
+        // as if no response had arrived. A branch below that can read a body
+        // replaces this with the fuller witness.
+        last_external_http = Some(crate::hub_v1::external_http_witness_head(&provider_raw));
         if let Some(body) = provider_raw.json_body() {
             provider_response_snapshot = Some(json!({
                 "status": provider_raw.status(),
@@ -675,13 +720,14 @@ where
                 .collect();
             let response_body = provider_raw.into_body_bytes().await.ok();
             if let Some(body) = response_body.as_ref() {
-                if let Some(witness) = V3EligibleExternalHttpResponse::new(
+                // Retained regardless of client-projection eligibility (bug
+                // `705d624`): an upstream 502 is still a real upstream
+                // response and its status and body must survive as evidence.
+                last_external_http = Some(V3ExternalHttpWitness::new(
                     provider_status,
                     response_headers,
                     body.clone(),
-                ) {
-                    last_external_http = Some(witness);
-                }
+                ));
             }
             let provider_detail = response_body.and_then(|body| {
                 serde_json::from_slice::<serde_json::Value>(&body)
@@ -1182,11 +1228,7 @@ where
                     )
                 }
             };
-        if let Err(error) = route_policy_state.commit_request(
-            &route_policy_scope,
-            C::request_id(&standardized),
-            &policies,
-        ) {
+        if let Err(error) = route_policy_pending.commit(&policies, now_epoch_ms) {
             return error_output(
                 runtime_source("V3Router06RoutePoolResolved", error),
                 trace,

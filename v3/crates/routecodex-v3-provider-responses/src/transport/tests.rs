@@ -250,68 +250,50 @@ fn responses_http_target() -> V3ResponsesProviderTarget {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn saturated_provider_admission_returns_typed_transport_failure() {
-    let provider_key = "admission-timeout-provider:key1";
+async fn saturated_provider_admission_without_preacquired_lease_does_not_wait() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let provider_key = "admission-no-wait-provider:key1";
     let controller = V3AdaptiveConcurrencyController::process_shared();
-    controller.ensure_initial_budget(provider_key, 2).unwrap();
-    let first = controller.acquire(provider_key, 0).await;
-    let second = controller.acquire(provider_key, 0).await;
-    assert!(!first.is_probe());
-    assert!(!second.is_probe());
+    controller.ensure_initial_budget(provider_key, 1).unwrap();
+    let held = controller
+        .try_acquire_business(provider_key)
+        .expect("the configured provider budget must be occupied");
 
     let mut target = responses_http_target();
-    target.provider_id = "admission-timeout-provider".into();
+    target.provider_id = "admission-no-wait-provider".into();
+    target.base_url = format!("http://{addr}/v1");
     target.auth.alias = "key1".into();
-    target.initial_concurrency_budget = 2;
-    target.concurrency_acquire_timeout_ms = 20;
+    target.auth.secret = V3ProviderAuthSecretHandle::ApiKey("test-secret".into());
+    target.initial_concurrency_budget = 1;
     let wire = build_v3_provider_12_responses_wire_payload(
-        "req-admission-timeout",
+        "req-admission-no-wait",
         target,
         json!({"model":"glm-5.2","input":"hello"}),
     )
     .unwrap();
     let request = build_v3_transport_13_responses_request_from_v3_provider_12(wire).unwrap();
-    let error = ProviderResponsesTransport::default()
-        .send(request)
-        .await
-        .unwrap_err();
+    let started = std::time::Instant::now();
+    let result = tokio::time::timeout(
+        Duration::from_millis(500),
+        ProviderResponsesTransport::default().send(request),
+    )
+    .await
+    .expect("full concurrency must return immediately");
     assert!(matches!(
-        error,
-        V3ProviderError::Transport { reason, .. }
-            if reason == "provider concurrency admission timed out after 20ms"
+        result,
+        Err(V3ProviderError::ConcurrencyBusy { .. })
     ));
+    assert!(started.elapsed() < Duration::from_millis(500));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), listener.accept())
+            .await
+            .is_err(),
+        "a full provider must not receive an upstream request"
+    );
 
-    controller.release(first.into_permit()).unwrap();
-    controller.release(second.into_permit()).unwrap();
-}
-
-#[test]
-fn direct_http_builder_preserves_target_admission_timeout() {
-    let mut target = responses_http_target();
-    target.concurrency_acquire_timeout_ms = 37;
-    let request =
-        build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
-            "req-direct-admission-timeout",
-            target.provider_id,
-            "https://api2.orangeai.cc/v1/chat/completions",
-            target.auth,
-            V3ResponsesStreamIntent::Json,
-            json!({"model":"glm-5.2","messages":[]}),
-            Vec::new(),
-            Some(std::time::Duration::from_secs(5)),
-            target.concurrency_acquire_timeout_ms,
-            None,
-        )
-        .unwrap();
-
-    let V3Transport13ResponsesRequestKind::Http {
-        concurrency_acquire_timeout_ms,
-        ..
-    } = request.kind
-    else {
-        panic!("direct HTTP builder must produce an HTTP request");
-    };
-    assert_eq!(concurrency_acquire_timeout_ms, 37);
+    controller.release(held.into_permit()).unwrap();
 }
 
 #[test]
@@ -775,16 +757,29 @@ async fn transport_success_body_read_failure_is_a_network_failure() {
         .send(request)
         .await
         .expect_err("truncated success body must fail");
-    // No usable upstream response body arrived, so this is a network transport
-    // failure and must not project as a response-stage 599.
+    // No usable upstream response body arrived, so this stays a network
+    // transport failure and must not project as a response-stage 599. The head
+    // did arrive, so it survives on the error instead of being erased.
     match error {
-        V3ProviderError::Transport { reason, .. } => {
+        V3ProviderError::ResponseBodyUnreadable {
+            status,
+            headers,
+            reason,
+            ..
+        } => {
+            assert_eq!(status, 200);
+            assert!(
+                headers.iter().any(|header| {
+                    header.name == "content-type" && header.value == &b"application/json"[..]
+                }),
+                "the received head must survive a failed body read: {headers:?}"
+            );
             assert!(
                 reason.contains("error decoding response body"),
                 "unexpected reason: {reason}"
             );
         }
-        other => panic!("expected transport error, got {other:?}"),
+        other => panic!("expected an unreadable-body error, got {other:?}"),
     }
 }
 

@@ -4,7 +4,8 @@ use crate::global_cooldown::{
 };
 use routecodex_v3_config::V3Config05ManifestPublished;
 use sha2::{Digest, Sha256};
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc, RwLock, RwLockWriteGuard};
 
 #[cfg(test)]
@@ -192,6 +193,7 @@ pub(super) fn start_provider_health_persistence(
     V3ProviderCooldownPersistenceEntries,
 )> {
     let path = persistence_path?;
+    prune_stale_provider_cooldown_scope_files(&path, legacy_persistence_path.as_deref());
     let mut coordinator =
         match load_provider_cooldown_coordinator(manifest, path, legacy_persistence_path) {
             Ok(coordinator) => coordinator,
@@ -223,6 +225,77 @@ pub(super) fn start_provider_health_persistence(
 fn disabled_persistence_writer(error: String) -> V3ProviderHealthPersistenceWriter {
     eprintln!("[RouteCodexV3] provider cooldown persistence disabled: {error}");
     V3ProviderHealthPersistenceWriter::disabled(error)
+}
+
+/// Retains a bounded number of superseded per-scope cooldown state files.
+///
+/// The state path is keyed by a manifest scope digest, so every config revision
+/// that changes provider, auth or model identity writes a new
+/// `provider-cooldowns-<scope>.json` and the superseded ones are never read
+/// again. Recent generations are kept so a rollback still finds its state;
+/// older ones are removed so the state directory cannot grow per revision.
+fn prune_stale_provider_cooldown_scope_files(current: &Path, legacy: Option<&Path>) {
+    const RETAINED_SCOPE_GENERATIONS: usize = 4;
+    /// The state directory is shared by every instance, so age gates deletion:
+    /// on the generation count alone the newest-four rule would remove the
+    /// current scope file of a concurrently running process that has simply not
+    /// written a cooldown recently.
+    const PRUNABLE_GENERATION_AGE: std::time::Duration =
+        std::time::Duration::from_secs(24 * 60 * 60);
+    if std::env::var_os("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE").is_some() {
+        // An explicit state path is caller-owned; never prune around it.
+        return;
+    }
+    let Some(directory) = current.parent() else {
+        return;
+    };
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    let now = std::time::SystemTime::now();
+    let mut superseded = Vec::new();
+    for entry in entries.flatten() {
+        let candidate = entry.path();
+        if candidate == current || legacy == Some(candidate.as_path()) {
+            continue;
+        }
+        let Some(name) = candidate.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !name.starts_with("provider-cooldowns-") || !name.ends_with(".json") {
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        if !metadata.is_file() {
+            continue;
+        }
+        let modified = metadata.modified().unwrap_or(std::time::UNIX_EPOCH);
+        // A future or unreadable timestamp is never treated as prunable.
+        if now
+            .duration_since(modified)
+            .map(|age| age < PRUNABLE_GENERATION_AGE)
+            .unwrap_or(true)
+        {
+            continue;
+        }
+        superseded.push((modified, candidate));
+    }
+    if superseded.len() <= RETAINED_SCOPE_GENERATIONS {
+        return;
+    }
+    // Newest first, and the file name breaks ties so equal timestamps cannot
+    // make the retained set depend on directory order.
+    superseded.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
+    for (_, candidate) in superseded.into_iter().skip(RETAINED_SCOPE_GENERATIONS) {
+        if let Err(error) = fs::remove_file(&candidate) {
+            eprintln!(
+                "[RouteCodexV3] superseded provider cooldown state not removed {}: {error}",
+                candidate.display()
+            );
+        }
+    }
 }
 
 fn load_provider_cooldown_coordinator(
@@ -788,7 +861,7 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
             .with(|failure| failure.set(Some("injected writer start failure".to_string())));
 
         let (writer, entries) = start_provider_health_persistence(&manifest, Some(path), None)
-            .expect("spawn failure must degrade provider health persistence");
+            .expect("spawn failure must keep provider health persistence available");
 
         assert_eq!(
             entries.len(),
@@ -802,5 +875,74 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
         writer.enqueue(Vec::new());
         assert!(writer.flush_snapshot(Vec::new()).is_err());
         assert!(TEST_SPAWN_FAILURE.with(std::cell::Cell::take).is_none());
+    }
+
+    #[test]
+    fn superseded_cooldown_scope_files_are_pruned_while_recent_generations_survive() {
+        // Backdates a generation far enough that the shared-directory age gate
+        // treats it as prunable.
+        fn backdate(path: &std::path::Path) {
+            let modified =
+                std::time::SystemTime::now() - std::time::Duration::from_secs(48 * 60 * 60);
+            let handle = fs::OpenOptions::new()
+                .write(true)
+                .open(path)
+                .expect("open superseded generation for backdating");
+            handle
+                .set_times(std::fs::FileTimes::new().set_modified(modified))
+                .expect("backdate superseded generation");
+        }
+
+        let root = tempfile::tempdir().expect("create isolated persistence directory");
+        let current = root.path().join("provider-cooldowns-current.json");
+        fs::write(&current, b"{}").expect("write current scope state");
+        let legacy = root.path().join("provider-cooldowns-legacy.json");
+        fs::write(&legacy, b"{}").expect("write legacy scope state");
+        let unrelated = root.path().join("provider-cooldowns.json");
+        fs::write(&unrelated, b"{}").expect("write undigested legacy state");
+        let mut generations = Vec::new();
+        for index in 0..6 {
+            let path = root
+                .path()
+                .join(format!("provider-cooldowns-rev{index}.json"));
+            fs::write(&path, b"{}").expect("write superseded scope state");
+            // Distinct modification times make the retained-generation rule
+            // deterministic instead of depending on filesystem timestamp
+            // granularity.
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            backdate(&path);
+            generations.push(path);
+        }
+        // A concurrently running instance's current scope file: superseded by
+        // name for this manifest, but freshly written by its owner.
+        let concurrent = root.path().join("provider-cooldowns-concurrent.json");
+        fs::write(&concurrent, b"{}").expect("write concurrent scope state");
+
+        prune_stale_provider_cooldown_scope_files(&current, Some(&legacy));
+
+        assert!(
+            current.exists(),
+            "the live scope state must never be pruned"
+        );
+        assert!(
+            legacy.exists(),
+            "the legacy scope state must never be pruned"
+        );
+        assert!(
+            unrelated.exists(),
+            "an undigested provider-cooldowns.json is not a scope generation"
+        );
+        assert!(
+            concurrent.exists(),
+            "a recently written scope file is never pruned, even when superseded by name"
+        );
+        for (index, path) in generations.iter().enumerate() {
+            assert_eq!(
+                path.exists(),
+                index >= 2,
+                "only the newest four prunable generations are retained: {}",
+                path.display()
+            );
+        }
     }
 }

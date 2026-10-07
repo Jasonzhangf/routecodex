@@ -838,6 +838,29 @@ fn build_v3_openai_chat_tool_result_message(item: &Map<String, Value>) -> Result
     if let Some(item_id) = read_v3_non_empty_str(item.get("id")) {
         extension.insert("responses_item_id".to_string(), json!(item_id));
     }
+    let extra_fields: Map<String, Value> = item
+        .iter()
+        .filter(|(key, _)| {
+            !matches!(
+                key.as_str(),
+                "type"
+                    | "id"
+                    | "status"
+                    | "call_id"
+                    | "tool_call_id"
+                    | "tool_use_id"
+                    | "output"
+                    | "content"
+            ) && !(call_id.is_none() && matches!(key.as_str(), "name" | "namespace"))
+        })
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    if !extra_fields.is_empty() {
+        extension.insert(
+            "responses_tool_output_extra_fields".to_string(),
+            Value::Object(extra_fields),
+        );
+    }
     let Some(call_id) = call_id else {
         // 命名无配对输出：name/namespace 是配对身份，不得伪造 call_id。Chat 的 tool 角色
         // 只能按 tool_call_id 配对，故以 user 角色承载 output 并保留注册扩展身份。

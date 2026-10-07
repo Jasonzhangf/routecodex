@@ -587,7 +587,8 @@ const providerReqCompat = functionSlice(
 );
 for (const phrase of [
   'V3HubProviderWireProtocol::Anthropic',
-  'let source = build_v3_anthropic_provider_request_source_from_chat_canonical(',
+  'let (source, anthropic_drops) =',
+  'build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops(',
   'encode_v3_responses_semantic_as_anthropic_request(source)',
   'input.provider_semantic_payload()',
   'input.entry_protocol()',
@@ -702,7 +703,7 @@ for (const phrase of [
   'responses_openai_chat_field_parity_responses_wire_generates_collision_resistant_fc_ids',
   'responses_openai_chat_field_parity_responses_wire_hashes_sanitized_collisions',
   'responses_openai_chat_field_parity_responses_wire_preserves_include_projection',
-  'responses_openai_chat_field_parity_include_is_rejected_from_chat_wire',
+  'responses_openai_chat_field_parity_include_is_dropped_from_chat_wire',
   'openai_chat_wire_preserves_same_protocol_request_fields',
   'relay_responses_wire_rejects_unconsumed_previous_response_id',
   'relay_responses_wire_preserves_non_continuation_provider_fields',

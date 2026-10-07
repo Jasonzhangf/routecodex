@@ -106,8 +106,7 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_inner(
         initial_selected_target.clone(),
         initial_expanded,
         BTreeSet::new(),
-        None,
-        None,
+        V3ResponsesRelayRuntimeSeeds::default(),
     )
     .await
     {
@@ -197,39 +196,6 @@ pub fn project_v3_responses_relay_runtime_failure(
     observability: Option<V3RuntimeObservability>,
 ) -> V3ResponsesRelayRuntimeOutput {
     match error {
-        V3ResponsesRelayRuntimeError::ModelNotFound(message) => {
-            let source = build_v3_error_01_source_raised(
-                V3ErrorSourceKind::ModelNotFound,
-                "V3Target10ConcreteProviderSelected",
-                "direct_model_not_found",
-                message,
-            );
-            let projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
-                source: source.clone(),
-                action_scope: V3ErrorActionScope::None,
-                candidates_remaining: 0,
-                source_status: None,
-            });
-            return V3ResponsesRelayRuntimeOutput {
-                status: projected.status,
-                terminal_disposition: None,
-                client_body: V3ResponsesRelayClientBody::Json(projected.body),
-                node_trace: vec!["V3Error06ClientProjected"],
-                error_chain: Some(vec![
-                    "V3Error01SourceRaised",
-                    "V3Error02Classified",
-                    "V3Error03TargetLocalAction",
-                    "V3Error04TargetExhaustionDecision",
-                    "V3Error05ExecutionDecision",
-                    "V3Error06ClientProjected",
-                ]),
-                observability: None,
-                stream_observation: None,
-                finalized_response: None,
-                provider_snapshots: None,
-                protocol_direct_handoff: None,
-            };
-        }
         V3ResponsesRelayRuntimeError::ProviderPoolExhausted {
             attempted_candidates,
         } => {

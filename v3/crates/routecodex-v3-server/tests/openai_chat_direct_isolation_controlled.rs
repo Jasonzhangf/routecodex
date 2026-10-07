@@ -10,7 +10,7 @@ use futures_util::StreamExt;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
-use std::{net::TcpListener, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use tokio::sync::{mpsc, oneshot, Mutex};
 
 #[path = "../../../crates/routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
@@ -268,9 +268,9 @@ async fn chat_entry_same_protocol_provider_runs_direct_isolated() {
     );
     let _omit_done_capture = captures_rx.recv().await.unwrap();
 
-    // 4. An actual provider HTTP error retains its external status and body;
-    //    Direct must not rewrite the 429 into an internal network error.
-    let error_response = client
+    // 4. A real provider HTTP error is provider-private: the chat client observes a
+    //    broken transport and never the upstream status or the raw provider body.
+    let error_result = client
         .post(&endpoint)
         .json(&json!({
             "model":"chat-client-alias",
@@ -278,14 +278,17 @@ async fn chat_entry_same_protocol_provider_runs_direct_isolated() {
             "stream":false
         }))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(error_response.status(), StatusCode::TOO_MANY_REQUESTS);
-    let error_body: Value = error_response.json().await.unwrap();
-    assert_eq!(
-        error_body,
-        json!({"error":{"type":"rate_limit_error","message":"raw provider secret detail"}})
-    );
+        .await;
+    match error_result {
+        Ok(response) => panic!(
+            "a provider-terminal 429 must not reach the chat client, got {}",
+            response.status()
+        ),
+        Err(error) => assert!(
+            error.is_request(),
+            "expected an aborted chat client transport: {error}"
+        ),
+    }
     let error_capture = tokio::time::timeout(Duration::from_secs(2), captures_rx.recv())
         .await
         .expect("provider failure must produce a capture")
@@ -380,13 +383,9 @@ async fn chat_direct_isolated_applies_configured_provider_compat_profile() {
     std::env::remove_var("V3_OPENAI_CHAT_CONTROLLED_KEY");
 }
 
-fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
+#[path = "../../../crates/routecodex-v3-runtime/tests/support/test_ports.rs"]
+mod test_ports;
+use test_ports::free_port;
 
 fn manifest(
     server_port: u16,

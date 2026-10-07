@@ -231,6 +231,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
         let capture_provider_response = state
             .debug
             .should_capture_snapshot_stage("provider-response");
+        let relay_runtime_seeds = handoff.relay_runtime_seeds();
         let relay_result = if capture_provider_request || capture_provider_response {
             execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
                 &state.manifest,
@@ -251,8 +252,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
                 Some(handoff.target),
                 Some(handoff.expanded),
                 handoff.request_local_excluded_candidates,
-                Some(handoff.observability_accumulator),
-                Some(handoff.request_execution_control),
+                relay_runtime_seeds,
             )
             .await
         } else {
@@ -272,8 +272,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
                 Some(handoff.target),
                 Some(handoff.expanded),
                 handoff.request_local_excluded_candidates,
-                Some(handoff.observability_accumulator),
-                Some(handoff.request_execution_control),
+                relay_runtime_seeds,
             )
             .await
         };

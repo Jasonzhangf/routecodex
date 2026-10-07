@@ -341,10 +341,11 @@ function affectedCargoPackages(rustFiles, { allowUnowned = new Set() } = {}) {
     metadata = JSON.parse(
       execFileSync(
         'cargo',
-        ['metadata', '--locked', '--no-deps', '--format-version', '1', '--manifest-path', 'v3/Cargo.toml'],
+        ['metadata', '--locked', '--format-version', '1', '--manifest-path', 'v3/Cargo.toml'],
         {
           cwd: root,
           encoding: 'utf8',
+          maxBuffer: 32 * 1024 * 1024,
           env: { ...process.env, CARGO_NET_OFFLINE: process.env.CARGO_NET_OFFLINE ?? 'true' },
         },
       ),
@@ -426,8 +427,8 @@ const semanticFiles = [...new Set(entries.map(({ path }) => path).filter((relati
 if (semanticFiles.length > 0) {
   process.stderr.write(`[verify:fast] ${GATE_SEVERITY.WARN} semantic validation deferred for ${semanticFiles.length} Rust/config file(s): ${semanticFiles.join(', ')}\n`);
 }
-
 for (const { commit, path: relative } of entries) {
+  if (!/\.(?:mjs|js|cjs|json|sh)$/u.test(relative) && relative !== '.githooks/pre-commit' && relative !== '.githooks/pre-push') continue;
   let content;
   try {
     content = contentFor(relative, commit);

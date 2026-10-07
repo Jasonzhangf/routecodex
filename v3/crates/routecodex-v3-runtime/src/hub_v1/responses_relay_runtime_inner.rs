@@ -2,6 +2,7 @@ use super::responses_relay_failures::V3_RELAY_TRANSPORT_HANG_REASON;
 use super::web_search_hop::store_v3_responses_relay_web_search_state;
 use super::web_search_sidecar::execute_web_search_through_hooks_sidecar;
 use super::*;
+use crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key;
 use crate::provider_failure_runtime_policy::{
     admit_v3_selected_target_after_recovery, V3AdmitAfterRecovery,
 };
@@ -21,12 +22,24 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
     initial_expanded: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
     initial_request_local_excluded_candidates: BTreeSet<String>,
-    initial_observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
-    initial_request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
+    initial_relay_seeds: V3ResponsesRelayRuntimeSeeds,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    let observability_accumulator =
-        initial_observability_accumulator.unwrap_or_else(V3RuntimeObservabilityAccumulator::start);
+    let observability_accumulator = initial_relay_seeds
+        .observability_accumulator
+        .unwrap_or_else(V3RuntimeObservabilityAccumulator::start);
+    let route_policy_pending = initial_relay_seeds.route_policy_pending;
+    let route_policy_scope = initial_relay_seeds.route_policy_scope;
     let runtime_timing = observability_accumulator.timing();
+    macro_rules! commit_route_policy_if_present {
+        () => {{
+            if let Some(pending) = route_policy_pending.as_ref() {
+                let now = v3_responses_relay_now_epoch_ms()?;
+                pending
+                    .commit_from_manifest(manifest, now)
+                    .map_err(V3ResponsesRelayRuntimeError::Target)?;
+            }
+        }};
+    }
     compile_v3_hub_v1_static_registry()
         .map_err(|error| V3ResponsesRelayRuntimeError::StaticRegistry(error.to_string()))?;
     let mut trace = Vec::with_capacity(17);
@@ -65,6 +78,18 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         client_response_transport_intent,
     );
     trace.push("V3HubReqInbound01ClientRaw");
+    // stage-3 丢弃上下文：保留客户端原始 payload 的 Arc 句柄（ReqInbound02 会用
+    // canonical 覆盖 `payload`，该 Arc 仍指向客户端原始值）。
+    let projection_drop_context = crate::projection_drop_log::V3ProjectionDropContext::new(
+        input.request_id.clone(),
+        manifest
+            .servers
+            .get(&input.server_id)
+            .map(|server| server.port.to_string())
+            .unwrap_or_default(),
+        manifest.debug.projection_drop_log_file.clone(),
+        std::sync::Arc::clone(&req01.payload.0),
+    );
     let req02 = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(req01)
         .map_err(V3ResponsesRelayRuntimeError::ClientInboundCanonical)?;
     trace.push("V3HubReqInbound02Normalized");
@@ -117,9 +142,9 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> = None;
     let mut initial_selected_target = initial_selected_target;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
-    let mut last_eligible_external_http = None;
+    let mut last_external_http = None;
     let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
-    let request_execution_control = match initial_request_execution_control {
+    let request_execution_control = match initial_relay_seeds.request_execution_control {
         Some(control) => control,
         None => crate::nodes::V3RequestExecutionControl::from_manifest(manifest, &input.server_id)
             .map_err(|error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string()))?,
@@ -171,13 +196,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 V3RelayProviderAdmittedTargetResolution::Selected(selected) => {
                     (selected.selected, Some(selected.admission))
                 }
-                V3RelayProviderAdmittedTargetResolution::Failed(source)
-                    if source.source_kind == V3ErrorSourceKind::ModelNotFound =>
-                {
-                    return Err(V3ResponsesRelayRuntimeError::ModelNotFound(
-                        source.message.clone(),
-                    ));
-                }
                 V3RelayProviderAdmittedTargetResolution::Failed(source) => {
                     return Err(V3ResponsesRelayRuntimeError::Target(format!(
                         "{}: {}",
@@ -205,7 +223,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     return Ok(provider_failure_output(
                         terminalize_v3_responses_relay_provider_failure(
                             failure,
-                            last_eligible_external_http.clone(),
+                            last_external_http.clone(),
                         ),
                         trace,
                         0,
@@ -281,7 +299,11 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         expanded: captured_expanded,
                         protocol_candidate_keys,
                         request_local_excluded_candidates: failed_candidates.clone(),
+                        _route_policy_pending: route_policy_pending.clone(),
+                        _route_policy_scope: route_policy_scope.clone(),
                     },
+                    route_policy_pending: route_policy_pending.clone(),
+                    route_policy_scope: route_policy_scope.clone(),
                     node_trace: handoff_trace,
                     provider_failure_events,
                     observability_accumulator: observability_accumulator
@@ -339,7 +361,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             provider_failure_event_sink: provider_failure_event_sink.as_ref(),
                             selected_observability: &selected_observability,
                             trace: &mut trace,
-                            last_eligible_external_http: &mut last_eligible_external_http,
+                            last_external_http: &mut last_external_http,
                         },
                     )
                     .await
@@ -351,7 +373,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
             }};
         }
         let req_compat = match build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07) {
-            Ok(req_compat) => req_compat,
+            Ok(projected) => record_projected_drops(&projection_drop_context, projected),
             Err(error) => {
                 handle_provider_request_failure!(V3ResponsesRelayRuntimeError::ProviderCompat(
                     error
@@ -404,6 +426,13 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     match admit_v3_selected_target_after_recovery(&selected) {
                         V3AdmitAfterRecovery::Admitted(admission) => {
                             selected_admission = Some(admission)
+                        }
+                        V3AdmitAfterRecovery::Busy => {
+                            failed_candidates
+                                .insert(v3_relay_provider_candidate_key(&selected.candidate));
+                            drop(_provider_action_permit.take());
+                            provider_action_permit_target = None;
+                            continue;
                         }
                         V3AdmitAfterRecovery::Failed(reason) => {
                             return Err(V3ResponsesRelayRuntimeError::Target(reason))
@@ -462,12 +491,19 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         };
         let provider_raw = match transport_result {
             Ok(raw) => raw,
+            Err(V3ProviderError::ConcurrencyBusy { .. }) => {
+                handle_error_before_resp03!(runtime_timing
+                    .finish_external()
+                    .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
+                failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
+                drop(_provider_action_permit.take());
+                provider_action_permit_target = None;
+                continue;
+            }
             Err(V3ProviderError::HttpStatus { response }) => {
-                if let Some(witness) =
-                    crate::hub_v1::relay_runtime_shared::eligible_external_http_witness(&response)
-                {
-                    last_eligible_external_http = Some(witness);
-                }
+                last_external_http = Some(
+                    crate::hub_v1::relay_runtime_shared::external_http_witness(&response),
+                );
                 handle_error_before_resp03!(runtime_timing
                     .finish_external()
                     .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
@@ -513,7 +549,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             provider_failure_event_sink: provider_failure_event_sink.as_ref(),
                             selected_observability: &selected_observability,
                             trace: &mut trace,
-                            last_eligible_external_http: &mut last_eligible_external_http,
+                            last_external_http: &mut last_external_http,
                         },
                     )
                     .await
@@ -527,6 +563,11 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 handle_error_before_resp03!(runtime_timing
                     .finish_external()
                     .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
+                if let Some(witness) =
+                    crate::hub_v1::external_http_witness_from_provider_error(&error)
+                {
+                    last_external_http = Some(witness);
+                }
                 let failure = provider_runtime_failure(
                     error,
                     &selected_target_provider_id,
@@ -547,7 +588,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             provider_failure_event_sink: provider_failure_event_sink.as_ref(),
                             selected_observability: &selected_observability,
                             trace: &mut trace,
-                            last_eligible_external_http: &mut last_eligible_external_http,
+                            last_external_http: &mut last_external_http,
                         },
                     )
                     .await
@@ -558,6 +599,12 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 continue;
             }
         };
+        // The upstream answered: from this instant its head is real evidence,
+        // whatever the body turns out to be. It is recorded before the body is
+        // interpreted so a stream whose payload never decodes is never reported
+        // as if no response had arrived. A branch below that can read a body
+        // replaces this with the fuller witness.
+        last_external_http = Some(crate::hub_v1::external_http_witness_head(&provider_raw));
         if provider_raw.body_kind()
             == routecodex_v3_provider_responses::V3ProviderResponseBodyKind::Json
         {
@@ -597,7 +644,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                         .as_ref(),
                                     selected_observability: &selected_observability,
                                     trace: &mut trace,
-                                    last_eligible_external_http: &mut last_eligible_external_http,
+                                    last_external_http: &mut last_external_http,
                                 },
                             )
                             .await
@@ -635,7 +682,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                         .as_ref(),
                                     selected_observability: &selected_observability,
                                     trace: &mut trace,
-                                    last_eligible_external_http: &mut last_eligible_external_http,
+                                    last_external_http: &mut last_external_http,
                                 },
                             )
                             .await
@@ -670,7 +717,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                 provider_failure_event_sink: provider_failure_event_sink.as_ref(),
                                 selected_observability: &selected_observability,
                                 trace: &mut trace,
-                                last_eligible_external_http: &mut last_eligible_external_http,
+                                last_external_http: &mut last_external_http,
                             },
                         )
                         .await
@@ -775,7 +822,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                 provider_failure_event_sink: provider_failure_event_sink.as_ref(),
                                 selected_observability: &selected_observability,
                                 trace: &mut trace,
-                                last_eligible_external_http: &mut last_eligible_external_http,
+                                last_external_http: &mut last_external_http,
                             },
                         )
                         .await
@@ -847,8 +894,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                             .as_ref(),
                                         selected_observability: &selected_observability,
                                         trace: &mut trace,
-                                        last_eligible_external_http:
-                                            &mut last_eligible_external_http,
+                                        last_external_http: &mut last_external_http,
                                     },
                                 )
                                 .await
@@ -953,6 +999,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     ),
                     attempt_budget.clone(),
                 )?;
+                commit_route_policy_if_present!();
                 return Ok(V3ResponsesRelayRuntimeOutput {
                     status: 200,
                     terminal_disposition: None,
@@ -1026,7 +1073,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                         .as_ref(),
                                     selected_observability: &selected_observability,
                                     trace: &mut trace,
-                                    last_eligible_external_http: &mut last_eligible_external_http,
+                                    last_external_http: &mut last_external_http,
                                 },
                             )
                             .await
@@ -1045,7 +1092,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                 attach_v3_provider_failure_events_to_failure(
                                     terminalize_v3_responses_relay_provider_failure(
                                         failure,
-                                        last_eligible_external_http.clone(),
+                                        last_external_http.clone(),
                                     ),
                                     &provider_failure_events,
                                 ),
@@ -1128,7 +1175,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                 provider_failure_event_sink: provider_failure_event_sink.as_ref(),
                                 selected_observability: &selected_observability,
                                 trace: &mut trace,
-                                last_eligible_external_http: &mut last_eligible_external_http,
+                                last_external_http: &mut last_external_http,
                             },
                         )
                         .await
@@ -1206,8 +1253,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                             .as_ref(),
                                         selected_observability: &selected_observability,
                                         trace: &mut trace,
-                                        last_eligible_external_http:
-                                            &mut last_eligible_external_http,
+                                        last_external_http: &mut last_external_http,
                                     },
                                 )
                                 .await
@@ -1339,6 +1385,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     ),
                     attempt_budget.clone(),
                 )?;
+                commit_route_policy_if_present!();
                 return Ok(V3ResponsesRelayRuntimeOutput {
                     status: 200,
                     terminal_disposition: None,

@@ -9,7 +9,6 @@ use reqwest::StatusCode as ReqwestStatusCode;
 use serde_json::{json, Value};
 use std::{
     fs,
-    net::TcpListener,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::Arc,
@@ -130,14 +129,13 @@ async fn cli_replay_proves_pool_match_default_floor_and_total_exhaustion() {
             "tools":[{"type":"function","name":"run","parameters":{"type":"object"}}]
         }))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        exhausted_response.status(),
-        ReqwestStatusCode::SERVICE_UNAVAILABLE
+        .await;
+    // Total exhaustion is provider-private: the client observes a transport
+    // break, never the provider's 503 or its body.
+    assert!(
+        exhausted_response.is_err(),
+        "a fully exhausted pool must not project a provider status to the client"
     );
-    let exhausted_body = exhausted_response.json::<Value>().await.unwrap();
-    assert_eq!(exhausted_body, json!({"error":"controlled_failure"}));
     let exhausted_optional = next_capture(&mut failure_a.captures, "exhaust optional").await;
     assert_eq!(exhausted_optional.body["model"], "wire-optional");
     let exhausted_default = next_capture(&mut failure_b.captures, "exhaust default").await;
@@ -193,13 +191,9 @@ async fn start_controlled_upstream(mode: ProviderMode) -> ControlledUpstream {
     }
 }
 
-fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
+#[path = "../../../crates/routecodex-v3-runtime/tests/support/test_ports.rs"]
+mod test_ports;
+use test_ports::free_port;
 
 fn write_config(
     success_port: u16,

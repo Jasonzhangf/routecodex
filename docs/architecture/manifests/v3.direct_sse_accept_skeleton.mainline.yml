@@ -4,7 +4,7 @@ owner_feature_id: v3.direct_sse_accept_skeleton
 commit_contract_owner_feature_id: v3.responses_direct_full_attempt_commit
 status: source_controlled_runtime_pending_live_replay
 implementation_symbols:
-  - V3FrontSseAcceptSkeleton
+  - accept_v3_client_sse_transport
   - v3_request_wants_sse
 supporting_callers:
   - pending_endpoint_after_responses_admission

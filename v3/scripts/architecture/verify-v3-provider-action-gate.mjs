@@ -234,12 +234,13 @@ for (const token of [
   'self.gate.abandon_admission(&self.key, self.generation)',
   'waiter_queue: VecDeque<u64>',
   'state.waiter_queue.len() > 1',
-  'state.admitted_generation == Some(state.generation)',
+  'state.admitted_generation.is_some()',
+  '!require_admission && *active_key == *key && state.admitted_generation.is_some()',
   'let active_admission_owned = states.iter().any',
   'if !active_admission_owned {',
   'let group_has_active_admission = states.iter().any',
   '(!self.admit_action || !group_has_active_admission)',
-  'record_failure_and_wait_for_terminal_projection',
+  'record_failure_and_commit_terminal_projection',
   'pub async fn wait_for_exact_provider_action(',
   'pub fn abandon_admission(',
   'pub fn commit_terminal_admission(',
@@ -549,7 +550,7 @@ for (const token of [
   'action_gate: V3ProviderActionGate::process_shared()',
   'project_v3_client_disconnect',
   'record_provider_action_failure',
-  'wait_for_terminal_provider_projection',
+  'record_terminal_provider_projection_in_scope',
   'build_v3_relay_provider_error_05_decision',
   'terminal_projection_for',
   'provider_runtime_failure_stage',
@@ -578,8 +579,9 @@ for (const forbidden of [
 
 const requiredGateTests = [
   'isolated_failure_blocks_one_action_for_at_least_one_second',
-  'isolated_terminal_projection_waits_for_the_same_one_second_gate',
-  'unrelated_success_cannot_release_a_stale_terminal_projection',
+  'isolated_terminal_projection_commits_without_waiting_for_provider_action_admission',
+  'terminal_projection_advances_an_active_exact_key_and_preserves_its_permit',
+  'unrelated_success_cannot_delay_a_terminal_projection',
   'overlapping_waiter_promotes_scope_to_five_seconds_and_one_admission',
   'process_shared_handles_observe_the_same_cross_request_generation',
   'terminal_transition_wakes_old_waiter_for_reselection_then_serializes_next_generation',
@@ -623,7 +625,7 @@ assertRustTest(
 assertRustTest(
   text.responsesRelayTests,
   files.responsesRelayTests,
-  'responses_relay_incomplete_exhaustion_keeps_typed_terminal_error',
+  'responses_relay_content_filter_incomplete_exhaustion_keeps_typed_terminal_error',
 );
 for (const token of [
   'provider_sse_done_without_completed_is_terminal_missing',
@@ -677,7 +679,7 @@ requireText(
 );
 for (const token of [
   'direct_sse_console_closeout_uses_runtime_stream_observation_for_usage_and_finish',
-  'io_sse_body_internal_error_is_explicit_599_not_silent_eof',
+  'io_sse_body_internal_error_aborts_instead_of_emitting_599',
 ]) {
   requireText(text.serverTests, files.serverTests, token);
 }
@@ -833,6 +835,7 @@ assertIncludes(
   [
     'V3ProviderActionGate::abandon_admission',
     'V3ProviderActionGate::commit_terminal_admission',
+    'V3ProviderActionGate::record_failure_and_commit_terminal_projection',
   ],
   `${files.resourceMap}: v3.error.provider_action_gate.allowed_writers`,
 );

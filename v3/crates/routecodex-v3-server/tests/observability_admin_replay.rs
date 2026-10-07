@@ -22,7 +22,6 @@ use routecodex_v3_server::spawn_v3_server_aggregate_with_admin;
 use serde_json::{json, Value};
 use std::{
     env, fs,
-    net::TcpListener,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -98,13 +97,9 @@ fn temp_home(label: &str) -> PathBuf {
     dir
 }
 
-fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
+#[path = "../../../crates/routecodex-v3-runtime/tests/support/test_ports.rs"]
+mod test_ports;
+use test_ports::free_port;
 
 fn now_epoch_ms() -> u64 {
     std::time::SystemTime::now()
@@ -276,19 +271,17 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
             "stream": false
         }))
         .send()
-        .await
-        .unwrap();
-    let client_status = response.status();
-    let client_body = response.text().await.unwrap();
+        .await;
 
-    // 1. The failure is real: the provider was contacted and its own status and
-    //    body reached the client unchanged.
+    // 1. The failure is real: the provider was contacted exactly once, and the
+    //    client observes a transport break. The provider's own status and body
+    //    are provider-private evidence and never reach the client.
     assert_eq!(upstream_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(client_status, reqwest::StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(
-        serde_json::from_str::<Value>(&client_body).unwrap(),
-        json!({"error":{"message":"controlled upstream unavailable","type":"server_error","code":"controlled_unavailable"}})
+    assert!(
+        response.is_err(),
+        "a provider HTTP failure must not fabricate a client HTTP response"
     );
+    let client_status = "transport_break";
 
     // 2. The runtime wrote a row for this request; read it back over HTTP.
     let list_url = format!("http://{admin_addr}/api/observability/records?range=all&page_size=50");
@@ -466,35 +459,54 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
     );
 
     // 6. The artifacts endpoint lists the real files with their real sizes.
-    let (artifacts_status, artifacts) = get_json(
-        &client,
-        &format!(
-            "http://{admin_addr}/api/observability/artifacts?port={server_port}&request_id={request_id}"
-        ),
-    )
-    .await;
-    assert_eq!(artifacts_status, reqwest::StatusCode::OK);
-    assert_eq!(artifacts["dir_exists"], true);
-    let files = artifact_files(&artifacts);
-    assert!(
-        !files.is_empty(),
-        "a captured failure must leave real artifacts"
-    );
-    let mut checked = Vec::new();
-    for entry in files {
-        let name = entry["file"].as_str().unwrap();
-        let reported = entry["size_bytes"].as_u64().unwrap();
-        let on_disk = fs::metadata(artifact_dir.join(name))
-            .unwrap_or_else(|error| panic!("{name} is listed but missing on disk: {error}"));
-        assert!(on_disk.is_file());
-        assert!(reported > 0, "{name} must have a real non-zero size");
-        assert_eq!(
-            on_disk.len(),
-            reported,
-            "{name} size must match the file on disk"
+    //    Evidence is persisted through the serialized sample worker, so the
+    //    listing can be observed while a file is still being written. Wait for a
+    //    stable listing, then still require exact size equality against disk.
+    let artifacts_deadline = Instant::now() + Duration::from_secs(20);
+    let (files, checked) = loop {
+        let (artifacts_status, artifacts) = get_json(
+            &client,
+            &format!(
+                "http://{admin_addr}/api/observability/artifacts?port={server_port}&request_id={request_id}"
+            ),
+        )
+        .await;
+        assert_eq!(artifacts_status, reqwest::StatusCode::OK);
+        assert_eq!(artifacts["dir_exists"], true);
+        let files = artifact_files(&artifacts).clone();
+        assert!(
+            !files.is_empty(),
+            "a captured failure must leave real artifacts"
         );
-        checked.push(format!("{name}={reported}"));
-    }
+        let mut checked = Vec::new();
+        let mut stable = true;
+        for entry in &files {
+            let name = entry["file"].as_str().unwrap();
+            let reported = entry["size_bytes"].as_u64().unwrap();
+            let on_disk = match fs::metadata(artifact_dir.join(name)) {
+                Ok(metadata) => metadata,
+                Err(_) => {
+                    stable = false;
+                    break;
+                }
+            };
+            assert!(on_disk.is_file());
+            assert!(reported > 0, "{name} must have a real non-zero size");
+            if on_disk.len() != reported {
+                stable = false;
+                break;
+            }
+            checked.push(format!("{name}={reported}"));
+        }
+        if stable {
+            break (files, checked);
+        }
+        assert!(
+            Instant::now() < artifacts_deadline,
+            "artifact sizes must stabilize against the files on disk"
+        );
+        sleep(Duration::from_millis(25)).await;
+    };
     assert!(
         files.iter().any(|entry| entry["file"] == "error.json"),
         "the failure evidence must include error.json"

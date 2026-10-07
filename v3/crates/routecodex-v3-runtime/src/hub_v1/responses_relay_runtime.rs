@@ -172,8 +172,7 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_server
         None,
         None,
         BTreeSet::new(),
-        None,
-        None,
+        V3ResponsesRelayRuntimeSeeds::default(),
     ))
     .await
 }
@@ -190,8 +189,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_se
     initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
     initial_expanded: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
     initial_request_local_excluded_candidates: BTreeSet<String>,
-    initial_observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
-    initial_request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
+    initial_relay_seeds: V3ResponsesRelayRuntimeSeeds,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     let transport = V3LiveSnapResponsesTransport::with_default_transport();
     let snapshots = transport.snapshots();
@@ -212,8 +210,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_se
         initial_selected_target,
         initial_expanded,
         initial_request_local_excluded_candidates,
-        initial_observability_accumulator,
-        initial_request_execution_control,
+        initial_relay_seeds,
     ))
     .await?;
     output.provider_snapshots = Some(snapshots.into_payload(
@@ -244,8 +241,7 @@ pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTr
         None,
         None,
         BTreeSet::new(),
-        None,
-        None,
+        V3ResponsesRelayRuntimeSeeds::default(),
     ))
     .await
 }
@@ -272,8 +268,7 @@ pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
         None,
         None,
         BTreeSet::new(),
-        None,
-        None,
+        V3ResponsesRelayRuntimeSeeds::default(),
     ))
     .await
 }
@@ -310,7 +305,7 @@ async fn handle_v3_responses_relay_provider_failure(
             failed_candidates: state.failed_candidates,
             same_candidate_retries: state.same_candidate_retries,
             trace: state.trace,
-            last_eligible_external_http: state.last_eligible_external_http,
+            last_external_http: state.last_external_http,
         },
     )
     .await
@@ -670,23 +665,30 @@ pub(crate) fn materialize_v3_runtime_input_usage_estimate_from_request(
     response: &mut Value,
     request: &Value,
 ) {
+    let Some(response_object) = response.as_object_mut() else {
+        return;
+    };
+    // The estimate is a full BPE pass and is discarded whenever the provider
+    // already reported `input_tokens`, so the reported value is checked first.
+    if response_object
+        .get("usage")
+        .and_then(Value::as_object)
+        .and_then(|usage| usage.get("input_tokens"))
+        .and_then(Value::as_u64)
+        .is_some_and(|tokens| tokens > 0)
+    {
+        return;
+    }
     let estimated_input_tokens = crate::token_estimation::estimate_v3_request_tokens(request);
     if estimated_input_tokens == 0 {
         return;
     }
-    let Some(response_object) = response.as_object_mut() else {
-        return;
-    };
     let usage = response_object
         .entry("usage")
         .or_insert_with(|| Value::Object(Map::new()));
     let Some(usage_object) = usage.as_object_mut() else {
         return;
     };
-    let input_tokens = usage_object.get("input_tokens").and_then(Value::as_u64);
-    if input_tokens.is_some_and(|tokens| tokens > 0) {
-        return;
-    }
     usage_object.insert(
         "input_tokens".to_string(),
         Value::from(estimated_input_tokens),

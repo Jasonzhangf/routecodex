@@ -1,9 +1,14 @@
+mod client_sse_transport;
+mod client_transport_observation;
 mod compaction_request;
 mod console;
+mod debug_runtime_degradation;
 mod endpoint_handlers;
 mod executors;
 mod frame_builders;
+mod listener_accept;
 mod live_snapshot;
+mod live_snapshot_projections;
 mod metadata_center;
 mod models_catalog;
 mod request_id;
@@ -30,6 +35,7 @@ use endpoint_handlers::{
 pub use executors::*;
 pub(crate) use frame_builders::*;
 pub(crate) use live_snapshot::*;
+pub(crate) use live_snapshot_projections::*;
 pub(crate) use metadata_center::*;
 use request_id::{
     format_v3_tm, v3_request_id_clock_now, V3AllocatedRequestIdentity, V3RequestCounterState,
@@ -51,9 +57,12 @@ use axum::http::{
     HeaderMap, HeaderValue, Response, StatusCode,
 };
 use axum::routing::{get, post};
-use axum::{Json, Router};
+use axum::Router;
+use client_sse_transport::accept_v3_client_sse_transport;
+use debug_runtime_degradation::build_v3_debug_runtime_degrading_optional_log_sink;
 use futures_util::{stream, StreamExt};
 use libc::EINTR;
+use listener_accept::{run_v3_listener_accept_loop, V3ListenerAcceptState};
 use responses_direct_server_outcome::{
     execute_responses_direct_server_outcome, V3ResponsesDirectServerOutcome,
 };
@@ -115,8 +124,8 @@ use routecodex_v3_runtime::{
     V3ResponsesRelayClientStream, V3ResponsesRelayDryRunOutcome,
     V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayProviderSnapshotCapture,
     V3ResponsesRelayRuntimeError, V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput,
-    V3ResponsesRelayServerToolScope, V3ResponsesRelayServerToolState, V3RuntimeObservability,
-    V3RuntimeObservabilityAccumulator, V3RuntimeProviderFailureEventSink,
+    V3ResponsesRelayRuntimeSeeds, V3ResponsesRelayServerToolScope, V3ResponsesRelayServerToolState,
+    V3RuntimeObservability, V3RuntimeObservabilityAccumulator, V3RuntimeProviderFailureEventSink,
     V3RuntimeProviderFailureObservation, V3RuntimeRouteSelectionEventSink,
     V3RuntimeStreamObservation, V3RuntimeTimingSummary, V3RuntimeUsageSummary,
 };
@@ -130,19 +139,20 @@ use routecodex_v3_sse::{
 use serde_json::{json, Map, Value};
 use session_admission::{
     hold_response_body_admission_permit, hold_response_body_request_activity_permit,
-    V3ResponsesSessionAdmissionGate, V3ResponsesSessionAdmissionPermit,
-    V3ResponsesSessionAdmissionScope, V3ServerRequestActivityGate,
+    V3ResponsesSessionAdmissionError, V3ResponsesSessionAdmissionGate,
+    V3ResponsesSessionAdmissionPermit, V3ResponsesSessionAdmissionScope,
+    V3ServerRequestActivityGate,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fmt;
 use std::fs;
 use std::future::Future;
-use std::io;
-use std::io::Read as _;
-use std::io::Write as _;
+use std::io::{self, Read as _, Write as _};
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -151,7 +161,7 @@ use tokio::sync::oneshot;
 
 // feature_id: v3.codex_sample_retention_snap_scope
 // sample persistence is owned solely by routecodex-v3-debug::V3CodexSampleStore.
-fn v3_io_error_is_eintr(error: &io::Error) -> bool {
+pub(crate) fn v3_io_error_is_eintr(error: &io::Error) -> bool {
     error.kind() == io::ErrorKind::Interrupted || error.raw_os_error() == Some(EINTR)
 }
 
@@ -237,6 +247,7 @@ pub struct V3ListenerHandle {
     pub server_id: String,
     pub addr: SocketAddr,
     shutdown: Option<oneshot::Sender<()>>,
+    accept_state: Arc<V3ListenerAcceptState>,
 }
 
 #[derive(Debug)]
@@ -254,6 +265,7 @@ pub struct V3ServerAggregateHandle {
 pub struct V3ServerExecPreparation {
     pub front_checkpoints: Vec<V3RuntimeHandoffCheckpoint>,
     pub codex_sample_persist_failures: Vec<routecodex_v3_debug::V3CodexSamplePersistFailure>,
+    _codex_sample_exec_guard: Option<routecodex_v3_debug::V3CodexSampleExecGuard>,
 }
 
 pub fn build_v3_server_startup_01_listener_set_from_config_05(
@@ -270,7 +282,49 @@ pub fn build_v3_server_startup_01_listener_set_from_config_05(
     }
 }
 
+/// Bounded window an exec replacement gives the client responses that are
+/// already in flight.
+///
+/// The bound keeps the replacement finite when a provider stream or a slow
+/// client would otherwise hold the process open; every remaining in-flight
+/// transport is still closed by `prepare_for_exec` after the window.
+const V3_EXEC_INFLIGHT_DRAIN: std::time::Duration = std::time::Duration::from_secs(5);
+
 impl V3ServerAggregateHandle {
+    pub async fn prepare_exec_attempt(&self) -> Result<V3ServerExecPreparation, String> {
+        self.flush_runtime_persistence();
+        let codex_sample_exec_guard = match self.codex_sample_persist_worker.as_ref() {
+            Some(worker) => match tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                worker.quiesce_for_exec(),
+            )
+            .await
+            {
+                Ok(Ok(guard)) => Some(guard),
+                Ok(Err(error)) => {
+                    return Err(format!(
+                        "codex sample persistence preparation failed: {error}"
+                    ))
+                }
+                Err(_) => {
+                    return Err(
+                        "codex sample persistence preparation timed out; worker retained".into(),
+                    )
+                }
+            },
+            None => None,
+        };
+        let codex_sample_persist_failures = codex_sample_exec_guard
+            .as_ref()
+            .map(|guard| guard.persist_failures())
+            .unwrap_or_default();
+        Ok(V3ServerExecPreparation {
+            front_checkpoints: self.front_transport_broker.freeze(Instant::now()),
+            codex_sample_persist_failures,
+            _codex_sample_exec_guard: codex_sample_exec_guard,
+        })
+    }
+
     pub fn front_transport_broker(&self) -> &V3FrontTransportBroker {
         &self.front_transport_broker
     }
@@ -301,11 +355,25 @@ impl V3ServerAggregateHandle {
         codex_sample_persist_failures
     }
 
-    /// Stop accepting new listener work without waiting for active client
-    /// bodies. Active bodies belong to Front/Transport handoff and must be
-    /// checkpointed/reattached by the lifecycle owner; waiting here would
-    /// deadlock restart on a provider stream that is already being replaced.
+    /// Stop accepting new listener work, then give client responses that are
+    /// already in flight a bounded window to finish before their transports are
+    /// closed.
+    ///
+    /// Active bodies belong to Front/Transport handoff and must be
+    /// checkpointed/reattached by the lifecycle owner; waiting without a bound
+    /// would deadlock restart on a provider stream that is already being
+    /// replaced.
     pub async fn prepare_for_exec(mut self) -> V3ServerExecPreparation {
+        for listener in &mut self.listeners {
+            if let Some(shutdown) = listener.shutdown.take() {
+                let _ = shutdown.send(());
+            }
+        }
+        let _ = tokio::time::timeout(
+            V3_EXEC_INFLIGHT_DRAIN,
+            self.request_activity_gate.wait_for_quiescence(),
+        )
+        .await;
         let checkpoints = self.front_transport_broker.freeze(Instant::now());
         // The current exec path does not transfer accepted client descriptors
         // or Hyper connection tasks. Close those transports before replacing
@@ -320,15 +388,10 @@ impl V3ServerAggregateHandle {
         if let Some(shutdown) = self.probe_shutdown.take() {
             let _ = shutdown.send(());
         }
-        for listener in &mut self.listeners {
-            if let Some(shutdown) = listener.shutdown.take() {
-                let _ = shutdown.send(());
-            }
-        }
-        let _ = &self.request_activity_gate;
         V3ServerExecPreparation {
             front_checkpoints: checkpoints,
             codex_sample_persist_failures,
+            _codex_sample_exec_guard: None,
         }
     }
 
@@ -372,6 +435,25 @@ impl V3ServerAggregateHandle {
         self.listeners
             .iter()
             .any(|listener| listener.shutdown.is_some())
+    }
+
+    /// Total `accept()` failures observed by the listener tasks.
+    ///
+    /// A listener keeps its port across a transient accept failure, so this
+    /// counter is the record that the failure happened instead of being silent.
+    pub fn listener_accept_failure_count(&self) -> u64 {
+        self.listeners
+            .iter()
+            .map(|listener| listener.accept_state.accept_failures())
+            .sum()
+    }
+
+    /// The last `accept()` failure observed by a listener task, if any.
+    pub fn listener_last_accept_error(&self) -> Option<String> {
+        self.listeners
+            .iter()
+            .filter_map(|listener| listener.accept_state.last_accept_error())
+            .next_back()
     }
 }
 
@@ -420,8 +502,22 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
     let debug_manifest = manifest.debug.clone();
     let manifest = Arc::new(manifest);
     let preflight = build_v3_server_startup_01_listener_set_from_config_05(&manifest);
-    let debug =
-        build_v3_debug_runtime_from_manifest(&debug_manifest).map_err(std::io::Error::other)?;
+    let debug = build_v3_debug_runtime_degrading_optional_log_sink(&debug_manifest)?;
+    // 独立的 stage-3 投影丢弃日志 wiring：启动时确保父目录与 append-only 文件
+    // 就位。丢弃证据刻意与 debug 日志物理分离，不写入 debug runtime。
+    if let Some(projection_drop_log_file) = debug_manifest.projection_drop_log_file.as_deref() {
+        if let Err(error) =
+            routecodex_v3_runtime::projection_drop_log::ensure_v3_projection_drop_log_file(
+                projection_drop_log_file,
+            )
+        {
+            // 投影丢弃证据是 Debug 观测，不是业务真相：路径不可写时记录原因并
+            // 继续，让声明的 listener 能力保持可用。
+            eprintln!(
+                "V3 projection drop log {projection_drop_log_file} unavailable: {error}; continuing without startup preparation"
+            );
+        }
+    }
     let responses_direct_server_tool_state = Arc::new(
         V3ResponsesDirectServerToolState::default()
             .with_hooks_sidecar_socket(hooks_sidecar_socket.clone()),
@@ -440,6 +536,10 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
             && !manifest.debug.codex_samples,
     ));
     for server in &preflight.listeners {
+        // Retention tolerates per-entry housekeeping failures inside the Debug
+        // owner. The one contract-bound retention failure is the process-shared
+        // sample lock, which must stay an explicit startup error: uncoordinated
+        // retention would prune a tree another process is writing.
         codex_sample_store
             .enforce_listener_retention(server.port)
             .map_err(std::io::Error::other)?;
@@ -483,7 +583,8 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
     // Generation zero is reserved for an uninitialized handoff carrier. A
     // listener may accept requests as soon as it binds, so the normal startup
     // broker must already carry a valid positive runtime generation.
-    let front_transport_broker = V3FrontTransportBroker::new(1);
+    let front_transport_broker =
+        V3FrontTransportBroker::new(1).with_client_observation(debug.clone());
     let admin_config_path_for_router = admin_config_path.clone();
     let canonical_admin_config_path = admin_config_path.clone().or_else(|| {
         std::env::var_os("HOME")
@@ -551,18 +652,35 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let connection_broker = front_transport_broker.clone();
         let app_for_serve = app.clone();
-        pending_listener_tasks.push((listener, app_for_serve, shutdown_rx, connection_broker));
+        let accept_state = Arc::new(V3ListenerAcceptState::new());
+        pending_listener_tasks.push((
+            listener,
+            app_for_serve,
+            shutdown_rx,
+            connection_broker,
+            Arc::clone(&accept_state),
+        ));
         listeners.push(V3ListenerHandle {
             server_id,
             addr,
             shutdown: Some(shutdown_tx),
+            accept_state,
         });
     }
     for listener in &listeners {
-        let scope = debug
-            .start_trace(&listener.server_id, "startup", "listener")
-            .map_err(std::io::Error::other)?;
-        debug
+        // Debug evidence is not business truth: a failing debug sink must not
+        // stop listener startup. The failure is announced and startup continues.
+        let scope = match debug.start_trace(&listener.server_id, "startup", "listener") {
+            Ok(scope) => scope,
+            Err(error) => {
+                eprintln!(
+                    "V3 debug listener startup trace {} unavailable: {error}",
+                    listener.server_id
+                );
+                continue;
+            }
+        };
+        let _ = debug
             .record_node_event(
                 &scope,
                 "V3ServerStartup01ListenerSetPreflight",
@@ -572,37 +690,35 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
                     "address": listener.addr.to_string()
                 })),
             )
-            .map_err(std::io::Error::other)?;
+            .inspect_err(|error| {
+                eprintln!(
+                    "V3 debug listener startup event {} unavailable: {error}",
+                    listener.server_id
+                );
+            });
     }
-    let codex_sample_persist_worker = codex_sample_store
-        .start_persist_worker()
-        .map_err(std::io::Error::other)?;
-    for (listener, app_for_serve, shutdown_rx, connection_broker) in pending_listener_tasks {
-        tokio::spawn(async move {
-            let mut shutdown_rx = shutdown_rx;
-            loop {
-                tokio::select! {
-                    _ = &mut shutdown_rx => break,
-                    accepted = listener.accept() => {
-                        let Ok((stream, remote_addr)) = accepted else { break };
-                        let connection_identity = connection_broker.allocate_connection_identity();
-                        let service = app_for_serve.clone().into_service();
-                        let request_connection_broker = connection_broker.clone();
-                        tokio::spawn(async move {
-                            if let Err(error) = serve_v3_front_http_connection(
-                                stream,
-                                remote_addr,
-                                connection_identity,
-                                request_connection_broker,
-                                service,
-                            ).await {
-                                eprintln!("V3 Front HTTP connection failed: {error}");
-                            }
-                        });
-                    }
-                }
-            }
-        });
+    // Codex sample persistence is optional debug capture, never business truth:
+    // a persistence worker that cannot start must not stop the aggregate server.
+    // The failure is recorded and the store simply keeps no persist worker.
+    let codex_sample_persist_worker = match codex_sample_store.start_persist_worker() {
+        Ok(worker) => Some(worker),
+        Err(error) => {
+            eprintln!(
+                "V3 codex sample persistence worker unavailable: {error}; continuing without sample persistence"
+            );
+            None
+        }
+    };
+    for (listener, app_for_serve, shutdown_rx, connection_broker, accept_state) in
+        pending_listener_tasks
+    {
+        tokio::spawn(run_v3_listener_accept_loop(
+            listener,
+            app_for_serve,
+            shutdown_rx,
+            connection_broker,
+            accept_state,
+        ));
     }
     if console_enabled {
         emit_v3_startup_console_line(&listeners);
@@ -681,7 +797,7 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
         front_transport_broker,
         provider_health,
         observability_writers,
-        codex_sample_persist_worker: Some(codex_sample_persist_worker),
+        codex_sample_persist_worker,
     })
 }
 
@@ -765,20 +881,47 @@ fn build_v3_listener_router(state: V3ListenerState) -> Router {
         .with_state(state)
 }
 
-async fn health(State(state): State<Arc<V3ListenerState>>) -> Json<serde_json::Value> {
+/// Build-version truth for `/health`.
+///
+/// A status probe must report an unavailable build version instead of turning a
+/// failed syscall into a panic: the handler returns the typed internal
+/// request-stage projection (598) through the server error channel.
+fn resolve_v3_health_build_version() -> Result<String, String> {
     let executable_path = std::env::current_exe()
-        .expect("V3 health requires current executable path for build_version truth");
-    let build_version = resolve_routecodex_package_version_from_executable(&executable_path)
-        .expect("V3 health requires installed package.json build_version truth");
-    Json(json!({
-        "status": "ok",
-        "version": 3,
-        "build_version": build_version,
-        "manifest_version": state.manifest_version,
-        "server_id": state.server.id,
-        "bind": state.server.bind,
-        "port": state.server.port,
-    }))
+        .map_err(|error| format!("current executable path is unavailable: {error}"))?;
+    resolve_routecodex_package_version_from_executable(&executable_path).ok_or_else(|| {
+        format!(
+            "installed package build_version is unavailable for {}",
+            executable_path.display()
+        )
+    })
+}
+
+async fn health(State(state): State<Arc<V3ListenerState>>) -> Response<Body> {
+    let build_version = match resolve_v3_health_build_version() {
+        Ok(build_version) => build_version,
+        Err(detail) => {
+            let projected = project_v3_server_runtime_failure(
+                "V3ServerHealth",
+                "health_build_version_unavailable",
+                detail,
+                598,
+            );
+            return json_response(projected.status, projected.body);
+        }
+    };
+    json_response(
+        200,
+        json!({
+            "status": "ok",
+            "version": 3,
+            "build_version": build_version,
+            "manifest_version": state.manifest_version,
+            "server_id": state.server.id,
+            "bind": state.server.bind,
+            "port": state.server.port,
+        }),
+    )
 }
 
 async fn models_endpoint(State(state): State<Arc<V3ListenerState>>) -> Response<Body> {
@@ -933,14 +1076,42 @@ async fn admit_v3_responses_session_after_json_parse(
                 );
             }
         };
-    let permit = state
+    let permit = match state
         .responses_session_admission
         .admit(V3ResponsesSessionAdmissionScope {
             endpoint: path.to_string(),
             session_id,
             conversation_id,
         })
-        .await;
+        .await
+    {
+        Ok(permit) => permit,
+        Err(error @ V3ResponsesSessionAdmissionError::TokenSpaceExhausted) => {
+            // The gate cannot hand out a unique admission token any more. The
+            // failure belongs to this request only: every later request gets
+            // its own attempt instead of inheriting a poisoned hot path.
+            let request_id = match allocate_v3_console_request_id(state, path, Some(payload)) {
+                Ok(request_id) => request_id,
+                Err(response) => return Err(*response),
+            };
+            return Err(
+                error_output_response_for_responses_request_with_project_path(
+                    &state.server,
+                    path,
+                    &request_id,
+                    project_v3_server_runtime_failure(
+                        "V3ServerResponsesSessionAdmission",
+                        "responses_session_admission_unavailable",
+                        error.to_string(),
+                        598,
+                    ),
+                    request_headers,
+                    Some(payload),
+                    resolve_v3_console_project_path(request_headers, payload).as_deref(),
+                ),
+            );
+        }
+    };
     Ok(permit)
 }
 
@@ -948,6 +1119,15 @@ async fn pending_endpoint(
     State(state): State<Arc<V3ListenerState>>,
     request: Request,
 ) -> Response<Body> {
+    let connection = request
+        .extensions()
+        .get::<V3FrontConnectionIdentity>()
+        .copied();
+    let response = pending_model_request(state.clone(), request).await;
+    commit_model_transport_outcome(&state, connection, response)
+}
+
+async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) -> Response<Body> {
     let front_connection_identity = request
         .extensions()
         .get::<V3FrontConnectionIdentity>()
@@ -1093,20 +1273,46 @@ async fn pending_endpoint(
         None
     };
     let request_activity_permit = state.request_activity_gate.admit();
-    let response = pending_endpoint_after_responses_admission(
-        state,
-        front_connection_identity,
-        request_headers,
-        method,
-        path,
-        started_at,
-        entry_protocol,
-        execution_mode,
-        pending_owner_symbol,
-        request_purpose,
-        payload,
-    )
-    .await;
+    // The Runtime owns full-attempt buffering, so no provider payload byte is
+    // projected before the runtime outcome exists. The Server owns the client
+    // transport: a client that requested SSE must not stay on a silent
+    // connection for longer than one keepalive interval while the runtime
+    // buffers the attempt.
+    let client_sse_channel = v3_request_wants_sse(&request_headers, &payload)
+        .then_some(Duration::from_millis(state.server.http_sse_keepalive_ms))
+        .filter(|interval| !interval.is_zero());
+    let runtime_outcome: Pin<Box<dyn Future<Output = Response<Body>> + Send>> =
+        Box::pin(pending_endpoint_after_responses_admission(
+            Arc::clone(&state),
+            front_connection_identity,
+            request_headers,
+            method,
+            path,
+            started_at,
+            entry_protocol,
+            execution_mode,
+            pending_owner_symbol,
+            request_purpose,
+            payload,
+        ));
+    let response = match client_sse_channel {
+        Some(keepalive_interval) => {
+            let outcome_state = Arc::clone(&state);
+            accept_v3_client_sse_transport(
+                runtime_outcome,
+                Box::new(move |outcome| {
+                    commit_model_transport_outcome(
+                        &outcome_state,
+                        front_connection_identity,
+                        outcome,
+                    )
+                }),
+                keepalive_interval,
+            )
+            .await
+        }
+        None => runtime_outcome.await,
+    };
     let response = hold_response_body_request_activity_permit(response, request_activity_permit);
     match admission_permit {
         Some(permit) => hold_response_body_admission_permit(response, permit),

@@ -100,7 +100,6 @@ pub(crate) enum V3Transport13ResponsesRequestKind {
         stream_intent: V3ResponsesStreamIntent,
         event: Value,
         initial_concurrency_budget: u32,
-        concurrency_acquire_timeout_ms: u64,
         cancellation: Option<V3ProviderCancellation>,
         compatibility_profile: Option<String>,
     },
@@ -201,15 +200,6 @@ impl V3Transport13ResponsesRequest {
             V3Transport13ResponsesRequestKind::Http { auth, .. }
             | V3Transport13ResponsesRequestKind::WebSocketV2 { auth, .. } => {
                 format!("{}:{}", self.provider_id(), auth.alias)
-            }
-        }
-    }
-
-    fn cancellation(&self) -> Option<V3ProviderCancellation> {
-        match &self.kind {
-            V3Transport13ResponsesRequestKind::Http { cancellation, .. }
-            | V3Transport13ResponsesRequestKind::WebSocketV2 { cancellation, .. } => {
-                cancellation.clone()
             }
         }
     }
@@ -527,7 +517,6 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
                     stream_intent,
                     event: body,
                     initial_concurrency_budget,
-                    concurrency_acquire_timeout_ms,
                     cancellation: None,
                     compatibility_profile,
                 },
@@ -739,7 +728,6 @@ impl ResponsesTransport for ProviderResponsesTransport {
         mut request: V3Transport13ResponsesRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
         let provider_key = request.provider_key();
-        let cancellation = request.cancellation();
         let request_id = request.request_id().to_string();
         let provider_id = request.provider_id().to_string();
         let attempt_key = request
@@ -777,16 +765,6 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 reason,
             });
         }
-        let acquire_timeout_ms = match &request.kind {
-            V3Transport13ResponsesRequestKind::Http {
-                concurrency_acquire_timeout_ms,
-                ..
-            }
-            | V3Transport13ResponsesRequestKind::WebSocketV2 {
-                concurrency_acquire_timeout_ms,
-                ..
-            } => *concurrency_acquire_timeout_ms,
-        };
         let (permit_guard, was_probe, websocket_connection) =
             websocket::acquire_admission_and_connection_slot(
                 &self.websocket_sessions,
@@ -795,8 +773,6 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 attempt_key.as_ref(),
                 controller.clone(),
                 provider_key.clone(),
-                acquire_timeout_ms,
-                cancellation.clone(),
             )
             .await?;
         let result = match request.kind {
@@ -839,7 +815,6 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 stream_intent,
                 event,
                 initial_concurrency_budget: _,
-                concurrency_acquire_timeout_ms: _,
                 cancellation,
                 compatibility_profile,
             } => {
@@ -1122,6 +1097,8 @@ impl ProviderResponsesTransport {
                 provider_id,
                 expected: "JSON",
                 content_type: response_content_type,
+                status,
+                headers,
             }),
             V3ResponsesStreamIntent::Sse
                 if response_content_type
@@ -1145,6 +1122,8 @@ impl ProviderResponsesTransport {
                 provider_id,
                 expected: "SSE",
                 content_type: response_content_type,
+                status,
+                headers,
             }),
         }
     }
@@ -1375,12 +1354,9 @@ async fn read_response_body_bytes(
     cancellation: Option<V3ProviderCancellation>,
 ) -> Result<Vec<u8>, V3ProviderError> {
     let status = response.status().as_u16();
-    // Only an error status needs to survive a failed body read.
-    let headers = if status >= 400 {
-        collect_response_headers(response.headers())
-    } else {
-        Vec::new()
-    };
+    // The head survives a failed body read for every status, not only for error
+    // statuses: the upstream really answered, and the head is that evidence.
+    let headers = collect_response_headers(response.headers());
     let read = response.bytes();
     let bytes = match cancellation {
         Some(cancellation) => {
@@ -1398,8 +1374,9 @@ async fn read_response_body_bytes(
     }
     // A failed body read is never a response-stage decode failure, so it must
     // not project as 599. When the upstream already returned an error status,
-    // that real status survives; otherwise no usable response body arrived and
-    // this is a network transport failure.
+    // that real status survives; for any other status the upstream still
+    // answered, so its head survives as well and this remains a transport
+    // failure that simply carries the head it really received.
     .map_err(|error| {
         let reason = crate::shared::format_v3_provider_transport_error(&error);
         if status >= 400 {
@@ -1414,9 +1391,11 @@ async fn read_response_body_bytes(
                 }),
             }
         } else {
-            V3ProviderError::Transport {
+            V3ProviderError::ResponseBodyUnreadable {
                 request_id: request_id.to_string(),
                 provider_id: provider_id.to_string(),
+                status,
+                headers,
                 reason,
             }
         }

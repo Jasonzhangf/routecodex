@@ -1,5 +1,7 @@
 # V3 unified operation runner design
 
+Model-client delivery follows AGENTS.md's mandatory all-entry no-client-error contract and [the client transport design](../goals/provider-terminal-no-502-dag-20260930.md). Legacy symbols containing `ClientProjected`, `client_projection_candidate`, or `terminal_client_error` name internal resources/decisions only; they never authorize an HTTP error, error payload/event, or fabricated success. This target design supersedes their former client-error semantics; current code has not completed that cutover.
+
 > Contract for the complete target graphs. In the current production baseline, only the
 > `capture_client_json` SESE slice is compiled and run by the DAGpipe Runtime entry. The complete
 > request, response, and error graphs, their later Operators, and field-profile execution are not
@@ -120,10 +122,10 @@ The design validates three DAGpipe SESE graphs:
   disposition is `client_commit`.
 - [error graph](../architecture/dagpipe/v3.operation_runner.error.graph.json): one source ARC
   `source-failure`, one exit ARC `error-client-projected-candidate`; every node always runs once
-  in fixed order. Error06 returns an empty candidate for `retry` and a projected candidate for
-  `terminal_client_error`; Runtime discards or submits that candidate according to the typed
-  Error05 decision. Retry releases failed attempt resources and re-enters the request graph; only
-  `terminal_client_error` reaches RuntimeRequestFinalizer. The graph nodes carry typed `v3.error.execution_decision` and
+  in fixed order. Error06 stages internal failure evidence only, never a client-error candidate.
+  Runtime consumes the typed Error05 decision: retry starts a new attempt; terminal failure ends
+  the affected transport without an error response. Retry releases attempt resources and re-enters
+  the request graph; terminal no-commit outcomes reach RuntimeRequestFinalizer. The graph nodes carry typed `v3.error.execution_decision` and
   `v3.error.client_projection_candidate` resource reads/writes for the same single-sink rule.
 
 Each graph uses exact `operator@operator_version` bindings. The graphs are design DAGs, not
@@ -185,7 +187,7 @@ or payload-carried control replaces this chain.
 | error_err03_runtime_classified | `error.pipeline_contract` (existing ErrorErr03) | error-host-captured | error-classified | error.chain, provider_runtime.observation read/write | error-classified produced | classification failure remains in error chain | classification is typed, not payload metadata |
 | error_err04_router_policy_applied | `error.execution_decision_consumer` (existing ErrorErr04) | error-classified | error-policy-applied | error.chain, route.retry_exclusion_set read/write | error-policy-applied produced | policy failure remains in error chain | cooldown/retry policy preserved |
 | error_err05_execution_decision | `error.execution_decision_owner` (existing ErrorErr05) | error-policy-applied | error-for-projection | error.chain, v3.error.execution_decision read/write | error-for-projection produced; typed decision stays in the side resource | decision failure remains in error chain | writes retry/terminal decision only to typed control resource |
-| error_err06_client_projected | `error.client_projection_candidate` / SSE (existing ErrorErr06) | error-for-projection | error-client-projected-candidate | error.chain and error_execution_decision read | projected candidate for terminal_client_error; empty candidate for retry | typed source failure to ErrorErr01 | this node always runs; Runtime discards retry output and only submits terminal projection through Server/SSE |
+| error_err06_client_projected | Error (existing ErrorErr06, internal resource despite legacy name) | error-for-projection | error-client-projected-candidate (internal only) | error.chain and error_execution_decision read | typed internal failure evidence; no client error candidate | typed source failure to ErrorErr01 | Runtime alone consumes retry/terminal decisions; Server/SSE only commits success or aborts transport |
 
 ## Runtime runner
 
@@ -217,8 +219,10 @@ dispositions stay on the control side and do not alter graph topology:
 | `client_commit` | `Resp03` | inverse projection, frame staging, RuntimeClientCommit, RuntimeRequestFinalizer | response graph stages a candidate; RuntimeClientCommit alone submits it; finalizer then releases request scope |
 | `servertool_followup` | `Resp03` | inverse projection, frame staging, RuntimeInternalFollowup, RuntimeAttemptCleanup, request graph | response graph stages an empty candidate; Runtime discards it, releases attempt scope, and re-enters with internal origin; finalizer is not triggered |
 | `retry` | `Error05` | Error06, RuntimeRetryLaunch, RuntimeAttemptCleanup, request graph | Error06 stages no client error; Runtime discards it, releases failed attempt scope, and admits one new attempt without a graph backedge; finalizer is not triggered |
+| terminal no-commit (legacy `terminal_client_error`) | `Error05` | Runtime transport-outcome consumer, RuntimeAttemptCleanup, RuntimeRequestFinalizer | no error projection; end only the affected transport, release attempt scope and finalize request scope |
 | `cancel` | Runtime | `RuntimeCancellation`, RuntimeAttemptCleanup, finalizer | no client commit; drains and releases attempt scope, then request scope |
 | `disconnect` | ServerDisconnectReceipt | `RuntimeAttemptCleanup`, finalizer | no new client commit; covers pre-first-frame and post-frame disconnects; releases attempt scope, then request scope |
+| `client_transport_break` | `Error05` | Server/SSE, `RuntimeAttemptCleanup`, finalizer | the error chain keeps the typed provider truth and stages no client candidate; Server/SSE ends the client transport without a provider status, code, or message; the finalizer then releases request scope. This is the only client boundary for a provider-derived terminal, so a client entry is never coupled to a provider |
 
 The request, response, and error graphs stay separate. Retry and servertool re-entry happen only
 after their fixed graph has returned to its single sink; Runtime consumes the typed disposition,
@@ -302,10 +306,12 @@ ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision -> ErrorErr06Client
 ```
 
 `ErrorErr02HostCaptured` is mandatory: no source failure skips host capture. Internal request
-stage failures project `598`; internal response stage failures project `599`; real network
-failures project `502`; external provider failures preserve their real status. Local projection
-and wire encoding failures never mutate provider health and never masquerade as transport
-failures.
+stage failures retain classification `598`; internal response stage failures retain `599`;
+real network failures retain `502`; external provider failures retain their real status as
+internal evidence only. None of these classifications authorizes a client error response.
+Terminal failure ends the affected transport without response or leaves an already started
+transfer incomplete. Local projection and wire encoding failures never mutate provider health
+and never masquerade as transport failures.
 
 ## Mode, inverse, ToolThinking, and response binding
 
@@ -324,7 +330,7 @@ Each control/projection family has one writer and explicit readers:
 | response tool binding | `govern_chat_response` | `inverse_project_client_response` | after final client inverse projection, servertool attempt cleanup, or finalizer |
 | execution disposition | `govern_chat_response` | inverse/frame staging, RuntimeClientCommit, RuntimeInternalFollowup, RuntimeRequestFinalizer | typed control stays separate; only RuntimeClientCommit submits the staged candidate; finalizer only for client_commit or terminal no-commit outcome |
 | servertool sidecar plan | `govern_chat_response` (Resp03) | `RuntimeInternalFollowup` | emitted only for `servertool_followup`; released by attempt cleanup after sidecar execution before request re-entry |
-| error execution decision | `error_err05_execution_decision` | Error06, RuntimeClientCommit, RuntimeRetryLaunch, RuntimeRequestFinalizer | typed control stays separate; Error06 always runs and emits a candidate only for terminal_client_error; finalizer only after terminal projection |
+| error execution decision | `error_err05_execution_decision` | Error06, Runtime transport-outcome consumer, RuntimeRetryLaunch, RuntimeRequestFinalizer | typed internal control only; Error06 emits no client error candidate; terminal no-commit reaches transport abort and finalizer |
 | remote continuation reference | entry protocol projection | provider projection and inverse projection | request-local, no local continuation store |
 | servertool hop | Resp03 typed action | Runtime internal follow-up | attempt scope released before request re-entry; request scope remains until finalizer |
 
@@ -403,10 +409,10 @@ graph TD
 ```mermaid
 graph TD
   A[任意固定节点产生类型化失败来源] --> B[主机必须捕获失败并记录]
-  B --> C[运行时分类：内部请求 598 / 内部响应 599 / 真实网络 502 / 外部状态保留]
+  B --> C[内部分类证据：请求 598 / 响应 599 / 网络 502 / 外部状态保留]
   C --> D[路由策略应用并维护冷却与排除集合]
-  D --> E[执行决策：重试为新尝试，终止进客户端投影]
-  E --> F[只经 SSE/最终错误投影输出客户端错误]
+  D --> E[类型化执行决策：合法恢复为新尝试，终态禁止提交响应]
+  E --> F[本请求收尾：无响应或未完成传输，错误仅留内部]
 ```
 
 ### 生命周期状态机（中文）
@@ -425,8 +431,8 @@ stateDiagram-v2
   客户端提交 --> [*]: 成功终态
   错误链 --> 重试排队: Error05 仅决策重试
   重试排队 --> 正在处理请求: RuntimeRetryLaunch 同 runner 重入
-  错误链 --> 客户端错误投影: Error06
-  客户端错误投影 --> [*]: 错误终态
+  错误链 --> 中止未完成传输: 内部确认无法继续或候选耗尽
+  中止未完成传输 --> [*]: 无错误响应并释放请求资源
   正在处理请求 --> 取消排空: 观察取消并在波次结束后排空
   取消排空 --> [*]: 释放尝试预算与上下文
   等待请求 --> 断开记录: 已接受帧后客户端断开
@@ -530,6 +536,7 @@ supported; no local continuation is introduced.
 | 17 | `error_err04_router_policy_applied` | Error04 |
 | 18 | `error_err05_execution_decision` | Error05 |
 | 19 | `error_err06_client_projected` | Error06/SSE |
+| 19a | Provider-derived client transport break (no client error projection) | Error05 / Server/SSE |
 
 ### Existing production families (context only, not delivery units)
 

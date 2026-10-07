@@ -28,6 +28,7 @@ pub struct V3TargetCandidate {
     pub model_capabilities: Vec<String>,
     pub web_search_execution_mode: V3WebSearchExecutionMode,
     pub max_context_tokens: Option<u64>,
+    pub max_tokens: Option<u64>,
     pub context_token_estimate_scale_bps: u64,
     pub base_url: String,
     pub responses_process: Option<String>,
@@ -748,6 +749,7 @@ impl V3TargetInterpreter {
                 model_capabilities: model.capabilities.clone(),
                 web_search_execution_mode: model.web_search_execution_mode,
                 max_context_tokens: model.max_context_tokens,
+                max_tokens: model.max_tokens,
                 context_token_estimate_scale_bps: model.context_token_estimate_scale_bps,
                 base_url: provider.base_url.clone(),
                 responses_process: provider

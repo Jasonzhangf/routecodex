@@ -49,22 +49,15 @@ pub(crate) fn v3_route_plan_error_source(
     code: &'static str,
     error: V3VirtualRouterError,
 ) -> V3Error01SourceRaised {
-    match error {
-        V3VirtualRouterError::DirectModelUnknown { provider, model } => {
-            build_v3_error_01_source_raised(
-                V3ErrorSourceKind::ModelNotFound,
-                stage,
-                "direct_model_not_found",
-                format!("direct provider model {provider}.{model} is not configured"),
-            )
-        }
-        other => build_v3_error_01_source_raised(
-            V3ErrorSourceKind::RuntimeFailure,
-            stage,
-            code,
-            other.to_string(),
-        ),
-    }
+    // An unlisted model name is no longer a route-plan error: the router falls
+    // back to normal classification, so every remaining route-plan failure is a
+    // real runtime failure.
+    build_v3_error_01_source_raised(
+        V3ErrorSourceKind::RuntimeFailure,
+        stage,
+        code,
+        error.to_string(),
+    )
 }
 
 pub(crate) enum V3ProviderAttemptBody {

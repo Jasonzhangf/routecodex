@@ -40,6 +40,7 @@ fn manifest(strategy: V3SelectionStrategy) -> V3Config05ManifestPublished {
         debug: V3DebugManifest {
             log_console: false,
             log_file: None,
+            projection_drop_log_file: None,
             snapshots: false,
             codex_samples: false,
             snapshot_stages: None,
@@ -342,7 +343,7 @@ fn direct_unknown_provider_falls_back_to_classification() {
 }
 
 #[test]
-fn direct_unknown_model_and_media_mismatch_fail_without_reroute() {
+fn direct_unknown_model_falls_back_to_normal_pool_routing() {
     let router = V3VirtualRouter::default();
     let manifest = manifest_with_direct_provider();
     let classified = router
@@ -353,14 +354,20 @@ fn direct_unknown_model_and_media_mismatch_fail_without_reroute() {
             direct_facts("prov.absent-model", BTreeSet::new()),
         )
         .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
     assert_eq!(
-        router.resolve_route_pool_plan(&manifest, classified),
-        Err(V3VirtualRouterError::DirectModelUnknown {
-            provider: "prov".into(),
-            model: "absent-model".into(),
-        })
+        hit.pool_id, "default",
+        "an enabled provider that declares no such model must fall back to normal pool routing"
     );
+}
 
+#[test]
+fn direct_media_mismatch_fails_without_reroute() {
+    let router = V3VirtualRouter::default();
+    let manifest = manifest_with_direct_provider();
     let classified = router
         .classify_request_with_facts(
             &manifest,

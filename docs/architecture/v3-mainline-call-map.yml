@@ -465,7 +465,7 @@ chains:
       side_channel_writes: [v3.target.concrete_provider]
 - chain_id: v3.codex_sample_retention_snap_scope
   owner_feature_id: v3.codex_sample_retention_snap_scope
-  summary: Debug-bounded request and response copies move from explicit manifest authorization through a single V3CodexSampleStore-owned queue and worker to the filesystem without entering MetadataCenter or normal payload truth. The queue bounds work to 64 jobs and 64 MiB of serialized payload across queued and in-flight writes; overload is failure-ledger reported without rejecting business requests. Barriers wait for previously accepted writes and report a non-destructive failure snapshot; worker shutdown drains the bounded ledger, including any omitted-count summary, for aggregate lifecycle reporting. Server startup starts the worker after fallible listener preparation and before listener tasks begin accepting requests. Diagnostic payloads remain verbatim, dev builds sample by default, error evidence force-writes, and each port retains at most 100 request directories.
+  summary: Debug-bounded request and response copies move from explicit manifest authorization through a single V3CodexSampleStore-owned queue and worker to the filesystem without entering MetadataCenter or normal payload truth. The queue bounds pending and in-flight writes to 64 MiB, charging each job's serialized payload plus a fixed per-job overhead so a full-sampling burst is not dropped by a message-count limit while total queued memory stays bounded. Overload is failure-ledger reported without rejecting business requests. Barriers wait for previously accepted writes and report a non-destructive failure snapshot; worker shutdown drains the bounded ledger, including any omitted-count summary, for aggregate lifecycle reporting. Server startup starts the worker after fallible listener preparation and before listener tasks begin accepting requests. Diagnostic payloads remain verbatim, dev builds sample by default, error evidence force-writes, and each port retains at most 100 request directories.
   edges:
   - step_id: v3-codex-sample-01
     from_node: V3CodexSample02ManifestAuthorizationPublished
@@ -595,6 +595,470 @@ chains:
       produces: [v3.debug.codex_sample_persist_failure]
       side_channel_reads: [v3.debug.codex_sample_persist_failure]
       side_channel_writes: [v3.debug.codex_sample_persist_failure]
+- chain_id: v3.managed_restart_attempt
+  owner_feature_id: v3.managed_server_lifecycle
+  summary: Lifecycle retains the original aggregate and hooks owner until native exec succeeds; current and previous-release transfer protocols converge on one exact adoption finish.
+  edges:
+  - step_id: v3-restart-cli-check-hooks-target
+    from_node: V3Lifecycle06LiveControlled
+    to_node: V3LifecycleRestartPrepared
+    caller_symbol: prepare_previous_release_restart_transfer
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    callee_symbol: V3HooksSidecarSupervisor::ensure_exec_target_available
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads: [v3.lifecycle.hooks_sidecar_process]
+      side_channel_writes: []
+    semantic_contract:
+    - Read-only target association validation precedes transfer creation and control dispatch, including dispatch to a previous-release handler; rejection preserves the live owner and unrelated cleanup state.
+  - step_id: v3-restart-handler-check-hooks-target
+    from_node: V3Lifecycle06LiveControlled
+    to_node: V3LifecycleRestartPrepared
+    caller_symbol: restart_managed_runtime_in_place
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/control_plane.rs
+    callee_symbol: V3HooksSidecarSupervisor::ensure_exec_target_available
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads: [v3.lifecycle.hooks_sidecar_process]
+      side_channel_writes: []
+    semantic_contract:
+    - The current handler checks target association before aggregate preparation or exec, protecting direct control requests without mutating foreign hooks ownership.
+  - step_id: v3-restart-prepare-previous-release-transfer
+    from_node: V3Lifecycle06LiveControlled
+    to_node: V3LifecycleRestartPrepared
+    caller_symbol: V3ManagedLifecycle::restart_with_observer
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: prepare_previous_release_restart_transfer
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: []
+      produces: [v3.lifecycle.previous_release_restart_transfer]
+      side_channel_reads: [v3.lifecycle.instance_declaration, v3.lifecycle.pid_cache, v3.lifecycle.control_channel]
+      side_channel_writes: []
+    semantic_contract:
+    - Caller validates compiled target auth before dispatch; callee requires exact listeners and live PID/start-token/nonce/control before exclusive intent creation.
+  - step_id: v3-restart-bind-transfer-rejection-guard
+    from_node: V3Lifecycle06LiveControlled
+    to_node: V3LifecycleRestartPrepared
+    caller_symbol: restart_managed_runtime_in_place
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/control_plane.rs
+    callee_symbol: bind_previous_release_restart_transfer
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads: [v3.lifecycle.previous_release_restart_transfer, v3.lifecycle.instance_declaration, v3.lifecycle.pid_cache]
+      side_channel_writes: []
+  - step_id: v3-restart-prepare-live
+    from_node: V3Lifecycle06LiveControlled
+    to_node: V3LifecycleRestartPrepared
+    caller_symbol: restart_managed_runtime_in_place
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/control_plane.rs
+    callee_symbol: V3ServerAggregateHandle::prepare_exec_attempt
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: []
+      produces: [v3.front.runtime_handoff_checkpoint]
+      side_channel_reads: [v3.debug.codex_sample_persist_failure]
+      side_channel_writes: []
+    semantic_contract:
+    - Caller holds the accepted typed ControlRestartPlan; aggregate delegates reversible sample cutoff and complete drain to Debug, then delegates checkpoint mutation to Front freeze. Lifecycle retains the returned guard through native exec and drops it on rejection; historical diagnostics are report data, not restart admission truth.
+  - step_id: v3-restart-cleanup-exact-hooks
+    from_node: V3LifecycleRestartExecReentered
+    to_node: V3LifecycleRestartHooksReconciled
+    caller_symbol: V3ManagedLifecycle::run_managed_child_with_declaration
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: V3HooksSidecarSupervisor::cleanup_exec_owner
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads: [v3.lifecycle.hooks_sidecar_process]
+      side_channel_writes: [v3.lifecycle.hooks_sidecar_process]
+  - step_id: v3-restart-control-exchange
+    from_node: V3Lifecycle02InstanceDeclared
+    to_node: V3Lifecycle06LiveControlled
+    caller_symbol: send_restart_control
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/control_plane.rs
+    callee_symbol: send_control_without_timeout
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/control_plane.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.lifecycle.pid_cache, v3.lifecycle.control_channel]
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: []
+    semantic_contract:
+    - The locked public restart exchange includes delegated PID/control consumption; this edge identifies the actual transport reader, not additional send_restart_control reader rights.
+  - step_id: v3-restart-retain-hooks-cleanup-owner
+    from_node: V3LifecycleRestartExecReentered
+    to_node: V3LifecycleRestartHooksOwnerRetained
+    caller_symbol: adopt_exec_restart_declaration_change
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    callee_symbol: V3HooksSidecarSupervisor::retain_exec_owner
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads: [v3.lifecycle.hooks_sidecar_process]
+      side_channel_writes: [v3.lifecycle.hooks_sidecar_process]
+  - step_id: v3-restart-read-retained-hooks-owner
+    from_node: V3LifecycleRestartHooksOwnerRetained
+    to_node: V3LifecycleRestartHooksOwnerResolved
+    caller_symbol: V3HooksSidecarSupervisor::cleanup_exec_owner
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
+    callee_symbol: pending_hooks_cleanup_directory
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads: [v3.lifecycle.hooks_sidecar_process]
+      side_channel_writes: []
+  - step_id: v3-restart-gate-hooks-replacement
+    from_node: V3LifecycleRestartHooksOwnerResolved
+    to_node: V3LifecycleRestartHooksReconciled
+    caller_symbol: start_managed_hooks_sidecar_cancelable
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
+    callee_symbol: start_configured_hooks_sidecar_with_timeout_and_cancel
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads: [v3.lifecycle.hooks_sidecar_process]
+      side_channel_writes: []
+  - step_id: v3-restart-plan-declaration
+    from_node: V3Lifecycle06LiveControlled
+    to_node: V3Lifecycle01ValidatedConfig
+    caller_symbol: control_restart_plan
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/restart_plan.rs
+    callee_symbol: V3ManagedLifecycle::declaration
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.lifecycle.restart_plan]
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-restart-declaration-snapshot
+    from_node: V3Lifecycle01ValidatedConfig
+    to_node: V3Lifecycle02InstanceDeclared
+    caller_symbol: V3ManagedLifecycle::declaration
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: V3ManagedLifecycle::declaration_with_runtime
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.config.published_manifest]
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-restart-freeze-front
+    from_node: V3LifecycleRestartPrepared
+    to_node: V3RuntimeHandoffCheckpoint
+    caller_symbol: V3ServerAggregateHandle::prepare_exec_attempt
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: V3FrontTransportBroker::freeze
+    callee_file: v3/crates/routecodex-v3-server/src/restart_handoff.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.front.runtime_handoff_checkpoint]
+      produces: [v3.front.runtime_handoff_checkpoint]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-restart-cleanup-rejected-artifacts
+    from_node: V3LifecycleRestartPrepared
+    to_node: V3Lifecycle06LiveControlled
+    caller_symbol: restart_managed_runtime_in_place
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/control_plane.rs
+    callee_symbol: cleanup_rejected_restart_handoff
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/control_plane.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.lifecycle.exec_restart_artifacts]
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: [v3.lifecycle.exec_restart_artifacts]
+    semantic_contract:
+    - Caller creates staged declaration and Front/provider JSON artifacts; rejection deletes only attempt-created files and retains the original owner.
+  - step_id: v3-restart-adopt-exact-artifacts
+    from_node: V3LifecycleRestartExecReentered
+    to_node: V3Lifecycle05IdentityPublished
+    caller_symbol: V3ManagedLifecycle::run_managed_child_with_declaration
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: adopt_exec_restart_declaration_change
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.lifecycle.exec_restart_artifacts]
+      produces: []
+      side_channel_reads: [v3.lifecycle.instance_declaration, v3.lifecycle.pid_cache, v3.lifecycle.control_channel, v3.lifecycle.previous_release_restart_transfer]
+      side_channel_writes: [v3.lifecycle.previous_release_restart_transfer]
+  - step_id: v3-restart-adopt-previous-release-transfer
+    from_node: V3LifecycleRestartExecReentered
+    to_node: V3Lifecycle05IdentityPublished
+    caller_symbol: V3ManagedLifecycle::run_managed_child_with_declaration
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: adopt_previous_release_restart_declaration_change
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.lifecycle.exec_restart_artifacts]
+      produces: []
+      side_channel_reads: [v3.lifecycle.previous_release_restart_transfer, v3.lifecycle.instance_declaration, v3.lifecycle.pid_cache, v3.lifecycle.control_channel, v3.lifecycle.status_record]
+      side_channel_writes: [v3.lifecycle.previous_release_restart_transfer]
+    semantic_contract:
+    - Without current exec-owner environment, validate only the exact target intent and previous-handler control removal; do not scan historical owners.
+  - step_id: v3-restart-current-shared-adoption-finish
+    from_node: V3LifecycleRestartExecReentered
+    to_node: V3Lifecycle05IdentityPublished
+    caller_symbol: adopt_exec_restart_declaration_change
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    callee_symbol: finish_exec_restart_adoption
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.lifecycle.exec_restart_artifacts]
+      produces: [v3.lifecycle.instance_declaration]
+      side_channel_reads: []
+      side_channel_writes: [v3.lifecycle.exec_restart_artifacts, v3.lifecycle.control_channel]
+  - step_id: v3-restart-previous-release-shared-adoption-finish
+    from_node: V3LifecycleRestartExecReentered
+    to_node: V3Lifecycle05IdentityPublished
+    caller_symbol: adopt_previous_release_restart_declaration_change
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    callee_symbol: finish_exec_restart_adoption
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.lifecycle.exec_restart_artifacts]
+      produces: [v3.lifecycle.instance_declaration]
+      side_channel_reads: []
+      side_channel_writes: [v3.lifecycle.exec_restart_artifacts, v3.lifecycle.control_channel]
+  - step_id: v3-restart-cleanup-previous-owner
+    from_node: V3Lifecycle05IdentityPublished
+    to_node: V3Lifecycle07GracefullyStopped
+    caller_symbol: finish_exec_restart_adoption
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    callee_symbol: cleanup_previous_exec_restart_owner
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.lifecycle.control_channel]
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: [v3.lifecycle.control_channel, v3.lifecycle.pid_cache, v3.lifecycle.restart_plan]
+  - step_id: v3-restart-publish-previous-stopped
+    from_node: V3Lifecycle06LiveControlled
+    to_node: V3Lifecycle07GracefullyStopped
+    caller_symbol: cleanup_previous_exec_restart_owner
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    callee_symbol: write_status
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/fs_locks.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: []
+      produces: [v3.lifecycle.status_record]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-restart-verify-published-declaration
+    from_node: V3LifecycleRestartExecReentered
+    to_node: V3Lifecycle02InstanceDeclared
+    caller_symbol: V3ManagedLifecycle::run_managed_child_with_declaration
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: verify_published_declaration
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/fs_locks.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.lifecycle.instance_declaration]
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-restart-read-startup-detail
+    from_node: V3LifecycleRestartExecReentered
+    to_node: V3Lifecycle05IdentityPublished
+    caller_symbol: V3ManagedLifecycle::run_managed_child_with_declaration
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: read_pending_startup_detail
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/control_plane.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.lifecycle.status_record]
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-restart-retire-previous-plan
+    from_node: V3LifecycleRestartExecReentered
+    to_node: V3Lifecycle05IdentityPublished
+    caller_symbol: V3ManagedLifecycle::run_managed_child_with_declaration
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: remove_restart_plan_for_previous_control_identity
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/restart_plan.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.lifecycle.restart_plan]
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: [v3.lifecycle.restart_plan]
+  - step_id: v3-restart-restore-provider-checkpoints
+    from_node: V3LifecycleRestartExecReentered
+    to_node: V3Lifecycle05IdentityPublished
+    caller_symbol: V3ManagedLifecycle::run_managed_child_with_declaration
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: restore_default_provider_transport_handoff_checkpoints
+    callee_file: v3/crates/routecodex-v3-runtime/src/kernel/default_transport.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.lifecycle.exec_restart_artifacts]
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: [v3.lifecycle.exec_restart_artifacts]
+    semantic_contract:
+    - Child reads provider JSON, delegates typed restore to Runtime and removes the file; Front JSON is discarded without claiming client reattachment.
+  - step_id: v3-restart-publish-child-status
+    from_node: V3LifecycleRestartExecReentered
+    to_node: V3Lifecycle06LiveControlled
+    caller_symbol: V3ManagedLifecycle::run_managed_child_with_declaration
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: write_status
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/fs_locks.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: []
+      produces: [v3.lifecycle.status_record]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-restart-publish-adopted-starting
+    from_node: V3Lifecycle05IdentityPublished
+    to_node: V3Lifecycle04ChildSpawned
+    caller_symbol: adopt_exec_restart_declaration_change
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/exec_restart.rs
+    callee_symbol: write_status
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/fs_locks.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: []
+      produces: [v3.lifecycle.status_record]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-restart-wait-sample-persistence
+    from_node: V3LifecycleRestartPrepared
+    to_node: V3CodexSamplePersistFailureReported
+    caller_symbol: V3ServerAggregateHandle::prepare_exec_attempt
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: V3CodexSamplePersistHandle::quiesce_for_exec
+    callee_file: v3/crates/routecodex-v3-debug/src/sample_store.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads: [v3.debug.codex_sample_persist_failure]
+      side_channel_writes: []
+    semantic_contract:
+    - Server delegates queue admission mutation to Debug; it holds the returned reversible guard without directly writing the queue.
+  - step_id: v3-restart-drain-quiesced-samples
+    from_node: V3LifecycleRestartPrepared
+    to_node: V3CodexSamplePersistFailureReported
+    caller_symbol: V3CodexSamplePersistHandle::quiesce_for_exec
+    caller_file: v3/crates/routecodex-v3-debug/src/sample_store.rs
+    callee_symbol: V3CodexSamplePersistHandle::wait_for_drain
+    callee_file: v3/crates/routecodex-v3-debug/src/sample_store.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.debug.codex_sample_persist_queue]
+      produces: [v3.debug.codex_sample_persist_queue]
+      side_channel_reads: [v3.debug.codex_sample_persist_failure]
+      side_channel_writes: []
+    semantic_contract:
+    - Guard is installed before any await; the sole worker Barrier distinguishes transport/drain failure from completed historical diagnostic failures.
+  - step_id: v3-restart-start-aggregate
+    from_node: V3LifecycleRestartExecReentered
+    to_node: V3ServerStartup01ListenerSetPreflight
+    caller_symbol: V3ManagedLifecycle::run_managed_child_with_declaration
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.config.published_manifest]
+      produces: [v3.server.listener_set]
+      side_channel_reads: []
+      side_channel_writes: []
+    semantic_contract:
+    - Child delegates listener construction to Server; this edge does not grant lifecycle listener writer rights.
+  - step_id: v3-restart-build-listener-set
+    from_node: V3Config05ManifestPublished
+    to_node: V3ServerStartup01ListenerSetPreflight
+    caller_symbol: spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: build_v3_server_startup_01_listener_set_from_config_05
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.config.published_manifest]
+      produces: [v3.server.listener_set]
+      side_channel_reads: []
+      side_channel_writes: []
+- chain_id: v3.runtime_fd_limit
+  owner_feature_id: v3.managed_server_lifecycle
+  summary: Managed child carries the typed OS descriptor limit and declaration from the same Config snapshot before listener or hooks startup.
+  edges:
+  - step_id: v3-life-runtime-limit
+    from_node: V3Lifecycle01ValidatedConfig
+    to_node: V3Lifecycle04ChildSpawned
+    caller_symbol: V3ManagedLifecycle::run_managed_child
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: V3ManagedLifecycle::declaration_with_runtime
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.config.source_identity, v3.config.runtime_limit]
+      produces: [v3.lifecycle.instance_declaration]
+      side_channel_reads: [v3.config.runtime_limit]
+      side_channel_writes: []
 - chain_id: v3.server.managed_lifecycle
   owner_feature_id: v3.managed_server_lifecycle
   summary: One Rust owner validates Config, declares aggregate instance identity, locks lifecycle operations, preserves old rcc start takeover for configured listener ports through managed control, foreign managed port-scoped release, and explicit listener PID signals, runs top-level start in the foreground with real Server console, retains hidden detached-child compatibility, publishes PID/control identity, restarts through one in-place exec with a nonce-bound restart plan when executable/snapshot overrides are needed, and gracefully stops the exact instance without broad kill while preserving terminal Codex sample persistence failures in managed status.
@@ -2534,19 +2998,61 @@ chains:
     status: anchored
   - step_id: v3-srv-05
     from_node: V3Error06ClientProjected
-    to_node: V3Server16HttpFrame
-    caller_symbol: pending_endpoint
-    caller_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
-    callee_symbol: build_v3_server_16_http_frame_from_v3_error_06
+    to_node: V3ModelClientNoResponse
+    caller_symbol: responses_direct_output_response_with_console_for_protocol
+    caller_file: v3/crates/routecodex-v3-server/src/frame_builders.rs
+    callee_symbol: model_no_response_output
     callee_file: v3/crates/routecodex-v3-server/src/frame_builders.rs
     owner_feature_id: v3.foundation_p0_p2
     resource_flow:
       consumes:
       - v3.error.chain
       produces:
-      - v3.response.client_payload
+      - v3.server.model_transport_outcome
       side_channel_reads:
       - v3.error.chain
+      side_channel_writes: []
+    status: anchored
+  - step_id: v3-srv-06
+    from_node: V3ModelClientNoResponse
+    to_node: V3FrontTransportCloseoutState
+    caller_symbol: commit_model_transport_outcome
+    caller_file: v3/crates/routecodex-v3-server/src/frame_builders.rs
+    callee_symbol: provider_terminal_response
+    callee_file: v3/crates/routecodex-v3-server/src/frame_builders.rs
+    owner_feature_id: v3.foundation_p0_p2
+    resource_flow:
+      consumes: [v3.server.model_transport_outcome]
+      produces: []
+      side_channel_reads: [v3.error.chain]
+      side_channel_writes: []
+    status: anchored
+  - step_id: v3-srv-07
+    from_node: V3ServerHttpFramingPolicy
+    to_node: HyperHttp1ParserPolicy
+    caller_symbol: serve_v3_front_http_connection
+    caller_file: v3/crates/routecodex-v3-server/src/restart_handoff.rs
+    callee_symbol: automatic_error_responses
+    callee_file: v3/vendor/hyper/src/server/conn/http1.rs
+    owner_feature_id: v3.runtime_restart_handoff_skeleton
+    resource_flow:
+      consumes: []
+      produces: [v3.server.http_parse_error_policy]
+      side_channel_reads: []
+      side_channel_writes: [v3.server.http_parse_error_policy]
+    status: anchored
+  - step_id: v3-srv-08
+    from_node: HyperHttp1ParserPolicy
+    to_node: HyperConnectionParserPolicy
+    caller_symbol: serve_connection
+    caller_file: v3/vendor/hyper/src/server/conn/http1.rs
+    callee_symbol: set_automatic_error_responses
+    callee_file: v3/vendor/hyper/src/proto/h1/conn.rs
+    owner_feature_id: v3.runtime_restart_handoff_skeleton
+    resource_flow:
+      consumes: [v3.server.http_parse_error_policy]
+      produces: []
+      side_channel_reads: [v3.server.http_parse_error_policy]
       side_channel_writes: []
     status: anchored
 - chain_id: v3.debug_error_foundation.mainline
@@ -5846,6 +6352,36 @@ chains:
       side_channel_reads: [v3.config.http_sse_keepalive_interval]
       side_channel_writes: []
 
+- chain_id: v3.client_sse_head_commit
+  owner_feature_id: v3.client_sse_head_commit
+  summary: A streamed client request commits the HTTP SSE response head and transport keepalives at the Server boundary while the Runtime still buffers the full provider attempt, and an exec replacement drains in-flight client responses before closing their transports.
+  manifest: docs/architecture/manifests/v3.client_sse_head_commit.mainline.yml
+  entry_contract:
+    node: V3ServerSseHeadCommit01ClientHead
+    owner_doc: docs/architecture/wiki/v3-client-sse-head-commit.md
+  edges:
+  - step_id: v3-client-sse-head-commit-01
+    from_node: V3ServerSseHeadCommit01ClientHead
+    to_node: V3ServerRespOutbound06ClientFrame
+    caller_symbol: pending_model_request
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: accept_v3_client_sse_transport
+    callee_file: v3/crates/routecodex-v3-server/src/client_sse_transport.rs
+    status: anchored
+    edge_kind: transport_head_commit
+    owner_feature_id: v3.client_sse_head_commit
+    semantic_input: streamed client request headers plus the bounded keepalive interval and the pending runtime outcome
+    semantic_output: committed 200 text/event-stream channel with transport-only keepalives, then the projected client payload by SSE transport framing, or an explicit transport break when the outcome has no successful client payload
+    resource_flow:
+      consumes:
+      - v3.sse.direct.accept_skeleton
+      - v3.sse.transport_encoded_chunk
+      - v3.config.http_sse_keepalive_interval
+      produces: []
+      side_channel_reads:
+      - v3.front.request_activity_gate
+      side_channel_writes: []
+
 - chain_id: v3.provider_action_gate.mainline
   owner_feature_id: v3.provider_action_gate
   summary: V3 provider action gate serializes provider failure recovery, permit ownership, post-commit SSE success/failure observation, and provider response event-codec terminal evidence; the Server frame owner consumes typed Error01 and performs the sole Error06 client-protocol projection.
@@ -5936,7 +6472,7 @@ chains:
       to_node: V3ProviderActionGateTerminalAdmission
       caller_symbol: run_v3_relay_provider_failure_policy
       caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-      callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_terminal_provider_projection_in_scope
+      callee_symbol: V3ProviderFailureRuntimeHealth::record_terminal_provider_projection_in_scope
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
@@ -5954,9 +6490,9 @@ chains:
     - step_id: v3-provider-action-gate-06
       from_node: V3ProviderActionGateTerminalAdmission
       to_node: V3ProviderActionGateTerminalCommitted
-      caller_symbol: V3ProviderActionGate::record_failure_and_wait_for_terminal_projection
+      caller_symbol: V3ProviderActionGate::record_failure_and_commit_terminal_projection
       caller_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-      callee_symbol: V3ProviderActionGate::commit_terminal_admission
+      callee_symbol: V3ProviderActionGate::commit_terminal_generation_locked
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
@@ -6966,7 +7502,7 @@ chains:
       side_channel_writes: []
 - chain_id: v3.provider_admission_rescue_entrypoints
   owner_feature_id: v3.provider_global_subscription_probe
-  summary: Direct and Relay Runtime entry points use one pre-transport selection boundary where health and request-local Error exclusions determine the candidate; concurrency is an observational soft signal and never alters provider or tier selection.
+  summary: Direct and Relay use one pre-transport selection boundary with atomic provider+authAlias capacity admission; full candidates are skipped request-locally without waiting, health mutation or Router reentry.
   edges:
   - step_id: v3-rd-target-select-direct-admission-rescue
     from_node: V3Target09CandidateSetExpanded
@@ -6979,9 +7515,9 @@ chains:
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
       - Direct runtime selects from the captured Target09 candidate set through the admission-aware rescue wrapper before provider transport.
-      - Provider+authAlias concurrency is an observational soft signal; Direct keeps the highest-priority health-eligible candidate selected and sends it without waiting or skipping.
+      - Direct atomically admits provider+authAlias capacity and immediately selects the next eligible candidate when full.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
-      - Concurrency state never exhausts Direct selection or advances a route tier; only an actual typed provider failure such as HTTP 429 enters Error recovery and may select a later candidate.
+      - All-full candidates exhaust immediately without a provider send or health mutation; concurrency never waits or enters Error recovery admission.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
       produces: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
@@ -6998,7 +7534,7 @@ chains:
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
       - Responses Direct runtime uses the same admission-aware selection wrapper for initial selection and request-local reselection.
-      - Concurrency state never excludes a Responses Direct candidate or advances tiers; it only tracks in-flight request leases.
+      - Responses Direct immediately skips full provider+authAlias candidates and exhausts an all-full target without waiting or mutating health.
       - The acquired provider admission lease is consumed by Provider transport or released by Runtime if selection does not reach transport.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
@@ -7016,7 +7552,7 @@ chains:
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
       - Generic Relay runtime resolves Target09 through the admission-aware relay wrapper before provider transport.
-      - Relay selects the highest-priority health-eligible candidate; concurrency is an observational soft signal and cannot exclude candidates or advance tiers.
+      - Relay uses the same atomic capacity admission, immediately skipping full candidates without waiting or changing health.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
       - Concurrency state cannot exhaust Relay selection; only an actual typed provider failure such as HTTP 429 enters Error recovery and may select a later candidate.
     resource_flow:
@@ -7035,7 +7571,7 @@ chains:
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
       - Responses Relay runtime uses the admission-aware relay wrapper for selected Target10 resolution after its route facts are captured.
-      - Concurrency state stays outside provider failure policy and does not alter the selected provider, auth key, model, or cooldown state.
+      - Full candidates are excluded only for this request and immediately reselected inside Target; capacity does not mutate failure policy or cooldown state.
       - The selected admission lease is handed to Relay Provider transport exactly once; otherwise Runtime releases it before terminal projection.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
@@ -7053,7 +7589,7 @@ chains:
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
       - Anthropic Relay resolves Target09 through admission-aware selection before Provider transport.
-      - Concurrency is an observational soft signal; Anthropic Relay sends the highest-priority health-eligible provider without waiting or switching early.
+      - Anthropic Relay uses shared admission to switch immediately from full providers to the next eligible candidate.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
       - Concurrency state cannot exhaust Anthropic Relay selection; only an actual typed provider failure such as HTTP 429 may enter Error recovery and select a later candidate.
     resource_flow:
@@ -7146,8 +7682,8 @@ chains:
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
-      - WebSocketV2 releases any Runtime pre-acquired provider lease before it waits for the shared session slot.
-      - After it owns the session slot, transport acquires provider admission; a losing admission race releases the slot and retries without holding provider capacity while queued.
+      - WebSocketV2 preserves a granted lease when the session slot is immediately available and releases it before an actual slot wait.
+      - After a slot wait, transport immediately reacquires provider admission; a losing capacity race releases the slot and returns typed ConcurrencyBusy for Runtime reselect.
       - Cancellation or admission failure releases the resources already owned by this request and cannot retain a provider lease while waiting for another request's WebSocket session.
     resource_flow:
       consumes: [v3.provider.adaptive_concurrency_admission, v3.provider.responses_websocket_connection]
@@ -7512,7 +8048,7 @@ chains:
     to_node: V3AdminObservabilityAggregation
     caller_symbol: records
     caller_file: v3/crates/routecodex-v3-admin/src/api/observability.rs
-    callee_symbol: v3_webui_observability_read_raw_rows
+    callee_symbol: v3_webui_observability_read_raw_rows_from
     callee_file: v3/crates/routecodex-v3-debug/src/observability_store.rs
     status: anchored
     owner_feature_id: v3.server_internal_observability_projection
@@ -7938,6 +8474,34 @@ chains:
     node: V3Front01StableRequestOwner
     owner_doc: docs/architecture/wiki/v3-runtime-restart-handoff-skeleton.md
   edges:
+  - step_id: v3-front-client-observation-01
+    from_node: V3Front01StableRequestOwner
+    to_node: V3ClientTransportObservation
+    caller_symbol: serve_v3_front_http_connection
+    caller_file: v3/crates/routecodex-v3-server/src/restart_handoff.rs
+    callee_symbol: V3ClientTransportObservation::prepared
+    callee_file: v3/crates/routecodex-v3-server/src/client_transport_observation.rs
+    status: anchored
+    owner_feature_id: v3.runtime_restart_handoff_skeleton
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads: [v3.debug.trace_context]
+      side_channel_writes: [v3.debug.client_transport_receipt]
+  - step_id: v3-front-client-observation-02
+    from_node: V3StableFrontSocket
+    to_node: V3ClientTransportObservation
+    caller_symbol: V3StableFrontSocket::spawn
+    caller_file: v3/crates/routecodex-v3-server/src/restart_handoff.rs
+    callee_symbol: V3ClientTransportObservation::wrote
+    callee_file: v3/crates/routecodex-v3-server/src/client_transport_observation.rs
+    status: anchored
+    owner_feature_id: v3.runtime_restart_handoff_skeleton
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads: [v3.debug.trace_context]
+      side_channel_writes: [v3.debug.client_transport_receipt]
   - step_id: v3-runtime-restart-handoff-01
     from_node: V3Front01StableRequestOwner
     to_node: V3Front02RequestLeaseBound
@@ -7969,9 +8533,9 @@ chains:
 
 - chain_id: v3.direct_sse_accept_skeleton
   owner_feature_id: v3.direct_sse_accept_skeleton
-  summary: Protocol-typed client SSE establishes a shared Front transport channel and heartbeat before the execution-plan-selected Direct or Relay attempt finishes; only runtime-projected client frames or typed Error06 terminal frames cross the channel, never reparsed HTTP JSON.
+  summary: Protocol-typed client SSE establishes a shared Front transport channel and heartbeat before the execution-plan-selected Direct or Relay attempt finishes; only successful runtime-projected client frames cross the channel, while typed terminal failure aborts the affected transport without an error frame or reparsed HTTP JSON.
   manifest: docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml
-  implementation_symbols: [V3FrontSseAcceptSkeleton, v3_request_wants_sse]
+  implementation_symbols: [accept_v3_client_sse_transport, v3_request_wants_sse]
   supporting_callers: [pending_endpoint_after_responses_admission, execute_responses_direct_server_outcome]
   entry_contract:
     node: V3DirectSseAccept01ClientChannel
@@ -8407,10 +8971,10 @@ chains:
     status: binding_pending
     owner_feature_id: v3.unified_operation_runner_design
     resource_flow:
-      consumes: [v3.hub.resolved_target]
-      produces: [v3.operation_runner.execution_mode]
-      side_channel_reads: [v3.hub.resolved_target]
-      side_channel_writes: [v3.operation_runner.execution_mode]
+      consumes: [v3.route.opaque_target, v3.config.published_manifest]
+      produces: [v3.hub.resolved_target, v3.operation_runner.execution_mode]
+      side_channel_reads: [v3.route.opaque_target, v3.provider.health_state, v3.provider.key_health_state, v3.provider.availability_projection, v3.operation_runner.request_local_exclusions]
+      side_channel_writes: [v3.hub.resolved_target, v3.operation_runner.execution_mode]
   - step_id: v3-op-runner-req-04
     from_node: V3OperationRunnerPlanExecution
     to_node: V3OperationRunnerGovernChatRequest
@@ -8437,7 +9001,7 @@ chains:
     resource_flow:
       consumes: [v3.request.normal_payload, v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing]
       produces: [v3.request.provider_semantic, v3.operation_runner.attempt_projection_context, v3.operation_runner.attempt_declaration_map]
-      side_channel_reads: [v3.operation_runner.execution_mode, v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing]
+      side_channel_reads: [v3.config.published_manifest, v3.hub.resolved_target, v3.operation_runner.execution_mode, v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing]
       side_channel_writes: [v3.operation_runner.attempt_projection_context, v3.operation_runner.attempt_declaration_map]
   - step_id: v3-op-runner-req-06
     from_node: V3OperationRunnerProjectProviderSemantic
@@ -8451,7 +9015,7 @@ chains:
     resource_flow:
       consumes: [v3.request.provider_semantic]
       produces: [v3.hub.provider_wire_payload]
-      side_channel_reads: []
+      side_channel_reads: [v3.hub.resolved_target, v3.operation_runner.execution_mode]
       side_channel_writes: []
   - step_id: v3-op-runner-req-07
     from_node: V3OperationRunnerCompatRequest
@@ -8464,8 +9028,8 @@ chains:
     owner_feature_id: v3.unified_operation_runner_design
     resource_flow:
       consumes: [v3.hub.provider_wire_payload]
-      produces: [v3.hub.provider_wire_payload]
-      side_channel_reads: []
+      produces: [v3.provider.responses_wire_payload]
+      side_channel_reads: [v3.hub.resolved_target]
       side_channel_writes: []
   - step_id: v3-op-runner-req-08
     from_node: V3OperationRunnerEncodeWire
@@ -8477,9 +9041,9 @@ chains:
     status: binding_pending
     owner_feature_id: v3.unified_operation_runner_design
     resource_flow:
-      consumes: [v3.hub.provider_wire_payload]
+      consumes: [v3.provider.responses_wire_payload]
       produces: [v3.provider.transport_request]
-      side_channel_reads: []
+      side_channel_reads: [v3.hub.resolved_target, v3.operation_runner.execution_mode]
       side_channel_writes: []
   request_typed_resource_edges:
     request_origin_kind:

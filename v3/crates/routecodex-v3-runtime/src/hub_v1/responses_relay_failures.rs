@@ -142,7 +142,8 @@ pub(crate) fn provider_runtime_failure(
             _ => 502,
         }
     };
-    // `status` above is the client-facing projection (502 for a network failure).
+    // `status` above is the internal typed marker (502 for a network failure); a
+    // provider terminal never projects it onto the client, so it is evidence only.
     // `provider_status` carries only a real upstream HTTP status: a transport or
     // other response-less failure must stay `None` so it cannot be mistaken for a
     // genuine upstream HTTP 502.
@@ -361,7 +362,7 @@ pub(crate) fn provider_request_relay_failure(
 
 pub(crate) fn terminalize_v3_responses_relay_provider_failure(
     mut failure: V3ResponsesRelayProviderFailure,
-    last_eligible_external_http: Option<routecodex_v3_error::V3EligibleExternalHttpResponse>,
+    last_external_http: Option<routecodex_v3_error::V3ExternalHttpWitness>,
 ) -> V3ResponsesRelayProviderFailure {
     if failure.terminal_projection.is_none() {
         let source = routecodex_v3_error::build_v3_error_01_source_raised(
@@ -387,7 +388,7 @@ pub(crate) fn terminalize_v3_responses_relay_provider_failure(
         .expect("Responses residence-budget terminal requires exhausted Error05");
         failure.terminal_disposition = Some(V3ErrorHandlingCenter::provider_terminal_disposition(
             terminal.clone(),
-            last_eligible_external_http,
+            last_external_http,
         ));
         failure.terminal_projection =
             Some(V3ErrorHandlingCenter::project_terminal_decision(terminal));

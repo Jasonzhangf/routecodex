@@ -230,9 +230,13 @@ pub(super) fn chat_tool_result_to_responses_input_item(
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty());
-    let Some(call_id) = call_id else {
+    let extension = row
+        .get("routecodex_chat_extension")
+        .and_then(Value::as_object);
+    let named_output = extension.and_then(|fields| fields.get("responses_tool_output_name"));
+    if call_id.is_none() && named_output.is_none() {
         return Ok(None);
-    };
+    }
     let output = row
         .get("content")
         .or_else(|| row.get("output"))
@@ -242,6 +246,9 @@ pub(super) fn chat_tool_result_to_responses_input_item(
         })
         .unwrap_or_default();
     if responses_tool_output_type == "tool_search_output" {
+        let call_id = call_id.ok_or_else(|| {
+            "MalformedOutboundField target_protocol=responses path=$.input[].tool_search_output.call_id".to_string()
+        })?;
         let tools = serde_json::from_str::<Value>(&output).map_err(|error| {
             format!(
                 "MalformedOutboundField target_protocol=responses path=$.input[].tool_search_output.tools: {error}"
@@ -265,21 +272,49 @@ pub(super) fn chat_tool_result_to_responses_input_item(
         return Ok(Some(Value::Object(item)));
     }
 
-    let item_id = if responses_tool_output_type == "custom_tool_call_output" {
-        responses_custom_item_id(row, call_id)
-    } else {
-        responses_function_item_id(row, call_id)
-    };
-
-    Ok(Some(Value::Object(Map::from_iter([
+    let mut item = Map::from_iter([
         (
             "type".to_string(),
             Value::String(responses_tool_output_type.to_string()),
         ),
-        ("id".to_string(), Value::String(item_id)),
-        ("call_id".to_string(), Value::String(call_id.to_string())),
         ("output".to_string(), Value::String(output)),
-    ]))))
+    ]);
+    if let Some(call_id) = call_id {
+        let item_id = if responses_tool_output_type == "custom_tool_call_output" {
+            responses_custom_item_id(row, call_id)
+        } else {
+            responses_function_item_id(row, call_id)
+        };
+        item.insert("id".to_string(), Value::String(item_id));
+        item.insert("call_id".to_string(), Value::String(call_id.to_string()));
+    } else if let Some(name) = named_output {
+        item.insert("name".to_string(), name.clone());
+        if let Some(item_id) = responses_item_id_from_chat_extension(row) {
+            item.insert("id".to_string(), Value::String(item_id.to_string()));
+        }
+        if let Some(namespace) =
+            extension.and_then(|fields| fields.get("responses_tool_output_namespace"))
+        {
+            item.insert("namespace".to_string(), namespace.clone());
+        }
+    }
+    if let Some(extension) = extension {
+        if let Some(status) = extension.get("responses_tool_output_status") {
+            item.insert("status".to_string(), status.clone());
+        }
+        if let Some(fields) = extension.get("responses_tool_output_extra_fields") {
+            let fields = fields.as_object().ok_or_else(|| {
+                "MalformedOutboundField target_protocol=responses path=$.messages[].routecodex_chat_extension.responses_tool_output_extra_fields".to_string()
+            })?;
+            for (key, value) in fields {
+                if item.get(key).is_some_and(|existing| existing != value) {
+                    return Err(format!("MalformedOutboundField target_protocol=responses path=$.input[].{key}: conflicting tool result field"));
+                }
+                item.insert(key.clone(), value.clone());
+            }
+        }
+    }
+    Ok(Some(Value::Object(item)))
 }
 
 fn project_responses_item_extension_fields(

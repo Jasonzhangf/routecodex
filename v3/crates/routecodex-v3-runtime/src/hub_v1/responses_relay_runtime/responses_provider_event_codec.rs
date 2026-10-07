@@ -187,16 +187,23 @@ fn apply_v3_typed_responses_event(
                     .to_owned(),
             ));
         }
-        let failure =
+        // The admission owner decides which incomplete reasons are genuinely
+        // rejected terminals. `max_output_tokens` is the output-cap terminal,
+        // i.e. the same valid partial output as the Chat aliases and the
+        // Anthropic `max_tokens` stop reason, so it is admitted here and the
+        // reducer materializes `status: incomplete`. Do not unwrap: admission
+        // returning `None` is the admitted path, not an invariant violation.
+        if let Some(failure) =
             classify_v3_provider_terminal_admission(V3HubProviderWireProtocol::Responses, event)
-                .expect("response.incomplete was validated before terminal admission");
-        return Err(
-            V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure {
-                status: 200,
-                code: failure.code,
-                message: failure.message,
-            },
-        );
+        {
+            return Err(
+                V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure {
+                    status: 200,
+                    code: failure.code,
+                    message: failure.message,
+                },
+            );
+        }
     }
     reducer.apply_event(event).map_err(|error| {
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
@@ -651,9 +658,9 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
     }
 
     #[test]
-    fn response_incomplete_is_provider_error_not_terminal_response() {
+    fn response_incomplete_at_the_relay_codec_boundary_is_terminal_incomplete() {
         let mut reducer = V3ResponsesSseReducerState::default();
-        let error = apply_v3_typed_responses_event(
+        let terminal = apply_v3_typed_responses_event(
             &json!({
                 "type": "response.incomplete",
                 "response": {
@@ -665,13 +672,9 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
             }),
             &mut reducer,
         )
-        .expect_err("response.incomplete must enter the provider error chain");
-        assert!(
-            error
-                .to_string()
-                .contains("provider response ended before completion"),
-            "unexpected error: {error}"
-        );
+        .expect("an output-cap response.incomplete is valid partial output")
+        .expect("response.incomplete must project a terminal response");
+        assert_eq!(terminal["status"], "incomplete", "{terminal}");
     }
 
     #[test]
@@ -690,6 +693,60 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
         assert_eq!(terminal["usage"]["input_tokens"], json!(0));
         assert_eq!(terminal["usage"]["output_tokens"], json!(0));
         assert_eq!(terminal["usage"]["total_tokens"], json!(0));
+    }
+
+    #[test]
+    fn response_incomplete_output_cap_is_terminal_incomplete_not_provider_error() {
+        // `max_output_tokens` is the output-cap terminal: valid partial output,
+        // admitted so the reducer materializes `status: incomplete` instead of
+        // sending the attempt into the provider failure/cooldown path.
+        let mut reducer = V3ResponsesSseReducerState::default();
+        let terminal = apply_v3_typed_responses_event(
+            &json!({
+                "type": "response.incomplete",
+                "response": {
+                    "id": "resp_incomplete_cap",
+                    "status": "incomplete",
+                    "incomplete_details": {"reason": "max_output_tokens"},
+                    "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+                }
+            }),
+            &mut reducer,
+        )
+        .expect("output-cap incomplete terminal must be admitted")
+        .expect("response.incomplete must be terminal");
+        assert_eq!(terminal["status"], "incomplete", "{terminal}");
+        assert_eq!(
+            terminal["incomplete_details"]["reason"], "max_output_tokens",
+            "{terminal}"
+        );
+        assert_eq!(terminal["usage"]["output_tokens"], json!(5), "{terminal}");
+    }
+
+    #[test]
+    fn response_incomplete_content_filter_still_enters_provider_error_chain() {
+        // `content_filter` is a genuine provider refusal and must keep the
+        // existing typed-error-then-reselect behavior.
+        let mut reducer = V3ResponsesSseReducerState::default();
+        let error = apply_v3_typed_responses_event(
+            &json!({
+                "type": "response.incomplete",
+                "response": {
+                    "id": "resp_incomplete_filtered",
+                    "status": "incomplete",
+                    "incomplete_details": {"reason": "content_filter"},
+                    "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+                }
+            }),
+            &mut reducer,
+        )
+        .expect_err("a content_filter incomplete terminal is a provider failure");
+        assert!(
+            error
+                .to_string()
+                .contains("provider response ended before completion"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]

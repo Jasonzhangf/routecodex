@@ -8,7 +8,8 @@
 // never as a raw `event: error`, which EventSource would treat as a connection
 // failure.
 
-use super::{project_query_rows, query_params, read_observability_rows, QueryRow, SourceRow};
+use super::store_cache::read_v3_obs_projection;
+use super::{query_params, QueryRow};
 use crate::AppState;
 use axum::extract::{RawQuery, State};
 use axum::http::StatusCode;
@@ -30,20 +31,18 @@ struct V3ObsStreamState {
     pending: VecDeque<QueryRow>,
 }
 
-fn v3_obs_stream_seq(rows: &[SourceRow]) -> u64 {
-    rows.iter()
-        .map(|row| row.updated_epoch_ms)
-        .max()
-        .unwrap_or(0)
-}
-
-/// Rows strictly after `cursor`, oldest first, projected exactly like
-/// `/api/observability/records` so the live stream and the polling path agree.
-fn select_v3_obs_stream_rows(rows: Vec<SourceRow>, cursor: Option<u64>) -> Vec<QueryRow> {
-    let mut query_rows = project_query_rows(rows);
-    if let Some(cursor) = cursor {
-        query_rows.retain(|row| row.updated_epoch_ms > cursor);
-    }
+/// Rows strictly after `cursor`, oldest first, from the same folded projection
+/// `/api/observability/records` serves so the live stream and the polling path
+/// agree.
+fn select_v3_obs_stream_rows(rows: &[QueryRow], cursor: Option<u64>) -> Vec<QueryRow> {
+    let mut query_rows: Vec<QueryRow> = match cursor {
+        Some(cursor) => rows
+            .iter()
+            .filter(|row| row.updated_epoch_ms > cursor)
+            .cloned()
+            .collect(),
+        None => rows.to_vec(),
+    };
     query_rows.sort_by_key(|row| row.updated_epoch_ms);
     query_rows
 }
@@ -77,7 +76,7 @@ pub(super) async fn stream(State(state): State<AppState>, raw_query: RawQuery) -
         None => {
             let probe_state = state.clone();
             match tokio::task::spawn_blocking(move || {
-                read_observability_rows(&probe_state).map(|rows| v3_obs_stream_seq(&rows))
+                read_v3_obs_projection(&probe_state).map(|projection| projection.max_seq)
             })
             .await
             {
@@ -125,8 +124,16 @@ pub(super) async fn stream(State(state): State<AppState>, raw_query: RawQuery) -
                 let poll_state = stream_state.state.clone();
                 let poll_cursor = stream_state.cursor;
                 let fetched = tokio::task::spawn_blocking(move || {
-                    read_observability_rows(&poll_state)
-                        .map(|rows| select_v3_obs_stream_rows(rows, poll_cursor))
+                    read_v3_obs_projection(&poll_state).map(|projection| {
+                        // The store cannot hold a row the cursor has not already
+                        // passed when its high-water mark has not moved, so an
+                        // unchanged store never re-scans the projection.
+                        if projection.max_seq <= poll_cursor.unwrap_or(0) {
+                            Vec::new()
+                        } else {
+                            select_v3_obs_stream_rows(&projection.rows, poll_cursor)
+                        }
+                    })
                 })
                 .await;
                 match fetched {

@@ -230,6 +230,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn responses_sse_incomplete_content_filter_projects_terminal_not_error() {
+        use futures_util::StreamExt;
+        let manifest = test_relay_manifest();
+        let outcome = test_relay_outcome(&manifest);
+        let provider: V3ProviderSseStream = Box::pin(futures_util::stream::iter(vec![
+            Ok(b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_cf\",\"status\":\"in_progress\"}}\n\n".to_vec()),
+            Ok(b"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_cf\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"content_filter\"},\"usage\":{\"input_tokens\":10,\"output_tokens\":0,\"total_tokens\":10}}}\n\n".to_vec()),
+        ]));
+        let mut stream = project_responses_sse_as_openai_chat_stream(
+            "test-request-id".to_string(),
+            "test-session-id".to_string(),
+            provider,
+            None,
+            V3WebSearchExecutionMode::None,
+            None,
+            false,
+            false,
+            V3RuntimeStreamObservation::default(),
+            true,
+            outcome,
+        );
+        let mut chunks = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            chunks.push(chunk.expect(
+                "a legal content_filter incomplete terminal must project as a Chat final frame, not a stream error",
+            ));
+        }
+        let text = String::from_utf8(chunks.concat()).unwrap();
+        assert!(
+            text.contains("\"finish_reason\":\"content_filter\""),
+            "{text}"
+        );
+        assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
+    }
+
+    #[tokio::test]
     async fn responses_sse_mid_stream_client_disconnect_is_health_neutral() {
         use futures_util::StreamExt;
         use routecodex_v3_provider_responses::V3ProviderAvailabilityReader;
@@ -437,6 +473,7 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             V3RelayProviderFailureRetryPolicy::default(),
             V3HubExecutionMode::Relay,
             Some(request_execution_control),
+            None,
         )
         .await
         .expect_err("Relay must reject the next transport attempt from the shared budget");

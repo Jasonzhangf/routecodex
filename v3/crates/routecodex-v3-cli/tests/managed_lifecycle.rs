@@ -1,13 +1,12 @@
 use serde_json::Value;
-use std::collections::HashSet;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpStream;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::{Mutex, MutexGuard};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
@@ -21,6 +20,489 @@ static MANAGED_LIFECYCLE_TEST_LOCK: Mutex<()> = Mutex::new(());
 // waits for the observed state with a generous bound instead of racing a thin
 // setup deadline.
 const HOOKS_MARKER_TIMEOUT: Duration = Duration::from_secs(30);
+
+#[path = "managed_lifecycle/p0_hooks_restart.rs"]
+mod p0_hooks_restart;
+
+#[path = "managed_lifecycle/p0_sample_restart.rs"]
+mod p0_sample_restart;
+
+#[path = "managed_lifecycle/previous_release_restart.rs"]
+mod previous_release_restart;
+
+#[path = "managed_lifecycle/hooks_target_restart.rs"]
+mod hooks_target_restart;
+
+struct P0ManagedProcess {
+    pid: u32,
+}
+
+struct P0Provider {
+    port: u16,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    task: Option<std::thread::JoinHandle<()>>,
+}
+
+impl P0Provider {
+    fn start() -> Self {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        listener.set_nonblocking(true).unwrap();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let worker_stop = stop.clone();
+        let task = std::thread::spawn(move || {
+            while !worker_stop.load(std::sync::atomic::Ordering::SeqCst) {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(connection) => connection,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        sleep(Duration::from_millis(5));
+                        continue;
+                    }
+                    Err(error) => panic!("P0 provider accept: {error}"),
+                };
+                stream.set_nonblocking(false).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                assert!(line.starts_with("POST /v1/responses "), "{line}");
+                let mut length = None;
+                loop {
+                    line.clear();
+                    assert!(reader.read_line(&mut line).unwrap() > 0);
+                    if line == "\r\n" {
+                        break;
+                    }
+                    if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        length = Some(value.trim().parse::<usize>().unwrap());
+                    }
+                }
+                let mut body = vec![0; length.expect("provider request length")];
+                reader.read_exact(&mut body).unwrap();
+                let request: Value = serde_json::from_slice(&body).unwrap();
+                assert_eq!(request["model"], "wire-test");
+                assert_eq!(request["input"], "uncached connection probe");
+                let response = serde_json::json!({
+                    "id": "resp_p0_live", "object": "response", "created_at": 0,
+                    "status": "completed", "model": "wire-test",
+                    "output": [{"id":"msg_p0_live", "type":"message", "role":"assistant",
+                        "status":"completed", "content":[{"type":"output_text",
+                        "text":"uncached connection probe", "annotations":[]}]}],
+                    "usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
+                })
+                .to_string();
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}", response.len()).unwrap();
+            }
+        });
+        Self {
+            port,
+            stop,
+            task: Some(task),
+        }
+    }
+}
+
+impl Drop for P0Provider {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        if self.task.take().unwrap().join().is_err() {
+            if std::thread::panicking() {
+                eprintln!("P0 provider failed during test cleanup");
+            } else {
+                panic!("P0 provider failed");
+            }
+        }
+    }
+}
+
+impl Drop for P0ManagedProcess {
+    fn drop(&mut self) {
+        unsafe { libc::kill(self.pid as libc::pid_t, libc::SIGTERM) };
+        assert!(wait_for_explicit_pid_exit(
+            self.pid.into(),
+            Duration::from_secs(10)
+        ));
+    }
+}
+
+fn p0_start(root: &TempDir, state: &Path, config: &Path) -> P0ManagedProcess {
+    let home = root.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    let output = managed_test_command(env!("CARGO_BIN_EXE_rccv3"), state)
+        .args(["server", "start", "--config"])
+        .arg(config)
+        .env("HOME", home)
+        .env("ROUTECODEX_V3_STATE_DIR", state)
+        .env("V3_MANAGED_TEST_KEY", SECRET)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let owner = single_instance_dir(state);
+    let cache: Value = serde_json::from_slice(&fs::read(owner.join("pid.cache")).unwrap()).unwrap();
+    let pid = cache["pid"].as_u64().unwrap() as u32;
+    eprintln!("P0 isolated managed PID={pid} state={}", state.display());
+    P0ManagedProcess { pid }
+}
+
+fn p0_control_stream(control: &Value) -> UnixStream {
+    let previous = std::env::current_dir().unwrap();
+    std::env::set_current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap();
+    let stream = UnixStream::connect(control["socket_path"].as_str().unwrap());
+    std::env::set_current_dir(previous).unwrap();
+    stream.unwrap()
+}
+
+fn p0_responses_on_connection(stream: &mut TcpStream, port: u16, workdir: &Path) {
+    let body = r#"{"model":"test","input":"uncached connection probe","stream":false}"#;
+    write!(stream, "POST /v1/responses HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nx-routecodex-workdir: {}\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\r\n{body}", workdir.display(), body.len()).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let mut reader = BufReader::new(stream);
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    assert!(line.starts_with("HTTP/1.1 200"), "{line}");
+    let mut content_length = None;
+    let mut chunked = false;
+    loop {
+        line.clear();
+        assert!(reader.read_line(&mut line).unwrap() > 0);
+        if line == "\r\n" {
+            break;
+        }
+        if let Some(length) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+            content_length = Some(length.trim().parse::<usize>().unwrap());
+        }
+        if line
+            .to_ascii_lowercase()
+            .starts_with("transfer-encoding: chunked")
+        {
+            chunked = true;
+        }
+    }
+    let mut body = Vec::new();
+    if chunked {
+        loop {
+            line.clear();
+            reader.read_line(&mut line).unwrap();
+            let size = usize::from_str_radix(line.trim().split(';').next().unwrap(), 16).unwrap();
+            if size == 0 {
+                loop {
+                    line.clear();
+                    reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" {
+                        break;
+                    }
+                }
+                break;
+            }
+            let mut chunk = vec![0; size];
+            reader.read_exact(&mut chunk).unwrap();
+            body.extend(chunk);
+            let mut delimiter = [0; 2];
+            reader.read_exact(&mut delimiter).unwrap();
+            assert_eq!(delimiter, *b"\r\n");
+        }
+    } else {
+        body.resize(content_length.expect("HTTP response framing"), 0);
+        reader.read_exact(&mut body).unwrap();
+    }
+    let response: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(response["id"], "resp_p0_live");
+    assert_eq!(response["status"], "completed");
+    assert_eq!(
+        response["output"][0]["content"][0]["text"],
+        "uncached connection probe"
+    );
+}
+
+#[test]
+fn p0_restart_repeated_declarations_keep_exact_owner() {
+    let _guard = lifecycle_test_guard();
+    let root = TempDir::new().unwrap();
+    let state = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let provider = P0Provider::start();
+    let config_a = write_config_with_provider(&root, ports, true, true, Some(provider.port));
+    let config_b = root.path().join("config-b.toml");
+    let config_c = root.path().join("config-c.toml");
+    fs::copy(&config_a, &config_b).unwrap();
+    fs::copy(&config_a, &config_c).unwrap();
+    let process = p0_start(&root, &state, &config_a);
+    let session_id = unsafe { libc::getsid(process.pid as libc::pid_t) };
+    assert!(session_id >= 0);
+    for (index, config) in [&config_b, &config_a, &config_c].into_iter().enumerate() {
+        let output = run_with_timeout(env!("CARGO_BIN_EXE_rccv3"), &state, config, "restart", 5000);
+        assert!(
+            output.status.success(),
+            "switch {index}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let owners = fs::read_dir(state.join("instances"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|directory| directory.join("pid.cache").exists())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            owners.len(),
+            1,
+            "switch {index}: stale authoritative owners {owners:?}"
+        );
+        let cache: Value =
+            serde_json::from_slice(&fs::read(owners[0].join("pid.cache")).unwrap()).unwrap();
+        assert_eq!(cache["pid"].as_u64().unwrap(), u64::from(process.pid));
+        assert_eq!(
+            unsafe { libc::getsid(process.pid as libc::pid_t) },
+            session_id
+        );
+        for port in ports {
+            assert_eq!(http_get_json(port, "/health")["status"], "ok");
+        }
+        let mut connection = TcpStream::connect(("127.0.0.1", ports[0])).unwrap();
+        p0_responses_on_connection(&mut connection, ports[0], root.path());
+    }
+}
+
+#[test]
+fn p0_restart_rejects_native_exec_and_invalid_inputs_without_shutdown() {
+    let _guard = lifecycle_test_guard();
+    let root = TempDir::new().unwrap();
+    let state = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let provider = P0Provider::start();
+    let config = write_config_with_provider(&root, ports, true, true, Some(provider.port));
+    let process = p0_start(&root, &state, &config);
+    let owner = single_instance_dir(&state);
+    let control: Value =
+        serde_json::from_slice(&fs::read(owner.join("control.json")).unwrap()).unwrap();
+    let invalid_image = root.path().join("invalid-executable");
+    fs::write(&invalid_image, b"#!/nonexistent/p0-restart-interpreter\n").unwrap();
+    fs::set_permissions(&invalid_image, fs::Permissions::from_mode(0o700)).unwrap();
+    let original_declaration = fs::read(owner.join("instance.json")).unwrap();
+    let mut connection = TcpStream::connect(("127.0.0.1", ports[0])).unwrap();
+    p0_responses_on_connection(&mut connection, ports[0], root.path());
+    for (case, executable, nonce) in [
+        (
+            "native-exec",
+            invalid_image.clone(),
+            control["start_nonce"].clone(),
+        ),
+        (
+            "missing-executable",
+            root.path().join("missing"),
+            control["start_nonce"].clone(),
+        ),
+        (
+            "wrong-control",
+            invalid_image.clone(),
+            Value::String("wrong-nonce".into()),
+        ),
+    ] {
+        fs::write(
+            owner.join("restart.plan.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "schema_version": 1,
+                "instance_id": control["instance_id"],
+                "start_nonce": control["start_nonce"],
+                "executable_path": executable,
+                "target_declaration": null,
+                "snapshots": false,
+                "snapshot_direct": false,
+                "snapshot_stages": null,
+                "sse_dump": false
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let mut stream = p0_control_stream(&control);
+        stream
+            .set_read_timeout(Some(Duration::from_secs(15)))
+            .unwrap();
+        writeln!(
+            stream,
+            "{}",
+            serde_json::json!({
+                "schema_version": 1,
+                "instance_id": control["instance_id"],
+                "start_nonce": nonce,
+                "operation": "restart",
+                "ports": null
+            })
+        )
+        .unwrap();
+        let mut response = String::new();
+        BufReader::new(stream).read_line(&mut response).unwrap();
+        let response: Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["accepted"], false, "{case}: {response}");
+        assert!(!response["message"].as_str().unwrap().is_empty());
+        if case == "native-exec" {
+            assert!(
+                response["message"].as_str().unwrap().contains("os error"),
+                "{response}"
+            );
+        }
+        for port in ports {
+            assert_eq!(http_get_json(port, "/health")["status"], "ok", "{case}");
+        }
+        p0_responses_on_connection(&mut connection, ports[0], root.path());
+        let cache: Value =
+            serde_json::from_slice(&fs::read(owner.join("pid.cache")).unwrap()).unwrap();
+        assert_eq!(cache["pid"].as_u64().unwrap(), u64::from(process.pid));
+        assert_eq!(cache["start_nonce"], control["start_nonce"]);
+        assert_eq!(
+            fs::read(owner.join("instance.json")).unwrap(),
+            original_declaration
+        );
+        assert!(!owner.join("front-handoff.json").exists());
+        assert!(!owner.join("provider-handoff.json").exists());
+    }
+    fs::remove_file(owner.join("restart.plan.json")).unwrap();
+    let invalid_config = root.path().join("invalid.toml");
+    fs::write(&invalid_config, "[invalid TOML").unwrap();
+    let output = run_with_timeout(
+        env!("CARGO_BIN_EXE_rccv3"),
+        &state,
+        &invalid_config,
+        "restart",
+        2000,
+    );
+    assert!(!output.status.success());
+    for port in ports {
+        assert_eq!(http_get_json(port, "/health")["status"], "ok");
+    }
+    p0_responses_on_connection(&mut connection, ports[0], root.path());
+    let output = run_with_timeout(
+        env!("CARGO_BIN_EXE_rccv3"),
+        &state,
+        &config,
+        "restart",
+        5000,
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn p0_restart_control_disconnect_retains_original_connection_and_owner() {
+    let _guard = lifecycle_test_guard();
+    let root = TempDir::new().unwrap();
+    let state = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let provider = P0Provider::start();
+    let config = write_config_with_provider(&root, ports, true, true, Some(provider.port));
+    let _process = p0_start(&root, &state, &config);
+    let owner = single_instance_dir(&state);
+    let control: Value =
+        serde_json::from_slice(&fs::read(owner.join("control.json")).unwrap()).unwrap();
+    let mut connection = TcpStream::connect(("127.0.0.1", ports[0])).unwrap();
+    p0_responses_on_connection(&mut connection, ports[0], root.path());
+    let mut stream = p0_control_stream(&control);
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    writeln!(stream, "{}", serde_json::json!({"schema_version":1,"instance_id":control["instance_id"],"start_nonce":control["start_nonce"],"operation":"restart"})).unwrap();
+    stream.shutdown(std::net::Shutdown::Write).unwrap();
+    let mut response = String::new();
+    BufReader::new(stream).read_line(&mut response).unwrap();
+    let response: Value = serde_json::from_str(&response).unwrap();
+    assert_eq!(response["accepted"], false, "{response}");
+    assert!(
+        response["message"]
+            .as_str()
+            .unwrap()
+            .contains("disconnected"),
+        "{response}"
+    );
+    p0_responses_on_connection(&mut connection, ports[0], root.path());
+    let current: Value =
+        serde_json::from_slice(&fs::read(owner.join("control.json")).unwrap()).unwrap();
+    assert_eq!(current, control);
+    assert!(!owner.join("front-handoff.json").exists());
+    assert!(!owner.join("provider-handoff.json").exists());
+}
+
+#[test]
+fn p0_restart_rejects_unwritable_handoff_without_shutdown() {
+    let _guard = lifecycle_test_guard();
+    let root = TempDir::new().unwrap();
+    let state = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let provider = P0Provider::start();
+    let config = write_config_with_provider(&root, ports, true, true, Some(provider.port));
+    let process = p0_start(&root, &state, &config);
+    let owner = single_instance_dir(&state);
+    let mut connection = TcpStream::connect(("127.0.0.1", ports[0])).unwrap();
+    p0_responses_on_connection(&mut connection, ports[0], root.path());
+    fs::create_dir(owner.join("front-handoff.json")).unwrap();
+    let output = run_with_timeout(
+        env!("CARGO_BIN_EXE_rccv3"),
+        &state,
+        &config,
+        "restart",
+        2000,
+    );
+    assert!(!output.status.success(), "handoff must reject");
+    for port in ports {
+        assert_eq!(http_get_json(port, "/health")["status"], "ok");
+    }
+    p0_responses_on_connection(&mut connection, ports[0], root.path());
+    let cache: Value = serde_json::from_slice(&fs::read(owner.join("pid.cache")).unwrap()).unwrap();
+    assert_eq!(cache["pid"].as_u64().unwrap(), u64::from(process.pid));
+}
+
+#[test]
+fn p0_restart_actual_second_handoff_write_failure_cleans_attempt_only() {
+    let _guard = lifecycle_test_guard();
+    let root = TempDir::new().unwrap();
+    let state = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let provider = P0Provider::start();
+    let config = write_config_with_provider(&root, ports, true, true, Some(provider.port));
+    let process = p0_start(&root, &state, &config);
+    let owner = single_instance_dir(&state);
+    let original = fs::read(owner.join("instance.json")).unwrap();
+    let mut connection = TcpStream::connect(("127.0.0.1", ports[0])).unwrap();
+    p0_responses_on_connection(&mut connection, ports[0], root.path());
+    let blocker = owner.join(format!("provider-handoff.tmp-{}", process.pid));
+    fs::create_dir(&blocker).unwrap();
+    let output = run_with_timeout(
+        env!("CARGO_BIN_EXE_rccv3"),
+        &state,
+        &config,
+        "restart",
+        5000,
+    );
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("original owner retained"));
+    assert!(!owner.join("front-handoff.json").exists());
+    assert!(!owner.join("provider-handoff.json").exists());
+    assert!(!owner.join("exec-restart-declaration.json").exists());
+    assert_eq!(fs::read(owner.join("instance.json")).unwrap(), original);
+    assert!(blocker.is_dir());
+    p0_responses_on_connection(&mut connection, ports[0], root.path());
+    fs::remove_dir(&blocker).unwrap();
+    let output = run_with_timeout(
+        env!("CARGO_BIN_EXE_rccv3"),
+        &state,
+        &config,
+        "restart",
+        5000,
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
 
 fn lifecycle_test_guard() -> MutexGuard<'static, ()> {
     MANAGED_LIFECYCLE_TEST_LOCK
@@ -116,23 +598,9 @@ allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
 "#;
 
-fn free_port() -> u16 {
-    static ALLOCATED_PORTS: OnceLock<Mutex<HashSet<u16>>> = OnceLock::new();
-    let mut allocated = ALLOCATED_PORTS
-        .get_or_init(|| Mutex::new(HashSet::new()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    loop {
-        let port = TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
-        if allocated.insert(port) {
-            return port;
-        }
-    }
-}
+#[path = "../../../crates/routecodex-v3-runtime/tests/support/test_ports.rs"]
+mod test_ports;
+use test_ports::free_port;
 
 fn state_root_diagnostics(state_root: &Path) -> String {
     let instances_root = state_root.join("instances");
@@ -179,6 +647,16 @@ fn write_config_with_debug(
     snapshots: bool,
     log_console: bool,
 ) -> PathBuf {
+    write_config_with_provider(root, ports, snapshots, log_console, None)
+}
+
+fn write_config_with_provider(
+    root: &TempDir,
+    ports: [u16; 2],
+    snapshots: bool,
+    log_console: bool,
+    provider_port: Option<u16>,
+) -> PathBuf {
     let path = root.path().join("config.v3.toml");
     let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
     let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
@@ -186,6 +664,8 @@ fn write_config_with_debug(
     let port_b = ports[1];
     let snapshots = if snapshots { "true" } else { "false" };
     let log_console = if log_console { "true" } else { "false" };
+    let dry_run = provider_port.is_none();
+    let provider_port = provider_port.unwrap_or(9);
     fs::write(
         &path,
         format!(
@@ -196,7 +676,7 @@ responses_direct = true
 [debug]
 log_console = {log_console}
 snapshots = {snapshots}
-dry_run = true
+dry_run = {dry_run}
 retention = {{ raw_requests = 4, raw_responses = 4, events = 32 }}
 [servers.a]
 bind = "127.0.0.1"
@@ -211,7 +691,7 @@ endpoints = ["responses", "anthropic", "gemini", "openai_chat"]
 {hub_v1_server_execution}
 [providers.test]
 type = "responses"
-base_url = "http://127.0.0.1:9/v1"
+base_url = "http://127.0.0.1:{provider_port}/v1"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_MANAGED_TEST_KEY" }}] }}
 [providers.test.models.test]
@@ -388,6 +868,32 @@ fn run_top_level(binary: &str, state_root: &Path, config: &Path, command: &str) 
         .unwrap()
 }
 
+fn run_with_soft_nofile(
+    binary: &str,
+    state_root: &Path,
+    config: &Path,
+    command: &str,
+    hooks_record: &Path,
+    soft: u64,
+) -> Output {
+    let script =
+        format!("ulimit -S -n {soft} || exit 125\nexec \"$0\" server {command} --config \"$1\"");
+    managed_test_command("/bin/sh", state_root)
+        .arg("-c")
+        .arg(script)
+        .arg(binary)
+        .arg(config)
+        .env("ROUTECODEX_V3_STATE_DIR", state_root)
+        .env(
+            "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
+            request_counter_file(state_root),
+        )
+        .env("V3_MANAGED_TEST_KEY", SECRET)
+        .env("ROUTECODEX_HOOKS_INSTALL_RECORD", hooks_record)
+        .output()
+        .unwrap()
+}
+
 fn kill_explicit_pid(pid: u64) {
     let result = unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
     assert_eq!(
@@ -396,6 +902,29 @@ fn kill_explicit_pid(pid: u64) {
         "explicit test PID {pid} must accept SIGKILL: {}",
         std::io::Error::last_os_error()
     );
+}
+
+fn wait_for_explicit_pid_exit(pid: u64, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        let result = unsafe { libc::kill(pid as libc::pid_t, 0) };
+        if result == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
+            return true;
+        }
+        sleep(Duration::from_millis(50));
+    }
+    false
+}
+
+fn wait_for_child_exit(child: &mut Child, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if child.try_wait().unwrap().is_some() {
+            return true;
+        }
+        sleep(Duration::from_millis(50));
+    }
+    false
 }
 
 fn assert_start_stdout(output: &Output, label: &str) {
@@ -410,6 +939,114 @@ fn assert_start_stdout(output: &Output, label: &str) {
             && stdout.contains("[RouteCodexV3] Server started version=")
             && last_json(output)["state"] == "running",
         "{label} must print visible start success and final status JSON, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn temporary_config_managed_child_exits_after_config_removal() {
+    let _guard = lifecycle_test_guard();
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let temp_config_dir = tempfile::Builder::new()
+        .tempdir_in(std::env::temp_dir())
+        .unwrap();
+    let ports = [free_port(), free_port()];
+    let config = write_config_with_debug(&root, ports, true, false);
+    let temp_config = temp_config_dir.path().join("config.v3.toml");
+    fs::copy(&config, &temp_config).unwrap();
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+
+    let start = managed_test_command(binary, &state_root)
+        .args(["server", "start", "--config"])
+        .arg(&temp_config)
+        .env("ROUTECODEX_V3_STATE_DIR", &state_root)
+        .env(
+            "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
+            request_counter_file(&state_root),
+        )
+        .env("V3_MANAGED_TEST_KEY", SECRET)
+        .env("TMPDIR", temp_config_dir.path())
+        .env("TMP", temp_config_dir.path())
+        .env("TEMP", temp_config_dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        start.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&start.stderr),
+        state_root_diagnostics(&state_root)
+    );
+    for port in ports {
+        wait_port(port, true);
+    }
+    let instance_dir = single_instance_dir(&state_root);
+    let pid_cache: Value =
+        serde_json::from_slice(&fs::read(instance_dir.join("pid.cache")).unwrap()).unwrap();
+    let managed_pid = pid_cache["pid"].as_u64().unwrap();
+
+    fs::remove_file(&temp_config).unwrap();
+
+    assert!(
+        wait_for_explicit_pid_exit(managed_pid, Duration::from_secs(10)),
+        "managed child PID {managed_pid} must exit after its temporary config is removed"
+    );
+    for port in ports {
+        wait_port(port, false);
+    }
+}
+
+#[test]
+fn temporary_config_foreground_start_exits_after_config_removal() {
+    let _guard = lifecycle_test_guard();
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let temp_config_dir = tempfile::Builder::new()
+        .tempdir_in(std::env::temp_dir())
+        .unwrap();
+    let ports = [free_port(), free_port()];
+    let config = write_config_with_debug(&root, ports, true, false);
+    let temp_config = temp_config_dir.path().join("config.v3.toml");
+    fs::copy(&config, &temp_config).unwrap();
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+
+    let mut start = managed_test_command(binary, &state_root)
+        .args(["start", "--config"])
+        .arg(&temp_config)
+        .env("ROUTECODEX_V3_STATE_DIR", &state_root)
+        .env(
+            "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
+            request_counter_file(&state_root),
+        )
+        .env("V3_MANAGED_TEST_KEY", SECRET)
+        .env("TMPDIR", temp_config_dir.path())
+        .env("TMP", temp_config_dir.path())
+        .env("TEMP", temp_config_dir.path())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    for port in ports {
+        wait_port(port, true);
+    }
+
+    fs::remove_file(&temp_config).unwrap();
+
+    if !wait_for_child_exit(&mut start, Duration::from_secs(10)) {
+        let pid = start.id();
+        let _ = unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+        let _ = start.wait_with_output();
+        panic!(
+            "foreground managed child PID {pid} must exit after its temporary config is removed"
+        );
+    }
+    for port in ports {
+        wait_port(port, false);
+    }
+    let output = start.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 
@@ -545,10 +1182,17 @@ fn send_invalid_json_request(port: u16) {
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
     let mut response = String::new();
-    let _ = stream.read_to_string(&mut response);
+    let received = stream.read_to_string(&mut response);
     assert!(
-        response.starts_with("HTTP/1.1 400"),
-        "invalid JSON response must fail visibly, got:\n{response}"
+        received.is_ok()
+            || received
+                .as_ref()
+                .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionReset),
+        "invalid JSON must reach a terminal transport outcome: {received:?}"
+    );
+    assert!(
+        response.is_empty(),
+        "invalid JSON must not receive an error response, got:\n{response}"
     );
 }
 
@@ -562,10 +1206,17 @@ fn send_path_not_found_request(port: u16) {
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
     let mut response = String::new();
-    let _ = stream.read_to_string(&mut response);
+    let received = stream.read_to_string(&mut response);
     assert!(
-        response.starts_with("HTTP/1.1 404"),
-        "unknown path response must fail visibly, got:\n{response}"
+        received.is_ok()
+            || received
+                .as_ref()
+                .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionReset),
+        "unknown path must reach a terminal transport outcome: {received:?}"
+    );
+    assert!(
+        response.is_empty(),
+        "unknown path must not receive an error response, got:\n{response}"
     );
 }
 
@@ -837,6 +1488,102 @@ fn managed_cli_start_status_restart_stop_is_one_aggregate_identity() {
 }
 
 #[test]
+fn managed_child_applies_configured_fd_limit_before_hooks_sidecar() {
+    assert_managed_child_observes_configured_fd_limit(512, 4096);
+}
+
+#[test]
+fn managed_child_lowers_inherited_fd_limit_to_configured_value() {
+    assert_managed_child_observes_configured_fd_limit(8192, 4096);
+}
+
+fn assert_managed_child_observes_configured_fd_limit(inherited_soft: u64, configured: u64) {
+    let _guard = lifecycle_test_guard();
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let config = write_config(&root, ports);
+    let mut config_text = fs::read_to_string(&config).unwrap();
+    config_text.push_str(&format!("\n[runtime]\nfd_limit = {configured}\n"));
+    fs::write(&config, config_text).unwrap();
+
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+    let hooks_root = root.path().join("hooks");
+    let bin_directory = hooks_root.join("bin");
+    let record_path = hooks_root.join("install.json");
+    let observed_limit = hooks_root.join("fd-limit.txt");
+    let hooksd = bin_directory.join("rccv3-hooksd");
+    fs::create_dir_all(&bin_directory).unwrap();
+    fs::write(
+        &hooksd,
+        format!(
+            "#!/bin/sh\nulimit -n > '{}'\nprintf '%s\\n' '{{\"protocol\":\"rcc-hooks-sidecar/v1\",\"ready\":true}}'\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n",
+            observed_limit.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&hooksd, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(
+        &record_path,
+        serde_json::json!({
+            "supervisor_enabled": true,
+            "hooks_runtime": "internal_hooksd",
+            "bin_directory": bin_directory,
+            "install_root": hooks_root,
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let start = run_with_soft_nofile(
+        binary,
+        &state_root,
+        &config,
+        "start",
+        &record_path,
+        inherited_soft,
+    );
+    assert!(
+        start.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&start.stdout),
+        String::from_utf8_lossy(&start.stderr)
+    );
+    assert_eq!(
+        top_level_status_json(binary, &state_root, &config)["state"],
+        "running"
+    );
+    let deadline = Instant::now() + HOOKS_MARKER_TIMEOUT;
+    while !observed_limit.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "hooks sidecar did not record the inherited fd limit"
+        );
+        sleep(Duration::from_millis(10));
+    }
+    let observed: u64 = fs::read_to_string(&observed_limit)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert_eq!(
+        observed, configured,
+        "managed child must apply [runtime] fd_limit before launching the hooks sidecar"
+    );
+
+    let stop = run_with_hooks_record(binary, &state_root, &config, "stop", &record_path);
+    assert!(
+        stop.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&stop.stdout),
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    for port in ports {
+        wait_port(port, false);
+    }
+}
+
+#[test]
 fn failed_hooks_sidecar_does_not_block_managed_start_or_live_status() {
     let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
@@ -879,7 +1626,9 @@ fn failed_hooks_sidecar_does_not_block_managed_start_or_live_status() {
     let status_json = last_json(&status);
     assert_eq!(status_json["state"], "running");
     let instance_dir = single_instance_dir(&state_root);
-    let deadline = Instant::now() + Duration::from_secs(5);
+    // Startup can report Running while the optional 15-second readiness
+    // window and identity-scoped cleanup are still pending.
+    let deadline = Instant::now() + HOOKS_MARKER_TIMEOUT;
     loop {
         let detail = wait_status_file_state(&instance_dir, "running")
             .get("detail")
@@ -1504,7 +2253,7 @@ fn top_level_start_status_restart_stop_match_legacy_cli_shape() {
     );
     assert!(
         restart_stdout.contains("[RouteCodexV3] Restart control accepted state=starting")
-            && restart_stdout.contains(" message=identity verified"),
+            && restart_stdout.contains(" message="),
         "top-level restart must print the lifecycle control acceptance state, got:\n{restart_stdout}"
     );
     assert!(

@@ -10,7 +10,7 @@ use futures_util::StreamExt;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
-use std::{net::TcpListener, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use tokio::sync::{mpsc, oneshot, Mutex};
 
 #[path = "../../../crates/routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
@@ -209,7 +209,7 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
     assert!(!rest.contains("[DONE]"));
     let _sse_capture = captures_rx.recv().await.unwrap();
 
-    let error_response = client
+    let error_result = client
         .post(&endpoint)
         .header("x-session-id", "gemini-controlled-test-session")
         .header("x-conversation-id", "gemini-controlled-test-conversation")
@@ -218,14 +218,19 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
             "stream":false
         }))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(error_response.status(), StatusCode::TOO_MANY_REQUESTS);
-    let error_body: Value = error_response.json().await.unwrap();
-    assert_eq!(
-        error_body,
-        json!({"error":{"code":429,"message":"controlled rate limit","status":"RESOURCE_EXHAUSTED"}})
-    );
+        .await;
+    // The provider's real 429 is provider-private. The client boundary is a broken
+    // transport, never the upstream status or the converted error body.
+    match error_result {
+        Ok(response) => panic!(
+            "a provider-terminal 429 must not reach the Gemini client, got {}",
+            response.status()
+        ),
+        Err(error) => assert!(
+            error.is_request(),
+            "expected an aborted Gemini client transport: {error}"
+        ),
+    }
     let _error_capture = captures_rx.recv().await.unwrap();
     while tokio::time::timeout(Duration::from_millis(25), captures_rx.recv())
         .await
@@ -241,9 +246,11 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
             "metadata_center":{"route":"must-not-leak"}
         }))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(isolation_response.status().as_u16(), 598);
+        .await;
+    assert!(
+        isolation_response.is_err(),
+        "a rejected control-plane leak must close transport without a client error response"
+    );
     assert!(
         tokio::time::timeout(Duration::from_millis(100), captures_rx.recv())
             .await
@@ -255,13 +262,9 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
     std::env::remove_var("V3_GEMINI_CONTROLLED_KEY");
 }
 
-fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
+#[path = "../../../crates/routecodex-v3-runtime/tests/support/test_ports.rs"]
+mod test_ports;
+use test_ports::free_port;
 
 fn manifest(
     server_port: u16,

@@ -202,15 +202,59 @@ fn bool_is_false(value: &bool) -> bool {
     !*value
 }
 
+fn apply_v3_runtime_fd_limit(configured: Option<u64>) -> Result<(), V3LifecycleError> {
+    let Some(limit) = configured else {
+        return Ok(());
+    };
+    if limit == 0 {
+        return Err(V3LifecycleError::Validation(
+            "runtime fd_limit must be non-zero".to_string(),
+        ));
+    }
+    let mut current = std::mem::MaybeUninit::<libc::rlimit>::uninit();
+    if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, current.as_mut_ptr()) } != 0 {
+        return Err(V3LifecycleError::Io(std::io::Error::last_os_error()));
+    }
+    let current = unsafe { current.assume_init() };
+    let hard = current.rlim_max;
+    let target = if hard == libc::RLIM_INFINITY {
+        limit as libc::rlim_t
+    } else {
+        limit.min(hard as u64) as libc::rlim_t
+    };
+    if current.rlim_cur == target {
+        return Ok(());
+    }
+    let next = libc::rlimit {
+        rlim_cur: target,
+        rlim_max: hard,
+    };
+    if unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &next) } != 0 {
+        return Err(V3LifecycleError::Io(std::io::Error::last_os_error()));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 struct ControlRestartPlan {
     control_instance_id: String,
+    control_start_nonce: String,
     declaration: V3ManagedInstanceDeclaration,
     executable_path: PathBuf,
     snapshots: bool,
     snapshot_direct: bool,
     snapshot_stages: Option<String>,
     sse_dump: bool,
+}
+
+const EXEC_RESTART_OWNER_ENV: &str = "ROUTECODEX_V3_EXEC_RESTART_OWNER";
+const EXEC_RESTART_DECLARATION_FILE: &str = "exec-restart-declaration.json";
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExecRestartOwner {
+    instance_id: String,
+    start_nonce: String,
 }
 
 #[derive(Debug, Clone)]
@@ -312,7 +356,23 @@ impl V3ManagedLifecycle {
         &self,
         executable_path: impl AsRef<Path>,
     ) -> Result<(V3ManagedInstanceDeclaration, V3Config05ManifestPublished), V3LifecycleError> {
+        let (declaration, manifest, _) = self.declaration_with_runtime(executable_path)?;
+        Ok((declaration, manifest))
+    }
+
+    fn declaration_with_runtime(
+        &self,
+        executable_path: impl AsRef<Path>,
+    ) -> Result<
+        (
+            V3ManagedInstanceDeclaration,
+            V3Config05ManifestPublished,
+            Option<u64>,
+        ),
+        V3LifecycleError,
+    > {
         let snapshot = load_v3_config_snapshot_from_path(&self.config_path)?;
+        let runtime_fd_limit = snapshot.runtime.fd_limit;
         let config_path = snapshot.canonical_path;
         let admin_webui = snapshot.admin_webui;
         let executable_path = fs::canonicalize(executable_path)?;
@@ -376,6 +436,7 @@ impl V3ManagedLifecycle {
                 listeners,
             },
             manifest,
+            runtime_fd_limit,
         ))
     }
 
@@ -747,6 +808,13 @@ impl V3ManagedLifecycle {
             listeners: declaration.listeners.clone(),
         });
         let previous_start_nonce = read_pid_cache_start_nonce(&control_instance_dir)?;
+        validate_auth_handles(&manifest)?;
+        let mut transfer = prepare_previous_release_restart_transfer(
+            &control_instance_dir,
+            &control_declaration,
+            &instance_dir,
+            &declaration,
+        )?;
         let response = match send_restart_control(
             &control_instance_dir,
             &control_declaration,
@@ -755,11 +823,15 @@ impl V3ManagedLifecycle {
             self.force_snapshot_direct,
             self.force_snapshot_stages.clone(),
             self.force_sse_dump,
+            transfer.as_mut(),
         )
         .await
         {
             Ok(response) => response,
             Err(error @ V3LifecycleError::NotRunning(_)) => {
+                if let Some(transfer) = transfer.as_mut() {
+                    transfer.reject();
+                }
                 if !restart_recovery_state_is_stale_owned_unreachable(&instance_dir, &declaration)?
                 {
                     return Err(error);
@@ -793,6 +865,9 @@ impl V3ManagedLifecycle {
             Err(error) => return Err(error),
         };
         if !response.accepted {
+            if let Some(transfer) = transfer.as_mut() {
+                transfer.reject();
+            }
             return Err(V3LifecycleError::IdentityMismatch(response.message));
         }
         observe(V3ManagedLifecycleObservation::RestartControlAccepted {
@@ -857,10 +932,16 @@ impl V3ManagedLifecycle {
         &self,
         executable_path: impl AsRef<Path>,
     ) -> Result<(), V3LifecycleError> {
-        let (declaration, manifest) = self.declaration(&executable_path)?;
+        let (declaration, manifest, runtime_fd_limit) =
+            self.declaration_with_runtime(&executable_path)?;
         validate_auth_handles(&manifest)?;
-        self.run_managed_child_with_declaration(executable_path, declaration, manifest)
-            .await
+        self.run_managed_child_with_declaration(
+            executable_path,
+            declaration,
+            manifest,
+            runtime_fd_limit,
+        )
+        .await
     }
 
     async fn run_managed_child_with_declaration(
@@ -868,24 +949,39 @@ impl V3ManagedLifecycle {
         _executable_path: impl AsRef<Path>,
         declaration: V3ManagedInstanceDeclaration,
         manifest: V3Config05ManifestPublished,
+        runtime_fd_limit: Option<u64>,
     ) -> Result<(), V3LifecycleError> {
         if self.force_sse_dump {
             std::env::set_var("ROUTECODEX_V3_SSE_DUMP", "1");
         }
         validate_auth_handles(&manifest)?;
+        apply_v3_runtime_fd_limit(runtime_fd_limit)?;
         let instance_dir = self.instance_dir(&declaration.instance_id);
         ensure_private_dir(&instance_dir)?;
-        if let Err(error) = verify_published_declaration(&instance_dir, &declaration) {
-            if !adopt_exec_restart_declaration_change(
+        let exec_cleanup_detail = if let Some(owner) = std::env::var_os(EXEC_RESTART_OWNER_ENV) {
+            std::env::remove_var(EXEC_RESTART_OWNER_ENV);
+            let owner: ExecRestartOwner = serde_json::from_str(&owner.to_string_lossy())?;
+            adopt_exec_restart_declaration_change(
                 &self.state_root,
                 &instance_dir,
                 &declaration,
-            )? {
-                return Err(error);
-            }
-            verify_published_declaration(&instance_dir, &declaration)?;
-        }
+                &owner,
+            )?;
+            V3HooksSidecarSupervisor::cleanup_exec_owner(&instance_dir).await
+        } else if adopt_previous_release_restart_declaration_change(
+            &self.state_root,
+            &instance_dir,
+            &declaration,
+        )? {
+            V3HooksSidecarSupervisor::cleanup_exec_owner(&instance_dir).await
+        } else {
+            None
+        };
+        verify_published_declaration(&instance_dir, &declaration)?;
         let startup_detail = read_pending_startup_detail(&instance_dir, &declaration.instance_id)?;
+        let startup_detail = exec_cleanup_detail
+            .map(|detail| append_status_detail(startup_detail.as_deref(), detail))
+            .or(startup_detail);
         let start_nonce = new_start_nonce(&declaration.instance_id);
         let socket_path = managed_control_socket_path(&declaration.instance_id);
         remove_restart_plan_for_previous_control_identity(&instance_dir, &start_nonce)?;
@@ -1060,6 +1156,32 @@ impl V3ManagedLifecycle {
             detail,
         })
     }
+}
+
+fn managed_config_is_ephemeral(config_path: &Path) -> bool {
+    let canonical_config =
+        fs::canonicalize(config_path).unwrap_or_else(|_| config_path.to_path_buf());
+    // A managed child config is ephemeral when it lives under a process temp
+    // root. Check the caller's TMPDIR (std::env::temp_dir) plus the fixed
+    // system temp roots, because Codex-managed orphans were observed under
+    // both `/private/var/folders/.../T/...` and `/private/tmp/...`.
+    let mut temp_roots = vec![std::env::temp_dir()];
+    temp_roots.push(PathBuf::from("/tmp"));
+    temp_roots.push(PathBuf::from("/var/tmp"));
+    #[cfg(target_os = "macos")]
+    {
+        // The caller can override TMPDIR while a managed child still
+        // references a config in the system per-user temp root.
+        temp_roots.push(PathBuf::from("/var/folders"));
+        temp_roots.push(PathBuf::from("/private/var/folders"));
+    }
+    temp_roots.into_iter().any(|temp_dir| {
+        let canonical_temp = fs::canonicalize(&temp_dir).unwrap_or_else(|_| temp_dir.clone());
+        config_path.starts_with(&temp_dir)
+            || canonical_config.starts_with(&temp_dir)
+            || config_path.starts_with(&canonical_temp)
+            || canonical_config.starts_with(&canonical_temp)
+    })
 }
 fn control_release_ports(
     request: &ControlRequest,

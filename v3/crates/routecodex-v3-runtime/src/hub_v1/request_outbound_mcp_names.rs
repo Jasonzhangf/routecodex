@@ -2,7 +2,7 @@ use provider_compat_core::namespace_tools::{
     flatten_namespace_tool_for_provider, namespace_tool_name_map, provider_function_tool_name,
 };
 use serde_json::{Map, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 pub(super) fn provider_function_name(name: &str) -> String {
     provider_compat_core::namespace_tools::normalize_provider_function_name(name)
@@ -256,8 +256,15 @@ pub(super) fn rewrite_openai_chat_declared_namespace_history(
 pub(super) fn responses_mcp_dispatch_identities(
     request: &Value,
 ) -> Result<HashMap<String, (String, String)>, String> {
+    Ok(responses_mcp_dispatch_names(request)?.0)
+}
+
+fn responses_mcp_dispatch_names(
+    request: &Value,
+) -> Result<(HashMap<String, (String, String)>, BTreeSet<String>), String> {
     let mut identities = HashMap::new();
-    collect_responses_mcp_dispatch_identities(request.get("tools"), &mut identities)?;
+    let mut names = BTreeSet::new();
+    collect_responses_mcp_dispatch_identities(request.get("tools"), &mut identities, &mut names)?;
     for item in request
         .get("input")
         .and_then(Value::as_array)
@@ -269,7 +276,11 @@ pub(super) fn responses_mcp_dispatch_identities(
             .and_then(Value::as_str)
             .is_some_and(|kind| matches!(kind, "additional_tools" | "tool_search_output"))
         {
-            collect_responses_mcp_dispatch_identities(item.get("tools"), &mut identities)?;
+            collect_responses_mcp_dispatch_identities(
+                item.get("tools"),
+                &mut identities,
+                &mut names,
+            )?;
         }
     }
     for message in request
@@ -297,14 +308,19 @@ pub(super) fn responses_mcp_dispatch_identities(
         };
         let discovered_tools: Value = serde_json::from_str(content)
             .map_err(|error| format!("Responses tool_search_output history is invalid: {error}"))?;
-        collect_responses_mcp_dispatch_identities(Some(&discovered_tools), &mut identities)?;
+        collect_responses_mcp_dispatch_identities(
+            Some(&discovered_tools),
+            &mut identities,
+            &mut names,
+        )?;
     }
-    Ok(identities)
+    Ok((identities, names))
 }
 
 fn collect_responses_mcp_dispatch_identities(
     tools: Option<&Value>,
     identities: &mut HashMap<String, (String, String)>,
+    declared_names: &mut BTreeSet<String>,
 ) -> Result<(), String> {
     for tool in tools.and_then(Value::as_array).into_iter().flatten() {
         if let Some(namespace_names) = namespace_tool_name_map(tool)? {
@@ -312,17 +328,27 @@ fn collect_responses_mcp_dispatch_identities(
                 let Some((namespace, name)) = client_path.rsplit_once('.') else {
                     continue;
                 };
+                declared_names.insert(provider_name.clone());
                 identities.insert(provider_name, (namespace.to_string(), name.to_string()));
             }
             continue;
         }
-        if tool.get("type").and_then(Value::as_str) != Some("function") {
+        let kind = tool.get("type").and_then(Value::as_str);
+        if !matches!(kind, Some("function" | "custom")) {
             continue;
         }
         let Some(name) = provider_function_tool_name(tool) else {
             continue;
         };
-        let provider_name = provider_function_name(name);
+        let provider_name = if kind == Some("function") {
+            provider_function_name(name)
+        } else {
+            name.to_owned()
+        };
+        declared_names.insert(provider_name.clone());
+        if kind != Some("function") {
+            continue;
+        }
         let client_name =
             provider_compat_core::namespace_tools::normalize_client_tool_dispatch_name(name);
         let Some((namespace, name)) = client_name.rsplit_once('.') else {
@@ -338,6 +364,62 @@ pub(super) fn normalize_openai_chat_namespace_history_names(
 ) -> Result<(), String> {
     qualify_openai_chat_missing_mcp_tool_call_names(payload);
     rewrite_openai_chat_declared_namespace_history(payload)
+}
+
+pub(super) fn project_openai_chat_namespace_wire_names(
+    wire: &mut Value,
+    request: &Value,
+) -> Result<(), String> {
+    let aliases = openai_chat_namespace_wire_aliases(request)?;
+    if aliases.is_empty() {
+        return Ok(());
+    }
+    let rewrite = |value: Option<&mut Value>| {
+        if let Some(value) = value {
+            if let Some(alias) = value.as_str().and_then(|name| aliases.get(name)) {
+                *value = Value::String(alias.clone());
+            }
+        }
+    };
+    for tool in wire
+        .get_mut("tools")
+        .and_then(Value::as_array_mut)
+        .into_iter()
+        .flatten()
+    {
+        rewrite(tool.pointer_mut("/function/name"));
+        rewrite(tool.get_mut("name"));
+    }
+    for message in wire
+        .get_mut("messages")
+        .and_then(Value::as_array_mut)
+        .into_iter()
+        .flatten()
+    {
+        for call in message
+            .get_mut("tool_calls")
+            .and_then(Value::as_array_mut)
+            .into_iter()
+            .flatten()
+        {
+            rewrite(call.pointer_mut("/function/name"));
+        }
+    }
+    rewrite(wire.pointer_mut("/tool_choice/function/name"));
+    rewrite(wire.pointer_mut("/tool_choice/name"));
+    Ok(())
+}
+
+pub(super) fn openai_chat_namespace_wire_aliases(
+    request: &Value,
+) -> Result<HashMap<String, String>, String> {
+    let (identities, names) = responses_mcp_dispatch_names(request)?;
+    Ok(
+        provider_compat_core::namespace_tools::openai_chat_namespace_wire_names(
+            identities.into_keys().collect(),
+            names,
+        ),
+    )
 }
 
 fn is_custom_tool_call(tool_call: &Map<String, Value>) -> bool {

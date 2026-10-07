@@ -1,4 +1,5 @@
 use super::*;
+use crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key;
 mod response_closeout;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
@@ -74,8 +75,6 @@ pub enum V3AnthropicRelayRuntimeError {
     Target(String),
     #[error("V3 Relay provider pool exhausted after {attempted_candidates:?}")]
     ProviderPoolExhausted { attempted_candidates: Vec<String> },
-    #[error("V3 Relay requested direct provider model not found: {0}")]
-    ModelNotFound(String),
     #[error("V3 Relay provider contract failed: {0}")]
     Provider(#[from] V3ProviderError),
     #[error("V3 Relay provider compat failed: {0}")]
@@ -458,6 +457,18 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         transport_intent,
     );
     trace.push("V3HubReqInbound01ClientRaw");
+    // stage-3 丢弃上下文：保留客户端原始 payload 的 Arc 句柄（ReqInbound02 会用
+    // canonical 覆盖 `payload`，该 Arc 仍指向客户端原始值）。
+    let projection_drop_context = crate::projection_drop_log::V3ProjectionDropContext::new(
+        input.request_id.clone(),
+        manifest
+            .servers
+            .get(&input.server_id)
+            .map(|server| server.port.to_string())
+            .unwrap_or_default(),
+        manifest.debug.projection_drop_log_file.clone(),
+        std::sync::Arc::clone(&req01.payload.0),
+    );
     let req02 = run_v3_anthropic_relay_runtime_req_inbound(req01)?;
     trace.push("V3HubReqInbound02Normalized");
     let request_outcome = {
@@ -504,7 +515,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     let mut _provider_action_permit: Option<V3ProviderActionPermit> = None;
     let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> = None;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
-    let mut last_eligible_external_http = None;
+    let mut last_external_http = None;
     let deterministic_sample = v3_relay_provider_target_selection_sample(&input.request_id);
     let failure_context = V3RelayProviderFailurePolicyContext {
         manifest,
@@ -543,13 +554,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 V3RelayProviderAdmittedTargetResolution::Selected(selected) => {
                     (selected.selected, Some(selected.admission))
                 }
-                V3RelayProviderAdmittedTargetResolution::Failed(source)
-                    if source.source_kind == V3ErrorSourceKind::ModelNotFound =>
-                {
-                    return Err(V3AnthropicRelayRuntimeError::ModelNotFound(
-                        source.message.clone(),
-                    ))
-                }
                 V3RelayProviderAdmittedTargetResolution::Failed(source) => {
                     return Err(V3AnthropicRelayRuntimeError::Target(format!(
                         "{}: {}",
@@ -565,7 +569,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         format!("selected target exhausted after {attempted_candidates:?}"),
                     );
                     return Ok(provider_failure_output(
-                        terminalize_provider_failure(failure, last_eligible_external_http.clone()),
+                        terminalize_provider_failure(failure, last_external_http.clone()),
                         trace,
                     ));
                 }
@@ -615,7 +619,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         failed_candidates: &mut failed_candidates,
                         same_candidate_retries: &mut same_candidate_retries,
                         trace: &mut trace,
-                        last_eligible_external_http: &mut last_eligible_external_http,
+                        last_external_http: &mut last_external_http,
                     },
                     &mut retry_selected,
                     &mut pending_provider_action_recovery,
@@ -643,7 +647,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         trace.push("V3HubReqOutbound07ProviderSemantic");
         let target = provider_target(manifest, req07.selected_target(), None)?;
         let req_compat = match build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07) {
-            Ok(req_compat) => req_compat,
+            Ok(projected) => record_projected_drops(&projection_drop_context, projected),
             Err(error) => {
                 trace.push("ProviderReqCompat06ProviderCompat");
                 return Ok(project_v3_anthropic_relay_runtime_failure_with_trace(
@@ -730,6 +734,13 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         V3AdmitAfterRecovery::Admitted(admission) => {
                             selected_admission = Some(admission)
                         }
+                        V3AdmitAfterRecovery::Busy => {
+                            failed_candidates
+                                .insert(v3_relay_provider_candidate_key(&selected.candidate));
+                            drop(_provider_action_permit.take());
+                            provider_action_permit_target = None;
+                            continue;
+                        }
                         V3AdmitAfterRecovery::Failed(reason) => {
                             return Err(V3AnthropicRelayRuntimeError::Target(reason))
                         }
@@ -792,12 +803,19 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         };
         let provider_raw = match transport_result {
             Ok(raw) => raw,
+            Err(V3ProviderError::ConcurrencyBusy { .. }) => {
+                runtime_timing
+                    .finish_external()
+                    .map_err(V3AnthropicRelayRuntimeError::Target)?;
+                failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
+                drop(_provider_action_permit.take());
+                provider_action_permit_target = None;
+                continue;
+            }
             Err(V3ProviderError::HttpStatus { response }) => {
-                if let Some(witness) =
-                    crate::hub_v1::relay_runtime_shared::eligible_external_http_witness(&response)
-                {
-                    last_eligible_external_http = Some(witness);
-                }
+                last_external_http = Some(
+                    crate::hub_v1::relay_runtime_shared::external_http_witness(&response),
+                );
                 let failure = if let Some(reason) = &response.body_read_failure {
                     let mut failure = provider_runtime_failure(
                         V3ProviderError::ResponseBody {
@@ -833,7 +851,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         failed_candidates: &mut failed_candidates,
                         same_candidate_retries: &mut same_candidate_retries,
                         trace: &mut trace,
-                        last_eligible_external_http: &mut last_eligible_external_http,
+                        last_external_http: &mut last_external_http,
                     },
                     &mut retry_selected,
                     &mut pending_provider_action_recovery,
@@ -845,6 +863,11 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 continue;
             }
             Err(error) => {
+                if let Some(witness) =
+                    crate::hub_v1::external_http_witness_from_provider_error(&error)
+                {
+                    last_external_http = Some(witness);
+                }
                 let failure = provider_runtime_failure(error, &selected_target_provider_id);
                 let _ = runtime_timing.finish_external();
                 drop(_provider_action_permit.take());
@@ -856,7 +879,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         failed_candidates: &mut failed_candidates,
                         same_candidate_retries: &mut same_candidate_retries,
                         trace: &mut trace,
-                        last_eligible_external_http: &mut last_eligible_external_http,
+                        last_external_http: &mut last_external_http,
                     },
                     &mut retry_selected,
                     &mut pending_provider_action_recovery,
@@ -868,6 +891,12 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 continue;
             }
         };
+        // The upstream answered: from this instant its head is real evidence,
+        // whatever the body turns out to be. Recorded before the body is
+        // interpreted so a stream whose payload never decodes is never reported
+        // as if no response had arrived. A branch that can read a body replaces
+        // this with the fuller witness.
+        last_external_http = Some(crate::hub_v1::external_http_witness_head(&provider_raw));
         if let Err(timing_error) = runtime_timing.finish_external() {
             return Err(V3AnthropicRelayRuntimeError::Target(timing_error));
         }
@@ -909,7 +938,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
                                 trace: &mut trace,
-                                last_eligible_external_http: &mut last_eligible_external_http,
+                                last_external_http: &mut last_external_http,
                             },
                             &mut retry_selected,
                             &mut pending_provider_action_recovery,
@@ -920,10 +949,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         }
                         if attempt_budget.residence_deadline() <= std::time::Instant::now() {
                             return Ok(provider_failure_output(
-                                terminalize_provider_failure(
-                                    failure,
-                                    last_eligible_external_http.clone(),
-                                ),
+                                terminalize_provider_failure(failure, last_external_http.clone()),
                                 trace,
                             ));
                         }
@@ -1008,7 +1034,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                                     failed_candidates: &mut failed_candidates,
                                     same_candidate_retries: &mut same_candidate_retries,
                                     trace: &mut trace,
-                                    last_eligible_external_http: &mut last_eligible_external_http,
+                                    last_external_http: &mut last_external_http,
                                 },
                                 &mut retry_selected,
                                 &mut pending_provider_action_recovery,
@@ -1095,7 +1121,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
                                 trace: &mut trace,
-                                last_eligible_external_http: &mut last_eligible_external_http,
+                                last_external_http: &mut last_external_http,
                             },
                             &mut retry_selected,
                             &mut pending_provider_action_recovery,
@@ -1120,7 +1146,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                             failed_candidates: &mut failed_candidates,
                             same_candidate_retries: &mut same_candidate_retries,
                             trace: &mut trace,
-                            last_eligible_external_http: &mut last_eligible_external_http,
+                            last_external_http: &mut last_external_http,
                         },
                         &mut retry_selected,
                         &mut pending_provider_action_recovery,
@@ -1132,46 +1158,45 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     continue;
                 }
                 let provider_response_snapshot = provider_value.clone();
-                let hook_provider_value = if provider_wire_protocol
-                    == V3HubProviderWireProtocol::Anthropic
-                {
-                    match project_v3_anthropic_message_as_responses_response(&provider_value) {
-                        Ok(value) => value,
-                        Err(error) => {
-                            let failure = provider_runtime_failure(
-                                V3ProviderError::ResponseBody {
-                                    request_id: input.request_id.clone(),
-                                    provider_id: selected_target_provider_id.clone(),
-                                    reason: format!(
+                let hook_provider_value =
+                    if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
+                        match project_v3_anthropic_message_as_responses_response(&provider_value) {
+                            Ok(value) => value,
+                            Err(error) => {
+                                let failure = provider_runtime_failure(
+                                    V3ProviderError::ResponseBody {
+                                        request_id: input.request_id.clone(),
+                                        provider_id: selected_target_provider_id.clone(),
+                                        reason: format!(
                                         "provider Anthropic JSON response codec failed: {error}"
                                     ),
-                                },
-                                &selected_target_provider_id,
-                            );
-                            drop(_provider_action_permit.take());
-                            if let Some(failure) = handle_provider_failure(
-                                &failure_context,
-                                selected,
-                                failure,
-                                &mut V3RelayProviderFailurePolicyState {
-                                    failed_candidates: &mut failed_candidates,
-                                    same_candidate_retries: &mut same_candidate_retries,
-                                    trace: &mut trace,
-                                    last_eligible_external_http: &mut last_eligible_external_http,
-                                },
-                                &mut retry_selected,
-                                &mut pending_provider_action_recovery,
-                            )
-                            .await?
-                            {
-                                return Ok(provider_failure_output(failure, trace));
+                                    },
+                                    &selected_target_provider_id,
+                                );
+                                drop(_provider_action_permit.take());
+                                if let Some(failure) = handle_provider_failure(
+                                    &failure_context,
+                                    selected,
+                                    failure,
+                                    &mut V3RelayProviderFailurePolicyState {
+                                        failed_candidates: &mut failed_candidates,
+                                        same_candidate_retries: &mut same_candidate_retries,
+                                        trace: &mut trace,
+                                        last_external_http: &mut last_external_http,
+                                    },
+                                    &mut retry_selected,
+                                    &mut pending_provider_action_recovery,
+                                )
+                                .await?
+                                {
+                                    return Ok(provider_failure_output(failure, trace));
+                                }
+                                continue;
                             }
-                            continue;
                         }
-                    }
-                } else {
-                    provider_value
-                };
+                    } else {
+                        provider_value
+                    };
                 let hook_provider_protocol =
                     if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
                         V3HubProviderWireProtocol::Responses
@@ -1238,7 +1263,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                                     failed_candidates: &mut failed_candidates,
                                     same_candidate_retries: &mut same_candidate_retries,
                                     trace: &mut trace,
-                                    last_eligible_external_http: &mut last_eligible_external_http,
+                                    last_external_http: &mut last_external_http,
                                 },
                                 &mut retry_selected,
                                 &mut pending_provider_action_recovery,

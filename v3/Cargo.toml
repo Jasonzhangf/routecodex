@@ -20,6 +20,10 @@ members = [
   "crates/routecodex-v3-admin",
 ]
 resolver = "2"
+exclude = ["vendor/hyper"]
+
+[patch.crates-io]
+hyper = { path = "vendor/hyper" }
 
 [workspace.package]
 edition = "2021"

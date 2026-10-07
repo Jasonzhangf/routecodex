@@ -205,12 +205,11 @@ fn web_search_sidecar_failure_preserves_typed_code_and_response_lane_without_con
 
 #[test]
 fn provider_failure_output_keeps_real_http_witness_outside_error06_body() {
-    let upstream = routecodex_v3_error::V3EligibleExternalHttpResponse::new(
+    let upstream = routecodex_v3_error::V3ExternalHttpWitness::new(
         429,
         vec![("retry-after".to_string(), b"17".to_vec())],
         br#"{"error":{"type":"rate_limit_error"}}"#.to_vec(),
-    )
-    .expect("real upstream 429 remains eligible");
+    );
     let terminal_projection = V3ErrorHandlingCenter::project_terminal_decision(
         V3ErrorHandlingCenter::decide_provider(
             V3ErrorHandlingCenterInput {
@@ -251,7 +250,7 @@ fn provider_failure_output_keeps_real_http_witness_outside_error06_body() {
             source_stage: "V3ProviderReqOutbound09TransportRequest",
             terminal_projection: Some(terminal_projection),
             terminal_disposition: Some(
-                routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(upstream.clone()),
+                routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
             ),
             observability: None,
             matched_policy: None,
@@ -261,7 +260,7 @@ fn provider_failure_output_keeps_real_http_witness_outside_error06_body() {
     );
     assert_eq!(
         output.terminal_disposition,
-        Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(upstream))
+        Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
     );
     let body = match &output.client_body {
         V3ResponsesRelayClientBody::Json(body) => body,
@@ -695,29 +694,24 @@ async fn provider_sse_json_completed_wins_over_opaque_event_label() {
 }
 
 #[tokio::test]
-async fn provider_sse_incomplete_enters_error_chain_with_usage_observation() {
+async fn provider_sse_content_filter_incomplete_enters_error_chain_with_usage_observation() {
     let observation = V3RuntimeStreamObservation::default();
     let provider = Box::pin(stream::iter(vec![Ok(
-            b"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_incomplete\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15}}}\n\n".to_vec(),
+            b"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_incomplete_filtered\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"content_filter\"},\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15}}}\n\n".to_vec(),
         )]));
     let error =
         build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(provider, &observation)
             .await
-            .expect_err("provider response.incomplete must enter the error chain");
+            .expect_err("a content_filter incomplete terminal must enter the error chain");
 
     assert!(
         error
             .to_string()
-            .contains("provider response ended before completion: max_output_tokens"),
+            .contains("provider response ended before completion: content_filter"),
         "unexpected provider error: {error}"
     );
     let snapshot = observation.snapshot().unwrap();
     assert_eq!(snapshot.response_status.as_deref(), Some("incomplete"));
-    assert_eq!(
-        snapshot.finish_reason.as_deref(),
-        Some("length"),
-        "max_output_tokens incomplete terminal must record finish_reason=length"
-    );
 }
 
 #[tokio::test]

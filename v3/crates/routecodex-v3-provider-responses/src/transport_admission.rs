@@ -1,8 +1,7 @@
 use crate::adaptive_concurrency::{V3AdaptiveConcurrencyController, V3AdaptiveConcurrencyLease};
 use crate::transport::{
-    v3_transport_13_request, V3ProviderCancellation, V3ProviderRequestHeader,
-    V3Transport13ResponsesHttpRequest, V3Transport13ResponsesRequest,
-    V3Transport13ResponsesRequestKind,
+    v3_transport_13_request, V3ProviderRequestHeader, V3Transport13ResponsesHttpRequest,
+    V3Transport13ResponsesRequest, V3Transport13ResponsesRequestKind,
 };
 use crate::wire::{V3ProviderAuthHandle, V3ResponsesStreamIntent};
 use crate::V3ProviderError;
@@ -45,32 +44,8 @@ impl Drop for V3PreAcquiredProviderAdmission {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum V3ProviderAdmissionError {
-    ClientDisconnect,
-    Timeout,
+    Busy,
     LeaseMismatch,
-}
-
-pub(crate) async fn acquire_provider_admission(
-    controller: V3AdaptiveConcurrencyController,
-    provider_key: String,
-    now_ms: u64,
-    timeout: Duration,
-    cancellation: Option<V3ProviderCancellation>,
-) -> Result<V3AdaptiveConcurrencyLease, V3ProviderAdmissionError> {
-    let acquire = controller.acquire_with_clock(provider_key, || now_ms);
-    match cancellation {
-        Some(cancellation) => {
-            tokio::select! {
-                biased;
-                _ = cancellation.cancelled() => Err(V3ProviderAdmissionError::ClientDisconnect),
-                result = tokio::time::timeout(timeout, acquire) =>
-                    result.map_err(|_| V3ProviderAdmissionError::Timeout),
-            }
-        }
-        None => tokio::time::timeout(timeout, acquire)
-            .await
-            .map_err(|_| V3ProviderAdmissionError::Timeout),
-    }
 }
 
 impl V3Transport13ResponsesRequest {
@@ -85,13 +60,10 @@ impl V3Transport13ResponsesRequest {
     }
 }
 
-pub(crate) async fn take_or_acquire_provider_admission(
+pub(crate) fn take_or_acquire_provider_admission(
     pre_acquired: Option<V3AdaptiveConcurrencyLease>,
     controller: V3AdaptiveConcurrencyController,
     provider_key: String,
-    now_ms: u64,
-    timeout: Duration,
-    cancellation: Option<V3ProviderCancellation>,
 ) -> Result<V3AdaptiveConcurrencyLease, V3ProviderAdmissionError> {
     match pre_acquired {
         Some(lease) if lease.provider_key() == provider_key && lease.belongs_to(&controller) => {
@@ -103,10 +75,9 @@ pub(crate) async fn take_or_acquire_provider_admission(
                 .expect("mismatched pre-acquired provider lease must release through its owner");
             Err(V3ProviderAdmissionError::LeaseMismatch)
         }
-        None => {
-            acquire_provider_admission(controller, provider_key, now_ms, timeout, cancellation)
-                .await
-        }
+        None => controller
+            .try_acquire_business(&provider_key)
+            .ok_or(V3ProviderAdmissionError::Busy),
     }
 }
 
@@ -114,19 +85,11 @@ pub(crate) fn provider_admission_error(
     error: V3ProviderAdmissionError,
     request_id: &str,
     provider_id: &str,
-    acquire_timeout_ms: u64,
 ) -> V3ProviderError {
     match error {
-        V3ProviderAdmissionError::ClientDisconnect => V3ProviderError::ClientDisconnect {
+        V3ProviderAdmissionError::Busy => V3ProviderError::ConcurrencyBusy {
             request_id: request_id.to_string(),
             provider_id: provider_id.to_string(),
-        },
-        V3ProviderAdmissionError::Timeout => V3ProviderError::Transport {
-            request_id: request_id.to_string(),
-            provider_id: provider_id.to_string(),
-            reason: format!(
-                "provider concurrency admission timed out after {acquire_timeout_ms}ms"
-            ),
         },
         V3ProviderAdmissionError::LeaseMismatch => V3ProviderError::InternalTransport {
             request_id: request_id.to_string(),
@@ -142,7 +105,25 @@ pub(crate) fn provider_admission_error(
 mod tests {
     use super::{take_or_acquire_provider_admission, V3ProviderAdmissionError};
     use crate::adaptive_concurrency::V3AdaptiveConcurrencyController;
-    use std::time::Duration;
+
+    #[test]
+    fn missing_preacquired_lease_does_not_wait_when_provider_is_at_budget() {
+        let controller = V3AdaptiveConcurrencyController::new(1).unwrap();
+        controller.ensure_initial_budget("provider:key", 1).unwrap();
+        let held = controller
+            .try_acquire_business("provider:key")
+            .expect("the first business request occupies the configured budget");
+
+        let result = take_or_acquire_provider_admission(
+            None,
+            controller.clone(),
+            "provider:key".to_string(),
+        );
+
+        assert!(matches!(result, Err(V3ProviderAdmissionError::Busy)));
+        assert_eq!(controller.snapshot("provider:key").unwrap().in_flight, 1);
+        controller.release(held.into_permit()).unwrap();
+    }
 
     #[tokio::test]
     async fn mismatched_pre_acquired_provider_key_is_released_and_rejected() {
@@ -158,11 +139,7 @@ mod tests {
             Some(lease),
             controller.clone(),
             "provider-b:key".to_string(),
-            0,
-            Duration::from_millis(1),
-            None,
-        )
-        .await;
+        );
 
         assert!(matches!(
             result,
@@ -185,11 +162,7 @@ mod tests {
             Some(lease),
             transport.clone(),
             "provider:key".to_string(),
-            0,
-            Duration::from_millis(1),
-            None,
-        )
-        .await;
+        );
 
         assert!(matches!(
             result,

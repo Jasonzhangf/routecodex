@@ -10,12 +10,15 @@
 
 mod artifacts;
 mod cooldown;
+mod store_cache;
 mod stream;
 
 use self::artifacts::{
     artifact_content, artifacts, list_v3_obs_artifacts, resolve_v3_obs_sample_dir,
 };
 use self::cooldown::{add_cooldown, cooldown_pool, probe_cooldown, remove_cooldown};
+pub(crate) use self::store_cache::visit_v3_obs_stores;
+use self::store_cache::{read_v3_obs_projection, read_v3_obs_rows_for_request_key};
 use self::stream::stream;
 use crate::AppState;
 use axum::extract::{Path as AxumPath, RawQuery, State};
@@ -27,7 +30,6 @@ use routecodex_v3_runtime::hub_v1::usage_normalization::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::PathBuf;
 
 /// The six typed Error chain nodes, in canonical order. The detail endpoint
 /// always reports all six; nodes the store did not observe are `not_reached`.
@@ -611,11 +613,11 @@ fn attempt_status_code(row: &QueryRow) -> Option<String> {
 /// `provider_attempt_failed` row is additionally kept as a separate
 /// `failed-attempt` query row with its original status/category/detail, so a
 /// retry that eventually succeeds does not hide the non-normal attempt.
-fn project_query_rows(rows: Vec<SourceRow>) -> Vec<QueryRow> {
-    let mut latest: BTreeMap<String, SourceRow> = BTreeMap::new();
-    let mut attempt_rows: Vec<SourceRow> = Vec::new();
+fn project_query_rows<'a>(rows: impl IntoIterator<Item = &'a SourceRow>) -> Vec<QueryRow> {
+    let mut latest: BTreeMap<String, &'a SourceRow> = BTreeMap::new();
+    let mut attempt_rows: Vec<&'a SourceRow> = Vec::new();
     for row in rows {
-        if is_provider_attempt_failure(&row) {
+        if is_provider_attempt_failure(row) {
             attempt_rows.push(row);
         } else {
             latest.insert(row.request_key.clone(), row);
@@ -626,43 +628,62 @@ fn project_query_rows(rows: Vec<SourceRow>) -> Vec<QueryRow> {
     for row in latest.into_values() {
         query_rows.push(to_query_row(row));
     }
-    query_rows.extend(
-        attempt_rows
-            .into_iter()
-            .map(|row| to_attempt_query_row(row))
-            .collect::<Vec<_>>(),
-    );
+    query_rows.extend(attempt_rows.into_iter().map(to_attempt_query_row));
     for row in query_rows.iter_mut() {
         row.error_origin = row_error_origin_opt(row).map(str::to_string);
     }
     query_rows
 }
 
-fn to_query_row(row: SourceRow) -> QueryRow {
-    let value = serde_json::to_value(row).expect("source row serializes");
-    serde_json::from_value(value).expect("query row shape is compatible")
-}
-
-fn to_attempt_query_row(row: SourceRow) -> QueryRow {
+/// Projects a stored row into its query shape.
+///
+/// `QueryRow` is `SourceRow` without `tokens_output` plus `error_origin`, so the
+/// projection is a direct field mapping. It previously round-tripped the row
+/// through `serde_json::to_value` + `from_value`, which serialized and reparsed
+/// every row of the whole history on every projection rebuild.
+fn to_query_row(row: &SourceRow) -> QueryRow {
     QueryRow {
-        request_key: row.request_key,
-        event_type: row.event_type,
+        request_key: row.request_key.clone(),
+        event_type: row.event_type.clone(),
         started_epoch_ms: row.started_epoch_ms,
         updated_epoch_ms: row.updated_epoch_ms,
         finished_epoch_ms: row.finished_epoch_ms,
         duration_ms: row.duration_ms,
-        meta: row.meta,
-        scope: row.scope,
+        meta: row.meta.clone(),
+        scope: row.scope.clone(),
+        result: row.result.clone(),
+        error_origin: None,
+        attempts: row.attempts,
+        failed_attempts: row.failed_attempts,
+        switches: row.switches,
+        usage: row.usage.clone(),
+        timing_internal_ms: row.timing_internal_ms,
+        timing_external_ms: row.timing_external_ms,
+        servertool: row.servertool,
+        raw_artifact_ref: row.raw_artifact_ref.clone(),
+    }
+}
+
+fn to_attempt_query_row(row: &SourceRow) -> QueryRow {
+    QueryRow {
+        request_key: row.request_key.clone(),
+        event_type: row.event_type.clone(),
+        started_epoch_ms: row.started_epoch_ms,
+        updated_epoch_ms: row.updated_epoch_ms,
+        finished_epoch_ms: row.finished_epoch_ms,
+        duration_ms: row.duration_ms,
+        meta: row.meta.clone(),
+        scope: row.scope.clone(),
         result: Some("failed-attempt".to_string()),
         error_origin: None,
         attempts: row.attempts,
         failed_attempts: row.failed_attempts,
         switches: row.switches,
-        usage: row.usage,
+        usage: row.usage.clone(),
         timing_internal_ms: row.timing_internal_ms,
         timing_external_ms: row.timing_external_ms,
         servertool: row.servertool,
-        raw_artifact_ref: row.raw_artifact_ref,
+        raw_artifact_ref: row.raw_artifact_ref.clone(),
     }
 }
 
@@ -800,83 +821,6 @@ fn row_effective_input(row: &QueryRow) -> u64 {
     row_canonical_usage_cache(row).effective_input_tokens
 }
 
-fn configured_ports(state: &AppState) -> Result<Vec<u16>, String> {
-    let authoring = state
-        .store
-        .read_authoring()
-        .map_err(|error| format!("observability config read failed: {error}"))?;
-    let mut ports = authoring
-        .servers
-        .values()
-        .filter(|server| server.enabled)
-        .map(|server| server.port)
-        .collect::<Vec<_>>();
-    ports.sort_unstable();
-    ports.dedup();
-    if ports.is_empty() {
-        return Err("observability has no enabled listener source".to_string());
-    }
-    Ok(ports)
-}
-
-/// Per-listener JSONL store path. Server and Admin derive the same path from
-/// the shared config helper using the authoring debug log file truth.
-fn observability_store_path(state: &AppState, port: u16) -> Result<PathBuf, String> {
-    let authoring = state
-        .store
-        .read_authoring()
-        .map_err(|error| format!("observability config read failed: {error}"))?;
-    let debug_log = authoring.debug.log_file.as_deref();
-    Ok(routecodex_v3_config::v3_webui_observability_store_path(
-        &state.config_path,
-        debug_log,
-        port,
-    ))
-}
-
-/// Read every persisted observability row across the configured listeners.
-///
-/// A store file that does not exist is "no traffic recorded yet" and is skipped;
-/// a store file that exists but cannot be read or decoded is an explicit failure
-/// and never becomes an empty result.
-fn read_observability_rows(state: &AppState) -> Result<Vec<SourceRow>, (StatusCode, Value)> {
-    let ports = configured_ports(state)
-        .map_err(|error| (StatusCode::BAD_GATEWAY, json!({ "error": error })))?;
-    let mut rows = Vec::new();
-    for port in ports {
-        let path = observability_store_path(state, port).map_err(|error| {
-            (
-                StatusCode::BAD_GATEWAY,
-                json!({ "error": format!("observability store path {port} unavailable: {error}") }),
-            )
-        })?;
-        let values = match routecodex_v3_debug::v3_webui_observability_read_raw_rows(&path) {
-            Ok(values) => values,
-            Err(error) => {
-                if path.exists() {
-                    return Err((
-                        StatusCode::BAD_GATEWAY,
-                        json!({ "error": format!("observability store {port} unavailable: {error}") }),
-                    ));
-                }
-                continue;
-            }
-        };
-        for value in values {
-            let row = serde_json::from_value::<SourceRow>(value).map_err(|error| {
-                (
-                    StatusCode::BAD_GATEWAY,
-                    json!({
-                        "error": format!("decode observability store {port} row failed: {error}")
-                    }),
-                )
-            })?;
-            rows.push(row);
-        }
-    }
-    Ok(rows)
-}
-
 fn query_params(raw_query: &RawQuery) -> HashMap<String, String> {
     raw_query
         .0
@@ -903,12 +847,36 @@ async fn records(
             return (StatusCode::BAD_REQUEST, Json(json!({ "error": error }))).into_response()
         }
     };
-    let rows = match read_observability_rows(&state) {
-        Ok(rows) => rows,
-        Err((status, body)) => return (status, Json(body)).into_response(),
+    // The cache lock spans metadata reads, decoding and the fold, so the read
+    // runs on the blocking pool instead of stalling a runtime worker.
+    let projection_state = state.clone();
+    let projection = match tokio::task::spawn_blocking(move || {
+        read_v3_obs_projection(&projection_state)
+    })
+    .await
+    {
+        Ok(Ok(projection)) => projection,
+        Ok(Err((status, body))) => return (status, Json(body)).into_response(),
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": format!("observability records read task failed: {error}")
+                })),
+            )
+                .into_response()
+        }
     };
-    let rows = project_query_rows(rows);
-    let mut filtered: Vec<QueryRow> = rows.into_iter().filter(|row| query.matches(row)).collect();
+    // The matched rows are materialised as an owned, contiguous Vec: the stats,
+    // facet and by-port passes below all walk it after the page sort, and
+    // iterating owned rows there is measurably cheaper than chasing sorted
+    // references back into the shared projection.
+    let mut filtered: Vec<QueryRow> = projection
+        .rows
+        .iter()
+        .filter(|row| query.matches(row))
+        .cloned()
+        .collect();
     let timeseries_rows: Vec<super::timeseries::TimeseriesRow<'_>> = filtered
         .iter()
         .map(|row| super::timeseries::TimeseriesRow {
@@ -1267,14 +1235,25 @@ async fn record_detail(
     State(state): State<AppState>,
     AxumPath(request_key): AxumPath<String>,
 ) -> Response {
-    let rows = match read_observability_rows(&state) {
-        Ok(rows) => rows,
-        Err((status, body)) => return (status, Json(body)).into_response(),
+    let detail_state = state.clone();
+    let detail_key = request_key.clone();
+    let mut matching: Vec<SourceRow> = match tokio::task::spawn_blocking(move || {
+        read_v3_obs_rows_for_request_key(&detail_state, &detail_key)
+    })
+    .await
+    {
+        Ok(Ok(rows)) => rows,
+        Ok(Err((status, body))) => return (status, Json(body)).into_response(),
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": format!("observability record detail read task failed: {error}")
+                })),
+            )
+                .into_response()
+        }
     };
-    let mut matching: Vec<SourceRow> = rows
-        .into_iter()
-        .filter(|row| row.request_key == request_key)
-        .collect();
     if matching.is_empty() {
         return (
             StatusCode::NOT_FOUND,
@@ -1293,22 +1272,15 @@ async fn record_detail(
     let attempts: Vec<QueryRow> = matching
         .iter()
         .filter(|row| is_provider_attempt_failure(row))
-        .cloned()
         .map(to_attempt_query_row)
         .collect();
     let mut row = matching
         .iter()
         .rev()
         .find(|row| !is_provider_attempt_failure(row))
-        .cloned()
         .map(to_query_row)
         .unwrap_or_else(|| {
-            to_attempt_query_row(
-                matching
-                    .last()
-                    .cloned()
-                    .expect("matching rows are non-empty"),
-            )
+            to_attempt_query_row(matching.last().expect("matching rows are non-empty"))
         });
     let observed_error = row
         .meta
