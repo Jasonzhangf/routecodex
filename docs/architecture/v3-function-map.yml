@@ -2628,6 +2628,7 @@ features:
   - responses_inbound_does_not_rewrite_same_named_user_tool_schema
   - responses_agent_message_with_encrypted_content_part_does_not_leak_ciphertext
   - responses_chat_long_namespace_names_round_trip_on_first_attempt_json_and_sse
+  - responses_discovered_custom_tools_restore_kind_and_identity_json_and_sse
   allowed_paths:
   - v3/crates/provider-compat-core/src/namespace_tools.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs

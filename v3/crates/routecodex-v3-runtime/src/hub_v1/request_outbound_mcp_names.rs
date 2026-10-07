@@ -271,11 +271,7 @@ fn responses_mcp_dispatch_names(
         .into_iter()
         .flatten()
     {
-        if item
-            .get("type")
-            .and_then(Value::as_str)
-            .is_some_and(|kind| matches!(kind, "additional_tools" | "tool_search_output"))
-        {
+        if item.get("type").and_then(Value::as_str) == Some("additional_tools") {
             collect_responses_mcp_dispatch_identities(
                 item.get("tools"),
                 &mut identities,
@@ -283,37 +279,13 @@ fn responses_mcp_dispatch_names(
             )?;
         }
     }
-    for message in request
-        .get("messages")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        let extension = message
-            .get("routecodex_chat_extension")
-            .and_then(Value::as_object);
-        if extension
-            .and_then(|fields| fields.get("responses_tool_output_type"))
-            .and_then(Value::as_str)
-            != Some("tool_search_output")
-            || extension
-                .and_then(|fields| fields.get("responses_output_field"))
-                .and_then(Value::as_str)
-                != Some("tools")
-        {
-            continue;
-        }
-        let Some(content) = message.get("content").and_then(Value::as_str) else {
-            continue;
-        };
-        let discovered_tools: Value = serde_json::from_str(content)
-            .map_err(|error| format!("Responses tool_search_output history is invalid: {error}"))?;
-        collect_responses_mcp_dispatch_identities(
-            Some(&discovered_tools),
-            &mut identities,
-            &mut names,
-        )?;
-    }
+    let discovered =
+        super::request_outbound_builtin_tool_projection::collect_tool_search_output_tools(request)?;
+    collect_responses_mcp_dispatch_identities(
+        Some(&Value::Array(discovered)),
+        &mut identities,
+        &mut names,
+    )?;
     Ok((identities, names))
 }
 
