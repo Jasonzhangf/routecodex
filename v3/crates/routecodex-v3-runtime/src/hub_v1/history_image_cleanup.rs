@@ -1,10 +1,10 @@
 // feature: 唯一登记的历史 payload 清理例外 —— 历史图片统一占位清理
 //
-// 规则（v5，Jason 2026-08-08）：
+// 规则（Jason 2026-10-06）：
 // - 所有请求在 inbound 归一化阶段统一执行（Relay ReqInbound02 + Direct
 //   V3Req04StandardizedResponses 共用本纯函数）。
-// - 仅清理历史轮次（最后一个 user 消息/input item 之外）的图片 part；
-//   当前轮图片保留（驱动 multimodal 路由）。
+// - 仅清理最后一条图片载体之前的图片；最后一条消息/工具结果中的图片全部保留。
+//   后续纯文本提醒不改变图片边界；保留的图片驱动 multimodal 路由。
 // - 历史图片 part 原位替换为统一固定文本占位符 {"type":"text","text":"[Image]"}
 //   （chat wire）/ {"type":"input_text","text":"[Image]"}（responses wire）；
 //   无编号、无前缀、不随图片数量/位置变化 —— 同位置永远同 token。
@@ -13,66 +13,91 @@
 // - cache 规则：固定占位符 -> 同会话同位置 token 逐字节一致 -> provider
 //   prefix cache 可命中（首次替换后稳定命中）；图片位置之后首次 miss、之后
 //   稳定命中；图片位置之前不受影响。
+use routecodex_v3_route_classifier::is_v3_inline_image_reference;
 use serde_json::Value;
 
 /// 统一占位符文本（chat wire 与 responses wire 共用同一字符串，保证确定性）。
 pub(crate) const V3_HISTORY_IMAGE_PLACEHOLDER: &str = "[Image]";
 
+fn is_v3_text_content_part(row: &serde_json::Map<String, Value>) -> bool {
+    matches!(
+        row.get("type").and_then(Value::as_str),
+        Some("text" | "input_text" | "output_text")
+    )
+}
+
 /// 统计 payload 中图片引用数（临时诊断辅助：image_url / data / file_id /
 /// file_url 键的 part）。
 pub(crate) fn count_v3_payload_image_refs(body: &Value) -> usize {
-    fn count_in_parts(parts: &[Value]) -> usize {
-        parts
-            .iter()
-            .filter(|part| {
-                part.get("image_url").is_some()
-                    || part.get("data").is_some()
-                    || part.get("file_id").is_some()
-                    || part.get("file_url").is_some()
-            })
-            .count()
-    }
     let mut total = 0;
     if let Some(input) = body.get("input").and_then(Value::as_array) {
         for item in input {
-            if let Some(content) = item.get("content").and_then(Value::as_array) {
-                total += count_in_parts(content);
-            }
-            if let Some(output) = item.get("output").and_then(Value::as_array) {
-                total += count_in_parts(output);
-            }
+            total += count_v3_item_image_refs(item);
         }
     }
     if let Some(messages) = body.get("messages").and_then(Value::as_array) {
         for message in messages {
-            if let Some(content) = message.get("content") {
-                if let Some(parts) = content.as_array() {
-                    total += count_in_parts(parts);
-                } else if let Some(text) = content.as_str() {
-                    if let Ok(parsed) = serde_json::from_str::<Value>(text) {
-                        if let Some(parts) = parsed.as_array() {
-                            total += count_in_parts(parts);
-                        }
-                    }
-                }
-            }
+            total += count_v3_item_image_refs(message);
         }
     }
     total
+}
+
+fn count_v3_item_image_refs(item: &Value) -> usize {
+    if is_top_level_input_image(item) {
+        return 1;
+    }
+    ["content", "output", "parts"]
+        .iter()
+        .map(|field| match item.get(*field) {
+            Some(Value::String(_))
+                if *field == "content"
+                    && item.get("role").and_then(Value::as_str) != Some("tool") =>
+            {
+                0
+            }
+            Some(value) => count_v3_image_refs(value),
+            None => 0,
+        })
+        .sum()
+}
+
+fn count_v3_image_refs(value: &Value) -> usize {
+    match value {
+        Value::Array(parts) => parts.iter().map(count_v3_image_refs).sum(),
+        Value::Object(row) => {
+            if is_v3_text_content_part(row) {
+                return 0;
+            }
+            let image_type = matches!(
+                row.get("type").and_then(Value::as_str),
+                Some("image" | "input_image" | "output_image" | "image_url")
+            );
+            let image_reference = is_v3_embedded_image_carrier(row);
+            if image_reference
+                || row.contains_key("inline_data")
+                || row.contains_key("file_data")
+                || image_type
+            {
+                1
+            } else {
+                row.values().map(count_v3_image_refs).sum()
+            }
+        }
+        Value::String(text) => serde_json::from_str::<Value>(text)
+            .map(|parsed| count_v3_image_refs(&parsed))
+            .unwrap_or_else(|_| usize::from(is_v3_inline_image_reference(text))),
+        _ => 0,
+    }
 }
 
 /// 历史图片统一占位清理（唯一清洗真源——所有入口/形态/边界在此一次处理完，
 /// 禁止在调用点/其他文件零散补丁）。
 ///
 /// ## 边界（历史轮定义，统一）
-/// - 最后一个 user carrier 之前的所有内容（含历史 fco/assistant）一律清洗；
-/// - 最后 user 之后若没有新的 user carrier（纯工具轮 / 完整历史重放——input
-///   末尾是 function_call_output / tool 结果）：这些 fco/tool 是历史工具结果
-///   截图，被推送会导致 provider context 膨胀 400（如 asxs-grok 收到 2.1MB
-///   请求必 400）——一并清洗；
-/// - 最后 user 本身（若含用户主动发的图片）是当前轮语义——保留不清洗。
-///   user carrier：messages 的 role=="user"；responses 的 role=="user" 或
-///   input_text/text/output_text item；gemini 的 role=="user" content。
+/// - 最后一条包含图片的消息/input item 之前的图片属于历史，清洗为占位符；
+/// - 最后图片载体内的所有图片保留，包括刚返回的工具结果；
+/// - 时间提醒、模型切换提示等后续纯文本消息不改变图片边界。
 ///
 /// ## 形态（全部覆盖）
 /// - messages[]：content 数组的 image_url/data/file_id part + tool 消息字符串
@@ -87,30 +112,20 @@ pub(crate) fn count_v3_payload_image_refs(body: &Value) -> usize {
 /// 相同占位符 → 历史 wire 稳定 → provider 前缀缓存命中）。
 pub(crate) fn normalize_v3_history_image_placeholders(body: &mut Value) {
     if let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) {
-        let last_user = messages
+        let history_end = messages
             .iter()
-            .rposition(|message| message.get("role").and_then(Value::as_str) == Some("user"));
-        let history_end = last_user.unwrap_or(0);
+            .rposition(|message| count_v3_item_image_refs(message) > 0)
+            .unwrap_or(0);
         for message in messages.iter_mut().take(history_end) {
             normalize_chat_content_parts(message);
-        }
-        // 最后 user 之后若没有新的 user 消息（纯工具轮 / 完整历史重放——末尾是
-        // tool 工具结果）：tool 消息的图片是历史工具结果截图——一并清洗。
-        if let Some(last_user) = last_user {
-            if !messages[last_user + 1..]
-                .iter()
-                .any(|message| message.get("role").and_then(Value::as_str) == Some("user"))
-            {
-                for message in messages.iter_mut().skip(last_user + 1) {
-                    normalize_chat_content_parts(message);
-                }
-            }
         }
         return;
     }
     if let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) {
-        let last_user = input.iter().rposition(is_responses_user_carrier);
-        let history_end = last_user.unwrap_or(0);
+        let history_end = input
+            .iter()
+            .rposition(|item| count_v3_item_image_refs(item) > 0)
+            .unwrap_or(0);
         for item in input.iter_mut().take(history_end) {
             normalize_responses_content_parts(item);
             normalize_responses_output_parts(item);
@@ -119,23 +134,12 @@ pub(crate) fn normalize_v3_history_image_placeholders(body: &mut Value) {
                     serde_json::json!({"type":"input_text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
             }
         }
-        // 最后 user 之后若没有新的 user carrier（纯工具轮 / 完整历史重放——
-        // input 末尾是 function_call_output 工具结果）：这些 fco 是历史工具结果
-        // 截图，被推送会导致 provider context 膨胀 400（如 asxs-grok 收到
-        // 2.1MB 请求必 400）——一并清洗 fco 图片 → [Image]。
-        if let Some(last_user) = last_user {
-            if !input[last_user + 1..].iter().any(is_responses_user_carrier) {
-                for item in input.iter_mut().skip(last_user + 1) {
-                    normalize_responses_output_parts(item);
-                }
-            }
-        }
         return;
     }
     if let Some(contents) = body.get_mut("contents").and_then(Value::as_array_mut) {
         let current_turn_index = contents
             .iter()
-            .rposition(|content| content.get("role").and_then(Value::as_str) == Some("user"))
+            .rposition(|content| count_v3_item_image_refs(content) > 0)
             .unwrap_or(0);
         for content in contents.iter_mut().take(current_turn_index) {
             normalize_gemini_content_parts(content);
@@ -170,16 +174,6 @@ pub(crate) fn normalize_v3_all_images_to_placeholder(body: &mut Value) {
     }
 }
 
-fn is_responses_user_carrier(item: &Value) -> bool {
-    if item.get("role").and_then(Value::as_str) == Some("user") {
-        return true;
-    }
-    matches!(
-        item.get("type").and_then(Value::as_str),
-        Some("input_text" | "text" | "output_text")
-    )
-}
-
 fn is_top_level_input_image(item: &Value) -> bool {
     // input_image/output_image 的 image_url / data / file_id / file_url 形态都必须清洗，
     // 否则历史图片以 base64 进 wire，导致 provider 侧 context 膨胀。
@@ -193,27 +187,13 @@ fn is_top_level_input_image(item: &Value) -> bool {
 }
 
 fn normalize_chat_content_parts(message: &mut Value) {
+    let tool_output = message.get("role").and_then(Value::as_str) == Some("tool");
     let Some(content) = message.get_mut("content") else {
         return;
     };
     if let Some(parts) = content.as_array_mut() {
         for part in parts.iter_mut() {
-            let Some(row) = part.as_object_mut() else {
-                continue;
-            };
-            // 与 responses output[] 判定一致：有 image_url / data / file_id / file_url
-            // 即视为图片（Codex 的图片 part 有时不带 type 字段，只靠字段名）。
-            // （Codex 的图片 part 有时不带 type 字段，只靠 type==image_url 会漏）。
-            let is_image = row.contains_key("image_url")
-                || row.contains_key("data")
-                || row.contains_key("file_id")
-                || row
-                    .get("file_url")
-                    .and_then(Value::as_str)
-                    .is_some_and(|value| value.trim().starts_with("data:image/"));
-            if is_image {
-                *part = serde_json::json!({"type":"text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
-            }
+            strip_v3_embedded_image_bytes(part, &mut false);
         }
         return;
     }
@@ -222,11 +202,11 @@ fn normalize_chat_content_parts(message: &mut Value) {
     // `[{"detail":"original","image_url":"data:image/..."}]`）。normalize 对
     // 数组 content 有效，但对字符串 content 必须解析后清洗，否则图片 base64
     // 原样进入 provider wire（context 400）。
-    if let Some(text) = content.as_str() {
+    if let Some(text) = content.as_str().filter(|_| tool_output) {
         if let Ok(mut parsed) = serde_json::from_str::<Value>(text) {
             let mut changed = false;
-            // 递归清洗解析后的 JSON（数组/对象/嵌套），字符串值内嵌
-            // data:image 一律替换为占位符（工具输出可能是
+            // 递归清洗解析后的 JSON（数组/对象/嵌套），裸图片引用
+            // 替换为占位符（工具输出可能是
             // `{"image":"data:image/..."}` 对象形态，不只是 part 数组）。
             strip_v3_embedded_image_bytes(&mut parsed, &mut changed);
             if changed {
@@ -234,19 +214,22 @@ fn normalize_chat_content_parts(message: &mut Value) {
                     serde_json::to_string(&parsed).unwrap_or_else(|_| text.to_string()),
                 );
             }
-        } else if text.contains("data:image") {
-            // 非 JSON 裸字符串直接内嵌图片字节 → 整段替换为占位符。
+        } else if is_v3_inline_image_reference(text) {
+            // 非 JSON 裸图片引用 → 替换为占位符，普通代码/句子保持原文。
             *content = Value::String(V3_HISTORY_IMAGE_PLACEHOLDER.to_string());
         }
     }
 }
 
-/// 递归清洗任意 JSON 值中内嵌的图片字节：对象/数组任意深度的字符串值若包含
-/// `data:image` 或 `image_url`/`data`/`file_id`/`file_url` 图片载体，替换为历史图片占位符。
+/// 递归清洗 JSON 中的裸图片引用及 `image_url`/`data`/`file_id`/`file_url` 图片载体。
+/// 普通文字中提到 `data:image` 不构成图片引用，必须保留。
 /// 覆盖工具输出字符串形态（`{"image":"data:image/..."}` 对象、part 数组、裸字符串）。
 fn strip_v3_embedded_image_bytes(value: &mut Value, changed: &mut bool) {
     match value {
         Value::Object(map) => {
+            if is_v3_text_content_part(map) {
+                return;
+            }
             if is_v3_embedded_image_carrier(map) {
                 *value = serde_json::json!({"type":"text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
                 *changed = true;
@@ -262,7 +245,7 @@ fn strip_v3_embedded_image_bytes(value: &mut Value, changed: &mut bool) {
             }
         }
         Value::String(text) => {
-            if text.contains("data:image") {
+            if is_v3_inline_image_reference(text) {
                 *text = V3_HISTORY_IMAGE_PLACEHOLDER.to_string();
                 *changed = true;
             }
@@ -281,6 +264,15 @@ fn strip_v3_embedded_image_bytes(value: &mut Value, changed: &mut bool) {
 /// 只按 `contains_key` 判定会把整个 schema 对象替换成 `[Image]` 占位符 →
 /// 上游 400 "Invalid schema for function 'spawn_agent'"。
 fn is_v3_embedded_image_carrier(map: &serde_json::Map<String, Value>) -> bool {
+    if is_v3_text_content_part(map) {
+        return false;
+    }
+    if matches!(
+        map.get("type").and_then(Value::as_str),
+        Some("image" | "input_image" | "output_image" | "image_url")
+    ) {
+        return true;
+    }
     if let Some(image_url) = map.get("image_url") {
         return match image_url {
             Value::String(value) => !value.trim().is_empty(),
@@ -289,7 +281,18 @@ fn is_v3_embedded_image_carrier(map: &serde_json::Map<String, Value>) -> bool {
         };
     }
     if let Some(data) = map.get("data") {
-        return data.as_str().is_some_and(|value| !value.trim().is_empty());
+        return data.as_str().is_some_and(|value| {
+            !value.trim().is_empty()
+                && (is_v3_inline_image_reference(value)
+                    || matches!(
+                        map.get("type").and_then(Value::as_str),
+                        Some("image" | "input_image" | "output_image")
+                    )
+                    || map
+                        .get("media_type")
+                        .and_then(Value::as_str)
+                        .is_some_and(|mime| mime.starts_with("image/")))
+        });
     }
     if let Some(file_id) = map.get("file_id") {
         return file_id
@@ -317,16 +320,7 @@ fn normalize_responses_image_part_array(parts: &mut [Value]) -> bool {
         let Some(row) = part.as_object_mut() else {
             continue;
         };
-        // 有 image_url / data / file_id / file_url 即视为图片（Codex 的 fco.output 图片 part
-        // 有时不带 type 字段——只靠 type 匹配会漏，历史 base64 原样进 wire → context 400）。
-        let is_image = row.contains_key("image_url")
-            || row.contains_key("data")
-            || row.contains_key("file_id")
-            || row
-                .get("file_url")
-                .and_then(Value::as_str)
-                .is_some_and(|value| value.trim().starts_with("data:image/"));
-        if is_image {
+        if is_v3_embedded_image_carrier(row) {
             *part = serde_json::json!({"type":"input_text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
             changed = true;
         }
@@ -356,7 +350,7 @@ fn normalize_responses_output_parts(item: &mut Value) {
         return;
     };
     let Ok(mut parsed) = serde_json::from_str::<Value>(text) else {
-        if text.contains("data:image") {
+        if is_v3_inline_image_reference(text) {
             *output = Value::String(V3_HISTORY_IMAGE_PLACEHOLDER.to_string());
         }
         return;
@@ -427,7 +421,10 @@ mod tests {
                     {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
                 ]},
                 {"role": "assistant", "content": "ok"},
-                {"role": "user", "content": "current text"}
+                {"role": "user", "content": [
+                    {"type":"text","text":"current text"},
+                    {"type":"image_url","image_url":{"url":"data:image/png;base64,LATEST"}}
+                ]}
             ]
         });
         normalize_v3_history_image_placeholders(&mut body);
@@ -450,7 +447,8 @@ mod tests {
                     {"type": "output_image", "image_url": {"url": "data:image/png;base64,EEEE"}}
                 ]},
                 {"type": "message", "role": "user", "content": [
-                    {"type": "input_text", "text": "current"}
+                    {"type": "input_text", "text": "current"},
+                    {"type": "input_image", "image_url": "data:image/png;base64,LATEST"}
                 ]}
             ]
         });
@@ -476,7 +474,8 @@ mod tests {
             "input": [
                 {"type": "input_image", "data": "data:image/png;base64,FFFF"},
                 {"type": "message", "role": "user", "content": [
-                    {"type": "input_text", "text": "current"}
+                    {"type": "input_text", "text": "current"},
+                    {"type": "input_image", "image_url": "data:image/png;base64,LATEST"}
                 ]}
             ]
         });
@@ -497,7 +496,10 @@ mod tests {
                         {"type": "text", "text": "between"},
                         {"type": "image_url", "image_url": {"url": "data:image/png;base64,B"}}
                     ]},
-                    {"role": "user", "content": "current text"}
+                    {"role": "user", "content": [
+                        {"type":"text","text":"current text"},
+                        {"type":"image_url","image_url":{"url":"data:image/png;base64,LATEST"}}
+                    ]}
                 ]
             });
             normalize_v3_history_image_placeholders(&mut body);
@@ -595,7 +597,9 @@ mod tests {
                 {"role": "user", "content": [
                     {"type": "image_url", "image_url": {"url": "data:image/png;base64,A"}}
                 ]},
-                {"role": "user", "content": "second turn"}
+                {"role": "user", "content": [
+                    {"type":"image_url","image_url":{"url":"data:image/png;base64,LATEST"}}
+                ]}
             ]
         });
         normalize_v3_history_image_placeholders(&mut earlier);
@@ -604,7 +608,9 @@ mod tests {
                 {"role": "user", "content": [
                     {"type": "image_url", "image_url": {"url": "data:image/png;base64,A"}}
                 ]},
-                {"role": "user", "content": "second turn"},
+                {"role": "user", "content": [
+                    {"type":"image_url","image_url":{"url":"data:image/png;base64,LATEST"}}
+                ]},
                 {"role": "assistant", "content": "reply"},
                 {"role": "user", "content": "third turn"}
             ]
@@ -626,7 +632,8 @@ mod tests {
                     {"type": "input_image", "detail": "original", "image_url": "data:image/png;base64,AAAA"}
                 ]},
                 {"type": "message", "role": "user", "content": [
-                    {"type": "input_text", "text": "current turn"}
+                    {"type": "input_text", "text": "current turn"},
+                    {"type": "input_image", "image_url": "data:image/png;base64,LATEST"}
                 ]}
             ]
         });
@@ -639,10 +646,7 @@ mod tests {
     }
 
     #[test]
-    fn current_turn_function_call_output_output_image_cleaned_when_no_new_user() {
-        // 最后 user 之后若无新的 user carrier（纯工具轮 / 完整历史重放——input
-        // 末尾是 function_call_output）：fco 是历史工具结果截图，被推送会导致
-        // provider context 膨胀 400（asxs-grok 2.1MB 必 400）——一律清洗。
+    fn latest_function_call_output_image_is_preserved() {
         let mut body = json!({
             "input": [
                 {"type": "message", "role": "user", "content": [
@@ -655,12 +659,12 @@ mod tests {
         });
         normalize_v3_history_image_placeholders(&mut body);
         assert_eq!(
-            body["input"][1]["output"][0]["type"], "input_text",
-            "fco image after last user with no new user must be cleaned to placeholder"
+            body["input"][1]["output"][0]["type"], "input_image",
+            "latest tool image must reach the next model request"
         );
         assert_eq!(
-            body["input"][1]["output"][0]["text"], V3_HISTORY_IMAGE_PLACEHOLDER,
-            "cleaned fco image must become placeholder text"
+            body["input"][1]["output"][0]["image_url"],
+            "data:image/png;base64,BBBB"
         );
     }
 
@@ -674,7 +678,8 @@ mod tests {
                     {"detail": "original", "image_url": "data:image/png;base64,CCCC"}
                 ]},
                 {"type": "message", "role": "user", "content": [
-                    {"type": "input_text", "text": "current turn"}
+                    {"type": "input_text", "text": "current turn"},
+                    {"type": "input_image", "image_url": "data:image/png;base64,LATEST"}
                 ]}
             ]
         });
@@ -687,7 +692,7 @@ mod tests {
     }
 
     #[test]
-    fn responses_trailing_tool_output_variants_clean_images() {
+    fn responses_trailing_tool_output_variants_preserve_latest_images() {
         for output_type in [
             "function_call_output",
             "custom_tool_call_output",
@@ -706,14 +711,14 @@ mod tests {
             normalize_v3_history_image_placeholders(&mut body);
             assert_eq!(
                 body["input"][1]["output"][0],
-                json!({"type": "input_text", "text": V3_HISTORY_IMAGE_PLACEHOLDER}),
-                "trailing {output_type} image must be cleaned"
+                json!({"detail": "original", "image_url": "data:image/png;base64,VARIANT"}),
+                "latest {output_type} image must be preserved"
             );
         }
     }
 
     #[test]
-    fn responses_function_call_output_json_string_image_is_cleaned() {
+    fn latest_function_call_output_json_string_image_is_preserved() {
         let mut body = json!({
             "input": [
                 {"type": "message", "role": "user", "content": [
@@ -729,12 +734,8 @@ mod tests {
             .as_str()
             .expect("JSON-string function output must remain a string");
         assert!(
-            !output.contains("data:image"),
-            "JSON-string function output must not retain image bytes: {output}"
-        );
-        assert!(
-            output.contains(V3_HISTORY_IMAGE_PLACEHOLDER),
-            "JSON-string function output must retain the stable image placeholder: {output}"
+            output.contains("data:image/png;base64,STRING"),
+            "latest JSON-string tool output must retain image bytes"
         );
     }
 
@@ -742,7 +743,7 @@ mod tests {
     fn output_images_any_base64_become_identical_placeholder_bytes() {
         // cache 影响确认：历史轮不同 base64 图片（不同请求/不同图片内容）必须归一为
         // 完全相同的占位符字节——历史 wire 字节稳定 → provider 前缀缓存命中。
-        // 只有当前轮（最后一个 user carrier 之后）保留原始图片（随输入变化，正常影响）。
+        // 最后一条图片载体保留原始图片；其前面的图片保持稳定占位。
         let build = |b64: &str| {
             let mut body = json!({
                 "input": [
@@ -750,7 +751,8 @@ mod tests {
                         {"detail": "original", "image_url": b64}
                     ]},
                     {"type": "message", "role": "user", "content": [
-                        {"type": "input_text", "text": "current turn"}
+                        {"type": "input_text", "text": "current turn"},
+                        {"type": "input_image", "image_url": "data:image/png;base64,LATEST"}
                     ]}
                 ]
             });
@@ -768,8 +770,7 @@ mod tests {
             bytes_a, bytes_c,
             "arbitrary base64 history image must produce identical bytes"
         );
-        // 最后 user 之后无新 user 的 fco 图片：历史工具结果（完整历史重放/纯工具轮）
-        // ——清洗为占位（与 asxs-grok 2.1MB 400 场景一致，图片绝不推送历史）。
+        // 最新工具图片保留；不能以没有新 user 为由在模型读取前删除。
         let mut current = json!({
             "input": [
                 {"type": "message", "role": "user", "content": [
@@ -782,8 +783,8 @@ mod tests {
         });
         normalize_v3_history_image_placeholders(&mut current);
         assert_eq!(
-            current["input"][1]["output"][0]["text"], V3_HISTORY_IMAGE_PLACEHOLDER,
-            "fco image after last user with no new user must be cleaned"
+            current["input"][1]["output"][0]["image_url"],
+            "data:image/png;base64,CURRENT"
         );
     }
 
@@ -799,14 +800,20 @@ mod tests {
                     "[{\"detail\":\"original\",\"image_url\":\"data:image/png;base64,AAAA\"},",
                     "{\"type\":\"input_image\",\"data\":\"data:image/png;base64,BBBB\"}]"
                 )},
-                {"role": "user", "content": "current turn"}
+                {"role": "user", "content": [
+                    {"type":"text","text":"current turn"},
+                    {"type":"image_url","image_url":{"url":"data:image/png;base64,LATEST"}}
+                ]}
             ]
         });
         let raw_img = count_v3_payload_image_refs(&body);
-        assert_eq!(raw_img, 2, "string content images must be counted");
+        assert_eq!(
+            raw_img, 3,
+            "string content and latest images must be counted"
+        );
         normalize_v3_history_image_placeholders(&mut body);
         let cleaned = count_v3_payload_image_refs(&body);
-        assert_eq!(cleaned, 0, "string content images must be cleaned");
+        assert_eq!(cleaned, 1, "only latest image must remain");
         let tool_content = body["messages"][1]["content"].as_str().unwrap();
         assert!(
             !tool_content.contains("data:image"),
@@ -919,10 +926,7 @@ mod tests {
     }
 
     #[test]
-    fn chat_tool_messages_after_last_user_without_new_user_are_cleaned() {
-        // chat 边界对称：最后 user 之后若无新的 user 消息（纯工具轮 / 完整历史
-        // 重放——末尾是 tool 工具结果），tool 消息的图片是历史工具结果截图——
-        // 一并清洗（与 responses 的 fco 场景一致，图片绝不推送历史）。
+    fn latest_chat_tool_image_is_preserved() {
         let mut body = json!({
             "messages": [
                 {"role": "user", "content": "last user"},
@@ -933,13 +937,10 @@ mod tests {
             ]
         });
         normalize_v3_history_image_placeholders(&mut body);
+        assert_eq!(body["messages"][2]["content"][0]["type"], "image_url");
         assert_eq!(
-            body["messages"][2]["content"][0]["type"], "text",
-            "tool image after last user with no new user must be cleaned"
-        );
-        assert_eq!(
-            body["messages"][2]["content"][0]["text"], V3_HISTORY_IMAGE_PLACEHOLDER,
-            "cleaned tool image must become placeholder text"
+            body["messages"][2]["content"][0]["image_url"]["url"],
+            "data:image/png;base64,TOOLIMG"
         );
     }
 }

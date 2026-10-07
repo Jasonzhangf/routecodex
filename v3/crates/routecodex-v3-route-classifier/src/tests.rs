@@ -657,19 +657,32 @@ fn live_responses_history_image_attachment_drives_multimodal_route_via_typed_car
     );
 }
 
-// Negative regression: historical input_image must NOT drive the multimodal
-// route when the current-turn message carries only text. Mirrors the
-// 4444 Responses shape `route_reason=multimodal:metadata-attachment` BUT
-// without any current-turn image, so the typed carrier must report
-// `has_current_turn_image=false` and classify_route must avoid the
-// multimodal / vision path entirely.
 #[test]
-fn live_responses_history_image_no_current_image_does_not_route_multimodal() {
+fn raw_latest_responses_image_survives_later_text_only_user() {
+    let request = serde_json::json!({
+        "input": [
+            {"type":"input_image","file_id":"latest-1"},
+            {"role":"assistant","content":"previous answer"},
+            {"role":"user","content":"describe the recent changes"}
+        ]
+    });
+    let entries = project_v3_current_turn_entries_from_value(&request);
+    let signals = build_v3_current_turn_route_facts(&entries);
+    assert!(
+        signals.has_current_turn_image,
+        "the latest retained image survives later text turns"
+    );
+}
+
+// Normalization owns historical image removal. Its text placeholder must
+// never activate the typed image route fact.
+#[test]
+fn normalized_responses_history_placeholder_does_not_route_multimodal() {
     use serde_json::json;
     let request = json!({
         "model": "gpt-5.6-sol",
         "input": [
-            {"type":"input_image","file_id":"hist-1"},
+            {"type":"input_text","text":"[Image]"},
             {"type":"input_text","text":"summary of past chart"},
             {"type":"message","role":"user","content":[
                 {"type":"input_text","text":"describe the recent changes"}
@@ -680,7 +693,7 @@ fn live_responses_history_image_no_current_image_does_not_route_multimodal() {
     let signals = build_v3_current_turn_route_facts(&entries);
     assert!(
         !signals.has_current_turn_image,
-        "history image must not leak into current-turn multimodal signal; signals={:?}",
+        "normalized history placeholder must not create an image signal; signals={:?}",
         signals
     );
     let route = classify_route(&RouteClassifierInput {

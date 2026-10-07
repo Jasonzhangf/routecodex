@@ -125,7 +125,7 @@ pub enum TurnPartKind {
 // this builder is the sole source of the typed intermediate that fills
 // `has_image_attachment` / `has_current_turn_*` fields.
 pub fn build_v3_current_turn_route_facts(entries: &V3CurrentTurnEntries) -> V3CurrentTurnSignals {
-    match entries {
+    let mut signals = match entries {
         V3CurrentTurnEntries::Chat(entries) => extract_chat_signals(entries),
         V3CurrentTurnEntries::Responses(entries) => extract_responses_signals(entries),
         V3CurrentTurnEntries::Gemini(entries) => extract_gemini_signals(entries),
@@ -134,7 +134,20 @@ pub fn build_v3_current_turn_route_facts(entries: &V3CurrentTurnEntries) -> V3Cu
             ..Default::default()
         },
         V3CurrentTurnEntries::Empty => V3CurrentTurnSignals::default(),
-    }
+    };
+    // Normalization owns removal of older image carriers. Retained image
+    // facts must survive later text-only reminders, regardless of their role.
+    signals.has_current_turn_image = match entries {
+        V3CurrentTurnEntries::Chat(entries) => entries
+            .iter()
+            .any(|entry| entry.parts.iter().any(|part| part.has_image)),
+        V3CurrentTurnEntries::Responses(entries) => entries.iter().any(|entry| entry.has_image),
+        V3CurrentTurnEntries::Gemini(entries) => entries
+            .iter()
+            .any(|entry| entry.parts.iter().any(|part| part.has_image)),
+        V3CurrentTurnEntries::PromptText(_) | V3CurrentTurnEntries::Empty => false,
+    };
+    signals
 }
 
 fn extract_chat_signals(entries: &[ChatTurnEntry]) -> V3CurrentTurnSignals {
@@ -149,23 +162,15 @@ fn extract_chat_signals(entries: &[ChatTurnEntry]) -> V3CurrentTurnSignals {
             current_user_text: latest_user.map(extract_chat_user_text).unwrap_or_default(),
             has_current_turn_web_search: latest_user
                 .is_some_and(|entry| entry.parts.iter().any(|part| part.has_web_search)),
-            has_current_turn_image: latest_user
-                .is_some_and(|entry| entry.parts.iter().any(|part| part.has_image)),
             ..Default::default()
         };
     };
     let mut has_current_turn_tool_output = false;
     let mut has_current_turn_tool_execution_error = false;
     let mut has_current_turn_web_search = false;
-    let mut has_current_turn_image = latest_user_index
-        .and_then(|index| entries.get(index))
-        .is_some_and(|entry| entry.parts.iter().any(|part| part.has_image));
     let mut last_assistant_tool = None;
     for entry in segment {
         for part in &entry.parts {
-            if part.has_image {
-                has_current_turn_image = true;
-            }
             if part.has_web_search {
                 has_current_turn_web_search = true;
             }
@@ -199,7 +204,7 @@ fn extract_chat_signals(entries: &[ChatTurnEntry]) -> V3CurrentTurnSignals {
         has_current_turn_tool_execution_error,
         is_compaction: false,
         has_current_turn_web_search,
-        has_current_turn_image,
+        has_current_turn_image: false,
         last_assistant_tool,
     }
 }
@@ -226,18 +231,6 @@ fn extract_responses_signals(entries: &[ResponsesTurnEntry]) -> V3CurrentTurnSig
                     .iter()
                     .any(|entry| entry.has_web_search)
             }),
-            has_current_turn_image: latest_user_index.is_some_and(|index| {
-                if entries[index].kind == ResponsesTurnKind::Other {
-                    // An explicit user message owns its nested content. Tool
-                    // output images before it belong to the preceding turn,
-                    // even when the request has no other carrier boundary.
-                    entries[index].has_image
-                } else {
-                    entries[current_turn_start..=index]
-                        .iter()
-                        .any(|entry| entry.has_image)
-                }
-            }),
             ..Default::default()
         };
     };
@@ -245,13 +238,8 @@ fn extract_responses_signals(entries: &[ResponsesTurnEntry]) -> V3CurrentTurnSig
     let mut has_current_turn_tool_execution_error = false;
     let mut is_compaction = false;
     let mut has_current_turn_web_search = false;
-    let mut has_current_turn_image =
-        latest_user_index.is_some_and(|index| entries[index..].iter().any(|entry| entry.has_image));
     let mut last_assistant_tool = None;
     for entry in segment {
-        if entry.has_image {
-            has_current_turn_image = true;
-        }
         if entry.has_web_search {
             has_current_turn_web_search = true;
         }
@@ -290,7 +278,7 @@ fn extract_responses_signals(entries: &[ResponsesTurnEntry]) -> V3CurrentTurnSig
         has_current_turn_tool_execution_error,
         is_compaction,
         has_current_turn_web_search,
-        has_current_turn_image,
+        has_current_turn_image: false,
         last_assistant_tool,
     }
 }
@@ -301,13 +289,9 @@ fn extract_gemini_signals(entries: &[GeminiTurnEntry]) -> V3CurrentTurnSignals {
         .iter()
         .rposition(|entry| matches!(entry.role, GeminiTurnRole::User));
     let segment_start = latest_user_index.unwrap_or(0);
-    let mut has_current_turn_image = false;
     let mut has_current_turn_web_search = false;
     for entry in entries.iter().skip(segment_start) {
         for part in &entry.parts {
-            if part.has_image {
-                has_current_turn_image = true;
-            }
             if part.has_web_search {
                 has_current_turn_web_search = true;
             }
@@ -315,7 +299,6 @@ fn extract_gemini_signals(entries: &[GeminiTurnEntry]) -> V3CurrentTurnSignals {
     }
     V3CurrentTurnSignals {
         latest_message_from_user: matches!(latest_role, Some(GeminiTurnRole::User)),
-        has_current_turn_image,
         has_current_turn_web_search,
         ..Default::default()
     }
@@ -447,7 +430,10 @@ fn project_chat_entries(messages: &[Value]) -> Vec<ChatTurnEntry> {
         .iter()
         .map(|message| ChatTurnEntry {
             role: chat_role(message.get("role").and_then(Value::as_str)),
-            parts: project_chat_parts(message.get("content")),
+            parts: project_chat_parts(
+                message.get("content"),
+                message.get("role").and_then(Value::as_str) == Some("tool"),
+            ),
             tool_calls: project_chat_tool_calls(message.get("tool_calls")),
         })
         .collect()
@@ -488,7 +474,7 @@ fn chat_role(role: Option<&str>) -> ChatTurnRole {
     }
 }
 
-fn project_chat_parts(value: Option<&Value>) -> Vec<TurnPart> {
+fn project_chat_parts(value: Option<&Value>, tool_output: bool) -> Vec<TurnPart> {
     let Some(value) = value else {
         return Vec::new();
     };
@@ -496,6 +482,7 @@ fn project_chat_parts(value: Option<&Value>) -> Vec<TurnPart> {
         Value::String(text) => vec![TurnPart {
             kind: TurnPartKind::Text,
             text: text.clone(),
+            has_image: tool_output && string_carries_image(text),
             ..Default::default()
         }],
         Value::Array(items) => items.iter().map(project_chat_part).collect(),
@@ -694,7 +681,7 @@ fn project_gemini_entries(contents: &[Value]) -> Vec<GeminiTurnEntry> {
                 Some("model") => GeminiTurnRole::Assistant,
                 _ => GeminiTurnRole::Other,
             },
-            parts: project_chat_parts(content.get("parts")),
+            parts: project_chat_parts(content.get("parts"), false),
         })
         .collect()
 }
@@ -715,16 +702,16 @@ fn value_as_array(value: &Value) -> Option<Vec<Value>> {
 fn value_contains_image(value: &Value) -> bool {
     match value {
         Value::Array(items) => items.iter().any(value_contains_image),
-        // fbab9d4: Codex view_image carriers embed the screenshot as a
-        // stringified JSON array (or a bare data URL) inside
-        // `function_call_output.output`; decode and recurse.
-        Value::String(text) => string_carries_image(text),
+        Value::String(_) => false,
         Value::Object(values) => {
             let type_value = values
                 .get("type")
                 .and_then(Value::as_str)
                 .map(|value| value.trim().to_ascii_lowercase())
                 .unwrap_or_default();
+            if matches!(type_value.as_str(), "text" | "input_text" | "output_text") {
+                return false;
+            }
             if type_value.contains("image") {
                 return true;
             }
@@ -736,17 +723,26 @@ fn value_contains_image(value: &Value) -> bool {
             }
             if values
                 .get("data")
+                .or_else(|| values.get("file_url"))
                 .and_then(Value::as_str)
-                .map(|value| value.trim().to_ascii_lowercase())
-                .is_some_and(|value| value.starts_with("data:image/"))
+                .is_some_and(is_v3_inline_image_reference)
             {
                 return true;
             }
-            if values
-                .get("file_url")
-                .and_then(Value::as_str)
-                .map(|value| value.trim().to_ascii_lowercase())
-                .is_some_and(|value| value.starts_with("data:image/"))
+            // Only a tool-output carrier may encode image parts as JSON text
+            // or a bare reference. Native message strings remain ordinary text.
+            if matches!(
+                type_value.as_str(),
+                "function_call_output"
+                    | "tool_call_output"
+                    | "custom_tool_call_output"
+                    | "tool_result"
+                    | "tool_output"
+            ) && ["content", "output"]
+                .into_iter()
+                .filter_map(|field| values.get(field))
+                .filter_map(Value::as_str)
+                .any(string_carries_image)
             {
                 return true;
             }
@@ -761,7 +757,7 @@ fn value_contains_image(value: &Value) -> bool {
 
 fn string_carries_image(text: &str) -> bool {
     let trimmed = text.trim();
-    if trimmed.starts_with("data:image/") {
+    if is_v3_inline_image_reference(text) {
         return true;
     }
     if trimmed.starts_with('[') || trimmed.starts_with('{') {
@@ -770,4 +766,9 @@ fn string_carries_image(text: &str) -> bool {
         }
     }
     false
+}
+
+pub fn is_v3_inline_image_reference(text: &str) -> bool {
+    let trimmed = text.trim();
+    trimmed.starts_with("data:image/") && !trimmed.chars().any(char::is_whitespace)
 }

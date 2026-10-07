@@ -2523,6 +2523,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec/tool_output.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_codex_integer_values.rs
@@ -4656,7 +4657,9 @@ features:
   status: active_normalization_and_session_compat_projection
   change_risk: medium
   owner_kind: rust_project_v3_req_inbound_normalization
-  owner_scope: ReqInbound history-turn image normalization plus the adjacent
+  owner_scope: ReqInbound image normalization preserves all images in the latest
+    image-bearing message or tool result despite later text-only reminders,
+    and replaces images in earlier carriers; plus the adjacent
     ProviderReqCompat06 session-preserving compatibility projection for a
     selected target without multimodal/vision capability. Image facts must
     select multimodal first; the projection is allowed only after typed target

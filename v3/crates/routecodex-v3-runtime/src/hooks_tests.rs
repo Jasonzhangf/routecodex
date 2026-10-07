@@ -302,6 +302,11 @@ fn direct_responses_projection_preserves_current_image_for_selected_target() {
         "canonical-provider-model",
         "provider-wire-model",
     );
+    policy
+        .target
+        .candidate
+        .model_capabilities
+        .push("multimodal".to_string());
     policy.request_body = json!({
         "model": "client-route-alias",
         "input": [{

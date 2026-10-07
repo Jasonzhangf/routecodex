@@ -277,7 +277,23 @@ pub(super) fn chat_tool_result_to_responses_input_item(
             "type".to_string(),
             Value::String(responses_tool_output_type.to_string()),
         ),
-        ("output".to_string(), Value::String(output)),
+        (
+            "output".to_string(),
+            if let Some(content) = row.get("content").filter(|content| {
+                content.as_array().is_some_and(|parts| {
+                    parts.iter().any(|part| {
+                        matches!(
+                            part.get("type").and_then(Value::as_str),
+                            Some("image_url" | "input_image")
+                        )
+                    })
+                })
+            }) {
+                chat_content_to_responses_content(content, "user")?
+            } else {
+                Value::String(output)
+            },
+        ),
     ]);
     if let Some(call_id) = call_id {
         let item_id = if responses_tool_output_type == "custom_tool_call_output" {
