@@ -220,6 +220,7 @@ async fn provider_reasoning_effort_policy_direct_relay_public_http() {
         "respxhigh",
         "chatcompatmedium",
         "respcompatmedium",
+        "opencode-go-zen",
     ];
     for id in ids {
         let protocol = if id.starts_with("resp") {
@@ -227,7 +228,7 @@ async fn provider_reasoning_effort_policy_direct_relay_public_http() {
         } else {
             "openai_chat"
         };
-        let policy = if id.ends_with("medium") {
+        let policy = if id.ends_with("medium") || id == "opencode-go-zen" {
             "reasoning_effort = \"medium\""
         } else if id.ends_with("low") {
             "reasoning_effort = \"low\""
@@ -316,7 +317,12 @@ async fn provider_reasoning_effort_policy_direct_relay_public_http() {
             "/v1/chat/completions"
         };
         for id in ids {
-            for client_effort in [Some("xhigh"), None] {
+            let client_efforts = if id == "opencode-go-zen" {
+                vec![Some("ultra"), Some("xhigh"), None]
+            } else {
+                vec![Some("xhigh"), None]
+            };
+            for client_effort in client_efforts {
                 let response = client
                     .post(format!("http://127.0.0.1:{server_port}{endpoint}"))
                     .json(&request(responses_entry, id, client_effort))
@@ -330,7 +336,7 @@ async fn provider_reasoning_effort_policy_direct_relay_public_http() {
                     Err(error) => Err(error.to_string()),
                 };
                 let captured = captures.lock().await.pop();
-                let expected = if id.ends_with("medium") {
+                let expected = if id.ends_with("medium") || id == "opencode-go-zen" {
                     Some("medium")
                 } else if id.ends_with("low") {
                     Some("low")

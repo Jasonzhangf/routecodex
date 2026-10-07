@@ -6,6 +6,9 @@ pub(super) fn project_reasoning_effort_for_selected_target(
     selected: &routecodex_v3_target::V3TargetCandidate,
     provider_protocol: V3HubProviderWireProtocol,
 ) -> Result<(), V3ProviderCompatError> {
+    if selected.reasoning_effort.is_some() {
+        return Ok(());
+    }
     let is_deepseek = matches!(
         selected.compatibility_profile.as_deref(),
         Some("chat:deepseek-max" | "responses:deepseek-console-go")
