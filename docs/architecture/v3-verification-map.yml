@@ -1887,6 +1887,8 @@ features:
   required_blackbox:
   - responses_additional_tools_refreshes_same_namespace_tool_before_chat_projection
   - responses_chat_long_namespace_names_round_trip_on_first_attempt_json_and_sse
+  - responses_discovered_custom_tools_restore_kind_and_identity_json_and_sse
+  - invalid_custom_arguments_reach_client_and_recover_json_and_sse
   - responses_additional_tools_refreshes_nested_mcpx_alias_before_chat_projection
   - openai_chat_nested_mcpx_function_call_restores_dotted_client_namespace
   - responses_provider_sse_restores_declared_mcp_identity_for_tool_followup

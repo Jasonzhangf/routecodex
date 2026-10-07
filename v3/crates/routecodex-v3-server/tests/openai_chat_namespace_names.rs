@@ -403,6 +403,164 @@ struct RecoveryFixture {
     captures: mpsc::UnboundedSender<Value>,
 }
 
+async fn discovered_custom_chat(Json(body): Json<Value>) -> Response<Body> {
+    let custom = body["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["function"]["description"] == "discovered JavaScript")
+        .unwrap();
+    let name = custom["function"]["name"].as_str().unwrap();
+    let followup = body["messages"].as_array().unwrap().iter().any(|message| {
+        message["role"] == "tool"
+            && message["tool_call_id"] == "call_discovered"
+            && message["content"] == "DISCOVERY_OK"
+    });
+    let message = if followup {
+        let history = body["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|message| message["tool_calls"].as_array().into_iter().flatten())
+            .find(|call| call["id"] == "call_discovered")
+            .unwrap();
+        assert_eq!(history["function"]["name"], name);
+        let arguments: Value =
+            serde_json::from_str(history["function"]["arguments"].as_str().unwrap()).unwrap();
+        assert_eq!(arguments["input"], "text(\"DISCOVERY_OK\");");
+        json!({"role":"assistant","content":"DISCOVERY_DONE"})
+    } else {
+        json!({"role":"assistant","content":null,"tool_calls":[{
+            "id":"call_discovered","type":"function","function":{
+                "name":name,"arguments":"{\"input\":\"text(\\\"DISCOVERY_OK\\\");\"}"
+            }
+        }]})
+    };
+    let finish = if followup { "stop" } else { "tool_calls" };
+    if body["stream"] == true {
+        let chunk = json!({"id":"chatcmpl-discovered","object":"chat.completion.chunk","model":"wire-model","choices":[{"index":0,"delta":message,"finish_reason":finish}]});
+        Response::builder()
+            .header("content-type", "text/event-stream")
+            .body(Body::from(format!("data: {chunk}\n\ndata: [DONE]\n\n")))
+            .unwrap()
+    } else {
+        Response::builder()
+            .header("content-type", "application/json")
+            .body(Body::from(json!({"id":"chatcmpl-discovered","object":"chat.completion","model":"wire-model","choices":[{"index":0,"message":message,"finish_reason":finish}]}).to_string()))
+            .unwrap()
+    }
+}
+
+#[tokio::test]
+async fn responses_discovered_custom_tools_restore_kind_and_identity_json_and_sse() {
+    let _counter_environment = CounterEnvironment::new();
+    std::env::set_var("V3_CHAT_NAME_TEST_KEY", "fixture-key");
+    let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream_addr = upstream.local_addr().unwrap();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let upstream_task = tokio::spawn(async move {
+        axum::serve(
+            upstream,
+            Router::new().route("/v1/chat/completions", post(discovered_custom_chat)),
+        )
+        .with_graceful_shutdown(async move {
+            let _ = shutdown_rx.await;
+        })
+        .await
+        .unwrap();
+    });
+    let handle = spawn_v3_server_aggregate(manifest(test_ports::free_port(), upstream_addr.port()))
+        .await
+        .unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(8))
+        .build()
+        .unwrap();
+    let mut failures = Vec::new();
+    for stream in [false, true] {
+        for namespace in [
+            None,
+            Some("functions".to_string()),
+            Some("long_namespace_".repeat(6)),
+        ] {
+            for source in ["tools", "additional_tools", "tool_search_output"] {
+                let custom = json!({"type":"custom","name":"exec","description":"discovered JavaScript","format":{"type":"text"}});
+                let declaration = if let Some(namespace) = &namespace {
+                    json!({"type":"namespace","name":namespace,"tools":[custom]})
+                } else {
+                    custom
+                };
+                let mut request = json!({"model":"name-client","stream":stream,"input":[
+                    {"role":"user","content":"Use the declared exec tool."}
+                ]});
+                match source {
+                    "tools" => request["tools"] = json!([declaration]),
+                    "additional_tools" => request["input"]
+                        .as_array_mut()
+                        .unwrap()
+                        .insert(0, json!({"type":"additional_tools","tools":[declaration]})),
+                    "tool_search_output" => {
+                        request["tools"] = json!([{"type":"tool_search","execution":"client"}]);
+                        request["input"] = json!([
+                        {"type":"tool_search_call","call_id":"call_search","execution":"client","arguments":{"query":"exec"}},
+                        {"type":"tool_search_output","call_id":"call_search","execution":"client","tools":[declaration]},
+                        {"role":"user","content":"Use the discovered exec tool."}
+                            ]);
+                    }
+                    _ => unreachable!(),
+                }
+                let response = client.post(&endpoint).json(&request).send().await.unwrap();
+                let output = read_recovery_response(response, stream).await.unwrap();
+                let call = output["output"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|item| item["call_id"] == "call_discovered")
+                    .unwrap();
+                if call["type"] != "custom_tool_call"
+                    || call["name"] != "exec"
+                    || call.get("namespace").and_then(Value::as_str) != namespace.as_deref()
+                    || call["input"] != "text(\"DISCOVERY_OK\");"
+                {
+                    failures.push(format!(
+                        "stream={stream} namespace={namespace:?} source={source}: {call}"
+                    ));
+                    continue;
+                }
+                let executed = std::process::Command::new("node")
+                .args(["-e", "new Function('text', process.argv[1])(value => process.stdout.write(String(value)));", call["input"].as_str().unwrap()])
+                .output().unwrap();
+                assert!(
+                    executed.status.success(),
+                    "JavaScript tool failed: {executed:?}"
+                );
+                let result = String::from_utf8(executed.stdout).unwrap();
+                assert_eq!(result, "DISCOVERY_OK");
+                request["input"].as_array_mut().unwrap().push(call.clone());
+                request["input"].as_array_mut().unwrap().push(json!({"type":"custom_tool_call_output","call_id":"call_discovered","output":result}));
+                let followup = read_recovery_response(
+                    client.post(&endpoint).json(&request).send().await.unwrap(),
+                    stream,
+                )
+                .await
+                .unwrap();
+                assert_eq!(followup["status"], "completed");
+                assert!(followup.to_string().contains("DISCOVERY_DONE"));
+            }
+        }
+    }
+    handle.shutdown().await;
+    let _ = shutdown_tx.send(());
+    upstream_task.await.unwrap();
+    std::env::remove_var("V3_CHAT_NAME_TEST_KEY");
+    assert!(
+        failures.is_empty(),
+        "discovered custom identity lost: {}",
+        failures.join("\n")
+    );
+}
+
 async fn recoverable_chat_call(
     State(state): State<Arc<RecoveryFixture>>,
     Json(body): Json<Value>,
@@ -429,13 +587,16 @@ async fn recoverable_chat_call(
             r#"{"input":"text(\"RECOVERED\");"}"#.to_string(),
         )
     };
-    let tool_name = body
-        .pointer("/tools/0/function/name")
-        .and_then(Value::as_str)
-        .unwrap_or("functions__exec");
     let message = if turn == 2 {
         json!({"role":"assistant","content":"RECOVERY_COMPLETED"})
     } else {
+        let tool = body["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["function"]["description"] == "JavaScript evaluator")
+            .unwrap();
+        let tool_name = tool["function"]["name"].as_str().unwrap();
         json!({"role":"assistant","content":null,"tool_calls":[{"id":call_id,"type":"function","function":{"name":tool_name,"arguments":arguments}}]})
     };
     let finish = if turn == 2 { "stop" } else { "tool_calls" };
@@ -457,6 +618,9 @@ async fn recoverable_chat_call(
         events.push(json!({"id":"chatcmpl-recovery","object":"chat.completion.chunk","model":"wire-model","choices":[{"index":0,"delta":message,"finish_reason":finish}],"usage":usage}));
     } else {
         let split = arguments.len() / 2;
+        let tool_name = message["tool_calls"][0]["function"]["name"]
+            .as_str()
+            .unwrap();
         events.push(json!({"id":"chatcmpl-recovery","object":"chat.completion.chunk","model":"wire-model","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":call_id,"type":"function","function":{"name":tool_name,"arguments":&arguments[..split]}}]},"finish_reason":null}]}));
         events.push(json!({"id":"chatcmpl-recovery","object":"chat.completion.chunk","model":"wire-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":&arguments[split..]}}]},"finish_reason":null}]}));
         events.push(json!({"id":"chatcmpl-recovery","object":"chat.completion.chunk","model":"wire-model","choices":[{"index":0,"delta":{},"finish_reason":finish}],"usage":usage}));
@@ -560,10 +724,18 @@ async fn invalid_custom_arguments_reach_client_and_recover_json_and_sse() {
             (r#""text(\"ORIGINAL\");""#, Some("text(\"ORIGINAL\");")),
         ];
         for stream in [false, true] {
+          for discovered in [false, true] {
             for (raw, unwrapped) in cases {
                 *fixture.raw.lock().unwrap() = raw.to_string();
                 let expected = unwrapped.unwrap_or(raw);
                 let mut request = json!({"model":"name-client","stream":stream,"input":[{"role":"user","content":"Use the declared tool; correct any tool error."}],"tools":[{"type":"namespace","name":"functions","tools":[{"type":"custom","name":"exec","description":"JavaScript evaluator","format":{"type":"text"}}]}]});
+                if discovered {
+                    let declarations = request["tools"].take();
+                    request["tools"] = json!([{"type":"tool_search","execution":"client"}]);
+                    let history = request["input"].as_array_mut().unwrap();
+                    history.insert(0, json!({"type":"tool_search_call","call_id":"call_search","execution":"client","arguments":{"query":"exec"}}));
+                    history.insert(1, json!({"type":"tool_search_output","call_id":"call_search","execution":"client","tools":declarations}));
+                }
                 for (turn, id, input) in [(0, "call_bad", expected), (1, "call_fixed", "text(\"RECOVERED\");")] {
                     let sent = client.post(&endpoint).json(&request).send().await.map_err(|error| error.to_string())?;
                     let response = read_recovery_response(sent, stream).await?;
@@ -587,6 +759,7 @@ async fn invalid_custom_arguments_reach_client_and_recover_json_and_sse() {
                 tokio::time::timeout(Duration::from_secs(2), rx.recv()).await.map_err(|error| error.to_string())?.ok_or("fixture capture closed")?;
                 if rx.try_recv().is_ok() { return Err("extra provider attempt concealed a response error".to_string()); }
             }
+          }
         }
         Ok(())
     }.await;

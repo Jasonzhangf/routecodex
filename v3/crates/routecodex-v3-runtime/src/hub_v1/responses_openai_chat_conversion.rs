@@ -80,6 +80,7 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
     )
     .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
     let custom_tool_names = collect_v3_responses_custom_tool_names(provider_semantic_body)
+        .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?
         .into_iter()
         .map(|(name, identity)| {
             let name = aliases.get(&name).cloned().unwrap_or(name);
@@ -489,7 +490,7 @@ pub(crate) fn parse_v3_openai_chat_tool_call_arguments_object(
 
 pub(crate) fn collect_v3_responses_custom_tool_names(
     payload: &Value,
-) -> BTreeMap<String, V3ClientCustomToolName> {
+) -> Result<BTreeMap<String, V3ClientCustomToolName>, String> {
     let mut names = BTreeMap::new();
     collect_v3_responses_custom_tool_names_from_tools(payload.get("tools"), &mut names);
     for item in payload
@@ -502,7 +503,10 @@ pub(crate) fn collect_v3_responses_custom_tool_names(
             collect_v3_responses_custom_tool_names_from_tools(item.get("tools"), &mut names);
         }
     }
-    names
+    let discovered =
+        super::request_outbound_builtin_tool_projection::collect_tool_search_output_tools(payload)?;
+    collect_v3_responses_custom_tool_names_from_tools(Some(&Value::Array(discovered)), &mut names);
+    Ok(names)
 }
 
 pub(crate) fn collect_v3_responses_custom_tool_names_from_tools(
