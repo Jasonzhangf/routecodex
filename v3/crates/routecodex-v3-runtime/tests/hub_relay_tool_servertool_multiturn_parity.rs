@@ -350,7 +350,7 @@ fn request_governance_rejects_orphan_output_wrong_kind_and_missing_call_id() {
 }
 
 #[test]
-fn attachment_history_is_preserved_without_placeholder_cleanup() {
+fn earlier_attachment_is_cleaned_while_inline_tool_text_and_latest_image_survive() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let outcome = hooks
         .run(
@@ -367,7 +367,8 @@ fn attachment_history_is_preserved_without_placeholder_cleanup() {
         .expect("Req04 attachment history governance");
     let serialized = serde_json::to_string(outcome.payload()).unwrap();
 
-    assert!(!serialized.contains("HISTORY"));
+    assert!(!serialized.contains("data:image/png;base64,HISTORY\""));
+    assert!(serialized.contains("before data:image/png;base64,HISTORY_INLINE after"));
     assert!(serialized.contains("[Image]"));
     assert!(serialized.contains("data:image/png;base64,CURRENT"));
 }

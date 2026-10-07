@@ -1,3 +1,4 @@
+use super::super::responses_openai_codec::{responses_image_url, responses_tool_output_content};
 use super::namespace_tool_names::anthropic_tool_call_wire_name;
 use super::*;
 
@@ -82,7 +83,7 @@ pub(super) fn chat_messages_as_anthropic_messages(
             );
             tool_result.insert(
                 "content".to_string(),
-                responses_tool_output_as_anthropic_content(object.get("content")),
+                responses_tool_output_as_anthropic_content(object.get("content"))?,
             );
             if is_error {
                 tool_result.insert("is_error".to_string(), Value::Bool(true));
@@ -431,7 +432,7 @@ pub(super) fn responses_tool_output_as_anthropic_tool_result(
     );
     result.insert(
         "content".to_string(),
-        responses_tool_output_as_anthropic_content(object.get("output")),
+        responses_tool_output_as_anthropic_content(object.get("output"))?,
     );
     if is_error {
         result.insert("is_error".to_string(), Value::Bool(true));
@@ -786,9 +787,10 @@ pub(super) fn responses_image_part_as_anthropic_image(
     part: &Value,
 ) -> Result<Value, V3AnthropicCodecError> {
     let image_url_value = part
-        .get("image_url")
+        .as_object()
+        .and_then(responses_image_url)
         .ok_or(V3AnthropicCodecError::MalformedField { field: "image_url" })?;
-    let image_url = match image_url_value {
+    let image_url = match &image_url_value {
         Value::String(value) => value.as_str(),
         Value::Object(object) => object.get("url").and_then(Value::as_str).ok_or(
             V3AnthropicCodecError::MalformedField {
@@ -840,12 +842,26 @@ pub(super) fn responses_function_call_input(
     }
 }
 
-pub(super) fn responses_tool_output_as_anthropic_content(value: Option<&Value>) -> Value {
-    match value {
-        Some(Value::String(text)) => Value::String(text.clone()),
-        Some(value) => Value::String(serde_json::to_string(value).unwrap_or_default()),
-        None => Value::String(String::new()),
-    }
+pub(super) fn responses_tool_output_as_anthropic_content(
+    value: Option<&Value>,
+) -> Result<Value, V3AnthropicCodecError> {
+    let Some(value) = value else {
+        return Ok(Value::String(String::new()));
+    };
+    let content = responses_tool_output_content(value).map_err(|_| {
+        V3AnthropicCodecError::MalformedField {
+            field: "tool output content",
+        }
+    })?;
+    Ok(match content {
+        Value::Array(parts) => Value::Array(
+            parts
+                .iter()
+                .map(responses_content_part_as_anthropic_content_part)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        other => other,
+    })
 }
 
 pub(super) fn responses_tools_for_anthropic_wire(

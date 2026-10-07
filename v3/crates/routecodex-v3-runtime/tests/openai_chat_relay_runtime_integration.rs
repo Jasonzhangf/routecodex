@@ -921,9 +921,9 @@ async fn responses_provider_empty_incomplete_reaches_chat_terminal() {
 }
 
 #[tokio::test]
-async fn openai_chat_provider_incomplete_reselects_before_client_commit() {
+async fn openai_chat_provider_content_filter_terminal_commits_primary_partial_output() {
     use futures_util::StreamExt;
-    let server_id = "openai_chat_wire_incomplete_reselect";
+    let server_id = "openai_chat_wire_content_filter";
     let manifest = manifest_with_two_providers_for_scope(server_id, true);
     let transport = IncompleteWireThenChatSuccessTransport {
         provider_ids: Mutex::new(Vec::new()),
@@ -938,26 +938,32 @@ async fn openai_chat_provider_incomplete_reselects_before_client_commit() {
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
-            request_id: "req-openai-chat-wire-incomplete-reselect".into(),
+            request_id: "req-openai-chat-wire-content-filter".into(),
             payload: json!({
                 "model":"chat-client-alias",
-                "messages":[{"role":"user","content":"recover after incomplete"}],
+                "messages":[{"role":"user","content":"provider content filter terminal"}],
                 "stream":true
             }),
         },
         &transport,
     )
     .await
-    .expect("incomplete OpenAI Chat provider attempt must reselect");
+    .expect("a content_filter terminal is a legal provider terminal");
+
+    // `content_filter` is the provider's own filter doing its job. The primary
+    // terminal is forwarded with its partial output instead of being judged a
+    // provider failure, so no reselection happens.
     let provider_ids = transport.provider_ids.lock().unwrap().clone();
     assert_eq!(output.status, 200, "{provider_ids:?} {output:?}");
-    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
     assert_eq!(
         provider_ids,
-        [
-            format!("{server_id}_primary"),
-            format!("{server_id}_secondary")
-        ]
+        [format!("{server_id}_primary")],
+        "an admitted content_filter terminal must not reselect"
+    );
+    assert!(
+        !output.node_trace.contains(&"V3TargetLocalReselected"),
+        "content_filter terminal must not reselect: {:?}",
+        output.node_trace
     );
     let V3OpenAiChatRelayClientBody::Sse(stream) = output.client_body else {
         panic!("expected Chat SSE client body");
@@ -969,14 +975,18 @@ async fn openai_chat_provider_incomplete_reselects_before_client_commit() {
         .map(String::from_utf8)
         .collect::<Result<String, _>>()
         .unwrap();
-    assert!(text.contains("secondary-after-incomplete"), "{text}");
-    assert!(!text.contains("primary-partial-must-not-commit"), "{text}");
+    assert!(text.contains("primary-partial-must-not-commit"), "{text}");
+    assert!(
+        text.contains("\"finish_reason\":\"content_filter\""),
+        "{text}"
+    );
+    assert!(!text.contains("secondary-after-incomplete"), "{text}");
 }
 
 #[tokio::test]
-async fn anthropic_provider_refusal_reselects_before_client_commit() {
+async fn anthropic_provider_refusal_terminal_commits_primary_partial_output() {
     use futures_util::StreamExt;
-    let server_id = "anthropic_wire_incomplete_reselect";
+    let server_id = "anthropic_wire_refusal_terminal";
     let manifest = manifest_with_two_anthropic_providers_for_scope(server_id);
     let transport = IncompleteWireThenChatSuccessTransport {
         provider_ids: Mutex::new(Vec::new()),
@@ -991,26 +1001,32 @@ async fn anthropic_provider_refusal_reselects_before_client_commit() {
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
-            request_id: "req-anthropic-wire-incomplete-reselect".into(),
+            request_id: "req-anthropic-wire-refusal-terminal".into(),
             payload: json!({
                 "model":"chat-client-alias",
-                "messages":[{"role":"user","content":"recover after incomplete"}],
+                "messages":[{"role":"user","content":"provider refusal terminal"}],
                 "stream":true
             }),
         },
         &transport,
     )
     .await
-    .expect("a refused Anthropic provider attempt must reselect");
+    .expect("an Anthropic refusal terminal is a legal provider terminal");
+
+    // `refusal` is the model declining to answer. It is a provider terminal, so
+    // the primary attempt is forwarded with its partial output and no reselection
+    // happens.
     let provider_ids = transport.provider_ids.lock().unwrap().clone();
     assert_eq!(output.status, 200, "{provider_ids:?} {output:?}");
-    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
     assert_eq!(
         provider_ids,
-        [
-            format!("{server_id}_primary"),
-            format!("{server_id}_secondary")
-        ]
+        [format!("{server_id}_primary")],
+        "an admitted refusal terminal must not reselect"
+    );
+    assert!(
+        !output.node_trace.contains(&"V3TargetLocalReselected"),
+        "refusal terminal must not reselect: {:?}",
+        output.node_trace
     );
     let V3OpenAiChatRelayClientBody::Sse(stream) = output.client_body else {
         panic!("expected Chat SSE client body");
@@ -1022,8 +1038,12 @@ async fn anthropic_provider_refusal_reselects_before_client_commit() {
         .map(String::from_utf8)
         .collect::<Result<String, _>>()
         .unwrap();
-    assert!(text.contains("secondary-after-incomplete"), "{text}");
-    assert!(!text.contains("primary-partial-must-not-commit"), "{text}");
+    assert!(text.contains("primary-partial-must-not-commit"), "{text}");
+    assert!(
+        text.contains("\"finish_reason\":\"content_filter\""),
+        "{text}"
+    );
+    assert!(!text.contains("secondary-after-incomplete"), "{text}");
 }
 
 #[tokio::test]
@@ -3763,7 +3783,7 @@ async fn openai_chat_entry_mode_b_web_search_intercepted_must_fail_fast_not_sile
 }
 
 #[test]
-fn routing_image_attachment_is_current_turn_only_not_history() {
+fn routing_latest_image_attachment_survives_text_only_turns() {
     let chat_history_image_then_text = json!({
         "model": "deepseek-v4-flash",
         "messages": [
@@ -3802,7 +3822,7 @@ fn routing_image_attachment_is_current_turn_only_not_history() {
             "chat history image + current text",
             &chat_history_image_then_text,
             "openai_chat",
-            false,
+            true,
         ),
         (
             "chat current turn image",
@@ -3814,7 +3834,7 @@ fn routing_image_attachment_is_current_turn_only_not_history() {
             "responses history image + current text",
             &responses_history_image_then_text,
             "responses",
-            false,
+            true,
         ),
     ];
     for (label, body, entry, expect_multimodal) in cases {

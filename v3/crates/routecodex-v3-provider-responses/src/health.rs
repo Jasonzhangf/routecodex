@@ -24,8 +24,8 @@ use persistence::{
 };
 use routecodex_v3_config::{V3Config05ManifestPublished, V3ProviderDispositionStepManifest};
 use routecodex_v3_error::{
-    V3ErrorActionScope, V3ProviderFailureAction, V3ProviderFailureSessionScope,
-    V3ProviderHealthScope, V3ProviderRecoveryKind,
+    V3ErrorActionScope, V3ProviderErrorFingerprint, V3ProviderFailureAction,
+    V3ProviderFailureSessionScope, V3ProviderHealthScope, V3ProviderRecoveryKind,
 };
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -259,6 +259,10 @@ struct V3ProviderAdaptiveHistory {
     score_milli: u32,
     configured_priority: i32,
     failure_streak: u32,
+    /// Typed identity of the current `failure_streak`. Only consecutive
+    /// failures with the same fingerprint extend the streak; a different
+    /// fingerprint starts a new streak of 1.
+    failure_fingerprint: Option<V3ProviderErrorFingerprint>,
     success_streak: u32,
     last_success_at_ms: Option<u64>,
     score_generation: u64,
@@ -275,6 +279,7 @@ impl Default for V3ProviderAdaptiveHistory {
             score_milli: 100,
             configured_priority: 100,
             failure_streak: 0,
+            failure_fingerprint: None,
             success_streak: 0,
             last_success_at_ms: None,
             score_generation: 0,
@@ -302,6 +307,10 @@ struct V3ProviderConsecutiveFailure {
     failure_count: u32,
     last_failure_at_ms: u64,
     reason: Option<String>,
+    /// Typed identity of the counted streak. A failure with a different
+    /// fingerprint starts a new consecutive-failure streak, so three
+    /// different recoverable errors never add up to one cooldown.
+    fingerprint: Option<V3ProviderErrorFingerprint>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -512,6 +521,7 @@ impl V3ProviderHealthStore {
             auth_alias,
             model_id,
             reason,
+            None,
             now_ms,
             None,
         )
@@ -525,6 +535,7 @@ impl V3ProviderHealthStore {
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         reason: Option<&str>,
+        failure_fingerprint: Option<V3ProviderErrorFingerprint>,
         now_ms: u64,
         policy_override: Option<V3ProviderFailurePolicy>,
     ) -> Result<V3ProviderFailureRecord, V3ProviderHealthError> {
@@ -600,7 +611,12 @@ impl V3ProviderHealthStore {
                         failure_count: 0,
                         last_failure_at_ms: now_ms,
                         reason: None,
+                        fingerprint: None,
                     });
+                if failure.fingerprint != failure_fingerprint {
+                    failure.failure_count = 0;
+                }
+                failure.fingerprint = failure_fingerprint;
                 failure.failure_count = failure.failure_count.saturating_add(1);
                 failure.last_failure_at_ms = now_ms;
                 if let Some(reason) = reason.filter(|value| !value.trim().is_empty()) {
@@ -699,7 +715,12 @@ impl V3ProviderHealthStore {
                     failure_count: 0,
                     last_failure_at_ms: now_ms,
                     reason: None,
+                    fingerprint: None,
                 });
+        if failure.fingerprint != failure_fingerprint {
+            failure.failure_count = 0;
+        }
+        failure.fingerprint = failure_fingerprint;
         failure.failure_count = failure.failure_count.saturating_add(1);
         failure.last_failure_at_ms = now_ms;
         if let Some(reason) = reason.filter(|value| !value.trim().is_empty()) {
@@ -1125,17 +1146,28 @@ impl V3ProviderHealthStore {
             record_health_delta(history, action.score_delta_milli);
         }
         history.success_streak = 0;
-        history.failure_streak = match action.recovery {
+        match action.recovery {
             V3ProviderRecoveryKind::RecoverableCounted
                 if action.scope == V3ProviderHealthScope::GlobalProviderKey =>
             {
-                history.failure_streak.saturating_add(1)
+                // 连续失败必须同源：只有同一个 typed fingerprint 的失败才累计
+                // streak，429/500/502 这类不同错误不会凑够阈值而误冷却 provider。
+                // 没有上游状态的失败已由分类器落到失败类别身份，不比较 class_code
+                // 之外的隐式状态。
+                let same_fingerprint = history.failure_fingerprint == action.failure_fingerprint;
+                history.failure_streak = if same_fingerprint {
+                    history.failure_streak.saturating_add(1)
+                } else {
+                    1
+                };
+                history.failure_fingerprint = action.failure_fingerprint.clone();
             }
             V3ProviderRecoveryKind::IrrecoverableGlobalCooldown => {
-                history.failure_streak.saturating_add(1)
+                history.failure_streak = history.failure_streak.saturating_add(1);
+                history.failure_fingerprint = action.failure_fingerprint.clone();
             }
-            _ => history.failure_streak,
-        };
+            _ => {}
+        }
         if matches!(
             action.recovery,
             V3ProviderRecoveryKind::IrrecoverableGlobalCooldown

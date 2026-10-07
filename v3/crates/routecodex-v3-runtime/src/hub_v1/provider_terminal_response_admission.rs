@@ -1,5 +1,5 @@
 use super::V3HubProviderWireProtocol;
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct V3ProviderTerminalAdmissionFailure {
@@ -13,7 +13,11 @@ pub(crate) fn classify_v3_provider_terminal_admission(
 ) -> Option<V3ProviderTerminalAdmissionFailure> {
     let reason = match provider_protocol {
         V3HubProviderWireProtocol::Responses => responses_incomplete_reason(payload),
-        V3HubProviderWireProtocol::OpenAiChat => openai_chat_incomplete_reason(payload),
+        // A Chat-wire provider terminal carries no reason RouteCodex may judge:
+        // `content_filter` is the provider's own content filter having done its
+        // job, and the client projection owns the Chat -> target mapping. A
+        // provider/transport failure is classified by its own owner, not here.
+        V3HubProviderWireProtocol::OpenAiChat => None,
         V3HubProviderWireProtocol::Anthropic => anthropic_incomplete_reason(payload),
         V3HubProviderWireProtocol::Gemini => None,
     }?;
@@ -39,7 +43,7 @@ fn responses_incomplete_reason(payload: &Value) -> Option<&str> {
         .map(str::trim)
         .filter(|reason| !reason.is_empty())
         .unwrap_or("unknown");
-    if responses_incomplete_reason_is_output_cap(reason) {
+    if responses_incomplete_reason_is_admitted_terminal(reason) {
         return None;
     }
     Some(reason)
@@ -49,11 +53,62 @@ fn responses_incomplete_reason(payload: &Value) -> Option<&str> {
 /// `response.incomplete` + `max_output_tokens` terminal. That is the same
 /// output-cap semantic as the Chat aliases and the Anthropic `max_tokens` stop
 /// reason, i.e. valid partial output, so it must not enter the provider
-/// failure/cooldown path on any entry. This function is the single owner of that
-/// rule; the provider health probe reuses it to admit an output-cap probe
-/// terminal without also admitting a genuine provider rejection.
+/// failure/cooldown path on any entry.
 pub(crate) fn responses_incomplete_reason_is_output_cap(reason: &str) -> bool {
     reason.trim() == "max_output_tokens"
+}
+
+/// Reasons a provider may legitimately report on its own `response.incomplete`
+/// terminal. They are business/terminal semantics, not provider failure:
+/// `max_output_tokens` is the output cap (valid partial output), and
+/// `content_filter` is the provider's own allow/deny content filter having done
+/// its job. RouteCodex must not judge either reason as an unhealthy provider,
+/// cool the provider, or switch away from it; the terminal is forwarded to the
+/// client as-is. Unknown or missing reasons stay provider failures because the
+/// client projection cannot represent them. The provider health probe reuses
+/// this owner so a probe that lands on an admitted terminal still clears
+/// cooldown.
+pub(crate) fn responses_incomplete_reason_is_admitted_terminal(reason: &str) -> bool {
+    let reason = reason.trim();
+    responses_incomplete_reason_is_output_cap(reason) || reason == "content_filter"
+}
+
+/// 声明的唯一 admission 例外（单 owner）：Anthropic 的 `stop_reason=refusal`
+/// 且 `stop_details.category=cyber`。
+///
+/// 这是 provider 自己声明的安全类拒答，不是 provider 故障。它与本 owner 上面
+/// 的 `refusal` 终态准入共用同一个上游形状，因此必须在这里显式声明：该例外被
+/// 产品决策为“可重试的 provider saturation”（429），会在 admission 之前被消费
+/// 并触发重选；单候选耗尽时投影 `502 network_error`。声明放在本 owner 内，是为
+/// 了让“哪些上游终态被准入、哪个被显式排除”只有一个真源，避免例外散落到调用方。
+/// 任何新增例外都必须在这里声明，而不是在调用链下游旁路本分类器。
+pub(crate) fn anthropic_cyber_refusal_is_declared_retryable_saturation(payload: &Value) -> bool {
+    let direct = payload.as_object();
+    let delta = payload.get("delta").and_then(Value::as_object);
+    [direct, delta]
+        .into_iter()
+        .flatten()
+        .any(anthropic_cyber_refusal_object_matches)
+}
+
+fn anthropic_cyber_refusal_object_matches(object: &Map<String, Value>) -> bool {
+    let stop_reason = object
+        .get("stop_reason")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .map(str::to_ascii_lowercase);
+    if stop_reason.as_deref() != Some("refusal") {
+        return false;
+    }
+    object
+        .get("stop_details")
+        .and_then(Value::as_object)
+        .and_then(|details| details.get("category"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+        == Some("cyber")
 }
 
 /// Chat output-cap terminals, including gateway aliases such as `max_tokens`,
@@ -63,18 +118,17 @@ pub(crate) fn openai_chat_finish_reason_is_output_cap(reason: &str) -> bool {
     matches!(reason, "length" | "max_tokens" | "max_output_tokens")
 }
 
-fn openai_chat_incomplete_reason(payload: &Value) -> Option<&str> {
-    payload
-        .get("choices")
-        .and_then(Value::as_array)?
-        .iter()
-        .find_map(
-            |choice| match choice.get("finish_reason").and_then(Value::as_str) {
-                Some(reason) if openai_chat_finish_reason_is_output_cap(reason) => None,
-                Some("content_filter") => Some("content_filter"),
-                _ => None,
-            },
-        )
+/// Chat `finish_reason` values a provider may legitimately report on its own
+/// terminal response. `content_filter` is the provider's own content filter
+/// having done its job, exactly like the Responses reason above: it is terminal
+/// response semantics, so RouteCodex must not judge it a provider failure.
+///
+/// The Chat wire terminal itself is admitted unconditionally; this owner exists
+/// for the downstream guards that would otherwise turn an admitted terminal into
+/// a proxy-generated provider failure (an empty-content `content_filter`
+/// response carries no visible model output by design).
+pub(crate) fn openai_chat_finish_reason_is_admitted_terminal(reason: &str) -> bool {
+    openai_chat_finish_reason_is_output_cap(reason) || reason == "content_filter"
 }
 
 fn anthropic_incomplete_reason(payload: &Value) -> Option<&str> {
@@ -89,18 +143,25 @@ fn anthropic_incomplete_reason(payload: &Value) -> Option<&str> {
         // failure/cooldown/switch path and surface a transport error to a
         // client that should have received `incomplete`.
         Some("max_tokens") => return None,
-        Some("refusal") => return Some("content_filter"),
+        // `refusal` is the model declining to answer, i.e. a terminal response
+        // semantic, not a provider failure. The client projection renders it as
+        // `incomplete` + `incomplete_details.reason=content_filter`.
+        Some("refusal") => return None,
         _ => {}
     }
-    let status = payload.get("status").and_then(Value::as_str);
-    (status == Some("incomplete")).then(|| {
-        payload
-            .pointer("/incomplete_details/reason")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|reason| !reason.is_empty())
-            .unwrap_or("unknown")
-    })
+    if payload.get("status").and_then(Value::as_str) != Some("incomplete") {
+        return None;
+    }
+    let reason = payload
+        .pointer("/incomplete_details/reason")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|reason| !reason.is_empty())
+        .unwrap_or("unknown");
+    if responses_incomplete_reason_is_admitted_terminal(reason) {
+        return None;
+    }
+    Some(reason)
 }
 
 #[cfg(test)]
@@ -109,8 +170,46 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn rejects_registered_incomplete_terminal_shapes() {
+    fn rejects_unrepresentable_incomplete_terminal_shapes() {
         for (protocol, payload, reason) in [
+            (
+                V3HubProviderWireProtocol::Responses,
+                json!({
+                    "type": "response.incomplete",
+                    "response": {
+                        "status": "incomplete",
+                        "incomplete_details": {"reason": "mystery"}
+                    }
+                }),
+                "mystery",
+            ),
+            (
+                V3HubProviderWireProtocol::Responses,
+                json!({"type": "response.incomplete", "response": {"status": "incomplete"}}),
+                "unknown",
+            ),
+            (
+                V3HubProviderWireProtocol::Anthropic,
+                json!({"type": "message", "status": "incomplete"}),
+                "unknown",
+            ),
+        ] {
+            let failure = classify_v3_provider_terminal_admission(protocol, &payload)
+                .expect("an unrepresentable incomplete terminal is a provider failure");
+            assert_eq!(
+                failure.message,
+                format!("provider response ended before completion: {reason}")
+            );
+        }
+    }
+
+    #[test]
+    fn admits_content_filter_terminal_as_provider_business_terminal() {
+        // `content_filter` is the provider's own allow/deny content filter having
+        // done its job. It is terminal response semantics, not a provider
+        // failure: cooling the provider or switching away would drop a
+        // representable terminal that the client projection already renders.
+        for (protocol, payload) in [
             (
                 V3HubProviderWireProtocol::Responses,
                 json!({
@@ -120,29 +219,78 @@ mod tests {
                         "incomplete_details": {"reason": "content_filter"}
                     }
                 }),
-                "content_filter",
+            ),
+            (
+                V3HubProviderWireProtocol::Responses,
+                json!({
+                    "status": "incomplete",
+                    "incomplete_details": {"reason": " content_filter "}
+                }),
             ),
             (
                 V3HubProviderWireProtocol::OpenAiChat,
                 json!({"choices": [{"finish_reason": "content_filter"}]}),
-                "content_filter",
             ),
             (
                 V3HubProviderWireProtocol::Anthropic,
                 json!({"type": "message", "stop_reason": "refusal"}),
-                "content_filter",
             ),
             (
                 V3HubProviderWireProtocol::Anthropic,
                 json!({"type": "message_delta", "delta": {"stop_reason": "refusal"}}),
-                "content_filter",
+            ),
+            (
+                V3HubProviderWireProtocol::Anthropic,
+                json!({
+                    "type": "message",
+                    "status": "incomplete",
+                    "incomplete_details": {"reason": "content_filter"}
+                }),
             ),
         ] {
-            let failure = classify_v3_provider_terminal_admission(protocol, &payload)
-                .expect("incomplete terminal must not be admitted as provider success");
             assert_eq!(
-                failure.message,
-                format!("provider response ended before completion: {reason}")
+                classify_v3_provider_terminal_admission(protocol, &payload),
+                None,
+                "content_filter terminal must be admitted for {protocol:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn declares_anthropic_cyber_refusal_as_the_only_retryable_admission_exception() {
+        // 该例外是本 owner 唯一的 admission 排除项：它复用普通 `refusal` 终态
+        // 形状，但被产品决策为 429 可重试饱和度。断言它只在该形状成立，普通
+        // refusal 与其它 stop_reason 不受影响。
+        let cyber = json!({
+            "type": "message_delta",
+            "delta": {
+                "stop_reason": "refusal",
+                "stop_details": {"category": "cyber", "explanation": "cyber policy"}
+            }
+        });
+        assert!(anthropic_cyber_refusal_is_declared_retryable_saturation(
+            &cyber
+        ));
+        for payload in [
+            json!({"type": "message_delta", "delta": {"stop_reason": "refusal"}}),
+            json!({
+                "type": "message_delta",
+                "delta": {
+                    "stop_reason": "refusal",
+                    "stop_details": {"category": "harassment"}
+                }
+            }),
+            json!({
+                "type": "message_delta",
+                "delta": {
+                    "stop_reason": "end_turn",
+                    "stop_details": {"category": "cyber"}
+                }
+            }),
+        ] {
+            assert!(
+                !anthropic_cyber_refusal_is_declared_retryable_saturation(&payload),
+                "only the declared cyber refusal shape is the exception: {payload}"
             );
         }
     }

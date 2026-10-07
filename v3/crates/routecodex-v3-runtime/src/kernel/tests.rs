@@ -68,6 +68,15 @@ fn direct_provider_failure_blocks_after_configured_threshold() {
             100 + offset,
         )
         .expect("direct failure must be recorded");
+        let projection = health
+            .store()
+            .scheduling_projection("openai", "key1", "gpt-test", 100, 100, 200)
+            .expect("direct health projection");
+        assert_eq!(
+            projection.available,
+            offset < 2,
+            "the first two same-key failures stay available; the third enters cooldown"
+        );
     }
 
     let projection = health
@@ -109,10 +118,14 @@ fn direct_provider_failure_thresholds_cover_400_and_401_classes() {
         weight: Some(1),
     };
 
-    // Every typed provider failure enters cooldown immediately.  The failure
-    // history still drives the later adaptive ladder, but never delays the
-    // first candidate exclusion.
-    for (status, code) in [(400u16, "provider_http_400"), (401, "provider_http_401")] {
+    // Every typed provider failure enters the shared health history. A
+    // recoverable class (400) must not exclude the provider before three
+    // consecutive same-class failures; the typed irrecoverable account class
+    // (401) still cools on its first failure.
+    for (status, code, threshold) in [
+        (400u16, "provider_http_400", 3u32),
+        (401, "provider_http_401", 1),
+    ] {
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
         let session =
             test_failure_session_scope_for("default", &format!("direct-health-threshold-{status}"));
@@ -141,21 +154,24 @@ fn direct_provider_failure_thresholds_cover_400_and_401_classes() {
                 message: Some("controlled direct provider failure".to_string()),
             },
         );
-        record_v3_direct_provider_failure_record(
-            &health,
-            &session,
-            &plan.decision.target,
-            &source,
-            100,
-        )
-        .expect("direct failure must be recorded");
-        let projection = health
-            .store()
-            .scheduling_projection("openai", "key1", "gpt-test", 100, 100, 300)
-            .expect("direct health projection");
-        assert!(
-            !projection.available,
-            "status {status} must enter cooldown after its first failure"
-        );
+        for offset in 0..threshold {
+            record_v3_direct_provider_failure_record(
+                &health,
+                &session,
+                &plan.decision.target,
+                &source,
+                100 + u64::from(offset),
+            )
+            .expect("direct failure must be recorded");
+            let projection = health
+                .store()
+                .scheduling_projection("openai", "key1", "gpt-test", 100, 100, 300)
+                .expect("direct health projection");
+            assert_eq!(
+                projection.available,
+                offset + 1 < threshold,
+                "status {status} must stay selectable until {threshold} consecutive same-class failures are recorded"
+            );
+        }
     }
 }

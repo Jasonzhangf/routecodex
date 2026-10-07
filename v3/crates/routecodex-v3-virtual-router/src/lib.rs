@@ -486,7 +486,9 @@ impl V3VirtualRouter {
                 advance_state,
             ) {
                 let target = &tier.targets[target_index];
-                let semantic_key = semantic_target_key(target);
+                // Default has a distinct capability contract after media/search
+                // tiers exhaust. Keep its opaque entry for Target to evaluate.
+                let semantic_key = (semantic_target_key(target), tier.pool_id == "default");
                 if !seen.insert(semantic_key) {
                     continue;
                 }

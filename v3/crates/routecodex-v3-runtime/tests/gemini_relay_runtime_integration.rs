@@ -889,52 +889,57 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
 
         let provider_health =
             V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
-        let failing = StaticSseTransport {
-            chunks: Mutex::new(Some(chunks)),
-        };
-        let first = execute_v3_gemini_relay_runtime_with_provider_health(
-            &manifest,
-            V3GeminiRelayRuntimeInput {
-                server_id: server_id.into(),
-                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                    "test-server",
-                    "test-group",
-                    concat!(module_path!(), ":", line!()),
-                )
-                .expect("test provider failure session scope"),
-                request_id: format!("req-gemini-uncommitted-failure-{case}"),
-                endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
-                payload: json!({
-                    "contents":[{"role":"user","parts":[{"text":"stream"}]}],
-                    "stream":true
-                }),
-            },
-            &failing,
-            provider_health.runtime_health(),
-        )
-        .await
-        .expect("provider attempt failure must reach terminal Error06");
-        assert_eq!(first.status, 502, "{case}: {first:?}");
-        assert_eq!(first.error_chain.as_ref().map(Vec::len), Some(6));
-        assert_eq!(first.node_trace.last(), Some(&"V3Error06ClientProjected"));
-        let client_error = match first.client_body {
-            V3GeminiRelayClientBody::Json(value) => value,
-            V3GeminiRelayClientBody::Sse(_) => {
-                panic!("{case} failed provider attempt must not produce client SSE")
-            }
-        };
-        assert!(
-            !client_error.to_string().contains("partial"),
-            "{case} failed-attempt bytes crossed the Broker boundary: {client_error}"
-        );
+        // A recoverable provider-attempt failure is counted into provider health
+        // but must not cool the provider before three consecutive same-class
+        // failures, so drive three identical attempts before checking cooldown.
+        for attempt in 0..3 {
+            let failing = StaticSseTransport {
+                chunks: Mutex::new(Some(chunks.clone())),
+            };
+            let first = execute_v3_gemini_relay_runtime_with_provider_health(
+                &manifest,
+                V3GeminiRelayRuntimeInput {
+                    server_id: server_id.into(),
+                    failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                        "test-server",
+                        "test-group",
+                        concat!(module_path!(), ":", line!()),
+                    )
+                    .expect("test provider failure session scope"),
+                    request_id: format!("req-gemini-uncommitted-failure-{case}-{attempt}"),
+                    endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
+                    payload: json!({
+                        "contents":[{"role":"user","parts":[{"text":"stream"}]}],
+                        "stream":true
+                    }),
+                },
+                &failing,
+                provider_health.runtime_health(),
+            )
+            .await
+            .expect("provider attempt failure must reach terminal Error06");
+            assert_eq!(first.status, 502, "{case} attempt {attempt}: {first:?}");
+            assert_eq!(first.error_chain.as_ref().map(Vec::len), Some(6));
+            assert_eq!(first.node_trace.last(), Some(&"V3Error06ClientProjected"));
+            let client_error = match first.client_body {
+                V3GeminiRelayClientBody::Json(value) => value,
+                V3GeminiRelayClientBody::Sse(_) => {
+                    panic!("{case} failed provider attempt must not produce client SSE")
+                }
+            };
+            assert!(
+                !client_error.to_string().contains("partial"),
+                "{case} failed-attempt bytes crossed the Broker boundary: {client_error}"
+            );
+        }
 
         // Broker 内完成的 provider-attempt failure 必须关闭本次 action lane，
-        // 同时保留 provider cooldown；Front 不参与错误判定。
+        // 连续三次同类失败后保留 provider cooldown；Front 不参与错误判定。
         let succeeding = JsonTransport {
             captured_url: Mutex::new(None),
             captured_body: Mutex::new(None),
         };
-        // A typed provider-attempt failure immediately isolates the exact
+        // Three consecutive typed provider-attempt failures isolate the exact
         // provider/key/model. Keep the provider held until its recovery probe
         // succeeds; probe failures are control-plane recovery traffic and do
         // not count as request attempts.
@@ -1010,44 +1015,49 @@ async fn validated_terminal_sse_releases_action_lane_for_a_fresh_request() {
     let manifest = manifest_for_action_gate_scope(server_id);
     let provider_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
-    let failing = StaticSseTransport {
-        chunks: Mutex::new(Some(vec![b"data: {malformed-json}\n\n".to_vec()])),
-    };
-    let failed = execute_v3_gemini_relay_runtime_with_provider_health(
-        &manifest,
-        V3GeminiRelayRuntimeInput {
-            server_id: server_id.into(),
-            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
-                concat!(module_path!(), ":", line!()),
-            )
-            .expect("test provider failure session scope"),
-            request_id: "req-gemini-seed-active-gate".into(),
-            endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
-            payload: json!({
-                "contents":[{"role":"user","parts":[{"text":"seed"}]}],
-                "stream":true
-            }),
-        },
-        &failing,
-        provider_health.runtime_health(),
-    )
-    .await
-    .expect("failed provider attempt must reach terminal Error06");
-    assert_eq!(failed.status, 502);
-    assert_eq!(failed.error_chain.as_ref().map(Vec::len), Some(6));
-    assert_eq!(failed.node_trace.last(), Some(&"V3Error06ClientProjected"));
-    let failed_client_response = match failed.client_body {
-        V3GeminiRelayClientBody::Json(value) => value,
-        V3GeminiRelayClientBody::Sse(_) => {
-            panic!("failed provider attempt must not produce client SSE")
-        }
-    };
-    assert!(
-        failed_client_response.get("error").is_some(),
-        "malformed provider attempt must project one terminal error: {failed_client_response}"
-    );
+    // A recoverable malformed provider stream is counted into provider health,
+    // so three consecutive same-class failures are needed before the provider is
+    // held in cooldown.
+    for attempt in 0..3 {
+        let failing = StaticSseTransport {
+            chunks: Mutex::new(Some(vec![b"data: {malformed-json}\n\n".to_vec()])),
+        };
+        let failed = execute_v3_gemini_relay_runtime_with_provider_health(
+            &manifest,
+            V3GeminiRelayRuntimeInput {
+                server_id: server_id.into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
+                request_id: format!("req-gemini-seed-active-gate-{attempt}"),
+                endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
+                payload: json!({
+                    "contents":[{"role":"user","parts":[{"text":"seed"}]}],
+                    "stream":true
+                }),
+            },
+            &failing,
+            provider_health.runtime_health(),
+        )
+        .await
+        .expect("failed provider attempt must reach terminal Error06");
+        assert_eq!(failed.status, 502, "attempt {attempt}: {failed:?}");
+        assert_eq!(failed.error_chain.as_ref().map(Vec::len), Some(6));
+        assert_eq!(failed.node_trace.last(), Some(&"V3Error06ClientProjected"));
+        let failed_client_response = match failed.client_body {
+            V3GeminiRelayClientBody::Json(value) => value,
+            V3GeminiRelayClientBody::Sse(_) => {
+                panic!("failed provider attempt must not produce client SSE")
+            }
+        };
+        assert!(
+            failed_client_response.get("error").is_some(),
+            "malformed provider attempt must project one terminal error: {failed_client_response}"
+        );
+    }
 
     let terminal = StaticSseTransport {
         chunks: Mutex::new(Some(vec![

@@ -354,7 +354,10 @@ fn recovered_primary_failback_is_not_starved_by_backup_successes() {
 fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
     let mut manifest = global_pool_alive_manifest("global_status_policy");
     normalize_global_pool_priorities(&mut manifest);
-    let cases = [(401, 1), (403, 1), (429, 1), (500, 1), (502, 1), (599, 1)];
+    // Account/billing classes (401/403) are typed irrecoverable and cool on their
+    // first failure. Every recoverable class requires three consecutive
+    // same-class failures, so one recoverable error cannot exclude a provider.
+    let cases = [(401, 1), (403, 1), (429, 3), (500, 3), (502, 3), (599, 3)];
     for (status, threshold) in cases {
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
         let scope = test_provider_failure_scope(
@@ -382,9 +385,14 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
                 )
                 .expect("runtime provider failure policy should record");
             assert_eq!(record.failure_count, attempt + 1);
+            let expected_state = if attempt + 1 == threshold {
+                "cooldown"
+            } else {
+                "healthy"
+            };
             assert_eq!(
-                record.state, "cooldown",
-                "status {status} must cool immediately"
+                record.state, expected_state,
+                "status {status} must cool only after {threshold} consecutive same-class failures"
             );
         }
         assert!(
@@ -392,7 +400,7 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
                 .store()
                 .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 10_000)
                 .available,
-            "status {status} must block after its first provider failure"
+            "status {status} must block after {threshold} consecutive failures"
         );
     }
 
@@ -403,8 +411,9 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
         "runtime-policy-negative",
     )
     .expect("failure session scope");
-    // 统一错误模型：400/请求形失败同样计入全局健康，首次失败进入全局冷却。
-    for attempt in 0..1 {
+    // 统一错误模型：400/请求形失败同样计入全局健康，但属于可恢复类，必须连续
+    // 三次同类失败才进入全局冷却——单次 400 不得排除 provider。
+    for attempt in 0..3 {
         health
             .record_provider_failure_record_with_policy(
                 None,
@@ -433,8 +442,9 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
             )
             .available;
         assert_eq!(
-            available, false,
-            "attempt {attempt} availability must be blocked immediately"
+            available,
+            attempt < 2,
+            "400 must stay selectable for the first two same-class failures and block on the third; attempt={attempt}"
         );
     }
 }
@@ -727,6 +737,7 @@ fn incomplete_key_identity_fails_before_provider_cooldown_write() {
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let action = V3ProviderFailureAction {
         class_code: "provider_auth_failure".to_string(),
+        failure_fingerprint: None,
         recovery: V3ProviderRecoveryKind::IrrecoverableGlobalCooldown,
         scope: V3ProviderHealthScope::GlobalProviderKey,
         score_delta_milli: -400,

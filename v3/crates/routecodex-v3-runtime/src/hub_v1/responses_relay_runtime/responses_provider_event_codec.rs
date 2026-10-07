@@ -724,11 +724,13 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
     }
 
     #[test]
-    fn response_incomplete_content_filter_still_enters_provider_error_chain() {
-        // `content_filter` is a genuine provider refusal and must keep the
-        // existing typed-error-then-reselect behavior.
+    fn response_incomplete_content_filter_is_forwarded_as_provider_terminal() {
+        // `content_filter` is the provider's own content filter doing its job, so
+        // the terminal is business data: it must reach the client as
+        // `status=incomplete` + `incomplete_details.reason=content_filter` instead
+        // of entering the provider failure/cooldown path.
         let mut reducer = V3ResponsesSseReducerState::default();
-        let error = apply_v3_typed_responses_event(
+        let terminal = apply_v3_typed_responses_event(
             &json!({
                 "type": "response.incomplete",
                 "response": {
@@ -740,13 +742,14 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
             }),
             &mut reducer,
         )
-        .expect_err("a content_filter incomplete terminal is a provider failure");
-        assert!(
-            error
-                .to_string()
-                .contains("provider response ended before completion"),
-            "unexpected error: {error}"
+        .expect("a content_filter terminal must not be a provider failure")
+        .expect("response.incomplete must be terminal");
+        assert_eq!(terminal["status"], "incomplete", "{terminal}");
+        assert_eq!(
+            terminal["incomplete_details"]["reason"], "content_filter",
+            "{terminal}"
         );
+        assert_eq!(terminal["usage"]["output_tokens"], json!(5), "{terminal}");
     }
 
     #[test]

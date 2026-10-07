@@ -131,6 +131,65 @@ impl ResponsesTransport for SingleJsonCaptureTransport {
     }
 }
 
+/// A Chat-wire provider that reports its own `content_filter` terminal with no
+/// visible model output at all. `content_filter` is the provider's own filter
+/// having done its job, so the terminal is business data: the Responses relay
+/// must forward it as `incomplete` instead of judging an empty-visible-output
+/// provider failure and switching away.
+struct OpenAiChatContentFilterTransport {
+    provider_ids: Mutex<Vec<String>>,
+    stream: bool,
+}
+
+#[async_trait]
+impl ResponsesTransport for OpenAiChatContentFilterTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let provider_id = request.provider_id().to_string();
+        self.provider_ids.lock().unwrap().push(provider_id.clone());
+        if self.stream {
+            let stream = futures_util::stream::iter([
+                Ok(b"data: {\"id\":\"chatcmpl_content_filter\",\"object\":\"chat.completion.chunk\",\"model\":\"chat-wire-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n".to_vec()),
+                Ok(b"data: {\"id\":\"chatcmpl_content_filter\",\"object\":\"chat.completion.chunk\",\"model\":\"chat-wire-model\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"content_filter\"}]}\n\n".to_vec()),
+                Ok(b"data: [DONE]\n\n".to_vec()),
+            ]);
+            return Ok(V3ProviderResp14Raw::from_sse(
+                request.request_id().to_string(),
+                provider_id,
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"text/event-stream".to_vec(),
+                }],
+                Box::pin(stream),
+            ));
+        }
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            provider_id,
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            serde_json::to_vec(&json!({
+                "id":"chatcmpl_content_filter",
+                "object":"chat.completion",
+                "model":"chat-wire-model",
+                "choices":[{
+                    "index":0,
+                    "message":{"role":"assistant","content":""},
+                    "finish_reason":"content_filter"
+                }],
+                "usage":{"prompt_tokens":10,"completion_tokens":0,"total_tokens":10}
+            }))
+            .unwrap(),
+        ))
+    }
+}
+
 #[tokio::test]
 async fn controlled_json_and_sse_e2e_use_fixed_topology_and_one_response_exit() {
     let transport = JsonThenSseTransport {
@@ -1579,9 +1638,12 @@ async fn responses_relay_provider_context_error_reselects_next_candidate_before_
         timing.internal.checked_add(timing.external),
         Some(timing.runtime_total)
     );
+    // One recoverable 400 excludes the candidate for this request only. The
+    // provider is not cooled yet: three consecutive same-class failures are
+    // required before provider health holds it.
     assert_eq!(
         observability.unavailable_candidates,
-        vec!["limited:key1:gpt-5.5:availability(provider_key_health_cooldown|provider_cooldown_probe_pending|provider_cooldown_probe_pending|request_local_provider_failure)".to_string()]
+        vec!["limited:key1:gpt-5.5:availability(request_local_provider_failure)".to_string()]
     );
     assert_eq!(
         observability
@@ -1664,7 +1726,10 @@ async fn responses_relay_provider_response_decode_error_reselects_next_candidate
         Some("minimax:key1:MiniMax-M3")
     );
     assert_eq!(provider_event.failure_count, 1);
-    assert_eq!(provider_event.health_state, "cooldown");
+    // A single recoverable decode failure is counted but does not cool the
+    // provider; three consecutive same-class failures are required.
+    assert_eq!(provider_event.health_state, "healthy");
+    assert!(provider_event.cooldown_until_ms.is_none());
 
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 2);
@@ -1673,8 +1738,8 @@ async fn responses_relay_provider_response_decode_error_reselects_next_candidate
 }
 
 #[tokio::test]
-async fn responses_relay_content_filter_incomplete_exhaustion_keeps_typed_terminal_error() {
-    let server_id = "responses_incomplete_exhaustion";
+async fn responses_relay_content_filter_incomplete_commits_partial_output_without_reselect() {
+    let server_id = "responses_content_filter";
     let manifest = responses_reselect_manifest_for_scope(server_id);
     let transport = ResponsesIncompleteExhaustionTransport {
         provider_ids: Mutex::new(Vec::new()),
@@ -1689,52 +1754,42 @@ async fn responses_relay_content_filter_incomplete_exhaustion_keeps_typed_termin
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
-            request_id: "req-responses-incomplete-exhaustion".into(),
+            request_id: "req-responses-content-filter".into(),
             payload: json!({
                 "model":"client-responses",
-                "input":"all providers incomplete",
+                "input":"provider content filter terminal",
                 "stream":false
             }),
         },
         &transport,
     )
     .await
-    .expect("provider exhaustion must project a typed terminal error");
+    .expect("a content_filter response.incomplete is a legal provider terminal");
 
-    assert_eq!(output.status, 502);
+    // `content_filter` is the provider's own content filter doing its job, so the
+    // terminal is business data: it is forwarded to the client instead of being
+    // judged a provider failure. Exactly one candidate is attempted and no error
+    // chain is opened.
     assert_eq!(
         transport.provider_ids.lock().unwrap().as_slice(),
-        ["limited", "minimax"]
+        ["limited"],
+        "an admitted content_filter terminal must not reselect"
     );
-    let error_body = match output.client_body {
+    assert_eq!(output.status, 200, "{output:?}");
+    assert!(output.error_chain.is_none(), "{output:?}");
+    let body = match output.client_body {
         V3ResponsesRelayClientBody::Json(value) => value,
-        V3ResponsesRelayClientBody::Sse(_) => panic!("expected typed JSON error body"),
+        V3ResponsesRelayClientBody::Sse(_) => panic!("expected JSON client body"),
     };
-    assert_eq!(error_body["error"]["code"], "network_error");
-    assert_eq!(error_body["error"]["message"], "network error");
-    assert!(
-        !error_body.to_string().contains("partial-must-not-commit"),
-        "partial incomplete output must not be committed: {error_body}"
-    );
-    assert!(
-        error_body.get("usage").is_none(),
-        "failed attempt usage must stay on the runtime side-channel: {error_body}"
-    );
+    assert_eq!(body["status"], "incomplete", "{body}");
     assert_eq!(
-        output.error_chain.as_deref(),
-        Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
+        body["incomplete_details"]["reason"], "content_filter",
+        "{body}"
     );
-    let usage = output
-        .stream_observation
-        .as_ref()
-        .expect("terminal incomplete failure must retain the final attempt observation")
-        .snapshot()
-        .expect("terminal incomplete failure observation must be readable")
-        .usage
-        .expect("terminal incomplete failure must retain provider usage");
-    assert_eq!(usage.input_tokens, Some(10));
-    assert_eq!(usage.output_tokens, Some(2));
-    assert_eq!(usage.total_tokens, Some(12));
+    assert!(
+        body.to_string().contains("partial-must-not-commit"),
+        "the provider's partial output must reach the client with its terminal: {body}"
+    );
 }
 
 #[tokio::test]
@@ -1789,6 +1844,128 @@ async fn responses_relay_output_cap_incomplete_commits_partial_output_without_re
         body.to_string().contains("capped-partial-output"),
         "truncated partial output must reach the client: {body}"
     );
+}
+
+#[tokio::test]
+async fn responses_relay_openai_chat_empty_content_filter_json_terminal_is_forwarded_without_reselect(
+) {
+    let transport = OpenAiChatContentFilterTransport {
+        provider_ids: Mutex::new(Vec::new()),
+        stream: false,
+    };
+    let output = execute_v3_responses_relay_runtime(
+        &openai_chat_target_manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-openai-chat-empty-content-filter-json".into(),
+            payload: json!({
+                "model":"gpt-5.5",
+                "stream":false,
+                "input":[{
+                    "type":"message",
+                    "role":"user",
+                    "content":[{"type":"input_text","text":"provider content filter terminal"}]
+                }]
+            }),
+        },
+        &transport,
+    )
+    .await
+    .expect("a content_filter terminal without visible output is legal provider business data");
+
+    // The provider's own content filter produced an empty terminal on purpose.
+    // RouteCodex must not judge that empty visible output as a provider failure:
+    // exactly one candidate is attempted and the terminal is forwarded.
+    assert_eq!(
+        transport.provider_ids.lock().unwrap().as_slice(),
+        ["chat"],
+        "an admitted empty-content content_filter terminal must not reselect"
+    );
+    assert_eq!(output.status, 200, "{output:?}");
+    assert!(output.error_chain.is_none(), "{output:?}");
+    assert!(
+        !output.node_trace.contains(&"V3TargetLocalReselected"),
+        "content_filter terminal must not reselect: {:?}",
+        output.node_trace
+    );
+    let body = match output.client_body {
+        V3ResponsesRelayClientBody::Json(value) => value,
+        V3ResponsesRelayClientBody::Sse(_) => panic!("expected JSON client body"),
+    };
+    assert_eq!(body["status"], "incomplete", "{body}");
+    assert_eq!(
+        body["incomplete_details"]["reason"], "content_filter",
+        "{body}"
+    );
+    assert_eq!(
+        body["output"].as_array().map(Vec::len),
+        Some(0),
+        "the provider's empty output is forwarded as-is: {body}"
+    );
+}
+
+#[tokio::test]
+async fn responses_relay_openai_chat_empty_content_filter_sse_terminal_is_forwarded_without_reselect(
+) {
+    let transport = OpenAiChatContentFilterTransport {
+        provider_ids: Mutex::new(Vec::new()),
+        stream: true,
+    };
+    let output = execute_v3_responses_relay_runtime(
+        &openai_chat_target_manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-openai-chat-empty-content-filter-sse".into(),
+            payload: json!({
+                "model":"gpt-5.5",
+                "stream":true,
+                "input":[{
+                    "type":"message",
+                    "role":"user",
+                    "content":[{"type":"input_text","text":"provider content filter terminal"}]
+                }]
+            }),
+        },
+        &transport,
+    )
+    .await
+    .expect("a streamed content_filter terminal without visible output is legal business data");
+
+    assert_eq!(
+        transport.provider_ids.lock().unwrap().as_slice(),
+        ["chat"],
+        "an admitted empty-content content_filter stream must not reselect"
+    );
+    assert_eq!(output.status, 200, "{output:?}");
+    assert!(output.error_chain.is_none(), "{output:?}");
+    assert!(
+        !output.node_trace.contains(&"V3TargetLocalReselected"),
+        "content_filter terminal must not reselect: {:?}",
+        output.node_trace
+    );
+    let V3ResponsesRelayClientBody::Sse(mut stream) = output.client_body else {
+        panic!("expected Responses SSE client body");
+    };
+    let mut forwarded = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        forwarded.extend(chunk);
+    }
+    let text = String::from_utf8(forwarded).unwrap();
+    assert!(text.contains("event: response.incomplete"), "{text}");
+    assert!(text.contains("\"reason\":\"content_filter\""), "{text}");
+    assert!(!text.contains("provider_empty_visible_output"), "{text}");
 }
 
 #[tokio::test]
@@ -1920,45 +2097,50 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
     )
     .expect("test provider failure session scope");
 
-    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
-        &manifest,
-        V3ResponsesRelayRuntimeInput {
-            server_id: server_id.into(),
-            failure_session_scope: failure_session_scope.clone(),
-            request_id: "req-responses-context-reselect-first".into(),
-            payload: json!({
-                "model":"client-responses",
-                "input":"same large payload",
-                "stream":false
-            }),
-        },
-        &transport,
-        &provider_health,
-        V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 3,
-        },
-    )
-    .await
-    .unwrap();
-    assert_eq!(output.status, 200);
-    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
-    let observability = output
-        .observability
-        .as_ref()
-        .expect("successful reroute must keep provider failure observability");
-    assert_eq!(
-        observability.provider_key.as_deref(),
-        Some("minimax:key1:MiniMax-M3")
-    );
-    assert_eq!(observability.provider_failure_events.len(), 1);
-    assert_eq!(observability.provider_failure_events[0].failure_count, 1);
-    assert_eq!(
-        observability.provider_failure_events[0].health_state,
-        "cooldown"
-    );
-    assert!(observability.provider_failure_events[0]
-        .cooldown_until_ms
-        .is_some());
+    // A recoverable provider failure is counted into shared provider health but
+    // must not cool the provider before three consecutive same-class failures.
+    for turn in 1..=3u32 {
+        let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+            &manifest,
+            V3ResponsesRelayRuntimeInput {
+                server_id: server_id.into(),
+                failure_session_scope: failure_session_scope.clone(),
+                request_id: format!("req-responses-context-reselect-seed-{turn}"),
+                payload: json!({
+                    "model":"client-responses",
+                    "input":"same large payload",
+                    "stream":false
+                }),
+            },
+            &transport,
+            &provider_health,
+            V3ResponsesRelayRetryPolicy {
+                same_candidate_retries: 3,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(output.status, 200);
+        assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+        let observability = output
+            .observability
+            .as_ref()
+            .expect("successful reroute must keep provider failure observability");
+        assert_eq!(
+            observability.provider_key.as_deref(),
+            Some("minimax:key1:MiniMax-M3")
+        );
+        assert_eq!(observability.provider_failure_events.len(), 1);
+        let event = &observability.provider_failure_events[0];
+        assert_eq!(event.failure_count, turn);
+        if turn < 3 {
+            assert_eq!(event.health_state, "healthy", "turn {turn}");
+            assert!(event.cooldown_until_ms.is_none(), "turn {turn}");
+        } else {
+            assert_eq!(event.health_state, "cooldown", "turn {turn}");
+            assert!(event.cooldown_until_ms.is_some(), "turn {turn}");
+        }
+    }
 
     for turn in 1..=3 {
         let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
@@ -2010,7 +2192,10 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
         .collect();
     assert_eq!(
         provider_sequence,
-        vec!["limited", "minimax", "minimax", "minimax", "minimax"]
+        vec![
+            "limited", "minimax", "limited", "minimax", "limited", "minimax", "minimax", "minimax",
+            "minimax"
+        ]
     );
 }
 

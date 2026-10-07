@@ -175,6 +175,7 @@ fn auth_key_policy_cools_key_across_sessions_without_blocking_sibling_keys() {
             Some("key-a"),
             Some("gpt-5.5"),
             Some("HTTP_401"),
+            None,
             100,
             Some(policy),
         )
@@ -187,6 +188,7 @@ fn auth_key_policy_cools_key_across_sessions_without_blocking_sibling_keys() {
             Some("key-a"),
             Some("gpt-5.5"),
             Some("HTTP_401"),
+            None,
             101,
             Some(policy),
         )

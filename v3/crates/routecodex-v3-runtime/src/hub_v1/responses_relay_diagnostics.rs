@@ -51,17 +51,24 @@ pub(super) struct V3ProviderSemanticErrorProjection {
     pub(super) matched_policy: Option<V3ProviderFailureDirective>,
 }
 
+/// 投影被声明的 admission 例外（见 `provider_terminal_response_admission`
+/// 的 `anthropic_cyber_refusal_is_declared_retryable_saturation`）。
+///
+/// 形状判定由 admission owner 提供，这里只做 429 可重试饱和度的投影：不复制
+/// 第二份匹配实现，避免例外出现两个真源。
 pub(super) fn anthropic_cyber_refusal_error_from_payload(
     payload: &Value,
 ) -> Option<V3ProviderSemanticErrorProjection> {
+    if !anthropic_cyber_refusal_is_declared_retryable_saturation(payload) {
+        return None;
+    }
     let direct = payload.as_object();
     let delta = payload.get("delta").and_then(Value::as_object);
-    let candidate = [direct, delta]
+    let details = [direct, delta]
         .into_iter()
         .flatten()
-        .find(|object| anthropic_cyber_refusal_object_matches(object))?;
-    let explanation = candidate
-        .get("stop_details")
+        .find_map(|object| object.get("stop_details"));
+    let explanation = details
         .and_then(Value::as_object)
         .and_then(|details| details.get("explanation"))
         .and_then(Value::as_str)
@@ -78,26 +85,6 @@ pub(super) fn anthropic_cyber_refusal_error_from_payload(
         cooldown_ms: None,
         matched_policy: None,
     })
-}
-
-fn anthropic_cyber_refusal_object_matches(object: &Map<String, Value>) -> bool {
-    let stop_reason = object
-        .get("stop_reason")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .map(str::to_ascii_lowercase);
-    if stop_reason.as_deref() != Some("refusal") {
-        return false;
-    }
-    object
-        .get("stop_details")
-        .and_then(Value::as_object)
-        .and_then(|details| details.get("category"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .map(str::to_ascii_lowercase)
-        .as_deref()
-        == Some("cyber")
 }
 
 pub(super) fn provider_response_semantic_error_message_from_manifest(
@@ -213,10 +200,13 @@ fn provider_terminal_without_visible_output_error(
     let projected_reason = choices
         .iter()
         .find_map(|choice| choice.get("finish_reason").and_then(Value::as_str));
-    // 输出上限截断是合法的部分输出：上游 Responses 参考以 status=incomplete +
-    // incomplete_details.reason=max_output_tokens 表示，客户端投影已按此实现。
-    // 因此截断响应必须走 incomplete 投影，不得进入 provider 失败/冷却/切换路径。
-    if projected_reason.is_some_and(openai_chat_finish_reason_is_output_cap)
+    // 合法终态豁免必须与 responses_openai_chat_conversion 的投影共用唯一 owner：
+    // 输出上限截断（上游 Responses 参考以 status=incomplete +
+    // incomplete_details.reason=max_output_tokens 表示）与 provider 自己的
+    // content_filter 都是合法终态，客户端投影已按此实现。两者都必须走 incomplete
+    // 投影，不得进入 provider 失败/冷却/切换路径；content_filter 的空内容响应
+    // 由 provider 过滤器决定，不是 RouteCodex 可裁决的 provider 失败。
+    if projected_reason.is_some_and(openai_chat_finish_reason_is_admitted_terminal)
         || provider_payload_has_valid_model_output(payload)
     {
         return None;
