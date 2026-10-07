@@ -1572,6 +1572,61 @@ mod tests {
     }
 
     #[test]
+    fn configured_deepseek_compat_covers_routed_official_and_v41_tool_history() {
+        for model in [
+            "deepseek-flash",
+            "deepseek-v4-pro",
+            "deepseek-v4.1-flash",
+            "deepseek-v4.1-pro",
+            "wb-deepseek-v4.1-flash",
+            "global:deepseek-v4.1-flash-sg",
+        ] {
+            let mut selected = target();
+            selected.canonical_model_id = "gpt-5.5".into();
+            selected.wire_model = model.into();
+            selected.compatibility_profile = Some("responses:deepseek-console-go".into());
+            let body = json!({
+                "model": model, "reasoning": {"effort": "medium"}, "input": [
+                    {"type": "message", "role": "user", "content": "inspect"},
+                    {"type": "function_call", "call_id": "call_1", "name": "inspect", "arguments": "{}"},
+                    {"type": "function_call_output", "call_id": "call_1", "output": "first receipt"},
+                    {"type": "function_call", "call_id": "call_2", "name": "inspect", "arguments": "{}"},
+                    {"type": "function_call_output", "call_id": "call_2", "output": "second receipt"},
+                    {"type": "message", "role": "user", "content": "apply"},
+                    {"type": "message", "role": "assistant", "content": "applying"},
+                    {"type": "custom_tool_call", "call_id": "call_3", "name": "apply_patch", "input": "patch"},
+                    {"type": "custom_tool_call_output", "call_id": "call_3", "output": "third receipt"}
+                ]
+            });
+            let wire = build_v3_provider_12_responses_wire_payload(
+                "req-configured-deepseek", selected.clone(), body.clone(),
+            ).unwrap();
+            let input = wire.body()["input"].as_array().unwrap();
+            let unchanged: Vec<_> = input.iter().filter(|item| item["type"] != "reasoning").cloned().collect();
+            assert_eq!(unchanged, *body["input"].as_array().unwrap(), "{model}: preserve calls and receipts");
+            assert_eq!(input.iter().filter(|item| item["type"] == "reasoning").count(), 3, "{model}: cover all tool segments");
+            assert_eq!(input[1]["content"][0]["text"], " ");
+            assert_eq!(input[8]["type"], "reasoning");
+            assert_eq!(input[8]["content"][0]["text"], "[thinking redacted]");
+            let repeated = build_v3_provider_12_responses_wire_payload(
+                "req-configured-deepseek-repeat", selected.clone(), wire.body().clone(),
+            ).unwrap();
+            assert_eq!(repeated.body(), wire.body(), "{model}: stable history");
+            let mut no_thinking = body.clone();
+            no_thinking["reasoning"]["effort"] = "none".into();
+            let off = build_v3_provider_12_responses_wire_payload(
+                "req-configured-deepseek-off", selected.clone(), no_thinking,
+            ).unwrap();
+            assert_eq!(off.body()["input"], body["input"], "{model}: thinking off");
+            selected.compatibility_profile = None;
+            let unconfigured = build_v3_provider_12_responses_wire_payload(
+                "req-unconfigured-deepseek", selected, body.clone(),
+            ).unwrap();
+            assert_eq!(unconfigured.body()["input"], body["input"], "{model}: provider must opt in");
+        }
+    }
+
+    #[test]
     fn wire_inserts_reasoning_before_interleaved_deepseek_tool_segments() {
         // 交错工具段（function_call_output/custom_tool_call_output 后直接跟随
         // function_call/custom_tool_call）经 Console Go 转 Chat 时会产生新的

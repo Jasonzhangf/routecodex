@@ -23,6 +23,18 @@ pub fn apply_deepseek_console_go_response_compat(payload: Value) -> Value {
     deepseek_console_go::apply_response_compat(payload)
 }
 
+/// Restore only tools declared custom by this request. An ordinary function's
+/// `input` parameter does not authorize a change to its dispatch type.
+pub fn apply_deepseek_console_go_response_compat_with_declared_custom_tools(
+    payload: Value,
+    custom_tool_names: &std::collections::BTreeSet<String>,
+) -> Value {
+    deepseek_console_go::apply_response_compat_with_declared_custom_tools(
+        payload,
+        Some(custom_tool_names),
+    )
+}
+
 /// DeepSeek Console Go request-side 400 compatibility owner.
 pub fn apply_deepseek_v4_request_compat(payload: &mut Value) {
     deepseek_console_go::apply_deepseek_v4_request_compat(payload)

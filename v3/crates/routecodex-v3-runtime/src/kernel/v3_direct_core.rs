@@ -885,6 +885,7 @@ where
                 ),
                 direct_failure_session_scope.session_id(),
                 C::tool_thinking_turn_context(&standardized).clone(),
+                C::body(&standardized),
             ) {
                 Ok(context) => context,
                 Err(error) => {

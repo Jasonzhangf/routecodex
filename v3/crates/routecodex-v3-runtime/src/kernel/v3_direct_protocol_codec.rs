@@ -46,7 +46,22 @@ pub(crate) fn build_direct_response_compat_context(
     toolreason_client_projection: bool,
     toolreason_observation_session_id: &str,
     tool_thinking_turn_context: crate::hub_v1::V3ToolThinkingTurnContext,
+    request_payload: &Value,
 ) -> Result<V3DirectResponseCompatContext, String> {
+    // Req04 may already have wrapped custom declarations for tool thinking.
+    // Preserve that typed set and add declarations that remain native.
+    let mut declared_custom_tool_names = tool_thinking_turn_context
+        .original_custom_tool_names()
+        .cloned()
+        .unwrap_or_default();
+    if let Some(tools) = request_payload.get("tools").and_then(Value::as_array) {
+        declared_custom_tool_names.extend(
+            tools
+                .iter()
+                .filter(|tool| tool.get("type").and_then(Value::as_str) == Some("custom"))
+                .filter_map(|tool| tool.get("name").and_then(Value::as_str).map(str::to_owned)),
+        );
+    }
     Ok(V3DirectResponseCompatContext {
         provider_protocol: crate::hub_v1::provider_wire_protocol_for_selected_candidate(
             &target.candidate,
@@ -58,6 +73,7 @@ pub(crate) fn build_direct_response_compat_context(
         toolreason_client_projection,
         toolreason_observation_session_id: Some(toolreason_observation_session_id.to_owned()),
         tool_thinking_turn_context,
+        declared_custom_tool_names,
         runtime_timing: crate::runtime_timing::V3RuntimeTimingState::start(),
     })
 }
