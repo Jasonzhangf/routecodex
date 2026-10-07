@@ -193,12 +193,9 @@ async fn failed_exec_restart_keeps_sample_persistence_failure_and_handoff_files(
     fs::write(&restart_plan_path, "restart-plan").unwrap();
     let sidecar_child = tokio::process::Command::new("true").spawn().unwrap();
     let sidecar = V3HooksSidecarProcess::for_test(sidecar_child, 0, process_record_path.clone());
-    let expected_provider_handoff = serde_json::to_value(
-        routecodex_v3_runtime::default_provider_transport_handoff_checkpoints(),
-    )
-    .unwrap();
     let restart_plan = ControlRestartPlan {
         control_instance_id: declaration.instance_id.clone(),
+        control_start_nonce: "test-nonce".into(),
         declaration: declaration.clone(),
         executable_path: root.join("missing-replacement"),
         snapshots: true,
@@ -207,50 +204,60 @@ async fn failed_exec_restart_keeps_sample_persistence_failure_and_handoff_files(
         sse_dump: false,
     };
 
-    let error = restart_managed_runtime_in_place(
-        &instance_dir,
-        &socket_path,
-        handle,
-        V3HooksSidecarSupervisor::from_startup(
-            instance_dir.clone(),
-            tokio::spawn(async move { Ok(Some(sidecar)) }),
-        ),
-        restart_plan,
-        false,
-    )
-    .await
-    .unwrap_err();
+    let supervisor = V3HooksSidecarSupervisor::from_startup(
+        instance_dir.clone(),
+        tokio::spawn(async move { Ok(Some(sidecar)) }),
+    );
+    let (stream, _peer) = UnixStream::pair().unwrap();
+    let error =
+        restart_managed_runtime_in_place(&instance_dir, &handle, restart_plan, false, &stream)
+            .await
+            .unwrap_err();
     assert!(
-        wait_for_listener_set_available(&declaration.listeners, Duration::from_secs(3)).await,
-        "failed exec restart must release listener ports before the test runtime exits"
+        !listener_set_is_available(&declaration.listeners),
+        "rejected restart must retain listener ownership"
     );
     assert!(
-        matches!(error, V3LifecycleError::Io(ref io) if io.kind() == std::io::ErrorKind::NotFound),
-        "restart should report the missing replacement executable: {error}"
+        error
+            .to_string()
+            .contains("exec restart rejected; original owner retained"),
+        "restart must reach native exec despite historical diagnostic failure: {error}"
     );
 
-    let status: V3ManagedStatusRecord = read_json(&instance_dir.join("status.json")).unwrap();
-    assert_eq!(status.state, V3ManagedRunState::Failed);
-    let detail = status.detail.unwrap_or_default();
-    assert!(
-        detail.contains("codex sample persistence shutdown failed during exec restart"),
-        "{detail}"
-    );
-    assert!(detail.contains("request.json"), "{detail}");
-    assert!(detail.contains("hooks sidecar shutdown failed"), "{detail}");
-    assert!(detail.contains("exec restart failed"), "{detail}");
-
-    let front_handoff: serde_json::Value =
-        read_json(&instance_dir.join(FRONT_HANDOFF_FILE)).unwrap();
-    assert!(front_handoff.is_array(), "{front_handoff}");
-    let provider_handoff: serde_json::Value =
-        read_json(&instance_dir.join(PROVIDER_HANDOFF_FILE)).unwrap();
-    assert_eq!(provider_handoff, expected_provider_handoff);
+    assert!(error.to_string().contains("os error"));
+    assert!(!instance_dir.join(FRONT_HANDOFF_FILE).exists());
+    assert!(!instance_dir.join(PROVIDER_HANDOFF_FILE).exists());
     assert!(process_record_path.exists());
-    assert!(!restart_plan_path.exists());
+    assert!(restart_plan_path.exists());
+    assert!(socket_path.exists());
+    let samples_root = home
+        .join(".rcc/codex-samples/openai-responses/ports")
+        .join(port.to_string());
+    fs::remove_file(&samples_root).unwrap();
+    sample_persistence_failure_http_roundtrip(handle.listeners[0].addr).await;
+    drop(handle.prepare_exec_attempt().await.unwrap());
+    let request_path = fs::read_dir(&samples_root)
+        .unwrap()
+        .map(|entry| entry.unwrap().path().join("request.json"))
+        .find(|path| path.exists())
+        .expect("original worker must resume and persist actual HTTP requests");
+    let request: serde_json::Value =
+        serde_json::from_slice(&fs::read(request_path).unwrap()).unwrap();
+    assert_eq!(request["input"], "managed sample persistence failure");
+    let failures = handle.shutdown().await;
+    assert!(
+        failures
+            .iter()
+            .any(|failure| failure.file_name == "request.json"),
+        "historical diagnostic evidence must remain reportable: {failures:?}"
+    );
+    assert!(supervisor.stop().await.is_err());
 }
 
-fn managed_fixture_with_port(root: &std::path::Path, port: u16) -> (PathBuf, PathBuf, PathBuf) {
+pub(super) fn managed_fixture_with_port(
+    root: &std::path::Path,
+    port: u16,
+) -> (PathBuf, PathBuf, PathBuf) {
     let config = root.join("managed-config.v3.toml");
     let executable = std::env::current_exe().unwrap();
     let state = root.join("managed-state");

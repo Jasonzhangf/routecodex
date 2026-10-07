@@ -64,6 +64,62 @@ pub(crate) fn is_control_client_disconnect(error: &std::io::Error) -> bool {
     )
 }
 
+/// Backoff between retries of a transient control-socket accept failure.
+///
+/// The delay bounds the retry rate so a persistent transient condition (for
+/// example fd exhaustion) cannot spin the control loop hot, while the operator
+/// channel and the managed runtime stay alive.
+const CONTROL_ACCEPT_RETRY_DELAY: Duration = Duration::from_millis(50);
+
+/// A transient accept failure ends only the affected accept.
+///
+/// The control socket is the operator channel, so per-accept errno such as
+/// EINTR, EMFILE/ENFILE, ECONNABORTED, EPROTO, or ENETDOWN must not escalate
+/// into a managed-runtime failure. Anything else (for example the listener fd
+/// is gone or is no longer a socket) stays fatal.
+pub(crate) fn control_accept_error_is_transient(error: &V3LifecycleError) -> bool {
+    let V3LifecycleError::Io(error) = error else {
+        return false;
+    };
+    if matches!(
+        error.kind(),
+        std::io::ErrorKind::Interrupted | std::io::ErrorKind::ConnectionAborted
+    ) {
+        return true;
+    }
+    #[cfg(unix)]
+    if matches!(
+        error.raw_os_error(),
+        Some(libc::EMFILE) | Some(libc::ENFILE) | Some(libc::EPROTO) | Some(libc::ENETDOWN)
+    ) {
+        return true;
+    }
+    false
+}
+
+/// Outcome of one control-socket accept failure.
+enum ControlAcceptFailure {
+    /// The accept was transient; the loop must keep serving.
+    Transient,
+    /// The failure ends the managed runtime.
+    Fatal(V3LifecycleError),
+}
+
+/// Classify one control-socket accept failure and bound the retry rate.
+///
+/// The unix and non-unix listeners share this decision, so a transient errno
+/// cannot stay fatal on one platform while it is retried on the other.
+async fn classify_control_accept_failure(error: V3LifecycleError) -> ControlAcceptFailure {
+    if !control_accept_error_is_transient(&error) {
+        return ControlAcceptFailure::Fatal(error);
+    }
+    // One transient accept failure ends only this accept: the control socket
+    // keeps serving and the managed runtime stays Running.
+    eprintln!("managed control accept failed; retrying: {error}");
+    tokio::time::sleep(CONTROL_ACCEPT_RETRY_DELAY).await;
+    ControlAcceptFailure::Transient
+}
+
 pub(crate) async fn write_control_response(
     stream: &mut UnixStream,
     response: &ControlResponse,
@@ -199,73 +255,75 @@ pub(crate) async fn shutdown_managed_runtime(
 
 pub(crate) async fn restart_managed_runtime_in_place(
     instance_dir: &Path,
-    socket_path: &Path,
-    handle: V3ServerAggregateHandle,
-    hooks_sidecar: V3HooksSidecarSupervisor,
+    handle: &V3ServerAggregateHandle,
     restart_plan: ControlRestartPlan,
     console: bool,
+    stream: &UnixStream,
 ) -> Result<(), V3LifecycleError> {
     let declaration = &restart_plan.declaration;
-    write_status(
-        instance_dir,
-        &restart_plan.control_instance_id,
-        V3ManagedRunState::Starting,
-        None,
-    )?;
-    let provider_checkpoints =
-        routecodex_v3_runtime::default_provider_transport_handoff_checkpoints();
-    let preparation = handle.prepare_for_exec().await;
-    write_json_atomic(
-        &instance_dir.join(FRONT_HANDOFF_FILE),
-        &preparation.front_checkpoints,
-    )?;
-    write_json_atomic(
-        &instance_dir.join(PROVIDER_HANDOFF_FILE),
-        &provider_checkpoints,
-    )?;
-    let mut restart_detail = if preparation.codex_sample_persist_failures.is_empty() {
-        None
-    } else {
-        let failure_detail = format!(
-            "codex sample persistence shutdown failed during exec restart: {}",
-            preparation
-                .codex_sample_persist_failures
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join("; ")
-        );
-        eprintln!("{failure_detail}");
-        Some(failure_detail)
-    };
-    let hooks_cleanup_detail = hooks_sidecar
-        .stop()
+    let instances_root = instance_dir.parent().ok_or_else(|| {
+        V3LifecycleError::Validation("managed instance has no instances directory".into())
+    })?;
+    let target_dir = instances_root.join(&declaration.instance_id);
+    V3HooksSidecarSupervisor::ensure_exec_target_available(instance_dir, &target_dir)?;
+    let _transfer = bind_previous_release_restart_transfer(instance_dir, &restart_plan)?;
+    let preparation = handle
+        .prepare_exec_attempt()
         .await
-        .err()
-        .map(|error| format!("hooks sidecar shutdown failed: {error}"));
-    if let Some(error) = hooks_cleanup_detail.as_deref() {
-        restart_detail = Some(match restart_detail.as_deref() {
-            Some(detail) => append_status_detail(Some(detail), error.to_string()),
-            None => error.to_string(),
-        });
-    } else {
-        let _ = fs::remove_file(instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE));
+        .map_err(V3LifecycleError::Validation)?;
+    let front_path = instance_dir.join(FRONT_HANDOFF_FILE);
+    let provider_path = instance_dir.join(PROVIDER_HANDOFF_FILE);
+    ensure_private_dir(&target_dir)?;
+    let staged_declaration = target_dir.join(EXEC_RESTART_DECLARATION_FILE);
+    let target_declaration = target_dir.join("instance.json");
+    if target_declaration.try_exists()? && !fs::metadata(&target_declaration)?.is_file() {
+        return Err(V3LifecycleError::Validation(
+            "restart target declaration path is not a file".into(),
+        ));
     }
-    if let Some(detail) = restart_detail.as_deref() {
-        write_status(
-            instance_dir,
-            &restart_plan.control_instance_id,
-            V3ManagedRunState::Starting,
-            Some(detail.to_string()),
+    for path in [&front_path, &provider_path, &staged_declaration] {
+        if path.try_exists()? {
+            return Err(V3LifecycleError::Validation(format!(
+                "restart handoff already exists; original owner retained: {}",
+                path.display()
+            )));
+        }
+    }
+    if target_dir != instance_dir {
+        for file in [FRONT_HANDOFF_FILE, PROVIDER_HANDOFF_FILE] {
+            let path = target_dir.join(file);
+            if path.try_exists()? {
+                return Err(V3LifecycleError::Validation(format!(
+                    "restart target handoff already exists: {}",
+                    path.display()
+                )));
+            }
+        }
+    }
+    let mut created = Vec::new();
+    let attempt = (|| -> Result<(), V3LifecycleError> {
+        write_json_atomic(&staged_declaration, declaration)?;
+        created.push(staged_declaration.clone());
+        write_json_atomic(&front_path, &preparation.front_checkpoints)?;
+        created.push(front_path.clone());
+        write_json_atomic(
+            &provider_path,
+            &routecodex_v3_runtime::default_provider_transport_handoff_checkpoints(),
         )?;
+        created.push(provider_path.clone());
+        Ok(())
+    })();
+    if let Err(error) = attempt {
+        return Err(cleanup_rejected_restart_handoff(created, error));
     }
-    let _ = fs::remove_file(instance_dir.join(RESTART_PLAN_FILE));
-    if restart_plan.control_instance_id == declaration.instance_id {
-        write_json_atomic(&instance_dir.join("instance.json"), declaration)?;
-    }
-    let _ = fs::remove_file(instance_dir.join("control.json"));
-    let _ = fs::remove_file(socket_path);
     let mut command = Command::new(&restart_plan.executable_path);
+    command.env(
+        EXEC_RESTART_OWNER_ENV,
+        serde_json::to_string(&ExecRestartOwner {
+            instance_id: restart_plan.control_instance_id.clone(),
+            start_nonce: restart_plan.control_start_nonce.clone(),
+        })?,
+    );
     command
         .arg("server")
         .arg("run-managed-child")
@@ -285,18 +343,48 @@ pub(crate) async fn restart_managed_runtime_in_place(
     if restart_plan.sse_dump {
         command.arg("--sse-dump");
     }
+    let mut peer_byte = [0_u8; 1];
+    match stream.try_read(&mut peer_byte) {
+        Ok(0) => {
+            return Err(cleanup_rejected_restart_handoff(
+                created,
+                V3LifecycleError::Validation(
+                    "restart control client disconnected before exec; original owner retained"
+                        .into(),
+                ),
+            ))
+        }
+        Ok(_) => {
+            return Err(cleanup_rejected_restart_handoff(
+                created,
+                V3LifecycleError::Validation("unexpected restart control input before exec".into()),
+            ))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+        Err(error) => return Err(cleanup_rejected_restart_handoff(created, error.into())),
+    }
     let error = command.exec();
-    let detail = append_status_detail(
-        restart_detail.as_deref(),
-        format!("exec restart failed: {error}"),
-    );
-    let _ = write_status(
-        instance_dir,
-        &restart_plan.control_instance_id,
-        V3ManagedRunState::Failed,
-        Some(detail),
-    );
-    Err(V3LifecycleError::Io(error))
+    drop(preparation);
+    Err(cleanup_rejected_restart_handoff(
+        created,
+        V3LifecycleError::Io(error),
+    ))
+}
+
+fn cleanup_rejected_restart_handoff(
+    created: Vec<PathBuf>,
+    error: V3LifecycleError,
+) -> V3LifecycleError {
+    let mut detail = format!("exec restart rejected; original owner retained: {error}");
+    for path in created {
+        if let Err(cleanup_error) = fs::remove_file(&path) {
+            detail.push_str(&format!(
+                "; retained handoff {}: {cleanup_error}",
+                path.display()
+            ));
+        }
+    }
+    V3LifecycleError::Validation(detail)
 }
 
 pub(crate) async fn run_managed_control_loop(
@@ -418,16 +506,19 @@ pub(crate) async fn run_managed_control_loop(
             accepted = listener.accept() => accepted.map_err(V3LifecycleError::from),
         } {
             Ok(accepted) => accepted,
-            Err(error) => {
-                return fail_managed_runtime_with_hooks_cleanup(
-                    instance_dir,
-                    &declaration.instance_id,
-                    handle.take(),
-                    hooks_sidecar,
-                    error,
-                )
-                .await;
-            }
+            Err(error) => match classify_control_accept_failure(error).await {
+                ControlAcceptFailure::Transient => continue,
+                ControlAcceptFailure::Fatal(error) => {
+                    return fail_managed_runtime_with_hooks_cleanup(
+                        instance_dir,
+                        &declaration.instance_id,
+                        handle.take(),
+                        hooks_sidecar,
+                        error,
+                    )
+                    .await;
+                }
+            },
         };
         #[cfg(not(unix))]
         let accepted = match tokio::select! {
@@ -459,16 +550,19 @@ pub(crate) async fn run_managed_control_loop(
             accepted = listener.accept() => accepted.map_err(V3LifecycleError::from),
         } {
             Ok(accepted) => accepted,
-            Err(error) => {
-                return fail_managed_runtime_with_hooks_cleanup(
-                    instance_dir,
-                    &declaration.instance_id,
-                    handle.take(),
-                    hooks_sidecar,
-                    error,
-                )
-                .await;
-            }
+            Err(error) => match classify_control_accept_failure(error).await {
+                ControlAcceptFailure::Transient => continue,
+                ControlAcceptFailure::Fatal(error) => {
+                    return fail_managed_runtime_with_hooks_cleanup(
+                        instance_dir,
+                        &declaration.instance_id,
+                        handle.take(),
+                        hooks_sidecar,
+                        error,
+                    )
+                    .await;
+                }
+            },
         };
         let (mut stream, _) = accepted;
         let mut line = String::new();
@@ -559,6 +653,37 @@ pub(crate) async fn run_managed_control_loop(
         let valid = valid_identity;
         let should_stop = valid && request.operation == ControlOperation::Stop;
         let should_restart = valid && request.operation == ControlOperation::Restart;
+        if should_restart {
+            let result = match (handle.as_ref(), restart_plan) {
+                (Some(handle), Some(plan)) => {
+                    restart_managed_runtime_in_place(
+                        instance_dir,
+                        handle,
+                        plan,
+                        force_console,
+                        &stream,
+                    )
+                    .await
+                }
+                _ => Err(V3LifecycleError::Validation(
+                    "restart runtime handle or plan is unavailable".into(),
+                )),
+            };
+            if let Err(error) = result {
+                eprintln!("managed restart rejected: {error}");
+                let response = ControlResponse {
+                    schema_version: SCHEMA_VERSION,
+                    instance_id: declaration.instance_id.clone(),
+                    accepted: false,
+                    state: V3ManagedRunState::Running,
+                    message: error.to_string(),
+                };
+                if let Err(error) = write_control_response(&mut stream, &response).await {
+                    eprintln!("managed restart rejection write failed: {error}");
+                }
+            }
+            continue;
+        }
         let should_release_ports = valid && request.operation == ControlOperation::ReleasePorts;
         let state = if should_stop {
             V3ManagedRunState::Stopping
@@ -707,41 +832,6 @@ pub(crate) async fn run_managed_control_loop(
             }
             continue;
         }
-        if should_restart {
-            let Some(restart_plan) = restart_plan else {
-                return fail_managed_runtime_with_hooks_cleanup(
-                    instance_dir,
-                    &declaration.instance_id,
-                    handle.take(),
-                    hooks_sidecar,
-                    V3LifecycleError::Validation(
-                        "restart control request did not carry an executable plan".to_string(),
-                    ),
-                )
-                .await;
-            };
-            let Some(handle) = handle.take() else {
-                return fail_managed_runtime_with_hooks_cleanup(
-                    instance_dir,
-                    &declaration.instance_id,
-                    None,
-                    hooks_sidecar,
-                    V3LifecycleError::Validation(
-                        "managed runtime handle was already consumed".to_string(),
-                    ),
-                )
-                .await;
-            };
-            return restart_managed_runtime_in_place(
-                instance_dir,
-                socket_path,
-                handle,
-                hooks_sidecar,
-                restart_plan,
-                force_console,
-            )
-            .await;
-        }
     }
 }
 
@@ -791,6 +881,7 @@ pub(crate) async fn send_restart_control(
     snapshot_direct: bool,
     snapshot_stages: Option<String>,
     sse_dump: bool,
+    transfer: Option<&mut PreviousReleaseRestartGuard>,
 ) -> Result<ControlResponse, V3LifecycleError> {
     let published: V3ManagedInstanceDeclaration = read_json(&instance_dir.join("instance.json"))?;
     let target_change =
@@ -821,6 +912,9 @@ pub(crate) async fn send_restart_control(
         )?;
     } else {
         let _ = fs::remove_file(instance_dir.join(RESTART_PLAN_FILE));
+    }
+    if let Some(transfer) = transfer {
+        transfer.retain_until_adoption();
     }
     tokio::time::timeout(
         CONTROL_TIMEOUT,
@@ -868,14 +962,23 @@ pub(crate) async fn send_control_without_timeout(
         schema_version: SCHEMA_VERSION,
         instance_id: declaration.instance_id.clone(),
         start_nonce: control.start_nonce,
-        operation,
+        operation: operation.clone(),
         ports,
     };
     stream.write_all(&serde_json::to_vec(&request)?).await?;
     stream.write_all(b"\n").await?;
     stream.flush().await?;
     let mut line = String::new();
-    BufReader::new(stream).read_line(&mut line).await?;
+    let received = BufReader::new(stream).read_line(&mut line).await?;
+    if received == 0 && operation == ControlOperation::Restart {
+        return Ok(ControlResponse {
+            schema_version: SCHEMA_VERSION,
+            instance_id: declaration.instance_id.clone(),
+            accepted: true,
+            state: V3ManagedRunState::Starting,
+            message: "restart transport closed; awaiting exact replacement identity".into(),
+        });
+    }
     Ok(serde_json::from_str(&line)?)
 }
 

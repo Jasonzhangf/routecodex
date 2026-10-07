@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 pub mod observability_store;
+mod sample_retention;
 pub mod sample_store;
 
 pub use observability_store::{
@@ -21,8 +22,8 @@ pub use observability_store::{
 pub use sample_store::{
     encode_v3_codex_sample_path_segment, format_v3_codex_sample_endpoint_dir,
     resolve_v3_codex_samples_root, v3_codex_sample_request_dir, v3_codex_sample_request_dir_in,
-    V3CodexSamplePersistFailure, V3CodexSamplePersistHandle, V3CodexSamplePersistJob,
-    V3CodexSampleStore, V3_CODEX_SAMPLE_REQUEST_RETENTION,
+    V3CodexSampleExecGuard, V3CodexSamplePersistFailure, V3CodexSamplePersistHandle,
+    V3CodexSamplePersistJob, V3CodexSampleStore, V3_CODEX_SAMPLE_REQUEST_RETENTION,
 };
 
 pub const V3_DEFAULT_SNAPSHOT_STAGE_SELECTOR: &str =
@@ -165,6 +166,11 @@ pub struct V3DebugSnapshotProjection {
 pub struct V3DebugStatusProjection {
     pub log_console: bool,
     pub log_file: Option<String>,
+    /// Reason the optional `log_file` sink is unavailable. Absent while the
+    /// configured sink works; present means the runtime degraded that sink and
+    /// did not report it as a working one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub log_sink_failure: Option<String>,
     pub snapshots_enabled: bool,
     pub snapshot_stages: String,
     pub dry_run_enabled: bool,
@@ -244,6 +250,12 @@ pub struct V3DebugRuntime {
     /// line; the handle is re-validated per line so the sink still self-heals
     /// when a log directory is removed underneath a running runtime.
     log_sink: Option<Arc<Mutex<BufWriter<File>>>>,
+    /// Reason the optional `log_file` sink is unavailable.
+    ///
+    /// The debug log sink is optional and Debug is never business truth, so a
+    /// runtime whose configured sink cannot be opened stays usable. This records
+    /// the failure so a degraded sink is never reported as a working one.
+    log_sink_failure: Option<Arc<str>>,
 }
 
 #[derive(Debug, Default)]
@@ -272,7 +284,18 @@ impl V3DebugRuntime {
             state: Arc::new(RwLock::new(V3DebugState::default())),
             sequence: Arc::new(AtomicU64::new(1)),
             log_sink,
+            log_sink_failure: None,
         })
+    }
+
+    /// Mark the optional `log_file` sink unavailable and record the reason.
+    ///
+    /// The startup owner calls this when the configured sink could not be
+    /// opened. The runtime keeps every other debug capability and reports the
+    /// sink as failed instead of silently reporting success; no substitute sink
+    /// is created.
+    pub fn mark_log_sink_unavailable(&mut self, reason: impl Into<String>) {
+        self.log_sink_failure = Some(Arc::from(reason.into()));
     }
 
     pub fn start_trace(
@@ -562,6 +585,7 @@ impl V3DebugRuntime {
         Ok(V3DebugStatusProjection {
             log_console: self.config.log_console,
             log_file: self.config.log_file.clone(),
+            log_sink_failure: self.log_sink_failure.as_deref().map(str::to_string),
             snapshots_enabled: self.config.snapshots_enabled,
             snapshot_stages: effective_v3_snapshot_stage_selector(
                 self.config.snapshot_stages.as_deref(),

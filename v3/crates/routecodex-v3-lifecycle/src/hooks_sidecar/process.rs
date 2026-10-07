@@ -453,6 +453,19 @@ pub(super) enum ForcedSidecarCleanup {
 pub(super) async fn force_terminate_sidecar_by_record(
     instance_dir: &Path,
 ) -> Result<ForcedSidecarCleanup, V3LifecycleError> {
+    terminate_sidecar_by_record(instance_dir, false).await
+}
+
+pub(super) async fn terminate_exec_sidecar_by_record(
+    instance_dir: &Path,
+) -> Result<ForcedSidecarCleanup, V3LifecycleError> {
+    terminate_sidecar_by_record(instance_dir, true).await
+}
+
+async fn terminate_sidecar_by_record(
+    instance_dir: &Path,
+    exec_owner: bool,
+) -> Result<ForcedSidecarCleanup, V3LifecycleError> {
     let path = instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE);
     if !path.exists() {
         return Ok(ForcedSidecarCleanup::RecordRemoved);
@@ -477,11 +490,57 @@ pub(super) async fn force_terminate_sidecar_by_record(
         record.leader_pid,
         &record.leader_start_token,
     )?;
-    signal_process_group(record.process_group_id, libc::SIGKILL)?;
+    signal_process_group(
+        record.process_group_id,
+        if exec_owner {
+            libc::SIGTERM
+        } else {
+            libc::SIGKILL
+        },
+    )?;
+    let graceful_deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+    let mut forced = !exec_owner;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     loop {
+        if exec_owner {
+            loop {
+                let mut status = 0;
+                let reaped =
+                    unsafe { libc::waitpid(-record.process_group_id, &mut status, libc::WNOHANG) };
+                if reaped > 0 {
+                    continue;
+                }
+                if reaped < 0
+                    && std::io::Error::last_os_error().raw_os_error() != Some(libc::ECHILD)
+                {
+                    return Err(std::io::Error::last_os_error().into());
+                }
+                break;
+            }
+        }
         if !process_group_exists(record.process_group_id)? {
             return finish_forced_sidecar_cleanup(instance_dir, &path, &record);
+        }
+        if exec_owner
+            && !forced
+            && process_group_contains_only_leader(record.process_group_id, record.leader_pid)?
+        {
+            validate_process_group_identity(
+                record.process_group_id,
+                record.leader_pid,
+                &record.leader_start_token,
+            )?;
+            signal_process(record.leader_pid, libc::SIGUSR1)?;
+            forced = true;
+        }
+        if !forced && tokio::time::Instant::now() >= graceful_deadline {
+            validate_process_group_identity(
+                record.process_group_id,
+                record.leader_pid,
+                &record.leader_start_token,
+            )?;
+            signal_process_group(record.process_group_id, libc::SIGKILL)?;
+            forced = true;
         }
         if tokio::time::Instant::now() >= deadline {
             return Err(V3LifecycleError::Timeout(format!(

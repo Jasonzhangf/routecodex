@@ -1,0 +1,19 @@
+{
+  "id": "v3.managed_restart",
+  "version": "3",
+  "inputs": [{"id": "restart-intent", "schema": "Object"}],
+  "nodes": [
+    {"id": "prepare_previous_release_transfer", "operator": "routecodex.v3.lifecycle.prepare_previous_release_restart_transfer", "operator_version": "1", "inputs": ["restart-intent"], "output": {"id": "verified-transfer-intent", "schema": "Object"}, "input_selector": {"include": [], "exclude": [], "predicate": null}, "output_selector": {"include": [], "exclude": [], "predicate": null}, "iterator": "Whole", "resources": {"reads": ["v3.lifecycle.instance_declaration", "v3.lifecycle.pid_cache", "v3.lifecycle.control_channel", "v3.lifecycle.hooks_sidecar_process"], "writes": ["v3.lifecycle.previous_release_restart_transfer"]}},
+    {"id": "control_identity", "operator": "routecodex.v3.lifecycle.send_restart_control", "operator_version": "1", "inputs": ["verified-transfer-intent"], "output": {"id": "owner-bound-plan", "schema": "Object"}, "input_selector": {"include": [], "exclude": [], "predicate": null}, "output_selector": {"include": [], "exclude": [], "predicate": null}, "iterator": "Whole", "resources": {"reads": ["v3.lifecycle.instance_declaration", "v3.lifecycle.control_channel"], "writes": ["v3.lifecycle.restart_plan"]}},
+    {"id": "prepare_or_reject", "operator": "routecodex.v3.lifecycle.control_restart_plan", "operator_version": "1", "inputs": ["owner-bound-plan"], "output": {"id": "prepared-or-rejected", "schema": "Object"}, "input_selector": {"include": [], "exclude": [], "predicate": null}, "output_selector": {"include": [], "exclude": [], "predicate": null}, "iterator": "Whole", "resources": {"reads": ["v3.lifecycle.restart_plan"], "writes": []}},
+    {"id": "exec_accepted_plan", "operator": "routecodex.v3.lifecycle.restart_managed_runtime_in_place", "operator_version": "1", "inputs": ["prepared-or-rejected"], "output": {"id": "exec-or-retained-owner", "schema": "Object"}, "input_selector": {"include": [], "exclude": [], "predicate": null}, "output_selector": {"include": [], "exclude": [], "predicate": null}, "iterator": "Whole", "resources": {"reads": ["v3.lifecycle.instance_declaration", "v3.lifecycle.pid_cache", "v3.lifecycle.control_channel", "v3.front.runtime_handoff_checkpoint", "v3.lifecycle.exec_restart_artifacts", "v3.lifecycle.previous_release_restart_transfer", "v3.lifecycle.hooks_sidecar_process"], "writes": ["v3.lifecycle.exec_restart_artifacts", "v3.lifecycle.previous_release_restart_transfer"]}},
+    {"id": "publish_exact_owner_outcome", "operator": "routecodex.v3.lifecycle.V3ManagedLifecycle::run_managed_child_with_declaration", "operator_version": "1", "inputs": ["exec-or-retained-owner"], "output": {"id": "restart-outcome", "schema": "Object"}, "input_selector": {"include": [], "exclude": [], "predicate": null}, "output_selector": {"include": [], "exclude": [], "predicate": null}, "iterator": "Whole", "resources": {"reads": ["v3.lifecycle.exec_restart_artifacts", "v3.lifecycle.previous_release_restart_transfer", "v3.lifecycle.instance_declaration", "v3.lifecycle.pid_cache", "v3.lifecycle.control_channel"], "writes": ["v3.lifecycle.instance_declaration", "v3.lifecycle.pid_cache", "v3.lifecycle.control_channel", "v3.lifecycle.exec_restart_artifacts", "v3.lifecycle.previous_release_restart_transfer"]}}
+  ],
+  "edges": [
+    {"from": "prepare_previous_release_transfer", "to": "control_identity", "arc_id": "verified-transfer-intent"},
+    {"from": "control_identity", "to": "prepare_or_reject", "arc_id": "owner-bound-plan"},
+    {"from": "prepare_or_reject", "to": "exec_accepted_plan", "arc_id": "prepared-or-rejected"},
+    {"from": "exec_accepted_plan", "to": "publish_exact_owner_outcome", "arc_id": "exec-or-retained-owner"}
+  ],
+  "outputs": ["restart-outcome"]
+}

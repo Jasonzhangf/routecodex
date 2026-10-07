@@ -238,12 +238,23 @@ fn apply_v3_runtime_fd_limit(configured: Option<u64>) -> Result<(), V3LifecycleE
 #[derive(Debug, Clone)]
 struct ControlRestartPlan {
     control_instance_id: String,
+    control_start_nonce: String,
     declaration: V3ManagedInstanceDeclaration,
     executable_path: PathBuf,
     snapshots: bool,
     snapshot_direct: bool,
     snapshot_stages: Option<String>,
     sse_dump: bool,
+}
+
+const EXEC_RESTART_OWNER_ENV: &str = "ROUTECODEX_V3_EXEC_RESTART_OWNER";
+const EXEC_RESTART_DECLARATION_FILE: &str = "exec-restart-declaration.json";
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExecRestartOwner {
+    instance_id: String,
+    start_nonce: String,
 }
 
 #[derive(Debug, Clone)]
@@ -797,6 +808,13 @@ impl V3ManagedLifecycle {
             listeners: declaration.listeners.clone(),
         });
         let previous_start_nonce = read_pid_cache_start_nonce(&control_instance_dir)?;
+        validate_auth_handles(&manifest)?;
+        let mut transfer = prepare_previous_release_restart_transfer(
+            &control_instance_dir,
+            &control_declaration,
+            &instance_dir,
+            &declaration,
+        )?;
         let response = match send_restart_control(
             &control_instance_dir,
             &control_declaration,
@@ -805,11 +823,15 @@ impl V3ManagedLifecycle {
             self.force_snapshot_direct,
             self.force_snapshot_stages.clone(),
             self.force_sse_dump,
+            transfer.as_mut(),
         )
         .await
         {
             Ok(response) => response,
             Err(error @ V3LifecycleError::NotRunning(_)) => {
+                if let Some(transfer) = transfer.as_mut() {
+                    transfer.reject();
+                }
                 if !restart_recovery_state_is_stale_owned_unreachable(&instance_dir, &declaration)?
                 {
                     return Err(error);
@@ -843,6 +865,9 @@ impl V3ManagedLifecycle {
             Err(error) => return Err(error),
         };
         if !response.accepted {
+            if let Some(transfer) = transfer.as_mut() {
+                transfer.reject();
+            }
             return Err(V3LifecycleError::IdentityMismatch(response.message));
         }
         observe(V3ManagedLifecycleObservation::RestartControlAccepted {
@@ -933,17 +958,30 @@ impl V3ManagedLifecycle {
         apply_v3_runtime_fd_limit(runtime_fd_limit)?;
         let instance_dir = self.instance_dir(&declaration.instance_id);
         ensure_private_dir(&instance_dir)?;
-        if let Err(error) = verify_published_declaration(&instance_dir, &declaration) {
-            if !adopt_exec_restart_declaration_change(
+        let exec_cleanup_detail = if let Some(owner) = std::env::var_os(EXEC_RESTART_OWNER_ENV) {
+            std::env::remove_var(EXEC_RESTART_OWNER_ENV);
+            let owner: ExecRestartOwner = serde_json::from_str(&owner.to_string_lossy())?;
+            adopt_exec_restart_declaration_change(
                 &self.state_root,
                 &instance_dir,
                 &declaration,
-            )? {
-                return Err(error);
-            }
-            verify_published_declaration(&instance_dir, &declaration)?;
-        }
+                &owner,
+            )?;
+            V3HooksSidecarSupervisor::cleanup_exec_owner(&instance_dir).await
+        } else if adopt_previous_release_restart_declaration_change(
+            &self.state_root,
+            &instance_dir,
+            &declaration,
+        )? {
+            V3HooksSidecarSupervisor::cleanup_exec_owner(&instance_dir).await
+        } else {
+            None
+        };
+        verify_published_declaration(&instance_dir, &declaration)?;
         let startup_detail = read_pending_startup_detail(&instance_dir, &declaration.instance_id)?;
+        let startup_detail = exec_cleanup_detail
+            .map(|detail| append_status_detail(startup_detail.as_deref(), detail))
+            .or(startup_detail);
         let start_nonce = new_start_nonce(&declaration.instance_id);
         let socket_path = managed_control_socket_path(&declaration.instance_id);
         remove_restart_plan_for_previous_control_identity(&instance_dir, &start_nonce)?;

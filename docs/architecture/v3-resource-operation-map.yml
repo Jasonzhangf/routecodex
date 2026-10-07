@@ -245,7 +245,7 @@ resources:
     owner_node: V3Config05ManifestPublished
     identity: [configVersion, serverIds, providerIds, forwarderIds, routeGroupIds]
     allowed_writers: [publish_v3_config_05_manifest_from_v3_config_04]
-    allowed_readers: [routecodex-v3-server, routecodex-v3-runtime, execute_v3_relay_runtime_core, guard_relay_sse_first_frame, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses, routecodex-v3-error, routecodex-v3-debug, routecodex-v3-cli]
+    allowed_readers: [routecodex-v3-server, routecodex-v3-runtime, execute_v3_relay_runtime_core, guard_relay_sse_first_frame, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses, routecodex-v3-error, routecodex-v3-debug, routecodex-v3-cli, V3ManagedLifecycle::declaration_with_runtime]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses, routecodex-v3-error, routecodex-v3-debug, routecodex-v3-cli]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -1297,8 +1297,8 @@ resources:
     owner_crate: routecodex-v3-server
     owner_node: V3RuntimeHandoffCheckpoint
     identity: [request_id, pipeline_id, port, session_scope, runtime_generation]
-    allowed_writers: [V3FrontRequestLease::checkpoint]
-    allowed_readers: [V3FrontRequestLease::reattach]
+    allowed_writers: [V3FrontRequestLease::checkpoint, V3FrontTransportBroker::freeze]
+    allowed_readers: [V3FrontRequestLease::reattach, V3FrontTransportBroker::freeze, restart_managed_runtime_in_place]
     forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, raw_json_control_reconstruction]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -1386,8 +1386,8 @@ resources:
     owner_crate: routecodex-v3-lifecycle
     owner_node: V3Lifecycle02InstanceDeclared
     identity: [instanceId, configPath, configDigest, executablePath, listenerSet]
-    allowed_writers: [V3ManagedLifecycle::start]
-    allowed_readers: [V3ManagedLifecycle::status, V3ManagedLifecycle::stop, V3ManagedLifecycle::restart, V3ManagedLifecycle::run_managed_child]
+    allowed_writers: [V3ManagedLifecycle::start, finish_exec_restart_adoption, V3ManagedLifecycle::run_managed_child_with_declaration]
+    allowed_readers: [V3ManagedLifecycle::status, V3ManagedLifecycle::stop, V3ManagedLifecycle::restart, V3ManagedLifecycle::run_managed_child, V3ManagedLifecycle::run_managed_child_with_declaration, send_restart_control, adopt_exec_restart_declaration_change, prepare_previous_release_restart_transfer, bind_previous_release_restart_transfer, adopt_previous_release_restart_declaration_change, verify_published_declaration, restart_managed_runtime_in_place]
     forbidden_writers: [routecodex-v3-cli, routecodex-v3-server, routecodex-v3-runtime]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -1398,8 +1398,8 @@ resources:
     owner_crate: routecodex-v3-lifecycle
     owner_node: V3Lifecycle05IdentityPublished
     identity: [instanceId, pid, startNonce, startedAt]
-    allowed_writers: [V3ManagedLifecycle::run_managed_child]
-    allowed_readers: [send_control]
+    allowed_writers: [V3ManagedLifecycle::run_managed_child_with_declaration, cleanup_previous_exec_restart_owner]
+    allowed_readers: [send_control, send_control_without_timeout, adopt_exec_restart_declaration_change, prepare_previous_release_restart_transfer, bind_previous_release_restart_transfer, adopt_previous_release_restart_declaration_change, restart_managed_runtime_in_place, V3ManagedLifecycle::run_managed_child_with_declaration]
     forbidden_writers: [routecodex-v3-cli, routecodex-v3-server, routecodex-v3-runtime]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -1410,8 +1410,8 @@ resources:
     owner_crate: routecodex-v3-lifecycle
     owner_node: V3Lifecycle06LiveControlled
     identity: [instanceId, startNonce, unixSocketPath]
-    allowed_writers: [V3ManagedLifecycle::run_managed_child]
-    allowed_readers: [send_control]
+    allowed_writers: [V3ManagedLifecycle::run_managed_child_with_declaration, finish_exec_restart_adoption, cleanup_previous_exec_restart_owner]
+    allowed_readers: [send_control, send_control_without_timeout, send_restart_control, adopt_exec_restart_declaration_change, prepare_previous_release_restart_transfer, adopt_previous_release_restart_declaration_change, cleanup_previous_exec_restart_owner, restart_managed_runtime_in_place, V3ManagedLifecycle::run_managed_child_with_declaration]
     forbidden_writers: [routecodex-v3-cli, routecodex-v3-server, routecodex-v3-runtime]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -1423,7 +1423,7 @@ resources:
     owner_node: V3Lifecycle07GracefullyStopped
     identity: [instanceId, state, updatedAtEpochMs, detail]
     allowed_writers: [write_status]
-    allowed_readers: [V3ManagedLifecycle::status, V3ManagedLifecycle::stop, V3ManagedLifecycle::restart, query_live, build_environment, doctor, environment, restart_runtime]
+    allowed_readers: [V3ManagedLifecycle::status, V3ManagedLifecycle::stop, V3ManagedLifecycle::restart, query_live, build_environment, doctor, environment, restart_runtime, read_pending_startup_detail, adopt_previous_release_restart_declaration_change]
     forbidden_writers: [routecodex-v3-cli, routecodex-v3-server, routecodex-v3-runtime]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -1446,12 +1446,52 @@ resources:
     owner_crate: routecodex-v3-lifecycle
     owner_node: V3Lifecycle06LiveControlled
     identity: [controlInstanceId, startNonce, executablePath, targetDeclaration, snapshots, snapshotStages]
-    allowed_writers: [send_restart_control]
-    allowed_readers: [control_restart_plan]
+    allowed_writers: [send_restart_control, remove_restart_plan_for_previous_control_identity, cleanup_previous_exec_restart_owner]
+    allowed_readers: [control_restart_plan, remove_restart_plan_for_previous_control_identity]
     forbidden_writers: [routecodex-v3-cli, routecodex-v3-server, routecodex-v3-runtime]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored_config_path_transfer_verified_pre_live
+  - resource_id: v3.lifecycle.exec_restart_artifacts
+    resource_kind: transient_filesystem_artifact
+    lifecycle: v3.server.managed_lifecycle
+    owner_feature_id: v3.managed_server_lifecycle
+    owner_crate: routecodex-v3-lifecycle
+    owner_node: V3LifecycleRestartPrepared
+    identity: [oldInstanceId, targetInstanceId, startNonce, artifactKind]
+    semantic_contract:
+      artifact_kinds: [staged_instance_declaration, front_handoff_json, provider_handoff_json]
+      creation: Exec preparation serializes the accepted declaration and owner-produced checkpoints; typed checkpoints retain their original owners.
+      adoption: Exact old instance and nonce authorize renaming handoffs and publishing the staged declaration.
+      cleanup: Rejected exec removes only files created by that attempt; replacement discards Front metadata and restores provider checkpoints through Runtime before removing handoff files.
+      front_boundary: Front metadata is not accepted-client descriptor or task transfer and does not prove client reattachment.
+    allowed_writers: [restart_managed_runtime_in_place, cleanup_rejected_restart_handoff, finish_exec_restart_adoption, V3ManagedLifecycle::run_managed_child_with_declaration]
+    allowed_readers: [restart_managed_runtime_in_place, adopt_exec_restart_declaration_change, adopt_previous_release_restart_declaration_change, V3ManagedLifecycle::run_managed_child_with_declaration]
+    forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, raw_json_control_reconstruction]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: anchored
+  - resource_id: v3.lifecycle.previous_release_restart_transfer
+    resource_kind: transient_runtime_control_plan
+    lifecycle: v3.server.managed_lifecycle
+    owner_feature_id: v3.managed_server_lifecycle
+    owner_crate: routecodex-v3-lifecycle
+    owner_node: V3LifecycleRestartPrepared
+    identity: [schemaVersion, previousDeclaration, pid, processStartToken, startNonce, targetDeclaration]
+    semantic_contract:
+      location: Exclusive target-instance previous-release-restart.json; no historical same-PID discovery.
+      preparation: CLI validates compiled target auth, exact listener set and live declaration/PID/start-token/nonce/control before dispatching the previous handler.
+      adoption: Replacement lacking the current owner environment validates only this exact typed record and previous-handler handoffs, then calls the shared finish_exec_restart_adoption owner.
+      cleanup: Exact-attempt guard removes intent on explicit rejection; success consumes it; dispatch uncertainty retains it with an OPEN owner-scoped recovery disposition.
+      delegated_effects: restart_managed_runtime_in_place owns the bound rejection guard; run_managed_child_with_declaration delegates exact adoption and consumption to the mapped transfer adapters and shared finish.
+    allowed_writers: [prepare_previous_release_restart_transfer, PreviousReleaseRestartGuard::drop, adopt_exec_restart_declaration_change, adopt_previous_release_restart_declaration_change, restart_managed_runtime_in_place, V3ManagedLifecycle::run_managed_child_with_declaration]
+    allowed_readers: [bind_previous_release_restart_transfer, PreviousReleaseRestartGuard::drop, adopt_exec_restart_declaration_change, adopt_previous_release_restart_declaration_change, restart_managed_runtime_in_place, V3ManagedLifecycle::run_managed_child_with_declaration]
+    forbidden_writers: [routecodex-v3-cli, routecodex-v3-server, routecodex-v3-runtime, request.normal_payload, response.client_payload, provider.wire_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: anchored
   - resource_id: v3.lifecycle.hooks_sidecar_declaration
     resource_kind: external_process_declaration
     lifecycle: v3.server.managed_lifecycle
@@ -1469,9 +1509,13 @@ resources:
     lifecycle: v3.server.managed_lifecycle
     owner_crate: routecodex-v3-lifecycle
     owner_node: V3Lifecycle06LiveControlled
-    identity: [supervisorWrapper, pid, processGroupId, leaderPid, leaderStartToken, readinessProtocol, state]
-    allowed_writers: [start_configured_hooks_sidecar, V3HooksSidecarProcess::stop, reap_inactive_runtime_files]
-    allowed_readers: [shutdown_managed_runtime, restart_managed_runtime_in_place, reap_inactive_runtime_files]
+    identity: [supervisorWrapper, pid, processGroupId, leaderPid, leaderStartToken, readinessProtocol, state, pendingCleanupInstanceId]
+    semantic_contract:
+      retained_cleanup: The process record remains at its original instance; a typed instance reference moves with the managed owner until identity-bound cleanup removes that record.
+      replacement_admission: An unresolved cleanup reference prevents starting another hooks group while the optional hooks failure leaves the main listener available.
+      restart_preparation: CLI and current-handler preparation delegate a read-only target association check to the hooks owner before irreversible exec; rejection retains the original runtime and foreign cleanup state.
+    allowed_writers: [start_configured_hooks_sidecar, V3HooksSidecarProcess::stop, V3HooksSidecarSupervisor::retain_exec_owner, V3HooksSidecarSupervisor::cleanup_exec_owner, reap_inactive_runtime_files]
+    allowed_readers: [shutdown_managed_runtime, V3HooksSidecarSupervisor::ensure_exec_target_available, prepare_previous_release_restart_transfer, restart_managed_runtime_in_place, V3HooksSidecarSupervisor::retain_exec_owner, V3HooksSidecarSupervisor::cleanup_exec_owner, pending_hooks_cleanup_directory, start_configured_hooks_sidecar_with_timeout_and_cancel, reap_inactive_runtime_files]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-provider-responses]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -1966,9 +2010,9 @@ resources:
     owner_crate: routecodex-v3-debug
     owner_node: run_v3_codex_sample_persist_worker
     identity: [requestId, artifactName]
-    semantic_contract: Bounded by 64 MiB across queued and in-flight writes; each queued job charges its serialized payload plus a fixed per-job overhead so both payload bytes and fixed message cost stay bounded. Budget exhaustion is logged and recorded as a persistence failure without rejecting the business request.
-    allowed_readers: [run_v3_codex_sample_persist_worker]
-    allowed_writers: [V3CodexSampleStore::enqueue_persist]
+    semantic_contract: Bounded by 64 MiB across queued and in-flight writes; each queued job charges its serialized payload plus a fixed per-job overhead. Exec preparation cuts off admission under the enqueue lock before awaiting the same worker Barrier, ordering all accepted writes before drain acknowledgement. During cutoff, diagnostic writes are explicitly refused and recorded without rejecting business requests. The guard restores original-worker admission on rejection, timeout or cancellation and remains held through native exec.
+    allowed_readers: [run_v3_codex_sample_persist_worker, V3CodexSamplePersistHandle::wait_for_drain]
+    allowed_writers: [V3CodexSampleStore::enqueue_persist, V3CodexSamplePersistHandle::quiesce_for_exec, V3CodexSampleExecGuard::drop, V3CodexSamplePersistHandle::wait_for_drain]
     forbidden_writers: [routecodex-v3-runtime, routecodex-v3-provider-responses, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -1983,8 +2027,8 @@ resources:
     owner_crate: routecodex-v3-debug
     owner_node: record_v3_codex_sample_persist_failure
     identity: [requestId, artifactName, reason]
-    semantic_contract: Retains at most 256 request-qualified failures plus one omitted-count summary. Barriers report a snapshot without draining it; worker shutdown drains the ledger for lifecycle reporting.
-    allowed_readers: [V3CodexSampleStore::persist_failures, V3CodexSamplePersistHandle::wait_until_idle, V3CodexSamplePersistHandle::shutdown, V3ServerAggregateHandle::shutdown, V3ServerAggregateHandle::prepare_for_exec, shutdown_managed_runtime, restart_managed_runtime_in_place, developer_logs]
+    semantic_contract: Retains at most 256 request-qualified failures plus one omitted-count summary. The shared drain Barrier reports a typed snapshot without consuming it; legacy wait_until_idle reports diagnostic failures as errors, while exec quiescence requires completed drain but does not use historical diagnostics to deny restart. The held guard exposes failure evidence to lifecycle reporting; worker shutdown drains the ledger.
+    allowed_readers: [V3CodexSampleStore::persist_failures, V3CodexSamplePersistHandle::wait_for_drain, V3CodexSamplePersistHandle::wait_until_idle, V3CodexSamplePersistHandle::quiesce_for_exec, V3CodexSampleExecGuard::persist_failures, V3CodexSamplePersistHandle::shutdown, V3ServerAggregateHandle::shutdown, V3ServerAggregateHandle::prepare_for_exec, V3ServerAggregateHandle::prepare_exec_attempt, shutdown_managed_runtime, developer_logs]
     allowed_writers: [record_v3_codex_sample_persist_failure]
     forbidden_writers: [routecodex-v3-runtime, routecodex-v3-provider-responses, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
     may_enter_provider_body: false

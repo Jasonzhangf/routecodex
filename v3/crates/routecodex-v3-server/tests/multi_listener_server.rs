@@ -12,6 +12,7 @@ use futures_util::{future::join_all, SinkExt, StreamExt};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
+use std::os::unix::fs::PermissionsExt;
 use std::{ffi::OsString, fs, net::TcpListener, path::PathBuf, sync::Arc};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -7095,6 +7096,237 @@ async fn responses_direct_sample_persist_failure_is_reported_after_live_sse_succ
 }
 
 #[tokio::test]
+async fn responses_direct_exec_cutoff_drains_and_resumes_original_sample_worker() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("exec-sample-cutoff");
+    let (base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-key");
+    let mut manifest = p6_manifest(free_port(), free_port(), &base_url);
+    manifest.debug.snapshots = true;
+    manifest.debug.codex_samples = true;
+    manifest.debug.full_codex_sampling = true;
+    manifest.debug.snapshot_direct = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let samples_root = home_guard.codex_samples_root(handle.listeners[0].addr.port());
+    let sample_lock_path = routecodex_v3_debug::resolve_v3_codex_samples_root()
+        .unwrap()
+        .join(".retention.lock");
+    fs::create_dir_all(sample_lock_path.parent().unwrap()).unwrap();
+    let sample_lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(sample_lock_path)
+        .unwrap();
+    sample_lock.lock().unwrap();
+    let client = reqwest::Client::new();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    for marker in ["accepted before cutoff", "second accepted before cutoff"] {
+        let response = client
+            .post(&endpoint)
+            .json(&json!({
+                "model": "client-test", "input": marker, "stream": false
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.json::<Value>().await.unwrap()["id"], "resp_json");
+        assert!(captures.recv().await.is_some());
+    }
+    let mut preparation = Box::pin(handle.prepare_exec_attempt());
+    std::future::poll_fn(|context| {
+        use std::future::Future;
+        assert!(
+            preparation.as_mut().poll(context).is_pending(),
+            "accepted sample writes are blocked by a real filesystem lock"
+        );
+        std::task::Poll::Ready(())
+    })
+    .await;
+    let response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "client-test", "input": "refused while draining accepted jobs", "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.json::<Value>().await.unwrap()["id"], "resp_json");
+    assert!(captures.recv().await.is_some());
+    drop(sample_lock);
+    let preparation = preparation.await.unwrap();
+    for marker in ["accepted before cutoff", "second accepted before cutoff"] {
+        assert_eq!(
+            read_responses_sample_response_by_request_marker(&samples_root, marker)["id"],
+            "resp_json"
+        );
+    }
+    for request in fs::read_dir(&samples_root).unwrap() {
+        for artifact in fs::read_dir(request.unwrap().path()).unwrap() {
+            let path = artifact.unwrap().path();
+            if path
+                .extension()
+                .is_some_and(|extension| extension == "json")
+            {
+                serde_json::from_slice::<Value>(&fs::read(&path).unwrap())
+                    .expect("every accepted sample is complete JSON before exec");
+            }
+        }
+    }
+    let response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "client-test", "input": "refused during cutoff", "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.json::<Value>().await.unwrap()["id"], "resp_json");
+    assert!(captures.recv().await.is_some());
+    drop(preparation);
+    drop(handle.prepare_exec_attempt().await.unwrap());
+    let response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "client-test", "input": "persist after rejected preparation", "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.json::<Value>().await.unwrap()["id"], "resp_json");
+    assert!(captures.recv().await.is_some());
+    drop(handle.prepare_exec_attempt().await.unwrap());
+    assert_eq!(
+        read_responses_sample_response_by_request_marker(
+            &samples_root,
+            "persist after rejected preparation"
+        )["id"],
+        "resp_json"
+    );
+    let failures = handle.shutdown().await;
+    assert!(
+        failures
+            .iter()
+            .any(|failure| failure.reason.contains("exec preparation")),
+        "cutoff must explicitly refuse diagnostics: {failures:?}"
+    );
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_direct_historical_sample_failure_does_not_reject_exec_preparation() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("exec-historical-sample-failure");
+    let (base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-key");
+    let mut manifest = p6_manifest(free_port(), free_port(), &base_url);
+    manifest.debug.snapshots = true;
+    manifest.debug.codex_samples = true;
+    manifest.debug.full_codex_sampling = true;
+    manifest.debug.snapshot_direct = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let samples_root = home_guard.codex_samples_root(handle.listeners[0].addr.port());
+    fs::create_dir_all(samples_root.parent().unwrap()).unwrap();
+    fs::write(&samples_root, b"block diagnostic directory").unwrap();
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .json(&json!({"model":"client-test", "input":"historical write failure", "stream":false}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.json::<Value>().await.unwrap()["id"], "resp_json");
+    assert!(captures.recv().await.is_some());
+    let preparation = handle
+        .prepare_exec_attempt()
+        .await
+        .expect("diagnostic failures do not deny restart");
+    assert!(preparation
+        .codex_sample_persist_failures
+        .iter()
+        .any(|failure| failure.file_name == "request.json"));
+    drop(preparation);
+    fs::remove_file(&samples_root).unwrap();
+    let preparation = handle
+        .prepare_exec_attempt()
+        .await
+        .expect("history must not permanently deny restart");
+    drop(preparation);
+    let failures = handle.shutdown().await;
+    assert!(
+        !failures.is_empty(),
+        "original failure evidence must remain reportable"
+    );
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_direct_exec_sample_drain_timeout_keeps_listener_and_admission() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("exec-sample-timeout");
+    let (base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-key");
+    let mut manifest = p6_manifest(free_port(), free_port(), &base_url);
+    manifest.debug.snapshots = true;
+    manifest.debug.codex_samples = true;
+    manifest.debug.full_codex_sampling = true;
+    manifest.debug.snapshot_direct = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let samples_root = home_guard.codex_samples_root(handle.listeners[0].addr.port());
+    let sample_lock_path = routecodex_v3_debug::resolve_v3_codex_samples_root()
+        .unwrap()
+        .join(".retention.lock");
+    fs::create_dir_all(sample_lock_path.parent().unwrap()).unwrap();
+    let sample_lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(sample_lock_path)
+        .unwrap();
+    sample_lock.lock().unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model":"client-test", "input":"accepted before timeout", "stream":false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.json::<Value>().await.unwrap()["id"], "resp_json");
+    assert!(captures.recv().await.is_some());
+    let error = handle.prepare_exec_attempt().await.unwrap_err();
+    assert!(error.contains("timed out; worker retained"), "{error}");
+    let response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model":"client-test", "input":"accepted after timeout", "stream":false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.json::<Value>().await.unwrap()["id"], "resp_json");
+    assert!(captures.recv().await.is_some());
+    drop(sample_lock);
+    let preparation = handle.prepare_exec_attempt().await.unwrap();
+    assert!(preparation.codex_sample_persist_failures.is_empty());
+    for marker in ["accepted before timeout", "accepted after timeout"] {
+        assert_eq!(
+            read_responses_sample_response_by_request_marker(&samples_root, marker)["id"],
+            "resp_json"
+        );
+    }
+    drop(preparation);
+    assert!(handle.shutdown().await.is_empty());
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
 async fn responses_full_sampling_burst_does_not_drop_sample_writes() {
     let _test_guard = TEST_LOCK.lock().await;
     let home_guard = TestHomeGuard::new("full-sampling-burst-no-drop");
@@ -8377,4 +8609,486 @@ async fn observability_projection_is_isolated_per_listener() {
     handle.shutdown().await;
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+// ---------------------------------------------------------------------------
+// Error-isolation black-box regressions (F3/F4/F5/F7).
+//
+// Stable public gate: test:v3-server-debug-error-blackbox (workspace CI).
+// Every case drives the real aggregate-server entry
+// (`spawn_v3_server_aggregate`) over real TCP/HTTP bytes and asserts an
+// externally observable outcome: an optional-capability failure (debug sample
+// retention, debug log sink, a status probe) must not stop the declared
+// listeners, and a listener that loses one accept() must keep accepting.
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+fn current_v3_test_nofile_limit() -> (libc::rlim_t, libc::rlim_t) {
+    let mut limit = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    assert_eq!(
+        unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) },
+        0,
+        "read RLIMIT_NOFILE"
+    );
+    (limit.rlim_cur, limit.rlim_max)
+}
+
+#[cfg(unix)]
+fn set_v3_test_nofile_limit(soft: libc::rlim_t, hard: libc::rlim_t) {
+    let limit = libc::rlimit {
+        rlim_cur: soft,
+        rlim_max: hard,
+    };
+    assert_eq!(
+        unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &limit) },
+        0,
+        "set RLIMIT_NOFILE"
+    );
+}
+
+#[cfg(unix)]
+fn v3_test_loopback_sockaddr(addr: std::net::SocketAddr) -> libc::sockaddr_in {
+    let mut sockaddr: libc::sockaddr_in = unsafe { std::mem::zeroed() };
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))]
+    {
+        sockaddr.sin_len = std::mem::size_of::<libc::sockaddr_in>() as u8;
+    }
+    sockaddr.sin_family = libc::AF_INET as libc::sa_family_t;
+    sockaddr.sin_port = addr.port().to_be();
+    sockaddr.sin_addr.s_addr = match addr.ip() {
+        std::net::IpAddr::V4(ip) => u32::from(ip).to_be(),
+        std::net::IpAddr::V6(_) => panic!("the accept-error case drives an IPv4 loopback listener"),
+    };
+    sockaddr
+}
+
+/// F3: startup sample retention is optional housekeeping, never business truth.
+///
+/// One sample port directory is unreadable (mode `0o000`), so retention's
+/// per-entry scan fails with a real filesystem error while the process-shared
+/// sample lock in the samples root stays usable. The aggregate server must
+/// still bind every declared listener and serve real HTTP on it.
+///
+/// Before the fix the Debug owner propagated that per-entry error
+/// (`fs::read_dir(port_dir.path())...?`), so startup returned `Err` and no
+/// listener was bound. The contract-bound case stays fatal: an invalid
+/// process-shared sample lock must still produce an explicit startup error
+/// (`shared_sample_retention_invalid_lock_is_explicit_blackbox`).
+#[tokio::test]
+async fn codex_sample_retention_failure_keeps_declared_listeners_serving_blackbox() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("sample-retention-unavailable");
+    let port_a = free_port();
+    let port_b = free_port();
+    let samples_root = home_guard.path.join(".rcc").join("codex-samples");
+    let unreadable_port_dir = samples_root
+        .join("openai-responses")
+        .join("ports")
+        .join("65535");
+    fs::create_dir_all(&unreadable_port_dir).unwrap();
+    fs::set_permissions(&unreadable_port_dir, fs::Permissions::from_mode(0o000)).unwrap();
+
+    let mut manifest = p6_manifest(port_a, port_b, "http://127.0.0.1:1");
+    manifest.debug.codex_samples = true;
+
+    let handle = spawn_v3_server_aggregate(manifest).await.expect(
+        "an unavailable debug sample retention directory must not stop the aggregate server",
+    );
+    assert_eq!(
+        handle.listeners.len(),
+        2,
+        "every declared listener must still bind"
+    );
+    assert!(
+        handle.has_active_listener(),
+        "the aggregate server must still report an active listener"
+    );
+
+    let client = reqwest::Client::new();
+    for listener in &handle.listeners {
+        let health = timeout(
+            Duration::from_secs(10),
+            client
+                .get(format!("http://{}/health", listener.addr))
+                .send(),
+        )
+        .await
+        .expect("health request must not hang")
+        .expect("health request must reach the declared listener");
+        assert_eq!(
+            health.status(),
+            StatusCode::OK,
+            "declared listener {} must serve a real request",
+            listener.server_id
+        );
+        let body: Value = health.json().await.unwrap();
+        assert_eq!(body["server_id"], listener.server_id.as_str());
+    }
+    // The business surface, not only the status probe, must be serving.
+    let models = timeout(
+        Duration::from_secs(10),
+        client
+            .get(format!("http://{}/v1/models", handle.listeners[0].addr))
+            .send(),
+    )
+    .await
+    .expect("models request must not hang")
+    .expect("models request must reach the declared listener");
+    assert_eq!(models.status(), StatusCode::OK);
+    let models: Value = models.json().await.unwrap();
+    assert_eq!(models["object"], "list");
+    assert!(models["data"]
+        .as_array()
+        .is_some_and(|data| !data.is_empty()));
+
+    // Restore the scan permission so the test home can be removed.
+    fs::set_permissions(&unreadable_port_dir, fs::Permissions::from_mode(0o700)).unwrap();
+    handle.shutdown().await;
+}
+
+/// F5: a configured debug `log_file` that cannot be opened must degrade the
+/// optional sink, not stop the server, and must be reported as unavailable.
+///
+/// The sink's parent path is a regular file, so opening the sink fails for real.
+/// The case asserts the server starts, serves real HTTP, and the debug status
+/// projection reports `log_sink_failure` with a reason instead of reporting a
+/// working sink.
+///
+/// Before the fix this startup returned `Err`
+/// (`build_v3_debug_runtime_from_manifest(...).map_err(std::io::Error::other)?`),
+/// so the `expect` below failed and `log_sink_failure` did not exist at all.
+#[tokio::test]
+async fn debug_log_sink_failure_degrades_and_is_reported_unavailable_blackbox() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let port_a = free_port();
+    let port_b = free_port();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-debug-log-sink-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let blocking_parent = root.join("log-parent-is-a-file");
+    fs::write(&blocking_parent, b"not a directory\n").unwrap();
+    let log_file = blocking_parent.join("debug.log");
+    let log_file_text = log_file.display().to_string();
+
+    let mut manifest = p6_manifest(port_a, port_b, "http://127.0.0.1:1");
+    manifest.debug.log_file = Some(log_file_text.clone());
+
+    let handle = spawn_v3_server_aggregate(manifest)
+        .await
+        .expect("an unopenable debug log sink must not stop the aggregate server");
+
+    let client = reqwest::Client::new();
+    let health = timeout(
+        Duration::from_secs(10),
+        client
+            .get(format!("http://{}/health", handle.listeners[0].addr))
+            .send(),
+    )
+    .await
+    .expect("health request must not hang")
+    .expect("health request must reach the listener");
+    assert_eq!(health.status(), StatusCode::OK);
+
+    let status: Value = timeout(
+        Duration::from_secs(10),
+        client
+            .get(format!(
+                "http://{}/_routecodex/debug/status",
+                handle.listeners[0].addr
+            ))
+            .send(),
+    )
+    .await
+    .expect("debug status request must not hang")
+    .expect("debug status request must reach the listener")
+    .json()
+    .await
+    .unwrap();
+    let reason = status["debug"]["log_sink_failure"]
+        .as_str()
+        .expect("a degraded debug log sink must be reported as unavailable, not as working");
+    assert!(
+        reason.contains("unavailable"),
+        "the degraded sink reason must state the sink is unavailable, got {reason}"
+    );
+    assert!(
+        reason.contains(&log_file_text),
+        "the degraded sink reason must name the configured sink, got {reason}"
+    );
+    assert!(
+        !log_file.exists(),
+        "a degraded sink must not silently create the configured file"
+    );
+
+    handle.shutdown().await;
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// F7: `/health` is a status probe. It must always answer with a complete HTTP
+/// response carrying a JSON body, never a connection reset, and it must not take
+/// the server down.
+///
+/// The case accepts either the 200 projection (build version available) or the
+/// typed internal request-stage projection 598 (`error.code` present), then
+/// proves a following request still works. A `RuntimeFailure` projection
+/// resolves its own internal status, so 598 is the observable error status.
+///
+/// Before the fix the handler used `.expect(...)` on the build-version lookup and
+/// would panic (no complete HTTP response) whenever that lookup failed. In this
+/// test binary `ROUTECODEX_BUILD_VERSION` is always embedded at compile time by
+/// `routecodex-v3-config/build.rs`, so the panic branch is not reachable here and
+/// this case cannot discriminate pre/post fix by construction.
+#[tokio::test]
+async fn health_probe_always_returns_a_complete_http_json_projection_blackbox() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let handle =
+        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), "http://127.0.0.1:1"))
+            .await
+            .expect("the aggregate server must start");
+    let addr = handle.listeners[0].addr;
+
+    let mut stream = timeout(Duration::from_secs(10), TcpStream::connect(addr))
+        .await
+        .expect("health connect must not hang")
+        .expect("health connect must reach the listener");
+    timeout(
+        Duration::from_secs(10),
+        stream.write_all(b"GET /health HTTP/1.1\r\nhost: localhost\r\nconnection: close\r\n\r\n"),
+    )
+    .await
+    .expect("health request write must not hang")
+    .unwrap();
+    let wire = timeout(
+        Duration::from_secs(10),
+        read_raw_content_length_response(&mut stream),
+    )
+    .await
+    .expect("a status probe must answer with a complete HTTP response, never a reset");
+    let text = String::from_utf8(wire).unwrap();
+    let (head, body_text) = text
+        .split_once("\r\n\r\n")
+        .expect("a status probe must return a complete HTTP response head");
+    let body: Value =
+        serde_json::from_str(body_text).expect("the status probe must return a JSON body");
+    assert!(
+        body.is_object(),
+        "the health projection must be a JSON object, got {body}"
+    );
+    if head.starts_with("HTTP/1.1 200") {
+        assert_eq!(body["status"], "ok");
+        assert!(
+            body["build_version"]
+                .as_str()
+                .is_some_and(|value| !value.trim().is_empty()),
+            "a 200 health projection must carry the build version, got {body}"
+        );
+    } else {
+        assert!(
+            head.starts_with("HTTP/1.1 598"),
+            "unexpected health status line: {head}"
+        );
+        assert!(
+            body["error"]["code"]
+                .as_str()
+                .is_some_and(|value| !value.trim().is_empty()),
+            "an unavailable build version must project a typed error, got {body}"
+        );
+    }
+
+    // The probe must not take the server down.
+    let follow_up = timeout(
+        Duration::from_secs(10),
+        reqwest::Client::new()
+            .get(format!("http://{addr}/health"))
+            .send(),
+    )
+    .await
+    .expect("follow-up health request must not hang")
+    .expect("follow-up health request must reach the listener");
+    assert!(
+        matches!(
+            follow_up.status(),
+            StatusCode::OK | StatusCode::INTERNAL_SERVER_ERROR
+        ),
+        "unexpected follow-up status {}",
+        follow_up.status()
+    );
+    let follow_up_body: Value = follow_up
+        .json()
+        .await
+        .expect("the follow-up probe must also return a JSON body");
+    assert!(follow_up_body.is_object());
+
+    handle.shutdown().await;
+}
+
+const V3_SERVER_ACCEPT_ERROR_CHILD_ENV: &str = "RCC_V3_SERVER_ACCEPT_ERROR_CHILD";
+
+/// F4 (parent): RLIMIT_NOFILE is process-wide, so the inducing case runs in a
+/// dedicated child process; this case asserts on the child's observed result.
+///
+/// Before the fix the child cannot even compile (the listener accept-failure
+/// accessors did not exist) and, at runtime, the listener task exited on the
+/// first `accept()` error (`let Ok((stream, remote_addr)) = accepted else {
+/// break }`), so the queued connection was never answered.
+#[cfg(unix)]
+#[test]
+fn v3_listener_survives_real_accept_error_blackbox() {
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "v3_listener_survives_real_accept_error_child_blackbox",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(V3_SERVER_ACCEPT_ERROR_CHILD_ENV, "1")
+        .output()
+        .expect("spawn the dedicated accept-error child process");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success() && stdout.contains("1 passed"),
+        "child accept-error case did not pass:\nstatus={:?}\n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}",
+        output.status
+    );
+    assert!(
+        stdout.contains("V3_ACCEPT_ERROR_KEEPS_SERVING=ok"),
+        "child must report that the listener kept serving:\n{stdout}"
+    );
+    let count = stdout
+        .split("V3_ACCEPT_FAILURE_COUNT=")
+        .nth(1)
+        .and_then(|rest| {
+            let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+            digits.parse::<u64>().ok()
+        })
+        .unwrap_or_else(|| {
+            panic!("child must report the observed accept failure count:\n{stdout}")
+        });
+    assert!(
+        count > 0,
+        "the real accept failure must be recorded instead of silent, got {count}"
+    );
+}
+
+/// F4 (child): start the real aggregate server, prove a real HTTP request
+/// succeeds, exhaust the process descriptor limit so the next `accept()` fails
+/// with a real EMFILE, then prove the listener still answers the connection that
+/// was queued during the failure and still serves fresh connections.
+#[cfg(unix)]
+#[tokio::test]
+async fn v3_listener_survives_real_accept_error_child_blackbox() {
+    if std::env::var_os(V3_SERVER_ACCEPT_ERROR_CHILD_ENV).is_none() {
+        // The descriptor limit change below is process-wide, so this case only
+        // runs inside the dedicated child process spawned by the parent case.
+        return;
+    }
+    use std::os::unix::io::FromRawFd;
+
+    let _test_guard = TEST_LOCK.lock().await;
+    let handle =
+        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), "http://127.0.0.1:1"))
+            .await
+            .expect("the aggregate server must start");
+    let addr = handle.listeners[0].addr;
+    let server_id = handle.listeners[0].server_id.clone();
+    let client = reqwest::Client::new();
+
+    let baseline = timeout(
+        Duration::from_secs(10),
+        client.get(format!("http://{addr}/health")).send(),
+    )
+    .await
+    .expect("baseline health request must not hang")
+    .expect("baseline health request must reach the listener");
+    assert_eq!(baseline.status(), StatusCode::OK);
+    let failures_before = handle.listener_accept_failure_count();
+
+    // Pre-create the client socket while descriptors are still available, then
+    // exhaust the limit. `connect()` reuses that descriptor, so the kernel still
+    // queues the connection while the server cannot accept it.
+    let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
+    assert!(
+        fd >= 0,
+        "pre-created client socket: {}",
+        std::io::Error::last_os_error()
+    );
+    let (saved_soft, saved_hard) = current_v3_test_nofile_limit();
+    set_v3_test_nofile_limit(0, saved_hard);
+    let sockaddr = v3_test_loopback_sockaddr(addr);
+    let connected = unsafe {
+        libc::connect(
+            fd,
+            &sockaddr as *const libc::sockaddr_in as *const libc::sockaddr,
+            std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+        )
+    };
+    assert_eq!(
+        connected,
+        0,
+        "the queued connection must complete while the server cannot accept it: {}",
+        std::io::Error::last_os_error()
+    );
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while handle.listener_accept_failure_count() == failures_before {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "a real accept failure must be recorded while descriptors are exhausted"
+        );
+        sleep(Duration::from_millis(10)).await;
+    }
+    set_v3_test_nofile_limit(saved_soft, saved_hard);
+
+    // The connection queued during the failure is not part of the contract: the
+    // kernel may abort it while accept() keeps failing with EMFILE. Release it
+    // and prove the listener still accepts and serves a fresh real connection.
+    drop(unsafe { std::net::TcpStream::from_raw_fd(fd) });
+
+    assert!(
+        handle.has_active_listener(),
+        "the listener must still report active after a transient accept failure"
+    );
+    let follow_up = timeout(
+        Duration::from_secs(10),
+        client.get(format!("http://{addr}/health")).send(),
+    )
+    .await
+    .expect("follow-up health request must not hang")
+    .expect("follow-up health request must reach the listener");
+    assert_eq!(
+        follow_up.status(),
+        StatusCode::OK,
+        "the listener must keep serving after a real accept error"
+    );
+    let follow_up_body: Value = follow_up.json().await.unwrap();
+    assert_eq!(follow_up_body["server_id"], server_id.as_str());
+
+    let failures_after = handle.listener_accept_failure_count();
+    let last_error = handle.listener_last_accept_error();
+    assert!(
+        failures_after > failures_before,
+        "the accept failure must be recorded: before={failures_before} after={failures_after}"
+    );
+    assert!(
+        last_error.is_some_and(|reason| !reason.trim().is_empty()),
+        "the accept failure must not be silent"
+    );
+    println!("V3_ACCEPT_FAILURE_COUNT={failures_after}");
+    println!("V3_ACCEPT_ERROR_KEEPS_SERVING=ok");
+
+    handle.shutdown().await;
 }

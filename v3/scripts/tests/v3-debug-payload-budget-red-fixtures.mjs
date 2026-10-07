@@ -118,6 +118,16 @@ const cases = [
     diagnostic: /must default to 100 requests/u,
   },
   {
+    name: "sample persistence drops the admitted queue message",
+    path: "v3/crates/routecodex-v3-debug/src/sample_store.rs",
+    mutate: (source) =>
+      source.replace(
+        "        match sender.send(message) {",
+        "        let _ = message;\n        match Ok::<(), tokio::sync::mpsc::error::SendError<V3CodexSamplePersistQueueMessage>>(()) {",
+      ),
+    diagnostic: /must bound pending samples by payload bytes plus a fixed per-job overhead/u,
+  },
+  {
     name: "config compilation authorizes live samples without explicit authoring",
     path: "v3/crates/routecodex-v3-config/src/validate.rs",
     mutate: (source) =>
