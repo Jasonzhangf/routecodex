@@ -166,24 +166,7 @@ pub(super) fn project_v3_anthropic_terminal_as_responses_terminal(
         }
     };
 
-    let stop_details = match object.get("stop_details") {
-        None | Some(Value::Null) => None,
-        Some(Value::Object(_)) if kind == V3AnthropicTerminalKind::Refusal => {
-            object.get("stop_details").cloned()
-        }
-        Some(Value::Object(_)) => {
-            return Err(V3AnthropicCodecError::InvalidTerminalField {
-                field: "stop_details",
-                reason: format!("must be absent or null when stop_reason={stop_reason}"),
-            })
-        }
-        Some(_) => {
-            return Err(V3AnthropicCodecError::InvalidTerminalField {
-                field: "stop_details",
-                reason: "must be an object when present".to_string(),
-            })
-        }
-    };
+    let stop_details = object.get("stop_details").cloned();
 
     // A `tool_use` stop reason is Anthropic's native expression of "the model
     // returned tool calls". The same semantic is a normal output item in the

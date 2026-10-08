@@ -1038,7 +1038,7 @@ where
                     provider_value,
                     provider_wire_protocol,
                     &req05.previous.previous.previous.payload.0,
-                    transport_intent,
+                    V3HubTransportIntent::Json,
                     &mut trace,
                     selected_target_compatibility_profile.as_deref(),
                     selected.candidate.web_search_execution_mode,

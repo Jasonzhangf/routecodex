@@ -1,6 +1,56 @@
 use super::*;
 
 #[test]
+fn chat_structured_arguments_survive_json_and_sse_normalization_without_string_repair() {
+    for arguments in [
+        json!({"q":" exact input \n","nested":{"retain":[1,2]}}),
+        json!([]),
+        Value::Null,
+        json!(true),
+        json!(7),
+        json!("{\"q\":"),
+        json!(""),
+        json!("{\"q\":\" x \"}"),
+    ] {
+        let expected = arguments
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| arguments.to_string());
+        let function = json!({"name":"lookup","arguments":arguments});
+        let call = json!({"index":0,"id":"call_original","type":"function","function":function});
+        let mut reducer = V3OpenAiChatSseReducerState::default();
+        reducer
+            .apply_chunk(
+                &json!({"id":"chatcmpl-structured","object":"chat.completion.chunk","model":"model",
+            "choices":[{"index":0,"delta":{"tool_calls":[call]},"finish_reason":"tool_calls"}]}),
+            )
+            .unwrap();
+        let completion = reducer.materialize_completion().unwrap();
+        assert_eq!(
+            completion["choices"][0]["message"]["tool_calls"][0]["id"],
+            "call_original"
+        );
+        assert_eq!(
+            completion["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+            "lookup"
+        );
+        assert_eq!(
+            completion["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"],
+            expected
+        );
+        let typed = parse_v3_openai_chat_json_tool_call(&call).unwrap();
+        assert_eq!(typed.function_arguments, Some(expected));
+    }
+    let call = json!({"id":"call_missing","type":"function","function":{"name":"lookup"}});
+    assert_eq!(
+        parse_v3_openai_chat_json_tool_call(&call)
+            .unwrap()
+            .function_arguments,
+        None
+    );
+}
+
+#[test]
 fn chat_sse_co_located_refusal_survives_materialization() {
     for delta in [
         json!({"content":"partial text","refusal":"provider declined"}),

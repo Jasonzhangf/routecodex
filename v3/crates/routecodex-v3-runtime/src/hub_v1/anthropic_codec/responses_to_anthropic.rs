@@ -140,10 +140,10 @@ pub(super) fn openai_chat_tool_call_as_anthropic_tool_use(
         .or_else(|| object.get("arguments"))
     {
         Some(Value::String(raw)) => {
-            serde_json::from_str(raw).unwrap_or_else(|_| json!({"input": raw}))
+            Some(serde_json::from_str(raw).unwrap_or_else(|_| json!({"input": raw})))
         }
-        Some(value) => value.to_owned(),
-        None => json!({}),
+        Some(value) => Some(value.to_owned()),
+        None => None,
     };
     let is_custom = value
         .pointer("/routecodex_chat_extension/responses_tool_call_type")
@@ -156,12 +156,11 @@ pub(super) fn openai_chat_tool_call_as_anthropic_tool_use(
         .map(|name| anthropic_tool_call_wire_name(name, is_custom))
         .map(Value::String)
         .unwrap_or(Value::Null);
-    Ok(json!({
-        "type":"tool_use",
-        "id": object.get("id").cloned().unwrap_or(Value::Null),
-        "name": name,
-        "input": input
-    }))
+    let mut tool_use = json!({"type":"tool_use","id":object.get("id").cloned().unwrap_or(Value::Null),"name":name});
+    if let Some(input) = input {
+        tool_use["input"] = input;
+    }
+    Ok(tool_use)
 }
 
 pub(super) fn responses_input_array_as_anthropic_messages(
@@ -412,12 +411,17 @@ pub(super) fn responses_tool_call_as_anthropic_tool_use(
         })
         .map(Value::String)
         .unwrap_or(Value::Null);
-    Ok(json!({
-        "type":"tool_use",
-        "id": responses_tool_call_id_value(object),
-        "name": name,
-        "input": responses_function_call_input(object)?
-    }))
+    let parameter = if object.get("type").and_then(Value::as_str) == Some("custom_tool_call") {
+        object.get("input")
+    } else {
+        object.get("arguments").or_else(|| object.get("input"))
+    };
+    let mut tool_use =
+        json!({"type":"tool_use","id":responses_tool_call_id_value(object),"name":name});
+    if parameter.is_some() {
+        tool_use["input"] = responses_function_call_input(object)?;
+    }
+    Ok(tool_use)
 }
 
 pub(super) fn responses_tool_output_as_anthropic_tool_result(
@@ -824,10 +828,7 @@ pub(super) fn responses_function_call_input(
 ) -> Result<Value, V3AnthropicCodecError> {
     if object.get("type").and_then(Value::as_str) == Some("custom_tool_call") {
         return match object.get("input") {
-            Some(Value::String(raw)) => Ok(json!({"input": raw})),
-            Some(_) => Err(V3AnthropicCodecError::MalformedField {
-                field: "custom_tool_call.input",
-            }),
+            Some(input) => Ok(json!({"input": input})),
             None => Err(V3AnthropicCodecError::MalformedField {
                 field: "custom_tool_call.input",
             }),

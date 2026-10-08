@@ -768,8 +768,8 @@ async fn client_sse_function_call_projection_preserves_missing_arguments_without
         .expect("missing arguments must not turn a native tool call into 502");
     let text = frames.join("\n");
     assert!(text.contains("\"call_id\":\"call_missing_args\""));
-    assert!(text.contains("\"arguments\":\"\""));
-    assert!(text.contains("response.function_call_arguments.done"));
+    assert!(!text.contains("\"arguments\""));
+    assert!(!text.contains("response.function_call_arguments.done"));
     assert!(text.contains("response.completed"));
 }
 

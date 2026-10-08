@@ -1355,6 +1355,33 @@ impl ResponsesTransport for ResponsesOutputCapTransport {
 struct ResponsesDuplicateToolIdentityThenSuccessTransport {
     captures: Mutex<Vec<(String, Value)>>,
     stream_response: bool,
+    custom_tool: bool,
+}
+
+fn responses_duplicate_tool_identity_output(custom_tool: bool) -> Value {
+    let (kind, argument_field, arguments) = if custom_tool {
+        (
+            "custom_tool_call",
+            "input",
+            ["first\ncomplete input", "second\ncomplete input"],
+        )
+    } else {
+        (
+            "function_call",
+            "arguments",
+            [
+                "{\"query\":\"first\",\"items\":[1,2]}",
+                "{\"query\":\"second\",\"items\":[3,4]}",
+            ],
+        )
+    };
+    let mut output = json!([
+        {"type":kind,"id":"fc_duplicate_a","call_id":"call_duplicate","name":"lookup"},
+        {"type":kind,"id":"fc_duplicate_b","call_id":"call_duplicate","name":"lookup_again"}
+    ]);
+    output[0][argument_field] = json!(arguments[0]);
+    output[1][argument_field] = json!(arguments[1]);
+    output
 }
 
 #[async_trait]
@@ -1370,28 +1397,13 @@ impl ResponsesTransport for ResponsesDuplicateToolIdentityThenSuccessTransport {
         let response = if request.provider_id() == "limited" {
             json!({
                 "id":"resp_duplicate_tool_identity",
-                "status":"requires_action",
-                "output":[
-                    {
-                        "type":"function_call",
-                        "id":"fc_duplicate_a",
-                        "call_id":"call_duplicate",
-                        "name":"lookup",
-                        "arguments":"{\"query\":\"first\"}"
-                    },
-                    {
-                        "type":"function_call",
-                        "id":"fc_duplicate_b",
-                        "call_id":"call_duplicate",
-                        "name":"lookup_again",
-                        "arguments":"{\"query\":\"second\"}"
-                    }
-                ]
+                "status":"completed",
+                "output":responses_duplicate_tool_identity_output(self.custom_tool)
             })
         } else {
             json!({
                 "id":"resp_after_duplicate_tool_identity",
-                "status":"requires_action",
+                "status":"completed",
                 "output":[
                     {
                         "type":"function_call",
@@ -1967,14 +1979,20 @@ async fn responses_relay_openai_chat_empty_content_filter_sse_terminal_is_forwar
 }
 
 #[tokio::test]
-async fn responses_relay_provider_duplicate_tool_identity_reselects_before_projection_for_json_and_sse(
-) {
-    for (suffix, stream_response) in [("json", false), ("sse", true)] {
+async fn responses_relay_provider_duplicate_tool_identity_preserves_first_attempt_for_json_and_sse()
+{
+    for (suffix, stream_response, custom_tool) in [
+        ("function_json", false, false),
+        ("custom_json", false, true),
+        ("function_sse", true, false),
+        ("custom_sse", true, true),
+    ] {
         let server_id = format!("responses_duplicate_tool_identity_{suffix}");
         let manifest = responses_reselect_manifest_for_scope(&server_id);
         let transport = ResponsesDuplicateToolIdentityThenSuccessTransport {
             captures: Mutex::new(Vec::new()),
             stream_response,
+            custom_tool,
         };
         let output = execute_v3_responses_relay_runtime(
             &manifest,
@@ -1989,94 +2007,128 @@ async fn responses_relay_provider_duplicate_tool_identity_reselects_before_proje
                 request_id: format!("req-responses-duplicate-tool-identity-{suffix}"),
                 payload: json!({
                     "model":"client-responses",
-                    "input":"reject duplicate provider tool identity and reselect",
+                    "input":"preserve both duplicate provider tool identities",
                     "stream":stream_response
                 }),
             },
             &transport,
         )
         .await
-        .expect("provider-origin Resp03 malformed tool identity must enter Error05 reselection");
+        .expect(
+            "representable duplicate tool identities must preserve the first provider response",
+        );
 
         assert_eq!(output.status, 200);
         assert!(output.error_chain.is_none());
-        assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+        assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
         let observability = output
             .observability
             .as_ref()
-            .expect("successful retry must keep console observability");
-        assert_eq!(observability.provider_id.as_deref(), Some("minimax"));
+            .expect("successful first attempt must keep console observability");
+        assert_eq!(observability.provider_id.as_deref(), Some("limited"));
         assert_eq!(observability.provider_status, Some(200));
-        assert_eq!(observability.attempts, Some(3));
-        assert_eq!(observability.provider_failure_events.len(), 1);
-        let provider_event = &observability.provider_failure_events[0];
-        assert_eq!(provider_event.provider_key, "limited:key1:gpt-5.5");
-        assert_eq!(provider_event.status, 502);
-        assert_eq!(provider_event.action, "switch_provider");
+        assert_eq!(observability.attempts, Some(1));
+        assert!(observability.provider_failure_events.is_empty());
+
+        let body = match output.client_body {
+            V3ResponsesRelayClientBody::Json(body) => {
+                assert!(!stream_response);
+                body
+            }
+            V3ResponsesRelayClientBody::Sse(mut stream) => {
+                assert!(stream_response);
+                let mut forwarded = Vec::new();
+                while let Some(chunk) = stream.next().await {
+                    forwarded.extend(chunk);
+                }
+                let text = String::from_utf8(forwarded).unwrap();
+                let events: Vec<Value> = text
+                    .lines()
+                    .filter_map(|line| line.strip_prefix("data: "))
+                    .filter(|data| *data != "[DONE]")
+                    .map(|data| serde_json::from_str(data).expect("client SSE event JSON"))
+                    .collect();
+                assert!(!events.iter().any(|event| matches!(
+                    event["type"].as_str(),
+                    Some("error" | "response.failed")
+                )));
+                events
+                    .iter()
+                    .find(|event| event["type"] == "response.completed")
+                    .expect("completed provider response must reach the client")["response"]
+                    .clone()
+            }
+        };
+        assert_eq!(body["id"], "resp_duplicate_tool_identity");
+        assert_eq!(body["status"], "completed");
+        assert!(body.get("error").is_none());
         assert_eq!(
-            provider_event.next_provider_key.as_deref(),
-            Some("minimax:key1:MiniMax-M3")
+            body["output"],
+            responses_duplicate_tool_identity_output(custom_tool)
         );
 
         let captures = transport.captures.lock().unwrap();
-        assert_eq!(captures.len(), 2);
+        assert_eq!(captures.len(), 1);
         assert_eq!(captures[0].0, "limited");
-        assert_eq!(captures[1].0, "minimax");
     }
 }
 
 #[tokio::test]
-async fn responses_relay_provider_duplicate_tool_identity_projects_typed_error_after_exhaustion() {
-    let server_id = "responses_duplicate_tool_identity_terminal";
-    let transport = ResponsesDuplicateToolIdentityThenSuccessTransport {
-        captures: Mutex::new(Vec::new()),
-        stream_response: false,
-    };
-    let output = execute_v3_responses_relay_runtime_with_retry_policy(
-        &responses_single_limited_manifest_for_scope(server_id),
-        V3ResponsesRelayRuntimeInput {
-            server_id: server_id.into(),
-            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
-                concat!(module_path!(), ":", line!()),
-            )
-            .expect("test provider failure session scope"),
-            request_id: "req-responses-duplicate-tool-identity-terminal".into(),
-            payload: json!({
-                "model":"client-responses",
-                "input":"reject duplicate provider tool identity without a backup target",
-                "stream":false
-            }),
-        },
-        &transport,
-        V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 0,
-        },
-    )
-    .await
-    .expect("provider-origin Resp03 failure must terminate through typed Error05/Error06");
+async fn responses_relay_provider_duplicate_tool_identity_preserves_single_candidate_response() {
+    for (suffix, custom_tool) in [("function", false), ("custom", true)] {
+        let server_id = format!("responses_duplicate_tool_identity_single_{suffix}");
+        let transport = ResponsesDuplicateToolIdentityThenSuccessTransport {
+            captures: Mutex::new(Vec::new()),
+            stream_response: false,
+            custom_tool,
+        };
+        let output = execute_v3_responses_relay_runtime_with_retry_policy(
+            &responses_single_limited_manifest_for_scope(&server_id),
+            V3ResponsesRelayRuntimeInput {
+                server_id,
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
+                request_id: format!("req-responses-duplicate-tool-identity-single-{suffix}"),
+                payload: json!({
+                    "model":"client-responses",
+                    "input":"preserve duplicate provider tool identities without a backup target",
+                    "stream":false
+                }),
+            },
+            &transport,
+            V3ResponsesRelayRetryPolicy {
+                same_candidate_retries: 0,
+            },
+        )
+        .await
+        .expect("one candidate is enough to return representable duplicate tool identities");
 
-    assert_eq!(output.status, 502);
-    assert_eq!(
-        output.error_chain.as_ref().unwrap(),
-        &V3_ERROR_CHAIN_NODE_IDS
-    );
-    assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));
-    let V3ResponsesRelayClientBody::Json(error_body) = output.client_body else {
-        panic!("terminal provider response failure must project standard Responses JSON error")
-    };
-    assert_eq!(error_body["error"]["code"], "network_error");
-    assert_eq!(error_body["error"]["message"], "network error");
-    assert!(output
-        .observability
-        .as_ref()
-        .unwrap()
-        .provider_failure_events
-        .iter()
-        .any(|event| event.message.contains("duplicate call_id/id")));
-    assert!(error_body.pointer("/error/stage").is_none());
-    assert_eq!(transport.captures.lock().unwrap().len(), 1);
+        assert_eq!(output.status, 200);
+        assert!(output.error_chain.is_none());
+        assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
+        let observability = output.observability.as_ref().unwrap();
+        assert_eq!(observability.provider_id.as_deref(), Some("limited"));
+        assert_eq!(observability.provider_status, Some(200));
+        assert_eq!(observability.attempts, Some(1));
+        assert!(observability.provider_failure_events.is_empty());
+        let V3ResponsesRelayClientBody::Json(body) = output.client_body else {
+            panic!("completed provider response must project Responses JSON");
+        };
+        assert_eq!(body["id"], "resp_duplicate_tool_identity");
+        assert_eq!(body["status"], "completed");
+        assert!(body.get("error").is_none());
+        assert_eq!(
+            body["output"],
+            responses_duplicate_tool_identity_output(custom_tool)
+        );
+        let captures = transport.captures.lock().unwrap();
+        assert_eq!(captures.len(), 1);
+        assert_eq!(captures[0].0, "limited");
+    }
 }
 
 #[tokio::test]

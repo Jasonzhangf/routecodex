@@ -2582,7 +2582,7 @@ features:
   - normalize_v3_codex_integer_tool_schema
   - build_v3_chat_canonical_request_from_responses_payload_for_req_inbound
   - build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat
-  - project_v3_responses_arguments_to_openai_chat_wire
+  - project_v3_responses_tool_call_to_openai_chat
   - build_v3_openai_chat_standard_request_from_chat_canonical
   - qualify_openai_chat_missing_mcp_tool_call_names
   - openai_chat_namespace_wire_names
@@ -2628,6 +2628,7 @@ features:
   - responses_inbound_does_not_rewrite_same_named_user_tool_schema
   - responses_agent_message_with_encrypted_content_part_does_not_leak_ciphertext
   - responses_chat_long_namespace_names_round_trip_on_first_attempt_json_and_sse
+  - responses_discovered_custom_tools_restore_kind_and_identity_json_and_sse
   allowed_paths:
   - v3/crates/provider-compat-core/src/namespace_tools.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs
@@ -6190,9 +6191,8 @@ features:
   status: source_gate_verified
   change_risk: high
   owner_kind: rust_project_v3_runtime_chat_process_gate
-  owner_scope: Resp03-only governance of the exact whole-item Anthropic DSML control frame on the Responses Relay SSE materialization path; all suspect, incomplete, and literal control text stays ordinary visible output.
+  owner_scope: Resp03 preserves representable Anthropic business text, including complete DSML-looking text, without semantic stripping or rejection.
   owner_files:
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_anthropic_control_text.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_inbound_01_raw.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
@@ -6202,10 +6202,8 @@ features:
   mainline_bindings:
   - v3-hub-relay-resp-03
   entry_symbols:
-  - govern_v3_anthropic_control_text_at_resp03
-  - classify_v3_anthropic_text_frame_at_resp03
+  - govern_v3_hub_relay_response
   allowed_paths:
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_anthropic_control_text.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_inbound_01_raw.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs

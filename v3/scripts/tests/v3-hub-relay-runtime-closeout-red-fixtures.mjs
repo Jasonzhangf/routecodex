@@ -188,9 +188,9 @@ const cases = [
   {
     name: 'duplicate identity integration test removed',
     file: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs',
-    marker: 'responses_relay_provider_duplicate_tool_identity_reselects_before_projection_for_json_and_sse',
-    mutation: 'removed_duplicate_tool_identity_reselection_regression',
-    diagnostic: /missing responses_relay_provider_duplicate_tool_identity_reselects_before_projection_for_json_and_sse/,
+    marker: 'responses_relay_provider_duplicate_tool_identity_preserves_first_attempt_for_json_and_sse',
+    mutation: 'removed_duplicate_tool_identity_preservation_regression',
+    diagnostic: /missing responses_relay_provider_duplicate_tool_identity_preserves_first_attempt_for_json_and_sse/,
   },
   {
     name: 'Resp03 provider failure entry edge removed',

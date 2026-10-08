@@ -468,11 +468,64 @@ fn relay_local_tool_output_consumes_call_id_aliases() {
 }
 
 #[test]
+fn duplicate_native_provider_tool_identities_preserve_complete_payloads() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    for (protocol, payload) in [
+        (
+            V3HubProviderWireProtocol::OpenAiChat,
+            json!({
+                "id":"chat_duplicate_calls",
+                "choices":[{
+                    "message":{
+                        "role":"assistant",
+                        "tool_calls":[
+                            {"type":"function","id":"dup","function":{"name":"lookup","arguments":"{\"query\":\"first\",\"items\":[1,2]}"}},
+                            {"type":"function","id":"dup","function":{"name":"lookup_again","arguments":"{\"query\":\"second\",\"items\":[3,4]}"}}
+                        ]
+                    },
+                    "finish_reason":"tool_calls"
+                }]
+            }),
+        ),
+        (
+            V3HubProviderWireProtocol::Gemini,
+            json!({
+                "candidates":[{
+                    "content":{
+                        "role":"model",
+                        "parts":[
+                            {"functionCall":{"name":"lookup","args":{"query":"first","items":[1,2]}}},
+                            {"functionCall":{"name":"lookup","args":{"query":"second","items":[3,4]}}}
+                        ]
+                    },
+                    "finishReason":"STOP"
+                }]
+            }),
+        ),
+    ] {
+        let raw = build_v3_provider_resp_inbound_01_raw(
+            payload.clone(),
+            V3HubEntryProtocol::Responses,
+            protocol,
+            V3HubExecutionMode::Relay,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+        let normalized = hooks.normalize(raw).expect("serialized provider response");
+        let governed = hooks
+            .govern(normalized, &V3HubRelayResponseHookProfile::empty())
+            .expect("duplicate identities must not create a provider failure");
+        assert_eq!(governed.tool_call_count(), 2);
+        assert_eq!(governed.finalized_payload(), &payload);
+    }
+}
+
+#[test]
 fn provider_response_failure_classifier_keeps_provider_and_local_hook_errors_separate() {
     let malformed_tool =
         V3ResponsesRelayRuntimeError::Response(V3HubRelayResponseError::MalformedToolCall {
             index: 5,
-            reason: "duplicate call_id/id",
+            reason: "missing call_id/id",
         });
     assert!(is_v3_responses_provider_response_failure(&malformed_tool));
     let resp03_failure = provider_response_hook_failure(malformed_tool, "controlled", None);
@@ -487,7 +540,7 @@ fn provider_response_failure_classifier_keeps_provider_and_local_hook_errors_sep
     assert!(
         resp03_failure
             .policy_error_message
-            .contains("duplicate call_id/id"),
+            .contains("missing call_id/id"),
         "{}",
         resp03_failure.policy_error_message
     );
@@ -733,11 +786,9 @@ fn openai_chat_tool_search_function_call_projects_to_responses_tool_search_call(
         }),
         &json!({
             "tools":[{
-                "type":"function",
-                "function":{
-                    "name":"tool_search",
-                    "parameters":{"type":"object"}
-                }
+                "type":"tool_search",
+                "execution":"client",
+                "parameters":{"type":"object"}
             }]
         }),
     )

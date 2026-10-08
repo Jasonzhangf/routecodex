@@ -761,10 +761,10 @@ pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05_
     //
     // Responses 客户端帧序列与 Direct 路径/上游 provider 保持一致：协议没有
     // `response.done` 事件，Chat Completions 的 `[DONE]` 终止符也不属于 Responses。
-    // 终态只能由 response.completed/response.incomplete/response.failed 承载，
+    // A paused provider turn retains response.in_progress at the end of this
+    // exchange; it must not acquire a fabricated response.completed event.
     // 不得向 Responses 客户端追加非协议帧。
     let failed = status == Some("failed");
-    let incomplete = status == Some("incomplete");
     let mut frames = Vec::new();
     if !failed {
         if let Some(response_id) = response.get("id").and_then(Value::as_str) {
@@ -829,10 +829,10 @@ pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05_
         terminal_frame_index = frames.len() - 1;
     } else {
         let terminal_response = project_v3_responses_client_completed_response(&response);
-        let terminal_event = if incomplete {
-            "response.incomplete"
-        } else {
-            "response.completed"
+        let terminal_event = match status {
+            Some("incomplete") => "response.incomplete",
+            Some("in_progress") => "response.in_progress",
+            _ => "response.completed",
         };
         frames.push(build_v3_runtime_sse_json_frame(
             terminal_event,
@@ -994,7 +994,7 @@ fn append_v3_responses_client_function_call_progress_frames(
         return Ok(());
     }
     let mut added_item = item.clone();
-    if item_type == Some("function_call") {
+    if item_type == Some("function_call") && item.get("arguments").is_some() {
         if let Some(object) = added_item.as_object_mut() {
             object.insert("arguments".to_string(), Value::String(String::new()));
         }
@@ -1022,9 +1022,8 @@ fn append_v3_responses_client_function_call_progress_frames(
     // string. Preserve an imperfect provider tool call instead of converting
     // it into a 502: native string arguments pass through byte-for-byte;
     // structured arguments are deterministically encoded; an absent field is
-    // represented by the protocol's empty initial argument buffer. This does
-    // does not infer or alter toolreason fields, and never changes the command
-    // object itself.
+    // kept absent without an invented parameter progress event. This does
+    // not infer or alter toolreason fields or the command object.
     let arguments = match item.get("arguments") {
         Some(Value::String(arguments)) => arguments.clone(),
         Some(arguments @ (Value::Object(_) | Value::Array(_))) => serde_json::to_string(arguments)
@@ -1032,7 +1031,7 @@ fn append_v3_responses_client_function_call_progress_frames(
                 format!("Responses client projection function_call arguments failed: {error}")
             })?,
         Some(value) => value.to_string(),
-        None => String::new(),
+        None => return Ok(()),
     };
     frames.push(build_v3_runtime_sse_json_frame(
         "response.function_call_arguments.done",

@@ -120,6 +120,11 @@ pub enum V3AnthropicCodecError {
     MalformedProviderError,
     #[error("Anthropic codec malformed {field}")]
     MalformedField { field: &'static str },
+    #[error("Anthropic tool input cannot represent provider arguments: {reason}")]
+    UnrepresentableToolArguments {
+        arguments: Option<Value>,
+        reason: String,
+    },
     #[error("Anthropic tool dispatch identity is ambiguous: {reason}")]
     AmbiguousToolDispatch { reason: String },
     #[error("Anthropic terminal field {field} is invalid: {reason}")]

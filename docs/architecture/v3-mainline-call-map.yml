@@ -4782,7 +4782,7 @@ chains:
     to_node: V3ProviderReqOutbound08WirePayload
     caller_symbol: build_v3_openai_chat_assistant_tool_call_message
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
-    callee_symbol: project_v3_responses_arguments_to_openai_chat_wire
+    callee_symbol: project_v3_responses_tool_call_to_openai_chat
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
     status: anchored
     binding_kind: protocol_field_parity_test_over_existing_relay_chain
@@ -5527,7 +5527,7 @@ chains:
   - step_id: v3-protocol-boundary-resp-02
     from_node: V3HubRespInbound02Normalized
     to_node: V3HubRespChatProcess03Governed
-    caller_symbol: duplicate_response_tool_identity_fails_inside_response_chat_process
+    caller_symbol: duplicate_response_tool_identity_preserves_function_and_custom_calls
     caller_file: v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs
     callee_symbol: govern_v3_hub_relay_response
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs

@@ -60,8 +60,8 @@ const cases = [
   {
     name: 'attachment history placeholder policy revived',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
-    marker: 'use serde_json::Value;\n',
-    mutation: 'enum V3HubAttachmentHistoryPolicy { Placeholder }\nuse serde_json::Value;\n',
+    marker: 'use serde_json::{json, Value};\n',
+    mutation: 'enum V3HubAttachmentHistoryPolicy { Placeholder }\nuse serde_json::{json, Value};\n',
     diagnostic: /historical payload rewrite or attachment placeholder owner/,
   },
   {
@@ -112,9 +112,9 @@ const cases = [
     name: 'Responses client SSE completed terminal relabeled as requires_action',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
     marker:
-      'let terminal_event = if incomplete {\n            "response.incomplete"\n        } else {\n            "response.completed"',
+      '_ => "response.completed",',
     mutation:
-      'let terminal_event = if incomplete {\n            "response.incomplete"\n        } else {\n            "response.requires_action"',
+      '_ => "response.requires_action",',
     diagnostic: /response\.requires_action client SSE terminal projection/,
   },
   {

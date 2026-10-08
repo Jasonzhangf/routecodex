@@ -1891,6 +1891,8 @@ features:
   required_blackbox:
   - responses_additional_tools_refreshes_same_namespace_tool_before_chat_projection
   - responses_chat_long_namespace_names_round_trip_on_first_attempt_json_and_sse
+  - responses_discovered_custom_tools_restore_kind_and_identity_json_and_sse
+  - invalid_custom_arguments_reach_client_and_recover_json_and_sse
   - responses_additional_tools_refreshes_nested_mcpx_alias_before_chat_projection
   - openai_chat_nested_mcpx_function_call_restores_dotted_client_namespace
   - responses_provider_sse_restores_declared_mcp_identity_for_tool_followup
@@ -3855,20 +3857,18 @@ features:
   status: source_gate_verified
   change_risk: high
   owner_kind: rust_project_v3_runtime_chat_process_gate
-  owner_scope: Black-box and unit verification for the exact whole-item Anthropic DSML control frame on the Responses Relay SSE materialization path; suspect/incomplete/literal text is preserved and complete frames are governed without client-visible provider failure.
+  owner_scope: Public HTTP and unit verification preserves complete and literal Anthropic text without stripping, rejection or provider reselection.
   owner_modules:
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_anthropic_control_text.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs
   - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
   - v3/crates/routecodex-v3-error/src/tests.rs
   mainline_bindings:
   - v3-hub-relay-resp-03
   required_contract:
-  - only a whole output_text/message item starting with the exact `<thinking>` opening and ending with the exact three-line DSML closing block is treated as control material
-  - incomplete, suspect, quoted, and whole-item paired-thinking literals are forwarded unchanged
-  - complete control frames with visible prose keep that prose and drop only the frame
-  - complete control frames without visible/native output use the existing exhausted NoResponse transport boundary and never project provider failure to the client
-  - the rule is bound to Responses Relay SSE materialization through the typed source_provider_protocol witness; Anthropic JSON paths remain unchanged
+  - complete, incomplete, suspect, quoted and literal DSML-looking business text is forwarded unchanged
+  - representable business text never causes provider rejection, reselection or a fabricated terminal error
+  - genuine HTTP and native protocol errors retain the existing internal Error chain and client transport-break boundary
   required_gates:
   - npm run verify:v3-architecture-ci
   - npm run verify:v3-resource-map
@@ -3878,8 +3878,9 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib anthropic_
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-error --lib
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_relay_suspect_anthropic_text_is_preserved_without_reselection
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_relay_anthropic_dsml_complete_text
   - git diff --check
   completion_rule:
-    source: Complete when the classifier, source witness, black-box matrix, runtime and error tests, and all map/resource/mainline gates pass on the exact candidate.
+    source: Complete when the faithful-text public HTTP cases, runtime and error tests, and affected map/resource/mainline gates pass on the exact candidate.
     runtime: No live claim is made without installed-binary restart and same-entry replay.
     forbidden_claim: Do not claim live closure from source tests alone.

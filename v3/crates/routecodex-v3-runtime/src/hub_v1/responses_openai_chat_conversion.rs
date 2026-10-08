@@ -1,3 +1,4 @@
+use super::request_outbound_mcp_names::provider_function_name;
 use super::*;
 use provider_compat_core::namespace_tools::namespace_tool_name_map;
 use serde_json::{json, Value};
@@ -12,14 +13,16 @@ pub(crate) struct V3ClientCustomToolName {
 fn client_custom_tool_call(
     call_id: &str,
     client_tool: &V3ClientCustomToolName,
-    input: &str,
+    input: Option<Value>,
 ) -> Value {
     let mut call = json!({
         "type":"custom_tool_call",
         "call_id":call_id,
-        "name":client_tool.name,
-        "input":input
+        "name":client_tool.name
     });
+    if let Some(input) = input {
+        call["input"] = input;
+    }
     if let Some(namespace) = &client_tool.namespace {
         call["namespace"] = Value::String(namespace.clone());
     }
@@ -47,6 +50,7 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload(
     )
     .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
     let custom_tool_names = collect_v3_responses_custom_tool_names(provider_semantic_body)
+        .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?
         .into_iter()
         .map(|(name, identity)| {
             let name = aliases.get(&name).cloned().unwrap_or(name);
@@ -60,6 +64,42 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload(
     .into_iter()
     .map(|(name, identity)| (aliases.get(&name).cloned().unwrap_or(name), identity))
     .collect();
+    let discovered =
+        super::request_outbound_builtin_tool_projection::collect_tool_search_output_tools(
+            provider_semantic_body,
+        )
+        .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
+    let declarations: Vec<&Value> = provider_semantic_body
+        .get("tools")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .chain(
+            provider_semantic_body
+                .get("input")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter(|item| item["type"] == "additional_tools")
+                .flat_map(|item| {
+                    item.get("tools")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                }),
+        )
+        .chain(discovered.iter())
+        .collect();
+    let native_tool_search = declarations
+        .iter()
+        .any(|tool| tool["type"] == "tool_search")
+        && !declarations.iter().any(|tool| {
+            matches!(
+                tool.get("type").and_then(Value::as_str),
+                Some("function" | "custom")
+            ) && provider_compat_core::namespace_tools::provider_function_tool_name(tool)
+                .is_some_and(|name| provider_function_name(name) == "tool_search")
+        });
     for choice in choices {
         if finish_reason.is_none() {
             finish_reason = choice
@@ -85,6 +125,7 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload(
                         call,
                         &custom_tool_names,
                         &mcp_tool_identities,
+                        native_tool_search,
                     )?);
                 }
             }
@@ -313,6 +354,7 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
     call: &Value,
     custom_tool_names: &BTreeMap<String, V3ClientCustomToolName>,
     mcp_tool_identities: &std::collections::HashMap<String, (String, String)>,
+    native_tool_search: bool,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
     let object = call.as_object().ok_or_else(|| {
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
@@ -362,7 +404,11 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
                     .to_string(),
             )
         })?;
-        return Ok(client_custom_tool_call(call_id, client_name, input));
+        return Ok(client_custom_tool_call(
+            call_id,
+            client_name,
+            Some(Value::String(input.to_string())),
+        ));
     }
     let function = object
         .get("function")
@@ -383,26 +429,40 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
                     .to_string(),
             )
         })?;
-    let arguments = function
-        .get("arguments")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    if name == "tool_search" {
-        let arguments = parse_v3_openai_chat_tool_call_arguments_object(name, arguments)?;
-        return Ok(json!({
-            "type":"tool_search_call",
-            "call_id":call_id,
-            "execution":"client",
-            "arguments":arguments
-        }));
-    }
+    let arguments = function.get("arguments").map(|value| match value {
+        Value::String(value) => value.clone(),
+        value => value.to_string(),
+    });
     if let Some(client_name) = custom_tool_names.get(name) {
         // 请求侧 custom -> function 扁平化后，provider 返回 function tool_call；
         // 按客户端声明的 custom 名归类回 custom_tool_call，保持客户端契约。
         // Decode the known input wrapper; preserve other model arguments for
         // client validation and the paired tool-error recovery turn.
-        let input = parse_v3_openai_chat_custom_tool_input(arguments);
-        return Ok(client_custom_tool_call(call_id, client_name, &input));
+        if let Some(arguments) = arguments.as_deref() {
+            let input = parse_v3_openai_chat_custom_tool_input(arguments);
+            return Ok(client_custom_tool_call(call_id, client_name, Some(input)));
+        }
+        return Ok(client_custom_tool_call(call_id, client_name, None));
+    }
+    if name == "tool_search" && native_tool_search {
+        let mut item = json!({"type":"tool_search_call","call_id":call_id,"execution":"client"});
+        if let Some(arguments) = function.get("arguments") {
+            item["arguments"] = match arguments {
+                Value::String(text) => {
+                    let serialized = object
+                        .get("routecodex_chat_extension")
+                        .and_then(|extension| extension.get("responses_arguments_serialized"))
+                        .and_then(Value::as_bool)
+                        == Some(true);
+                    serde_json::from_str::<Value>(text)
+                        .ok()
+                        .filter(|value| serialized || value.is_object())
+                        .unwrap_or_else(|| arguments.clone())
+                }
+                _ => arguments.clone(),
+            };
+        }
+        return Ok(item);
     }
     let mut item = Map::from_iter([
         (
@@ -411,11 +471,10 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
         ),
         ("call_id".to_string(), Value::String(call_id.to_string())),
         ("name".to_string(), Value::String(name.to_string())),
-        (
-            "arguments".to_string(),
-            Value::String(arguments.to_string()),
-        ),
     ]);
+    if let Some(arguments) = arguments {
+        item.insert("arguments".to_string(), Value::String(arguments));
+    }
     super::request_outbound_mcp_names::restore_responses_mcp_namespace(
         &mut item,
         mcp_tool_identities,
@@ -423,45 +482,20 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
     Ok(Value::Object(item))
 }
 
-fn parse_v3_openai_chat_custom_tool_input(arguments: &str) -> String {
+fn parse_v3_openai_chat_custom_tool_input(arguments: &str) -> Value {
     match serde_json::from_str::<Value>(arguments) {
-        Ok(Value::Object(parsed)) => parsed
-            .get("input")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .unwrap_or_else(|| arguments.to_string()),
-        Ok(Value::String(value)) => value,
-        _ => arguments.to_string(),
+        Ok(Value::Object(parsed)) => match parsed.get("input") {
+            Some(input) => input.clone(),
+            None => Value::String(arguments.to_string()),
+        },
+        Ok(Value::String(value)) => Value::String(value),
+        _ => Value::String(arguments.to_string()),
     }
-}
-
-pub(crate) fn parse_v3_openai_chat_tool_call_arguments_object(
-    name: &str,
-    arguments: &str,
-) -> Result<Value, V3ResponsesRelayRuntimeError> {
-    let trimmed = arguments.trim();
-    let parsed = if trimmed.is_empty() {
-        Value::Object(Map::new())
-    } else {
-        serde_json::from_str::<Value>(trimmed).map_err(|error| {
-            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
-                "OpenAI Chat tool_call {name} arguments must be a JSON object before Responses projection: {error}"
-            ))
-        })?
-    };
-    if parsed.is_object() {
-        return Ok(parsed);
-    }
-    Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-        format!(
-            "OpenAI Chat tool_call {name} arguments must be a JSON object before Responses projection"
-        ),
-    ))
 }
 
 pub(crate) fn collect_v3_responses_custom_tool_names(
     payload: &Value,
-) -> BTreeMap<String, V3ClientCustomToolName> {
+) -> Result<BTreeMap<String, V3ClientCustomToolName>, String> {
     let mut names = BTreeMap::new();
     collect_v3_responses_custom_tool_names_from_tools(payload.get("tools"), &mut names);
     for item in payload
@@ -474,7 +508,10 @@ pub(crate) fn collect_v3_responses_custom_tool_names(
             collect_v3_responses_custom_tool_names_from_tools(item.get("tools"), &mut names);
         }
     }
-    names
+    let discovered =
+        super::request_outbound_builtin_tool_projection::collect_tool_search_output_tools(payload)?;
+    collect_v3_responses_custom_tool_names_from_tools(Some(&Value::Array(discovered)), &mut names);
+    Ok(names)
 }
 
 pub(crate) fn collect_v3_responses_custom_tool_names_from_tools(

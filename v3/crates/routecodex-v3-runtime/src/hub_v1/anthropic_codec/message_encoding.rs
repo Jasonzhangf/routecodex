@@ -33,6 +33,7 @@ pub(super) fn push_anthropic_shape_string(
 pub(super) fn encode_anthropic_messages_as_responses_semantic(
     messages: &[Value],
 ) -> Result<Vec<Value>, V3AnthropicCodecError> {
+    let mut custom_results = HashMap::new();
     let mut encoded = Vec::new();
     for message in messages {
         let role = message.get("role").cloned().unwrap_or(Value::Null);
@@ -44,6 +45,20 @@ pub(super) fn encode_anthropic_messages_as_responses_semantic(
                 }));
             }
             Some(Value::Array(parts)) => {
+                if parts.iter().any(|part| part["type"] == "tool_use") {
+                    custom_results.clear();
+                    for part in parts.iter().filter(|part| part["type"] == "tool_use") {
+                        if let Some(id) = part.get("id").and_then(Value::as_str) {
+                            let custom = part["routecodex_chat_extension"]
+                                ["responses_tool_call_type"]
+                                == "custom_tool_call";
+                            custom_results
+                                .entry(id)
+                                .and_modify(|all_custom| *all_custom &= custom)
+                                .or_insert(custom);
+                        }
+                    }
+                }
                 let mut message_content = Vec::new();
                 for part in parts {
                     match part.get("type").and_then(Value::as_str) {
@@ -74,7 +89,28 @@ pub(super) fn encode_anthropic_messages_as_responses_semantic(
                                 &role,
                                 &mut message_content,
                             );
-                            encoded.push(json!({"type":"function_call","call_id":part.get("id").cloned().unwrap_or(Value::Null),"name":part.get("name").cloned().unwrap_or(Value::Null),"arguments":serde_json::to_string(part.get("input").unwrap_or(&Value::Null)).map_err(|_| V3AnthropicCodecError::MalformedField { field: "tool_use input" })?}));
+                            let association = &part["routecodex_chat_extension"];
+                            if association["responses_tool_call_type"] == "custom_tool_call" {
+                                let mut call = json!({"type":"custom_tool_call","call_id":part.get("id").cloned().unwrap_or(Value::Null),"name":part.get("name").cloned().unwrap_or(Value::Null)});
+                                let input = if association["responses_custom_input_wrapped"] == true
+                                {
+                                    part.get("input").and_then(|input| input.get("input"))
+                                } else {
+                                    part.get("input")
+                                };
+                                if let Some(input) = input {
+                                    call["input"] = input.clone();
+                                }
+                                if let Some(id) = association.get("responses_item_id") {
+                                    call["id"] = id.clone();
+                                }
+                                if let Some(namespace) = association.get("responses_namespace") {
+                                    call["namespace"] = namespace.clone();
+                                }
+                                encoded.push(call);
+                            } else {
+                                encoded.push(json!({"type":"function_call","call_id":part.get("id").cloned().unwrap_or(Value::Null),"name":part.get("name").cloned().unwrap_or(Value::Null),"arguments":serde_json::to_string(part.get("input").unwrap_or(&Value::Null)).map_err(|_| V3AnthropicCodecError::MalformedField { field: "tool_use input" })?}));
+                            }
                         }
                         Some("tool_result") => {
                             push_responses_message_content(
@@ -82,7 +118,13 @@ pub(super) fn encode_anthropic_messages_as_responses_semantic(
                                 &role,
                                 &mut message_content,
                             );
-                            encoded.push(json!({"type":"function_call_output","call_id":part.get("tool_use_id").cloned().unwrap_or(Value::Null),"output":anthropic_tool_result_output_as_responses_semantic(part.get("content"))?}));
+                            let custom = part
+                                .get("tool_use_id")
+                                .and_then(Value::as_str)
+                                .and_then(|id| custom_results.get(id))
+                                .copied()
+                                .unwrap_or(false);
+                            encoded.push(json!({"type":if custom {"custom_tool_call_output"} else {"function_call_output"},"call_id":part.get("tool_use_id").cloned().unwrap_or(Value::Null),"output":anthropic_tool_result_output_as_responses_semantic(part.get("content"))?}));
                         }
                         _ => {}
                     }

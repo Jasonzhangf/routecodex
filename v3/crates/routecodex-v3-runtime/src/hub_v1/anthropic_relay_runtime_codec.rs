@@ -37,12 +37,24 @@ pub fn project_v3_responses_json_as_anthropic_message(
             }
             Some("custom_tool_call") => {
                 has_tool = true;
-                content.push(json!({
+                let mut block = json!({
                     "type":"tool_use",
                     "id":item.get("call_id").or_else(|| item.get("id")).cloned().unwrap_or(Value::Null),
                     "name":item.get("name").cloned().unwrap_or(Value::Null),
                     "input":responses_custom_tool_call_input(item)?
-                }));
+                });
+                let mut association = json!({
+                    "responses_tool_call_type":"custom_tool_call",
+                    "responses_custom_input_wrapped":!item.get("input").is_some_and(Value::is_object)
+                });
+                if let Some(id) = item.get("id") {
+                    association["responses_item_id"] = id.clone();
+                }
+                if let Some(namespace) = item.get("namespace") {
+                    association["responses_namespace"] = namespace.clone();
+                }
+                block["routecodex_chat_extension"] = association;
+                content.push(block);
             }
             Some("output_text") => {
                 if let Some(text) = item.get("text").and_then(Value::as_str) {
@@ -80,6 +92,12 @@ pub fn project_v3_responses_json_as_anthropic_message(
     });
     if let Some(model) = object.get("model") {
         message["model"] = model.clone();
+    }
+    if let Some(details) = object.get("stop_details") {
+        message["stop_details"] = details.clone();
+    }
+    if let Some(sequence) = object.get("stop_sequence") {
+        message["stop_sequence"] = sequence.clone();
     }
     if let Some(usage) = object
         .get("usage")
@@ -166,13 +184,7 @@ pub fn project_v3_openai_chat_completion_as_anthropic_message(
         .unwrap_or_default();
     for tool_call in &tool_calls {
         let function = tool_call.get("function").cloned().unwrap_or_default();
-        let arguments = function
-            .get("arguments")
-            .and_then(Value::as_str)
-            .unwrap_or("{}");
-        let input = serde_json::from_str::<Value>(arguments)
-            .ok()
-            .unwrap_or_else(|| json!({}));
+        let input = parse_responses_function_call_arguments(&function)?;
         content.push(json!({
             "type":"tool_use",
             "id":tool_call.get("id").cloned().unwrap_or(Value::Null),
@@ -206,15 +218,12 @@ pub fn project_v3_openai_chat_completion_as_anthropic_message(
 }
 
 fn openai_chat_stop_reason_as_anthropic_stop_reason(choice: &Value, tool_calls: &[Value]) -> Value {
-    if !tool_calls.is_empty() {
-        return Value::String("tool_use".to_string());
-    }
-    let stop_reason = Value::String(match choice.get("finish_reason").and_then(Value::as_str) {
-        Some("length" | "max_tokens") => "max_tokens".to_string(),
+    Value::String(match choice.get("finish_reason").and_then(Value::as_str) {
+        Some("length" | "max_tokens" | "max_output_tokens") => "max_tokens".to_string(),
         Some("content_filter") => "refusal".to_string(),
+        _ if !tool_calls.is_empty() => "tool_use".to_string(),
         _ => "end_turn".to_string(),
-    });
-    stop_reason
+    })
 }
 
 pub fn project_v3_responses_error_as_anthropic_error(body: &[u8]) -> Value {
@@ -326,14 +335,14 @@ fn project_v3_anthropic_message_as_sse_events(
                 }));
             }
             Some("tool_use") => {
-                let id = part
+                let _id = part
                     .get("id")
                     .and_then(Value::as_str)
                     .filter(|value| !value.trim().is_empty())
                     .ok_or(V3AnthropicCodecError::MalformedField {
                         field: "tool_use id",
                     })?;
-                let name = part
+                let _name = part
                     .get("name")
                     .and_then(Value::as_str)
                     .filter(|value| !value.trim().is_empty())
@@ -353,7 +362,7 @@ fn project_v3_anthropic_message_as_sse_events(
                 }
                 events.push(json!({
                     "event":"content_block_start",
-                    "data":{"type":"content_block_start","index":index,"content_block":{"type":"tool_use","id":id,"name":name,"input":input}}
+                    "data":{"type":"content_block_start","index":index,"content_block":part}
                 }));
                 events.push(json!({
                     "event":"content_block_stop",
@@ -367,14 +376,18 @@ fn project_v3_anthropic_message_as_sse_events(
             }
         }
     }
+    let mut terminal_delta = json!({
+        "stop_reason": object.get("stop_reason").cloned().unwrap_or(Value::String("end_turn".to_string())),
+        "stop_sequence": object.get("stop_sequence").cloned().unwrap_or(Value::Null)
+    });
+    if let Some(details) = object.get("stop_details") {
+        terminal_delta["stop_details"] = details.clone();
+    }
     events.push(json!({
         "event":"message_delta",
         "data":{
             "type":"message_delta",
-            "delta":{
-                "stop_reason": object.get("stop_reason").cloned().unwrap_or(Value::String("end_turn".to_string())),
-                "stop_sequence": object.get("stop_sequence").cloned().unwrap_or(Value::Null)
-            },
+            "delta":terminal_delta,
             "usage": object.get("usage").cloned().unwrap_or(Value::Object(serde_json::Map::new()))
         }
     }));
@@ -403,22 +416,23 @@ fn optional_anthropic_reasoning_string<'a>(
 }
 
 fn parse_responses_function_call_arguments(item: &Value) -> Result<Value, V3AnthropicCodecError> {
-    let arguments = item
-        .get("arguments")
-        .ok_or(V3AnthropicCodecError::MalformedField {
-            field: "function_call arguments",
-        })?;
-    match arguments {
-        Value::String(raw) => {
-            serde_json::from_str(raw).map_err(|_| V3AnthropicCodecError::MalformedField {
-                field: "function_call arguments",
-            })
-        }
-        Value::Object(_) => Ok(arguments.clone()),
-        _ => Err(V3AnthropicCodecError::MalformedField {
-            field: "function_call arguments",
-        }),
+    let arguments = item.get("arguments");
+    let unrepresentable = |reason: String| V3AnthropicCodecError::UnrepresentableToolArguments {
+        arguments: arguments.cloned(),
+        reason,
+    };
+    let input = match arguments {
+        Some(Value::String(raw)) => serde_json::from_str::<Value>(raw)
+            .map_err(|error| unrepresentable(error.to_string()))?,
+        Some(value) => value.clone(),
+        None => return Err(unrepresentable("arguments are missing".to_owned())),
+    };
+    if !input.is_object() {
+        return Err(unrepresentable(
+            "tool_use input requires a JSON object".to_owned(),
+        ));
     }
+    Ok(input)
 }
 
 fn responses_custom_tool_call_input(item: &Value) -> Result<Value, V3AnthropicCodecError> {
@@ -426,8 +440,9 @@ fn responses_custom_tool_call_input(item: &Value) -> Result<Value, V3AnthropicCo
         Some(Value::Object(_)) => Ok(item.get("input").cloned().unwrap_or(Value::Null)),
         Some(Value::String(raw)) => Ok(json!({"input":raw})),
         Some(other) => Ok(json!({"input":other})),
-        None => Err(V3AnthropicCodecError::MalformedField {
-            field: "custom_tool_call input",
+        None => Err(V3AnthropicCodecError::UnrepresentableToolArguments {
+            arguments: None,
+            reason: "custom_tool_call input is missing".to_owned(),
         }),
     }
 }
@@ -436,8 +451,8 @@ fn responses_stop_reason_as_anthropic_stop_reason(
     object: &serde_json::Map<String, Value>,
     has_tool: bool,
 ) -> &'static str {
-    if has_tool {
-        return "tool_use";
+    if object.get("stop_sequence").is_some_and(Value::is_string) {
+        return "stop_sequence";
     }
     // responses finish_reason -> hub -> anthropic（查表；未命中走 status 分支，与原 match 兜底一致）
     if let Some(value) = object.get("finish_reason").and_then(Value::as_str) {
@@ -472,6 +487,8 @@ fn responses_stop_reason_as_anthropic_stop_reason(
     ) {
         (Some("incomplete"), Some("content_filter")) => "refusal",
         (Some("incomplete"), Some("max_output_tokens")) => "max_tokens",
+        (Some("in_progress"), _) => "pause_turn",
+        _ if has_tool => "tool_use",
         _ => "end_turn",
     }
 }
@@ -479,6 +496,53 @@ fn responses_stop_reason_as_anthropic_stop_reason(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn anthropic_tool_arguments_keep_complete_objects_and_original_unrepresentable_values() {
+        for arguments in [
+            json!("{\"q\":\" exact input \\n\"}"),
+            json!({"q":" exact input \n"}),
+            json!("{}"),
+            json!({}),
+        ] {
+            let input =
+                parse_responses_function_call_arguments(&json!({"arguments":arguments})).unwrap();
+            let expected = if let Some(raw) = arguments.as_str() {
+                serde_json::from_str::<Value>(raw).unwrap()
+            } else {
+                arguments.clone()
+            };
+            assert_eq!(input, expected);
+        }
+        for arguments in [
+            None,
+            Some(json!("{\"q\":")),
+            Some(json!("")),
+            Some(json!("[]")),
+            Some(json!("null")),
+            Some(json!("true")),
+            Some(json!("7")),
+            Some(json!([])),
+            Some(Value::Null),
+            Some(json!(true)),
+            Some(json!(7)),
+        ] {
+            let item = arguments
+                .as_ref()
+                .map(|raw| json!({"arguments":raw}))
+                .unwrap_or_else(|| json!({}));
+            match parse_responses_function_call_arguments(&item).unwrap_err() {
+                V3AnthropicCodecError::UnrepresentableToolArguments {
+                    arguments: original,
+                    reason,
+                } => {
+                    assert_eq!(original, arguments);
+                    assert!(!reason.is_empty());
+                }
+                other => panic!("original arguments and cause must remain typed: {other:?}"),
+            }
+        }
+    }
 
     #[test]
     fn responses_content_filter_projects_to_anthropic_refusal() {
@@ -535,7 +599,11 @@ mod tests {
                 let message = project_v3_responses_json_as_anthropic_message(&response).unwrap();
                 assert_eq!(
                     message["stop_reason"],
-                    if with_tools { "tool_use" } else { expected }
+                    if with_tools && expected == "end_turn" {
+                        "tool_use"
+                    } else {
+                        expected
+                    }
                 );
                 assert_eq!(message["id"], "msg_native");
                 assert_eq!(message["model"], "model");
@@ -673,7 +741,7 @@ mod tests {
             );
             assert_eq!(message["id"], "msg_mixed");
             assert_eq!(message["model"], "model");
-            assert_eq!(message["stop_reason"], "tool_use");
+            assert_eq!(message["stop_reason"], "refusal");
             assert_eq!(message["usage"]["input_tokens"], 3);
             assert_eq!(message["usage"]["output_tokens"], 2);
             response["choices"][0]["message"]["reasoning_content"] = json!("");

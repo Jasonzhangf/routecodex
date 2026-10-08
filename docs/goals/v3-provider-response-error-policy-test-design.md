@@ -59,6 +59,12 @@ provider HTTP / complete SSE attempt
 - Real HTTP failures use the provider-scoped typed recovery path and never become a client error response.
 - One recoverable failure leaves the provider eligible; a subsequent real success resets the pre-cooldown streak.
 - Positive control: normal provider HTTP 200 content completes unchanged.
+- Responses custom calls projected to Chat keep their existing custom-kind association and input wrapper. Submit the returned JSON/SSE call unchanged with the actual client result; the next Responses request must retain the original custom call, complete input or absence, and matching custom output.
+- Chat providers returning custom-call input wrappers preserve every JSON input value and true absence through JSON and SSE, including fragmented wrapper text. Submit the actual returned call and client execution or validation result unchanged; the next Chat request must contain exactly one wrapper. Malformed raw argument text remains intact.
+- Responses custom calls returned through Anthropic JSON/SSE retain their business type association. Execute the actual returned tool_use and submit it unchanged with its matching actual tool_result; the next Responses request must recover custom call/output kinds, original IDs, name and complete input, including natural object input fields and scalar wrappers.
+- Chat JSON/SSE clients execute an ordinary returned call and a later custom returned call that reuse one ID. Submit both actual call/result turns unchanged; the next Responses wire must preserve the earlier function result and the later custom result, with the complete arguments/input and actual execution output.
+- Chat JSON/SSE calls named tool_search use the actual ordinary, custom or native declaration. Preserve opaque structured values, raw text and missing arguments. Execute or validate each returned call in the client, then submit that call and its actual result unchanged to Chat and Responses; neither parameter validation nor a name collision may cause provider cooldown.
+- An otherwise successful provider response that cannot represent tool arguments in Anthropic ends only that client request through the typed local response Error chain. With health enabled, two identical projection failures must leave the same provider/auth/model identity eligible for a subsequent valid request.
 
 ## Required verification
 

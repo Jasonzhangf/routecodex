@@ -1002,6 +1002,14 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                             {
                                 return Err(error);
                             }
+                            // 成功 provider 业务响应的 tool 参数无法表示为
+                            // Anthropic tool_use.input：这是请求本地的表示边界
+                            // 失败，不是 provider 失败。禁止进入 provider failure
+                            // 重试/降级/health 链，直接 fail-fast，由 typed
+                            // request-local Error06 路径投影为 NoResponse 真实断开。
+                            if is_v3_anthropic_request_local_projection_failure(&error) {
+                                return Err(error);
+                            }
                             let failure = if let Some(failure) =
                                 anthropic_provider_stream_failure_from_closeout_error(
                                     &error,
@@ -1220,6 +1228,14 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                             if let V3AnthropicRelayRuntimeError::WebSearchInterceptedUnprojected =
                                 &error
                             {
+                                return Err(error);
+                            }
+                            // 成功 provider 业务响应的 tool 参数无法表示为
+                            // Anthropic tool_use.input：请求本地的表示边界失败，
+                            // 不是 provider 失败。禁止进入 provider failure
+                            // 重试/降级/health 链，直接 fail-fast，由 typed
+                            // request-local Error06 路径投影为 NoResponse 真实断开。
+                            if is_v3_anthropic_request_local_projection_failure(&error) {
                                 return Err(error);
                             }
                             let failure = provider_runtime_failure(

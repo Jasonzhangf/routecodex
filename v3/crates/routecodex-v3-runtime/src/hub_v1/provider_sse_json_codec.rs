@@ -117,21 +117,13 @@ pub(crate) fn normalize_v3_provider_sse_json_data_with_event_name(
 pub(crate) fn normalize_v3_responses_function_call_arguments(
     event: &mut Value,
 ) -> Result<bool, String> {
-    let event_name = event
-        .get("type")
-        .and_then(Value::as_str)
-        .or_else(|| event.get("event").and_then(Value::as_str))
-        .or_else(|| event.get("event_name").and_then(Value::as_str))
-        .map(ToOwned::to_owned);
-    normalize_v3_responses_function_call_arguments_for_event(event, event_name.as_deref())
+    normalize_v3_responses_function_call_arguments_for_event(event)
 }
 
 fn normalize_v3_responses_function_call_arguments_for_event(
     event: &mut Value,
-    event_name: Option<&str>,
 ) -> Result<bool, String> {
     let mut normalized = false;
-    let partial_function_call = event_name == Some("response.output_item.added");
     let mut normalize_item = |item: &mut Value| -> Result<(), String> {
         let Some(object) = item.as_object_mut() else {
             return Ok(());
@@ -140,21 +132,14 @@ fn normalize_v3_responses_function_call_arguments_for_event(
             return Ok(());
         }
         let Some(arguments) = object.get_mut("arguments") else {
-            if partial_function_call {
-                object.insert("arguments".to_owned(), Value::String(String::new()));
-                normalized = true;
-            }
             return Ok(());
         };
-        if partial_function_call && arguments.is_null() {
-            *arguments = Value::String(String::new());
-            normalized = true;
-        } else if !arguments.is_string() {
+        if !arguments.is_string() {
             // Responses function_call.arguments is JSON text. Providers may
             // emit the JSON value itself (object/array/number/bool/null);
             // serialize that value at the provider-response boundary without
-            // interpreting or rewriting tool semantics. Missing terminal
-            // arguments remain invalid because there is no value to preserve.
+            // interpreting or rewriting tool semantics. A missing field stays
+            // absent because there is no value to preserve.
             *arguments =
                 Value::String(serde_json::to_string(arguments).map_err(|error| error.to_string())?);
             normalized = true;
@@ -444,13 +429,11 @@ pub(super) fn response_output_item_has_client_output(item: &Value) -> Result<boo
         Some("function_call") => {
             require_non_empty_output_string(item, "function_call", "call_id")?;
             require_non_empty_output_string(item, "function_call", "name")?;
-            require_output_string(item, "function_call", "arguments")?;
             Ok(true)
         }
         Some("custom_tool_call") => {
             require_non_empty_output_string(item, "custom_tool_call", "call_id")?;
             require_non_empty_output_string(item, "custom_tool_call", "name")?;
-            require_output_string(item, "custom_tool_call", "input")?;
             Ok(true)
         }
         Some("tool_search_call") => {
@@ -556,19 +539,6 @@ pub(super) fn require_non_empty_output_string(
     if !has_non_empty_string(item.get(field)) {
         return Err(format!(
             "provider Responses {output_type} output requires non-empty {field}"
-        ));
-    }
-    Ok(())
-}
-
-pub(super) fn require_output_string(
-    item: &serde_json::Map<String, Value>,
-    output_type: &str,
-    field: &str,
-) -> Result<(), String> {
-    if item.get(field).and_then(Value::as_str).is_none() {
-        return Err(format!(
-            "provider Responses {output_type} output requires string field {field}"
         ));
     }
     Ok(())
@@ -1566,7 +1536,7 @@ mod provider_sse_json_codec_tests {
     }
 
     #[test]
-    fn responses_partial_function_call_missing_arguments_is_empty_string() {
+    fn responses_partial_function_call_preserves_missing_and_null_arguments() {
         for arguments in ["missing", "null"] {
             let item = if arguments == "missing" {
                 r#"{"type":"function_call","call_id":"call_1","name":"exec_command"}"#
@@ -1581,7 +1551,11 @@ mod provider_sse_json_codec_tests {
             )
             .expect("partial function call must normalize");
             let value: Value = serde_json::from_str(&normalized).expect("normalized JSON");
-            assert_eq!(value["item"]["arguments"], "");
+            if arguments == "missing" {
+                assert!(value["item"].get("arguments").is_none());
+            } else {
+                assert_eq!(value["item"]["arguments"], "null");
+            }
             assert_eq!(
                 classify_v3_provider_sse_json_data(
                     V3HubProviderWireProtocol::Responses,
@@ -1618,16 +1592,18 @@ mod provider_sse_json_codec_tests {
     }
 
     #[test]
-    fn responses_terminal_function_call_missing_arguments_still_fails() {
+    fn responses_terminal_function_call_missing_arguments_is_preserved() {
         let data = normalize_v3_provider_sse_json_data_with_event_name(
             V3HubProviderWireProtocol::Responses,
             r#"{"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_1","name":"exec_command"}}"#,
             None,
         )
         .expect("terminal frame normalization must not guess arguments");
-        let error = classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &data)
-            .expect_err("terminal function call without arguments must fail");
-        assert!(error.contains("arguments"), "unexpected error: {error}");
+        let event: Value = serde_json::from_str(&data).unwrap();
+        assert!(event["item"].get("arguments").is_none());
+        assert!(
+            classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &data).is_ok()
+        );
     }
 
     #[test]

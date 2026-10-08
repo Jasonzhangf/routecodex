@@ -333,7 +333,6 @@ forbidAll(responseGovern, 'RespChatProcess tool governance owner', [
 const responseToolCollector = functionBody(hub, 'fn collect_v3_resp03_responses_tool_calls');
 requireAll(responseToolCollector, 'RespChatProcess tool governance collector', [
   'tool_calls.push',
-  'duplicate call_id/id',
   'classify_v3_hub_relay_tool_kind',
 ]);
 

@@ -125,6 +125,26 @@ pub fn project_v3_anthropic_relay_runtime_failure(
     project_v3_anthropic_relay_runtime_failure_with_trace(error, Vec::new())
 }
 
+/// Request-local client-projection boundary failure.
+///
+/// A successful provider business response reached the Anthropic client
+/// projector, but the model-generated tool arguments cannot be represented as
+/// Anthropic `tool_use.input` (malformed string, missing, or non-object). The
+/// provider/model content is not a provider failure: the runtime must terminate
+/// only the affected client request, keep the typed original value and cause,
+/// and never mutate shared provider health. The typed codec variant is the sole
+/// signal; no error-string matching is used.
+pub(crate) fn is_v3_anthropic_request_local_projection_failure(
+    error: &V3AnthropicRelayRuntimeError,
+) -> bool {
+    matches!(
+        error,
+        V3AnthropicRelayRuntimeError::Codec(
+            V3AnthropicCodecError::UnrepresentableToolArguments { .. }
+        )
+    )
+}
+
 pub(crate) fn project_v3_anthropic_relay_runtime_failure_with_trace(
     error: V3AnthropicRelayRuntimeError,
     trace: Vec<&'static str>,
@@ -138,9 +158,11 @@ pub(crate) fn project_v3_anthropic_relay_runtime_failure_with_trace(
         &error,
         V3AnthropicRelayRuntimeError::ProviderPoolExhausted { .. }
     );
+    let request_local_projection_failure = is_v3_anthropic_request_local_projection_failure(&error);
     let internal_status = match &error {
         V3AnthropicRelayRuntimeError::ExecutionControlRequest(_) => Some(598),
         V3AnthropicRelayRuntimeError::ExecutionControlResponse(_) => Some(599),
+        _ if request_local_projection_failure => Some(599),
         _ => None,
     };
     let source = match error {
@@ -180,6 +202,21 @@ pub(crate) fn project_v3_anthropic_relay_runtime_failure_with_trace(
                 message,
             )
         }
+        V3AnthropicRelayRuntimeError::Codec(
+            V3AnthropicCodecError::UnrepresentableToolArguments { arguments, reason },
+        ) => build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3ServerRespOutbound06ClientFrame",
+            "anthropic_unrepresentable_tool_arguments",
+            format!(
+                "Anthropic client projection cannot represent provider tool arguments: {reason}; \
+                 original_arguments={}",
+                match arguments {
+                    Some(value) => value.to_string(),
+                    None => "<absent>".to_string(),
+                }
+            ),
+        ),
         error => build_v3_error_01_source_raised(
             V3ErrorSourceKind::RuntimeFailure,
             "V3HubRuntime",
@@ -193,7 +230,11 @@ pub(crate) fn project_v3_anthropic_relay_runtime_failure_with_trace(
         "none",
         trace,
     );
-    if provider_pool_exhausted {
+    // Both terminals carry no client payload: the provider pool is exhausted, or
+    // a successful business response cannot be represented in the client
+    // protocol. Either way the client observes a true transport break, and the
+    // typed cause stays in the Error chain instead of a fabricated error body.
+    if provider_pool_exhausted || request_local_projection_failure {
         output.terminal_disposition =
             Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse);
     }

@@ -374,8 +374,12 @@ fn transducer_projects_custom_tool_call_items() {
     assert_eq!(tool_call["function"]["name"], json!("apply_patch"));
     assert_eq!(
         tool_call["function"]["arguments"],
-        json!("*** Begin Patch"),
-        "custom_tool_call.input must project into function.arguments"
+        json!("{\"input\":\"*** Begin Patch\"}"),
+        "custom_tool_call.input must use the reversible Chat wrapper"
+    );
+    assert_eq!(
+        tool_call["routecodex_chat_extension"]["responses_tool_call_type"],
+        "custom_tool_call"
     );
 }
 
@@ -412,7 +416,11 @@ fn non_stream_projection_resolves_item_id_and_projects_custom_tool_call() {
     assert_eq!(tool_calls[1]["function"]["name"], json!("apply_patch"));
     assert_eq!(
         tool_calls[1]["function"]["arguments"],
-        json!("*** Begin Patch")
+        json!("{\"input\":\"*** Begin Patch\"}")
+    );
+    assert_eq!(
+        tool_calls[1]["routecodex_chat_extension"]["responses_tool_call_type"],
+        "custom_tool_call"
     );
     assert_eq!(
         projected["choices"][0]["finish_reason"],

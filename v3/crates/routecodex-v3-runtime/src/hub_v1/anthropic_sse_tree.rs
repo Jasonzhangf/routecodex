@@ -369,6 +369,12 @@ impl V3AnthropicSseReducerState {
                     .and_then(Value::as_str)
                     .map(str::to_owned)
                     .or_else(|| message.stop_sequence.take());
+                if let Some(details) = delta.get("stop_details") {
+                    message.extensions.push(V3AnthropicSseExtension {
+                        name: "stop_details".to_owned(),
+                        value: details.clone(),
+                    });
+                }
             }
         }
         if let Some(usage) = event.get("usage") {

@@ -226,16 +226,13 @@ pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
                     .map(read_v3_openai_chat_tool_identity)
                     .unwrap_or_default();
                 let name = item.get("name").and_then(Value::as_str).unwrap_or_default();
-                let arguments = item
-                    .get("arguments")
-                    .and_then(Value::as_str)
-                    .or_else(|| item.get("input").and_then(Value::as_str))
-                    .unwrap_or_default();
-                tool_calls.push(serde_json::json!({
-                    "id": call_id,
-                    "type": "function",
-                    "function": {"name": name, "arguments": arguments}
-                }));
+                if let Some(item) = item.as_object() {
+                    tool_calls.push(
+                        super::responses_openai_codec::project_v3_responses_tool_call_to_openai_chat(
+                            item, &call_id, name,
+                        ),
+                    );
+                }
             }
             _ => {}
         }
@@ -299,12 +296,10 @@ pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
 }
 
 fn responses_as_chat_finish_reason(has_tool_calls: bool, reason: Option<&str>) -> &'static str {
-    if has_tool_calls {
-        return "tool_calls";
-    }
     match reason {
         Some("max_output_tokens") => "length",
         Some("content_filter") => "content_filter",
+        _ if has_tool_calls => "tool_calls",
         _ => "stop",
     }
 }
@@ -750,6 +745,7 @@ fn require_object(payload: &Value) -> Result<&Map<String, Value>, V3OpenAiChatCo
 pub(crate) struct V3OpenAiChatResponsesSseTransducer {
     response_started: bool,
     completed: bool,
+    pending_items: super::responses_sse_tree::V3ResponsesSseReducerState,
     emitted_items: BTreeMap<usize, Map<String, Value>>,
     summary_part_indices: BTreeMap<usize, u64>,
     response_id: Option<String>,
@@ -764,6 +760,7 @@ impl Default for V3OpenAiChatResponsesSseTransducer {
         Self {
             response_started: false,
             completed: false,
+            pending_items: super::responses_sse_tree::V3ResponsesSseReducerState::default(),
             emitted_items: BTreeMap::new(),
             summary_part_indices: BTreeMap::new(),
             response_id: None,
@@ -797,6 +794,24 @@ impl V3OpenAiChatResponsesSseTransducer {
             .ok_or_else(|| "Responses SSE event is missing type".to_string())?;
         if self.completed {
             return Ok(Vec::new());
+        }
+        let has_item = object.get("item").is_some_and(Value::is_object);
+        if (has_item
+            && matches!(
+                event_type,
+                "response.output_item.added" | "response.output_item.done"
+            ))
+            || matches!(
+                event_type,
+                "response.function_call_arguments.delta"
+                    | "response.function_call_arguments.done"
+                    | "response.custom_tool_call_input.delta"
+                    | "response.custom_tool_call_input.done"
+            )
+        {
+            self.pending_items
+                .apply_event(&event)
+                .map_err(|error| error.to_string())?;
         }
         match event_type {
             "response.created" => {
@@ -1044,11 +1059,25 @@ impl V3OpenAiChatResponsesSseTransducer {
                 .and_then(Value::as_str)
                 .map(str::to_owned);
         }
-        let Some(output) = response.get("output").and_then(Value::as_array) else {
-            return Ok(Vec::new());
+        // A terminal may omit output already carried by item/argument events.
+        // The same typed reducer owns that assembly; a present empty output
+        // remains empty rather than being filled from earlier progress.
+        let output = if let Some(output) = response.get("output") {
+            output.as_array().cloned().unwrap_or_default()
+        } else {
+            self.pending_items
+                .items
+                .iter()
+                .map(|item| item.item().to_normalized_value())
+                .collect()
         };
         let mut chunks = Vec::new();
         for (index, item) in output.iter().enumerate() {
+            let index = item
+                .get("output_index")
+                .and_then(Value::as_u64)
+                .map(|index| index as usize)
+                .unwrap_or(index);
             chunks.extend(self.output_item_chunks(index, item)?);
         }
         Ok(chunks)

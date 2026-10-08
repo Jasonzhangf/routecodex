@@ -564,7 +564,7 @@ fn anthropic_responses_field_parity_response_matrix() {
             {"type":"text","text":"hello"},
             {"type":"text","text":" world"},
             {"type":"tool_use","id":"call_lookup","name":"lookup","input":{"q":"beta"}},
-            {"type":"tool_use","id":"call_raw","name":"exec","input":{"input":"raw script"}}
+            {"type":"tool_use","id":"call_raw","name":"exec","input":{"input":"raw script"},"routecodex_chat_extension":{"responses_tool_call_type":"custom_tool_call","responses_custom_input_wrapped":true}}
         ])
     );
 }
@@ -580,7 +580,9 @@ fn anthropic_responses_field_parity_rejects_malformed_function_arguments() {
     }))
     .unwrap_err();
     assert!(
-        error.to_string().contains("function_call arguments"),
+        error
+            .to_string()
+            .contains("Anthropic tool input cannot represent provider arguments"),
         "unexpected error: {error}"
     );
 }

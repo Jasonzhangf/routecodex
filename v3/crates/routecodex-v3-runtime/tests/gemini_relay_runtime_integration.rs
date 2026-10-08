@@ -1048,10 +1048,9 @@ async fn validated_terminal_sse_releases_action_lane_for_a_fresh_request() {
     let manifest = manifest_for_action_gate_scope(server_id);
     let provider_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
-    // A recoverable malformed provider stream is counted into provider health,
-    // so three consecutive same-class failures are needed before the provider is
-    // held in cooldown.
-    for attempt in 0..3 {
+    // Seed one recoverable malformed attempt so the next success can prove
+    // action-lane release while this provider remains eligible.
+    {
         let failing = StaticSseTransport {
             chunks: Mutex::new(Some(vec![b"data: {malformed-json}\n\n".to_vec()])),
         };
@@ -1065,7 +1064,7 @@ async fn validated_terminal_sse_releases_action_lane_for_a_fresh_request() {
                     concat!(module_path!(), ":", line!()),
                 )
                 .expect("test provider failure session scope"),
-                request_id: format!("req-gemini-seed-active-gate-{attempt}"),
+                request_id: "req-gemini-seed-active-gate".into(),
                 endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
                 payload: json!({
                     "contents":[{"role":"user","parts":[{"text":"seed"}]}],
@@ -1077,7 +1076,7 @@ async fn validated_terminal_sse_releases_action_lane_for_a_fresh_request() {
         )
         .await
         .expect("failed provider attempt must reach terminal Error06");
-        assert_eq!(failed.status, 502, "attempt {attempt}: {failed:?}");
+        assert_eq!(failed.status, 502, "{failed:?}");
         assert_eq!(failed.error_chain.as_ref().map(Vec::len), Some(6));
         assert_eq!(failed.node_trace.last(), Some(&"V3Error06ClientProjected"));
         let failed_client_response = match failed.client_body {

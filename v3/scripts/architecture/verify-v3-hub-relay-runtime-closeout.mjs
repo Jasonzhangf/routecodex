@@ -262,8 +262,8 @@ requireText(
   'source_stage: "V3HubRespChatProcess03Governed"',
 );
 for (const phrase of [
-  'responses_relay_provider_duplicate_tool_identity_reselects_before_projection_for_json_and_sse',
-  'responses_relay_provider_duplicate_tool_identity_projects_typed_error_after_exhaustion',
+  'responses_relay_provider_duplicate_tool_identity_preserves_first_attempt_for_json_and_sse',
+  'responses_relay_provider_duplicate_tool_identity_preserves_single_candidate_response',
 ]) requireText(tests, testPath, phrase);
 for (const node of expectedNodes) requireText(responsesRuntime, responsesRuntimePath, node);
 for (const node of expectedNodes.slice(0, 10)) {
