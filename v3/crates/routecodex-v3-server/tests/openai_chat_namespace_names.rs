@@ -718,16 +718,16 @@ async fn invalid_custom_arguments_reach_client_and_recover_json_and_sse() {
     let outcome: Result<(), String> = async {
         let cases = [
             (r#"{"arguments":"{\"cmd\":\"DIAGNOSTIC_ONLY\"}","name":"functions__exec"}"#, None),
-            (r#"{"input":42}"#, None), (" null \n", None), ("[1,2]", None), ("", None),
+            (r#"{"input":42}"#, Some(json!(42))), (" null \n", None), ("[1,2]", None), ("", None),
             ("  {\"input\":  \n", None), ("  text(\"ORIGINAL\");\n", None),
-            (r#"{"input":"text(\"ORIGINAL\");"}"#, Some("text(\"ORIGINAL\");")),
-            (r#""text(\"ORIGINAL\");""#, Some("text(\"ORIGINAL\");")),
+            (r#"{"input":"text(\"ORIGINAL\");"}"#, Some(json!("text(\"ORIGINAL\");"))),
+            (r#""text(\"ORIGINAL\");""#, Some(json!("text(\"ORIGINAL\");"))),
         ];
         for stream in [false, true] {
           for discovered in [false, true] {
-            for (raw, unwrapped) in cases {
+            for (raw, unwrapped) in &cases {
                 *fixture.raw.lock().unwrap() = raw.to_string();
-                let expected = unwrapped.unwrap_or(raw);
+                let expected = unwrapped.clone().unwrap_or_else(|| json!(raw));
                 let mut request = json!({"model":"name-client","stream":stream,"input":[{"role":"user","content":"Use the declared tool; correct any tool error."}],"tools":[{"type":"namespace","name":"functions","tools":[{"type":"custom","name":"exec","description":"JavaScript evaluator","format":{"type":"text"}}]}]});
                 if discovered {
                     let declarations = request["tools"].take();
@@ -736,7 +736,7 @@ async fn invalid_custom_arguments_reach_client_and_recover_json_and_sse() {
                     history.insert(0, json!({"type":"tool_search_call","call_id":"call_search","execution":"client","arguments":{"query":"exec"}}));
                     history.insert(1, json!({"type":"tool_search_output","call_id":"call_search","execution":"client","tools":declarations}));
                 }
-                for (turn, id, input) in [(0, "call_bad", expected), (1, "call_fixed", "text(\"RECOVERED\");")] {
+                for (turn, id, input) in [(0, "call_bad", expected.clone()), (1, "call_fixed", json!("text(\"RECOVERED\");"))] {
                     let sent = client.post(&endpoint).json(&request).send().await.map_err(|error| error.to_string())?;
                     let response = read_recovery_response(sent, stream).await?;
                     let call = response["output"].as_array().and_then(|items| items.iter().find(|item| item["type"] == "custom_tool_call")).ok_or_else(|| format!("missing client tool call: {response}"))?;
