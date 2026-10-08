@@ -165,54 +165,6 @@ pub(crate) fn provider_runtime_failure(
     }
 }
 
-pub(crate) fn provider_semantic_failure(
-    error: responses_relay_diagnostics::V3ProviderSemanticErrorProjection,
-    provider_id: &str,
-    observability: Option<V3RuntimeObservability>,
-) -> V3ResponsesRelayProviderFailure {
-    let status = error.status;
-    let policy_error_type = error.code.clone();
-    let policy_error_message = error.message.clone();
-    let matched_policy = error.matched_policy.clone();
-    V3ResponsesRelayProviderFailure {
-        status,
-        // A provider *semantic* failure is a synthesized projection status
-        // (`V3ProviderSemanticErrorProjection` uses 200/429/502 to select the
-        // Error05 lane); it is not an upstream HTTP status, so record none.
-        provider_status: None,
-        policy_error_type,
-        policy_error_message,
-        provider_id: provider_id.to_string(),
-        source_stage: "V3ProviderRespInbound01Raw",
-        observability,
-        terminal_projection: None,
-        terminal_disposition: None,
-        matched_policy,
-    }
-}
-
-pub(crate) fn provider_terminal_admission_failure(
-    failure: crate::hub_v1::V3ProviderTerminalAdmissionFailure,
-    status: u16,
-    provider_id: &str,
-    observability: Option<V3RuntimeObservability>,
-) -> V3ResponsesRelayProviderFailure {
-    V3ResponsesRelayProviderFailure {
-        status,
-        // Callers pass the raw status of the HTTP response that carried the
-        // inadmissible body, so this IS a real upstream HTTP status.
-        provider_status: Some(status),
-        policy_error_type: failure.code,
-        policy_error_message: failure.message,
-        provider_id: provider_id.to_string(),
-        source_stage: "V3ProviderRespInbound01Raw",
-        observability,
-        terminal_projection: None,
-        terminal_disposition: None,
-        matched_policy: None,
-    }
-}
-
 pub(crate) fn provider_response_stream_relay_failure(
     error: V3ResponsesRelayRuntimeError,
     request_id: &str,

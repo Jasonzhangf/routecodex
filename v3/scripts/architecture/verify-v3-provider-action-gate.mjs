@@ -454,7 +454,7 @@ requireText(text.responsesCodec, files.responsesCodec, '| "response.done"');
 requireText(
   `${text.providerSseJsonCodec}\n${text.providerResponsesEventClassification}`,
   `${files.providerSseJsonCodec} + ${files.providerResponsesEventClassification}`,
-  'if event_type == "response.completed" {',
+  'if matches!(event_type, "response.completed" | "response.incomplete") {',
 );
 for (const forbidden of [
   'Some("response.completed" | "response.done")',
@@ -625,7 +625,7 @@ assertRustTest(
 assertRustTest(
   text.responsesRelayTests,
   files.responsesRelayTests,
-  'responses_relay_content_filter_incomplete_commits_partial_output_without_reselect',
+  'responses_relay_content_filter_incomplete_preserves_output_without_reselect',
 );
 for (const token of [
   'provider_sse_done_without_completed_is_terminal_missing',

@@ -268,27 +268,24 @@ fn transducer_maps_content_filter_incomplete_to_content_filter_terminal_chunk() 
 }
 
 #[test]
-fn transducer_rejects_incomplete_without_or_unknown_reason() {
-    for payload in [
-        json!({
-            "type": "response.incomplete",
-            "response": {"id": "resp_test_1", "status": "incomplete"}
-        }),
-        json!({
-            "type": "response.incomplete",
-            "incomplete_details": {"reason": "internal_error"},
-            "response": {"id": "resp_test_1", "status": "incomplete"}
-        }),
+fn transducer_preserves_incomplete_with_optional_or_opaque_details() {
+    for details in [
+        None,
+        Some(Value::Null),
+        Some(json!({"reason":""})),
+        Some(json!({"reason":42})),
     ] {
         let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
         transducer.push_event(created_event()).expect("created");
-        let error = transducer
-            .push_event(payload)
-            .expect_err("malformed/unknown incomplete terminal must fail fast");
-        assert!(
-            error.contains("response.incomplete"),
-            "unexpected error: {error}"
-        );
+        let mut response = json!({"id":"resp_test_1", "status":"incomplete"});
+        if let Some(details) = details {
+            response["incomplete_details"] = details;
+        }
+        let chunks = transducer
+            .push_event(json!({"type":"response.incomplete", "response":response}))
+            .expect("optional business details must not reject a terminal");
+        assert_eq!(chunks[0]["choices"][0]["finish_reason"], "stop");
+        transducer.finish().expect("complete transport");
     }
 }
 
@@ -377,8 +374,12 @@ fn transducer_projects_custom_tool_call_items() {
     assert_eq!(tool_call["function"]["name"], json!("apply_patch"));
     assert_eq!(
         tool_call["function"]["arguments"],
-        json!("*** Begin Patch"),
-        "custom_tool_call.input must project into function.arguments"
+        json!("{\"input\":\"*** Begin Patch\"}"),
+        "custom_tool_call.input must use the reversible Chat wrapper"
+    );
+    assert_eq!(
+        tool_call["routecodex_chat_extension"]["responses_tool_call_type"],
+        "custom_tool_call"
     );
 }
 
@@ -415,12 +416,160 @@ fn non_stream_projection_resolves_item_id_and_projects_custom_tool_call() {
     assert_eq!(tool_calls[1]["function"]["name"], json!("apply_patch"));
     assert_eq!(
         tool_calls[1]["function"]["arguments"],
-        json!("*** Begin Patch")
+        json!("{\"input\":\"*** Begin Patch\"}")
+    );
+    assert_eq!(
+        tool_calls[1]["routecodex_chat_extension"]["responses_tool_call_type"],
+        "custom_tool_call"
     );
     assert_eq!(
         projected["choices"][0]["finish_reason"],
         json!("tool_calls")
     );
+}
+
+#[test]
+fn non_stream_projection_preserves_responses_refusal_with_text_usage_and_tools() {
+    for with_tools in [false, true] {
+        let mut canonical = json!({
+            "id":"resp_native", "model":"model", "status":"completed",
+            "output":[{"type":"message","role":"assistant","content":[
+                {"type":"output_text","text":" retained text "},
+                {"type":"refusal","refusal":" NATIVE_REFUSAL "}
+            ]}],
+            "usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}
+        });
+        if with_tools {
+            canonical["output"].as_array_mut().unwrap().push(json!({
+                "type":"function_call", "call_id":"call_native", "name":"lookup",
+                "arguments":"{\"q\":\"retained\"}"
+            }));
+        }
+        let projected = project_v3_openai_chat_client_response_from_canonical(&canonical).unwrap();
+        let choice = &projected["choices"][0];
+        assert_eq!(choice["message"]["refusal"], " NATIVE_REFUSAL ");
+        assert_eq!(choice["message"]["content"], " retained text ");
+        assert_eq!(projected["id"], "resp_native");
+        assert_eq!(projected["model"], "model");
+        assert_eq!(projected["usage"]["prompt_tokens"], 3);
+        assert_eq!(projected["usage"]["completion_tokens"], 2);
+        assert_eq!(projected["usage"]["total_tokens"], 5);
+        assert_eq!(
+            choice["finish_reason"],
+            if with_tools { "tool_calls" } else { "stop" }
+        );
+        if with_tools {
+            assert_eq!(choice["message"]["tool_calls"][0]["id"], "call_native");
+            assert_eq!(
+                choice["message"]["tool_calls"][0]["function"]["arguments"],
+                "{\"q\":\"retained\"}"
+            );
+        }
+        assert_eq!(
+            canonical["output"][0]["content"][1]["refusal"],
+            " NATIVE_REFUSAL "
+        );
+    }
+    let pure = project_v3_openai_chat_client_response_from_canonical(&json!({
+        "id":"resp_native", "status":"completed",
+        "output":[{"type":"message","role":"assistant","content":[
+            {"type":"refusal","refusal":"NATIVE_REFUSAL"}
+        ]}]
+    }))
+    .unwrap();
+    assert_eq!(pure["choices"][0]["message"]["refusal"], "NATIVE_REFUSAL");
+}
+
+#[test]
+fn transducer_preserves_terminal_only_responses_text_refusal_and_incomplete() {
+    for (event_type, status, part, finish) in [
+        (
+            "response.completed",
+            "completed",
+            json!({"type":"output_text","text":"NATIVE_OK"}),
+            "stop",
+        ),
+        (
+            "response.completed",
+            "completed",
+            json!({"type":"refusal","refusal":"NATIVE_REFUSAL"}),
+            "stop",
+        ),
+        (
+            "response.incomplete",
+            "incomplete",
+            json!({"type":"output_text","text":"NATIVE_OK"}),
+            "content_filter",
+        ),
+    ] {
+        let mut response = json!({
+            "id":"resp_native", "model":"model", "status":status,
+            "output":[{"type":"message","role":"assistant","content":[part]}],
+            "usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}
+        });
+        if status == "incomplete" {
+            response["incomplete_details"] = json!({"reason":"content_filter"});
+        }
+        let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+        let chunks = transducer
+            .push_event(json!({"type":event_type,"response":response}))
+            .unwrap();
+        let field = if part["type"] == "refusal" {
+            "refusal"
+        } else {
+            "content"
+        };
+        let text = chunks
+            .iter()
+            .filter_map(|chunk| chunk["choices"][0]["delta"][field].as_str())
+            .collect::<String>();
+        assert_eq!(
+            text,
+            if field == "refusal" {
+                "NATIVE_REFUSAL"
+            } else {
+                "NATIVE_OK"
+            }
+        );
+        assert!(chunks
+            .iter()
+            .any(|chunk| chunk["choices"][0]["finish_reason"] == finish));
+        assert!(chunks
+            .iter()
+            .all(|chunk| chunk["id"] == "resp_native" && chunk["model"] == "model"));
+        assert!(chunks
+            .iter()
+            .any(|chunk| chunk["usage"]["total_tokens"] == 5));
+        transducer.finish().unwrap();
+    }
+}
+
+#[test]
+fn transducer_preserves_refusal_deltas_alongside_text_without_terminal_duplication() {
+    let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+    transducer.push_event(created_event()).unwrap();
+    let text = transducer
+        .push_event(json!({"type":"response.output_text.delta","delta":"retained text"}))
+        .unwrap();
+    assert_eq!(text[0]["choices"][0]["delta"]["content"], "retained text");
+    let refusal = transducer
+        .push_event(json!({"type":"response.refusal.delta","delta":"NATIVE_REFUSAL"}))
+        .unwrap();
+    assert_eq!(refusal.len(), 1);
+    assert_eq!(
+        refusal[0]["choices"][0]["delta"]["refusal"],
+        "NATIVE_REFUSAL"
+    );
+    let terminal = transducer.push_event(json!({"type":"response.completed","response":{
+        "status":"completed","output":[{"type":"message","role":"assistant","content":[
+            {"type":"output_text","text":"retained text"},{"type":"refusal","refusal":"NATIVE_REFUSAL"}
+        ]}]
+    }})).unwrap();
+    assert!(terminal.iter().all(
+        |chunk| chunk["choices"][0]["delta"].get("refusal").is_none()
+            && chunk["choices"][0]["delta"].get("content").is_none()
+    ));
+    transducer.finish().unwrap();
 }
 
 // canonical `status:"in_progress"` 是 Responses 语义；投影到 Chat 时不得产出

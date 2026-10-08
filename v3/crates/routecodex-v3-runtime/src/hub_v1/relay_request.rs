@@ -6,7 +6,7 @@ use super::{
     V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized, V3HubRequestSemanticProtocol,
     V3ToolThinkingTurnContext, V3WebSearchCenterState,
 };
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
@@ -331,13 +331,7 @@ fn govern_openai_chat_tool_identity_at_req04(
                         index,
                         reason: "tool_calls.id is required",
                     })?;
-                if !declared.insert(id.to_owned()) {
-                    return Err(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
-                        protocol: "openai_chat",
-                        index,
-                        reason: "duplicate tool_calls.id",
-                    });
-                }
+                declared.insert(id.to_owned());
             }
         }
         if message.get("role").and_then(Value::as_str) == Some("tool") {
@@ -415,7 +409,8 @@ fn govern_tool_outputs_at_req04(
     {
         return govern_chat_tool_outputs_at_req04(payload, current_payload_start);
     }
-    let mut expected_outputs = BTreeMap::new();
+    let mut expected_outputs: BTreeMap<String, Vec<V3HubRelayExpectedToolOutputKind>> =
+        BTreeMap::new();
     if let Some(messages) = payload.get("messages").and_then(Value::as_array) {
         for message in messages.iter().skip(current_payload_start) {
             if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
@@ -423,7 +418,10 @@ fn govern_tool_outputs_at_req04(
                     if let Some((call_id, expected_kind)) =
                         expected_tool_call_output_from_chat_call(call)
                     {
-                        expected_outputs.insert(call_id, expected_kind);
+                        expected_outputs
+                            .entry(call_id)
+                            .or_default()
+                            .push(expected_kind);
                     }
                 }
             }
@@ -435,7 +433,10 @@ fn govern_tool_outputs_at_req04(
     let mut output_count = 0;
     for (index, item) in input.iter_mut().enumerate().skip(current_payload_start) {
         if let Some((call_id, expected_kind)) = expected_tool_call_output_from_item(item) {
-            expected_outputs.insert(call_id, expected_kind);
+            expected_outputs
+                .entry(call_id)
+                .or_default()
+                .push(expected_kind);
             continue;
         }
         let actual_kind = match item.get("type").and_then(Value::as_str) {
@@ -449,8 +450,11 @@ fn govern_tool_outputs_at_req04(
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
             .ok_or(V3HubRelayRequestError::MalformedToolOutput { index })?;
-        if let Some(expected_kind) = expected_outputs.get(call_id) {
-            if !expected_kind.matches_actual(actual_kind) {
+        if let Some(expected_kinds) = expected_outputs.get(call_id) {
+            if !expected_kinds
+                .iter()
+                .any(|expected_kind| expected_kind.matches_actual(actual_kind))
+            {
                 return Err(V3HubRelayRequestError::ToolOutputKindMismatch {
                     index,
                     call_id: call_id.to_owned(),
@@ -470,25 +474,32 @@ fn govern_chat_tool_outputs_at_req04(
     payload: &mut Value,
     current_payload_start: usize,
 ) -> Result<usize, V3HubRelayRequestError> {
-    let mut expected_outputs = BTreeMap::new();
     let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) else {
         return Ok(0);
     };
-    for message in messages.iter().skip(current_payload_start) {
-        if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
-            for call in calls {
-                if let Some((call_id, expected_kind)) =
-                    expected_tool_call_output_from_chat_call(call)
-                {
-                    expected_outputs.insert(call_id, expected_kind);
-                }
-            }
-        }
-    }
+    let mut expected_outputs: BTreeMap<String, Vec<V3HubRelayExpectedToolOutputKind>> =
+        BTreeMap::new();
     let mut output_count = 0usize;
     for (index, message) in messages.iter_mut().enumerate().skip(current_payload_start) {
-        if message.get("role").and_then(Value::as_str) != Some("tool") {
-            continue;
+        match message.get("role").and_then(Value::as_str) {
+            Some("assistant") => {
+                expected_outputs.clear();
+                if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
+                    for call in calls {
+                        if let Some((call_id, expected_kind)) =
+                            expected_tool_call_output_from_chat_call(call)
+                        {
+                            expected_outputs
+                                .entry(call_id)
+                                .or_default()
+                                .push(expected_kind);
+                        }
+                    }
+                }
+                continue;
+            }
+            Some("tool") => {}
+            _ => continue,
         }
         output_count = output_count.saturating_add(1);
         let call_id = message
@@ -497,15 +508,39 @@ fn govern_chat_tool_outputs_at_req04(
             .or_else(|| message.get("id"))
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
+            .map(str::to_owned)
             .ok_or(V3HubRelayRequestError::MalformedToolOutput { index })?;
-        let expected_kind = expected_outputs.get(call_id).copied().ok_or_else(|| {
+        let expected_kinds = expected_outputs.get(&call_id).ok_or_else(|| {
             V3HubRelayRequestError::OrphanToolOutput {
                 index,
                 call_id: call_id.to_owned(),
             }
         })?;
+        if message
+            .pointer("/routecodex_chat_extension/responses_tool_output_type")
+            .is_none()
+            && expected_kinds
+                .iter()
+                .all(|kind| *kind == V3HubRelayExpectedToolOutputKind::Custom)
+        {
+            if let Some(row) = message.as_object_mut() {
+                if let Some(extension) = row
+                    .entry("routecodex_chat_extension")
+                    .or_insert_with(|| json!({}))
+                    .as_object_mut()
+                {
+                    extension.insert(
+                        "responses_tool_output_type".to_string(),
+                        json!("custom_tool_call_output"),
+                    );
+                }
+            }
+        }
         let actual_kind = actual_chat_tool_output_kind(message);
-        if !expected_kind.matches_actual(actual_kind) {
+        if !expected_kinds
+            .iter()
+            .any(|expected_kind| expected_kind.matches_actual(actual_kind))
+        {
             return Err(V3HubRelayRequestError::ToolOutputKindMismatch {
                 index,
                 call_id: call_id.to_owned(),

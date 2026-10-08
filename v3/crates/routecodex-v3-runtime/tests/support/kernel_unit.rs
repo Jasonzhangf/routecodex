@@ -1840,7 +1840,7 @@ async fn direct_sse_precommit_failures_reselect_before_client_stream() {
 }
 
 #[tokio::test]
-async fn direct_sse_incomplete_reselects_without_projecting_partial_attempt() {
+async fn direct_sse_incomplete_commits_original_attempt_without_reselection() {
     use futures_util::StreamExt;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -1920,18 +1920,19 @@ async fn direct_sse_incomplete_reselects_without_projecting_partial_attempt() {
     assert_eq!(output.client_payload.status, 200, "{output:?}");
     assert_eq!(
         transport.sends.load(Ordering::SeqCst),
-        2,
-        "the incomplete attempt must reselect exactly once: {output:?}"
+        1,
+        "the representable incomplete attempt must be preserved: {output:?}"
     );
-    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
     let V3ClientBody::CommittedSse(stream) = output.client_payload.body else {
-        panic!("incomplete attempt must be reselected before client stream starts")
+        panic!("incomplete attempt must be committed to the client")
     };
     let committed = stream.collect::<Vec<_>>().await;
     let text = String::from_utf8(committed.into_iter().flatten().collect()).unwrap();
-    assert!(text.contains("provider-b-only"), "{text}");
-    assert!(!text.contains("provider-a-must-not-commit"), "{text}");
-    assert!(!text.contains("response.incomplete"), "{text}");
+    assert!(!text.contains("provider-b-only"), "{text}");
+    assert!(text.contains("provider-a-must-not-commit"), "{text}");
+    assert!(text.contains("response.incomplete"), "{text}");
+    assert!(text.contains("max_output_tokens"), "{text}");
 }
 
 #[tokio::test]

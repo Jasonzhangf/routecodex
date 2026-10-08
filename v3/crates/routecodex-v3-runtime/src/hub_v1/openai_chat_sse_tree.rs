@@ -106,7 +106,8 @@ pub struct V3OpenAiChatSseMaterializedToolCall {
     pub call_id: Option<String>,
     pub kind: Option<String>,
     pub function_name: Option<String>,
-    pub function_arguments: String,
+    pub function_arguments: Option<String>,
+    pub extensions: BTreeMap<String, Value>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -184,10 +185,18 @@ impl V3OpenAiChatSseMaterializedChoice {
             tool_call.function_name = call.name.clone();
         }
         if let Some(arguments) = &call.arguments {
-            tool_call.function_arguments.push_str(arguments);
+            tool_call
+                .function_arguments
+                .get_or_insert_with(String::new)
+                .push_str(arguments);
         }
         if tool_call.kind.is_none() {
             tool_call.kind = Some("function".to_owned());
+        }
+        for extension in &call.extensions {
+            tool_call
+                .extensions
+                .insert(extension.name.clone(), extension.value.clone());
         }
     }
 
@@ -208,6 +217,17 @@ impl V3OpenAiChatSseMaterializedChoice {
             V3OpenAiChatSseDelta::ToolCalls(calls) => {
                 for call in calls {
                     self.apply_tool_call(call);
+                }
+            }
+        }
+        for extension in &choice.delta_extensions {
+            if let Some(text) = extension.value.as_str() {
+                match extension.name.as_str() {
+                    "content" => self.content.push_str(text),
+                    "reasoning_content" | "reasoning" => self.reasoning_content.push_str(text),
+                    "refusal" => self.refusal.push_str(text),
+                    "role" => self.role = Some(text.to_owned()),
+                    _ => {}
                 }
             }
         }
@@ -243,11 +263,19 @@ impl V3OpenAiChatSseMaterializedChoice {
                         "Chat tool call[{position}] at choice[{index}] is missing function name"
                     ))
                 })?;
-                calls.push(serde_json::json!({
+                let mut function = serde_json::json!({"name": name});
+                if let Some(arguments) = &call.function_arguments {
+                    function["arguments"] = Value::String(arguments.clone());
+                }
+                let mut projected = serde_json::json!({
                     "id": id,
                     "type": call.kind.clone().unwrap_or_else(|| "function".to_owned()),
-                    "function": {"name": name, "arguments": call.function_arguments}
-                }));
+                    "function": function
+                });
+                for (name, value) in &call.extensions {
+                    projected[name] = value.clone();
+                }
+                calls.push(projected);
             }
             message.insert("tool_calls".to_owned(), Value::Array(calls));
         }
@@ -498,6 +526,9 @@ impl V3OpenAiChatSseToolCall {
             tool_call.insert("id".to_owned(), Value::String(id.clone()));
         }
         tool_call.insert("function".to_owned(), Value::Object(function));
+        for extension in &self.extensions {
+            tool_call.insert(extension.name.clone(), extension.value.clone());
+        }
         Value::Object(tool_call)
     }
 }
@@ -572,6 +603,7 @@ pub struct V3OpenAiChatSseToolCall {
     pub call_id: Option<String>,
     pub name: Option<String>,
     pub arguments: Option<String>,
+    pub extensions: Vec<V3OpenAiChatSseExtension>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -738,25 +770,6 @@ fn classify_choice(choice: &Value) -> Result<V3OpenAiChatSseChoice, V3OpenAiChat
         .get("tool_calls")
         .and_then(Value::as_array)
         .is_some_and(|calls| !calls.is_empty());
-    // A tool-call delta may carry the Resp03 toolreason projection in the
-    // same delta. Keep the reasoning field as an extension in that shape;
-    // otherwise the tool-call semantic branch would consume the call and
-    // silently drop the co-located reasoning projection.
-    let delta_extensions = if has_tool_calls {
-        object_extensions(delta_object, &["content", "refusal", "tool_calls"])
-    } else {
-        object_extensions(
-            delta_object,
-            &[
-                "content",
-                "reasoning_content",
-                "reasoning",
-                "refusal",
-                "role",
-                "tool_calls",
-            ],
-        )
-    };
     let semantic_delta = if has_tool_calls {
         let tool_calls = delta_object
             .get("tool_calls")
@@ -776,7 +789,8 @@ fn classify_choice(choice: &Value) -> Result<V3OpenAiChatSseChoice, V3OpenAiChat
                         .unwrap_or(0) as usize,
                     call_id: string_field(call_object, "id"),
                     name: function.and_then(|value| string_field(value, "name")),
-                    arguments: function.and_then(|value| string_field(value, "arguments")),
+                    arguments: function.and_then(|value| argument_text_field(value, "arguments")),
+                    extensions: tool_call_extensions(call_object, &["index", "id", "function"]),
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -796,6 +810,17 @@ fn classify_choice(choice: &Value) -> Result<V3OpenAiChatSseChoice, V3OpenAiChat
     } else {
         V3OpenAiChatSseDelta::Empty
     };
+    // Only the primary semantic field is consumed. Co-located fields remain
+    // available to both wire projection and complete-response materialization.
+    let consumed: &[&str] = match &semantic_delta {
+        V3OpenAiChatSseDelta::Text(_) => &["content"],
+        V3OpenAiChatSseDelta::Reasoning(_) => &["reasoning_content", "reasoning"],
+        V3OpenAiChatSseDelta::Refusal(_) => &["refusal"],
+        V3OpenAiChatSseDelta::Role(_) => &["role"],
+        V3OpenAiChatSseDelta::ToolCall(_) | V3OpenAiChatSseDelta::ToolCalls(_) => &["tool_calls"],
+        V3OpenAiChatSseDelta::Empty => &[],
+    };
+    let delta_extensions = object_extensions(delta_object, consumed);
     let extensions = object_extensions(object, &["index", "delta", "finish_reason"]);
     let finish_reason = match object.get("finish_reason") {
         None | Some(Value::Null) => None,
@@ -830,6 +855,42 @@ fn string_field(object: &serde_json::Map<String, Value>, field: &str) -> Option<
         .get(field)
         .and_then(Value::as_str)
         .map(ToOwned::to_owned)
+}
+
+fn argument_text_field(object: &serde_json::Map<String, Value>, field: &str) -> Option<String> {
+    match object.get(field) {
+        Some(Value::String(value)) => Some(value.clone()),
+        Some(value) => Some(value.to_string()),
+        None => None,
+    }
+}
+
+fn tool_call_extensions(
+    object: &serde_json::Map<String, Value>,
+    known: &[&str],
+) -> Vec<V3OpenAiChatSseExtension> {
+    let mut extensions = object_extensions(object, known);
+    if object
+        .get("function")
+        .and_then(|function| function.get("arguments"))
+        .is_some_and(|arguments| !arguments.is_string())
+    {
+        let mut association = object
+            .get("routecodex_chat_extension")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        association.insert(
+            "responses_arguments_serialized".to_string(),
+            Value::Bool(true),
+        );
+        extensions.retain(|extension| extension.name != "routecodex_chat_extension");
+        extensions.push(V3OpenAiChatSseExtension {
+            name: "routecodex_chat_extension".to_string(),
+            value: Value::Object(association),
+        });
+    }
+    extensions
 }
 
 fn parse_terminal_state(
@@ -1275,8 +1336,8 @@ fn parse_v3_openai_chat_json_tool_call(
         call_id: string_field(object, "id"),
         call_type: string_field(object, "type"),
         function_name: string_field(function, "name"),
-        function_arguments: string_field(function, "arguments"),
-        extensions: object_extensions(object, &["id", "type", "function"]),
+        function_arguments: argument_text_field(function, "arguments"),
+        extensions: tool_call_extensions(object, &["id", "type", "function"]),
     })
 }
 

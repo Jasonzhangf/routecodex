@@ -69,13 +69,10 @@ pub(crate) fn run_json_response_hooks(
     let mut resp02 = hooks.normalize(resp01)?;
     trace.push("ProviderRespCompat02ProviderCompat");
     if input.provider_protocol == V3HubProviderWireProtocol::OpenAiChat {
-        let converted =
-            build_v3_responses_provider_response_from_openai_chat_payload_with_manifest(
-                resp02.provider_payload(),
-                input.provider_semantic_body,
-                Some(input.manifest),
-                input.provider_id,
-            )?;
+        let converted = build_v3_responses_provider_response_from_openai_chat_payload(
+            resp02.provider_payload(),
+            input.provider_semantic_body,
+        )?;
         resp02.set_responses_semantic_payload(normalize_v3_responses_json_document(
             &converted,
             "OpenAI Chat",

@@ -8,10 +8,6 @@ use std::fmt;
 use std::ops::Deref;
 use std::sync::{Arc, Mutex, OnceLock};
 
-#[path = "resp_chat_process_03_anthropic_control_text.rs"]
-mod anthropic_control_text;
-use anthropic_control_text::govern_v3_anthropic_control_text_at_resp03;
-
 include!("resp_chat_process_03_governed_provider_identity.rs");
 
 #[derive(Clone, Copy)]
@@ -999,8 +995,6 @@ pub enum V3HubRelayResponseError {
     MissingStatus,
     #[error("unsupported provider response status: {status}")]
     UnsupportedStatus { status: String },
-    #[error("provider response incomplete_details.reason is invalid: {reason}")]
-    InvalidIncompleteDetails { reason: String },
     #[error("{protocol} provider response is malformed at Resp03: {reason}")]
     ProviderProtocolResponseMalformed {
         protocol: &'static str,
@@ -1084,7 +1078,6 @@ fn govern_v3_hub_relay_response(
     let input =
         strip_v3_resp03_encrypted_reasoning_content(input, profile.retain_response_cipher());
     let mut input = harvest_v3_think_blocks_at_resp03(input);
-    let anthropic_text_governed = govern_v3_anthropic_control_text_at_resp03(&mut input)?;
     let is_responses_protocol = input.semantic_protocol() == V3HubProviderWireProtocol::Responses;
     let payload = Arc::make_mut(&mut input.previous.previous.payload.0);
     if is_responses_protocol {
@@ -1148,19 +1141,6 @@ fn govern_v3_hub_relay_response(
         }
         V3Resp03FinishReasonBranch::Other => (input, governance),
     };
-    if anthropic_text_governed
-        && governance.tool_calls.is_empty()
-        && input
-            .provider_payload()
-            .get("output_text")
-            .and_then(Value::as_str)
-            .is_none_or(|text| text.trim().is_empty())
-    {
-        return Err(V3HubRelayResponseError::ProviderProtocolResponseMalformed {
-            protocol: "anthropic",
-            reason: "control frame contained no visible answer or native tool call",
-        });
-    }
     let servertool_tool_call_followup = governance
         .tool_calls
         .iter()
@@ -1426,23 +1406,7 @@ fn build_v3_responses_resp03_protocol_governance(
         .and_then(Value::as_str)
         .ok_or(V3HubRelayResponseError::MissingStatus)?;
     let status_terminality = match status {
-        "completed" => V3HubResponseTerminality::Terminal,
-        "incomplete" => {
-            let reason = object
-                .get("incomplete_details")
-                .and_then(Value::as_object)
-                .and_then(|details| details.get("reason"))
-                .and_then(Value::as_str)
-                .ok_or_else(|| V3HubRelayResponseError::InvalidIncompleteDetails {
-                    reason: "missing non-empty reason".to_string(),
-                })?;
-            if !matches!(reason, "max_output_tokens" | "content_filter") {
-                return Err(V3HubRelayResponseError::InvalidIncompleteDetails {
-                    reason: format!("unsupported value '{reason}'"),
-                });
-            }
-            V3HubResponseTerminality::Terminal
-        }
+        "completed" | "incomplete" => V3HubResponseTerminality::Terminal,
         "requires_action" | "in_progress" | "queued" => V3HubResponseTerminality::NonTerminal,
         _ => {
             return Err(V3HubRelayResponseError::UnsupportedStatus {
@@ -1460,7 +1424,6 @@ fn collect_v3_resp03_responses_tool_calls(
     output: &[Value],
 ) -> Result<Vec<V3HubResponseToolCall>, V3HubRelayResponseError> {
     let mut tool_calls = Vec::new();
-    let mut seen_call_ids = BTreeSet::new();
     for (index, item) in output.iter().enumerate() {
         let Some(item) = item.as_object() else {
             continue;
@@ -1478,12 +1441,6 @@ fn collect_v3_resp03_responses_tool_calls(
                 index,
                 reason: "missing call_id/id",
             })?;
-        if !seen_call_ids.insert(call_id.to_owned()) {
-            return Err(V3HubRelayResponseError::MalformedToolCall {
-                index,
-                reason: "duplicate call_id/id",
-            });
-        }
         let name = item
             .get("name")
             .and_then(Value::as_str)

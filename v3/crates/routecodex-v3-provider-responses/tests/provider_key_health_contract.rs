@@ -92,7 +92,7 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "a", pr
 }
 
 #[test]
-fn recoverable_failure_cools_after_three_same_failures_without_changing_score_contract() {
+fn recoverable_failure_cools_after_repeat_without_changing_score_contract() {
     let store = V3ProviderKeyHealthStore::default();
     let action = V3ProviderFailureAction::recoverable("transport");
 
@@ -101,21 +101,16 @@ fn recoverable_failure_cools_after_three_same_failures_without_changing_score_co
         .expect("first failure");
     assert_eq!(first.score_milli, 95);
     assert_eq!(first.success_streak, 0);
-    // A single recoverable failure is counted into health but must not exclude
-    // the provider: three consecutive same-fingerprint failures are required.
     assert!(first.available);
     assert!(!first.cooldown);
     assert_eq!(first.cooldown_until_ms, None);
-
-    store
+    let second = store
         .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 101)
-        .expect("second failure");
-    let third = store
-        .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 102)
-        .expect("third failure");
-    assert!(!third.available);
-    assert!(third.cooldown);
-    assert_eq!(third.cooldown_until_ms, Some(5_102));
+        .expect("repeated failure");
+    assert_eq!(second.score_milli, 90);
+    assert!(!second.available);
+    assert!(second.cooldown);
+    assert_eq!(second.cooldown_until_ms, Some(5_101));
 }
 
 #[test]
@@ -389,7 +384,7 @@ fn health_score_uses_configured_priority_as_its_baseline() {
 }
 
 #[test]
-fn three_502_failures_enter_cooldown() {
+fn two_502_failures_enter_cooldown() {
     let store = V3ProviderHealthStore::default();
     store
         .scheduling_projection("p", "k", "m", 100, 1, 100)
@@ -411,14 +406,11 @@ fn three_502_failures_enter_cooldown() {
         95
     );
 
-    store
+    let second = store
         .record_provider_failure_action("p", "k", "m", &action, 102)
         .expect("second 502 failure");
-    let third = store
-        .record_provider_failure_action("p", "k", "m", &action, 103)
-        .expect("third 502 failure");
-    assert!(third.cooldown);
-    assert_eq!(third.cooldown_until_ms, Some(5_103));
+    assert!(second.cooldown);
+    assert_eq!(second.cooldown_until_ms, Some(5_102));
 }
 
 #[test]

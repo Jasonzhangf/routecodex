@@ -715,7 +715,7 @@ impl V3ResponsesSseReducerState {
                 }
             }
             "response.function_call_arguments.done" => {
-                if let Some(arguments) = event.get("arguments").and_then(Value::as_str) {
+                if let Some(arguments) = event.get("arguments") {
                     if let Some(item) = self.item_mut_for_event(&metadata) {
                         item.set_function_arguments(arguments);
                     }
@@ -729,7 +729,7 @@ impl V3ResponsesSseReducerState {
                 }
             }
             "response.custom_tool_call_input.done" => {
-                if let Some(input) = event.get("input").and_then(Value::as_str) {
+                if let Some(input) = event.get("input") {
                     if let Some(item) = self.item_mut_for_event(&metadata) {
                         item.set_custom_tool_input(input);
                     }
@@ -868,12 +868,12 @@ pub enum V3ResponsesSseItemPayload {
     FunctionCall {
         call_id: Option<String>,
         name: Option<String>,
-        arguments: Option<String>,
+        arguments: Option<Value>,
     },
     CustomToolCall {
         call_id: Option<String>,
         name: Option<String>,
-        input: Option<String>,
+        input: Option<Value>,
     },
     StructuredExtensions(Vec<V3ResponsesSseExtension>),
 }
@@ -1047,7 +1047,7 @@ impl V3ResponsesSseOutputItem {
                     value.insert("name".to_owned(), Value::String(name.clone()));
                 }
                 if let Some(arguments) = arguments {
-                    value.insert("arguments".to_owned(), Value::String(arguments.clone()));
+                    value.insert("arguments".to_owned(), arguments.clone());
                 }
             }
             V3ResponsesSseItemPayload::CustomToolCall {
@@ -1062,7 +1062,7 @@ impl V3ResponsesSseOutputItem {
                     value.insert("name".to_owned(), Value::String(name.clone()));
                 }
                 if let Some(input) = input {
-                    value.insert("input".to_owned(), Value::String(input.clone()));
+                    value.insert("input".to_owned(), input.clone());
                 }
             }
             V3ResponsesSseItemPayload::StructuredExtensions(extensions) => {
@@ -1111,29 +1111,29 @@ impl V3ResponsesSseOutputItem {
 
     fn append_function_arguments(&mut self, delta: &str) {
         if let V3ResponsesSseItemPayload::FunctionCall { arguments, .. } = &mut self.payload {
-            arguments.get_or_insert_with(String::new).push_str(delta);
+            append_tool_text(arguments, delta);
         }
     }
 
-    fn set_function_arguments(&mut self, arguments: &str) {
+    fn set_function_arguments(&mut self, arguments: &Value) {
         if let V3ResponsesSseItemPayload::FunctionCall {
             arguments: current, ..
         } = &mut self.payload
         {
-            *current = Some(arguments.to_owned());
+            *current = Some(arguments.clone());
         }
     }
 
     fn append_custom_tool_input(&mut self, delta: &str) {
         if let V3ResponsesSseItemPayload::CustomToolCall { input, .. } = &mut self.payload {
-            input.get_or_insert_with(String::new).push_str(delta);
+            append_tool_text(input, delta);
         }
     }
 
-    fn set_custom_tool_input(&mut self, input: &str) {
+    fn set_custom_tool_input(&mut self, input: &Value) {
         if let V3ResponsesSseItemPayload::CustomToolCall { input: current, .. } = &mut self.payload
         {
-            *current = Some(input.to_owned());
+            *current = Some(input.clone());
         }
     }
 
@@ -1261,12 +1261,12 @@ pub fn classify_v3_responses_sse_output_item(
         V3ResponsesSseOutputItemKind::FunctionCall => V3ResponsesSseItemPayload::FunctionCall {
             call_id: string_field(object, "call_id"),
             name: string_field(object, "name"),
-            arguments: string_field(object, "arguments"),
+            arguments: object.get("arguments").cloned(),
         },
         V3ResponsesSseOutputItemKind::CustomToolCall => V3ResponsesSseItemPayload::CustomToolCall {
             call_id: string_field(object, "call_id"),
             name: string_field(object, "name"),
-            input: string_field(object, "input"),
+            input: object.get("input").cloned(),
         },
         _ => V3ResponsesSseItemPayload::StructuredExtensions(event_extensions(
             object,
@@ -1517,6 +1517,15 @@ fn string_field(object: &serde_json::Map<String, Value>, field: &str) -> Option<
         .get(field)
         .and_then(Value::as_str)
         .map(ToOwned::to_owned)
+}
+
+fn append_tool_text(value: &mut Option<Value>, delta: &str) {
+    // Text fragments require the string representation of any preceding value.
+    match value {
+        Some(Value::String(current)) => current.push_str(delta),
+        Some(current) => *current = Value::String(format!("{current}{delta}")),
+        None => *value = Some(Value::String(delta.to_owned())),
+    }
 }
 
 pub(crate) fn parse_response_container(

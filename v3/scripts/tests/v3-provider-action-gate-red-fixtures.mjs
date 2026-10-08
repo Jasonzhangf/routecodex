@@ -167,10 +167,10 @@ const cases = [
     name: 'Responses Relay content_filter terminal loses faithful-forward coverage',
     path: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs',
     mutate: (source) => source.replace(
-      'responses_relay_content_filter_incomplete_commits_partial_output_without_reselect',
-      'responses_relay_content_filter_incomplete_has_no_faithful_forward_contract',
+      'responses_relay_content_filter_incomplete_preserves_output_without_reselect',
+      'responses_relay_incomplete_exhaustion_has_no_typed_terminal_contract',
     ),
-    diagnostic: /missing active Rust test responses_relay_content_filter_incomplete_commits_partial_output_without_reselect/u,
+    diagnostic: /missing active Rust test responses_relay_content_filter_incomplete_preserves_output_without_reselect/u,
   },
   {
     name: 'terminal transition is removed',
@@ -511,10 +511,10 @@ const cases = [
     name: 'Direct provider outcome accepts response.done as provider semantic terminal',
     path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_responses_event_classification.rs',
     mutate: (source) => source.replace(
-      'if event_type == "response.completed" {',
-      'if matches!(event_type, "response.completed" | "response.done") {',
+      'if matches!(event_type, "response.completed" | "response.incomplete") {',
+      'if matches!(event_type, "response.completed" | "response.incomplete" | "response.done") {',
     ),
-    diagnostic: /missing if event_type == "response\.completed" \{/u,
+    diagnostic: /missing if matches!\(event_type, "response\.completed" \| "response\.incomplete"\)/u,
   },
   {
     name: 'Relay target-resolution source errors are swallowed as exhaustion',

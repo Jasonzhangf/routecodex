@@ -16,6 +16,9 @@ include!("provider_action_gate_tests.rs");
 #[path = "classified_global_tests.rs"]
 mod classified_global;
 
+#[path = "tests/no_first_failure.rs"]
+mod no_first_failure;
+
 #[path = "tests/cooldown_exhaustion.rs"]
 mod cooldown_exhaustion;
 
@@ -358,9 +361,9 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
     let mut manifest = global_pool_alive_manifest("global_status_policy");
     normalize_global_pool_priorities(&mut manifest);
     // Account/billing classes (401/403) are typed irrecoverable and cool on their
-    // first failure. Every recoverable class requires three consecutive
+    // first failure. Every recoverable class requires two consecutive
     // same-class failures, so one recoverable error cannot exclude a provider.
-    let cases = [(401, 1), (403, 1), (429, 3), (500, 3), (502, 3), (599, 3)];
+    let cases = [(401, 1), (403, 1), (429, 2), (500, 2), (502, 2), (599, 2)];
     for (status, threshold) in cases {
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
         let scope = test_provider_failure_scope(
@@ -397,6 +400,18 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
                 record.state, expected_state,
                 "status {status} must cool only after {threshold} consecutive same-class failures"
             );
+            assert_eq!(
+                health
+                    .availability(
+                        "first",
+                        Some("key1"),
+                        Some("gpt-test"),
+                        10_000 + attempt as u64
+                    )
+                    .available,
+                attempt + 1 < threshold,
+                "status {status} availability must honor its failure threshold"
+            );
         }
         assert!(
             !health
@@ -414,9 +429,8 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
         "runtime-policy-negative",
     )
     .expect("failure session scope");
-    // 统一错误模型：400/请求形失败同样计入全局健康，但属于可恢复类，必须连续
-    // 三次同类失败才进入全局冷却——单次 400 不得排除 provider。
-    for attempt in 0..3 {
+    // Generic provider rejection remains counted, with repeat admission.
+    for attempt in 0..2 {
         health
             .record_provider_failure_record_with_policy(
                 None,
@@ -446,8 +460,8 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
             .available;
         assert_eq!(
             available,
-            attempt < 2,
-            "400 must stay selectable for the first two same-class failures and block on the third; attempt={attempt}"
+            attempt == 0,
+            "generic rejection must cool only after the second consecutive failure"
         );
     }
 }
@@ -688,7 +702,7 @@ fn post_commit_transient_stream_failures_count_toward_global_cooldown() {
         "Responses SSE event was not decodable JSON",
     );
 
-    for offset in 0..3 {
+    for _ in 0..3 {
         health
             .record_post_commit_provider_stream_failure_from_source(
                 &session,

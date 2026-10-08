@@ -854,15 +854,14 @@ async fn anthropic_relay_anthropic_provider_tool_use_missing_name_fails_without_
     assert_eq!(output.client_response["error"]["code"], "network_error");
 }
 
-/// Direct Anthropic relay JSON 必须把 provider 声明的 cyber refusal
-/// （`stop_reason=refusal` + `stop_details.category=cyber`）当作 429 可重试
-/// 饱和度消费：先重选备选，而不是把该终态直接当业务响应返回客户端。
-struct AnthropicCyberRefusalJsonThenSuccessTransport {
+/// A successful provider cyber refusal is representable business output.
+/// Preserve its terminal details without selecting the available backup.
+struct AnthropicCyberRefusalJsonTransport {
     attempts: Mutex<Vec<String>>,
 }
 
 #[async_trait]
-impl ResponsesTransport for AnthropicCyberRefusalJsonThenSuccessTransport {
+impl ResponsesTransport for AnthropicCyberRefusalJsonTransport {
     async fn send(
         &self,
         request: V3Transport13ResponsesHttpRequest,
@@ -905,13 +904,13 @@ impl ResponsesTransport for AnthropicCyberRefusalJsonThenSuccessTransport {
 }
 
 #[tokio::test]
-async fn anthropic_relay_cyber_refusal_json_reselects_instead_of_committing_terminal() {
+async fn anthropic_relay_cyber_refusal_json_preserves_output_without_reselection() {
     ensure_isolated_provider_state_dir();
     let server_id = "anthropic_wire_cyber_refusal_json";
     let manifest = anthropic_reselect_manifest(server_id);
     let provider_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
-    let transport = AnthropicCyberRefusalJsonThenSuccessTransport {
+    let transport = AnthropicCyberRefusalJsonTransport {
         attempts: Mutex::new(Vec::new()),
     };
     let output = execute_v3_anthropic_relay_runtime_with_client_headers_provider_health(
@@ -925,7 +924,7 @@ async fn anthropic_relay_cyber_refusal_json_reselects_instead_of_committing_term
             )
             .expect("test provider failure session scope"),
             toolreason_observation_session_id: None,
-            request_id: "req-anthropic-cyber-refusal-json-reselect".into(),
+            request_id: "req-anthropic-cyber-refusal-json-preserved".into(),
             payload: json!({
                 "model":"MiniMax-M3",
                 "max_tokens":64,
@@ -943,18 +942,27 @@ async fn anthropic_relay_cyber_refusal_json_reselects_instead_of_committing_term
     let attempts = transport.attempts.lock().unwrap().clone();
     assert_eq!(
         attempts,
-        ["flaky", "stable"],
-        "cyber refusal must reselect the next candidate instead of committing a terminal"
+        ["flaky"],
+        "successful refusal must not trigger another provider attempt"
     );
     assert_eq!(output.status, 200);
     assert!(
-        output.node_trace.contains(&"V3TargetLocalReselected"),
+        !output.node_trace.contains(&"V3TargetLocalReselected"),
         "node_trace={:?}",
         output.node_trace
     );
     assert_eq!(
-        output.client_response["content"][0]["text"],
-        "cyber reselect ok"
+        output.client_response,
+        json!({
+            "id":"msg_cyber_refusal",
+            "type":"message",
+            "role":"assistant",
+            "model":"MiniMax-M3",
+            "content":[],
+            "stop_reason":"refusal",
+            "stop_details":{"type":"refusal","category":"cyber","explanation":"policy"},
+            "usage":{"input_tokens":7,"output_tokens":0}
+        })
     );
 }
 

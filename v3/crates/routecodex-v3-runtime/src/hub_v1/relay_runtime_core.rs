@@ -1031,36 +1031,6 @@ where
                         continue;
                     }
                 };
-                if let Some(admission) = crate::hub_v1::classify_v3_provider_terminal_admission(
-                    provider_wire_protocol,
-                    &provider_value,
-                ) {
-                    let failure =
-                        crate::hub_v1::relay_runtime_shared::provider_terminal_admission_failure(
-                            provider_status,
-                            admission,
-                        );
-                    drop(provider_action_permit.take());
-                    if let Some(failure) = handle_provider_failure(
-                        &failure_context,
-                        selected,
-                        failure,
-                        &mut V3RelayProviderFailurePolicyState {
-                            failed_candidates: &mut failed_candidates,
-                            same_candidate_retries: &mut same_candidate_retries,
-                            trace: &mut trace,
-                            last_external_http: &mut last_external_http,
-                        },
-                        &mut retry_selected,
-                        &mut pending_provider_action_recovery,
-                    )
-                    .await
-                    .map_err(V3RelayCoreError::Target)?
-                    {
-                        return Ok(C::assemble_failure_output(failure, trace));
-                    }
-                    continue;
-                }
                 let provider_response_snapshot = provider_value.clone();
                 let client_response = match C::project_json_response(
                     &request_id,
@@ -1068,7 +1038,7 @@ where
                     provider_value,
                     provider_wire_protocol,
                     &req05.previous.previous.previous.payload.0,
-                    transport_intent,
+                    V3HubTransportIntent::Json,
                     &mut trace,
                     selected_target_compatibility_profile.as_deref(),
                     selected.candidate.web_search_execution_mode,

@@ -1,3 +1,4 @@
+use super::request_outbound_mcp_names::provider_function_name;
 use super::*;
 use provider_compat_core::namespace_tools::namespace_tool_name_map;
 use serde_json::{json, Value};
@@ -12,14 +13,16 @@ pub(crate) struct V3ClientCustomToolName {
 fn client_custom_tool_call(
     call_id: &str,
     client_tool: &V3ClientCustomToolName,
-    input: &str,
+    input: Option<Value>,
 ) -> Value {
     let mut call = json!({
         "type":"custom_tool_call",
         "call_id":call_id,
-        "name":client_tool.name,
-        "input":input
+        "name":client_tool.name
     });
+    if let Some(input) = input {
+        call["input"] = input;
+    }
     if let Some(namespace) = &client_tool.namespace {
         call["namespace"] = Value::String(namespace.clone());
     }
@@ -30,39 +33,6 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload(
     payload: &Value,
     provider_semantic_body: &Value,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
-    build_v3_responses_provider_response_from_openai_chat_payload_with_manifest(
-        payload,
-        provider_semantic_body,
-        None,
-        None,
-    )
-}
-
-pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with_manifest(
-    payload: &Value,
-    provider_semantic_body: &Value,
-    manifest: Option<&V3Config05ManifestPublished>,
-    provider_id: Option<&str>,
-) -> Result<Value, V3ResponsesRelayRuntimeError> {
-    if let Some(message) =
-        responses_relay_diagnostics::openai_chat_provider_diagnostic_message(payload)
-    {
-        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-            message,
-        ));
-    }
-    if let Some(message) =
-        responses_relay_diagnostics::provider_response_semantic_error_message_from_manifest(
-            manifest,
-            provider_id,
-            payload,
-        )
-    {
-        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-            message,
-        ));
-    }
-
     let choices = payload
         .get("choices")
         .and_then(Value::as_array)
@@ -94,6 +64,42 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
     .into_iter()
     .map(|(name, identity)| (aliases.get(&name).cloned().unwrap_or(name), identity))
     .collect();
+    let discovered =
+        super::request_outbound_builtin_tool_projection::collect_tool_search_output_tools(
+            provider_semantic_body,
+        )
+        .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
+    let declarations: Vec<&Value> = provider_semantic_body
+        .get("tools")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .chain(
+            provider_semantic_body
+                .get("input")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter(|item| item["type"] == "additional_tools")
+                .flat_map(|item| {
+                    item.get("tools")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                }),
+        )
+        .chain(discovered.iter())
+        .collect();
+    let native_tool_search = declarations
+        .iter()
+        .any(|tool| tool["type"] == "tool_search")
+        && !declarations.iter().any(|tool| {
+            matches!(
+                tool.get("type").and_then(Value::as_str),
+                Some("function" | "custom")
+            ) && provider_compat_core::namespace_tools::provider_function_tool_name(tool)
+                .is_some_and(|name| provider_function_name(name) == "tool_search")
+        });
     for choice in choices {
         if finish_reason.is_none() {
             finish_reason = choice
@@ -119,8 +125,16 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
                         call,
                         &custom_tool_names,
                         &mcp_tool_identities,
+                        native_tool_search,
                     )?);
                 }
+            }
+            if let Some(refusal) = message.get("refusal").and_then(Value::as_str) {
+                output.push(json!({
+                    "type":"message",
+                    "role":"assistant",
+                    "content":[{"type":"refusal","refusal":refusal}]
+                }));
             }
         }
     }
@@ -128,15 +142,17 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
     // keeps the terminal status `completed`. `requires_action` is not a Responses
     // status; fabricating it here makes clients that wait for a terminal status
     // hang. The presence of tool calls is carried by `output`, not by `status`.
-    // Only an explicit truncation is a non-success terminal, and it must use the
-    // Responses `incomplete` shape rather than a Chat `finish_reason` field.
-    // 合法终态词表复用唯一 owner：guard 与投影必须认同一组 reason，否则
-    // `max_tokens` 等网关别名会被 guard 豁免、却在这里落成 `completed` 的空成功
-    // 响应；`content_filter` 是 provider 自己的内容过滤器完成的终态，同样必须用
-    // Responses `incomplete` 形状表示，而不是伪造的空 `completed`。
-    let status = match finish_reason.as_deref() {
-        Some(reason) if openai_chat_finish_reason_is_admitted_terminal(reason) => "incomplete",
-        _ => "completed",
+    // Content filtering and output caps are business terminals, represented by
+    // Responses incomplete details without changing the provider output.
+    let incomplete_reason = match finish_reason.as_deref() {
+        Some("length" | "max_tokens" | "max_output_tokens") => Some("max_output_tokens"),
+        Some("content_filter") => Some("content_filter"),
+        _ => None,
+    };
+    let status = if incomplete_reason.is_some() {
+        "incomplete"
+    } else {
+        "completed"
     };
     let mut response = Map::new();
     response.insert(
@@ -161,11 +177,7 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
             Value::String(output_text_parts.join("")),
         );
     }
-    if status == "incomplete" {
-        let reason = match finish_reason.as_deref() {
-            Some("content_filter") => "content_filter",
-            _ => "max_output_tokens",
-        };
+    if let Some(reason) = incomplete_reason {
         response.insert("incomplete_details".to_string(), json!({"reason": reason}));
     }
     if let Some(usage) = payload
@@ -342,6 +354,7 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
     call: &Value,
     custom_tool_names: &BTreeMap<String, V3ClientCustomToolName>,
     mcp_tool_identities: &std::collections::HashMap<String, (String, String)>,
+    native_tool_search: bool,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
     let object = call.as_object().ok_or_else(|| {
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
@@ -391,7 +404,11 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
                     .to_string(),
             )
         })?;
-        return Ok(client_custom_tool_call(call_id, client_name, input));
+        return Ok(client_custom_tool_call(
+            call_id,
+            client_name,
+            Some(Value::String(input.to_string())),
+        ));
     }
     let function = object
         .get("function")
@@ -412,26 +429,40 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
                     .to_string(),
             )
         })?;
-    let arguments = function
-        .get("arguments")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    if name == "tool_search" {
-        let arguments = parse_v3_openai_chat_tool_call_arguments_object(name, arguments)?;
-        return Ok(json!({
-            "type":"tool_search_call",
-            "call_id":call_id,
-            "execution":"client",
-            "arguments":arguments
-        }));
-    }
+    let arguments = function.get("arguments").map(|value| match value {
+        Value::String(value) => value.clone(),
+        value => value.to_string(),
+    });
     if let Some(client_name) = custom_tool_names.get(name) {
         // 请求侧 custom -> function 扁平化后，provider 返回 function tool_call；
         // 按客户端声明的 custom 名归类回 custom_tool_call，保持客户端契约。
         // Decode the known input wrapper; preserve other model arguments for
         // client validation and the paired tool-error recovery turn.
-        let input = parse_v3_openai_chat_custom_tool_input(arguments);
-        return Ok(client_custom_tool_call(call_id, client_name, &input));
+        if let Some(arguments) = arguments.as_deref() {
+            let input = parse_v3_openai_chat_custom_tool_input(arguments);
+            return Ok(client_custom_tool_call(call_id, client_name, Some(input)));
+        }
+        return Ok(client_custom_tool_call(call_id, client_name, None));
+    }
+    if name == "tool_search" && native_tool_search {
+        let mut item = json!({"type":"tool_search_call","call_id":call_id,"execution":"client"});
+        if let Some(arguments) = function.get("arguments") {
+            item["arguments"] = match arguments {
+                Value::String(text) => {
+                    let serialized = object
+                        .get("routecodex_chat_extension")
+                        .and_then(|extension| extension.get("responses_arguments_serialized"))
+                        .and_then(Value::as_bool)
+                        == Some(true);
+                    serde_json::from_str::<Value>(text)
+                        .ok()
+                        .filter(|value| serialized || value.is_object())
+                        .unwrap_or_else(|| arguments.clone())
+                }
+                _ => arguments.clone(),
+            };
+        }
+        return Ok(item);
     }
     let mut item = Map::from_iter([
         (
@@ -440,11 +471,10 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
         ),
         ("call_id".to_string(), Value::String(call_id.to_string())),
         ("name".to_string(), Value::String(name.to_string())),
-        (
-            "arguments".to_string(),
-            Value::String(arguments.to_string()),
-        ),
     ]);
+    if let Some(arguments) = arguments {
+        item.insert("arguments".to_string(), Value::String(arguments));
+    }
     super::request_outbound_mcp_names::restore_responses_mcp_namespace(
         &mut item,
         mcp_tool_identities,
@@ -452,40 +482,15 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
     Ok(Value::Object(item))
 }
 
-fn parse_v3_openai_chat_custom_tool_input(arguments: &str) -> String {
+fn parse_v3_openai_chat_custom_tool_input(arguments: &str) -> Value {
     match serde_json::from_str::<Value>(arguments) {
-        Ok(Value::Object(parsed)) => parsed
-            .get("input")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .unwrap_or_else(|| arguments.to_string()),
-        Ok(Value::String(value)) => value,
-        _ => arguments.to_string(),
+        Ok(Value::Object(parsed)) => match parsed.get("input") {
+            Some(input) => input.clone(),
+            None => Value::String(arguments.to_string()),
+        },
+        Ok(Value::String(value)) => Value::String(value),
+        _ => Value::String(arguments.to_string()),
     }
-}
-
-pub(crate) fn parse_v3_openai_chat_tool_call_arguments_object(
-    name: &str,
-    arguments: &str,
-) -> Result<Value, V3ResponsesRelayRuntimeError> {
-    let trimmed = arguments.trim();
-    let parsed = if trimmed.is_empty() {
-        Value::Object(Map::new())
-    } else {
-        serde_json::from_str::<Value>(trimmed).map_err(|error| {
-            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
-                "OpenAI Chat tool_call {name} arguments must be a JSON object before Responses projection: {error}"
-            ))
-        })?
-    };
-    if parsed.is_object() {
-        return Ok(parsed);
-    }
-    Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-        format!(
-            "OpenAI Chat tool_call {name} arguments must be a JSON object before Responses projection"
-        ),
-    ))
 }
 
 pub(crate) fn collect_v3_responses_custom_tool_names(

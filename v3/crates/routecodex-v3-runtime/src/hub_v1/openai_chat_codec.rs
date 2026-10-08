@@ -1,6 +1,7 @@
 use super::{V3HubEntryProtocol, V3HubProviderWireProtocol, V3HubTransportIntent};
 use crate::protocol_tables::{map_value as table_map_value, V3TableDirection, V3TableKind};
 use serde_json::{json, Map, Value};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3OpenAiChatCodecStage {
@@ -172,6 +173,7 @@ pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
         .ok_or_else(|| "canonical response must be an object".to_string())?;
     let output = object.get("output").and_then(Value::as_array);
     let mut content = String::new();
+    let mut refusal = None::<String>;
     let mut reasoning_content = String::new();
     let mut tool_calls = Vec::new();
     for item in output.into_iter().flatten() {
@@ -188,10 +190,18 @@ pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
                     .into_iter()
                     .flatten()
                 {
-                    if part.get("type").and_then(Value::as_str) == Some("output_text") {
-                        if let Some(text) = part.get("text").and_then(Value::as_str) {
-                            content.push_str(text);
+                    match part.get("type").and_then(Value::as_str) {
+                        Some("output_text") => {
+                            if let Some(text) = part.get("text").and_then(Value::as_str) {
+                                content.push_str(text);
+                            }
                         }
+                        Some("refusal") => {
+                            if let Some(text) = part.get("refusal").and_then(Value::as_str) {
+                                refusal.get_or_insert_with(String::new).push_str(text);
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -216,16 +226,13 @@ pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
                     .map(read_v3_openai_chat_tool_identity)
                     .unwrap_or_default();
                 let name = item.get("name").and_then(Value::as_str).unwrap_or_default();
-                let arguments = item
-                    .get("arguments")
-                    .and_then(Value::as_str)
-                    .or_else(|| item.get("input").and_then(Value::as_str))
-                    .unwrap_or_default();
-                tool_calls.push(serde_json::json!({
-                    "id": call_id,
-                    "type": "function",
-                    "function": {"name": name, "arguments": arguments}
-                }));
+                if let Some(item) = item.as_object() {
+                    tool_calls.push(
+                        super::responses_openai_codec::project_v3_responses_tool_call_to_openai_chat(
+                            item, &call_id, name,
+                        ),
+                    );
+                }
             }
             _ => {}
         }
@@ -235,24 +242,13 @@ pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
     // `finish_reason` is a Chat-only field: it is derived here from the
     // canonical `incomplete_details`, never read from a Responses client
     // object, which has no such field.
-    let finish_reason = if !tool_calls.is_empty() {
-        Value::from("tool_calls")
-    } else if let Some(reason) = object
-        .get("incomplete_details")
-        .and_then(|details| details.get("reason"))
-        .and_then(Value::as_str)
-    {
-        match reason {
-            "max_output_tokens" => Value::from("length"),
-            "content_filter" => Value::from("content_filter"),
-            _ => Value::from("stop"),
-        }
-    } else {
-        // Chat 终态只有 stop/length/content_filter/tool_calls/stop_sequence：
-        // canonical 的 in_progress 是 Responses 语义，投影到 Chat 时按普通
-        // 结束收口，不得产出 Chat 协议之外的 null finish_reason。
-        Value::from("stop")
-    };
+    let finish_reason = responses_as_chat_finish_reason(
+        !tool_calls.is_empty(),
+        object
+            .get("incomplete_details")
+            .and_then(|details| details.get("reason"))
+            .and_then(Value::as_str),
+    );
     let mut message = Map::new();
     message.insert("role".to_string(), Value::String("assistant".to_string()));
     if !content.is_empty() {
@@ -265,6 +261,9 @@ pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
             "reasoning_content".to_string(),
             Value::String(reasoning_content),
         );
+    }
+    if let Some(refusal) = refusal {
+        message.insert("refusal".to_string(), Value::String(refusal));
     }
     if !tool_calls.is_empty() {
         message.insert("tool_calls".to_string(), Value::Array(tool_calls));
@@ -294,6 +293,15 @@ pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
         }
     }
     Ok(Value::Object(response))
+}
+
+fn responses_as_chat_finish_reason(has_tool_calls: bool, reason: Option<&str>) -> &'static str {
+    match reason {
+        Some("max_output_tokens") => "length",
+        Some("content_filter") => "content_filter",
+        _ if has_tool_calls => "tool_calls",
+        _ => "stop",
+    }
 }
 
 /// Responses 语义 usage -> OpenAI Chat wire usage 唯一归一化入口（JSON 响应与
@@ -737,8 +745,9 @@ fn require_object(payload: &Value) -> Result<&Map<String, Value>, V3OpenAiChatCo
 pub(crate) struct V3OpenAiChatResponsesSseTransducer {
     response_started: bool,
     completed: bool,
-    incomplete_terminal: bool,
-    emitted_content: bool,
+    pending_items: super::responses_sse_tree::V3ResponsesSseReducerState,
+    emitted_items: BTreeMap<usize, Map<String, Value>>,
+    summary_part_indices: BTreeMap<usize, u64>,
     response_id: Option<String>,
     model: Option<String>,
     tool_call_index: usize,
@@ -751,8 +760,9 @@ impl Default for V3OpenAiChatResponsesSseTransducer {
         Self {
             response_started: false,
             completed: false,
-            incomplete_terminal: false,
-            emitted_content: false,
+            pending_items: super::responses_sse_tree::V3ResponsesSseReducerState::default(),
+            emitted_items: BTreeMap::new(),
+            summary_part_indices: BTreeMap::new(),
             response_id: None,
             model: None,
             tool_call_index: 0,
@@ -784,6 +794,24 @@ impl V3OpenAiChatResponsesSseTransducer {
             .ok_or_else(|| "Responses SSE event is missing type".to_string())?;
         if self.completed {
             return Ok(Vec::new());
+        }
+        let has_item = object.get("item").is_some_and(Value::is_object);
+        if (has_item
+            && matches!(
+                event_type,
+                "response.output_item.added" | "response.output_item.done"
+            ))
+            || matches!(
+                event_type,
+                "response.function_call_arguments.delta"
+                    | "response.function_call_arguments.done"
+                    | "response.custom_tool_call_input.delta"
+                    | "response.custom_tool_call_input.done"
+            )
+        {
+            self.pending_items
+                .apply_event(&event)
+                .map_err(|error| error.to_string())?;
         }
         match event_type {
             "response.created" => {
@@ -830,54 +858,47 @@ impl V3OpenAiChatResponsesSseTransducer {
                 if delta.is_empty() {
                     return Ok(Vec::new());
                 }
-                self.emitted_content = true;
+                self.record_delta(object, "content", delta);
                 Ok(vec![self.chunk(json!({"content": delta}), None)])
+            }
+            "response.refusal.delta" => {
+                let delta = object
+                    .get("delta")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if delta.is_empty() {
+                    return Ok(Vec::new());
+                }
+                self.record_delta(object, "refusal", delta);
+                Ok(vec![self.chunk(json!({"refusal": delta}), None)])
             }
             "response.output_item.done" => {
                 let Some(item) = object.get("item").and_then(Value::as_object) else {
                     return Ok(Vec::new());
                 };
-                let item_type = item.get("type").and_then(Value::as_str);
-                if item_type != Some("function_call") && item_type != Some("custom_tool_call") {
-                    return Ok(Vec::new());
-                }
-                let index = self.tool_call_index;
-                self.tool_call_index += 1;
-                self.emitted_tool_call = true;
-                self.emitted_content = true;
-                let call_id = read_v3_openai_chat_tool_identity(item);
-                let name = item.get("name").and_then(Value::as_str).unwrap_or_default();
-                let arguments = item
-                    .get("arguments")
-                    .and_then(Value::as_str)
-                    .or_else(|| item.get("input").and_then(Value::as_str))
-                    .unwrap_or_default();
-                Ok(vec![self.chunk(
-                    json!({"tool_calls": [{
-                        "index": index,
-                        "id": call_id,
-                        "type": "function",
-                        "function": {"name": name, "arguments": arguments}
-                    }]}),
-                    None,
-                )])
+                let index = object
+                    .get("output_index")
+                    .and_then(Value::as_u64)
+                    .map(|index| index as usize)
+                    .unwrap_or(self.tool_call_index);
+                self.output_item_chunks(index, &Value::Object(item.clone()))
             }
             "response.completed" => {
                 self.completed = true;
                 let response = object.get("response").and_then(Value::as_object);
+                let mut chunks = self.terminal_output_chunks(response)?;
                 let status = response
                     .and_then(|response| response.get("status"))
                     .and_then(Value::as_str);
                 let finish_reason = if status == Some("completed") {
-                    Some(if self.emitted_tool_call {
-                        "tool_calls"
-                    } else {
-                        "stop"
-                    })
+                    Some(responses_as_chat_finish_reason(
+                        self.emitted_tool_call,
+                        None,
+                    ))
                 } else {
                     None
                 };
-                let mut chunks = vec![self.chunk(json!({}), finish_reason)];
+                chunks.push(self.chunk(json!({}), finish_reason));
                 if let Some(usage) = response.and_then(|response| response.get("usage")) {
                     if let Some(chunk) = self.usage_chunk(usage) {
                         chunks.push(chunk);
@@ -885,15 +906,11 @@ impl V3OpenAiChatResponsesSseTransducer {
                 }
                 Ok(chunks)
             }
-            // response.incomplete 是 Responses 协议合法终态（max_output_tokens
-            // 截断 / content_filter 触发）：provider 已交付完整（截断）响应，必须
-            // 投影为 Chat 终帧 finish_reason=length/content_filter + usage +
-            // [DONE]，而不是把合法终帧当流错误 abort 客户端连接。
+            // Preserve the JSON projection's terminal mapping. Chat has no
+            // standard reason for opaque Responses incomplete reasons; `stop`
+            // closes the transport without guessing length or content_filter.
             "response.incomplete" => {
                 self.completed = true;
-                // content_filter / max_output_tokens 截断时 provider 可能没有任何
-                // content/tool 输出帧；空输出是合法终态，不能触发空响应失败检查。
-                self.incomplete_terminal = true;
                 let response = object.get("response").and_then(Value::as_object);
                 let reason = object
                     .get("incomplete_details")
@@ -906,25 +923,10 @@ impl V3OpenAiChatResponsesSseTransducer {
                             .and_then(Value::as_object)
                             .and_then(|details| details.get("reason"))
                             .and_then(Value::as_str)
-                    })
-                    .map(str::trim)
-                    .filter(|reason| !reason.is_empty());
-                let finish_reason = match reason {
-                    Some("max_output_tokens") => "length",
-                    Some("content_filter") => "content_filter",
-                    Some(other) => {
-                        return Err(format!(
-                            "Responses SSE response.incomplete carries unsupported incomplete_details.reason {other}"
-                        ));
-                    }
-                    None => {
-                        return Err(
-                            "Responses SSE response.incomplete requires incomplete_details.reason"
-                                .to_string(),
-                        );
-                    }
-                };
-                let mut chunks = vec![self.chunk(json!({}), Some(finish_reason))];
+                    });
+                let mut chunks = self.terminal_output_chunks(response)?;
+                let finish_reason = responses_as_chat_finish_reason(self.emitted_tool_call, reason);
+                chunks.push(self.chunk(json!({}), Some(finish_reason)));
                 if let Some(usage) = response.and_then(|response| response.get("usage")) {
                     if let Some(chunk) = self.usage_chunk(usage) {
                         chunks.push(chunk);
@@ -949,7 +951,6 @@ impl V3OpenAiChatResponsesSseTransducer {
             | "response.reasoning_image.delta"
             | "response.custom_tool_call_input.delta"
             | "response.custom_tool_call_input.done"
-            | "response.refusal.delta"
             | "response.refusal.done"
             | "response.web_search_call.in_progress"
             | "response.web_search_call.searching"
@@ -987,7 +988,29 @@ impl V3OpenAiChatResponsesSseTransducer {
                 if delta.is_empty() {
                     return Ok(Vec::new());
                 }
-                self.emitted_content = true;
+                let mut delta = delta.to_owned();
+                if event_type == "response.reasoning_summary_text.delta" {
+                    let index = object
+                        .get("output_index")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0) as usize;
+                    let part = object
+                        .get("summary_index")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0);
+                    let previous = self.summary_part_indices.insert(index, part);
+                    if previous.is_some_and(|previous| previous != part)
+                        && self
+                            .emitted_items
+                            .get(&index)
+                            .and_then(|item| item.get("reasoning_content"))
+                            .and_then(Value::as_str)
+                            .is_some_and(|text| !text.is_empty())
+                    {
+                        delta.insert(0, '\n');
+                    }
+                }
+                self.record_delta(object, "reasoning_content", &delta);
                 Ok(vec![self.chunk(json!({"reasoning_content": delta}), None)])
             }
             other => Err(format!("Responses SSE event type {other} is unsupported")),
@@ -998,16 +1021,109 @@ impl V3OpenAiChatResponsesSseTransducer {
         if !self.completed {
             return Err("Responses SSE ended without response.completed".to_string());
         }
-        // 空响应识别：completed 但未产生任何 content / tool_calls 帧 —— provider
-        // 返回了空文本（客户端会判定 "no visible final answer" 并重试）。归一化为
-        // provider 失败进入错误链（记录 health → 连续失败达到阈值 → 拉黑 15 分钟
-        // → 下次 route 排除/切 provider），而不是把空文本投影给客户端。
-        // response.incomplete（content_filter / max_output_tokens）空输出是合法
-        // 终态，豁免该检查。
-        if !self.emitted_content && !self.incomplete_terminal {
-            return Err("provider returned empty response (no content, no tool calls)".to_string());
-        }
         Ok(())
+    }
+
+    fn record_delta(&mut self, event: &Map<String, Value>, field: &str, delta: &str) {
+        let index = event
+            .get("output_index")
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as usize;
+        let item = self.emitted_items.entry(index).or_default();
+        let text = item
+            .entry(field)
+            .or_insert_with(|| Value::String(String::new()));
+        if let Value::String(text) = text {
+            text.push_str(delta);
+        }
+    }
+
+    // Full items and terminal output use the JSON projection owner. Keep each
+    // output index separate so an earlier tool or text delta cannot hide another item.
+    fn terminal_output_chunks(
+        &mut self,
+        response: Option<&Map<String, Value>>,
+    ) -> Result<Vec<Value>, String> {
+        let Some(response) = response else {
+            return Ok(Vec::new());
+        };
+        if self.response_id.is_none() {
+            self.response_id = response
+                .get("id")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+        }
+        if self.model.is_none() {
+            self.model = response
+                .get("model")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+        }
+        // A terminal may omit output already carried by item/argument events.
+        // The same typed reducer owns that assembly; a present empty output
+        // remains empty rather than being filled from earlier progress.
+        let output = if let Some(output) = response.get("output") {
+            output.as_array().cloned().unwrap_or_default()
+        } else {
+            self.pending_items
+                .items
+                .iter()
+                .map(|item| item.item().to_normalized_value())
+                .collect()
+        };
+        let mut chunks = Vec::new();
+        for (index, item) in output.iter().enumerate() {
+            let index = item
+                .get("output_index")
+                .and_then(Value::as_u64)
+                .map(|index| index as usize)
+                .unwrap_or(index);
+            chunks.extend(self.output_item_chunks(index, item)?);
+        }
+        Ok(chunks)
+    }
+
+    fn output_item_chunks(&mut self, index: usize, item: &Value) -> Result<Vec<Value>, String> {
+        let projected = project_v3_openai_chat_client_response_from_canonical(
+            &json!({"status":"completed", "output":[item]}),
+        )?;
+        let mut message = projected["choices"][0]["message"].clone();
+        let emitted = self.emitted_items.entry(index).or_default();
+        for field in ["content", "refusal", "reasoning_content"] {
+            if let Some(full) = message[field].as_str() {
+                let prior = emitted
+                    .get(field)
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let remaining = full.strip_prefix(prior).unwrap_or(full).to_owned();
+                emitted.insert(field.to_owned(), Value::String(full.to_owned()));
+                message.as_object_mut().unwrap().remove(field);
+                if !remaining.is_empty() {
+                    message[field] = Value::String(remaining);
+                }
+            } else {
+                message.as_object_mut().unwrap().remove(field);
+            }
+        }
+        if emitted.contains_key("tool_calls") {
+            message.as_object_mut().unwrap().remove("tool_calls");
+        }
+        if let Some(calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut) {
+            for call in calls {
+                call["index"] = Value::from(self.tool_call_index);
+                self.tool_call_index += 1;
+                self.emitted_tool_call = true;
+            }
+            emitted.insert("tool_calls".to_owned(), Value::Bool(true));
+        }
+        if ["content", "refusal", "reasoning_content", "tool_calls"]
+            .into_iter()
+            .any(|field| message.get(field).is_some())
+        {
+            Ok(vec![self.chunk(message, None)])
+        } else {
+            Ok(Vec::new())
+        }
     }
 
     fn chunk(&self, delta: Value, finish_reason: Option<&str>) -> Value {

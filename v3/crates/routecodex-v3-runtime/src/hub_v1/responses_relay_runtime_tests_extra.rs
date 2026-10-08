@@ -959,7 +959,7 @@ fn anthropic_json_relay_keeps_literal_control_text_unchanged() {
 
 #[test]
 fn anthropic_sse_whole_item_thinking_literal_stays_visible() {
-    // Scope guard: Resp03 governs only the proven complete DSML control frame.
+    // Complete and literal DSML-looking text remains ordinary provider output.
     // A whole-item `<thinking>...</thinking>` literal that does not carry the
     // exact DSML closing block is representable provider text and must be
     // forwarded unchanged instead of being dropped as internal-only.

@@ -1,4 +1,3 @@
-use super::responses_relay_diagnostics::anthropic_cyber_refusal_error_from_payload;
 use super::*;
 use crate::hub_v1::anthropic_sse_tree::{V3AnthropicSseReducerState, V3AnthropicSseTreeError};
 use crate::hub_v1::relay_sse_hooks::V3RelaySseHookCatalog;
@@ -212,15 +211,6 @@ pub(crate) async fn build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_
             if let Some(error) = extract_v3_provider_event_error(&event) {
                 return Err(error);
             }
-            if let Some(error) = anthropic_cyber_refusal_error_from_payload(&event) {
-                return Err(
-                    V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure {
-                        status: 429,
-                        code: error.code,
-                        message: error.message,
-                    },
-                );
-            }
             typed_state.apply_event(&event).map_err(|error| {
                 let message = match error {
                     V3AnthropicSseTreeError::DuplicateMessageMismatch => {
@@ -290,18 +280,6 @@ pub(crate) async fn build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_
     observation
         .record_provider_event_json(&anthropic_message)
         .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
-    if let Some(failure) = classify_v3_provider_terminal_admission(
-        V3HubProviderWireProtocol::Anthropic,
-        &anthropic_message,
-    ) {
-        return Err(
-            V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure {
-                status: 200,
-                code: failure.code,
-                message: failure.message,
-            },
-        );
-    }
     let response = project_v3_anthropic_message_as_responses_response_with_context(
         &anthropic_message,
         anthropic_context,
@@ -440,18 +418,6 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_strea
                         status: 502,
                         code: "network_error".to_owned(),
                         message,
-                    },
-                );
-            }
-            if let Some(failure) = classify_v3_provider_terminal_admission(
-                V3HubProviderWireProtocol::OpenAiChat,
-                &event,
-            ) {
-                return Err(
-                    V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure {
-                        status: 200,
-                        code: failure.code,
-                        message: failure.message,
                     },
                 );
             }
@@ -896,7 +862,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn provider_content_filter_finish_reason_is_forwarded_as_terminal() {
+    async fn provider_content_filter_finish_reason_survives_materialization() {
         let observation = V3RuntimeStreamObservation::default();
         let provider = Box::pin(stream::iter(vec![Ok(
             b"data: {\"id\":\"chatcmpl_filter\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"content_filter\"}]}\n\n".to_vec(),
@@ -907,16 +873,9 @@ mod tests {
             &observation,
         )
         .await
-        .expect("a content_filter terminal is a legal provider terminal, not a proxy error");
-
-        assert_eq!(
-            response["choices"][0]["finish_reason"], "content_filter",
-            "{response}"
-        );
-        assert_eq!(
-            response["choices"][0]["message"]["content"], "",
-            "{response}"
-        );
+        .expect("content_filter is a representable provider terminal");
+        assert_eq!(response["choices"][0]["finish_reason"], "content_filter");
+        assert_eq!(response["choices"][0]["message"]["content"], "");
     }
 
     #[tokio::test]
