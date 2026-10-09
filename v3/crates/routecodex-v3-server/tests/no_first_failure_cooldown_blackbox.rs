@@ -1,4 +1,4 @@
-//! Public regression: isolated recoverable failures keep the exact key eligible.
+//! Public regression: ordinary 429 cools only after three consecutive failures.
 //! Command: CARGO_NET_OFFLINE=true cargo test --locked --manifest-path v3/Cargo.toml
 //! -p routecodex-v3-server --test no_first_failure_cooldown_blackbox -- --nocapture
 //! Run with an isolated test HOME, as server error sampling uses HOME/.rcc.
@@ -34,11 +34,16 @@ async fn provider(State(state): State<Arc<Upstream>>, Json(body): Json<Value>) -
             .entry(input.to_string())
             .or_default() += 1;
     }
-    if input.starts_with("health-test:fail") || input.starts_with("health-test:auth") {
+    if input.starts_with("health-test:fail")
+        || input.starts_with("health-test:auth")
+        || input.starts_with("health-test:server")
+    {
         let (status, kind) = if input.starts_with("health-test:auth") {
             (StatusCode::UNAUTHORIZED, "invalid_api_key")
-        } else {
+        } else if input.starts_with("health-test:server") {
             (StatusCode::INTERNAL_SERVER_ERROR, "server_error")
+        } else {
+            (StatusCode::TOO_MANY_REQUESTS, "rate_limit_error")
         };
         return Response::builder().status(status).header("content-type", "application/json")
             .body(Body::from(json!({"error":{"type":kind,"code":kind,"message":"controlled real upstream failure"}}).to_string())).unwrap();
@@ -206,7 +211,7 @@ async fn no_first_failure_cooldown_public_http() {
             .await
             .iter()
             .all(|e| e["provider_id"] != "primary"),
-        "first recoverable HTTP 500 must not create global cooldown"
+        "first ordinary HTTP 429 must not create global cooldown"
     );
     request(&client, &base, "main", "health-test:success-reset", true).await;
     receipt(&state, "health-test:success-reset").await;
@@ -229,12 +234,21 @@ async fn no_first_failure_cooldown_public_http() {
     );
     request(&client, &base, "main", "health-test:fail-repeat", false).await;
     receipt(&state, "health-test:fail-repeat").await;
+    assert!(
+        pool(&client, &base)
+            .await
+            .iter()
+            .all(|e| e["provider_id"] != "primary"),
+        "second consecutive ordinary HTTP 429 must not create global cooldown"
+    );
+    request(&client, &base, "main", "health-test:fail-third", false).await;
+    receipt(&state, "health-test:fail-third").await;
     let entries = pool(&client, &base).await;
     assert!(
         entries.iter().any(|e| e["provider_id"] == "primary"
             && e["auth_alias"] == alias
             && e["model_id"] == "main"),
-        "consecutive second HTTP 500 must cool exact provider/key/model: {entries:?}"
+        "consecutive third HTTP 429 must cool exact provider/key/model: {entries:?}"
     );
     request(&client, &base, "main", "health-test:blocked", false).await;
     assert!(
@@ -267,6 +281,34 @@ async fn no_first_failure_cooldown_public_http() {
                 && e["model_id"] == "main"),
         "sibling success must not reset another identity's streak/cooldown"
     );
+
+    request(
+        &client,
+        &base,
+        "other",
+        "health-test:server-terminal",
+        false,
+    )
+    .await;
+    receipt(&state, "health-test:server-terminal").await;
+    assert!(
+        pool(&client, &base)
+            .await
+            .iter()
+            .any(|e| e["provider_id"] == "primary"
+                && e["auth_alias"] == alias
+                && e["model_id"] == "other"),
+        "HTTP 500 retains its declared immediate threshold on the other model"
+    );
+    request(
+        &client,
+        &base,
+        "sibling",
+        "health-test:after-server-failure",
+        true,
+    )
+    .await;
+    receipt(&state, "health-test:after-server-failure").await;
 
     request(
         &client,

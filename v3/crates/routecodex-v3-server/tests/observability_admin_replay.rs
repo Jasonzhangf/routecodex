@@ -381,15 +381,14 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
     assert_eq!(observed["external_error_code"], "server_error");
     assert_eq!(observed["external_error_status"], 503);
     assert_eq!(observed["failure_count"], 1);
-    // A single recoverable provider failure is counted into health but must not
-    // cool the provider: two consecutive same-fingerprint failures are
-    // required, so one recoverable error never excludes a provider.
-    assert_eq!(observed["health_state"], "healthy");
+    // HTTP 503 retains its declared first-failure threshold; only ordinary 429
+    // uses the three-consecutive-failure rule.
+    assert_eq!(observed["health_state"], "cooldown");
     assert_eq!(observed["action"], "terminal_route_and_default_exhausted");
     assert_eq!(observed["attempt_index"], 1);
     assert!(
-        observed["cooldown_until_ms"].is_null(),
-        "one recoverable failure must not start a cooldown: {observed}"
+        observed["cooldown_until_ms"].as_u64().unwrap() > request_started_ms,
+        "the real HTTP 503 failure must schedule exact-identity recovery: {observed}"
     );
     assert_eq!(
         detail["observed_error_source"],
@@ -508,8 +507,7 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
         "the failure evidence must include error.json"
     );
 
-    // 7. One recoverable failure is counted but must not exclude the provider:
-    //    the real cooldown pool must not move yet.
+    // 7. The first HTTP 503 must cool its exact provider/model/key identity.
     let (pool_status, pool) = get_json(
         &client,
         &format!("http://{admin_addr}/api/observability/cooldown-pool"),
@@ -519,13 +517,14 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
     let entries = pool["listeners"][0]["entries"]
         .as_array()
         .expect("cooldown pool entries");
-    assert!(
-        !entries.iter().any(|entry| entry["provider_id"] == "mock"),
-        "one recoverable provider failure must not cool the provider: {pool}"
-    );
+    let first_cooled = entries
+        .iter()
+        .find(|entry| entry["provider_id"] == "mock")
+        .unwrap_or_else(|| panic!("the first HTTP 503 must cool its exact identity: {pool}"));
+    assert_eq!(first_cooled["auth_alias"], "key");
+    assert_eq!(first_cooled["model_id"], "test");
 
-    // 8. The second identical failure reaches the default two-failure threshold;
-    //    only then does the exact failed identity move into the cooldown pool.
+    // 8. A later business request cannot send another attempt to the cooled key.
     let response = client
         .post(format!("http://{server_addr}/v1/responses"))
         .json(&json!({
@@ -537,9 +536,9 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
         .await;
     assert!(
         response.is_err(),
-        "provider HTTP failure attempt 2 must not fabricate a client HTTP response"
+        "a cooled identity must not fabricate a client HTTP response"
     );
-    assert_eq!(upstream_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(upstream_calls.load(Ordering::SeqCst), 1);
 
     let (pool_status, pool) = get_json(
         &client,
@@ -554,7 +553,7 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
         .iter()
         .find(|entry| entry["provider_id"] == "mock")
         .unwrap_or_else(|| {
-            panic!("provider mock must be cooled after two consecutive failures: {pool}")
+            panic!("provider mock must remain cooled after the blocked request: {pool}")
         });
     assert_eq!(cooled["auth_alias"], "key");
     assert_eq!(cooled["model_id"], "test");
@@ -577,7 +576,7 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
 
     // Real captured values, so the evidence is inspectable without a debugger.
     eprintln!("[replay] request_key={request_key}");
-    eprintln!("[replay] client_status={client_status} upstream_calls=2");
+    eprintln!("[replay] client_status={client_status} upstream_calls=1");
     eprintln!("[replay] error_chain={chain}");
     eprintln!(
         "[replay] observed_error_source={} health_action={} error_class={}",
