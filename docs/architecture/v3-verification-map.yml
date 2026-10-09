@@ -471,7 +471,7 @@ features:
   - npm run verify:v3-architecture-ci
 - feature_id: v3.provider_compat_profile_loading
   change_risk: high
-  owner_scope: Provider compatibility profiles, fail-fast normal-payload boundary validation, provider-declared output-cap projection, and provider-configurable reasoning-effort override between Hub provider semantic/raw nodes and the provider wire/client semantic nodes.
+  owner_scope: Provider compatibility profiles, fail-fast normal-payload boundary validation, output-cap and reasoning-effort projection, and registered reversible Zen TCM tool/history compatibility between Hub provider semantic/raw and provider wire/client semantic nodes.
   contract:
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-function-map.yml
@@ -485,6 +485,8 @@ features:
   - When the client supplied no output limit, the provider-declared model output cap is projected into the provider wire payload; a client-supplied output limit is never overwritten on any registered provider protocol.
   - When a provider-directory TOML declares `provider.v3.reasoning_effort`, the configured value becomes the final OpenAI Chat `reasoning_effort` or Responses `reasoning.effort` provider wire value; a configured `medium` overrides a client `xhigh`, and a configured `low` overrides the absence of a client effort.
   - When no provider reasoning-effort policy is declared, the client/protocol/compat effort result is preserved unchanged.
+  - Explicit chat:opencode-zen-tcm binds the actual compatible executor and performs a reversible native bash/read to client executor to native-history conversion with unchanged call IDs and actual paired output/error content.
+  - Original custom executor scripts and passable direct exec_command calls preserve complete UTF8 file contents, actual execution receipts and paired history through public Responses SSE entry.
   required_negative:
   - Top-level semantics, processed, and processingMetadata fail at both request and response compat entrypoints.
   - Compat does not strip, reconstruct, or route control state and does not own Chat Process or SSE semantics.
@@ -492,6 +494,8 @@ features:
   - Unsupported provider protocols (Anthropic, Gemini) with an explicit reasoning-effort policy fail Config compile before `V3Config05ManifestPublished`; the policy value never reaches runtime or provider wire for unsupported protocols.
   - Generic chat:glm Anthropic passthrough and other provider protocols never receive Goaichat private hosted-tool fields.
   - Goaichat compatibility never adds function envelopes to native hosted declarations, adds type/function envelopes to ordinary Anthropic declarations, or restores retired historical tools to the callable inventory.
+  - Zen TCM aliases are never added without the real compatible executor or when its new calls are disabled; native declarations/calls, ordinary executor scripts and incompatible entry/protocol paths are preserved.
+  - Missing or malformed alias arguments reach the real client executor for error/correction; Compat never fabricates execution receipts or reconstructs capability controls from the executable codec.
   black_box_regression:
     command: npm run test:v3-goaichat-hosted-tool-history-blackbox
     test_ids:
@@ -500,11 +504,21 @@ features:
     - goaichat_chat_hosted_history_round_trip_blackbox
     - goaichat_messages_hosted_history_round_trip_blackbox
     - generic_glm_anthropic_hosted_history_preserved_blackbox
+  zen_tcm_black_box_regression:
+    command: npm run test:v3-opencode-zen-tcm-bridge-blackbox
+    test_ids:
+    - zen_tcm_bash_native_history_roundtrip
+    - zen_tcm_read_native_history_roundtrip
+    - zen_tcm_invalid_args_native_history_correction
+    - zen_tcm_incompatible_executor_preserved
+    - zen_tcm_original_executor_file_write_history_roundtrip
+    - zen_tcm_direct_shell_file_write_history_roundtrip
   required_gates:
   - npm run test:v3-provider-compat-profile-loading
   - npm run test:v3-goaichat-hosted-tool-history-blackbox
   - npm run test:v3-provider-reasoning-effort-policy-blackbox
   - npm run test:v3-provider-reasoning-effort-policy-config-failures
+  - npm run test:v3-opencode-zen-tcm-bridge-blackbox
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
@@ -3123,21 +3137,21 @@ features:
   completion_rule:
     source: protocol_tables unit tests and architecture CI pass; tables fail-fast on schema violation and never enter provider/client payload.
 - feature_id: v3.history_image_cleanup
-  status: active_normalization_and_session_compat_projection
+  status: active_latest_image_preservation
   change_risk: medium
   owner_kind: rust_project_v3_req_inbound_normalization
-  owner_scope: ReqInbound preserves the latest image-bearing carrier despite later text-only reminders and cleans earlier images; typed-target-gated session compatibility projects images only for selected non-multimodal targets.
+  owner_scope: ReqInbound preserves the latest image-bearing carrier despite later text-only reminders and cleans earlier images; ProviderReqCompat06 preserves representable latest images and paired tool receipts independently of target capability metadata.
   owner_modules:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/history_image_cleanup.rs
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib hooks::tests::direct_responses_projection_preserves_current_image_for_selected_target
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib multimodal_target_preserves_image_bytes_for_session_semantics
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib non_multimodal_target_projects_image_to_session_placeholder
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib non_multimodal_target_preserves_representable_latest_image
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server image_input_blackbox
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-error --lib transient_stage_code_classifier
   completion_rule:
-    source: Runtime tests and public HTTP image_input_blackbox cases pass for Chat, Responses and Anthropic; latest images and tool identity survive with multimodal available, older images are placeholders, and empty/exhausted multimodal routes permit current-image placeholders.
+    source: Runtime tests and public HTTP image_input_blackbox cases pass for Chat, Responses and Anthropic; latest images and tool identity survive even when multimodal metadata is absent or its route is cooled, and older images are placeholders. Live 7777 blind-image tool write/read/follow-up cases match hidden visual ground truth, while the no-image control returns NO_IMAGE.
 - feature_id: v3.direct_runtime_kernel_core
   status: active_skeleton
   change_risk: critical
@@ -3162,6 +3176,9 @@ features:
   change_risk: critical
   owner_kind: rust_v3_provider_adaptive_health_lifecycle
   owner_modules:
+  - v3/crates/routecodex-v3-provider-responses/src/probe.rs
+  - v3/crates/provider-compat-core/src/opencode_zen_tcm.rs
+  - v3/crates/routecodex-v3-cli/tests/provider_account_pool_blackbox.rs
   - v3/crates/routecodex-v3-error/src/lib.rs
   - v3/crates/routecodex-v3-error/src/subscription.rs
   - v3/crates/routecodex-v3-config/src/types.rs
@@ -3191,10 +3208,11 @@ features:
   - failed provider-health probes advance only next_probe_at_ms and never extend the original blocked_until_ms
   - every ordinary and long-policy probe interval is capped at 30 minutes; a configured provider health probe_interval_ms is an optional maximum and cannot exceed 30 minutes
   - cc-sol and kdns providers configured with probe_interval_ms=120000 run the bounded ladder but never wait longer than two minutes between recovery probes
-  - matched HTTP 401 and HTTP 403 provider error policies with scope=auth_key record provider+auth_alias failures without model identity and cool the key after the first failure
-  - a 401 auth-key cooldown blocks scheduling and session availability for another model under the same provider/auth_alias while sibling keys remain available
+  - matched HTTP 401 and HTTP 403 automatic cooldown policies retain the exact selected provider+auth_alias+model identity
+  - every automatic failure excludes and cools only the failed complete candidate; untried sibling keys, models and providers remain available
   - 401 auth-key business cooldown remains until semantic probe success, while its first recovery probe is due after 5 seconds and later failures advance the shared 5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s ladder
-  - a recoverable typed provider failure cools its identity only after its declared threshold of consecutive failures carrying the same typed fingerprint, default two; a different fingerprint restarts the consecutive streak and mixed fingerprints never add up to one cooldown
+  - ordinary 429 requires three consecutive same-fingerprint failures of the exact provider+auth_alias+model identity; success or a different fingerprint resets its streak; other failures retain typed thresholds
+  - zen_429_three_failures_and_semantic_streaming_recovery_public exercises public HTTP business failures, real private-profile streaming probes, negative nonterminal/error streams and semantic recovery before a successful next business request
   - a provider-declared terminal with no visible output is forwarded as-is and never becomes a provider failure: Responses incomplete max_output_tokens/content_filter, Anthropic max_tokens/refusal, and the OpenAI Chat wire terminal including an empty-content content_filter finish
   - Direct and Relay atomically admit the highest-priority health-and-capacity-eligible provider, immediately skipping full candidates without a capacity wait
   - Public `/v1/responses` switches to a spare provider while the first provider remains held; all-full pools terminate promptly without an extra upstream request
@@ -3206,11 +3224,12 @@ features:
   - HTTP 2xx with an error object, malformed JSON, nonterminal status, or missing protocol terminal shape cannot recover a provider
   - an early due probe does not make the provider available before semantic probe success
   - zero or greater-than-30-minute provider health probe_interval_ms values fail config compilation
-  - model-less auth-key cooldown state never enters provider or client payload or MetadataCenter
+  - automatic model-less cooldown state never blocks other complete identities or enters provider/client payload or MetadataCenter; explicit manual administration retains its declared scope
   - Crossing the adaptive budget cannot record provider failure health, auth-key cooldown, model cooldown, MetadataCenter state, or provider/client payload truth
   - Capacity saturation cannot trigger health rescue probes for the full candidate, provider-action waits, oversubscription, or escape from an explicit provider.model pin
   - WebSocketV2 session-slot contention cannot retain provider capacity, starve another request that owns the session, or leak its session slot or provider lease on cancellation
   required_gates:
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test provider_account_pool_blackbox
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --lib
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_probe_backoff_ladder_contract -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_global_subscription_probe_contract -- --nocapture

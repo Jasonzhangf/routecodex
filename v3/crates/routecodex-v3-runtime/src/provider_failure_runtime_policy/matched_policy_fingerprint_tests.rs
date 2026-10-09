@@ -91,8 +91,18 @@ message_mode = "code_only"
             )
             .available;
         assert!(
-            available,
-            "class {class} must stay selectable: one failure per distinct fingerprint is not a cooldown"
+            !available,
+            "threshold one blocks only this complete identity"
+        );
+        assert!(
+            health
+                .availability("first", Some("key1"), Some("other-model"), 101)
+                .available
+        );
+        assert!(
+            health
+                .availability("first", Some("key2"), Some("gpt-test"), 101)
+                .available
         );
     }
 }

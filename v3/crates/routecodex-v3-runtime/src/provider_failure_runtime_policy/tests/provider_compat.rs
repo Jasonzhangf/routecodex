@@ -198,7 +198,7 @@ async fn relay_provider_compat_failure_keeps_same_provider_sibling_health_neutra
 }
 
 #[tokio::test]
-async fn relay_generic_provider_http_400_excludes_provider_family_and_records_health() {
+async fn relay_generic_provider_http_400_excludes_only_failed_identity_and_records_health() {
     let scope = "relay_generic_provider_http_400";
     let manifest = provider_compat_sibling_manifest(scope);
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -247,27 +247,35 @@ async fn relay_generic_provider_http_400_excludes_provider_family_and_records_he
 
     assert_eq!(
         failed_candidates,
-        BTreeSet::from([
-            "first:key:test".to_string(),
-            "first:key:sibling".to_string(),
-        ]),
-        "generic provider HTTP 400 must exclude every candidate in the provider family"
+        BTreeSet::from(["first:key:test".to_string()]),
+        "generic provider HTTP 400 must exclude only the failed exact candidate"
     );
     assert_ne!(
         result.event.health_record.state,
         "request_local_provider_compat"
     );
     assert_eq!(result.event.health_record.failure_count, 1);
-    assert_eq!(result.event.health_record.state, "healthy");
-    assert!(result.event.health_record.cooldown_until_ms.is_none());
+    assert_eq!(result.event.health_record.state, "cooldown");
+    assert!(result.event.health_record.cooldown_until_ms.is_some());
     assert!(
-        health
+        !health
             .availability("first", Some("key"), Some("test"), u64::MAX)
             .available
     );
-    assert_eq!(result.event.action, "terminal_route_and_default_exhausted");
-    assert!(result.retry_selected.is_none());
-    assert!(result.terminal_projection.is_some());
+    assert_eq!(result.event.action, "switch_provider");
+    let retry = result
+        .retry_selected
+        .as_ref()
+        .expect("generic provider HTTP 400 must retain the untried sibling candidate");
+    assert_eq!(retry.candidate.provider_id, "first");
+    assert_eq!(retry.candidate.auth_alias, "key");
+    assert_eq!(retry.candidate.model_id, "sibling");
+    assert!(
+        health
+            .availability("first", Some("key"), Some("sibling"), u64::MAX)
+            .available
+    );
+    assert!(result.terminal_projection.is_none());
     assert!(same_candidate_retries.is_empty());
     assert!(!trace.contains(&"V3TargetPolicyRetriedSame"));
 }

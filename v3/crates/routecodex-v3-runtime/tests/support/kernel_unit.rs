@@ -1073,9 +1073,18 @@ async fn direct_runtime_rejects_invalid_current_data_image_before_provider_send(
 }
 
 #[test]
-fn direct_protocol_plan_uses_session_bound_cooldown_before_initial_target() {
+fn direct_protocol_plan_uses_exact_identity_cooldown_across_sessions() {
     let routing_group = "protocol_plan_session_cooldown";
-    let manifest = scoped_test_manifest(reselection_manifest(), routing_group);
+    let mut manifest = scoped_test_manifest(reselection_manifest(), routing_group);
+    if let Some(pool) = manifest
+        .route_groups
+        .get_mut(routing_group)
+        .and_then(|group| group.pools.get_mut("default"))
+    {
+        for target in &mut pool.targets {
+            target.priority = Some(1);
+        }
+    }
     let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let session_a = test_failure_session_scope_for(routing_group, "session-a");
     let session_b = test_failure_session_scope_for(routing_group, "session-b");
@@ -1099,7 +1108,7 @@ fn direct_protocol_plan_uses_session_bound_cooldown_before_initial_target() {
                     max_probe_interval_ms: None,
                     long_probe_backoff: false,
                     until_restart: false,
-                    cooldown_scope: V3ProviderFailureCooldownScope::Session,
+                    cooldown_scope: V3ProviderFailureCooldownScope::ProviderKeyModel,
                 }),
             )
             .expect("session A failure should be recorded");
@@ -1132,11 +1141,6 @@ fn direct_protocol_plan_uses_session_bound_cooldown_before_initial_target() {
         "{:?}",
         plan_a.decision.target.unavailable_candidates
     );
-    assert!(
-        plan_a.decision.target.unavailable_candidates[0].contains("session-a"),
-        "{:?}",
-        plan_a.decision.target.unavailable_candidates
-    );
 
     let plan_b = plan_v3_responses_protocol_execution_with_provider_health(
         &manifest,
@@ -1155,9 +1159,9 @@ fn direct_protocol_plan_uses_session_bound_cooldown_before_initial_target() {
         provider_health,
         now + 10,
     )
-    .expect("session B protocol plan should preserve session isolation from session A");
-    assert_eq!(plan_b.decision.target.candidate.provider_id, "first");
-    assert_eq!(plan_b.decision.target.unavailable_candidates.len(), 0);
+    .expect("session B must respect the same complete provider identity cooldown");
+    assert_eq!(plan_b.decision.target.candidate.provider_id, "second");
+    assert_eq!(plan_b.decision.target.unavailable_candidates.len(), 1);
 }
 
 #[tokio::test]

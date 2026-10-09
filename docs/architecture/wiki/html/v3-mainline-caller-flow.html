@@ -282,8 +282,8 @@
       <div class="hero-meta">
         <span>Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-caller-flow.md</code></span>
         <span>Edge source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
-        <span>87 functional paths</span>
-        <span>526 caller edges</span>
+        <span>90 functional paths</span>
+        <span>530 caller edges</span>
       </div>
     </header>
 
@@ -472,7 +472,7 @@ flowchart TD
 <tr><td>Missing caller/callee fields</td><td><strong>none</strong></td></tr>
 <tr><td>Binding-pending edges</td><td><strong>22</strong></td></tr>
 <tr><td>typed-test-only edges</td><td><strong>15</strong></td></tr>
-<tr><td>live-bound source edges</td><td><strong>414</strong></td></tr>
+<tr><td>live-bound source edges</td><td><strong>417</strong></td></tr>
 <tr><td>aggregate-only wrapper edges</td><td><strong>2</strong></td></tr>
 </tbody>
 </table>
@@ -596,8 +596,11 @@ flowchart TD
 <tr><td><a href="#chain-v3_global_binary_install"><code>v3.global_binary_install</code></a><br/>v 3.global_binary_install</td><td><span class="status audited_locked">locked by Jason</span></td><td>1</td><td>1</td><td><code>v3.global_binary_install</code></td><td><code>sha256:34c3f3e588a9…</code></td></tr>
 <tr><td><a href="#chain-v3_direct_request_key_hooks"><code>v3.direct.request_key_hooks</code></a><br/>v 3.direct.request_key_hooks</td><td><span class="status pending_review">pending review</span></td><td>6</td><td>3</td><td><code>v3.direct.request_key_hooks</code></td><td><code>sha256:d680f1142ebb…</code></td></tr>
 <tr><td><a href="#chain-v3_provider_compat_profile_request"><code>v3.provider_compat_profile.request</code></a><br/>v 3.provider_compat_profile.request</td><td><span class="status pending_review">pending review</span></td><td>1</td><td>5</td><td><code>v3.provider_compat_profile_loading</code></td><td><code>sha256:8115448683b5…</code></td></tr>
+<tr><td><a href="#chain-v3_provider_compat_zen_health_probe"><code>v3.provider_compat.zen_health_probe</code></a><br/>v 3.provider_compat.zen_health_probe</td><td><span class="status pending_review">pending review</span></td><td>1</td><td>2</td><td><code>v3.provider_global_subscription_probe</code></td><td><code>sha256:e0a6e3311bfb…</code></td></tr>
 <tr><td><a href="#chain-v3_provider_compat_request_invalid_error_source"><code>v3.provider_compat.request_invalid_error_source</code></a><br/>v 3.provider_compat.request_invalid_error_source</td><td><span class="status pending_review">pending review</span></td><td>1</td><td>2</td><td><code>v3.provider_compat_profile_loading</code></td><td><code>sha256:8e5435ba6720…</code></td></tr>
 <tr><td><a href="#chain-v3_provider_compat_profile_response"><code>v3.provider_compat_profile.response</code></a><br/>v 3.provider_compat_profile.response</td><td><span class="status pending_review">pending review</span></td><td>1</td><td>4</td><td><code>v3.provider_compat_profile_loading</code></td><td><code>sha256:cb52e8e22579…</code></td></tr>
+<tr><td><a href="#chain-v3_opencode_zen_tcm_request"><code>v3.opencode_zen_tcm.request</code></a><br/>v 3.opencode_zen_tcm.request</td><td><span class="status pending_review">pending review</span></td><td>2</td><td>3</td><td><code>v3.provider_compat_profile_loading</code></td><td><code>sha256:3a9555f5d9a4…</code></td></tr>
+<tr><td><a href="#chain-v3_opencode_zen_tcm_response"><code>v3.opencode_zen_tcm.response</code></a><br/>v 3.opencode_zen_tcm.response</td><td><span class="status pending_review">pending review</span></td><td>1</td><td>3</td><td><code>v3.provider_compat_profile_loading</code></td><td><code>sha256:b85b48c6aa9f…</code></td></tr>
 <tr><td><a href="#chain-v3_target_session_global_selection"><code>v3.target.session_global_selection</code></a><br/>v 3.target.session_global_selection</td><td><span class="status audited_locked">locked by Jason</span></td><td>4</td><td>4</td><td><code>v3.virtual_router_target_interpreter</code></td><td><code>sha256:ff56cb023f01…</code></td></tr>
 <tr><td><a href="#chain-v3_codex_sample_retention_snap_scope"><code>v3.codex_sample_retention_snap_scope</code></a><br/>v 3.codex_sample_retention_snap_scope</td><td><span class="status audited_locked">locked by Jason</span></td><td>9</td><td>5</td><td><code>v3.codex_sample_retention_snap_scope</code></td><td><code>sha256:73893d0d8082…</code></td></tr>
 <tr><td><a href="#chain-v3_managed_restart_attempt"><code>v3.managed_restart_attempt</code></a><br/>v 3.managed_restart_attempt</td><td><span class="status pending_review">pending review</span></td><td>30</td><td>13</td><td><code>v3.managed_server_lifecycle</code></td><td><code>sha256:e5c70cdca330…</code></td></tr>
@@ -728,11 +731,32 @@ flowchart TD
             <span>1 edges · 5 resources · provider-compat-core, v3-runtime::hub_v1</span>
             <span class="status pending_review">pending review</span>
           </a>
+<a class="branch-card" href="#chain-v3_provider_compat_zen_health_probe">
+            <span class="chain-id">v 3.provider_compat.zen_health_probe</span>
+            <span>ProviderProbeRequest → ProviderPrivateProbeCompat</span>
+            <span><code>v3.provider_compat.zen_health_probe</code></span>
+            <span>1 edges · 2 resources · provider-compat-core, v3-provider-responses</span>
+            <span class="status pending_review">pending review</span>
+          </a>
 <a class="branch-card" href="#chain-v3_provider_compat_profile_response">
             <span class="chain-id">v 3.provider_compat_profile.response</span>
             <span>V3ProviderRespInbound01Raw → ProviderRespCompat02ProviderCompat</span>
             <span><code>v3.provider_compat_profile.response</code></span>
             <span>1 edges · 4 resources · provider-compat-core, v3-runtime::hub_v1</span>
+            <span class="status pending_review">pending review</span>
+          </a>
+<a class="branch-card" href="#chain-v3_opencode_zen_tcm_request">
+            <span class="chain-id">v 3.opencode_zen_tcm.request</span>
+            <span>V3HubReqOutbound07ProviderSemantic → V3ProviderReqOutbound08WirePayload</span>
+            <span><code>v3.opencode_zen_tcm.request</code></span>
+            <span>2 edges · 3 resources · provider-compat-core, v3-runtime::hub_v1</span>
+            <span class="status pending_review">pending review</span>
+          </a>
+<a class="branch-card" href="#chain-v3_opencode_zen_tcm_response">
+            <span class="chain-id">v 3.opencode_zen_tcm.response</span>
+            <span>V3ProviderRespInbound01Raw → ProviderRespCompat02ProviderCompat</span>
+            <span><code>v3.opencode_zen_tcm.response</code></span>
+            <span>1 edges · 3 resources · provider-compat-core, v3-runtime::hub_v1</span>
             <span class="status pending_review">pending review</span>
           </a>
 <a class="branch-card" href="#chain-v3_target_session_global_selection">
@@ -1571,7 +1595,7 @@ flowchart TD
         <span class="summary-sub">1 edges · <code>v3.provider_compat_profile.request</code> · V3HubReqOutbound07ProviderSemantic → ProviderReqCompat06ProviderCompat</span>
       </summary>
       <div class="branch-body">
-        <p class="chain-summary">The request provider-compat node consumes the adjacent provider-semantic payload plus the selected target capability and provider-policy carrier, validates the normal-payload boundary, applies the selected provider-family wire profile, projects the provider-declared output cap, applies the provider-configurable reasoning-effort override, and performs the registered session-preserving image compatibility projection only for a selected target without multimodal/vision capability.</p>
+        <p class="chain-summary">The request provider-compat node consumes the adjacent provider-semantic payload plus the selected target capability and provider-policy carrier, validates the normal-payload boundary, applies the selected provider-family wire profile, projects the provider-declared output cap, applies the provider-configurable reasoning-effort override, and preserves representable latest images and paired tool receipts independently of target capability metadata.</p>
         <div class="branch-meta">
           <span>owner: <code>v3.provider_compat_profile_loading</code></span>
           <span>audit: <span class="status pending_review">pending review</span></span>
@@ -1594,6 +1618,42 @@ flowchart TD
 <thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
 <tbody>
 <tr><td><code>v3-provider-compat-profile-request-01</code></td><td><code>V3HubReqOutbound07ProviderSemantic</code><br/>→ <code>ProviderReqCompat06ProviderCompat</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.request.provider_semantic</code> <code>v3.provider_compat.payload_boundary_contract</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.provider_wire_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.hub.resolved_target</code> <code>v3.hub.provider_protocol</code></div></td><td><code>apply_v3_provider_req_compat_to_provider_payload</code><br/><small>routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs</small></td><td><code>run_req_outbound_stage3_compat</code><br/><small>provider-compat-core/src/lib.rs</small></td></tr>
+</tbody>
+</table>
+      </div>
+    </details>
+
+
+    <details class="branch-detail" id="chain-v3_provider_compat_zen_health_probe" >
+      <summary>
+        <span class="summary-main">v 3.provider_compat.zen_health_probe</span>
+        <span class="summary-sub">ProviderProbeRequest → ProviderPrivateProbeCompat</span>
+        <span class="summary-sub">1 edges · <code>v3.provider_compat.zen_health_probe</code> · ProviderProbeRequest → ProviderPrivateProbeCompat</span>
+      </summary>
+      <div class="branch-body">
+        <p class="chain-summary">The selected Zen private profile shapes inert streaming recovery probes before Provider transport; Runtime uses its existing semantic SSE decoder for recovery.</p>
+        <div class="branch-meta">
+          <span>owner: <code>v3.provider_global_subscription_probe</code></span>
+          <span>audit: <span class="status pending_review">pending review</span></span>
+          <span>modules: <code>provider-compat-core · v3-provider-responses</code></span>
+          <span>resources: <code>2</code></span>
+
+
+        </div>
+        <div class="diagram-shell">
+          <pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 82, &quot;nodeSpacing&quot;: 46}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;18px&quot;}} }%%
+flowchart TD
+  n_v3_provider_compat_zen_health_probe_0[&quot;&lt;b&gt;Provider Probe Request&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;ProviderProbeRequest&lt;/small&gt;&quot;]
+  n_v3_provider_compat_zen_health_probe_1[&quot;&lt;b&gt;Provider Private Probe Compat&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;ProviderPrivateProbeCompat&lt;/small&gt;&quot;]
+  n_v3_provider_compat_zen_health_probe_0 --&gt;|v3-zen-health-probe-compat&lt;br/&gt;v3-provider-responses → provider-compat-core| n_v3_provider_compat_zen_health_probe_1
+  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+  classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
+  class n_v3_provider_compat_zen_health_probe_0,n_v3_provider_compat_zen_health_probe_1 node;</pre>
+        </div>
+        <table>
+<thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
+<tbody>
+<tr><td><code>v3-zen-health-probe-compat</code></td><td><code>ProviderProbeRequest</code><br/>→ <code>ProviderPrivateProbeCompat</code></td><td><span class="status anchored">anchored</span></td><td><span class="status test-bound" title="test/characterization evidence over declared owner path">test-bound</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.config.published_manifest</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.provider.cooldown_probe_state</code></div></td><td><code>build_v3_provider_global_probe_request</code><br/><small>routecodex-v3-provider-responses/src/probe.rs</small></td><td><code>apply_opencode_zen_probe_request</code><br/><small>provider-compat-core/src/opencode_zen_tcm.rs</small></td></tr>
 </tbody>
 </table>
       </div>
@@ -1666,6 +1726,81 @@ flowchart TD
 <thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
 <tbody>
 <tr><td><code>v3-provider-compat-profile-response-01</code></td><td><code>V3ProviderRespInbound01Raw</code><br/>→ <code>ProviderRespCompat02ProviderCompat</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.response.provider_raw</code> <code>v3.provider_compat.payload_boundary_contract</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.hub.provider_protocol</code></div></td><td><code>apply_v3_provider_resp_compat</code><br/><small>routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs</small></td><td><code>run_resp_inbound_stage3_compat</code><br/><small>provider-compat-core/src/lib.rs</small></td></tr>
+</tbody>
+</table>
+      </div>
+    </details>
+
+
+    <details class="branch-detail" id="chain-v3_opencode_zen_tcm_request" >
+      <summary>
+        <span class="summary-main">v 3.opencode_zen_tcm.request</span>
+        <span class="summary-sub">V3HubReqOutbound07ProviderSemantic → V3ProviderReqOutbound08WirePayload</span>
+        <span class="summary-sub">2 edges · <code>v3.opencode_zen_tcm.request</code> · V3HubReqOutbound07ProviderSemantic → V3ProviderReqOutbound08WirePayload</span>
+      </summary>
+      <div class="branch-body">
+        <p class="chain-summary">Explicit provider Compat binds the real TCM executor, appends executable native aliases, and restores canonical native history with actual paired results.</p>
+        <div class="branch-meta">
+          <span>owner: <code>v3.provider_compat_profile_loading</code></span>
+          <span>audit: <span class="status pending_review">pending review</span></span>
+          <span>modules: <code>provider-compat-core · v3-runtime::hub_v1</code></span>
+          <span>resources: <code>3</code></span>
+
+
+        </div>
+        <div class="diagram-shell">
+          <pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 82, &quot;nodeSpacing&quot;: 46}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;18px&quot;}} }%%
+flowchart TD
+  n_v3_opencode_zen_tcm_request_0[&quot;&lt;b&gt;Provider semantic&lt;/b&gt;&lt;br/&gt;Hub 语义 envelope；还不是 provider wire&lt;br/&gt;&lt;small&gt;V3HubReqOutbound07ProviderSemantic&lt;/small&gt;&quot;]
+  n_v3_opencode_zen_tcm_request_1[&quot;&lt;b&gt;Provider request compat&lt;/b&gt;&lt;br/&gt;provider 差异兼容层，只做 provider 协议差异&lt;br/&gt;&lt;small&gt;ProviderReqCompat06ProviderCompat&lt;/small&gt;&quot;]
+  n_v3_opencode_zen_tcm_request_2[&quot;&lt;b&gt;Provider request wire&lt;/b&gt;&lt;br/&gt;最终 provider 请求体&lt;br/&gt;&lt;small&gt;V3ProviderReqOutbound08WirePayload&lt;/small&gt;&quot;]
+  n_v3_opencode_zen_tcm_request_0 --&gt;|v3-zen-tcm-request-01&lt;br/&gt;v3-runtime::hub_v1 → provider-compat-core| n_v3_opencode_zen_tcm_request_1
+  n_v3_opencode_zen_tcm_request_1 --&gt;|v3-zen-tcm-request-02&lt;br/&gt;v3-runtime::hub_v1 → provider-compat-core| n_v3_opencode_zen_tcm_request_2
+  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+  classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
+  class n_v3_opencode_zen_tcm_request_0,n_v3_opencode_zen_tcm_request_1,n_v3_opencode_zen_tcm_request_2 node;</pre>
+        </div>
+        <table>
+<thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
+<tbody>
+<tr><td><code>v3-zen-tcm-request-01</code></td><td><code>V3HubReqOutbound07ProviderSemantic</code><br/>→ <code>ProviderReqCompat06ProviderCompat</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.request.provider_semantic</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.provider_compat.opencode_zen_tcm_bridge</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.provider_compat.opencode_zen_tcm_bridge</code></div></td><td><code>build_provider_req_compat_06_from_v3_hub_req_outbound_07</code><br/><small>routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs</small></td><td><code>compile_opencode_zen_tcm_bridge</code><br/><small>provider-compat-core/src/opencode_zen_tcm.rs</small></td></tr>
+<tr><td><code>v3-zen-tcm-request-02</code></td><td><code>ProviderReqCompat06ProviderCompat</code><br/>→ <code>V3ProviderReqOutbound08WirePayload</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.provider_wire_payload</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.provider_wire_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.provider_compat.opencode_zen_tcm_bridge</code></div></td><td><code>build_provider_req_compat_06_from_v3_hub_req_outbound_07</code><br/><small>routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs</small></td><td><code>apply_opencode_zen_tcm_request</code><br/><small>provider-compat-core/src/opencode_zen_tcm.rs</small></td></tr>
+</tbody>
+</table>
+      </div>
+    </details>
+
+
+    <details class="branch-detail" id="chain-v3_opencode_zen_tcm_response" >
+      <summary>
+        <span class="summary-main">v 3.opencode_zen_tcm.response</span>
+        <span class="summary-sub">V3ProviderRespInbound01Raw → ProviderRespCompat02ProviderCompat</span>
+        <span class="summary-sub">1 edges · <code>v3.opencode_zen_tcm.response</code> · V3ProviderRespInbound01Raw → ProviderRespCompat02ProviderCompat</span>
+      </summary>
+      <div class="branch-body">
+        <p class="chain-summary">Response Compat consumes the exact attempt binding, converts only appended aliases into the real executor, then existing standard projection restores custom namespace identity.</p>
+        <div class="branch-meta">
+          <span>owner: <code>v3.provider_compat_profile_loading</code></span>
+          <span>audit: <span class="status pending_review">pending review</span></span>
+          <span>modules: <code>provider-compat-core · v3-runtime::hub_v1</code></span>
+          <span>resources: <code>3</code></span>
+
+
+        </div>
+        <div class="diagram-shell">
+          <pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 82, &quot;nodeSpacing&quot;: 46}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;18px&quot;}} }%%
+flowchart TD
+  n_v3_opencode_zen_tcm_response_0[&quot;&lt;b&gt;Provider response raw&lt;/b&gt;&lt;br/&gt;provider 响应进入 Hub 的唯一入口&lt;br/&gt;&lt;small&gt;V3ProviderRespInbound01Raw&lt;/small&gt;&quot;]
+  n_v3_opencode_zen_tcm_response_1[&quot;&lt;b&gt;Provider response compat&lt;/b&gt;&lt;br/&gt;provider 原始响应兼容解析&lt;br/&gt;&lt;small&gt;ProviderRespCompat02ProviderCompat&lt;/small&gt;&quot;]
+  n_v3_opencode_zen_tcm_response_0 --&gt;|v3-zen-tcm-response-01&lt;br/&gt;v3-runtime::hub_v1 → provider-compat-core| n_v3_opencode_zen_tcm_response_1
+  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+  classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
+  class n_v3_opencode_zen_tcm_response_0,n_v3_opencode_zen_tcm_response_1 node;</pre>
+        </div>
+        <table>
+<thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
+<tbody>
+<tr><td><code>v3-zen-tcm-response-01</code></td><td><code>V3ProviderRespInbound01Raw</code><br/>→ <code>ProviderRespCompat02ProviderCompat</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.response.provider_raw</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.provider_compat.opencode_zen_tcm_bridge</code></div></td><td><code>apply_v3_provider_resp_compat</code><br/><small>routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs</small></td><td><code>apply_opencode_zen_tcm_response</code><br/><small>provider-compat-core/src/opencode_zen_tcm.rs</small></td></tr>
 </tbody>
 </table>
       </div>

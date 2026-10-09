@@ -331,6 +331,7 @@ fn responses_provider_json_restores_declared_mcp_identity_for_tool_followup() {
     let (response, _) = run_json_response_hooks(
         V3ResponsesRelayJsonResponseHookInput {
             session_id: "mcp-json-roundtrip",
+            opencode_zen_tcm_bridge: None,
             request_id: "mcp-json-roundtrip",
             provider_value: &provider_response,
             provider_semantic_body: &request,
@@ -872,6 +873,7 @@ fn anthropic_sse_minimax_profile_still_harvests_text_tool_calls() {
     let (response, _) = run_json_response_hooks(
         V3ResponsesRelayJsonResponseHookInput {
             session_id: "anthropic-sse-minimax",
+            opencode_zen_tcm_bridge: None,
             request_id: "anthropic-sse-minimax",
             provider_value: &provider_response,
             provider_semantic_body: &json!({"model":"client-model"}),
@@ -925,6 +927,7 @@ fn anthropic_json_relay_keeps_literal_control_text_unchanged() {
     let (response, _) = run_json_response_hooks(
         V3ResponsesRelayJsonResponseHookInput {
             session_id: "anthropic-json-literal",
+            opencode_zen_tcm_bridge: None,
             request_id: "anthropic-json-literal",
             provider_value: &provider_response,
             provider_semantic_body: &json!({"model":"client-model"}),
@@ -977,6 +980,7 @@ fn anthropic_sse_whole_item_thinking_literal_stays_visible() {
     let (response, _) = run_json_response_hooks(
         V3ResponsesRelayJsonResponseHookInput {
             session_id: "anthropic-sse-thinking-literal",
+            opencode_zen_tcm_bridge: None,
             request_id: "anthropic-sse-thinking-literal",
             provider_value: &provider_response,
             provider_semantic_body: &json!({"model":"client-model"}),

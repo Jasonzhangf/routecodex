@@ -111,8 +111,8 @@ pub async fn probe_v3_provider_global_target(
     probe_v3_provider_global_target_impl(target).await
 }
 
-/// internal.toml 全局错误策略表的落地点：可恢复类必须连续两次同样失败才冷却，
-/// typed irrecoverable 账户/计费类首次即冷却；分类优先于 HTTP 状态码。
+/// Error owns typed thresholds: ordinary 429 requires three consecutive failures
+/// of the exact provider+auth_alias+model identity; typed classification wins.
 pub(crate) fn apply_v3_internal_provider_failure_policy(
     mut action: V3ProviderFailureAction,
     source_stage: &str,
@@ -165,45 +165,19 @@ pub(crate) fn provider_runtime_failure_stage(error: &V3ProviderError) -> &'stati
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum V3RequestLocalProviderFailureScope {
-    Candidate,
-    Provider,
-}
-
-pub(crate) fn request_local_provider_failure_scope(
+/// Request/provider compatibility failures are health-neutral. Exclusion is
+/// exact-identity for every failure class; this classifier only decides whether
+/// the exact failed identity is recorded in provider health.
+pub(crate) fn is_health_neutral_request_compat_failure(
     source_stage: &str,
     error_type: Option<&str>,
-) -> V3RequestLocalProviderFailureScope {
-    let request_local_compat = source_stage == "ProviderReqCompat06ProviderCompat"
+) -> bool {
+    source_stage == "ProviderReqCompat06ProviderCompat"
         || error_type == Some("provider_request_compat_error")
         // Provider semantic invalid-request responses describe this request,
         // not provider health. Relay may surface them as a runtime 502 after
         // decoding an HTTP-200 SSE error event, so status alone is insufficient.
-        || error_type == Some("invalid_request_error");
-    if request_local_compat {
-        V3RequestLocalProviderFailureScope::Candidate
-    } else {
-        V3RequestLocalProviderFailureScope::Provider
-    }
-}
-
-pub(crate) fn expand_request_local_provider_failure_scope(
-    scope: V3RequestLocalProviderFailureScope,
-    selected: &V3Target10ConcreteProviderSelected,
-    expanded: &V3Target09CandidateSetExpanded,
-) -> BTreeSet<String> {
-    let mut failed = BTreeSet::from([v3_relay_provider_candidate_key(&selected.candidate)]);
-    if scope == V3RequestLocalProviderFailureScope::Provider {
-        failed.extend(
-            expanded
-                .candidates
-                .iter()
-                .filter(|candidate| candidate.provider_id == selected.candidate.provider_id)
-                .map(v3_relay_provider_candidate_key),
-        );
-    }
-    failed
+        || error_type == Some("invalid_request_error")
 }
 
 pub(crate) fn project_v3_client_disconnect(
@@ -1186,10 +1160,8 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         )
     });
     let reason = (!message.trim().is_empty()).then_some(message.as_str());
-    let request_local_scope =
-        request_local_provider_failure_scope(source_stage, error_type.as_deref());
     let is_request_local_compat_failure =
-        request_local_scope == V3RequestLocalProviderFailureScope::Candidate;
+        is_health_neutral_request_compat_failure(source_stage, error_type.as_deref());
     // SSE/transport failures are provider-health events as well. The
     // failure action builder classifies them as recoverable, so they enter
     // the shared rolling score/cooldown path instead of a synthetic local
@@ -1223,27 +1195,6 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
             )
             .map_err(|error| error.to_string())?
     };
-    let provider_scope_expansion =
-        if request_local_scope == V3RequestLocalProviderFailureScope::Provider {
-            let expanded = match context.captured_target_09 {
-                Some(captured) => Ok(captured.clone()),
-                None => expand_v3_relay_target_plan_for_selected(
-                    context.manifest,
-                    &selected,
-                    context.deterministic_sample,
-                )
-                .map_err(|error| {
-                    target_resolution_source(
-                        "V3Target09CandidateSetExpanded",
-                        "captured_target_plan_expansion_failed",
-                        error,
-                    )
-                }),
-            };
-            Some(expanded)
-        } else {
-            None
-        };
     let retries_done = state
         .same_candidate_retries
         .get(&candidate_key)
@@ -1251,36 +1202,13 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         .unwrap_or(0);
     let mut excluded_with_failed = state.failed_candidates.clone();
     excluded_with_failed.insert(candidate_key.clone());
-    let resolution = match provider_scope_expansion {
-        Some(Ok(expanded)) => {
-            state
-                .failed_candidates
-                .extend(expand_request_local_provider_failure_scope(
-                    request_local_scope,
-                    &selected,
-                    &expanded,
-                ));
-            excluded_with_failed = state.failed_candidates.clone();
-            excluded_with_failed.insert(candidate_key.clone());
-            reselect_from_captured_target_plan(
-                context,
-                &selected,
-                &excluded_with_failed,
-                v3_relay_provider_policy_now_epoch_ms()?,
-            )
-            .await
-        }
-        Some(Err(source)) => V3RelayProviderTargetResolution::Failed(source),
-        None => {
-            reselect_from_captured_target_plan(
-                context,
-                &selected,
-                &excluded_with_failed,
-                v3_relay_provider_policy_now_epoch_ms()?,
-            )
-            .await
-        }
-    };
+    let resolution = reselect_from_captured_target_plan(
+        context,
+        &selected,
+        &excluded_with_failed,
+        v3_relay_provider_policy_now_epoch_ms()?,
+    )
+    .await;
     let route_resolution_proved_no_alternative = match resolution {
         V3RelayProviderTargetResolution::Selected(alternative) => {
             let alternative_key = v3_relay_provider_candidate_key(&alternative.candidate);
@@ -1573,7 +1501,9 @@ fn provider_failure_policy_from_error_policy_directive(
     let failure_threshold = if recovery == V3ProviderRecoveryKind::IrrecoverableGlobalCooldown {
         internal.unrecoverable_failure_threshold
     } else {
-        routecodex_v3_error::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD
+        build_v3_provider_global_failure_policy(status)
+            .map(|policy| policy.failure_threshold)
+            .unwrap_or(routecodex_v3_error::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD)
     };
     let Some(cooldown) = policy.path.iter().find_map(|step| match step {
         V3ProviderDispositionStepManifest::Cooldown {
@@ -1587,10 +1517,13 @@ fn provider_failure_policy_from_error_policy_directive(
         return Ok(None);
     };
     let (scope, duration_ms, until_restart) = cooldown;
-    if scope != V3ProviderErrorActionScope::AuthKey {
-        // V3 provider health only implements auth_key policy cooldowns today.
-        // Other scopes keep the existing generic key-health path rather than
-        // being silently remapped to auth_key.
+    if !matches!(
+        scope,
+        V3ProviderErrorActionScope::AuthKey | V3ProviderErrorActionScope::ProviderModel
+    ) {
+        // Automatic health cooldown is owned by the exact provider+auth+model
+        // key-health path. Administrative provider-instance policies keep their
+        // declared scope rather than being silently widened.
         return Ok(None);
     }
     Ok(Some(V3ProviderFailurePolicy {
@@ -1600,7 +1533,7 @@ fn provider_failure_policy_from_error_policy_directive(
         max_probe_interval_ms: None,
         long_probe_backoff: matches!(status, 401 | 402 | 403 | 503),
         until_restart: until_restart.unwrap_or(false),
-        cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
+        cooldown_scope: V3ProviderFailureCooldownScope::ProviderKeyModel,
     }))
 }
 
@@ -1636,8 +1569,9 @@ fn build_v3_relay_provider_error_05_decision(
     V3ErrorHandlingCenter::decide_provider(
         V3ErrorHandlingCenterInput {
             source,
-            action_scope: V3ErrorActionScope::CanonicalModel {
+            action_scope: V3ErrorActionScope::ProviderKeyModel {
                 provider_id: selected.candidate.provider_id.clone(),
+                auth_alias: selected.candidate.auth_alias.clone(),
                 model_id: selected.candidate.model_id.clone(),
             },
             candidates_remaining: route_pool_remaining_after_exclusion,

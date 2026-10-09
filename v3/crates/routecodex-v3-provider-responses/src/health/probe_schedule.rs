@@ -1,6 +1,6 @@
 use super::{persistence, V3ProviderHealthError, V3ProviderHealthStore};
 use crate::key_health::V3ProviderHealthProbePermit;
-use crate::provider_cooldown_probe::resolve_provider_cooldown_probe_key;
+use crate::provider_cooldown_probe::provider_cooldown_probe_key;
 use persistence::persist_cooldown_state;
 
 pub type V3ProviderCooldownProbeKey = (String, Option<String>, Option<String>);
@@ -56,12 +56,7 @@ impl V3ProviderHealthStore {
             .state
             .read()
             .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
-        let key = resolve_provider_cooldown_probe_key(
-            &state.provider_cooldown_probes,
-            provider_id,
-            auth_alias,
-            model_id,
-        );
+        let key = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
         Ok(state
             .provider_cooldown_probes
             .get(&key)
@@ -85,7 +80,7 @@ impl V3ProviderHealthStore {
             .any(|(key, probe_state)| {
                 key.provider_id == provider_id
                     && key.auth_alias.as_deref() == auth_alias
-                    && (key.model_id.as_deref() == model_id || key.model_id.is_none())
+                    && key.model_id.as_deref() == model_id
                     && (probe_state.probe_in_flight
                         || probe_state.next_probe_at_ms.is_some()
                         || probe_state.blocked_until_ms.is_some())
@@ -113,12 +108,7 @@ impl V3ProviderHealthStore {
             .state
             .write()
             .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
-        let key = resolve_provider_cooldown_probe_key(
-            &state.provider_cooldown_probes,
-            provider_id,
-            auth_alias,
-            model_id,
-        );
+        let key = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
         let Some(probe_state) = state.provider_cooldown_probes.get_mut(&key) else {
             return Ok(None);
         };
@@ -158,12 +148,7 @@ impl V3ProviderHealthStore {
             .state
             .write()
             .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
-        let key = resolve_provider_cooldown_probe_key(
-            &state.provider_cooldown_probes,
-            provider_id,
-            auth_alias,
-            model_id,
-        );
+        let key = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
         let Some(probe_state) = state.provider_cooldown_probes.get_mut(&key) else {
             return Ok(None);
         };
@@ -199,12 +184,7 @@ impl V3ProviderHealthStore {
             .state
             .write()
             .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
-        let key = resolve_provider_cooldown_probe_key(
-            &state.provider_cooldown_probes,
-            provider_id,
-            auth_alias,
-            model_id,
-        );
+        let key = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
         let current_generation = state
             .adaptive_history
             .get(&key)

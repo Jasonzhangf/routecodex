@@ -10,7 +10,7 @@ use routecodex_v3_error::{
 use routecodex_v3_provider_responses::{
     adaptive_concurrency::V3AdaptiveConcurrencyController, build_v3_provider_global_probe_request,
     ReqwestResponsesTransport, ResponsesTransport, V3ProviderAuthHandle,
-    V3ProviderAuthSecretHandle, V3ProviderError, V3ResponsesProviderTarget,
+    V3ProviderAuthSecretHandle, V3ProviderError, V3ProviderResponseBody, V3ResponsesProviderTarget,
 };
 
 use crate::provider_failure_runtime_policy::{
@@ -148,6 +148,7 @@ pub(crate) async fn probe_v3_provider_global_target_impl(
     let provider_type = target.provider_type.clone();
     let provider_key = format!("{}:{}", target.provider_id, target.auth.alias);
     let initial_concurrency_budget = target.initial_concurrency_budget;
+    let timeout_ms = target.request_timeout_ms;
     let request = build_v3_provider_global_probe_request(
         target,
         format!("provider-global-probe-{provider_id}"),
@@ -172,14 +173,54 @@ pub(crate) async fn probe_v3_provider_global_target_impl(
             response.status()
         )));
     }
-    let json = response.json_body().ok_or_else(|| {
-        V3ProviderHealthProbeFailure::Provider(format!(
-            "provider global probe returned non-JSON body for {provider_id}"
-        ))
-    })?;
-    validate_v3_provider_probe_json(&provider_id, &provider_type, json)
-        .map_err(V3ProviderHealthProbeFailure::Provider)?;
+    match response.into_body() {
+        V3ProviderResponseBody::Json(json) => {
+            validate_v3_provider_probe_json(&provider_id, &provider_type, &json)
+                .map_err(V3ProviderHealthProbeFailure::Provider)?;
+        }
+        V3ProviderResponseBody::Sse(stream) => {
+            validate_v3_provider_probe_sse(&provider_id, &provider_type, stream, timeout_ms)
+                .await?;
+        }
+    }
     Ok(())
+}
+
+async fn validate_v3_provider_probe_sse(
+    provider_id: &str,
+    provider_type: &str,
+    stream: routecodex_v3_provider_responses::V3ProviderSseStream,
+    timeout_ms: u64,
+) -> Result<(), V3ProviderHealthProbeFailure> {
+    use crate::hub_v1::V3HubProviderWireProtocol;
+    let protocol = match provider_type {
+        "openai_chat" => V3HubProviderWireProtocol::OpenAiChat,
+        "responses" => V3HubProviderWireProtocol::Responses,
+        "anthropic" => V3HubProviderWireProtocol::Anthropic,
+        other => {
+            return Err(V3ProviderHealthProbeFailure::Provider(format!(
+                "unsupported provider probe stream protocol {other}"
+            )))
+        }
+    };
+    let response = tokio::time::timeout(
+        std::time::Duration::from_millis(timeout_ms),
+        crate::materialize_v3_provider_sse_as_canonical_response(protocol, stream),
+    )
+    .await
+    .map_err(|_| V3ProviderHealthProbeFailure::Provider("provider probe stream timed out".into()))?
+    .map_err(|error| V3ProviderHealthProbeFailure::Provider(error.to_string()))?;
+    // The materializer uses the existing typed decoder and rejects missing
+    // semantic terminals, malformed frames and embedded provider errors.
+    let json = serde_json::to_vec(&response)
+        .map_err(|error| V3ProviderHealthProbeFailure::Internal(error.to_string()))?;
+    let terminal_protocol = if provider_type == "openai_chat" {
+        "openai_chat"
+    } else {
+        "responses"
+    };
+    validate_v3_provider_probe_json(provider_id, terminal_protocol, &json)
+        .map_err(V3ProviderHealthProbeFailure::Provider)
 }
 
 fn provider_probe_error(error: V3ProviderError) -> V3ProviderHealthProbeFailure {
@@ -281,6 +322,23 @@ mod tests {
     use super::{provider_probe_error, validate_v3_provider_probe_json};
     use crate::provider_failure_runtime_policy::V3ProviderHealthProbeFailure;
     use routecodex_v3_provider_responses::V3ProviderError;
+
+    #[tokio::test]
+    async fn streaming_probe_requires_a_real_semantic_terminal() {
+        for (body, expected) in [
+            ("data: {\"id\":\"probe\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n", true),
+            ("data: [DONE]\n\n", false),
+            (": keepalive\n\n", false),
+            ("data: {\"error\":{\"message\":\"denied\",\"code\":\"bad\"}}\n\n", false),
+            ("data: not-json\n\n", false),
+            ("data: {\"id\":\"probe\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\n", false),
+        ] {
+            let bytes = body.as_bytes().to_vec();
+            let stream = Box::pin(futures_util::stream::once(async move { Ok(bytes) }));
+            let result = super::validate_v3_provider_probe_sse("p", "openai_chat", stream, 1000).await;
+            assert_eq!(result.is_ok(), expected, "body={body} result={result:?}");
+        }
+    }
 
     #[test]
     fn internal_transport_errors_remain_internal_probe_failures() {

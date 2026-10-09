@@ -928,18 +928,27 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             "{case} failed-attempt bytes crossed the Broker boundary: {client_error}"
         );
 
-        assert!(provider_health
+        assert!(!provider_health
             .store()
             .provider_cooldown_probe_keys_due(u64::MAX)
             .expect("isolated failure probe inventory")
             .is_empty());
         assert!(
-            provider_health
+            !provider_health
                 .store()
                 .availability(server_id, Some(server_id), Some("gemini-wire"), u64::MAX)
                 .available,
-            "{case} isolated provider failure must remain eligible"
+            "{case} first non-429 failure cools this exact identity"
         );
+        assert!(
+            provider_health
+                .store()
+                .availability(server_id, Some(server_id), Some("other-model"), u64::MAX)
+                .available
+        );
+        // Recover this complete identity before exercising a second real
+        // failed business attempt. The public probe blackbox covers wire validation.
+        revive_cooled_provider(&provider_health, server_id).await;
         let repeated = execute_v3_gemini_relay_runtime_with_provider_health(
             &manifest,
             V3GeminiRelayRuntimeInput {
@@ -966,7 +975,7 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
         .expect("repeated provider failure must reach the typed error chain");
         assert_eq!(repeated.status, 502, "{case}: {repeated:?}");
         assert_eq!(repeated.error_chain.as_ref().map(Vec::len), Some(6));
-        // The second actual failed attempt admits provider cooldown. The
+        // The next actual failed attempt after recovery admits cooldown. The
         // recovery probe then owns eligibility for subsequent requests.
         let succeeding = JsonTransport {
             captured_url: Mutex::new(None),
@@ -1099,8 +1108,15 @@ async fn validated_terminal_sse_releases_action_lane_for_a_fresh_request() {
             .to_vec(),
         ])),
     };
-    // A single recoverable failure keeps this provider eligible. A complete
-    // successful attempt releases the Error05 action lane without a probe.
+    // Health recovery and action-lane release are separate: a matching
+    // semantic probe restores eligibility before the real terminal attempt.
+    assert!(
+        !provider_health
+            .store()
+            .availability(server_id, Some(server_id), Some("gemini-wire"), u64::MAX)
+            .available
+    );
+    revive_cooled_provider(&provider_health, server_id).await;
     assert!(provider_health
         .store()
         .provider_cooldown_probe_keys_due(u64::MAX)

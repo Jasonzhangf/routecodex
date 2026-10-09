@@ -59,7 +59,7 @@ fn direct_provider_failure_blocks_after_configured_threshold() {
         },
     );
 
-    for offset in 0..2 {
+    for offset in 0..1 {
         record_v3_direct_provider_failure_record(
             &health,
             &session,
@@ -73,9 +73,8 @@ fn direct_provider_failure_blocks_after_configured_threshold() {
             .scheduling_projection("openai", "key1", "gpt-test", 100, 100, 200)
             .expect("direct health projection");
         assert_eq!(
-            projection.available,
-            offset == 0,
-            "the first same-key failure stays available; the second enters cooldown"
+            projection.available, false,
+            "one typed recoverable 502 failure cools the exact identity"
         );
     }
 
@@ -83,12 +82,11 @@ fn direct_provider_failure_blocks_after_configured_threshold() {
         .store()
         .scheduling_projection("openai", "key1", "gpt-test", 100, 100, 200)
         .expect("direct health projection");
-    assert_eq!(projection.score_milli, 90);
-    // 统一错误模型：连续 2 次 recoverable 失败（429/5xx 阈值 2）进入全局
-    // 冷却，等待后台探活或真实成功恢复；分数衰减保留为诊断信息。
+    assert_eq!(projection.score_milli, 95);
+    // 统一错误模型：typed recoverable 失败当前共享 threshold=1；429 另有三次阈值。
     assert!(
         !projection.available,
-        "two consecutive 502 failures must trigger threshold cooldown"
+        "one typed 502 failure must trigger threshold cooldown"
     );
 }
 
@@ -119,11 +117,10 @@ fn direct_provider_failure_thresholds_cover_400_and_401_classes() {
     };
 
     // Every typed provider failure enters the shared health history. A
-    // recoverable class (400) must not exclude the provider before two
-    // consecutive same-class failures; the typed irrecoverable account class
-    // (401) still cools on its first failure.
+    // typed recoverable and irrecoverable classes both cool on their first
+    // failure under the current policy; ordinary 429 is covered separately.
     for (status, code, threshold) in [
-        (400u16, "provider_http_400", 2u32),
+        (400u16, "provider_http_400", 1u32),
         (401, "provider_http_401", 1),
     ] {
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);

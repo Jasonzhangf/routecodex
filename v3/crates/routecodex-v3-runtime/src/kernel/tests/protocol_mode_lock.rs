@@ -85,7 +85,7 @@ impl ResponsesTransport for DirectProviderCompatTerminalTransport {
 }
 
 #[tokio::test]
-async fn direct_generic_provider_http_400_exhausts_provider_family() {
+async fn direct_generic_provider_http_400_reselects_untried_sibling_model() {
     let routing_group = "direct_provider_compat_sibling";
     let manifest = scoped_test_manifest(provider_compat_sibling_manifest(), routing_group);
     let raw = V3Server03HttpRequestRaw {
@@ -123,18 +123,19 @@ async fn direct_generic_provider_http_400_exhausts_provider_family() {
     .await;
 
     assert!(
-        !output.node_trace.contains(&"V3TargetLocalReselected"),
-        "generic provider HTTP 400 must not retry a same-provider sibling: {output:?}"
+        output.node_trace.contains(&"V3TargetLocalReselected"),
+        "generic provider HTTP 400 must preserve the untried sibling: {output:?}"
     );
     assert_eq!(
         transport.sends.load(Ordering::SeqCst),
-        1,
-        "generic provider HTTP 400 must exhaust the provider family: {output:?}"
+        2,
+        "one failed model and one successful sibling attempt: {output:?}"
     );
     assert!(
-        output.error_chain.is_some(),
-        "provider-family exhaustion must project a client error: {output:?}"
+        output.error_chain.is_none(),
+        "successful sibling must complete without a terminal error: {output:?}"
     );
+    assert_eq!(output.client_payload.status, 200);
 }
 
 #[tokio::test]

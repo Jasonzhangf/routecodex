@@ -14,6 +14,7 @@ mod cc_sol;
 mod deepseek_console_go;
 mod minimax_anthropic;
 pub mod namespace_tools;
+pub mod opencode_zen_tcm;
 
 /// DeepSeek Console Go responses 网关的响应侧 custom/function 工具回射入口：
 /// 上游以 `function_call` 返回映射过的 function 工具（exec_command 等），客户端

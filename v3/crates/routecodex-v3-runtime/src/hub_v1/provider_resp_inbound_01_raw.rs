@@ -2,6 +2,7 @@ use super::{
     V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource, V3HubProviderWireProtocol,
     V3HubResponsePayload, V3HubTransportIntent, V3ProviderCompatProfileId,
 };
+use provider_compat_core::opencode_zen_tcm::OpencodeZenTcmBridgeBinding;
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -23,6 +24,7 @@ pub struct V3ProviderRespInbound01Raw {
     pub(crate) invocation_source: V3HubInvocationSource,
     pub(crate) transport_intent: V3HubTransportIntent,
     pub(crate) compatibility_profile: V3ProviderCompatProfileId,
+    pub(crate) opencode_zen_tcm_bridge: Option<OpencodeZenTcmBridgeBinding>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +36,7 @@ pub struct V3ProviderRespInbound01RawContext {
     pub(crate) invocation_source: V3HubInvocationSource,
     pub(crate) transport_intent: V3HubTransportIntent,
     pub(crate) compatibility_profile: V3ProviderCompatProfileId,
+    pub(crate) opencode_zen_tcm_bridge: Option<OpencodeZenTcmBridgeBinding>,
 }
 
 impl V3ProviderRespInbound01RawContext {
@@ -52,6 +55,7 @@ impl V3ProviderRespInbound01RawContext {
             invocation_source,
             transport_intent,
             compatibility_profile: V3ProviderCompatProfileId::Passthrough,
+            opencode_zen_tcm_bridge: None,
         }
     }
 
@@ -65,6 +69,14 @@ impl V3ProviderRespInbound01RawContext {
 
     pub fn with_compatibility_profile(mut self, compatibility_profile: Option<&str>) -> Self {
         self.compatibility_profile = V3ProviderCompatProfileId::from_config(compatibility_profile);
+        self
+    }
+
+    pub(crate) fn with_opencode_zen_tcm_bridge(
+        mut self,
+        binding: Option<OpencodeZenTcmBridgeBinding>,
+    ) -> Self {
+        self.opencode_zen_tcm_bridge = binding;
         self
     }
 }
@@ -103,6 +115,7 @@ pub fn build_v3_provider_resp_inbound_01_raw_with_compat_profile(
         invocation_source: context.invocation_source,
         transport_intent: context.transport_intent,
         compatibility_profile: context.compatibility_profile,
+        opencode_zen_tcm_bridge: context.opencode_zen_tcm_bridge,
     }
 }
 
@@ -120,6 +133,7 @@ pub fn build_v3_provider_resp_inbound_01_raw_from_sse_chunks(
         invocation_source: context.invocation_source,
         transport_intent: context.transport_intent,
         compatibility_profile: context.compatibility_profile,
+        opencode_zen_tcm_bridge: context.opencode_zen_tcm_bridge,
     }
 }
 

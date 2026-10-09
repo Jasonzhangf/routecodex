@@ -476,37 +476,13 @@ async fn run_case_shape(
             assert_eq!(messages[first + 2]["role"], "user");
         }
     }
-    if matches!(
-        pool,
-        PoolState::Available | PoolState::MixedAvailable | PoolState::DefaultVisionAvailable
-    ) {
-        let mut images = Vec::new();
-        image_references(&wire, &mut images);
-        assert_eq!(
-            images,
-            vec![PNG, OTHER],
-            "actual image parts, not embedded text, must reach the provider"
-        );
-    } else {
-        let mut images = Vec::new();
-        image_references(&wire, &mut images);
-        assert!(
-            images.is_empty(),
-            "text target must receive no structured images: {protocol}"
-        );
-        assert!(
-            !wire_text.contains(PNG.split_once(',').unwrap().1),
-            "text target must receive no raw base64 image bytes: {protocol}"
-        );
-        assert!(
-            !wire_text.contains(PNG),
-            "text target receives placeholders"
-        );
-        assert!(
-            !wire_text.contains(OTHER),
-            "all current images projected on text target"
-        );
-    }
+    let mut images = Vec::new();
+    image_references(&wire, &mut images);
+    assert_eq!(
+        images,
+        vec![PNG, OTHER],
+        "representable latest images reach the selected provider even without a capability declaration: {protocol}"
+    );
 }
 
 #[tokio::test]
@@ -540,7 +516,7 @@ async fn latest_images_anthropic_available() {
 }
 
 #[tokio::test]
-async fn placeholders_only_with_empty_or_exhausted_multimodal() {
+async fn latest_images_preserved_with_empty_or_exhausted_multimodal() {
     let _guard = TEST_LOCK.lock().await;
     for path in ["/v1/chat/completions", "/v1/responses", "/v1/messages"] {
         for tool in [false, true] {
@@ -739,7 +715,7 @@ async fn sole_latest_image_survives_assistant_and_later_text_only_user() {
 }
 
 #[tokio::test]
-async fn vision_transport_failure_exhausts_before_text_placeholder_projection() {
+async fn vision_transport_failure_exhausts_before_default_image_passage() {
     let _guard = TEST_LOCK.lock().await;
     for path in ["/v1/chat/completions", "/v1/responses", "/v1/messages"] {
         for tool in [false, true] {

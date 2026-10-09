@@ -380,6 +380,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 ));
             }
         };
+        let opencode_zen_tcm_bridge = req_compat.opencode_zen_tcm_bridge.clone();
         trace.push("V3HubReqTarget06Resolved");
         trace.push("V3HubReqOutbound07ProviderSemantic");
         trace.push("ProviderReqCompat06ProviderCompat");
@@ -700,6 +701,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             provider_protocol: hook_provider_protocol,
                             source_provider_protocol: provider_wire_protocol,
                             projection_context: &anthropic_response_projection_context,
+                            opencode_zen_tcm_bridge: opencode_zen_tcm_bridge.as_ref(),
                             provider_response_transport_intent: V3HubTransportIntent::Json,
                             tool_thinking_enabled: request_tool_thinking_enabled,
                             tool_thinking_turn_context: &request_tool_thinking_turn_context,
@@ -968,6 +970,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             provider_protocol: hook_provider_protocol,
                             source_provider_protocol: provider_wire_protocol,
                             projection_context: &anthropic_response_projection_context,
+                            opencode_zen_tcm_bridge: opencode_zen_tcm_bridge.as_ref(),
                             provider_response_transport_intent: V3HubTransportIntent::Sse,
                             tool_thinking_enabled: request_tool_thinking_enabled,
                             tool_thinking_turn_context: &request_tool_thinking_turn_context,

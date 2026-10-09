@@ -147,33 +147,6 @@ pub(crate) fn normalize_v3_history_image_placeholders(body: &mut Value) {
     }
 }
 
-/// 全量图片占位清理（continuation save 专用）：不分当前轮/历史轮，把 payload 中
-/// 所有图片 part（messages content / input content+output / gemini contents）
-/// 统一替换为占位符。continuation 保存的上下文只允许存占位符——图片 base64
-/// 若进入 continuation，下一轮 restore 会把历史图片重新注入 wire（context 400）。
-pub(crate) fn normalize_v3_all_images_to_placeholder(body: &mut Value) {
-    if let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) {
-        for message in messages.iter_mut() {
-            normalize_chat_content_parts(message);
-        }
-    }
-    if let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) {
-        for item in input.iter_mut() {
-            normalize_responses_content_parts(item);
-            normalize_responses_output_parts(item);
-            if is_top_level_input_image(item) {
-                *item =
-                    serde_json::json!({"type":"input_text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
-            }
-        }
-    }
-    if let Some(contents) = body.get_mut("contents").and_then(Value::as_array_mut) {
-        for content in contents.iter_mut() {
-            normalize_gemini_content_parts(content);
-        }
-    }
-}
-
 fn is_top_level_input_image(item: &Value) -> bool {
     // input_image/output_image 的 image_url / data / file_id / file_url 形态都必须清洗，
     // 否则历史图片以 base64 进 wire，导致 provider 侧 context 膨胀。
@@ -823,42 +796,6 @@ mod tests {
             tool_content.contains(V3_HISTORY_IMAGE_PLACEHOLDER),
             "tool string content must contain placeholder: {tool_content}"
         );
-    }
-
-    #[test]
-    fn continuation_save_cleans_all_images_any_turn() {
-        // continuation save 专用：全量清理（不分当前轮/历史轮）——保存的上下文
-        // 只允许存图片占位符，图片 base64 绝不进入 continuation（下一轮 restore
-        // 会把它重新注入 wire → context 400）。
-        let mut body = json!({
-            "messages": [
-                {"role": "user", "content": [
-                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,HISTORY"}}
-                ]},
-                {"role": "user", "content": [
-                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,CURRENT"}}
-                ]},
-                {"role": "tool", "content": [
-                    {"detail": "original", "image_url": "data:image/png;base64,TOOL"}
-                ]}
-            ]
-        });
-        normalize_v3_all_images_to_placeholder(&mut body);
-        let messages = body["messages"].as_array().unwrap();
-        for message in messages {
-            let content = message["content"].as_array().unwrap();
-            for part in content {
-                assert!(
-                    part.get("image_url").is_none() && part.get("data").is_none(),
-                    "continuation save must not keep any image part: {part}"
-                );
-                assert_eq!(
-                    part.get("text").and_then(Value::as_str),
-                    Some(V3_HISTORY_IMAGE_PLACEHOLDER),
-                    "image must become placeholder text"
-                );
-            }
-        }
     }
 
     #[test]

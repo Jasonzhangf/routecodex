@@ -35,85 +35,125 @@ fn no_first_failure_default_counts_real_failure_and_success_resets_exact_identit
     let scope =
         test_provider_failure_scope("no_first_failure_counted", "no_first_failure_counted", "s")
             .unwrap();
-    let failure = source(V3ErrorSourceKind::ProviderFailure, "provider_http_500", 500);
-    for now in [100, 102] {
+    let failure = source(V3ErrorSourceKind::ProviderFailure, "provider_http_429", 429);
+    let first_failure = health
+        .record_provider_failure_record_from_source(
+            &scope,
+            "first",
+            Some("key1"),
+            Some("gpt-test"),
+            &failure,
+            100,
+        )
+        .unwrap();
+    assert_eq!(first_failure.failure_count, 1);
+    health
+        .store()
+        .record_provider_key_success("first", "key1", "gpt-test", 101)
+        .unwrap();
+    health
+        .store()
+        .record_provider_success_in_session(&scope, "first", Some("key1"), Some("gpt-test"), 101)
+        .unwrap();
+    assert!(
         health
+            .availability("first", Some("key1"), Some("gpt-test"), 101)
+            .available,
+        "a business success before any cooldown must leave the exact identity eligible"
+    );
+    for now_ms in 102..=104 {
+        let record = health
             .record_provider_failure_record_from_source(
                 &scope,
                 "first",
                 Some("key1"),
                 Some("gpt-test"),
                 &failure,
-                now,
+                now_ms,
             )
             .unwrap();
-        let projection = health
-            .store()
-            .scheduling_projection("first", "key1", "gpt-test", 100, 1, now)
-            .unwrap();
-        assert!(
-            projection.available,
-            "isolated real failure must leave key eligible"
-        );
-        assert!(health
-            .store()
-            .provider_cooldown_probe_keys(now, false)
-            .unwrap()
-            .is_empty());
-        if now == 100 {
+        assert_eq!(record.failure_count, (now_ms - 101) as u32);
+        assert_eq!(
             health
-                .store()
-                .record_provider_key_success("first", "key1", "gpt-test", 101)
-                .unwrap();
-        }
+                .availability("first", Some("key1"), Some("gpt-test"), now_ms)
+                .available,
+            now_ms < 104
+        );
     }
-    health
-        .record_provider_failure_record_from_source(
-            &scope,
-            "first",
-            Some("key1"),
-            Some("gpt-test"),
-            &failure,
-            103,
-        )
-        .unwrap();
     assert!(
         !health
-            .availability("first", Some("key1"), Some("gpt-test"), 103)
+            .availability("first", Some("key1"), Some("gpt-test"), 102)
             .available
     );
     assert!(
         health
-            .availability("first", Some("key2"), Some("gpt-test"), 103)
+            .availability("first", Some("key2"), Some("gpt-test"), 102)
             .available
     );
     assert!(
         health
-            .availability("first", Some("key1"), Some("other"), 103)
+            .availability("first", Some("key1"), Some("other"), 102)
             .available
     );
     assert!(
         health
-            .availability("second", Some("key1"), Some("gpt-test"), 103)
+            .availability("second", Some("key1"), Some("gpt-test"), 102)
             .available
     );
+    assert!(
+        health
+            .store()
+            .provider_cooldown_probe_keys_due(5_104)
+            .unwrap()
+            .iter()
+            .any(|(provider, key, model)| {
+                provider == "first"
+                    && key.as_deref() == Some("key1")
+                    && model.as_deref() == Some("gpt-test")
+            }),
+        "an existing cooldown must remain recoverable by an exact-identity semantic probe"
+    );
+    assert!(
+        !health
+            .availability("first", Some("key1"), Some("gpt-test"), 104)
+            .available
+    );
+    let permit = health
+        .store()
+        .acquire_provider_cooldown_probe_if_due("first", Some("key1"), Some("gpt-test"), 5_104)
+        .unwrap()
+        .expect("matching due semantic probe");
     health
         .store()
-        .record_provider_key_success("first", "key1", "gpt-test", 104)
+        .complete_provider_cooldown_probe_success_at_generation(
+            permit.provider_id(),
+            permit.auth_alias(),
+            permit.model_id(),
+            5_105,
+            Some(permit.expected_generation()),
+        )
         .unwrap();
-    health
+    assert!(
+        health
+            .availability("first", Some("key1"), Some("gpt-test"), 5_105)
+            .available
+    );
+    let after_recovery = health
         .record_provider_failure_record_from_source(
             &scope,
             "first",
             Some("key1"),
             Some("gpt-test"),
             &failure,
-            105,
+            5_106,
         )
         .unwrap();
+    // This source wrapper returns session bookkeeping. Semantic recovery
+    // resets the global health streak, while retaining the session history.
+    assert_eq!(after_recovery.failure_count, 4);
     assert!(
         health
-            .availability("first", Some("key1"), Some("gpt-test"), 105)
+            .availability("first", Some("key1"), Some("gpt-test"), 5_106)
             .available
     );
 }

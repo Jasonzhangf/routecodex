@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Notify;
 
 #[test]
-fn post_commit_sse_failures_enter_provider_cooldown_after_two_same_errors() {
+fn post_commit_sse_failure_enters_provider_cooldown_after_one_same_error() {
     let manifest = target_resolution_manifest("post_commit_sse_single_retryable");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let session = test_provider_failure_scope(
@@ -21,7 +21,7 @@ fn post_commit_sse_failures_enter_provider_cooldown_after_two_same_errors() {
         "Responses SSE event must be a JSON object",
     );
 
-    for attempt in 0..2 {
+    for _attempt in 0..1 {
         health
             .record_post_commit_provider_stream_failure_from_source(
                 &session,
@@ -43,21 +43,18 @@ fn post_commit_sse_failures_enter_provider_cooldown_after_two_same_errors() {
                 v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
             );
         assert_eq!(
-            projection.available,
-            attempt == 0,
-            "one recoverable post-commit SSE failure must not exclude the provider; attempt={attempt}"
+            projection.available, false,
+            "one typed recoverable post-commit SSE failure must cool the exact identity"
         );
-        if attempt == 1 {
-            assert!(projection
-                .blocked_scopes
-                .iter()
-                .any(|scope| scope == "provider_cooldown_probe_pending"));
-        }
+        assert!(projection
+            .blocked_scopes
+            .iter()
+            .any(|scope| scope == "provider_cooldown_probe_pending"));
     }
 }
 
 #[test]
-fn successful_retry_clears_post_commit_sse_failure_state() {
+fn business_success_resets_post_commit_sse_streak_without_releasing_cooldown() {
     let manifest = target_resolution_manifest("post_commit_sse_success_reset");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let session = test_provider_failure_scope(
@@ -73,7 +70,7 @@ fn successful_retry_clears_post_commit_sse_failure_state() {
         "Responses SSE event must be a JSON object",
     );
 
-    for _ in 0..2 {
+    for _ in 0..1 {
         health
             .record_post_commit_provider_stream_failure_from_source(
                 &session,
@@ -104,17 +101,43 @@ fn successful_retry_clears_post_commit_sse_failure_state() {
             1,
             v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
         );
-    assert!(projection.available);
+    assert!(!projection.available);
     assert!(
         health
             .store()
             .provider_cooldown_probe_keys_due(u64::MAX)
             .expect("provider cooldown probe query")
-            .is_empty(),
-        "a successful retry must not leave a pending cooldown probe"
+            .iter()
+            .any(|(provider, key, model)| {
+                provider == "primary"
+                    && key.as_deref() == Some("key1")
+                    && model.as_deref() == Some("gpt-test")
+            }),
+        "a business success must not release the exact existing cooldown"
     );
 
-    for _ in 0..3 {
+    let permit = health
+        .store()
+        .acquire_provider_cooldown_probe("primary", Some("key1"), Some("gpt-test"))
+        .unwrap()
+        .expect("matching semantic recovery permit");
+    health
+        .store()
+        .complete_provider_cooldown_probe_success_at_generation(
+            permit.provider_id(),
+            permit.auth_alias(),
+            permit.model_id(),
+            v3_relay_provider_policy_now_epoch_ms().unwrap(),
+            Some(permit.expected_generation()),
+        )
+        .unwrap();
+    assert!(
+        health
+            .availability("primary", Some("key1"), Some("gpt-test"), u64::MAX)
+            .available
+    );
+
+    for _ in 0..1 {
         health
             .record_post_commit_provider_stream_failure_from_source(
                 &session,
@@ -137,7 +160,7 @@ fn successful_retry_clears_post_commit_sse_failure_state() {
         );
     assert!(
         !after_post_success_failures.available,
-        "after recovery, three same-class provider failures must cool again"
+        "after semantic recovery, one non-429 provider failure must cool again"
     );
 }
 

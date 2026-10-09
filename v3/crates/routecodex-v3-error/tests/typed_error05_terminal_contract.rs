@@ -56,8 +56,9 @@ fn provider_failure_never_uses_same_provider_budget() {
     let decision = V3ErrorHandlingCenter::decide_provider(
         V3ErrorHandlingCenterInput {
             source: provider_failure(),
-            action_scope: V3ErrorActionScope::CanonicalModel {
+            action_scope: V3ErrorActionScope::ProviderKeyModel {
                 provider_id: "provider-a".to_string(),
+                auth_alias: "key-a".to_string(),
                 model_id: "model-a".to_string(),
             },
             candidates_remaining: 0,
@@ -80,8 +81,9 @@ fn provider_failure_projects_only_with_route_and_default_exhaustion_proof() {
     let decision = V3ErrorHandlingCenter::decide_provider(
         V3ErrorHandlingCenterInput {
             source: provider_failure(),
-            action_scope: V3ErrorActionScope::CanonicalModel {
+            action_scope: V3ErrorActionScope::ProviderKeyModel {
                 provider_id: "provider-a".to_string(),
+                auth_alias: "key-a".to_string(),
                 model_id: "model-a".to_string(),
             },
             candidates_remaining: 0,

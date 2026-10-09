@@ -12,7 +12,17 @@ pub fn build_v3_provider_global_probe_request(
     target: V3ResponsesProviderTarget,
     request_id: String,
 ) -> Result<V3Transport13ResponsesRequest, String> {
-    let body = probe_request_body(&target)?;
+    let mut body = probe_request_body(&target)?;
+    if target.provider_type == "openai_chat"
+        && target
+            .compatibility_profile
+            .as_deref()
+            .is_some_and(|profile| {
+                profile.eq_ignore_ascii_case(provider_compat_core::opencode_zen_tcm::PROFILE)
+            })
+    {
+        provider_compat_core::opencode_zen_tcm::apply_opencode_zen_probe_request(&mut body);
+    }
     build_v3_provider_global_request(target, request_id, body)
 }
 
@@ -93,12 +103,17 @@ pub fn build_v3_provider_global_request(
         ),
         other => return Err(format!("unsupported provider request protocol {other}")),
     };
+    let stream_intent = if body.get("stream").and_then(serde_json::Value::as_bool) == Some(true) {
+        V3ResponsesStreamIntent::Sse
+    } else {
+        V3ResponsesStreamIntent::Json
+    };
     build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
         request_id,
         target.provider_id,
         url,
         target.auth,
-        V3ResponsesStreamIntent::Json,
+        stream_intent,
         body,
         headers.into_iter().chain(provider_headers).collect(),
         Some(std::time::Duration::from_millis(target.request_timeout_ms)),
@@ -141,7 +156,7 @@ mod tests {
             concurrency_acquire_timeout_ms: 60_000,
         };
         let request =
-            build_v3_provider_global_probe_request(target, "probe-provider-header".into())
+            build_v3_provider_global_probe_request(target.clone(), "probe-provider-header".into())
                 .expect("probe request builds");
         assert!(
             request
@@ -151,5 +166,15 @@ mod tests {
                     && header.value() == "local-image-extension"),
             "provider authoring headers must reach non-responses cooldown probe requests"
         );
+        assert_eq!(request.stream_intent(), V3ResponsesStreamIntent::Json);
+        assert_eq!(request.body()["max_tokens"], 1);
+        let mut zen = target;
+        zen.compatibility_profile = Some(provider_compat_core::opencode_zen_tcm::PROFILE.into());
+        let request = build_v3_provider_global_probe_request(zen, "probe-zen".into()).unwrap();
+        assert_eq!(request.stream_intent(), V3ResponsesStreamIntent::Sse);
+        assert_eq!(request.body()["stream"], true);
+        assert!(request.body().get("max_tokens").is_none());
+        assert_eq!(request.body()["tools"][0]["function"]["name"], "bash");
+        assert_eq!(request.body()["tools"][1]["function"]["name"], "read");
     }
 }

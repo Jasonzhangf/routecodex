@@ -127,6 +127,7 @@ fn put_auth_key_in_cooldown(
     failure_session_scope: &V3ProviderFailureSessionScope,
     provider_id: &str,
     auth_alias: &str,
+    model_id: &str,
     now_ms: u64,
 ) {
     health
@@ -135,7 +136,7 @@ fn put_auth_key_in_cooldown(
             failure_session_scope,
             provider_id,
             Some(auth_alias),
-            None,
+            Some(model_id),
             Some("controlled auth-key cooldown"),
             None,
             now_ms,
@@ -241,7 +242,7 @@ async fn serve_two_gated_responses_probes(
 }
 
 #[test]
-fn request_local_provider_failure_excludes_all_auth_keys_for_provider() {
+fn request_local_provider_failure_excludes_only_failed_candidate() {
     let scope = "request_local_provider_exclusion";
     let mut manifest = global_pool_alive_manifest(scope);
     let primary = manifest.providers.get_mut("first").expect("first provider");
@@ -269,20 +270,16 @@ fn request_local_provider_failure_excludes_all_auth_keys_for_provider() {
         V3RelayProviderTargetResolution::Selected(selected) => selected,
         _ => panic!("first provider must be selectable before failure"),
     };
-    let expanded = expand_v3_relay_target_plan_for_selected(&manifest, &selected, 0)
-        .expect("provider family expansion");
-    let excluded = expand_request_local_provider_failure_scope(
-        V3RequestLocalProviderFailureScope::Provider,
-        &selected,
-        &expanded,
-    );
+    let failed_key = selected.candidate.auth_alias.clone();
+    let excluded = BTreeSet::from([v3_relay_provider_candidate_key(&selected.candidate)]);
 
     let V3RelayProviderTargetResolution::Selected(selected) =
         resolve_target(&manifest, scope, &excluded, &health)
     else {
-        panic!("the second provider must remain selectable");
+        panic!("the sibling key must remain selectable");
     };
-    assert_eq!(selected.candidate.provider_id, "second");
+    assert_eq!(selected.candidate.provider_id, "first");
+    assert_ne!(selected.candidate.auth_alias, failed_key);
 }
 
 #[tokio::test]
@@ -897,18 +894,25 @@ async fn auth_key_cooldown_holds_selection_until_probe_recovery() {
         Err(_) => panic!("expanded candidates failed"),
     };
     for provider_id in ["first", "second"] {
-        put_auth_key_in_cooldown(&health, &failure_session_scope, provider_id, "key1", 20_001);
+        put_auth_key_in_cooldown(
+            &health,
+            &failure_session_scope,
+            provider_id,
+            "key1",
+            "gpt-test",
+            20_001,
+        );
     }
     let first_permit = health
         .store
         .acquire_provider_cooldown_probe_if_due("first", Some("key1"), Some("gpt-test"), 25_001)
         .expect("auth-key due probe acquisition")
-        .expect("the model candidate must acquire the model-less auth-key probe");
+        .expect("the model candidate must acquire its exact identity probe");
     assert_eq!(first_permit.auth_alias(), Some("key1"));
     assert_eq!(
         first_permit.model_id(),
-        None,
-        "the auth-key probe must retain its model-less identity"
+        Some("gpt-test"),
+        "the auth-key probe must retain the failed model identity"
     );
 
     let selection = tokio::spawn({
@@ -1011,18 +1015,25 @@ async fn auth_key_cooldown_holds_selection_until_successful_probe_recovery() {
         Err(_) => panic!("expanded candidates failed"),
     };
     for provider_id in ["first", "second"] {
-        put_auth_key_in_cooldown(&health, &failure_session_scope, provider_id, "key1", 20_001);
+        put_auth_key_in_cooldown(
+            &health,
+            &failure_session_scope,
+            provider_id,
+            "key1",
+            "gpt-test",
+            20_001,
+        );
     }
     let first_permit = health
         .store
         .acquire_provider_cooldown_probe_if_due("first", Some("key1"), Some("gpt-test"), 25_001)
         .expect("auth-key due probe acquisition")
-        .expect("the model candidate must acquire the model-less auth-key probe");
+        .expect("the model candidate must acquire its exact identity probe");
     assert_eq!(first_permit.auth_alias(), Some("key1"));
     assert_eq!(
         first_permit.model_id(),
-        None,
-        "the auth-key probe must retain its model-less identity"
+        Some("gpt-test"),
+        "the auth-key probe must retain the failed model identity"
     );
 
     let selection = tokio::spawn({

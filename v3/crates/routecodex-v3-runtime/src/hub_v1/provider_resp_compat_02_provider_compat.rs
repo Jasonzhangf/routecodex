@@ -2,6 +2,9 @@ use super::{
     classify_v3_provider_compat_error, provider_protocol_compat_id, V3HubResponsePayload,
     V3ProviderCompatError, V3ProviderCompatProfileId, V3ProviderRespInbound01Raw,
 };
+use provider_compat_core::opencode_zen_tcm::{
+    apply_opencode_zen_tcm_response, PROFILE as OPENCODE_ZEN_TCM_PROFILE,
+};
 use provider_compat_core::req_outbound_stage3_compat::{
     run_resp_inbound_stage3_compat, AdapterContext, ReqOutboundCompatInput,
 };
@@ -77,7 +80,7 @@ fn apply_v3_provider_resp_compat(
     input: &V3ProviderRespInbound01Raw,
     profile: &V3ProviderCompatProfileId,
 ) -> Result<Value, V3ProviderCompatError> {
-    run_resp_inbound_stage3_compat(ReqOutboundCompatInput {
+    let mut payload = run_resp_inbound_stage3_compat(ReqOutboundCompatInput {
         payload: input.payload.0.as_ref().clone(),
         adapter_context: AdapterContext {
             compatibility_profile: profile.as_optional_string(),
@@ -87,5 +90,17 @@ fn apply_v3_provider_resp_compat(
         explicit_profile: profile.as_optional_string(),
     })
     .map(|result| result.payload)
-    .map_err(|reason| classify_v3_provider_compat_error("response", profile, reason))
+    .map_err(|reason| classify_v3_provider_compat_error("response", profile, reason))?;
+    if profile
+        .as_str()
+        .eq_ignore_ascii_case(OPENCODE_ZEN_TCM_PROFILE)
+        && input.entry_protocol == super::V3HubEntryProtocol::Responses
+        && input.provider_protocol == super::V3HubProviderWireProtocol::OpenAiChat
+        && input.execution == super::V3HubExecutionMode::Relay
+    {
+        if let Some(binding) = &input.opencode_zen_tcm_bridge {
+            apply_opencode_zen_tcm_response(&mut payload, binding);
+        }
+    }
+    Ok(payload)
 }
