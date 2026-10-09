@@ -17,6 +17,7 @@ pub enum V3ProviderCooldownFailureClass {
     Transport,
     Semantic,
     ProbeLong,
+    ManualAuth,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -167,7 +168,7 @@ impl V3ProviderCooldownCoordinator {
         !self.entries.iter().any(|(key, entry)| {
             key.provider_id == provider_id
                 && key.auth_alias.as_deref() == auth_alias
-                && (key.model_id.is_none() || key.model_id.as_deref() == model_id)
+                && key.model_id.as_deref() == model_id
                 && (entry.probe_in_flight
                     || entry.next_probe_at_ms > now_ms
                     || entry.blocked_until_ms > now_ms)

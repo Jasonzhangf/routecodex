@@ -332,7 +332,7 @@ chains:
       side_channel_writes: []
 - chain_id: v3.provider_compat_profile.request
   owner_feature_id: v3.provider_compat_profile_loading
-  summary: The request provider-compat node consumes the adjacent provider-semantic payload plus the selected target capability and provider-policy carrier, validates the normal-payload boundary, applies the selected provider-family wire profile, projects the provider-declared output cap, applies the provider-configurable reasoning-effort override, and performs the registered session-preserving image compatibility projection only for a selected target without multimodal/vision capability.
+  summary: The request provider-compat node consumes the adjacent provider-semantic payload plus the selected target capability and provider-policy carrier, validates the normal-payload boundary, applies the selected provider-family wire profile, projects the provider-declared output cap, applies the provider-configurable reasoning-effort override, and preserves representable latest images and paired tool receipts independently of target capability metadata.
   edges:
   - step_id: v3-provider-compat-profile-request-01
     from_node: V3HubReqOutbound07ProviderSemantic
@@ -350,6 +350,25 @@ chains:
       side_channel_reads: [v3.hub.resolved_target, v3.hub.provider_protocol]
       side_channel_writes: []
   
+- chain_id: v3.provider_compat.zen_health_probe
+  owner_feature_id: v3.provider_global_subscription_probe
+  summary: The selected Zen private profile shapes inert streaming recovery probes before Provider transport; Runtime uses its existing semantic SSE decoder for recovery.
+  edges:
+  - step_id: v3-zen-health-probe-compat
+    from_node: ProviderProbeRequest
+    to_node: ProviderPrivateProbeCompat
+    caller_symbol: build_v3_provider_global_probe_request
+    caller_file: v3/crates/routecodex-v3-provider-responses/src/probe.rs
+    callee_symbol: apply_opencode_zen_probe_request
+    callee_file: v3/crates/provider-compat-core/src/opencode_zen_tcm.rs
+    status: anchored
+    binding_kind: provider_private_probe_compat
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.config.published_manifest]
+      produces: []
+      side_channel_reads: [v3.provider.cooldown_probe_state]
+      side_channel_writes: []
 - chain_id: v3.provider_compat.request_invalid_error_source
   owner_feature_id: v3.provider_compat_profile_loading
   summary: Request-shape compatibility failures enter the canonical typed Error01 source chain before relay policy and client projection.
@@ -387,6 +406,56 @@ chains:
       consumes: [v3.response.provider_raw, v3.provider_compat.payload_boundary_contract]
       produces: [v3.hub.response_semantic]
       side_channel_reads: [v3.hub.provider_protocol]
+      side_channel_writes: []
+- chain_id: v3.opencode_zen_tcm.request
+  owner_feature_id: v3.provider_compat_profile_loading
+  summary: Explicit provider Compat binds the real TCM executor, appends executable native aliases, and restores canonical native history with actual paired results.
+  edges:
+  - step_id: v3-zen-tcm-request-01
+    from_node: V3HubReqOutbound07ProviderSemantic
+    to_node: ProviderReqCompat06ProviderCompat
+    caller_symbol: build_provider_req_compat_06_from_v3_hub_req_outbound_07
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+    callee_symbol: compile_opencode_zen_tcm_bridge
+    callee_file: v3/crates/provider-compat-core/src/opencode_zen_tcm.rs
+    status: anchored
+    owner_feature_id: v3.provider_compat_profile_loading
+    resource_flow:
+      consumes: [v3.request.provider_semantic]
+      produces: [v3.provider_compat.opencode_zen_tcm_bridge]
+      side_channel_reads: []
+      side_channel_writes: [v3.provider_compat.opencode_zen_tcm_bridge]
+  - step_id: v3-zen-tcm-request-02
+    from_node: ProviderReqCompat06ProviderCompat
+    to_node: V3ProviderReqOutbound08WirePayload
+    caller_symbol: build_provider_req_compat_06_from_v3_hub_req_outbound_07
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+    callee_symbol: apply_opencode_zen_tcm_request
+    callee_file: v3/crates/provider-compat-core/src/opencode_zen_tcm.rs
+    status: anchored
+    owner_feature_id: v3.provider_compat_profile_loading
+    resource_flow:
+      consumes: [v3.hub.provider_wire_payload]
+      produces: [v3.hub.provider_wire_payload]
+      side_channel_reads: [v3.provider_compat.opencode_zen_tcm_bridge]
+      side_channel_writes: []
+- chain_id: v3.opencode_zen_tcm.response
+  owner_feature_id: v3.provider_compat_profile_loading
+  summary: Response Compat consumes the exact attempt binding, converts only appended aliases into the real executor, then existing standard projection restores custom namespace identity.
+  edges:
+  - step_id: v3-zen-tcm-response-01
+    from_node: V3ProviderRespInbound01Raw
+    to_node: ProviderRespCompat02ProviderCompat
+    caller_symbol: apply_v3_provider_resp_compat
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs
+    callee_symbol: apply_opencode_zen_tcm_response
+    callee_file: v3/crates/provider-compat-core/src/opencode_zen_tcm.rs
+    status: anchored
+    owner_feature_id: v3.provider_compat_profile_loading
+    resource_flow:
+      consumes: [v3.response.provider_raw]
+      produces: [v3.hub.response_semantic]
+      side_channel_reads: [v3.provider_compat.opencode_zen_tcm_bridge]
       side_channel_writes: []
 - chain_id: v3.target.session_global_selection
   owner_feature_id: v3.virtual_router_target_interpreter

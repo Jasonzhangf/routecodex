@@ -1,0 +1,6 @@
+{
+  "id":"v3.opencode_zen_tcm.response","version":"1",
+  "inputs":[{"id":"provider-response","schema":"Object","schema_ref":"v3.opencode_zen_tcm.provider_response"}],
+  "nodes":[{"id":"zen_resp_compat","operator":"apply_opencode_zen_tcm_response","operator_version":"1","inputs":["provider-response"],"output":{"id":"client-executor-response","schema":"Object","schema_ref":"v3.opencode_zen_tcm.client_executor_response"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole","resources":{"reads":["v3.provider_compat.opencode_zen_tcm_bridge"],"writes":[]}}],
+  "edges":[],"outputs":["client-executor-response"]
+}

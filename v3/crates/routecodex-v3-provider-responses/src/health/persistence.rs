@@ -76,6 +76,7 @@ impl V3ProviderHealthPersistenceWriter {
                                     key.failure_class,
                                     V3ProviderCooldownFailureClass::Semantic
                                         | V3ProviderCooldownFailureClass::ProbeLong
+                                        | V3ProviderCooldownFailureClass::ManualAuth
                                 )
                             })
                             .cloned()
@@ -443,7 +444,9 @@ fn provider_cooldown_persistence_entries(
                     provider_id: key.provider_id.clone(),
                     auth_alias: key.auth_alias.clone(),
                     model_id: probe.probe_model_id.clone(),
-                    failure_class: if probe.long_probe_backoff {
+                    failure_class: if state.auth_key_cooldowns.contains_key(key) {
+                        V3ProviderCooldownFailureClass::ManualAuth
+                    } else if probe.long_probe_backoff {
                         V3ProviderCooldownFailureClass::ProbeLong
                     } else {
                         V3ProviderCooldownFailureClass::Semantic

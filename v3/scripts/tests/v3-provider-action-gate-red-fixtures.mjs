@@ -520,8 +520,8 @@ const cases = [
     name: 'Relay target-resolution source errors are swallowed as exhaustion',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
     mutate: (source) => source.replace(
-      'Some(Err(source)) => V3RelayProviderTargetResolution::Failed(source),',
-      'Some(Err(_source)) => V3RelayProviderTargetResolution::Exhausted {\n+                attempted_candidates: vec![candidate_key.clone()],\n+            },',
+      'V3RelayProviderTargetResolution::Failed(source) => {',
+      'V3RelayProviderTargetResolution::Exhausted { attempted_candidates: _ } => {',
     ),
     diagnostic: /target-resolution source errors must not be swallowed as provider-pool exhaustion/u,
   },

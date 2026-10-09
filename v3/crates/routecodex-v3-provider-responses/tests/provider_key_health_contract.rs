@@ -1,8 +1,60 @@
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_error::{
-    build_v3_provider_global_error_fingerprint, V3ProviderErrorFingerprint,
-    V3ProviderFailureSessionScope,
+    build_v3_provider_global_error_fingerprint, build_v3_provider_global_failure_policy,
+    V3ProviderErrorFingerprint, V3ProviderFailureSessionScope,
 };
+
+#[test]
+fn ordinary_429_requires_three_consecutive_failures_of_exact_identity() {
+    let store = V3ProviderKeyHealthStore::default();
+    let mut action = V3ProviderFailureAction::recoverable("rate_limit_error");
+    action.failure_threshold = build_v3_provider_global_failure_policy(429)
+        .unwrap()
+        .failure_threshold;
+    action.failure_fingerprint = build_v3_provider_global_error_fingerprint(429).unwrap();
+    assert_eq!(action.failure_threshold, 3);
+    for time in [100, 101] {
+        let state = store
+            .record_provider_failure_action("p", "a", "m", &action, time)
+            .unwrap();
+        assert!(state.available);
+        assert!(!state.cooldown);
+    }
+    for (provider, key, model) in [("p", "b", "m"), ("p", "a", "n"), ("q", "a", "m")] {
+        let state = store
+            .record_provider_failure_action(provider, key, model, &action, 102)
+            .unwrap();
+        assert!(state.available, "sibling {provider}.{model}.{key}");
+    }
+    let third = store
+        .record_provider_failure_action("p", "a", "m", &action, 103)
+        .unwrap();
+    assert!(third.cooldown);
+    assert!(!third.available);
+    store.complete_probe_success("p", "a", "m", 104).unwrap();
+    store
+        .record_provider_key_success("p", "a", "m", 104)
+        .unwrap();
+    for time in [105, 106] {
+        assert!(
+            store
+                .record_provider_failure_action("p", "a", "m", &action, time)
+                .unwrap()
+                .available
+        );
+    }
+    let mut different = action.clone();
+    different.failure_fingerprint = Some(
+        V3ProviderErrorFingerprint::new("recoverable_upstream", "different", 429, "different")
+            .unwrap(),
+    );
+    assert!(
+        store
+            .record_provider_failure_action("p", "a", "m", &different, 107)
+            .unwrap()
+            .available
+    );
+}
 use routecodex_v3_provider_responses::{
     V3ProviderFailureAction, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
     V3ProviderHealthStore, V3ProviderKeyHealthStore, V3ProviderRecoveryKind,
@@ -55,20 +107,13 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "a", pr
     assert_eq!(first.score_milli, 0);
     assert!(
         !first.cooldown,
-        "one thresholded failure must not cool down a low-priority key"
+        "the health store consumes the typed threshold as declared; a low-priority key stays available until threshold 3"
     );
     assert!(first.available);
-    assert!(store
-        .provider_cooldown_probe_keys(100, false)
-        .expect("probe keys after first failure")
-        .is_empty());
     let first_scheduling = store
         .scheduling_projection("p", "a", "m", 1, 1, 100)
         .expect("first scheduling projection");
-    assert!(
-        first_scheduling.available,
-        "score zero without a cooldown must remain schedulable"
-    );
+    assert!(first_scheduling.available);
     assert_eq!(first_scheduling.score_milli, 0);
     assert_eq!(first_scheduling.effective_weight_milli, 1);
     assert!(first_scheduling.blocked_scopes.is_empty());
@@ -101,13 +146,30 @@ fn recoverable_failure_cools_after_repeat_without_changing_score_contract() {
         .expect("first failure");
     assert_eq!(first.score_milli, 95);
     assert_eq!(first.success_streak, 0);
-    assert!(first.available);
-    assert!(!first.cooldown);
-    assert_eq!(first.cooldown_until_ms, None);
+    assert!(!first.available);
+    assert!(first.cooldown);
+    assert_eq!(first.cooldown_until_ms, Some(5_100));
+    let first_probe = store
+        .provider_cooldown_probe_keys_due(5_099)
+        .expect("probe due query");
+    assert!(first_probe.is_empty(), "first probe must wait 5s");
+    assert_eq!(
+        store
+            .provider_cooldown_probe_keys_due(5_100)
+            .expect("probe due query"),
+        vec![(
+            "provider-a".into(),
+            Some("key-a".into()),
+            Some("model-a".into())
+        )]
+    );
+    store
+        .complete_probe_success("provider-a", "key-a", "model-a", 5_101)
+        .expect("probe success must restore exact identity");
     let second = store
         .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 101)
         .expect("repeated failure");
-    assert_eq!(second.score_milli, 90);
+    assert_eq!(second.score_milli, 95);
     assert!(!second.available);
     assert!(second.cooldown);
     assert_eq!(second.cooldown_until_ms, Some(5_101));
@@ -125,7 +187,7 @@ fn dynamic_probe_ladder_starts_at_5s_after_the_first_cooldown() {
         max_probe_interval_ms: None,
         long_probe_backoff: false,
         until_restart: false,
-        cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
+        cooldown_scope: V3ProviderFailureCooldownScope::ProviderKeyModel,
     };
     for now_ms in 100..=100 {
         store
@@ -150,15 +212,19 @@ fn dynamic_probe_ladder_starts_at_5s_after_the_first_cooldown() {
         store
             .provider_cooldown_probe_keys_due(5_100)
             .expect("probe due query"),
-        vec![("provider-a".into(), Some("key-a".into()), None,)]
+        vec![(
+            "provider-a".into(),
+            Some("key-a".into()),
+            Some("model-a".into()),
+        )]
     );
 }
 
 #[test]
-fn mixed_recoverable_auth_key_fingerprints_do_not_cool_until_three_same_failures() {
-    // auth-key 连续失败身份只含 (provider, auth_alias)，不含 model：
+fn mixed_recoverable_fingerprints_do_not_share_an_identity() {
+    // exact provider key model failure identity is `(provider, auth_alias, model)`:
     // 1) 不同指纹必须各自重启连续计数，混合指纹永远不得相加触发冷却；
-    // 2) 同一 auth alias 下跨模型的三次同指纹失败仍属于同一身份，必须冷却。
+    // 2) 同一 auth alias 下不同 model 各持独立身份，同指纹也不会跨模型叠加。
     let store = V3ProviderHealthStore::default();
     let session = V3ProviderFailureSessionScope::new("server-a", "group-a", "session-a")
         .expect("session scope");
@@ -169,7 +235,7 @@ fn mixed_recoverable_auth_key_fingerprints_do_not_cool_until_three_same_failures
         max_probe_interval_ms: None,
         long_probe_backoff: false,
         until_restart: false,
-        cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
+        cooldown_scope: V3ProviderFailureCooldownScope::ProviderKeyModel,
     };
     let fingerprint = |status: u16| {
         build_v3_provider_global_error_fingerprint(status)
@@ -214,19 +280,29 @@ fn mixed_recoverable_auth_key_fingerprints_do_not_cool_until_three_same_failures
             .provider_cooldown_probe_keys_due(102)
             .expect("probe due query")
             .is_empty(),
-        "no auth-key cooldown probe may be scheduled before three same-fingerprint failures"
+        "no exact identity cooldown probe may be scheduled before three same-fingerprint failures"
     );
-    // 同一 500 指纹、三个不同模型各一次：auth-key 身份不含 model，三次同指纹
-    // 连续失败必须冷却整把 key。
+    // 同一 500 指纹、三个不同模型各一次：每个 provider+key+model 都独立计
+    // 数；随后只让 model-a 达到阈值，其他模型必须保持可用。
     record("model-a", 500, 200);
     record("model-b", 500, 201);
     record("model-c", 500, 202);
-    assert!(
-        !store
-            .availability_for_session(&session, "provider-a", Some("key-a"), Some("model-a"), 202)
-            .available,
-        "three same-fingerprint failures across models of one auth alias must cool the key"
-    );
+    record("model-a", 500, 203);
+    for (model_id, expected) in [("model-a", false), ("model-b", true), ("model-c", true)] {
+        assert_eq!(
+            store
+                .availability_for_session(
+                    &session,
+                    "provider-a",
+                    Some("key-a"),
+                    Some(model_id),
+                    203,
+                )
+                .available,
+            expected,
+            "exact provider+key+model identity isolation: model={model_id}"
+        );
+    }
 }
 
 #[test]
@@ -305,7 +381,7 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
 }
 
 #[test]
-fn key_success_revives_global_cooldown_immediately() {
+fn business_success_resets_streak_and_only_matching_probe_releases_cooldown() {
     let store = V3ProviderKeyHealthStore::default();
     let action = V3ProviderFailureAction::recoverable("transport");
     for now_ms in 100..120 {
@@ -314,16 +390,19 @@ fn key_success_revives_global_cooldown_immediately() {
             .expect("failure");
     }
 
-    // 全局复活契约（bug 61863a0）：冷却中的 key 收到真实成功调用时必须立即
-    // 解除全局冷却并清理探针状态，其余 session 不必等探针周期；探针成功
-    // （complete_probe_success）仍是无人成功调用时的恢复路径。
+    // A business success breaks the streak. Recovery of an existing cooldown
+    // remains owned by a successful semantic probe of the matching identity.
     let revived = store
         .record_provider_key_success("provider-a", "key-a", "model-a", 103)
         .expect("success revival");
-    assert!(revived.available, "success must clear global cooldown");
-    assert!(!revived.cooldown);
+    assert!(
+        !revived.available,
+        "business success cannot bypass pending probe recovery"
+    );
+    assert!(revived.cooldown);
+    assert_eq!(revived.failure_streak, 0);
     assert_eq!(revived.success_streak, 1);
-    assert_eq!(revived.score_milli, 100);
+    assert_eq!(revived.score_milli, 1);
 
     let probe_recovered = store
         .complete_probe_success("provider-a", "key-a", "model-a", 104)
@@ -351,9 +430,10 @@ fn health_score_uses_only_the_latest_100_calls() {
     let success = store
         .record_provider_key_success("p", "k", "m", 101)
         .expect("success");
-    // 成功即全局复活（bug 61863a0）：分数重置回 configured_priority 基线，
-    // 窗口同时清空；后续 100 次成功仍只按最近 100 次调用计分。
-    assert_eq!(success.score_milli, 100);
+    // The first success remains inside the latest 100-call score window; it
+    // resets the failure streak without deleting prior observations.
+    assert_eq!(success.score_milli, 0);
+    assert_eq!(success.failure_streak, 0);
     for now_ms in 102..202 {
         store
             .record_provider_key_success("p", "k", "m", now_ms)
@@ -395,8 +475,8 @@ fn two_502_failures_enter_cooldown() {
         .record_provider_failure_action("p", "k", "m", &action, 101)
         .expect("first 502 failure");
     assert!(
-        !first.cooldown,
-        "a single recoverable 502 must not cool the provider"
+        first.cooldown,
+        "first typed provider failure cools exact identity"
     );
     assert_eq!(
         store

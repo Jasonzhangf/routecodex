@@ -910,6 +910,25 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+  - resource_id: v3.provider_compat.opencode_zen_tcm_bridge
+    resource_kind: projection_resource
+    lifecycle: v3.responses_relay.provider_attempt
+    owner_feature_id: v3.provider_compat_profile_loading
+    owner_crate: provider-compat-core
+    owner_node: ProviderReqCompat06ProviderCompat / ProviderRespCompat02ProviderCompat
+    identity: [requestId, providerId, compatibilityProfile, executorWireName, appendedAliases]
+    semantic_contract:
+      activation: Explicit chat:opencode-zen-tcm profile, Responses Relay to OpenAI Chat, and an actually declared compatible TCM executor.
+      carrier: Typed attempt-local executor capability and newly appended aliases; released with the attempt and never reconstructed from business payload or logs.
+      history: The declared reversible executable input codec restores provider bash/read history and preserves complete argument representation and paired call_id/output content.
+      execution: Only the client executes through its existing functions.exec permission boundary; RCC performs no shell or file execution.
+    allowed_writers: [compile_opencode_zen_tcm_bridge, build_provider_req_compat_06_from_v3_hub_req_outbound_07]
+    allowed_readers: [apply_opencode_zen_tcm_request, apply_opencode_zen_tcm_response, execute_v3_responses_relay_runtime_inner, run_json_response_hooks, apply_v3_provider_resp_compat]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-debug, MetadataCenter, SSE transport, provider.wire_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    release_point: Provider attempt completion or cancellation
+    binding_status: anchored
   - resource_id: v3.request.response_projection_context
     resource_kind: projection_resource
     lifecycle: v3.hub_pipeline.v1
@@ -1217,15 +1236,15 @@ resources:
     lifecycle: v3.provider_cooldown_rescue_probe
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderCooldownProbeState
-    identity: [providerId, authAlias]
+    identity: [providerId, authAlias, modelId]
     semantic_contract:
       health_window: latest 100 calls for this provider+authAlias+model
       score_contract: clamp(configured_priority + sum(deltas), 0, 150)
       deltas: { normal_http: 1, recoverable_including_502: -5, account_401_403: -20 }
-      cooldown_condition: an isolated recoverable failure does not block the exact providerId+authAlias+model identity; the default second consecutive same-fingerprint failure creates cooldown, real success clears the streak, and explicit terminal policies retain their declared threshold; the dynamic cooldown/probe ladder is selected from continuous same-fingerprint failure streak and meaningful observed failure rate
+      cooldown_condition: ordinary 429 requires three consecutive same-fingerprint failures of the exact providerId+authAlias+modelId; other typed failures retain declared thresholds; real success clears that identity's streak
       revival_rule: only a successful provider transport probe may remove cooldown state
       exhaustion_rescue_rule: the complete candidate set may force one single-flight probe per continuous cooldown block; only a successful probe resets that generation
-      generation_state: rescueProbeAttempted remains attached to the providerId+authAlias cooldown block until a successful probe removes the block
+      generation_state: rescueProbeAttempted remains attached to the providerId+authAlias+modelId cooldown block until a successful semantic probe removes the block
       in_flight_rule: if another request owns a cooldown probe, this request skips the cooled candidate and continues to the selected later tier without waiting
       dry_run_rule: dry-run never acquires or sends a rescue probe
     allowed_writers: [V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::acquire_provider_cooldown_probe_if_due, V3ProviderHealthStore::acquire_provider_cooldown_rescue_probe, V3ProviderHealthStore::cancel_provider_cooldown_probe_at_generation, V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation]
@@ -1252,15 +1271,15 @@ resources:
     owner_feature_id: v3.provider_global_subscription_probe
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderHealthStore
-    identity: [providerId, authAlias]
+    identity: [providerId, authAlias, modelId]
     semantic_contract:
-      policy_scope: matched provider error policy cooldown step with scope = auth_key
+      policy_scope: automatic matched cooldown directives resolve to the exact selected provider+authAlias+modelId; explicit manual auth_key actions retain their declared administrative scope
       cross_session: shared
-      cross_model_same_key: shared
+      cross_model_same_key: isolated
       sibling_keys: isolated
-      cooldown_condition: a recoverable typed provider failure blocks the providerId+authAlias auth-key identity after its declared threshold of consecutive failures of the same typed fingerprint, default two; typed irrecoverable account/billing classes (401..403) block on their first occurrence
+      cooldown_condition: ordinary 429 blocks only after three consecutive same-fingerprint failures of this complete identity; other typed failures retain declared thresholds
       cooldown_deadline: provider-owned adaptive ladder 5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s
-      revival_rule: only a due auth-key probe success clears the auth-key cooldown and consecutive failure counts
+      revival_rule: only semantic probe success clears the matching identity's cooldown and consecutive failure counts; Zen probes use the selected private streaming profile
       dry_run_rule: dry-run never acquires or sends an auth-key health probe
     allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy, V3ProviderHealthStore::record_provider_failure_in_session_with_policy, V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::acquire_provider_cooldown_probe_if_due, V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation]
     allowed_readers: [V3ProviderHealthStore::scheduling_projection, V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_keys, V3ProviderHealthStore::provider_cooldown_probe_keys_due, V3ProviderHealthStore::provider_cooldown_probe_next_deadline_ms]

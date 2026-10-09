@@ -14,8 +14,8 @@ use crate::probe_backoff::{
     provider_failure_cooldown_ms, MAX_PROBE_INTERVAL_MS,
 };
 use crate::provider_cooldown_probe::{
-    provider_cooldown_probe_key, resolve_provider_cooldown_probe_key, V3ProviderCooldownProbeKey,
-    V3ProviderCooldownProbeState, V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
+    provider_cooldown_probe_key, V3ProviderCooldownProbeKey, V3ProviderCooldownProbeState,
+    V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
 };
 use persistence::{
     legacy_provider_cooldown_state_path_for_manifest, persist_cooldown_state,
@@ -59,7 +59,7 @@ pub struct V3ProviderConcurrencyState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum V3ProviderFailureCooldownScope {
     Session,
-    AuthKey,
+    ProviderKeyModel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -82,7 +82,7 @@ impl Default for V3ProviderFailurePolicy {
             max_probe_interval_ms: None,
             long_probe_backoff: false,
             until_restart: false,
-            cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
+            cooldown_scope: V3ProviderFailureCooldownScope::ProviderKeyModel,
         }
     }
 }
@@ -242,8 +242,6 @@ pub(super) struct V3ProviderHealthState {
     failure_policies: BTreeMap<String, V3ProviderFailurePolicy>,
     consecutive_failures: BTreeMap<V3ProviderFailureSessionKey, V3ProviderConsecutiveFailure>,
     cooldowns: BTreeMap<V3ProviderFailureSessionKey, V3ProviderCooldown>,
-    auth_key_consecutive_failures:
-        BTreeMap<V3ProviderCooldownProbeKey, V3ProviderConsecutiveFailure>,
     auth_key_cooldowns: BTreeMap<V3ProviderCooldownProbeKey, V3ProviderCooldown>,
     provider_cooldown_probes: BTreeMap<V3ProviderCooldownProbeKey, V3ProviderCooldownProbeState>,
     adaptive_history: BTreeMap<V3ProviderCooldownProbeKey, V3ProviderAdaptiveHistory>,
@@ -421,7 +419,7 @@ impl V3ProviderHealthStore {
                             max_probe_interval_ms: health.probe_interval_ms,
                             long_probe_backoff: false,
                             until_restart: false,
-                            cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
+                            cooldown_scope: V3ProviderFailureCooldownScope::ProviderKeyModel,
                         },
                     );
                 }
@@ -463,6 +461,7 @@ impl V3ProviderHealthStore {
                     key.failure_class,
                     V3ProviderCooldownFailureClass::Semantic
                         | V3ProviderCooldownFailureClass::ProbeLong
+                        | V3ProviderCooldownFailureClass::ManualAuth
                 ) {
                     continue;
                 }
@@ -476,6 +475,18 @@ impl V3ProviderHealthStore {
                     key.auth_alias.as_deref(),
                     key.model_id.as_deref(),
                 );
+                if key.failure_class == V3ProviderCooldownFailureClass::ManualAuth {
+                    state.auth_key_cooldowns.insert(
+                        probe_key.clone(),
+                        V3ProviderCooldown {
+                            reason: "manual".into(),
+                            until_ms: Some(blocked_until_ms),
+                        },
+                    );
+                } else if key.auth_alias.is_none() || key.model_id.is_none() {
+                    // Retired automatic broad cooldowns cannot block exact identities.
+                    continue;
+                }
                 state.provider_cooldown_probes.insert(
                     probe_key.clone(),
                     V3ProviderCooldownProbeState {
@@ -578,96 +589,31 @@ impl V3ProviderHealthStore {
                     }),
             );
         }
-        if policy.cooldown_scope == V3ProviderFailureCooldownScope::AuthKey {
-            let auth_key = provider_cooldown_probe_key(provider_id, auth_alias, None);
-            let scope_label = format!("auth_key:{provider_id}:{}", auth_alias.unwrap_or("-"));
-            if let Some((_, cooldown)) = state.auth_key_cooldowns.iter().find(|(key, cooldown)| {
-                key.provider_id == provider_id
-                    && key.auth_alias.as_deref() == auth_alias
-                    && cooldown.until_ms.is_none_or(|until| until > now_ms)
-            }) {
-                let failure_count = state
-                    .auth_key_consecutive_failures
-                    .get(&auth_key)
-                    .map_or(0, |failure| failure.failure_count);
+        if policy.cooldown_scope == V3ProviderFailureCooldownScope::ProviderKeyModel {
+            if let (Some(alias), Some(model)) = (auth_alias, model_id) {
+                drop(state);
+                let mut action = V3ProviderFailureAction::recoverable("provider_failure");
+                action.failure_threshold = policy.failure_threshold;
+                action.failure_fingerprint = failure_fingerprint;
+                action.cooldown_ms = policy.cooldown_ms;
+                action.long_probe_backoff = policy.long_probe_backoff;
+                let projection = self
+                    .record_provider_failure_action(provider_id, alias, model, &action, now_ms)
+                    .map_err(V3ProviderHealthError::Poisoned)?;
                 return Ok(V3ProviderFailureRecord {
                     scope_label,
                     provider_key,
-                    state: "cooldown".to_string(),
-                    failure_count,
-                    cooldown_until_ms: cooldown.until_ms,
+                    state: if projection.cooldown {
+                        "cooldown"
+                    } else {
+                        "healthy"
+                    }
+                    .into(),
+                    failure_count: projection.failure_streak,
+                    cooldown_until_ms: projection.cooldown_until_ms,
                     reason: reason.map(str::to_string),
                 });
             }
-            state.auth_key_cooldowns.remove(&auth_key);
-            let (record_reason, auth_key_failure_count) = {
-                let failure = state
-                    .auth_key_consecutive_failures
-                    .entry(auth_key.clone())
-                    .or_insert(V3ProviderConsecutiveFailure {
-                        failure_count: 0,
-                        last_failure_at_ms: now_ms,
-                        reason: None,
-                        fingerprint: None,
-                    });
-                if failure.fingerprint != failure_fingerprint {
-                    failure.failure_count = 0;
-                }
-                failure.fingerprint = failure_fingerprint;
-                failure.failure_count = failure.failure_count.saturating_add(1);
-                failure.last_failure_at_ms = now_ms;
-                if let Some(reason) = reason.filter(|value| !value.trim().is_empty()) {
-                    failure.reason = Some(reason.to_string());
-                }
-                (failure.reason.clone(), failure.failure_count)
-            };
-            // auth-key 身份只含 (provider, auth_alias)，不含 model。阈值必须用
-            // 本身份的连续失败计数，而不是汇总连续失败表里的匹配条目；否则
-            // 一旦表里出现同 alias 的多条目，各条目重置成 1 也会相加凑够阈值。
-            let failure_count = auth_key_failure_count;
-            // Adaptive history stays provider-owned. The declared threshold
-            // admits cooldown; the continuous failure level sets its duration.
-            let _ = record_adaptive_failure(&mut state, &auth_key);
-            let cooldown_interval_ms = provider_failure_cooldown_ms(failure_count, 0, 0);
-            let cooldown_until_ms = (failure_count >= policy.failure_threshold)
-                .then(|| {
-                    (!policy.until_restart).then(|| now_ms.saturating_add(cooldown_interval_ms))
-                })
-                .flatten();
-            let record_state = if failure_count >= policy.failure_threshold {
-                if let Some(until_ms) = cooldown_until_ms {
-                    upsert_provider_cooldown_probe_with_interval(
-                        &mut state,
-                        provider_id,
-                        auth_alias,
-                        None,
-                        now_ms,
-                        until_ms,
-                        V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
-                        policy.long_probe_backoff,
-                    );
-                }
-                state.auth_key_cooldowns.insert(
-                    auth_key,
-                    V3ProviderCooldown {
-                        reason: record_reason
-                            .clone()
-                            .unwrap_or_else(|| "provider_auth_key_failures".to_string()),
-                        until_ms: cooldown_until_ms,
-                    },
-                );
-                "cooldown"
-            } else {
-                "healthy"
-            };
-            return Ok(V3ProviderFailureRecord {
-                scope_label,
-                provider_key,
-                state: record_state.to_string(),
-                failure_count,
-                cooldown_until_ms,
-                reason: record_reason,
-            });
         }
         if state
             .cooldowns
@@ -722,19 +668,33 @@ impl V3ProviderHealthStore {
         let record_reason = failure.reason.clone();
         let mut cooldown_until_ms = None;
         let mut record_state = "healthy".to_string();
-        // 失败计数绑定完整 session + provider key；不同 session、不同 key
-        // 独立计数，不能互相污染。
+        // 自动失败计数与冷却都绑定完整 provider+auth_alias+model；不同
+        // session、key、model 或 provider 必须独立计数，不能互相污染。
         if failure_count >= policy.failure_threshold {
             cooldown_until_ms = (!policy.until_restart)
                 .then(|| now_ms.saturating_add(provider_failure_cooldown_ms(failure_count, 0, 0)));
             record_state = "cooldown".to_string();
-            let cooldown = V3ProviderCooldown {
-                reason: record_reason
-                    .clone()
-                    .unwrap_or_else(|| "provider_consecutive_failures".to_string()),
-                until_ms: cooldown_until_ms,
-            };
-            state.cooldowns.insert(key.clone(), cooldown);
+            if let Some(until_ms) = cooldown_until_ms {
+                upsert_provider_cooldown_probe_with_interval(
+                    &mut state,
+                    provider_id,
+                    auth_alias,
+                    model_id,
+                    now_ms,
+                    until_ms,
+                    V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
+                    policy.long_probe_backoff,
+                );
+            }
+            state.cooldowns.insert(
+                key.clone(),
+                V3ProviderCooldown {
+                    reason: record_reason
+                        .clone()
+                        .unwrap_or_else(|| "provider_consecutive_failures".to_string()),
+                    until_ms: cooldown_until_ms,
+                },
+            );
         }
         Ok(V3ProviderFailureRecord {
             scope_label,
@@ -845,16 +805,6 @@ impl V3ProviderHealthStore {
         state.consecutive_failures.retain(|session_key, _| {
             session_key.provider_runtime_identity != provider_runtime_identity
         });
-        let auth_key = provider_cooldown_probe_key(provider_id, auth_alias, None);
-        // Before cooldown admission, a real success breaks the auth-key
-        // failure streak. An established auth/manual cooldown still requires
-        // the existing probe or operator recovery path.
-        if !state.auth_key_cooldowns.contains_key(&auth_key)
-            && !state.provider_cooldown_probes.contains_key(&auth_key)
-        {
-            state.auth_key_consecutive_failures.remove(&auth_key);
-        }
-        record_adaptive_success(&mut state, &auth_key, _now_ms);
         let model_key = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
         record_adaptive_success(&mut state, &model_key, _now_ms);
         // A business success resets session evidence only. A pending provider
@@ -1011,12 +961,7 @@ impl V3ProviderHealthStore {
             .state
             .write()
             .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
-        let key = resolve_provider_cooldown_probe_key(
-            &state.provider_cooldown_probes,
-            provider_id,
-            auth_alias,
-            model_id,
-        );
+        let key = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
         complete_provider_probe_success_at_generation(
             &mut state,
             &key,
@@ -1058,12 +1003,7 @@ impl V3ProviderHealthStore {
             .state
             .write()
             .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
-        let key = resolve_provider_cooldown_probe_key(
-            &state.provider_cooldown_probes,
-            provider_id,
-            auth_alias,
-            model_id,
-        );
+        let key = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
         let Some(existing_probe) = state.provider_cooldown_probes.get(&key) else {
             return Ok(());
         };
@@ -1247,36 +1187,17 @@ impl V3ProviderHealthStore {
             .state
             .write()
             .map_err(|error| format!("provider health state poisoned: {error}"))?;
-        // 全局复活（bug 61863a0）：冷却中的 key 收到真实成功调用时立即解除
-        // 全局冷却并清理探针状态，其余 session 不必等探针周期；探针成功
-        // （complete_probe_success）仍是无人成功调用时的恢复路径。
-        let had_probe_state = state.provider_cooldown_probes.remove(&key).is_some();
-        if had_probe_state {
-            if let Some(history) = state.adaptive_history.get_mut(&key) {
-                history.failure_streak = 0;
-                history.success_streak = history.success_streak.saturating_add(1);
-                history.attempts = 0;
-                history.failures = 0;
-                history.score_milli = history.configured_priority.clamp(0, 150) as u32;
-                history.last_success_at_ms = Some(now_ms);
-                history.recent_deltas_milli.clear();
-                history.probe_failure_count = 0;
-                history.score_generation = history.score_generation.saturating_add(1);
-            }
-        } else {
-            let history = state.adaptive_history.entry(key.clone()).or_default();
-            // A success closes the current failure-rate window. The next
-            // failure must begin again at the 5s aggressive step.
-            history.attempts = 0;
-            history.failures = 0;
-            record_health_delta(history, 1);
-            history.failure_streak = 0;
-            history.success_streak = history.success_streak.saturating_add(1);
-            history.last_success_at_ms = Some(now_ms);
-            history.score_generation = history.score_generation.saturating_add(1);
-        }
-        let auth_key = provider_cooldown_probe_key(provider_id, Some(auth_alias), None);
-        state.auth_key_consecutive_failures.remove(&auth_key);
+        // Business success is health evidence, not automatic cooldown recovery.
+        // A pending exact-identity provider cooldown probe remains the only
+        // recovery owner until its same-identity semantic probe succeeds.
+        let history = state.adaptive_history.entry(key.clone()).or_default();
+        history.attempts = 0;
+        history.failures = 0;
+        record_health_delta(history, 1);
+        history.failure_streak = 0;
+        history.success_streak = history.success_streak.saturating_add(1);
+        history.last_success_at_ms = Some(now_ms);
+        history.score_generation = history.score_generation.saturating_add(1);
         let projection = key_health_projection(&state, &key, now_ms);
         persist_cooldown_state(state);
         self.publish_availability_change();
@@ -1365,28 +1286,13 @@ impl V3ProviderHealthStore {
             })
             .unwrap_or((0, 0));
         let score_milli = priority.saturating_add(net_delta).clamp(0, 150) as u32;
-        let auth_key = provider_cooldown_probe_key(provider_id, Some(auth_alias), None);
-        let auth_key_cooldown = state
-            .auth_key_cooldowns
-            .get(&auth_key)
-            .is_some_and(|cooldown| cooldown.until_ms.is_none_or(|until| until > _now_ms));
-        let auth_key_probe = state
-            .provider_cooldown_probes
-            .get(&auth_key)
-            .is_some_and(|probe| {
-                probe.probe_in_flight
-                    || probe.next_probe_at_ms.is_some()
-                    || probe.blocked_until_ms.is_some_and(|until| until > _now_ms)
-            });
         // score 是同一 configured priority bucket 内的调度权重，不是可用性。
         // 低优先级 key 在一次 -5 后可能已经 score=0，但只有连击达到阈值后
         // 创建的 cooldown/probe 状态才允许把候选从 Target selection 中移除。
         let available = state
             .provider_cooldown_probes
             .get(&key)
-            .is_none_or(|probe| !probe.probe_in_flight && probe.blocked_until_ms.is_none())
-            && !auth_key_cooldown
-            && !auth_key_probe;
+            .is_none_or(|probe| !probe.probe_in_flight && probe.blocked_until_ms.is_none());
         Ok(V3ProviderSchedulingProjection {
             provider_id: provider_id.to_string(),
             auth_alias: auth_alias.to_string(),
@@ -1482,21 +1388,6 @@ impl V3ProviderHealthStore {
         remove_expired_session_state(&mut state, now_ms);
         let mut projection =
             global_availability_projection(&state, provider_id, auth_alias, model_id, now_ms);
-        if let Some(cooldown) = state.auth_key_cooldowns.iter().find_map(|(key, cooldown)| {
-            (key.provider_id == provider_id
-                && key.auth_alias.as_deref() == auth_alias
-                && cooldown.until_ms.is_none_or(|until| until > now_ms))
-            .then_some(cooldown)
-        }) {
-            projection.available = false;
-            projection.blocked_scopes.push(match cooldown.until_ms {
-                Some(until_ms) => format!(
-                    "auth_key:{provider_id}:{}:until:{until_ms}",
-                    auth_alias.unwrap_or("-")
-                ),
-                None => format!("auth_key:{provider_id}:{}", auth_alias.unwrap_or("-")),
-            });
-        }
         let session_cooldown = state
             .cooldowns
             .get(&key)
@@ -1577,6 +1468,11 @@ impl V3ProviderHealthStore {
             .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
         let mut removed = false;
         match kind {
+            "auth_key" => {
+                let key = provider_cooldown_probe_key(provider_id, auth_alias, None);
+                removed |= state.auth_key_cooldowns.remove(&key).is_some();
+                removed |= state.provider_cooldown_probes.remove(&key).is_some();
+            }
             "session" => {
                 let prefix = match auth_alias {
                     Some(alias) => format!("{provider_id}:{alias}"),
@@ -1599,19 +1495,9 @@ impl V3ProviderHealthStore {
                     state.consecutive_failures.remove(&key);
                 }
             }
-            "auth_key" | "probe" => {
+            "probe" => {
                 let key = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
-                if kind == "auth_key" {
-                    removed |= state.auth_key_cooldowns.remove(&key).is_some();
-                    state.auth_key_consecutive_failures.remove(&key);
-                }
-                if kind == "probe" || kind == "auth_key" {
-                    removed |= state.provider_cooldown_probes.remove(&key).is_some();
-                }
-                if kind == "probe" || kind == "auth_key" {
-                    removed |= state.auth_key_cooldowns.remove(&key).is_some();
-                    state.auth_key_consecutive_failures.remove(&key);
-                }
+                removed |= state.provider_cooldown_probes.remove(&key).is_some();
                 if removed {
                     state.adaptive_history.remove(&key);
                 }
@@ -1662,29 +1548,25 @@ impl V3ProviderHealthStore {
             });
         }
 
-        // Auth-key cooldowns
+        // Explicit operator auth-key cooldowns; automatic failures never write these.
         for (key, cooldown) in &state.auth_key_cooldowns {
-            let remaining = cooldown.until_ms.map(|u| u.saturating_sub(now_ms) as i64);
-            if remaining.is_some_and(|r| r <= 0) {
+            if cooldown.until_ms.is_some_and(|until| until <= now_ms) {
                 continue;
             }
-            let failure_count = state
-                .auth_key_consecutive_failures
-                .get(key)
-                .map(|f| f.failure_count);
             entries.push(V3CooldownPoolEntry {
                 provider_id: key.provider_id.clone(),
                 auth_alias: key.auth_alias.clone(),
-                model_id: key.model_id.clone(),
-                state: "auth_key_cooldown".to_string(),
+                model_id: None,
+                state: "auth_key_cooldown".into(),
                 until_ms: cooldown.until_ms,
-                remaining_ms: remaining,
+                remaining_ms: cooldown
+                    .until_ms
+                    .map(|until| until.saturating_sub(now_ms) as i64),
                 reason: Some(cooldown.reason.clone()),
-                failure_count,
-                kind: "auth_key".to_string(),
+                failure_count: None,
+                kind: "auth_key".into(),
             });
         }
-
         // Provider cooldown probes (global)
         for (key, probe) in &state.provider_cooldown_probes {
             if !probe.blocked_until_ms.is_some_and(|u| u > now_ms)
@@ -1752,7 +1634,7 @@ fn default_failure_policy_from_manifest(
         max_probe_interval_ms: None,
         long_probe_backoff: false,
         until_restart,
-        cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
+        cooldown_scope: V3ProviderFailureCooldownScope::ProviderKeyModel,
     }
 }
 
@@ -1826,6 +1708,19 @@ fn global_availability_projection(
             "configured_disabled:provider_instance:{provider_id}"
         ));
     }
+    let manual_key = provider_cooldown_probe_key(provider_id, auth_alias, None);
+    if state.auth_key_cooldowns.contains_key(&manual_key)
+        && (state
+            .auth_key_cooldowns
+            .get(&manual_key)
+            .is_some_and(|cooldown| cooldown.until_ms.is_none_or(|until| until > now_ms))
+            || state.provider_cooldown_probes.contains_key(&manual_key))
+    {
+        blocked_scopes.push("manual_auth_key_cooldown".into());
+        if state.provider_cooldown_probes.contains_key(&manual_key) {
+            blocked_scopes.push("provider_cooldown_probe_pending".into());
+        }
+    }
     // `health.enabled=false` 表示"不启用 health 跟踪"：provider 视为永远可用
     // （失败不记录、不冷却、不阻断，与 record_provider_failure 的
     // health_disabled 短路一致），而不是"被 health 禁用"。只有
@@ -1851,40 +1746,22 @@ fn global_availability_projection(
     {
         blocked_scopes.push(format!("concurrency:provider_instance:{provider_id}"));
     }
-    let cooldown_probe = state
+    if state
         .provider_cooldown_probes
         .get(&provider_cooldown_probe_key(
             provider_id,
             auth_alias,
             model_id,
-        ));
-    let auth_key_cooldown_probe = state
-        .provider_cooldown_probes
-        .get(&provider_cooldown_probe_key(provider_id, auth_alias, None));
-    if cooldown_probe.is_some_and(|probe_state| {
-        probe_state.probe_in_flight
-            || probe_state.next_probe_at_ms.is_some()
-            || probe_state
-                .blocked_until_ms
-                .is_some_and(|blocked_until_ms| blocked_until_ms > now_ms)
-    }) || auth_key_cooldown_probe.is_some_and(|probe_state| {
-        probe_state.probe_in_flight
-            || probe_state.next_probe_at_ms.is_some()
-            || probe_state
-                .blocked_until_ms
-                .is_some_and(|blocked_until_ms| blocked_until_ms > now_ms)
-    }) {
+        ))
+        .is_some_and(|probe_state| {
+            probe_state.probe_in_flight
+                || probe_state.next_probe_at_ms.is_some()
+                || probe_state
+                    .blocked_until_ms
+                    .is_some_and(|blocked_until_ms| blocked_until_ms > now_ms)
+        })
+    {
         blocked_scopes.push("provider_cooldown_probe_pending".to_string());
-    }
-    if state.auth_key_cooldowns.iter().any(|(key, cooldown)| {
-        key.provider_id == provider_id
-            && key.auth_alias.as_deref() == auth_alias
-            && cooldown.until_ms.is_none_or(|until| until > now_ms)
-    }) {
-        blocked_scopes.push(format!(
-            "auth_key:{provider_id}:{}",
-            auth_alias.unwrap_or("-")
-        ));
     }
     V3ProviderAvailabilityProjection {
         provider_id: provider_id.to_string(),
@@ -1995,9 +1872,6 @@ fn remove_expired_session_state(state: &mut V3ProviderHealthState, now_ms: u64) 
     state
         .cooldowns
         .retain(|_, cooldown| cooldown.until_ms.is_none_or(|until_ms| until_ms > now_ms));
-    state
-        .auth_key_cooldowns
-        .retain(|_, cooldown| cooldown.until_ms.is_none_or(|until_ms| until_ms > now_ms));
     // provider 级冷却探针状态独立于 session 冷却：冷却期、待探期、探针
     // 执行中都保留，只有 `complete_provider_cooldown_probe_success` 清除。
     state.provider_cooldown_probes.retain(|_, probe_state| {
@@ -2016,9 +1890,6 @@ fn remove_expired_session_state(state: &mut V3ProviderHealthState, now_ms: u64) 
             .saturating_add(SESSION_STATE_IDLE_TTL_MS)
             > now_ms
     });
-    state
-        .auth_key_consecutive_failures
-        .retain(|_, failure| failure.last_failure_at_ms.saturating_add(60 * 60_000) > now_ms);
 }
 
 fn availability_scope_keys(
@@ -2034,7 +1905,9 @@ fn availability_scope_keys(
         keys.push(format!("canonical_model:{provider_id}:{model_id}"));
     }
     if auth_alias.is_some() || model_id.is_some() {
-        keys.push(provider_key_scope_label(provider_id, auth_alias, model_id));
+        if let (Some(alias), Some(model)) = (auth_alias, model_id) {
+            keys.push(format!("provider_key_model:{provider_id}:{alias}:{model}"));
+        }
     }
     keys
 }
@@ -2083,21 +1956,6 @@ fn upsert_provider_cooldown_probe(
     );
 }
 
-fn record_adaptive_failure(
-    state: &mut V3ProviderHealthState,
-    key: &V3ProviderCooldownProbeKey,
-) -> u64 {
-    let history = state.adaptive_history.entry(key.clone()).or_default();
-    history.attempts = history.attempts.saturating_add(1);
-    history.failures = history.failures.saturating_add(1);
-    adaptive_probe_interval_ms(
-        history.attempts,
-        history.failures,
-        history.recovery_ewma_ms,
-        history.probe_failure_count,
-    )
-}
-
 fn record_adaptive_success(
     state: &mut V3ProviderHealthState,
     key: &V3ProviderCooldownProbeKey,
@@ -2112,6 +1970,8 @@ fn record_adaptive_success(
     // provider failure must start at the first 5s cooldown step.
     history.attempts = 0;
     history.failures = 0;
+    history.failure_streak = 0;
+    history.failure_fingerprint = None;
     if let Some(recovery_ms) = recovery_ms {
         history.recovery_ewma_ms = Some(match history.recovery_ewma_ms {
             Some(previous) => previous.saturating_mul(4).saturating_add(recovery_ms) / 5,
@@ -2155,7 +2015,6 @@ fn complete_provider_probe_success_at_generation(
 
     state.provider_cooldown_probes.remove(key);
     state.auth_key_cooldowns.remove(key);
-    state.auth_key_consecutive_failures.remove(key);
     Ok(())
 }
 
@@ -2228,14 +2087,11 @@ fn scope_label(scope: &V3ErrorActionScope) -> String {
         V3ErrorActionScope::ProviderInstance { provider_id } => {
             format!("provider_instance:{provider_id}")
         }
-        V3ErrorActionScope::AuthKey {
+        V3ErrorActionScope::ProviderKeyModel {
             provider_id,
             auth_alias,
-        } => format!("auth_key:{provider_id}:{auth_alias}"),
-        V3ErrorActionScope::CanonicalModel {
-            provider_id,
             model_id,
-        } => format!("canonical_model:{provider_id}:{model_id}"),
+        } => format!("provider_key_model:{provider_id}:{auth_alias}:{model_id}"),
     }
 }
 

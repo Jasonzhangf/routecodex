@@ -1650,13 +1650,12 @@ async fn responses_relay_provider_context_error_reselects_next_candidate_before_
         timing.internal.checked_add(timing.external),
         Some(timing.runtime_total)
     );
-    // One recoverable 400 excludes the candidate for this request only. The
-    // provider is not cooled yet: three consecutive same-class failures are
-    // required before provider health holds it.
-    assert_eq!(
-        observability.unavailable_candidates,
-        vec!["limited:key1:gpt-5.5:availability(request_local_provider_failure)".to_string()]
+    assert_eq!(observability.unavailable_candidates.len(), 1);
+    assert!(
+        observability.unavailable_candidates[0].starts_with("limited:key1:gpt-5.5:availability(")
     );
+    assert!(observability.unavailable_candidates[0].contains("request_local_provider_failure"));
+    assert!(observability.unavailable_candidates[0].contains("provider_cooldown_probe_pending"));
     assert_eq!(
         observability
             .usage
@@ -1738,10 +1737,8 @@ async fn responses_relay_provider_response_decode_error_reselects_next_candidate
         Some("minimax:key1:MiniMax-M3")
     );
     assert_eq!(provider_event.failure_count, 1);
-    // A single recoverable decode failure is counted but does not cool the
-    // provider; two consecutive same-class failures are required.
-    assert_eq!(provider_event.health_state, "healthy");
-    assert!(provider_event.cooldown_until_ms.is_none());
+    assert_eq!(provider_event.health_state, "cooldown");
+    assert!(provider_event.cooldown_until_ms.is_some());
 
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 2);
@@ -2181,13 +2178,13 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
     assert_eq!(observability.provider_failure_events[0].failure_count, 1);
     assert_eq!(
         observability.provider_failure_events[0].health_state,
-        "healthy"
+        "cooldown"
     );
     assert!(observability.provider_failure_events[0]
         .cooldown_until_ms
-        .is_none());
+        .is_some());
     assert!(
-        provider_health
+        !provider_health
             .store()
             .availability("limited", Some("key1"), Some("gpt-5.5"), u64::MAX)
             .available
@@ -2217,7 +2214,7 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
         assert_eq!(output.status, 200);
         assert_eq!(
             output.node_trace.contains(&"V3TargetLocalReselected"),
-            turn == 1
+            false
         );
         let observability = output
             .observability
@@ -2227,18 +2224,6 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
             observability.provider_key.as_deref(),
             Some("minimax:key1:MiniMax-M3")
         );
-        if turn == 1 {
-            assert_eq!(observability.provider_failure_events.len(), 1);
-            assert_eq!(observability.provider_failure_events[0].failure_count, 2);
-            assert_eq!(
-                observability.provider_failure_events[0].health_state,
-                "cooldown"
-            );
-            assert!(observability.provider_failure_events[0]
-                .cooldown_until_ms
-                .is_some());
-            continue;
-        }
         assert_eq!(observability.attempts, Some(1));
         assert!(observability
             .unavailable_candidates
@@ -2258,7 +2243,7 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
         .collect();
     assert_eq!(
         provider_sequence,
-        vec!["limited", "minimax", "limited", "minimax", "minimax", "minimax"]
+        vec!["limited", "minimax", "minimax", "minimax", "minimax"]
     );
 }
 

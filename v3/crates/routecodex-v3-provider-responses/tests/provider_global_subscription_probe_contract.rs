@@ -19,11 +19,11 @@ fn fail(store: &V3ProviderHealthStore, session_id: &str, model_id: &str, now_ms:
 }
 
 #[test]
-fn second_failure_blocks_same_key_across_sessions() {
+fn default_failure_blocks_exact_key_model_across_sessions() {
     let store = V3ProviderHealthStore::default();
     fail(&store, "session-a", "model-a", 10);
     assert!(
-        store
+        !store
             .availability_for_session(
                 &scope("session-a"),
                 "provider-a",
@@ -48,10 +48,9 @@ fn second_failure_blocks_same_key_across_sessions() {
 }
 
 #[test]
-fn different_keys_do_not_combine_but_same_key_blocks_models() {
+fn different_keys_and_models_do_not_combine() {
     let store = V3ProviderHealthStore::default();
     fail(&store, "session-a", "model-a", 10);
-    fail(&store, "session-b", "model-b", 11);
     fail(&store, "session-a", "model-a", 12);
     assert!(
         store
@@ -65,7 +64,7 @@ fn different_keys_do_not_combine_but_same_key_blocks_models() {
             .available
     );
     assert!(
-        !store
+        store
             .availability_for_session(
                 &scope("session-a"),
                 "provider-a",
@@ -91,7 +90,9 @@ fn cooldown_expiry_only_makes_probe_due_and_success_probe_restores() {
         .provider_cooldown_probe_keys_due(first_due)
         .unwrap()
         .iter()
-        .any(|(_, auth, model)| { auth.as_deref() == Some("key-a") && model.is_none() }));
+        .any(|(_, auth, model)| {
+            auth.as_deref() == Some("key-a") && model.as_deref() == Some("model-a")
+        }));
     assert!(
         !store
             .availability_for_session(
@@ -104,14 +105,14 @@ fn cooldown_expiry_only_makes_probe_due_and_success_probe_restores() {
             .available
     );
     assert!(store
-        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), None)
+        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
         .unwrap()
         .is_some());
     store
         .complete_provider_cooldown_probe_success_at(
             "provider-a",
             Some("key-a"),
-            None,
+            Some("model-a"),
             first_due + 1,
         )
         .unwrap();
@@ -135,11 +136,16 @@ fn failed_probe_keeps_blocked_and_stretches_next_deadline() {
     fail(&store, "session-a", "model-a", 2);
     let first_due = 5_002;
     assert!(store
-        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), None)
+        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
         .unwrap()
         .is_some());
     store
-        .complete_provider_cooldown_probe_failure("provider-a", Some("key-a"), None, first_due)
+        .complete_provider_cooldown_probe_failure(
+            "provider-a",
+            Some("key-a"),
+            Some("model-a"),
+            first_due,
+        )
         .unwrap();
     assert!(
         !store
@@ -177,11 +183,11 @@ fn probe_acquisition_is_single_flight() {
     fail(&store, "session-a", "model-a", 1);
     fail(&store, "session-a", "model-a", 2);
     assert!(store
-        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), None)
+        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
         .unwrap()
         .is_some());
     assert!(!store
-        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), None)
+        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
         .unwrap()
         .is_some());
 }

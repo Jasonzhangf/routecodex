@@ -257,8 +257,9 @@ fn provider_failure_projects_only_after_selected_target_is_fully_exhausted() {
     let classified = build_v3_error_02_classified_from_v3_error_01(source);
     let action = build_v3_error_03_target_local_action_from_v3_error_02(
         classified,
-        V3ErrorActionScope::CanonicalModel {
+        V3ErrorActionScope::ProviderKeyModel {
             provider_id: "cc".to_string(),
+            auth_alias: "key1".to_string(),
             model_id: "gpt-5.5".to_string(),
         },
         0,
@@ -337,8 +338,9 @@ fn exhausted_provider_http_400_projects_as_bad_gateway() {
     );
     let projected = project_exhausted_provider(
         source,
-        V3ErrorActionScope::CanonicalModel {
+        V3ErrorActionScope::ProviderKeyModel {
             provider_id: "opencode-go".to_string(),
+            auth_alias: "key1".to_string(),
             model_id: "deepseek-v4-flash".to_string(),
         },
         Some(400),

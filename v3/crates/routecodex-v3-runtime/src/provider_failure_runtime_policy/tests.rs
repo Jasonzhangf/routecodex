@@ -361,9 +361,9 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
     let mut manifest = global_pool_alive_manifest("global_status_policy");
     normalize_global_pool_priorities(&mut manifest);
     // Account/billing classes (401/403) are typed irrecoverable and cool on their
-    // first failure. Every recoverable class requires two consecutive
-    // same-class failures, so one recoverable error cannot exclude a provider.
-    let cases = [(401, 1), (403, 1), (429, 2), (500, 2), (502, 2), (599, 2)];
+    // first failure. Ordinary 429 keeps a three-failure threshold; other typed
+    // recoverable classes currently use the shared threshold of one.
+    let cases = [(401, 1), (403, 1), (429, 3), (500, 1), (502, 1), (599, 1)];
     for (status, threshold) in cases {
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
         let scope = test_provider_failure_scope(
@@ -429,7 +429,7 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
         "runtime-policy-negative",
     )
     .expect("failure session scope");
-    // Generic provider rejection remains counted, with repeat admission.
+    // Generic provider rejection is counted under the shared typed threshold.
     for attempt in 0..2 {
         health
             .record_provider_failure_record_with_policy(
@@ -459,9 +459,8 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
             )
             .available;
         assert_eq!(
-            available,
-            attempt == 0,
-            "generic rejection must cool only after the second consecutive failure"
+            available, false,
+            "generic rejection must cool under the current typed threshold; attempt={attempt}"
         );
     }
 }
@@ -1100,7 +1099,7 @@ targets = [
 }
 
 #[tokio::test]
-async fn transport_error_switches_provider_family() {
+async fn transport_error_selects_untried_same_provider_sibling_key() {
     let manifest = transport_thrash_manifest("transport_thrash");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let selected = match resolve_target(&manifest, "transport_thrash", &BTreeSet::new(), &health) {
@@ -1152,21 +1151,16 @@ async fn transport_error_switches_provider_family() {
     let reselected = result
         .retry_selected
         .expect("transport failure must reselect");
-    assert_eq!(
-        reselected.candidate.provider_id, "second",
-        "transport failure must switch provider families"
-    );
+    assert_eq!(reselected.candidate.provider_id, "first");
+    assert_eq!(reselected.candidate.auth_alias, "key2");
     assert_eq!(
         state.failed_candidates.len(),
-        2,
-        "provider-scoped transport failure must exclude every candidate in the failed provider family"
+        1,
+        "transport failure must exclude only the failed exact provider key"
     );
     assert!(state
         .failed_candidates
         .contains(&"first:key1:gpt-test".to_string()));
-    assert!(state
-        .failed_candidates
-        .contains(&"first:key2:gpt-test".to_string()));
     assert!(!state
         .failed_candidates
         .contains(&"second:key1:gpt-test".to_string()));

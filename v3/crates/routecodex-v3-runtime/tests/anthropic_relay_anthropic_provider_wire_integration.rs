@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_provider_responses::{
-    ResponsesTransport, V3ProviderError, V3ProviderResp14Raw, V3ProviderResponseHeader,
-    V3Transport13ResponsesHttpRequest,
+    ResponsesTransport, V3ProviderError, V3ProviderRequestHeader, V3ProviderResp14Raw,
+    V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
     execute_v3_anthropic_relay_runtime, execute_v3_anthropic_relay_runtime_with_client_headers,
@@ -71,6 +71,7 @@ impl ResponsesTransport for AnthropicProviderJsonTransport {
 
 struct AnthropicProviderProjectionTransport {
     captured_projection: Mutex<Option<Value>>,
+    captured_provider_headers: Mutex<Option<Vec<V3ProviderRequestHeader>>>,
 }
 
 #[async_trait]
@@ -80,6 +81,7 @@ impl ResponsesTransport for AnthropicProviderProjectionTransport {
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
         *self.captured_projection.lock().unwrap() = Some(request.provider_request_projection());
+        *self.captured_provider_headers.lock().unwrap() = Some(request.provider_headers().to_vec());
         Ok(V3ProviderResp14Raw::from_json(
             request.request_id(),
             request.provider_id(),
@@ -451,6 +453,7 @@ async fn anthropic_relay_dynamic_claude_code_packet_reaches_anthropic_provider_r
     let thinking = json!({"type":"adaptive","display":"omitted"});
     let transport = AnthropicProviderProjectionTransport {
         captured_projection: Mutex::new(None),
+        captured_provider_headers: Mutex::new(None),
     };
 
     let output = execute_v3_anthropic_relay_runtime_with_client_headers(
@@ -531,11 +534,33 @@ async fn anthropic_relay_dynamic_claude_code_packet_reaches_anthropic_provider_r
         projection["body"]["messages"],
         json!([{"role":"user","content":[{"type":"text","text":"Reply with exactly: ok"}]}])
     );
-    assert_eq!(projection["headers"]["x-stainless-timeout"], "600");
-    assert!(projection["headers"]["anthropic-beta"]
-        .as_str()
+    let headers = transport
+        .captured_provider_headers
+        .lock()
         .unwrap()
-        .contains("advisor-tool-2026-03-01"));
+        .clone()
+        .expect("typed transport headers must be captured independently of debug projection");
+    let timeouts: Vec<_> = headers
+        .iter()
+        .filter(|header| header.name() == "x-stainless-timeout")
+        .map(|header| header.value())
+        .collect();
+    assert_eq!(timeouts, vec!["600"]);
+    let betas: Vec<_> = headers
+        .iter()
+        .filter(|header| header.name() == "anthropic-beta")
+        .map(|header| header.value())
+        .collect();
+    assert_eq!(betas.len(), 1);
+    assert!(betas[0].contains("advisor-tool-2026-03-01"));
+    for header in &headers {
+        assert_eq!(
+            projection["headers"][header.name()],
+            "[REDACTED]",
+            "debug projection must redact the supplied header {}",
+            header.name()
+        );
+    }
     let serialized = serde_json::to_string(&projection).unwrap();
     assert!(
         !serialized.contains("cc_version=2.1.220.dae"),

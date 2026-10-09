@@ -425,7 +425,7 @@ const relayFailurePolicy = findFunctionBody(
   files.policy,
 );
 const targetResolutionFailure = relayFailurePolicy.match(
-  /Some\(Err\(source\)\)\s*=>\s*V3RelayProviderTargetResolution::Failed\(source\)\s*,/u,
+  /V3RelayProviderTargetResolution::Failed\(source\)\s*=>\s*\{\s*let resolution_message = source\.message\.clone\(\);\s*let decision = V3ErrorHandlingCenter::decide_provider\(\s*V3ErrorHandlingCenterInput\s*\{\s*source,/u,
 );
 if (!targetResolutionFailure) {
   failures.push(

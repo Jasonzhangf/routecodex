@@ -10,12 +10,15 @@ use super::{
     V3HubProviderWireProtocol, V3HubReqOutbound07ProviderSemantic, V3ProviderCompatError,
     V3ProviderCompatProfileId,
 };
+use provider_compat_core::opencode_zen_tcm::{
+    apply_opencode_zen_tcm_request, compile_opencode_zen_tcm_bridge, OpencodeZenTcmBridgeBinding,
+    PROFILE as OPENCODE_ZEN_TCM_PROFILE,
+};
 use provider_compat_core::req_outbound_stage3_compat::{
     run_req_outbound_stage3_compat, AdapterContext, ReqOutboundCompatInput,
 };
 use serde_json::Value;
 
-use crate::hub_v1::{count_v3_payload_image_refs, normalize_v3_all_images_to_placeholder};
 use crate::projection_drop_log::{V3ProjectionDropContext, V3ProjectionDropRecord};
 use crate::selected_provider_model_binding::{
     bind_v3_selected_provider_model, V3SelectedProviderModelBinding,
@@ -26,6 +29,7 @@ pub struct ProviderReqCompat06ProviderCompat {
     pub(crate) previous: V3HubReqOutbound07ProviderSemantic,
     pub(crate) profile: V3ProviderCompatProfileId,
     pub(crate) payload: V3HubOpaquePayload,
+    pub(crate) opencode_zen_tcm_bridge: Option<OpencodeZenTcmBridgeBinding>,
 }
 
 pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
@@ -35,12 +39,27 @@ pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
         Some(profile) => V3ProviderCompatProfileId::from_config(Some(profile)),
         None => V3ProviderCompatProfileId::Passthrough,
     };
-    let (payload, drops) = apply_v3_provider_req_compat(&input, &profile)?;
+    let (mut payload, drops) = apply_v3_provider_req_compat(&input, &profile)?;
+    let opencode_zen_tcm_bridge = if profile
+        .as_str()
+        .eq_ignore_ascii_case(OPENCODE_ZEN_TCM_PROFILE)
+        && input.entry_protocol() == super::V3HubEntryProtocol::Responses
+        && input.provider_protocol == V3HubProviderWireProtocol::OpenAiChat
+        && input.previous.previous.execution == super::V3HubExecutionMode::Relay
+    {
+        compile_opencode_zen_tcm_bridge(input.provider_semantic_payload(), &payload)
+    } else {
+        None
+    };
+    if let Some(binding) = &opencode_zen_tcm_bridge {
+        apply_opencode_zen_tcm_request(&mut payload, binding);
+    }
     Ok(ProviderReqCompat06Projected {
         node: ProviderReqCompat06ProviderCompat {
             previous: input,
             profile,
             payload: V3HubOpaquePayload(std::sync::Arc::new(payload)),
+            opencode_zen_tcm_bridge,
         },
         drops,
     })
@@ -61,22 +80,6 @@ pub(super) fn apply_v3_provider_req_compat(
     Ok((payload, drops))
 }
 
-fn project_v3_images_for_selected_target_session_compat(
-    payload: &mut Value,
-    model_capabilities: &[String],
-) {
-    // Images route to multimodal by default. If the already-selected target
-    // has no multimodal/vision capability, preserve the session structure by
-    // projecting media to the deterministic [Image] compatibility token.
-    if !model_capabilities
-        .iter()
-        .any(|capability| matches!(capability.as_str(), "multimodal" | "vision"))
-        && count_v3_payload_image_refs(payload) > 0
-    {
-        normalize_v3_all_images_to_placeholder(payload);
-    }
-}
-
 pub(crate) fn provider_req_compat_reasoning_effort_explicit(payload: &Value) -> bool {
     payload
         .get("reasoning_effort")
@@ -95,10 +98,6 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
     provider_protocol: V3HubProviderWireProtocol,
     profile: &V3ProviderCompatProfileId,
 ) -> Result<Value, V3ProviderCompatError> {
-    project_v3_images_for_selected_target_session_compat(
-        &mut payload,
-        &selected.model_capabilities,
-    );
     project_reasoning_effort_for_selected_target(&mut payload, selected, provider_protocol)?;
     let provider_key = format!(
         "{}:{}:{}",
@@ -1329,20 +1328,21 @@ mod tests {
 
     #[test]
     fn multimodal_target_preserves_image_bytes_for_session_semantics() {
-        let mut payload = json!({
+        let payload = json!({
             "messages": [{"role": "user", "content": [{
                 "type": "image_url",
                 "image_url": {"url": VALID_1X1_PNG_DATA_URL}
             }]}]
         });
-        project_v3_images_for_selected_target_session_compat(
-            &mut payload,
-            &[
-                "text".to_string(),
-                "multimodal".to_string(),
-                "vision".to_string(),
-            ],
-        );
+        let mut selected = selected_candidate(V3HubProviderWireProtocol::OpenAiChat);
+        selected.model_capabilities = vec!["text".into(), "multimodal".into(), "vision".into()];
+        let payload = apply_v3_provider_req_compat_to_provider_payload(
+            payload,
+            &selected,
+            V3HubProviderWireProtocol::OpenAiChat,
+            &V3ProviderCompatProfileId::Passthrough,
+        )
+        .unwrap();
         assert_eq!(
             payload["messages"][0]["content"][0]["image_url"]["url"],
             VALID_1X1_PNG_DATA_URL
@@ -1350,20 +1350,25 @@ mod tests {
     }
 
     #[test]
-    fn non_multimodal_target_projects_image_to_session_placeholder() {
-        let mut payload = json!({
+    fn non_multimodal_target_preserves_representable_latest_image() {
+        let payload = json!({
             "messages": [{"role": "user", "content": [{
                 "type": "image_url",
                 "image_url": {"url": VALID_1X1_PNG_DATA_URL}
             }]}]
         });
-        project_v3_images_for_selected_target_session_compat(
-            &mut payload,
-            &["text".to_string(), "tools".to_string()],
-        );
+        let mut selected = selected_candidate(V3HubProviderWireProtocol::OpenAiChat);
+        selected.model_capabilities = vec!["text".into(), "tools".into()];
+        let payload = apply_v3_provider_req_compat_to_provider_payload(
+            payload,
+            &selected,
+            V3HubProviderWireProtocol::OpenAiChat,
+            &V3ProviderCompatProfileId::Passthrough,
+        )
+        .unwrap();
         assert_eq!(
-            payload["messages"][0]["content"][0],
-            json!({"type": "text", "text": "[Image]"})
+            payload["messages"][0]["content"][0]["image_url"]["url"],
+            VALID_1X1_PNG_DATA_URL
         );
     }
 

@@ -51,10 +51,20 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
 #[test]
 fn three_failures_cool_the_same_provider_key_across_sessions() {
     let store = V3ProviderHealthStore::default();
-    for now_ms in 100..103 {
+    store
+        .record_provider_failure_in_session(
+            &session("session-a"),
+            "provider-a",
+            Some("key-a"),
+            Some("gpt-5.5"),
+            Some("controlled failure"),
+            100,
+        )
+        .unwrap();
+    for now_ms in 101..103 {
         store
             .record_provider_failure_in_session(
-                &session("session-a"),
+                &session("session-b"),
                 "provider-a",
                 Some("key-a"),
                 Some("gpt-5.5"),
@@ -88,12 +98,22 @@ fn three_failures_cool_the_same_provider_key_across_sessions() {
 }
 
 #[test]
-fn operator_can_remove_auth_key_cooldown_and_probe_state() {
+fn operator_can_remove_exact_identity_cooldown_and_probe_state() {
     let store = V3ProviderHealthStore::default();
-    for now_ms in 100..103 {
+    store
+        .record_provider_failure_in_session(
+            &session("session-a"),
+            "provider-a",
+            Some("key-a"),
+            Some("gpt-5.5"),
+            Some("controlled failure"),
+            100,
+        )
+        .unwrap();
+    for now_ms in 101..103 {
         store
             .record_provider_failure_in_session(
-                &session("session-a"),
+                &session("session-b"),
                 "provider-a",
                 Some("key-a"),
                 Some("gpt-5.5"),
@@ -105,14 +125,14 @@ fn operator_can_remove_auth_key_cooldown_and_probe_state() {
     assert!(store
         .cooldown_entries(103)
         .iter()
-        .any(|entry| entry.kind == "auth_key"));
+        .any(|entry| entry.kind == "probe" && entry.model_id.as_deref() == Some("gpt-5.5")));
     assert!(store
-        .remove_cooldown_entry("provider-a", Some("key-a"), None, "auth_key")
+        .remove_cooldown_entry("provider-a", Some("key-a"), Some("gpt-5.5"), "probe")
         .unwrap());
     assert!(!store
         .cooldown_entries(103)
         .iter()
-        .any(|entry| entry.kind == "auth_key"));
+        .any(|entry| entry.kind == "probe" && entry.model_id.as_deref() == Some("gpt-5.5")));
     assert!(
         store
             .availability("provider-a", Some("key-a"), Some("gpt-5.5"), 103)
@@ -123,26 +143,30 @@ fn operator_can_remove_auth_key_cooldown_and_probe_state() {
 #[test]
 fn failures_in_other_session_share_provider_key_cooldown() {
     let store = V3ProviderHealthStore::default();
-    for (index, session_id) in ["session-a", "session-a", "session-a", "session-b"]
-        .into_iter()
-        .enumerate()
-    {
-        let record = store
-            .record_provider_failure_in_session(
-                &session(session_id),
-                "provider-a",
-                Some("key-a"),
-                Some("gpt-5.5"),
-                Some("controlled failure"),
-                100 + index as u64,
-            )
-            .unwrap();
-        assert_eq!(
-            record.state,
-            if index == 0 { "healthy" } else { "cooldown" }
-        );
-        assert_eq!(record.failure_count, (index as u32 + 1).min(2));
-    }
+    let first = store
+        .record_provider_failure_in_session(
+            &session("session-a"),
+            "provider-a",
+            Some("key-a"),
+            Some("gpt-5.5"),
+            Some("controlled failure"),
+            100,
+        )
+        .unwrap();
+    assert_eq!(first.state, "cooldown");
+    assert_eq!(first.failure_count, 1);
+    let repeated = store
+        .record_provider_failure_in_session(
+            &session("session-b"),
+            "provider-a",
+            Some("key-a"),
+            Some("gpt-5.5"),
+            Some("controlled failure"),
+            101,
+        )
+        .unwrap();
+    assert_eq!(repeated.state, "cooldown");
+    assert_eq!(repeated.failure_count, 2);
     for (key, available) in [("key-a", false), ("key-b", true)] {
         assert_eq!(
             store
@@ -160,7 +184,7 @@ fn failures_in_other_session_share_provider_key_cooldown() {
 }
 
 #[test]
-fn auth_key_policy_cools_key_across_sessions_without_blocking_sibling_keys() {
+fn provider_key_model_policy_isolates_models_across_sessions() {
     let store = V3ProviderHealthStore::default();
     let policy = V3ProviderFailurePolicy {
         failure_threshold: 2,
@@ -169,7 +193,7 @@ fn auth_key_policy_cools_key_across_sessions_without_blocking_sibling_keys() {
         max_probe_interval_ms: None,
         long_probe_backoff: false,
         until_restart: false,
-        cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
+        cooldown_scope: V3ProviderFailureCooldownScope::ProviderKeyModel,
     };
     let first = store
         .record_provider_failure_in_session_with_policy(
@@ -197,10 +221,14 @@ fn auth_key_policy_cools_key_across_sessions_without_blocking_sibling_keys() {
         )
         .unwrap();
     assert_eq!(second.state, "cooldown");
-    assert_eq!(second.cooldown_until_ms, Some(10_101));
+    assert_eq!(second.cooldown_until_ms, Some(5_101));
     assert_eq!(
         store.provider_cooldown_probe_keys_due(5_101).unwrap(),
-        vec![("provider-a".to_string(), Some("key-a".to_string()), None,)]
+        vec![(
+            "provider-a".to_string(),
+            Some("key-a".to_string()),
+            Some("gpt-5.5".to_string()),
+        )]
     );
     assert_eq!(
         store
@@ -212,12 +240,12 @@ fn auth_key_policy_cools_key_across_sessions_without_blocking_sibling_keys() {
     let permit = store
         .acquire_provider_cooldown_probe_if_due("provider-a", Some("key-a"), Some("gpt-5.5"), 5_101)
         .unwrap()
-        .expect("a model candidate must acquire the due auth-key probe");
+        .expect("a model candidate must acquire the due exact identity probe");
     assert_eq!(permit.auth_alias(), Some("key-a"));
     assert_eq!(
         permit.model_id(),
-        None,
-        "the auth-key probe permit must retain the model-less probe identity"
+        Some("gpt-5.5"),
+        "the exact identity probe permit must retain the model dimension"
     );
     assert_eq!(
         store
@@ -247,7 +275,7 @@ fn auth_key_policy_cools_key_across_sessions_without_blocking_sibling_keys() {
             .available
     );
     assert!(
-        !store
+        store
             .availability_for_session(
                 &session("session-c"),
                 "provider-a",
@@ -256,7 +284,7 @@ fn auth_key_policy_cools_key_across_sessions_without_blocking_sibling_keys() {
                 102,
             )
             .available,
-        "auth-key cooldown must block another model under the same provider/auth alias"
+        "provider+key+model identity must not block another model"
     );
     assert!(
         store
@@ -270,7 +298,22 @@ fn auth_key_policy_cools_key_across_sessions_without_blocking_sibling_keys() {
             .available
     );
     store
-        .complete_provider_cooldown_probe_success("provider-a", Some("key-a"), None)
+        .record_provider_key_success("provider-a", "key-a", "gpt-5.5", 103)
+        .unwrap();
+    assert!(
+        !store
+            .availability_for_session(
+                &session("session-a"),
+                "provider-a",
+                Some("key-a"),
+                Some("gpt-5.5"),
+                104,
+            )
+            .available,
+        "a sibling success must not reset the exact identity cooldown"
+    );
+    store
+        .complete_provider_cooldown_probe_success("provider-a", Some("key-a"), Some("gpt-5.5"))
         .unwrap();
     assert!(
         store
@@ -686,11 +729,8 @@ fn failure_count_is_provider_key_scoped_for_default_policy() {
                 100,
             )
             .unwrap();
-        assert_eq!(
-            record.state,
-            if index == 0 { "healthy" } else { "cooldown" }
-        );
-        assert_eq!(record.failure_count, (index as u32 + 1).min(2));
+        assert_eq!(record.state, "cooldown");
+        assert_eq!(record.failure_count, index as u32 + 1);
     }
     for (key, available) in [("key-a", false), ("key-b", true)] {
         assert_eq!(
@@ -749,7 +789,7 @@ fn session_transient_bypass_isolated_between_models_while_active() {
 fn real_success_resets_pre_cooldown_failure_window_for_declared_policy() {
     for cooldown_scope in [
         V3ProviderFailureCooldownScope::Session,
-        V3ProviderFailureCooldownScope::AuthKey,
+        V3ProviderFailureCooldownScope::ProviderKeyModel,
     ] {
         let store = V3ProviderHealthStore::default();
         let scope = session("success-reset");
@@ -821,8 +861,9 @@ fn quota_concurrency_and_diagnostics_are_provider_owned_inputs() {
     let store = V3ProviderHealthStore::default();
     store
         .update_quota_state(
-            &V3ErrorActionScope::CanonicalModel {
+            &V3ErrorActionScope::ProviderKeyModel {
                 provider_id: "provider-a".to_string(),
+                auth_alias: "key-a".to_string(),
                 model_id: "gpt-5.5".to_string(),
             },
             0,
@@ -852,6 +893,6 @@ fn quota_concurrency_and_diagnostics_are_provider_owned_inputs() {
     );
     assert_eq!(
         explain_provider_health_reasons(&store, "provider-a", Some("key-a"), Some("gpt-5.5"), 101,),
-        vec!["quota:canonical_model:provider-a:gpt-5.5:exhausted"]
+        vec!["quota:provider_key_model:provider-a:key-a:gpt-5.5:exhausted"]
     );
 }

@@ -253,8 +253,8 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         .and_then(|error| error.status)
         .filter(|external_status| *external_status >= 400)
         .unwrap_or(status);
-    let request_local_scope =
-        crate::provider_failure_runtime_policy::request_local_provider_failure_scope(
+    let is_request_local_compat_failure =
+        crate::provider_failure_runtime_policy::is_health_neutral_request_compat_failure(
             source.source_stage,
             source
                 .external_error
@@ -262,9 +262,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                 .and_then(|error| error.code.as_deref()),
         );
     let failed_key = candidate_key(&selected.candidate);
-    let health_record = if request_local_scope
-        == crate::provider_failure_runtime_policy::V3RequestLocalProviderFailureScope::Candidate
-    {
+    let health_record = if is_request_local_compat_failure {
         V3ProviderFailureRecord {
             scope_label: failed_key.clone(),
             provider_key: failed_key.clone(),
@@ -292,35 +290,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             ))
         }
     };
-    let request_local_excluded = context.expanded.map_or_else(
-        || {
-            if request_local_scope
-                == crate::provider_failure_runtime_policy::V3RequestLocalProviderFailureScope::Provider
-            {
-                expanded_candidates.map_or_else(
-                    || BTreeSet::from([failed_key.clone()]),
-                    |expanded_candidates| {
-                        expanded_candidates
-                            .iter()
-                            .filter(|candidate| {
-                                candidate.provider_id == selected.candidate.provider_id
-                            })
-                            .map(candidate_key)
-                            .collect()
-                    },
-                )
-            } else {
-                BTreeSet::from([failed_key.clone()])
-            }
-        },
-        |expanded| {
-            crate::provider_failure_runtime_policy::expand_request_local_provider_failure_scope(
-                request_local_scope,
-                selected,
-                expanded,
-            )
-        },
-    );
+    let request_local_excluded = BTreeSet::from([failed_key.clone()]);
     state
         .failed_candidates
         .extend(request_local_excluded.clone());
@@ -377,13 +347,12 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             }
         }
     }
-    let provider_scope = V3ErrorActionScope::ProviderInstance {
+    let provider_key_model_scope = V3ErrorActionScope::ProviderKeyModel {
         provider_id: selected.candidate.provider_id.clone(),
+        auth_alias: selected.candidate.auth_alias.clone(),
+        model_id: selected.candidate.model_id.clone(),
     };
-    let recovery_record = if remaining > 0
-        && request_local_scope
-            == crate::provider_failure_runtime_policy::V3RequestLocalProviderFailureScope::Provider
-    {
+    let recovery_record = if remaining > 0 && !is_request_local_compat_failure {
         Some(
             context
                 .provider_health
@@ -418,7 +387,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
     };
     let decision = (context.run_error)(
         source.clone(),
-        provider_scope,
+        provider_key_model_scope,
         remaining,
         false,
         false,
@@ -451,8 +420,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             // Candidate-scoped request/provider compatibility failures are
             // health-neutral and must reselect immediately without entering
             // the provider action gate.
-            retryable_transient: request_local_scope
-                == crate::provider_failure_runtime_policy::V3RequestLocalProviderFailureScope::Candidate,
+            retryable_transient: is_request_local_compat_failure,
         });
     }
     if matches!(
@@ -485,9 +453,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             )
             .map_err(|error| runtime_source("V3ProviderActionGateAdmission", error))?;
     }
-    let admission = if request_local_scope
-        == crate::provider_failure_runtime_policy::V3RequestLocalProviderFailureScope::Candidate
-    {
+    let admission = if is_request_local_compat_failure {
         None
     } else {
         Some(

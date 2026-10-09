@@ -67,7 +67,7 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
 }
 
 #[test]
-fn runtime_policy_blocks_account_errors_immediately_and_recoverable_after_three() {
+fn runtime_policy_blocks_account_errors_immediately_and_recoverable_after_threshold() {
     let manifest = account_threshold_manifest();
     for status in [401, 403] {
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -140,10 +140,7 @@ fn runtime_policy_blocks_account_errors_immediately_and_recoverable_after_three(
                 200 + index,
             )
             .unwrap();
-        assert_eq!(
-            record.state,
-            if index == 0 { "healthy" } else { "cooldown" }
-        );
+        assert_eq!(record.state, "cooldown");
         assert_eq!(record.failure_count, index as u32 + 1);
     }
     assert!(
@@ -222,8 +219,8 @@ fn account_http_401_policy_blocks_auth_key_on_first_failure_in_runtime_bridge() 
         )
         .expect("second 401 should be recorded by the runtime policy bridge");
     assert_eq!(second.state, "cooldown");
-    assert_eq!(second.failure_count, 1);
-    assert_eq!(second.cooldown_until_ms, Some(5_100));
+    assert_eq!(second.failure_count, 2);
+    assert_eq!(second.cooldown_until_ms, Some(5_101));
     assert_eq!(
         health
             .store()
@@ -234,9 +231,13 @@ fn account_http_401_policy_blocks_auth_key_on_first_failure_in_runtime_bridge() 
     assert_eq!(
         health
             .store()
-            .provider_cooldown_probe_keys_due(5_100)
+            .provider_cooldown_probe_keys_due(5_101)
             .expect("probe interval query"),
-        vec![("primary".to_string(), Some("key1".to_string()), None,)]
+        vec![(
+            "primary".to_string(),
+            Some("key1".to_string()),
+            Some("gpt-test".to_string()),
+        )]
     );
     assert!(
         !health
@@ -247,19 +248,19 @@ fn account_http_401_policy_blocks_auth_key_on_first_failure_in_runtime_bridge() 
         "401 auth key must be unavailable to scheduling after one failure"
     );
     assert!(
-        !health
+        health
             .store()
             .scheduling_projection("primary", "key1", "gpt-other", 1, 1, 102)
             .expect("sibling-model scheduling projection")
             .available,
-        "401 auth key cooldown must block another model under the same provider/auth alias"
+        "401 must leave another model under the same key available"
     );
     assert!(
-        !health
+        health
             .store()
             .availability_for_session(&session, "primary", Some("key1"), Some("gpt-other"), 102,)
             .available,
-        "401 auth key cooldown must block another model in session availability"
+        "401 must leave another model available in the session"
     );
     assert!(
         !health
@@ -284,13 +285,17 @@ fn account_http_401_policy_blocks_auth_key_on_first_failure_in_runtime_bridge() 
     assert!(availability
         .blocked_scopes
         .iter()
-        .any(|scope| scope.contains("auth_key:primary:key1")));
+        .any(|scope| scope == "provider_cooldown_probe_pending"));
     assert_eq!(
         health
             .store()
-            .provider_cooldown_probe_keys_due(5_100)
+            .provider_cooldown_probe_keys_due(5_101)
             .expect("provider cooldown probe query"),
-        vec![("primary".to_string(), Some("key1".to_string()), None,)]
+        vec![(
+            "primary".to_string(),
+            Some("key1".to_string()),
+            Some("gpt-test".to_string()),
+        )]
     );
 }
 
@@ -333,7 +338,7 @@ fn account_http_403_policy_blocks_auth_key_on_first_failure_in_runtime_bridge() 
                 now_ms,
             )
             .expect("403 should be recorded by the runtime policy bridge");
-        assert_eq!(record.failure_count, 1);
+        assert_eq!(record.failure_count, (now_ms - 99) as u32);
         assert_eq!(record.state, "cooldown");
     }
     assert_eq!(
@@ -347,9 +352,13 @@ fn account_http_403_policy_blocks_auth_key_on_first_failure_in_runtime_bridge() 
     assert_eq!(
         health
             .store()
-            .provider_cooldown_probe_keys_due(5_100)
+            .provider_cooldown_probe_keys_due(5_101)
             .expect("403 probe due query"),
-        vec![("primary".to_string(), Some("key1".to_string()), None,)]
+        vec![(
+            "primary".to_string(),
+            Some("key1".to_string()),
+            Some("gpt-test".to_string()),
+        )]
     );
 }
 
@@ -431,8 +440,8 @@ targets = [
             .available;
         assert_eq!(
             model_available,
-            attempt == 0,
-            "a recoverable response-body decode failure must not cool the model before two same-class failures; attempt={attempt}"
+            false,
+            "a response-body decode failure cools only the failed identity immediately; attempt={attempt}"
         );
         assert!(
             health

@@ -74,11 +74,16 @@ fn first_probe_is_due_exactly_5s_after_block_and_probe_success_resurrects() {
             .available
     );
     store
-        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), None)
+        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
         .unwrap()
-        .expect("due auth-key probe must be acquirable");
+        .expect("due exact identity probe must be acquirable");
     store
-        .complete_provider_cooldown_probe_success_at("provider-a", Some("key-a"), None, first_due)
+        .complete_provider_cooldown_probe_success_at(
+            "provider-a",
+            Some("key-a"),
+            Some("model-a"),
+            first_due,
+        )
         .unwrap();
     assert!(
         store
@@ -90,7 +95,7 @@ fn first_probe_is_due_exactly_5s_after_block_and_probe_success_resurrects() {
                 first_due + 1,
             )
             .available,
-        "probe success must resurrect a globally cooled auth key"
+        "probe success must resurrect a globally cooled exact identity"
     );
 }
 
@@ -152,31 +157,21 @@ fn successful_recovery_restarts_repeat_admission_and_five_second_probe() {
     );
 
     store
-        .record_provider_key_success("provider-a", "key", "model", 103)
+        .complete_probe_success("provider-a", "key", "model", 103)
         .expect("successful recovery");
-
-    // A real success resets the streak, so the next cooldown again needs three
-    // consecutive same-fingerprint failures; the first two only count into
-    // health.
-    for now_ms in 104..=105 {
-        let record = store
-            .record_provider_failure_action("provider-a", "key", "model", &action, now_ms)
-            .expect("failure after recovery");
-        assert_eq!(record.cooldown_until_ms, None, "now_ms={now_ms}");
-    }
     let after_recovery = store
         .record_provider_failure_action("provider-a", "key", "model", &action, 104)
         .expect("failure after recovery");
-    assert!(after_recovery.available);
-    assert!(!after_recovery.cooldown);
-    assert_eq!(after_recovery.cooldown_until_ms, None);
+    assert!(!after_recovery.available);
+    assert!(after_recovery.cooldown);
+    assert_eq!(after_recovery.cooldown_until_ms, Some(5_104));
     let after_repeat = store
         .record_provider_failure_action("provider-a", "key", "model", &action, 105)
         .expect("repeated failure after recovery");
     assert_eq!(
         after_repeat.cooldown_until_ms,
         Some(5_105),
-        "a fast recovery must not inherit the old failure-rate band"
+        "the first recovery probe remains due after five seconds"
     );
     // A real success resets the streak and its failure-rate window.
     assert_eq!(
@@ -220,7 +215,7 @@ fn session_business_success_does_not_remove_pending_probe() {
 }
 
 #[test]
-fn model_success_does_not_clear_auth_key_cooldown() {
+fn model_success_cannot_block_sibling_model_or_clear_pending_probe() {
     let store = V3ProviderHealthStore::default();
     fail(&store, 1);
     fail(&store, 2);
@@ -228,7 +223,7 @@ fn model_success_does_not_clear_auth_key_cooldown() {
         .record_provider_key_success("provider-a", "key-a", "model-a", 30_003)
         .expect("model success");
     assert!(
-        !store
+        store
             .availability_for_session(
                 &scope(),
                 "provider-a",
@@ -237,17 +232,17 @@ fn model_success_does_not_clear_auth_key_cooldown() {
                 30_004,
             )
             .available,
-        "a model-scoped success must not clear an auth-key cooldown"
+        "a failed model cannot block a sibling model"
     );
     assert_eq!(
         store.provider_cooldown_probe_keys_due(5_003).unwrap().len(),
         1,
-        "the auth-key probe remains the only recovery owner"
+        "the exact identity probe remains the only recovery owner"
     );
 }
 
 #[test]
-fn model_success_resets_auth_key_consecutive_failures() {
+fn model_success_resets_exact_identity_consecutive_failures() {
     let store = V3ProviderHealthStore::default();
     let policy = routecodex_v3_provider_responses::V3ProviderFailurePolicy {
         failure_threshold: 3,
@@ -256,7 +251,7 @@ fn model_success_resets_auth_key_consecutive_failures() {
         max_probe_interval_ms: None,
         long_probe_backoff: false,
         until_restart: false,
-        cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
+        cooldown_scope: V3ProviderFailureCooldownScope::ProviderKeyModel,
     };
     for now_ms in [1, 2] {
         store
@@ -291,7 +286,7 @@ fn model_success_resets_auth_key_consecutive_failures() {
         store
             .availability_for_session(&scope(), "provider-a", Some("key-a"), Some("model-a"), 5,)
             .available,
-        "a success between failures must reset the auth-key failure streak"
+        "a success between failures must reset the exact identity failure streak"
     );
 }
 
@@ -321,13 +316,18 @@ fn probe_failures_cap_all_provider_errors_at_thirty_minutes() {
         now_ms = due_at;
         assert!(
             store
-                .acquire_provider_cooldown_probe("provider-a", Some("key-a"), None)
+                .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
                 .unwrap()
                 .is_some(),
             "probe permit missing at step {index}"
         );
         store
-            .complete_provider_cooldown_probe_failure("provider-a", Some("key-a"), None, now_ms)
+            .complete_provider_cooldown_probe_failure(
+                "provider-a",
+                Some("key-a"),
+                Some("model-a"),
+                now_ms,
+            )
             .unwrap();
         assert!(
             !store
@@ -425,7 +425,10 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "a", pr
             .unwrap();
     }
     let mut now_ms = 3;
-    for (step, delta) in [5_000, 30_000, 120_000, 120_000].into_iter().enumerate() {
+    for (step, delta) in [5_000, 10_000, 30_000, 60_000, 120_000, 120_000, 120_000]
+        .into_iter()
+        .enumerate()
+    {
         let due_at = now_ms + delta;
         assert_eq!(
             store
@@ -436,14 +439,14 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "a", pr
             "fast-recovery probe step {step} must be due at {delta}ms"
         );
         let permit = store
-            .acquire_provider_cooldown_probe("p", Some("a"), None)
+            .acquire_provider_cooldown_probe("p", Some("a"), Some("m"))
             .unwrap()
             .expect("fast-recovery probe permit");
         store
             .complete_provider_cooldown_probe_failure_at_generation(
                 "p",
                 Some("a"),
-                None,
+                Some("m"),
                 due_at,
                 Some(permit.expected_generation()),
             )
