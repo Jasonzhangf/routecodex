@@ -6,11 +6,12 @@ use routecodex_v3_config::{
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
     build_v3_error_02_classified_from_v3_error_01,
-    build_v3_provider_failure_action_from_v3_error_02, build_v3_provider_global_failure_policy,
-    is_v3_provider_pool_exhausted, V3Error01SourceRaised, V3Error05ExecutionDecision,
-    V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected, V3ErrorActionScope,
-    V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3ExternalErrorKind,
-    V3ExternalErrorLink, V3ProviderFailureSessionScope, V3ProviderHealthScope,
+    build_v3_provider_failure_action_from_v3_error_02,
+    build_v3_provider_global_error_fingerprint_from_classified,
+    build_v3_provider_global_failure_policy, is_v3_provider_pool_exhausted, V3Error01SourceRaised,
+    V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected,
+    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
+    V3ExternalErrorKind, V3ExternalErrorLink, V3ProviderFailureSessionScope, V3ProviderHealthScope,
 };
 use routecodex_v3_provider_responses::{
     adaptive_concurrency::{V3AdaptiveConcurrencyController, V3AdaptiveConcurrencyLease},
@@ -1567,8 +1568,7 @@ fn provider_failure_policy_from_error_policy_directive(
     status: u16,
     recovery: V3ProviderRecoveryKind,
 ) -> Result<Option<V3ProviderFailurePolicy>, String> {
-    // Error owns recoverable thresholds; internal.toml owns account thresholds.
-    // Typed class wins over status. Request-local retry count does not set health.
+    // Error owns recoverable thresholds; internal.toml owns account thresholds; typed class wins over status.
     let internal = routecodex_v3_config::internal::v3_internal_error_handling();
     let failure_threshold = if recovery == V3ProviderRecoveryKind::IrrecoverableGlobalCooldown {
         internal.unrecoverable_failure_threshold

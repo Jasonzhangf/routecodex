@@ -1,0 +1,35 @@
+{
+  "id": "v3.opencode_zen_provider_headers",
+  "version": "1",
+  "inputs": [
+    { "id": "selected-provider-wire-request", "schema": "Object", "schema_ref": "v3.opencode_zen_provider_headers.arc.provider_wire_request" }
+  ],
+  "nodes": [
+    {
+      "id": "zen_h01_chat_transport_request_built",
+      "operator": "build_v3_openai_chat_transport_request_from_v3_provider_08",
+      "operator_version": "1",
+      "inputs": ["selected-provider-wire-request"],
+      "output": { "id": "transport-request", "schema": "Object", "schema_ref": "v3.opencode_zen_provider_headers.arc.transport_request" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.hub.provider_wire_payload", "v3.target.concrete_provider"], "writes": ["v3.provider.transport_request"] }
+    },
+    {
+      "id": "zen_h02_provider_http_attempt",
+      "operator": "ProviderResponsesTransport::send_http",
+      "operator_version": "1",
+      "inputs": ["transport-request"],
+      "output": { "id": "provider-attempt-outcome", "schema": "Object", "schema_ref": "v3.opencode_zen_provider_headers.arc.provider_attempt_outcome" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.provider.transport_request"], "writes": ["v3.response.provider_raw"] }
+    }
+  ],
+  "edges": [
+    { "from": "zen_h01_chat_transport_request_built", "to": "zen_h02_provider_http_attempt", "arc_id": "transport-request" }
+  ],
+  "outputs": ["provider-attempt-outcome"]
+}

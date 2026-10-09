@@ -445,7 +445,7 @@ resources:
       protocol_decision_inputs: providerType and provider.responses.process from the selected Target10 truth; process=chat is a Relay execution requirement, not a provider id special case.
       provider_request_policy: the selected candidate carries the compiled provider reasoning-effort policy; ProviderReqCompat06ProviderCompat is the only runtime owner that applies it to the provider wire payload, and an unsupported protocol policy is rejected by Config compile before manifest publication.
     allowed_writers: [V3Target10ConcreteProviderSelected]
-    allowed_readers: [V3Execution11ProtocolDecision, V3ResponsesDirect11Policy, ProviderReqCompat06ProviderCompat, V3Provider12ResponsesWirePayload]
+    allowed_readers: [V3Execution11ProtocolDecision, V3ResponsesDirect11Policy, ProviderReqCompat06ProviderCompat, V3Provider12ResponsesWirePayload, build_v3_openai_chat_transport_request_from_v3_provider_08]
     forbidden_writers: [routecodex-v3-virtual-router, routecodex-v3-server, V3Resp15ClientPayload]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -498,8 +498,12 @@ resources:
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3Transport13ResponsesHttpRequest
     identity: [requestId, providerId, providerType, upstreamUrl]
-    allowed_writers: [V3Transport13ResponsesHttpRequest]
-    allowed_readers: [V3ProviderResp14Raw]
+    semantic_contract:
+      configured_headers: selected Target headers are carried on the typed transport request and applied by the generic HTTP send owner; the resolved auth handle alone supplies Authorization
+      projection: configured header names may be projected for diagnosis, but configured header values are redacted from dry-run/debug artifacts
+      scope: provider transport consumes the already selected Target and never reads configuration or branches on deployment provider ID
+    allowed_writers: [V3Transport13ResponsesHttpRequest, build_v3_openai_chat_transport_request_from_v3_provider_08]
+    allowed_readers: [V3ProviderResp14Raw, ProviderResponsesTransport::send_http]
     forbidden_writers: [routecodex-v3-server, V3Resp15ClientPayload]
     may_enter_provider_body: true
     may_enter_client_body: false
@@ -567,7 +571,7 @@ resources:
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderResp14Raw
     identity: [requestId, providerId, statusCode]
-    allowed_writers: [V3ProviderResp14Raw]
+    allowed_writers: [V3ProviderResp14Raw, ProviderResponsesTransport::send_http]
     allowed_readers: [V3Resp15ClientPayload, V3ProviderRespInbound01Raw, V3Error01SourceRaised]
     forbidden_writers: [V3Server16HttpFrame, V3Provider12ResponsesWirePayload]
     may_enter_provider_body: false
@@ -977,7 +981,7 @@ resources:
     semantic_contract:
       configured_reasoning_effort: ProviderReqCompat06ProviderCompat writes the selected provider's compiled reasoning-effort policy after standard protocol projection and existing compat mappings; an omitted policy preserves the existing client/protocol/compat value. The value applies only to OpenAI Chat and Responses providers because unsupported protocols fail Config compile before manifest publication.
     allowed_writers: [ProviderReqCompat06ProviderCompat, V3ProviderReqOutbound08WirePayload]
-    allowed_readers: [V3ProviderReqOutbound09TransportRequest]
+    allowed_readers: [V3ProviderReqOutbound09TransportRequest, build_v3_openai_chat_transport_request_from_v3_provider_08]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-debug, V3HubReqInbound02Normalized, V3HubReqChatProcess04Governed]
     may_enter_provider_body: true
     may_enter_client_body: false

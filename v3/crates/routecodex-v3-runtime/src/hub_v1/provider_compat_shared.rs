@@ -159,7 +159,11 @@ fn build_v3_openai_chat_transport_request_from_v3_provider_08(
         target.auth,
         stream_intent,
         body,
-        Vec::new(),
+        target
+            .headers
+            .iter()
+            .map(|(name, value)| V3ProviderRequestHeader::new(name, value))
+            .collect(),
         Some(Duration::from_millis(target.request_timeout_ms)),
         target.concurrency_acquire_timeout_ms,
         sse_first_frame_timeout_ms,
@@ -342,6 +346,57 @@ mod tests {
                 "x-openai-actor-authorization".to_string(),
                 "local-image-extension".to_string()
             )]
+        );
+    }
+
+    #[test]
+    fn openai_chat_transport_carries_provider_headers_from_selected_target() {
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-openai-chat-provider-headers",
+            V3ResponsesProviderTarget {
+                provider_id: "opencode-zen-free".into(),
+                provider_type: "openai_chat".into(),
+                base_url: "https://opencode.ai/zen/v1".into(),
+                canonical_model_id: "step-5-preview-free".into(),
+                wire_model: "step-5-preview-free".into(),
+                compatibility_profile: None,
+                headers: [
+                    ("x-opencode-client".to_string(), "cli".to_string()),
+                    ("x-opencode-session".to_string(), "ses_test".to_string()),
+                ]
+                .into_iter()
+                .collect(),
+                auth: V3ProviderAuthHandle {
+                    alias: "key3".into(),
+                    secret: V3ProviderAuthSecretHandle::ApiKey("secret-value".into()),
+                },
+                responses_transport: V3ResponsesTransportKind::Http,
+                websocket_v2_url: None,
+                provider_request_cleanup: Default::default(),
+                request_timeout_ms: 300_000,
+                sse_first_frame_timeout_ms: None,
+                initial_concurrency_budget: 8,
+                concurrency_acquire_timeout_ms: 60_000,
+            },
+            json!({"model":"step-5-preview-free","stream":true,"tools":[{"type":"function","function":{"name":"bash"}}]}),
+        )
+        .unwrap();
+        let request = build_v3_provider_transport_request_for_protocol(
+            V3HubProviderWireProtocol::OpenAiChat,
+            wire,
+        )
+        .unwrap();
+        let headers = request
+            .provider_headers()
+            .iter()
+            .map(|header| (header.name().to_string(), header.value().to_string()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            headers,
+            vec![
+                ("x-opencode-client".to_string(), "cli".to_string()),
+                ("x-opencode-session".to_string(), "ses_test".to_string()),
+            ]
         );
     }
 

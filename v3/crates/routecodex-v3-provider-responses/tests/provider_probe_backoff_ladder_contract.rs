@@ -155,6 +155,15 @@ fn successful_recovery_restarts_repeat_admission_and_five_second_probe() {
         .record_provider_key_success("provider-a", "key", "model", 103)
         .expect("successful recovery");
 
+    // A real success resets the streak, so the next cooldown again needs three
+    // consecutive same-fingerprint failures; the first two only count into
+    // health.
+    for now_ms in 104..=105 {
+        let record = store
+            .record_provider_failure_action("provider-a", "key", "model", &action, now_ms)
+            .expect("failure after recovery");
+        assert_eq!(record.cooldown_until_ms, None, "now_ms={now_ms}");
+    }
     let after_recovery = store
         .record_provider_failure_action("provider-a", "key", "model", &action, 104)
         .expect("failure after recovery");

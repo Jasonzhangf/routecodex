@@ -104,10 +104,20 @@ pub(crate) enum V3Transport13ResponsesRequestKind {
         compatibility_profile: Option<String>,
     },
 }
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct V3ProviderRequestHeader {
     name: String,
     value: String,
+}
+
+impl fmt::Debug for V3ProviderRequestHeader {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("V3ProviderRequestHeader")
+            .field("name", &self.name)
+            .field("value", &"[REDACTED]")
+            .finish()
+    }
 }
 
 impl V3ProviderRequestHeader {
@@ -375,7 +385,11 @@ fn provider_request_headers_for_url(
         Value::Object(headers) => headers,
         _ => unreachable!("provider_request_headers always returns an object"),
     };
-    headers.extend(provider_headers);
+    headers.extend(
+        provider_headers
+            .into_iter()
+            .map(|(name, _)| (name, Value::String("[REDACTED]".to_string()))),
+    );
     Value::Object(headers)
 }
 
@@ -1040,6 +1054,10 @@ impl ProviderResponsesTransport {
         }
         if anthropic_messages {
             request = apply_anthropic_messages_compat_headers(request, &secret, &provider_headers);
+        } else {
+            for header in &provider_headers {
+                request = request.header(header.name(), header.value());
+            }
         }
         let send = request.json(&body).send();
         let response = send_http_await(

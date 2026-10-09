@@ -345,7 +345,7 @@ fn additional_tool_fixture() -> Value {
 }
 
 #[test]
-fn provider_request_projection_preserves_transport_headers_verbatim() {
+fn configured_provider_headers_projection_redacts_values() {
     let request = build_v3_transport_13_responses_http_request_with_provider_headers_from_parts(
         "req-provider-projection-verbatim",
         "provider-projection",
@@ -360,9 +360,122 @@ fn provider_request_projection_preserves_transport_headers_verbatim() {
     )
     .unwrap();
     let projection = request.provider_request_projection();
-    assert_eq!(projection["headers"]["x-api-key"], "secret-value");
-    assert!(!projection.to_string().contains("[REDACTED]"));
+    assert_eq!(projection["headers"]["x-api-key"], "[REDACTED]");
+    assert!(!projection.to_string().contains("secret-value"));
     assert_eq!(projection["body"]["input"], "original");
+}
+
+#[test]
+fn configured_provider_headers_debug_redacts_value() {
+    let header = V3ProviderRequestHeader::new("x-opencode-session", "session-secret");
+    let debug = format!("{header:?}");
+
+    assert!(debug.contains("x-opencode-session"));
+    assert!(debug.contains("[REDACTED]"));
+    assert!(!debug.contains("session-secret"));
+}
+
+#[tokio::test]
+async fn configured_provider_headers_reach_wire_with_single_bearer_and_unchanged_body() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let upstream = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        let mut chunk = [0_u8; 1024];
+        let body_start = loop {
+            let read = stream.read(&mut chunk).await.unwrap();
+            assert_ne!(read, 0, "client closed before the request was complete");
+            request.extend_from_slice(&chunk[..read]);
+            if let Some(index) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+                break index + 4;
+            }
+        };
+        let head = String::from_utf8_lossy(&request[..body_start]).to_ascii_lowercase();
+        let content_length = head
+            .lines()
+            .find_map(|line| line.strip_prefix("content-length: "))
+            .expect("request content-length")
+            .trim()
+            .parse::<usize>()
+            .unwrap();
+        while request.len() - body_start < content_length {
+            let read = stream.read(&mut chunk).await.unwrap();
+            assert_ne!(
+                read, 0,
+                "client closed before the request body was complete"
+            );
+            request.extend_from_slice(&chunk[..read]);
+        }
+        let body = request[body_start..body_start + content_length].to_vec();
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 35\r\nconnection: close\r\n\r\n{\"id\":\"chatcmpl-test\",\"choices\":[]}",
+            )
+            .await
+            .unwrap();
+        (
+            String::from_utf8_lossy(&request[..body_start]).to_ascii_lowercase(),
+            body,
+        )
+    });
+
+    let body = json!({
+        "model": "step-5-preview-free",
+        "stream": true,
+        "reasoning_effort": "low",
+        "tools": [
+            {"type":"function","function":{"name":"bash","parameters":{"type":"object"}}},
+            {"type":"function","function":{"name":"read","parameters":{"type":"object"}}}
+        ]
+    });
+    let request = build_v3_transport_13_responses_http_request_from_parts_with_timeout(
+        "req-opencode-zen-configured-headers-wire",
+        "opencode-zen-free",
+        format!("http://{addr}/v1/chat/completions"),
+        V3ProviderAuthHandle {
+            alias: "key3".into(),
+            secret: V3ProviderAuthSecretHandle::ApiKey("test-account-secret".into()),
+        },
+        V3ResponsesStreamIntent::Sse,
+        body.clone(),
+        vec![
+            V3ProviderRequestHeader::new("x-opencode-client", "cli"),
+            V3ProviderRequestHeader::new("x-opencode-session", "ses_test"),
+            V3ProviderRequestHeader::new("x-opencode-request", "msg_test"),
+        ],
+        Some(Duration::from_secs(5)),
+    )
+    .unwrap();
+    let projection = request.provider_request_projection();
+    assert_eq!(projection["headers"]["x-opencode-client"], "[REDACTED]");
+    assert_eq!(projection["headers"]["x-opencode-session"], "[REDACTED]");
+    assert_eq!(projection["body"], body);
+    assert_eq!(projection["streamIntent"], "sse");
+    assert!(!projection.to_string().contains("ses_test"));
+
+    ProviderResponsesTransport::default()
+        .send(request)
+        .await
+        .expect("loopback provider response succeeds");
+    let (headers, wire_body) = upstream.await.unwrap();
+    assert!(headers.contains("x-opencode-client: cli\r\n"), "{headers}");
+    assert!(
+        headers.contains("x-opencode-session: ses_test\r\n"),
+        "{headers}"
+    );
+    assert!(
+        headers.contains("x-opencode-request: msg_test\r\n"),
+        "{headers}"
+    );
+    assert_eq!(headers.matches("authorization:").count(), 1, "{headers}");
+    assert!(
+        headers.contains("authorization: bearer test-account-secret\r\n"),
+        "{headers}"
+    );
+    assert_eq!(serde_json::from_slice::<Value>(&wire_body).unwrap(), body);
 }
 
 #[test]

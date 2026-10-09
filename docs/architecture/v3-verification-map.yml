@@ -1013,6 +1013,8 @@ features:
   owner_scope: Unique V3 config read/parse/validate/resource-registry/published-manifest chain used by mainline v3.config.compile.
   owner_modules:
   - v3/crates/routecodex-v3-config
+  design:
+  - docs/goals/opencode-zen-step5-provider-headers-design.md
   contract:
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-function-map.yml
@@ -1031,6 +1033,7 @@ features:
   - provider auth secretFile supports single-key and list authoring by expanding key names into ordered secret_file + secret_key handles without materializing values
   - provider auth secretFile rejects malformed, duplicate, empty, unreadable, or mixed explicit authoring at config compile time
   - provider_error_action_policy and client_error_projection_policy compile into V3ErrorManifest without secrets, provider runtime hardcoding, or payload leakage
+  - Provider authoring rejects an Authorization header after trimming and case-insensitive comparison before publishing the manifest
   required_contract:
   - v3.config.compile chain owner_feature_id resolves through the V3 function map and verification map
   - v3-cfg-01 through v3-cfg-04 remain adjacent config compiler edges
@@ -1040,6 +1043,7 @@ features:
   - Provider-specific error text/status/usage matchers are config compiled into v3.provider_error.policy_manifest, not hardcoded in runtime
   - User-facing V3 config does not require listing fixed Hub V1 hook/resource lifecycle internals
   required_gates:
+  - npm run test:v3-provider-header-auth-validation
   - npm run verify:v3-resource-relation-edge-lock
   - npm run test:v3-resource-relation-edge-lock-red-fixtures
   - npm run verify:v3-architecture-docs
@@ -1184,7 +1188,7 @@ features:
   status: source_verified_controlled_upstream
   change_risk: high
   owner_kind: rust_project_v3
-  owner_scope: 'Generic Rust Provider runtime slice for Responses entry: selected Target with provider_type -> provider wire -> protocol-specific transport request -> typed raw response/source error'
+  owner_scope: Generic selected-target Provider transport for Responses and OpenAI Chat requests, including provider wire-to-transport adaptation and typed raw response/source errors
   owner_modules:
   - v3/crates/routecodex-v3-config
   - v3/crates/routecodex-v3-provider-responses
@@ -1193,6 +1197,8 @@ features:
   design:
   - docs/goals/v3-responses-direct-mvp-implementation-plan.md
   - docs/goals/v3-responses-direct-mvp-test-design.md
+  - docs/goals/opencode-zen-step5-provider-headers-design.md
+  - docs/architecture/dags/v3.opencode_zen_provider_headers.graph.json
   contract:
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-mainline-call-map.yml
@@ -1200,6 +1206,9 @@ features:
   test_design:
   - docs/goals/v3-responses-direct-mvp-test-design.md
   required_unit:
+  - OpenAI Chat selected Target headers reach generic HTTP wire sends; configured Authorization headers fail config validation and cannot replace the resolved auth handle
+  - Provider request projections redact configured header values while HTTP sends preserve the configured values
+  - A provider HTTP error remains a typed attempt failure and does not become a successful client payload or trigger an unconfigured fallback
   - Provider wire preserves the complete client history byte-for-byte, including historical tool-output images and reasoning encrypted content; only the selected wire model binding and current-turn validation
     may differ
   - The Responses provider wire preserves client history byte-for-byte; only the selected wire model binding and current-turn validation may differ
@@ -1232,6 +1241,7 @@ features:
   - Provider node structs 12, 13, and 14 cannot be constructed by non-owner code
   - auth secret values never enter manifest, Debug, Error, Provider wire Debug, transport request Debug, or client payload
   required_gates:
+  - npm run test:v3-opencode-zen-provider-headers
   - npm run test:v3-provider-responses
   - npm run test:v3-provider-adaptive-concurrency
   - npm run test:v3-responses-direct-blackbox
@@ -1249,7 +1259,7 @@ features:
   - npm run test:v3-workspace
   completion_rule:
     source: Provider nodes 12-14 and adjacent edges 10-12 are bound to real Rust symbols, and Provider module blackbox passes against a controlled upstream.
-    runtime: This feature proves Provider execution only; Server /v1/responses live usability remains pending until the full Responses Direct MVP feature is completed.
+    runtime: This feature proves Provider execution only; Server /v1/responses live usability remains pending until the full Responses Direct MVP feature is completed. This OpenCode Zen task additionally requires separate installed-runtime acceptance through authenticated curl on the 7777 /v1/chat/completions entry; that evidence does not change this feature-level completion claim.
     forbidden_claim: Do not claim Server live integration, client projection completeness, relay, servertool, V2 compatibility, global install, or real ~/.rcc mutation from this provider slice.
 - feature_id: v3.debug_error_foundation
   status: p3_p4_source_and_live_verified
