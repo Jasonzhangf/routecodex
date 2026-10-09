@@ -312,6 +312,7 @@ features:
   - v3/crates/routecodex-v3-config/src/defaults.rs
   - v3/crates/routecodex-v3-config/src/validate.rs
   - v3/crates/routecodex-v3-config/src/provider_config.rs
+  - v3/crates/routecodex-v3-config/src/provider_config_tests.rs
   resource_bindings:
   - v3.config.file_source
   - v3.config.authoring_parsed
@@ -344,8 +345,13 @@ features:
   - default_hub_v1_authoring
   - default_server_execution
   - discover_v3_secret_file_auth_handles
+  - compile_providers
   allowed_paths:
   - v3/crates/routecodex-v3-config
+  - v3/package.json
+  - package.json
+  - docs/goals/opencode-zen-step5-provider-headers-design.md
+  - docs/architecture/dags/v3.opencode_zen_provider_headers.graph.json
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
@@ -804,7 +810,9 @@ features:
   - v3/crates/routecodex-v3-provider-responses/src/wire.rs
   - v3/crates/routecodex-v3-provider-responses/tests/support/wire_unit.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport.rs
+  - v3/crates/routecodex-v3-provider-responses/src/transport/tests.rs
   - v3/crates/routecodex-v3-provider-responses/src/raw_response.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_shared.rs
   - v3/crates/routecodex-v3-runtime/src/hooks.rs
   - v3/crates/routecodex-v3-target/src/lib.rs
   resource_bindings:
@@ -828,6 +836,7 @@ features:
   - wire_preserves_historical_reasoning_even_when_legacy_cleanup_is_configured
   - validate_current_responses_data_images
   - build_v3_transport_13_responses_http_request_from_v3_provider_12
+  - build_v3_openai_chat_transport_request_from_v3_provider_08
   - ReqwestResponsesTransport::send
   - V3ProviderResp14Raw::from_json
   - current_turn_invalid_png_data_image_is_rejected_before_provider_transport
@@ -838,9 +847,14 @@ features:
   allowed_paths:
   - v3/crates/routecodex-v3-provider-responses
   - v3/crates/routecodex-v3-runtime/src/hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_shared.rs
   - v3/crates/routecodex-v3-target
   - v3/crates/routecodex-v3-config/src/lib.rs
   - v3/crates/routecodex-v3-config/src/provider_config.rs
+  - v3/package.json
+  - package.json
+  - docs/goals/opencode-zen-step5-provider-headers-design.md
+  - docs/architecture/dags/v3.opencode_zen_provider_headers.graph.json
   - docs/goals/v3-responses-direct-mvp-implementation-plan.md
   - docs/goals/v3-responses-direct-mvp-test-design.md
   - docs/architecture/v3-resource-operation-map.yml

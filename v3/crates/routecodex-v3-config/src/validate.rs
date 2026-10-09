@@ -1,10 +1,9 @@
-use crate::memory_raw_capture::compile_memory_raw_capture;
-use crate::runtime_config::compile_runtime;
 use crate::types::*;
 use crate::{
     compile_v3_http_sse_keepalive_ms_from_environment, looks_like_secret_literal, validation,
     V3ConfigError,
 };
+use crate::{memory_raw_capture::compile_memory_raw_capture, runtime_config::compile_runtime};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) fn validate_schema(
@@ -641,6 +640,7 @@ fn compile_providers(
         if provider.models.is_empty() {
             return Err(validation(format!("provider {id} has no models")));
         }
+        crate::provider_config::validate_provider_headers(&id, &provider.headers)?;
         if providers_using_default_model.contains(&id)
             && !provider.models.contains_key(&provider.default_model)
         {

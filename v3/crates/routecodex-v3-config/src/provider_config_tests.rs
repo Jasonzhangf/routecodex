@@ -614,3 +614,50 @@ wireName = "deepseek-v4.1-flash"
     );
     std::fs::remove_dir_all(&tmp).ok();
 }
+
+#[test]
+fn configured_authorization_header_is_rejected_case_insensitively_after_trim() {
+    let source = r#"
+version = 3
+
+[pipelines.hub_v1]
+skeleton = "hub_v1"
+
+[servers.primary]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "primary"
+endpoints = ["chat_completions"]
+
+[providers.test]
+type = "openai_chat"
+base_url = "https://provider.example/v1"
+default_model = "model"
+auth = { type = "api_key", entries = [{ alias = "key", env = "TEST_KEY" }] }
+headers = { "  aUtHoRiZaTiOn  " = "Bearer replacement" }
+
+[providers.test.models.model]
+wire_name = "wire-model"
+capabilities = ["text", "tools"]
+supports_streaming = true
+supports_thinking = false
+
+[forwarders."fwd.primary"]
+model = "model"
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "test", model = "model", key = "key", priority = 1 }]
+
+[route_groups.primary.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "fwd.primary", priority = 1 }]
+"#;
+    let authoring = crate::parse_v3_config_02_authoring(source).expect("config parses");
+    let error = crate::compile_v3_config_05_manifest(authoring)
+        .expect_err("provider Authorization header must be rejected");
+    assert!(
+        error
+            .to_string()
+            .contains("headers cannot define Authorization"),
+        "unexpected error: {error}"
+    );
+}

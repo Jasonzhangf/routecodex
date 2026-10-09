@@ -18,6 +18,21 @@ use std::sync::LazyLock;
 /// provider per-request 总超时默认值（毫秒）：60s。
 pub(crate) const DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS: u64 = 60_000;
 
+pub(crate) fn validate_provider_headers(
+    provider_id: &str,
+    headers: &BTreeMap<String, String>,
+) -> Result<(), V3ConfigError> {
+    if headers
+        .keys()
+        .any(|name| name.trim().eq_ignore_ascii_case("authorization"))
+    {
+        return Err(validation(format!(
+            "provider {provider_id} headers cannot define Authorization; use provider auth"
+        )));
+    }
+    Ok(())
+}
+
 pub(crate) fn compile_provider_directory(
     config_dir: &Path,
     referenced_models: &BTreeMap<String, BTreeSet<String>>,

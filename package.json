@@ -95,6 +95,8 @@
     "test:v3-simplified-user-config-red-fixtures": "node scripts/tests/v3-simplified-user-config-red-fixtures.mjs",
     "test:v3-user-config-contract": "CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test user_config_contract -- --nocapture",
     "test:v3-user-config-cli": "CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test user_config_cli -- --nocapture",
+    "test:v3-opencode-zen-provider-headers": "npm --prefix v3 run test:v3-opencode-zen-provider-headers",
+    "test:v3-provider-header-auth-validation": "npm --prefix v3 run test:v3-provider-header-auth-validation",
     "test:v3-source-gate-red-fixtures": "node v3/scripts/tests/v3-source-gate-red-fixtures.mjs",
     "verify:v3-normalization-payload-logic-boundary": "npm --prefix v3 run verify:v3-normalization-payload-logic-boundary",
     "test:v3-normalization-payload-logic-boundary-red-fixtures": "npm --prefix v3 run test:v3-normalization-payload-logic-boundary-red-fixtures",
