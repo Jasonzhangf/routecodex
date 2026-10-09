@@ -29,6 +29,7 @@ const paths = {
   requestOutboundMetadata: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs',
   requestOutboundFormatExtraTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs',
   providerReqCompat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
+  providerReqReasoningEffort: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_reasoning_effort.rs',
   directPassthroughTests: 'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   responsesRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   responsesRuntimeInner: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
@@ -282,10 +283,6 @@ forbid(responsesToChat, `${paths.responsesOpenaiCodec}::reasoning_policy_is_payl
   /responses_reasoning_policy_as_target_valid_system_marker/,
   /<routecodex_reasoning_request/,
 ]);
-for (const phrase of [
-  'fn read_v3_responses_function_call_arguments_for_openai_chat',
-  'fn project_v3_responses_arguments_to_openai_chat_wire(arguments: &str) -> String',
-]) requireText(text.responsesOpenaiCodec, `${paths.responsesOpenaiCodec}::responses_arguments_payload_projection`, phrase);
 const reqInbound02 = functionSlice(
   text.reqInbound02,
   paths.reqInbound02,
@@ -307,12 +304,12 @@ forbid(reqInbound02, `${paths.reqInbound02}::all_inbound_to_chat_canonical_no_co
 const responsesArgumentProjector = functionSlice(
   text.responsesOpenaiCodec,
   paths.responsesOpenaiCodec,
-  'fn project_v3_responses_arguments_to_openai_chat_wire(arguments: &str) -> String',
+  'pub(crate) fn project_v3_responses_tool_call_to_openai_chat',
   'fn build_v3_openai_chat_tool_result_message',
 );
-requireText(responsesArgumentProjector, `${paths.responsesOpenaiCodec}::responses_arguments_payload_projection`, 'arguments.to_string()');
+requireText(responsesArgumentProjector, `${paths.responsesOpenaiCodec}::responses_arguments_payload_projection`, 'Value::String(text) => text.clone()');
 forbid(responsesArgumentProjector, `${paths.responsesOpenaiCodec}::responses_arguments_payload_projection`, [
-  /serde_json::to_string|Value::String|Map::new|json!\(\{\}\)|"\{\}"\.to_string\(\)|matching_parse_feedback|function_call_output|tool_result/,
+  /serde_json::to_string\(&Value::String|json!\(\{\}\)|"\{\}"\.to_string\(\)|matching_parse_feedback|function_call_output|tool_result/,
 ]);
 requireOrder(responsesToChat, `${paths.responsesOpenaiCodec}::responses_to_chat_copy_list`, [
   '"stop"',
@@ -476,21 +473,16 @@ for (const phrase of [
   '"metadata" | "client_metadata" | "prompt_cache_key" | "store" | "text"',
 ]) requireText(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, phrase);
 forbid(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, [/MetadataCenter|metadata_center|debug_snapshot|runtime_control/i, /responses_reasoning_effort_as_anthropic_budget/, /responses_reasoning_policy_as_anthropic_system_marker/, /<routecodex_reasoning_request/, /unwrap_or_else\(\|\|\s*\{?\s*responses_reasoning_effort_as_anthropic_budget/s]);
-const targetReasoningEffortProjection = functionSlice(
-  text.providerReqCompat,
-  paths.providerReqCompat,
-  'fn project_reasoning_effort_for_selected_target',
-  'fn build_v3_provider_standard_protocol_payload_from_req07',
-);
+const targetReasoningEffortProjection = text.providerReqReasoningEffort;
 for (const phrase of [
-  'project_reasoning_effort_for_selected_target',
+  'fn project_reasoning_effort_for_selected_target',
   '"responses:deepseek-console-go"',
   'serde_json::json!({"type":"adaptive"})',
   '"xhigh" | "max" => "max"',
   '"none" | "minimal" | "low" | "medium" | "high" | "xhigh" => effort.as_str()',
   '_ => "medium"',
-]) requireText(targetReasoningEffortProjection, `${paths.providerReqCompat}::target_protocol_reasoning_effort_projection`, phrase);
-forbid(targetReasoningEffortProjection, `${paths.providerReqCompat}::target_protocol_reasoning_effort_projection`, [/thinking_budget|budget_tokens|MetadataCenter|metadata_center/i]);
+]) requireText(targetReasoningEffortProjection, `${paths.providerReqReasoningEffort}::target_protocol_reasoning_effort_projection`, phrase);
+forbid(targetReasoningEffortProjection, `${paths.providerReqReasoningEffort}::target_protocol_reasoning_effort_projection`, [/thinking_budget|budget_tokens|MetadataCenter|metadata_center/i]);
 forbid(text.anthropicCodec, `${paths.anthropicCodec}::registered_anthropic_system_extension`, [/anthropic_entry_system/]);
 for (const phrase of ['responses_metadata_as_anthropic_metadata', 'pub(super) fn validate_responses_cache_and_store_for_anthropic(', 'pub(super) fn reject_responses_reasoning_summary_for_anthropic(', 'pub(super) fn project_responses_text_as_anthropic_output_config(', 'extension.get("prompt_cache_key")', 'extension.get("store")', 'Some(false) => {}', 'Some(true) => {', 'matches!(value, "auto" | "concise" | "detailed")']) requireText(text.anthropicRequestFieldProjection, paths.anthropicRequestFieldProjection, phrase);
 for (const phrase of [
@@ -507,8 +499,8 @@ for (const phrase of [
 requireText(text.anthropicCodecTests, `${paths.anthropicCodecTests}::malformed_chat_tool_arguments`, 'chat_malformed_tool_call_arguments_keep_pair_with_reversible_anthropic_input');
 requireText(text.anthropicCodecTests, `${paths.anthropicCodecTests}::malformed_responses_function_arguments`, 'responses_malformed_function_call_arguments_keep_pair_with_reversible_anthropic_input');
 for (const phrase of [
-  'responses_custom_tool_call_missing_input_fails_without_empty_object_repair',
-  'responses_custom_tool_call_non_string_input_fails_without_relabel_or_repair',
+  'responses_custom_tool_call_missing_input_preserves_correction_without_empty_object_repair',
+  'responses_custom_tool_call_non_string_input_is_preserved_without_relabel_or_repair',
   'responses_valid_function_arguments_use_native_anthropic_object_input',
 ]) requireText(text.anthropicCodecTests, `${paths.anthropicCodecTests}::registered_compatibility_shapes`, phrase);
 requireText(text.requestFieldProjectionDesign, paths.requestFieldProjectionDesign, 'v3.function_call.anthropic_raw_argument_wrapper.v1');
@@ -797,7 +789,7 @@ for (const [owner, body, phrases] of [
     'v3/scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs',
     'Text truth for the audit lives in docs/architecture/reviews/v3-protocol-semantic-matrix-review.md',
     'build_v3_chat_canonical_request_from_responses_payload',
-    'project_v3_responses_arguments_to_openai_chat_wire',
+    'project_v3_responses_tool_call_to_openai_chat',
     'All inbound protocols decode into Chat canonical plus registered payload extensions',
     'reasoning_policy_system_marker',
     'execute_v3_responses_relay_runtime_inner',
@@ -848,7 +840,7 @@ for (const [owner, body, phrases] of [
   ['v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs', readFileSync(repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs'), 'utf8'), ['"container_upload" => Ok(Self::ContainerUpload),']],
   [paths.anthropicTests, text.anthropicTests, ['anthropic_max_tokens_is_admitted_as_incomplete_not_a_provider_failure']],
   ['v3/crates/routecodex-v3-runtime/tables/finish_reason_map.json', readFileSync(repoPath('v3/crates/routecodex-v3-runtime/tables/finish_reason_map.json'), 'utf8'), ['"hub": "content_filter"', '"anthropic": "refusal"']],
-  ['v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs', readFileSync(repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs'), 'utf8'), ['responses_resp03_accepts_registered_incomplete_terminal_and_rejects_malformed_details']],
+  ['v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_provider_tests.rs', readFileSync(repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_provider_tests.rs'), 'utf8'), ['responses_resp03_accepts_incomplete_terminal_with_optional_or_opaque_details']],
   [paths.fieldMatrix, text.fieldMatrix, ['    - SSE transport']],
 ]) for (const phrase of phrases) requireText(body, owner, phrase);
 
@@ -861,7 +853,7 @@ if (!parityFeature) {
   if (!(parityFeature.entry_symbols ?? []).includes('execute_v3_responses_relay_runtime_inner')) {
     failures.push(`${paths.functionMap}: protocol parity runtime entry must be execute_v3_responses_relay_runtime_inner`);
   }
-  if (!(parityFeature.entry_symbols ?? []).includes('project_v3_responses_arguments_to_openai_chat_wire')) {
+  if (!(parityFeature.entry_symbols ?? []).includes('project_v3_responses_tool_call_to_openai_chat')) {
     failures.push(`${paths.functionMap}: malformed-arguments projection helper must be registered as the adjacent codec owner`);
   }
   if ((parityFeature.mainline_bindings ?? []).some((entry) => String(entry).includes('responses-chat-req-negative'))) {
@@ -880,7 +872,7 @@ for (const [key, expected] of [
   ['to_node', 'V3ProviderReqOutbound08WirePayload'],
   ['caller_symbol', 'build_v3_openai_chat_assistant_tool_call_message'],
   ['caller_file', paths.responsesOpenaiCodec],
-  ['callee_symbol', 'project_v3_responses_arguments_to_openai_chat_wire'],
+  ['callee_symbol', 'project_v3_responses_tool_call_to_openai_chat'],
   ['callee_file', paths.responsesOpenaiCodec],
 ]) {
   if (malformedArgumentsEdge?.[key] !== expected) {

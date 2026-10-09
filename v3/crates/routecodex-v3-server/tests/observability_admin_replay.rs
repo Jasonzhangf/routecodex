@@ -169,7 +169,7 @@ type = "responses"
 base_url = "{upstream_base_url}"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "{PROVIDER_KEY_ENV}" }}] }}
-health = {{ enabled = true, failure_threshold = 1, cooldown_ms = 5000 }}
+health = {{ enabled = true, failure_threshold = 2, cooldown_ms = 5000 }}
 responses = {{ process = "chat", streaming = "always" }}
 
 [providers.mock.models.test]
@@ -382,7 +382,7 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
     assert_eq!(observed["external_error_status"], 503);
     assert_eq!(observed["failure_count"], 1);
     // A single recoverable provider failure is counted into health but must not
-    // cool the provider: three consecutive same-fingerprint failures are
+    // cool the provider: two consecutive same-fingerprint failures are
     // required, so one recoverable error never excludes a provider.
     assert_eq!(observed["health_state"], "healthy");
     assert_eq!(observed["action"], "terminal_route_and_default_exhausted");
@@ -524,25 +524,22 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
         "one recoverable provider failure must not cool the provider: {pool}"
     );
 
-    // 8. Two more identical failures reach the three-consecutive-failure
-    //    threshold; only then does the exact failed identity really move into
-    //    the cooldown pool.
-    for attempt in 2..=3 {
-        let response = client
-            .post(format!("http://{server_addr}/v1/responses"))
-            .json(&json!({
-                "model": "client-test",
-                "input": "observability replay probe",
-                "stream": false
-            }))
-            .send()
-            .await;
-        assert!(
-            response.is_err(),
-            "provider HTTP failure attempt {attempt} must not fabricate a client HTTP response"
-        );
-    }
-    assert_eq!(upstream_calls.load(Ordering::SeqCst), 3);
+    // 8. The second identical failure reaches the default two-failure threshold;
+    //    only then does the exact failed identity move into the cooldown pool.
+    let response = client
+        .post(format!("http://{server_addr}/v1/responses"))
+        .json(&json!({
+            "model": "client-test",
+            "input": "observability replay probe",
+            "stream": false
+        }))
+        .send()
+        .await;
+    assert!(
+        response.is_err(),
+        "provider HTTP failure attempt 2 must not fabricate a client HTTP response"
+    );
+    assert_eq!(upstream_calls.load(Ordering::SeqCst), 2);
 
     let (pool_status, pool) = get_json(
         &client,
@@ -557,7 +554,7 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
         .iter()
         .find(|entry| entry["provider_id"] == "mock")
         .unwrap_or_else(|| {
-            panic!("provider mock must be cooled after three consecutive failures: {pool}")
+            panic!("provider mock must be cooled after two consecutive failures: {pool}")
         });
     assert_eq!(cooled["auth_alias"], "key");
     assert_eq!(cooled["model_id"], "test");
@@ -580,7 +577,7 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
 
     // Real captured values, so the evidence is inspectable without a debugger.
     eprintln!("[replay] request_key={request_key}");
-    eprintln!("[replay] client_status={client_status} upstream_calls=3");
+    eprintln!("[replay] client_status={client_status} upstream_calls=2");
     eprintln!("[replay] error_chain={chain}");
     eprintln!(
         "[replay] observed_error_source={} health_action={} error_class={}",

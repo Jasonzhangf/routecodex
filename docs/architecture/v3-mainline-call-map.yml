@@ -332,7 +332,7 @@ chains:
       side_channel_writes: []
 - chain_id: v3.provider_compat_profile.request
   owner_feature_id: v3.provider_compat_profile_loading
-  summary: The request provider-compat node consumes the adjacent provider-semantic payload plus the selected target capability carrier, validates the normal-payload boundary, applies the selected provider-family wire profile, and performs the registered session-preserving image compatibility projection only for a selected target without multimodal/vision capability.
+  summary: The request provider-compat node consumes the adjacent provider-semantic payload plus the selected target capability and provider-policy carrier, validates the normal-payload boundary, applies the selected provider-family wire profile, projects the provider-declared output cap, applies the provider-configurable reasoning-effort override, and performs the registered session-preserving image compatibility projection only for a selected target without multimodal/vision capability.
   edges:
   - step_id: v3-provider-compat-profile-request-01
     from_node: V3HubReqOutbound07ProviderSemantic
@@ -4782,7 +4782,7 @@ chains:
     to_node: V3ProviderReqOutbound08WirePayload
     caller_symbol: build_v3_openai_chat_assistant_tool_call_message
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
-    callee_symbol: project_v3_responses_arguments_to_openai_chat_wire
+    callee_symbol: project_v3_responses_tool_call_to_openai_chat
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
     status: anchored
     binding_kind: protocol_field_parity_test_over_existing_relay_chain
@@ -5527,7 +5527,7 @@ chains:
   - step_id: v3-protocol-boundary-resp-02
     from_node: V3HubRespInbound02Normalized
     to_node: V3HubRespChatProcess03Governed
-    caller_symbol: duplicate_response_tool_identity_fails_inside_response_chat_process
+    caller_symbol: duplicate_response_tool_identity_preserves_function_and_custom_calls
     caller_file: v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs
     callee_symbol: govern_v3_hub_relay_response
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
@@ -7933,7 +7933,7 @@ chains:
     to_node: V3HubRespInbound02Normalized
     caller_symbol: run_json_response_hooks
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
-    callee_symbol: build_v3_responses_provider_response_from_openai_chat_payload_with_manifest
+    callee_symbol: build_v3_responses_provider_response_from_openai_chat_payload
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs
     status: anchored
     behavior_gap: current response bridge preserves the governed native container for Resp03; remaining gap is canonical persisted evidence for duplicate/malformed negative samples

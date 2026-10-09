@@ -111,9 +111,8 @@ pub async fn probe_v3_provider_global_target(
     probe_v3_provider_global_target_impl(target).await
 }
 
-/// internal.toml 全局错误策略表的落地点：可恢复类必须连续三次同样失败才冷却，
-/// typed irrecoverable 账户/计费类首次即冷却；分类优先于 HTTP 状态码，阈值取自
-/// `[error_handling]` 声明值，不在代码内硬编码。
+/// internal.toml 全局错误策略表的落地点：可恢复类必须连续两次同样失败才冷却，
+/// typed irrecoverable 账户/计费类首次即冷却；分类优先于 HTTP 状态码。
 pub(crate) fn apply_v3_internal_provider_failure_policy(
     mut action: V3ProviderFailureAction,
     source_stage: &str,
@@ -121,8 +120,14 @@ pub(crate) fn apply_v3_internal_provider_failure_policy(
     code: &str,
 ) -> V3ProviderFailureAction {
     let _ = (source_stage, code);
+    if matches!(
+        action.recovery,
+        V3ProviderRecoveryKind::NotProviderHealth | V3ProviderRecoveryKind::HealthNeutralTransient
+    ) {
+        return action;
+    }
     // 状态码阈值只作用在可恢复类：已注册的不可恢复账户/计费代码即使上游返回
-    // 503 等可恢复状态，也必须保持首次冷却，不能被覆盖成三次。
+    // 503 等可恢复状态，也必须保持首次冷却，不能被覆盖成两次。
     if action.recovery != V3ProviderRecoveryKind::IrrecoverableGlobalCooldown {
         if let Some(policy) = build_v3_provider_global_failure_policy(status) {
             action.failure_threshold = policy.failure_threshold;
@@ -133,14 +138,16 @@ pub(crate) fn apply_v3_internal_provider_failure_policy(
         }
     }
     if action.failure_threshold == 0 {
-        // Thresholds are declared product policy in `internal.toml`
-        // `[error_handling]`; the runtime looks them up instead of hardcoding.
+        // Error owns the shared recoverable threshold; terminal policy stays
+        // declared in internal.toml.
         let internal = routecodex_v3_config::internal::v3_internal_error_handling();
         action.failure_threshold = match action.recovery {
             V3ProviderRecoveryKind::IrrecoverableGlobalCooldown => {
                 internal.unrecoverable_failure_threshold
             }
-            V3ProviderRecoveryKind::RecoverableCounted => internal.recoverable_failure_threshold,
+            V3ProviderRecoveryKind::RecoverableCounted => {
+                routecodex_v3_error::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD
+            }
             _ => 0,
         };
     }
@@ -470,14 +477,18 @@ impl V3ProviderFailureRuntimeHealth {
         action: &V3ProviderFailureAction,
         now_ms: u64,
     ) -> Result<Option<V3ProviderKeyHealthProjection>, String> {
-        let (Some(auth_alias), Some(model_id)) = (auth_alias, model_id) else {
-            if action.recovery != V3ProviderRecoveryKind::NotProviderHealth {
-                return Err(format!(
-                    "provider health action {} requires complete key identity: provider={provider_id} auth_alias={auth_alias:?} model_id={model_id:?}",
-                    action.class_code
-                ));
-            }
+        if matches!(
+            action.recovery,
+            V3ProviderRecoveryKind::NotProviderHealth
+                | V3ProviderRecoveryKind::HealthNeutralTransient
+        ) {
             return Ok(None);
+        }
+        let (Some(auth_alias), Some(model_id)) = (auth_alias, model_id) else {
+            return Err(format!(
+                "provider health action {} requires complete key identity: provider={provider_id} auth_alias={auth_alias:?} model_id={model_id:?}",
+                action.class_code
+            ));
         };
         self.store
             .record_provider_failure_action(provider_id, auth_alias, model_id, action, now_ms)
@@ -649,17 +660,27 @@ impl V3ProviderFailureRuntimeHealth {
         source: &V3Error01SourceRaised,
         now_ms: u64,
     ) -> Result<V3ProviderFailureRecord, String> {
-        let _classified = build_v3_error_02_classified_from_v3_error_01(source.clone());
-        self.store
-            .record_provider_failure_in_session(
-                failure_session_scope,
-                provider_id,
-                auth_alias,
-                model_id,
-                Some(&source.message),
-                now_ms,
-            )
-            .map_err(|error| error.to_string())
+        let classified = build_v3_error_02_classified_from_v3_error_01(source.clone());
+        let status = source
+            .external_error
+            .as_ref()
+            .and_then(|error| error.status)
+            .unwrap_or(0);
+        let action = apply_v3_internal_provider_failure_policy(
+            build_v3_provider_failure_action_from_v3_error_02(&classified),
+            source.source_stage,
+            status,
+            &source.code,
+        );
+        self.record_provider_failure_record_with_action(
+            failure_session_scope,
+            provider_id,
+            auth_alias,
+            model_id,
+            Some(&source.message),
+            now_ms,
+            &action,
+        )
     }
 
     pub(crate) fn record_provider_failure_record_with_action(
@@ -766,9 +787,10 @@ impl V3ProviderFailureRuntimeHealth {
                     auth_alias,
                     model_id,
                     reason,
-                    build_v3_provider_global_error_fingerprint_from_classified(&classified)
-                        .ok()
-                        .flatten(),
+                    // 必须传 failure_action 的完整身份指纹：它带 source.code
+                    // 兜底，而全局分类指纹只认 HTTP 状态码。缺状态码时两类不同
+                    // 的 provider 本地错误会塌进同一个 None 桶，累加触发冷却。
+                    failure_action.failure_fingerprint.clone(),
                     now_ms,
                     Some(policy),
                 )
@@ -972,28 +994,24 @@ impl V3ProviderFailureRuntimeHealth {
         source: &V3Error01SourceRaised,
     ) -> Result<(), String> {
         let classified = build_v3_error_02_classified_from_v3_error_01(source.clone());
-        // 统一错误模型：post-commit 流失败同样经 internal 全局策略表盖章。
-        // 旧瞬态分类（HealthNeutralTransient/NotProviderHealth）显式转换为
-        // recoverable counted，不允许 health-neutral 旁路绕过冷却/探活。
         let status = source
             .external_error
             .as_ref()
             .and_then(|error| error.status)
             .unwrap_or(0);
-        let mut action = build_v3_provider_failure_action_from_v3_error_02(&classified);
-        if matches!(
-            action.recovery,
-            V3ProviderRecoveryKind::HealthNeutralTransient
-                | V3ProviderRecoveryKind::NotProviderHealth
-        ) {
-            action = V3ProviderFailureAction::recoverable(&source.code);
-        }
         let action = apply_v3_internal_provider_failure_policy(
-            action,
+            build_v3_provider_failure_action_from_v3_error_02(&classified),
             source.source_stage,
             status,
             &source.code,
         );
+        if matches!(
+            action.recovery,
+            V3ProviderRecoveryKind::NotProviderHealth
+                | V3ProviderRecoveryKind::HealthNeutralTransient
+        ) {
+            return Ok(());
+        }
         let now_ms = v3_relay_provider_policy_now_epoch_ms()?;
         self.record_provider_failure_record_with_action(
             failure_session_scope,
@@ -1550,20 +1568,12 @@ fn provider_failure_policy_from_error_policy_directive(
     status: u16,
     recovery: V3ProviderRecoveryKind,
 ) -> Result<Option<V3ProviderFailurePolicy>, String> {
-    // Retry count controls request-local candidate traversal. Provider health
-    // must not cool a provider on the first recoverable occurrence: three
-    // consecutive failures of the same provider key are required. Account and
-    // billing classes (`401..=403`) are the typed irrecoverable group and keep
-    // cooling on their first occurrence. The typed classification wins over the
-    // HTTP status: a registered irrecoverable code keeps its first-occurrence
-    // threshold even when the upstream status looks recoverable. Both
-    // thresholds are declared product policy in `internal.toml`
-    // `[error_handling]`, not hardcoded here.
+    // Error owns recoverable thresholds; internal.toml owns account thresholds; typed class wins over status.
     let internal = routecodex_v3_config::internal::v3_internal_error_handling();
     let failure_threshold = if recovery == V3ProviderRecoveryKind::IrrecoverableGlobalCooldown {
         internal.unrecoverable_failure_threshold
     } else {
-        internal.recoverable_failure_threshold
+        routecodex_v3_error::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD
     };
     let Some(cooldown) = policy.path.iter().find_map(|step| match step {
         V3ProviderDispositionStepManifest::Cooldown {
@@ -1651,11 +1661,8 @@ pub(crate) fn expand_v3_relay_target_plan_for_selected(
         .map_err(|error| error.to_string())
 }
 
-/// REQ03 routing owner: build request facts, classify the request, resolve the
-/// route-pool plan, and hit one opaque target. This helper owns only the opaque
-/// target decision. It never reads provider health, never expands concrete
-/// candidates, and never selects a provider; `build_v3_relay_target_candidates`
-/// runs Target expansion after this returns.
+/// REQ03 Router owner: classify request facts and hit one opaque route target.
+/// Target expands/selects concrete candidates afterward; this helper never reads health.
 pub(crate) fn resolve_v3_relay_opaque_target_once(
     manifest: &V3Config05ManifestPublished,
     server_id: &str,
@@ -1700,10 +1707,8 @@ pub(crate) fn resolve_v3_relay_opaque_target_once(
         })
 }
 
-/// REQ04 Target expansion owner: consume one real opaque target hit and expand
-/// it through the existing Target interpreter. This helper does not classify
-/// the request or hit the Router again. It also does not read health, probe,
-/// select a concrete provider, or decide execution mode.
+/// REQ04 expands an opaque Router hit through Target; no classification or route re-hit.
+/// Health, probes, candidate selection and execution mode remain downstream.
 pub(crate) fn expand_v3_relay_target_candidates_from_opaque_hit(
     manifest: &V3Config05ManifestPublished,
     hit: V3Router07OpaqueTargetHitOnce,

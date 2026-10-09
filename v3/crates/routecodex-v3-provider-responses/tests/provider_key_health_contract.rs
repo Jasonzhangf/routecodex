@@ -92,7 +92,7 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "a", pr
 }
 
 #[test]
-fn recoverable_failure_cools_after_three_same_failures_without_changing_score_contract() {
+fn recoverable_failure_cools_after_repeat_without_changing_score_contract() {
     let store = V3ProviderKeyHealthStore::default();
     let action = V3ProviderFailureAction::recoverable("transport");
 
@@ -101,21 +101,16 @@ fn recoverable_failure_cools_after_three_same_failures_without_changing_score_co
         .expect("first failure");
     assert_eq!(first.score_milli, 95);
     assert_eq!(first.success_streak, 0);
-    // A single recoverable failure is counted into health but must not exclude
-    // the provider: three consecutive same-fingerprint failures are required.
     assert!(first.available);
     assert!(!first.cooldown);
     assert_eq!(first.cooldown_until_ms, None);
-
-    store
+    let second = store
         .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 101)
-        .expect("second failure");
-    let third = store
-        .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 102)
-        .expect("third failure");
-    assert!(!third.available);
-    assert!(third.cooldown);
-    assert_eq!(third.cooldown_until_ms, Some(5_102));
+        .expect("repeated failure");
+    assert_eq!(second.score_milli, 90);
+    assert!(!second.available);
+    assert!(second.cooldown);
+    assert_eq!(second.cooldown_until_ms, Some(5_101));
 }
 
 #[test]
@@ -156,6 +151,81 @@ fn dynamic_probe_ladder_starts_at_5s_after_the_first_cooldown() {
             .provider_cooldown_probe_keys_due(5_100)
             .expect("probe due query"),
         vec![("provider-a".into(), Some("key-a".into()), None,)]
+    );
+}
+
+#[test]
+fn mixed_recoverable_auth_key_fingerprints_do_not_cool_until_three_same_failures() {
+    // auth-key 连续失败身份只含 (provider, auth_alias)，不含 model：
+    // 1) 不同指纹必须各自重启连续计数，混合指纹永远不得相加触发冷却；
+    // 2) 同一 auth alias 下跨模型的三次同指纹失败仍属于同一身份，必须冷却。
+    let store = V3ProviderHealthStore::default();
+    let session = V3ProviderFailureSessionScope::new("server-a", "group-a", "session-a")
+        .expect("session scope");
+    let policy = V3ProviderFailurePolicy {
+        failure_threshold: 3,
+        cooldown_ms: 5_000,
+        probe_interval_ms: 5_000,
+        max_probe_interval_ms: None,
+        long_probe_backoff: false,
+        until_restart: false,
+        cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
+    };
+    let fingerprint = |status: u16| {
+        build_v3_provider_global_error_fingerprint(status)
+            .expect("classification")
+            .expect("fingerprint")
+    };
+    let record = |model_id: &'static str, status: u16, now_ms: u64| {
+        store
+            .record_provider_failure_in_session_with_policy(
+                &session,
+                "provider-a",
+                Some("key-a"),
+                Some(model_id),
+                Some("transport"),
+                Some(fingerprint(status)),
+                now_ms,
+                Some(policy),
+            )
+            .expect("recoverable failure")
+    };
+    // 500 / 502 / 503 各一次：每次换指纹都重启连续计数，三次都是"第 1 次"，
+    // 不得凑成一次 auth-key 冷却。
+    record("model-a", 500, 100);
+    record("model-b", 502, 101);
+    record("model-c", 503, 102);
+    for model_id in ["model-a", "model-b", "model-c"] {
+        assert!(
+            store
+                .availability_for_session(
+                    &session,
+                    "provider-a",
+                    Some("key-a"),
+                    Some(model_id),
+                    102,
+                )
+                .available,
+            "{model_id} must stay available: distinct recoverable fingerprints must not sum into a cooldown"
+        );
+    }
+    assert!(
+        store
+            .provider_cooldown_probe_keys_due(102)
+            .expect("probe due query")
+            .is_empty(),
+        "no auth-key cooldown probe may be scheduled before three same-fingerprint failures"
+    );
+    // 同一 500 指纹、三个不同模型各一次：auth-key 身份不含 model，三次同指纹
+    // 连续失败必须冷却整把 key。
+    record("model-a", 500, 200);
+    record("model-b", 500, 201);
+    record("model-c", 500, 202);
+    assert!(
+        !store
+            .availability_for_session(&session, "provider-a", Some("key-a"), Some("model-a"), 202)
+            .available,
+        "three same-fingerprint failures across models of one auth alias must cool the key"
     );
 }
 
@@ -314,7 +384,7 @@ fn health_score_uses_configured_priority_as_its_baseline() {
 }
 
 #[test]
-fn three_502_failures_enter_cooldown() {
+fn two_502_failures_enter_cooldown() {
     let store = V3ProviderHealthStore::default();
     store
         .scheduling_projection("p", "k", "m", 100, 1, 100)
@@ -336,14 +406,11 @@ fn three_502_failures_enter_cooldown() {
         95
     );
 
-    store
+    let second = store
         .record_provider_failure_action("p", "k", "m", &action, 102)
         .expect("second 502 failure");
-    let third = store
-        .record_provider_failure_action("p", "k", "m", &action, 103)
-        .expect("third 502 failure");
-    assert!(third.cooldown);
-    assert_eq!(third.cooldown_until_ms, Some(5_103));
+    assert!(second.cooldown);
+    assert_eq!(second.cooldown_until_ms, Some(5_102));
 }
 
 #[test]

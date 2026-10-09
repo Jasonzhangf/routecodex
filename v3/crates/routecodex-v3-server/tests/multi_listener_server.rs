@@ -35,6 +35,9 @@ static TEST_LOCK: Mutex<()> = Mutex::const_new(());
 #[path = "support/image_input_blackbox.rs"]
 mod image_input_blackbox;
 
+#[path = "support/pool_empty_recovery_blackbox.rs"]
+mod pool_empty_recovery_blackbox;
+
 async fn read_raw_content_length_response(socket: &mut TcpStream) -> Vec<u8> {
     let mut wire = Vec::new();
     while !wire.ends_with(b"\r\n\r\n") {
@@ -3852,8 +3855,7 @@ async fn chat_client_anthropic_cache_usage_projects_prompt_details_shape() {
 }
 
 #[tokio::test]
-async fn responses_relay_anthropic_dsml_exhausted_control_frame_breaks_stream_without_error_to_client(
-) {
+async fn responses_relay_anthropic_dsml_complete_text_is_faithfully_returned() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
         StatusCode::OK,
@@ -3884,52 +3886,71 @@ async fn responses_relay_anthropic_dsml_exhausted_control_frame_breaks_stream_wi
         .await
         .expect("Anthropic mock must receive provider request")
         .unwrap();
-    // The provider-attempt failure is isolated from the client: exhaustion ends the
-    // streaming client transport as an aborted SSE transfer instead of projecting a
-    // provider-derived Error06/502, a response.failed event, or the malformed
-    // control text.
-    let response = send_result.expect(
-        "exhausted malformed provider response must not project a provider-derived error \
-         status",
-    );
+    // This is complete native Anthropic business text, even though it resembles
+    // control syntax. Preserve it rather than adjudicating its meaning.
+    let response = send_result.expect("complete Anthropic text must reach the client");
+    let status = response.status();
     assert_eq!(
         response.headers()["content-type"],
         "text/event-stream",
-        "exhausted malformed provider response must keep the SSE boundary, not a \
-         terminal error frame",
+        "successful Anthropic text must retain the client SSE boundary",
     );
-    // A complete response body (including any provider-derived 502/response.failed
-    // payload) would read Ok here; an Err is the aborted SSE transfer that the
-    // streaming client retries, so exhaustion does not end the session.
-    let _body_error = response.bytes().await.expect_err(
-        "exhausted malformed provider response must abort the streaming body instead of \
-         ending the transfer normally",
-    );
+    let body = response
+        .text()
+        .await
+        .expect("complete Anthropic text must finish the client transfer normally");
+    let events: Vec<Value> = body
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .filter(|data| *data != "[DONE]")
+        .map(|data| serde_json::from_str(data).expect("client SSE data must be JSON"))
+        .collect();
+    let text: String = events
+        .iter()
+        .filter(|event| event["type"] == "response.output_item.done")
+        .filter_map(|event| event["item"]["content"].as_array())
+        .flatten()
+        .filter_map(|part| part["text"].as_str())
+        .collect();
     handle.shutdown().await;
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
     assert_eq!(capture.body["model"], "wire-test");
+    assert!(
+        captures.try_recv().is_err(),
+        "no additional provider attempt"
+    );
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        text,
+        "<thinking>internal plan\n</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>",
+        "provider business text must be returned unchanged: {body}"
+    );
+    let terminal = events
+        .iter()
+        .find(|event| event["type"] == "response.completed")
+        .expect("complete Anthropic text must project a completed business response");
+    assert_eq!(terminal["response"]["status"], "completed", "{body}");
 }
 
 #[tokio::test]
-async fn responses_relay_anthropic_dsml_failure_reselects_valid_provider() {
+async fn responses_relay_anthropic_dsml_complete_text_does_not_attempt_fallback() {
     let _test_guard = TEST_LOCK.lock().await;
-    let (bad_base_url, mut bad_captures, bad_shutdown) =
-        start_controlled_terminal_upstream_with_body(
-            StatusCode::OK,
-            "text/event-stream",
-            DSML_ANTHROPIC_SSE.as_bytes().to_vec(),
-        )
-        .await;
-    let (good_base_url, mut good_captures, good_shutdown) =
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "text/event-stream",
+        DSML_ANTHROPIC_SSE.as_bytes().to_vec(),
+    )
+    .await;
+    let (fallback_base_url, mut fallback_captures, fallback_shutdown) =
         start_controlled_responses_relay_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "dsml-controlled-key");
     let mut manifest = responses_relay_provider_protocol_manifest(
         free_port(),
         free_port(),
-        bad_base_url.trim_end_matches("/v1"),
+        provider_base_url.trim_end_matches("/v1"),
         "anthropic",
-        Some(&good_base_url),
+        Some(&fallback_base_url),
     );
     manifest.debug.log_console = true;
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
@@ -3944,29 +3965,51 @@ async fn responses_relay_anthropic_dsml_failure_reselects_valid_provider() {
         .await
         .unwrap();
     let status = response.status();
-    let body = response.text().await.unwrap();
-    let bad_capture = timeout(Duration::from_secs(15), bad_captures.recv())
+    let body = response
+        .text()
         .await
-        .unwrap();
-    let good_capture = timeout(Duration::from_secs(15), good_captures.recv())
+        .expect("complete Anthropic text must finish the client transfer normally");
+    let capture = timeout(Duration::from_secs(15), captures.recv())
         .await
-        .unwrap();
+        .expect("Anthropic mock must receive provider request")
+        .expect("first Anthropic attempt must reach provider");
+    let events: Vec<Value> = body
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .filter(|data| *data != "[DONE]")
+        .map(|data| serde_json::from_str(data).expect("client SSE data must be JSON"))
+        .collect();
+    let text: String = events
+        .iter()
+        .filter(|event| event["type"] == "response.output_item.done")
+        .filter_map(|event| event["item"]["content"].as_array())
+        .flatten()
+        .filter_map(|part| part["text"].as_str())
+        .collect();
     handle.shutdown().await;
-    bad_shutdown.send(()).unwrap();
-    good_shutdown.send(()).unwrap();
+    shutdown.send(()).unwrap();
+    fallback_shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
+    assert_eq!(capture.body["model"], "wire-test");
     assert!(
-        bad_capture.is_some(),
-        "first Anthropic attempt must reach provider"
+        captures.try_recv().is_err(),
+        "no additional provider attempt"
     );
     assert!(
-        good_capture.is_some(),
-        "typed failure must reselect next provider"
+        fallback_captures.try_recv().is_err(),
+        "successful Anthropic business text must not trigger a fallback attempt"
     );
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert!(body.contains("relay sse final text"), "{body}");
-    assert!(!body.contains("<thinking>"), "{body}");
-    assert!(!body.contains("DSML"), "{body}");
+    assert_eq!(
+        text,
+        "<thinking>internal plan\n</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>",
+        "provider business text must be returned unchanged: {body}"
+    );
+    let terminal = events
+        .iter()
+        .find(|event| event["type"] == "response.completed")
+        .expect("complete Anthropic text must project a completed business response");
+    assert_eq!(terminal["response"]["status"], "completed", "{body}");
 }
 
 #[tokio::test]
@@ -3983,7 +4026,7 @@ async fn responses_relay_anthropic_control_text_preserves_native_call_and_ordina
         (
             "<thinking>private<\u{2f}thinking>Visible answer\n<\u{2f}｜DSML｜parameter>\n<\u{2f}｜DSML｜invoke>\n<\u{2f}｜DSML｜tool_calls>",
             false,
-            "Visible answer",
+            "private",
         ),
         ("Quoted <thinking>literal</thinking> text", false, "Quoted"),
         ("```\n<thinking>literal</thinking>\n```", false, "literal"),
@@ -4020,22 +4063,31 @@ async fn responses_relay_anthropic_control_text_preserves_native_call_and_ordina
         shutdown.send(()).unwrap();
         assert_eq!(status, StatusCode::OK, "{body}");
         assert!(body.contains(expected), "missing {expected}: {body}");
+        let payloads: Vec<Value> = body
+            .lines()
+            .filter_map(|line| line.strip_prefix("data: "))
+            .filter(|data| *data != "[DONE]")
+            .map(|data| serde_json::from_str(data).unwrap())
+            .collect();
+        let items: Vec<&Value> = payloads
+            .iter()
+            .filter(|event| event["type"] == "response.output_item.done")
+            .map(|event| &event["item"])
+            .collect();
+        let actual_text: String = items
+            .iter()
+            .filter_map(|item| item["content"].as_array())
+            .flatten()
+            .filter_map(|part| part["text"].as_str())
+            .collect();
+        assert_eq!(
+            actual_text, text,
+            "provider text must be preserved exactly: {body}"
+        );
+        assert!(captures.try_recv().is_err(), "no provider reselection");
         if native_tool {
             assert!(body.contains("exec_command"), "{body}");
             assert!(body.contains("pwd"), "{body}");
-            assert!(!body.contains("DSML"), "{body}");
-            assert!(!body.contains("<thinking>"), "{body}");
-        } else if expected == "Visible answer"
-            && text.contains("</thinking>")
-            && text.starts_with("<thinking>")
-        {
-            assert!(!body.contains("private"), "{body}");
-            assert!(!body.contains("<thinking>"), "{body}");
-        } else {
-            assert!(
-                body.contains("<thinking>"),
-                "ordinary text was changed: {body}"
-            );
         }
     }
     std::env::remove_var("V3_P6_TEST_KEY");

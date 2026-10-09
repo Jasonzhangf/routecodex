@@ -26,6 +26,7 @@ use routecodex_v3_config::{V3Config05ManifestPublished, V3ProviderDispositionSte
 use routecodex_v3_error::{
     V3ErrorActionScope, V3ProviderErrorFingerprint, V3ProviderFailureAction,
     V3ProviderFailureSessionScope, V3ProviderHealthScope, V3ProviderRecoveryKind,
+    V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD,
 };
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -75,7 +76,7 @@ pub struct V3ProviderFailurePolicy {
 impl Default for V3ProviderFailurePolicy {
     fn default() -> Self {
         Self {
-            failure_threshold: 1,
+            failure_threshold: V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD,
             cooldown_ms: 5_000,
             probe_interval_ms: V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
             max_probe_interval_ms: None,
@@ -108,7 +109,7 @@ pub struct V3ProviderGlobalSubscriptionPolicy {
 impl Default for V3ProviderGlobalSubscriptionPolicy {
     fn default() -> Self {
         Self {
-            failure_threshold: 1,
+            failure_threshold: V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD,
             cooldown_ms: V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
             probe_interval_ms: V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
         }
@@ -587,12 +588,8 @@ impl V3ProviderHealthStore {
             }) {
                 let failure_count = state
                     .auth_key_consecutive_failures
-                    .iter()
-                    .filter(|(key, _)| {
-                        key.provider_id == provider_id && key.auth_alias.as_deref() == auth_alias
-                    })
-                    .map(|(_, failure)| failure.failure_count)
-                    .sum();
+                    .get(&auth_key)
+                    .map_or(0, |failure| failure.failure_count);
                 return Ok(V3ProviderFailureRecord {
                     scope_label,
                     provider_key,
@@ -603,7 +600,7 @@ impl V3ProviderHealthStore {
                 });
             }
             state.auth_key_cooldowns.remove(&auth_key);
-            let record_reason = {
+            let (record_reason, auth_key_failure_count) = {
                 let failure = state
                     .auth_key_consecutive_failures
                     .entry(auth_key.clone())
@@ -622,19 +619,14 @@ impl V3ProviderHealthStore {
                 if let Some(reason) = reason.filter(|value| !value.trim().is_empty()) {
                     failure.reason = Some(reason.to_string());
                 }
-                failure.reason.clone()
+                (failure.reason.clone(), failure.failure_count)
             };
-            let failure_count = state
-                .auth_key_consecutive_failures
-                .iter()
-                .filter(|(key, _)| {
-                    key.provider_id == provider_id && key.auth_alias.as_deref() == auth_alias
-                })
-                .map(|(_, failure)| failure.failure_count)
-                .sum();
-            // Adaptive history stays provider-owned. The first failure cools
-            // immediately, and the exact key's continuous failure level
-            // determines the next cooldown step.
+            // auth-key 身份只含 (provider, auth_alias)，不含 model。阈值必须用
+            // 本身份的连续失败计数，而不是汇总连续失败表里的匹配条目；否则
+            // 一旦表里出现同 alias 的多条目，各条目重置成 1 也会相加凑够阈值。
+            let failure_count = auth_key_failure_count;
+            // Adaptive history stays provider-owned. The declared threshold
+            // admits cooldown; the continuous failure level sets its duration.
             let _ = record_adaptive_failure(&mut state, &auth_key);
             let cooldown_interval_ms = provider_failure_cooldown_ms(failure_count, 0, 0);
             let cooldown_until_ms = (failure_count >= policy.failure_threshold)
@@ -845,12 +837,23 @@ impl V3ProviderHealthStore {
             .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
         state.cooldowns.remove(&key);
         // A real success in any session is recovery evidence for this exact
-        // provider:key:model. Clear sibling session cooldowns, but retain
-        // adaptive history and consecutive failure counters for diagnostics.
+        // provider:key:model. Close the same identity's consecutive-failure
+        // window across sessions while retaining adaptive history.
         state.cooldowns.retain(|session_key, _| {
             session_key.provider_runtime_identity != provider_runtime_identity
         });
+        state.consecutive_failures.retain(|session_key, _| {
+            session_key.provider_runtime_identity != provider_runtime_identity
+        });
         let auth_key = provider_cooldown_probe_key(provider_id, auth_alias, None);
+        // Before cooldown admission, a real success breaks the auth-key
+        // failure streak. An established auth/manual cooldown still requires
+        // the existing probe or operator recovery path.
+        if !state.auth_key_cooldowns.contains_key(&auth_key)
+            && !state.provider_cooldown_probes.contains_key(&auth_key)
+        {
+            state.auth_key_consecutive_failures.remove(&auth_key);
+        }
         record_adaptive_success(&mut state, &auth_key, _now_ms);
         let model_key = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
         record_adaptive_success(&mut state, &model_key, _now_ms);
@@ -1130,6 +1133,13 @@ impl V3ProviderHealthStore {
             .state
             .write()
             .map_err(|error| format!("provider health state poisoned: {error}"))?;
+        if matches!(
+            action.recovery,
+            V3ProviderRecoveryKind::NotProviderHealth
+                | V3ProviderRecoveryKind::HealthNeutralTransient
+        ) {
+            return Ok(key_health_projection(&state, &key, now_ms));
+        }
         if state.health_disabled.contains(provider_id) {
             return Ok(key_health_projection(&state, &key, now_ms));
         }
@@ -1137,6 +1147,14 @@ impl V3ProviderHealthStore {
             .failure_policies
             .get(provider_id)
             .and_then(|policy| policy.max_probe_interval_ms);
+        // Consume nonzero typed thresholds unchanged; their numeric value is
+        // not evidence that a policy was implicit or explicit.
+        let failure_threshold = match action.recovery {
+            V3ProviderRecoveryKind::RecoverableCounted if action.failure_threshold == 0 => {
+                V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD
+            }
+            _ => action.failure_threshold.max(1),
+        };
         let history = state.adaptive_history.entry(key.clone()).or_default();
         if matches!(
             action.recovery,
@@ -1184,9 +1202,8 @@ impl V3ProviderHealthStore {
             let interval = configured_max_probe_interval_ms
                 .map(|maximum| V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS.min(maximum))
                 .unwrap_or(V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS);
-            // 每个 provider failure 都必须立即隔离精确 key/model。失败阈值只
-            // 保留给显式配置的更高阈值策略；score 只影响权重，不决定可用性。
-            let failure_threshold = action.failure_threshold.max(1);
+            // Only the exact key/model streak admits cooldown. An isolated
+            // recoverable failure changes score but does not block selection.
             let should_block = action.scope == V3ProviderHealthScope::GlobalProviderKey
                 && match action.recovery {
                     V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
@@ -1712,10 +1729,6 @@ impl V3ProviderHealthStore {
 fn default_failure_policy_from_manifest(
     manifest: &V3Config05ManifestPublished,
 ) -> V3ProviderFailurePolicy {
-    // Request retry count is a candidate traversal concern. Provider health
-    // isolation is deliberately more aggressive: the first provider failure
-    // creates the shared cooldown/probe state.
-    let threshold = 1;
     let (cooldown_ms, until_restart) = manifest
         .error
         .provider_error_default_path
@@ -1733,7 +1746,7 @@ fn default_failure_policy_from_manifest(
         })
         .expect("compiled provider error default path must contain cooldown");
     V3ProviderFailurePolicy {
-        failure_threshold: threshold,
+        failure_threshold: V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD,
         cooldown_ms,
         probe_interval_ms: V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
         max_probe_interval_ms: None,

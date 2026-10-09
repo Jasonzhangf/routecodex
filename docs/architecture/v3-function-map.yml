@@ -1230,7 +1230,7 @@ features:
 - feature_id: v3.provider_compat_profile_loading
   status: active
   owner_kind: rust_ssot
-  owner_scope: Provider compatibility profile loading, payload-boundary validation, and the provider-declared output-cap projection into the provider wire payload at the adjacent request and response compat nodes only.
+  owner_scope: Provider compatibility profile loading, payload-boundary validation, provider-declared output-cap projection, and the provider-configurable reasoning-effort override into the provider wire payload at the adjacent request and response compat nodes only.
   owner_module: v3.provider_compat_core
   resource_bindings:
   - v3.provider_compat.payload_boundary_contract
@@ -1249,12 +1249,14 @@ features:
   allowed_paths:
   - v3/crates/provider-compat-core
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_reasoning_effort.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_error.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
   - v3/crates/routecodex-v3-runtime/tests
   - v3/crates/routecodex-v3-cli/tests/goaichat_hosted_tool_history_blackbox.rs
+  - v3/crates/routecodex-v3-cli/tests/provider_reasoning_effort_policy_blackbox.rs
   - v3/scripts/test.mjs
   - v3/package.json
   - package.json
@@ -1268,6 +1270,8 @@ features:
   - fallback
   required_gates:
   - npm run test:v3-provider-compat-profile-loading
+  - npm run test:v3-provider-reasoning-effort-policy-blackbox
+  - npm run test:v3-provider-reasoning-effort-policy-config-failures
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
@@ -2592,7 +2596,7 @@ features:
   - normalize_v3_codex_integer_tool_schema
   - build_v3_chat_canonical_request_from_responses_payload_for_req_inbound
   - build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat
-  - project_v3_responses_arguments_to_openai_chat_wire
+  - project_v3_responses_tool_call_to_openai_chat
   - build_v3_openai_chat_standard_request_from_chat_canonical
   - qualify_openai_chat_missing_mcp_tool_call_names
   - openai_chat_namespace_wire_names
@@ -2638,6 +2642,7 @@ features:
   - responses_inbound_does_not_rewrite_same_named_user_tool_schema
   - responses_agent_message_with_encrypted_content_part_does_not_leak_ciphertext
   - responses_chat_long_namespace_names_round_trip_on_first_attempt_json_and_sse
+  - responses_discovered_custom_tools_restore_kind_and_identity_json_and_sse
   allowed_paths:
   - v3/crates/provider-compat-core/src/namespace_tools.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs
@@ -4891,7 +4896,7 @@ features:
   status: implementation_in_progress
   change_risk: critical
   owner_kind: rust_v3_provider_terminal_response_error_policy
-  owner_scope: Provider-local response error authoring, bounded terminal response fact extraction, one-shot typed failure directive, configured retry/backoff consumption, and Error06 projection before provider success or client commit.
+  owner_scope: Genuine provider errors enter the typed Error chain before provider success or client commit; representable successful response content and terminals pass without semantic adjudication.
   owner_crates:
   - routecodex-v3-config
   - routecodex-v3-runtime
@@ -4902,12 +4907,10 @@ features:
   - v3/crates/routecodex-v3-config/src/validate.rs
   - v3/crates/routecodex-v3-config/src/validate/provider_error_policy.rs
   - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_diagnostics.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_terminal_response_admission.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/shared.rs
@@ -4928,10 +4931,7 @@ features:
   - v3-provider-action-gate-51
   entry_symbols:
   - V3ProviderSemanticErrorPolicyAuthoringConfig
-  - provider_response_semantic_error_from_manifest
   - V3ProviderFailureDirective
-  - provider_semantic_failure
-  - classify_v3_provider_terminal_admission
   - run_v3_relay_provider_failure_policy
   - V3ProviderActionGate::record_failure_with_minimum_delay
   allowed_paths:
@@ -4942,13 +4942,11 @@ features:
   - v3/scripts/tests/v3-protocol-conversion-field-parity-red-fixtures.mjs
   - v3/crates/routecodex-v3-config/src
   - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_diagnostics.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_terminal_response_admission.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_responses_event_classification.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
@@ -5294,6 +5292,7 @@ features:
   - routecodex-v3-runtime
   owner_files:
   - v3/crates/routecodex-v3-error/src/lib.rs
+  - v3/crates/routecodex-v3-error/src/subscription.rs
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
   - v3/crates/routecodex-v3-provider-responses/src/lib.rs
   - v3/crates/routecodex-v3-target/src/lib.rs
@@ -5304,6 +5303,7 @@ features:
   - v3.provider.scheduling_projection
   entry_symbols:
   - build_v3_provider_failure_action_from_v3_error_02
+  - V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD
   - V3ProviderHealthStore::record_provider_failure_action
   - V3ProviderHealthStore::record_provider_key_success
   - V3ProviderHealthStore::complete_probe_success
@@ -5320,6 +5320,8 @@ features:
   - V3ProviderHealthStore::configured_failure_policy
   allowed_paths:
   - v3/crates/routecodex-v3-error/src/lib.rs
+  - v3/crates/routecodex-v3-error/src/subscription.rs
+  - v3/crates/routecodex-v3-server/tests/no_first_failure_cooldown_blackbox.rs
   - v3/crates/routecodex-v3-provider-responses/src/key_health.rs
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
   - v3/crates/routecodex-v3-provider-responses/src/lib.rs
@@ -6203,9 +6205,8 @@ features:
   status: source_gate_verified
   change_risk: high
   owner_kind: rust_project_v3_runtime_chat_process_gate
-  owner_scope: Resp03-only governance of the exact whole-item Anthropic DSML control frame on the Responses Relay SSE materialization path; all suspect, incomplete, and literal control text stays ordinary visible output.
+  owner_scope: Resp03 preserves representable Anthropic business text, including complete DSML-looking text, without semantic stripping or rejection.
   owner_files:
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_anthropic_control_text.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_inbound_01_raw.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
@@ -6215,10 +6216,8 @@ features:
   mainline_bindings:
   - v3-hub-relay-resp-03
   entry_symbols:
-  - govern_v3_anthropic_control_text_at_resp03
-  - classify_v3_anthropic_text_frame_at_resp03
+  - govern_v3_hub_relay_response
   allowed_paths:
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_anthropic_control_text.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_inbound_01_raw.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs

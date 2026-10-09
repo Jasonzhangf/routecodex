@@ -2,27 +2,26 @@
 
 ## Objective
 
-Turn provider terminal responses that match configured provider-local error policy into the existing typed Error01-06 path before provider success and Resp04 continuation commit. Preserve one policy identity and one disposition path from terminal-response classification through retry/backoff and final Error06 projection.
+Pass successful, representable provider responses without content adjudication. Genuine provider HTTP and native SSE errors enter the typed Error01-06 path before client commit. Client exhaustion terminates transport without an error response or fabricated completion.
 
 ## Lifecycle
 
 ```text
-provider terminal JSON / materialized SSE
-  -> extract bounded ProviderResponseFacts
-  -> first configured policy match
-  -> typed V3ProviderFailureDirective side-channel
-  -> Error01-05 retry/reselect/cooldown decision
+provider HTTP / complete SSE attempt
+  -> protocol parsing and genuine error extraction
+  -> successful output: lossless canonical projection -> Resp03/Resp04 -> client commit
+  -> genuine failure: typed Error01-05 -> retry/reselect/cooldown decision
   -> configured minimum backoff through Provider Action Gate
-  -> success: Resp03/Resp04 + provider-success record
-  -> exhaustion: one configured Error06 projection
+  -> recovery: successful provider output -> client commit
+  -> exhaustion: typed Error06 -> transport termination
 ```
 
 ## Owners and boundaries
 
 - Config authoring/compile owner: `routecodex-v3-config`.
-- Terminal fact extraction and semantic-failure construction owner: Responses Relay runtime before Resp03.
+- Genuine error extraction owner: registered provider protocol codecs before Resp03.
 - Retry timing/admission owner: `v3.provider_action_gate`.
-- Final HTTP/public-code projection owner: typed Error06 consumer.
+- Terminal failure owner: typed Error06, with transport termination at the client boundary.
 - `V3ProviderFailureDirective` is an error/control side-channel. It must never enter provider/client payload, MetadataCenter, continuation context, debug snapshot, or protocol metadata.
 - SSE transport and Server handler remain framing/projection only.
 
@@ -35,35 +34,42 @@ provider terminal JSON / materialized SSE
 - `path + action`, neither, invalid attempt/backoff, and non-final project fail fast.
 - Legacy `semantic_error_policy.action` still compiles unchanged.
 
-### Response facts and matching
+### Successful response passage
 
-- Chat `choices[].message.content`, `choices[].delta.content`, and finish reason.
-- Anthropic root `content[].text` and `stop_reason=end_turn`.
-- Responses `output[].content[].text`, wrapped `response.output[]`, terminal status.
-- Root/wrapped `error.code`, `error.type`, `error.message`, plus root `message`.
-- Keywords only in id/model/metadata do not match.
-- Valid ordinary HTTP 200 output does not match.
+- Chat text, reasoning, tool calls and refusal survive JSON and SSE conversion, including co-located deltas.
+- Anthropic refusal remains output and maps to the representable Responses incomplete reason.
+- Responses incomplete reasons remain opaque business values.
+- Empty output and zero usage do not make a successful protocol response fail.
+- Content keywords cannot turn successful provider output into a failure.
 
 ### Directive and policy execution
 
-- First match carries exact policy id/reason/path; Error05 does not re-match compressed message.
-- Two similar policies cannot switch identities after classification.
+- Genuine errors retain typed source and declared recovery path; Error05 never re-matches business content.
 - `max_attempts=3` means initial send plus two same-provider retries.
 - Retry delays follow `max(action_gate_delay, configured_backoff)` with saturating exponent and 60-second cap.
 - Success on retry stops further retry/project and only successful response reaches Resp04.
-- Exhaustion emits one Error06 projection with configured status/public code.
+- Exhaustion ends client transport without provider error bytes.
 
 ## Black-box matrix
 
-- JSON HTTP 200 embedded error is rejected before continuation commit.
-- Materialized provider SSE with same terminal error matches identically.
+- JSON and SSE representable incomplete/refusal output passes Direct and Relay paths.
+- Genuine native SSE error ends transport without error bytes or fabricated completion.
 - Second attempt success commits only successful response.
 - Exhausted attempts leave continuation at pre-request state.
-- Real HTTP 429 can use same provider-scoped manifest path and map to configured 503.
+- Real HTTP failures use the provider-scoped typed recovery path and never become a client error response.
+- One recoverable failure leaves the provider eligible; a subsequent real success resets the pre-cooldown streak.
 - Positive control: normal provider HTTP 200 content completes unchanged.
+- Responses custom calls projected to Chat keep their existing custom-kind association and input wrapper. Submit the returned JSON/SSE call unchanged with the actual client result; the next Responses request must retain the original custom call, complete input or absence, and matching custom output.
+- Chat providers returning custom-call input wrappers preserve every JSON input value and true absence through JSON and SSE, including fragmented wrapper text. Submit the actual returned call and client execution or validation result unchanged; the next Chat request must contain exactly one wrapper. Malformed raw argument text remains intact.
+- Responses custom calls returned through Anthropic JSON/SSE retain their business type association. Execute the actual returned tool_use and submit it unchanged with its matching actual tool_result; the next Responses request must recover custom call/output kinds, original IDs, name and complete input, including natural object input fields and scalar wrappers.
+- Chat JSON/SSE clients execute an ordinary returned call and a later custom returned call that reuse one ID. Submit both actual call/result turns unchanged; the next Responses wire must preserve the earlier function result and the later custom result, with the complete arguments/input and actual execution output.
+- Chat JSON/SSE calls named tool_search use the actual ordinary, custom or native declaration. Preserve opaque structured values, raw text and missing arguments. Execute or validate each returned call in the client, then submit that call and its actual result unchanged to Chat and Responses; neither parameter validation nor a name collision may cause provider cooldown.
+- An otherwise successful provider response that cannot represent tool arguments in Anthropic ends only that client request through the typed local response Error chain. With health enabled, two identical projection failures must leave the same provider/auth/model identity eligible for a subsequent valid request.
 
 ## Required verification
 
+- `cargo test --release --locked --manifest-path v3/Cargo.toml -p routecodex-v3-server --test no_response_adjudication_blackbox -- --nocapture`
+- `cargo test --release --locked --manifest-path v3/Cargo.toml -p routecodex-v3-server --test no_first_failure_cooldown_blackbox -- --nocapture`
 - `npm run test:v3-provider-action-gate`
 - `npm run verify:v3-provider-action-gate`
 - `npm run test:v3-provider-action-gate-red-fixtures`

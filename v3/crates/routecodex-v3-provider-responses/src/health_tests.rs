@@ -137,8 +137,11 @@ fn failures_in_other_session_share_provider_key_cooldown() {
                 100 + index as u64,
             )
             .unwrap();
-        assert_eq!(record.state, "cooldown");
-        assert_eq!(record.failure_count, 1);
+        assert_eq!(
+            record.state,
+            if index == 0 { "healthy" } else { "cooldown" }
+        );
+        assert_eq!(record.failure_count, (index as u32 + 1).min(2));
     }
     for (key, available) in [("key-a", false), ("key-b", true)] {
         assert_eq!(
@@ -669,7 +672,10 @@ fn cooldown_reupsert_preserves_in_flight_probe_single_flight() {
 #[test]
 fn failure_count_is_provider_key_scoped_for_default_policy() {
     let store = V3ProviderHealthStore::default();
-    for session_id in ["session-a", "session-b", "session-b"] {
+    for (index, session_id) in ["session-a", "session-b", "session-b"]
+        .into_iter()
+        .enumerate()
+    {
         let record = store
             .record_provider_failure_in_session(
                 &session(session_id),
@@ -680,8 +686,11 @@ fn failure_count_is_provider_key_scoped_for_default_policy() {
                 100,
             )
             .unwrap();
-        assert_eq!(record.state, "cooldown");
-        assert_eq!(record.failure_count, 1);
+        assert_eq!(
+            record.state,
+            if index == 0 { "healthy" } else { "cooldown" }
+        );
+        assert_eq!(record.failure_count, (index as u32 + 1).min(2));
     }
     for (key, available) in [("key-a", false), ("key-b", true)] {
         assert_eq!(
@@ -733,6 +742,77 @@ fn session_transient_bypass_isolated_between_models_while_active() {
                 100,
             )
             .available
+    );
+}
+
+#[test]
+fn real_success_resets_pre_cooldown_failure_window_for_declared_policy() {
+    for cooldown_scope in [
+        V3ProviderFailureCooldownScope::Session,
+        V3ProviderFailureCooldownScope::AuthKey,
+    ] {
+        let store = V3ProviderHealthStore::default();
+        let scope = session("success-reset");
+        let policy = V3ProviderFailurePolicy {
+            failure_threshold: 3,
+            cooldown_scope,
+            ..Default::default()
+        };
+        let record = |now| {
+            store
+                .record_provider_failure_in_session_with_policy(
+                    &scope,
+                    "provider-a",
+                    Some("key-a"),
+                    Some("model-a"),
+                    Some("real failure"),
+                    None,
+                    now,
+                    Some(policy),
+                )
+                .unwrap()
+        };
+        assert_eq!(record(100).failure_count, 1);
+        assert_eq!(record(101).failure_count, 2);
+        store
+            .record_provider_success_in_session(
+                &scope,
+                "provider-a",
+                Some("key-a"),
+                Some("model-a"),
+                102,
+            )
+            .unwrap();
+        let after_success = record(103);
+        assert_eq!(
+            after_success.failure_count, 1,
+            "real success must break a consecutive failure window"
+        );
+        assert_eq!(after_success.state, "healthy");
+        assert_eq!(record(104).state, "healthy");
+        assert_eq!(
+            record(105).state,
+            "cooldown",
+            "explicit threshold 3 must remain effective"
+        );
+    }
+}
+
+#[test]
+fn neutral_failure_action_preserves_real_success_streak_and_score() {
+    let store = V3ProviderHealthStore::default();
+    let before = store
+        .record_provider_key_success("p", "k", "m", 100)
+        .unwrap();
+    let mut action = V3ProviderFailureAction::recoverable("local_response_codec_failure");
+    action.recovery = V3ProviderRecoveryKind::NotProviderHealth;
+    action.scope = V3ProviderHealthScope::None;
+    let after = store
+        .record_provider_failure_action("p", "k", "m", &action, 101)
+        .unwrap();
+    assert_eq!(
+        before, after,
+        "a typed local failure must not mutate provider health"
     );
 }
 

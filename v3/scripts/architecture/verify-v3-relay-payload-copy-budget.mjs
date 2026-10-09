@@ -166,18 +166,18 @@ if (providerTerminalOutputReconstructions === 1) {
   requireAll(providerTransport, paths.providerResponsesTransport, [
     'const V3_RESPONSES_WEBSOCKET_PROTOCOL_AGGREGATION_OWNER: &str =',
     'struct V3ResponsesWebSocketProtocolAggregate',
-    'function_call_items: BTreeMap<u64, Value>',
+    'output_items: BTreeMap<u64, Value>',
     'fn apply_responses_websocket_protocol_events_to_terminal_response(',
     'response.function_call_arguments.delta arrived before function_call output_item',
   ]);
   requireAll(text.providerResponsesWebsocketTests, paths.providerResponsesWebsocketTests, [
-    'websocket_v2_json_aggregates_function_call_item_when_terminal_output_is_empty',
+    'websocket_v2_json_preserves_mixed_output_items_when_terminal_output_is_empty',
     'V3_WS_KEY_ASXS_SHAPE',
   ]);
   requireAll(text.providerResponsesWebsocketVerifier, paths.providerResponsesWebsocketVerifier, [
     'same-stream WebSocket event aggregation',
     'struct V3ResponsesWebSocketProtocolAggregate',
-    'websocket_v2_json_aggregates_function_call_item_when_terminal_output_is_empty',
+    'websocket_v2_json_preserves_mixed_output_items_when_terminal_output_is_empty',
   ]);
 }
 forbid(

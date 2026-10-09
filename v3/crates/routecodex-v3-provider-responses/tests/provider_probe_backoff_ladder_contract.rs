@@ -42,8 +42,9 @@ fn fail(store: &V3ProviderHealthStore, now_ms: u64) {
 fn first_probe_is_due_exactly_5s_after_block_and_probe_success_resurrects() {
     let store = V3ProviderHealthStore::default();
     fail(&store, 1);
-    // Block was created at now_ms = 3; first probe due at 3 + 5_000.
-    let first_due = 1 + 5_000;
+    fail(&store, 2);
+    // The second consecutive failure admits cooldown and starts the ladder.
+    let first_due = 2 + 5_000;
     assert!(
         store
             .provider_cooldown_probe_keys_due(first_due - 1)
@@ -128,7 +129,7 @@ fn continuous_failure_ladder_is_isolated_per_provider_key() {
 }
 
 #[test]
-fn successful_recovery_resets_the_failure_band_for_the_next_cooldown() {
+fn successful_recovery_restarts_repeat_admission_and_five_second_probe() {
     let store = V3ProviderHealthStore::default();
     let action = V3ProviderFailureAction::recoverable("transport");
 
@@ -164,24 +165,28 @@ fn successful_recovery_resets_the_failure_band_for_the_next_cooldown() {
         assert_eq!(record.cooldown_until_ms, None, "now_ms={now_ms}");
     }
     let after_recovery = store
-        .record_provider_failure_action("provider-a", "key", "model", &action, 106)
-        .expect("third failure after recovery");
+        .record_provider_failure_action("provider-a", "key", "model", &action, 104)
+        .expect("failure after recovery");
+    assert!(after_recovery.available);
+    assert!(!after_recovery.cooldown);
+    assert_eq!(after_recovery.cooldown_until_ms, None);
+    let after_repeat = store
+        .record_provider_failure_action("provider-a", "key", "model", &action, 105)
+        .expect("repeated failure after recovery");
     assert_eq!(
-        after_recovery.cooldown_until_ms,
-        Some(5_106),
-        "the action policy still declares the 5s business cooldown"
+        after_repeat.cooldown_until_ms,
+        Some(5_105),
+        "a fast recovery must not inherit the old failure-rate band"
     );
-    // The recovered streak is recomputed instead of inherited: three fresh
-    // consecutive failures land on the same 900s ladder rung as the first
-    // three-failure sequence, not on a further-advanced rung.
+    // A real success resets the streak and its failure-rate window.
     assert_eq!(
         store
-            .cooldown_entries(106)
+            .cooldown_entries(105)
             .iter()
             .find(|entry| entry.provider_id == "provider-a")
             .and_then(|entry| entry.until_ms),
-        Some(900_106),
-        "a real success must reset the failure band instead of inheriting it"
+        Some(10_105),
+        "second consecutive failure uses its business ladder step after the reset"
     );
 }
 
@@ -190,6 +195,7 @@ fn session_business_success_does_not_remove_pending_probe() {
     let store = V3ProviderHealthStore::default();
     let session = scope();
     fail(&store, 1);
+    fail(&store, 2);
     store
         .record_provider_success_in_session(
             &session,
@@ -217,6 +223,7 @@ fn session_business_success_does_not_remove_pending_probe() {
 fn model_success_does_not_clear_auth_key_cooldown() {
     let store = V3ProviderHealthStore::default();
     fail(&store, 1);
+    fail(&store, 2);
     store
         .record_provider_key_success("provider-a", "key-a", "model-a", 30_003)
         .expect("model success");
@@ -292,7 +299,8 @@ fn model_success_resets_auth_key_consecutive_failures() {
 fn probe_failures_cap_all_provider_errors_at_thirty_minutes() {
     let store = V3ProviderHealthStore::default();
     fail(&store, 1);
-    let mut now_ms = 1;
+    fail(&store, 2);
+    let mut now_ms = 2;
     for (index, delta) in LADDER_MS.iter().enumerate() {
         let due_at = now_ms + delta;
         assert!(

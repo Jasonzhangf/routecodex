@@ -46,7 +46,7 @@ impl V3ProviderFailureAction {
             recovery: V3ProviderRecoveryKind::RecoverableCounted,
             scope: V3ProviderHealthScope::GlobalProviderKey,
             score_delta_milli: -5,
-            failure_threshold: 3,
+            failure_threshold: crate::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD,
             cooldown_ms: 5_000,
             long_probe_backoff: false,
         }
@@ -80,10 +80,8 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
         .as_ref()
         .and_then(|error| error.status);
     let failure_fingerprint = build_v3_provider_failure_identity_from_classified(classified);
-    // 统一错误模型：不再按状态码豁免——瞬态重试来源与 400/4xx 同样计入
-    // 全局健康。可恢复类必须连续三次同类失败才进入共享冷却，避免单个 provider
-    // 因一次可恢复错误被排除而耗尽路由池；账户/计费类仍按 typed irrecoverable
-    // 立即冷却，由后台探活或真实成功恢复。
+    // Real recoverable failures count toward the shared repeat threshold.
+    // Authentication/account failures retain their immediate typed boundary.
     if matches!(status, Some(401..=403))
         || is_irrecoverable_provider_failure_code(&classified.source.code)
     {
@@ -196,7 +194,7 @@ pub fn build_v3_provider_global_failure_policy(
             probe_interval_ms: 5_000,
         }),
         429 | 500..=599 => Some(V3ProviderGlobalFailurePolicy {
-            failure_threshold: 3,
+            failure_threshold: crate::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD,
             cooldown_ms: 5_000,
             probe_interval_ms: 5_000,
         }),
@@ -288,9 +286,9 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        // 503 is a recoverable class: three consecutive same-fingerprint failures
+        // 503 is a recoverable class: two consecutive same-fingerprint failures
         // are required before cooldown, while the probe ladder still backs off.
-        assert_eq!(action.failure_threshold, 3);
+        assert_eq!(action.failure_threshold, 2);
         assert_eq!(action.cooldown_ms, 5_000);
         assert!(action.long_probe_backoff);
 
@@ -299,7 +297,7 @@ mod tests {
             "provider_connect_failed",
             500,
         ));
-        assert_eq!(ordinary.failure_threshold, 3);
+        assert_eq!(ordinary.failure_threshold, 2);
         assert_eq!(ordinary.cooldown_ms, 5_000);
         assert!(!ordinary.long_probe_backoff);
 
@@ -352,7 +350,7 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 3);
+        assert_eq!(action.failure_threshold, 2);
         assert_eq!(action.score_delta_milli, -5);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -362,7 +360,7 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 3);
+        assert_eq!(action.failure_threshold, 2);
         assert_eq!(action.score_delta_milli, -5);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -372,7 +370,7 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 3);
+        assert_eq!(action.failure_threshold, 2);
         assert_eq!(action.score_delta_milli, -5);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -381,7 +379,7 @@ mod tests {
             502,
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
-        assert_eq!(action.failure_threshold, 3);
+        assert_eq!(action.failure_threshold, 2);
     }
 
     #[test]
@@ -445,10 +443,10 @@ mod tests {
         let (fingerprint_a, fingerprint_b) = (
             action_a
                 .failure_fingerprint
-                .expect("class fallback identity"),
+                .expect("no-status class identity"),
             action_b
                 .failure_fingerprint
-                .expect("class fallback identity"),
+                .expect("no-status class identity"),
         );
         assert_eq!(fingerprint_a.http_status, 0);
         assert_ne!(fingerprint_a, fingerprint_b);

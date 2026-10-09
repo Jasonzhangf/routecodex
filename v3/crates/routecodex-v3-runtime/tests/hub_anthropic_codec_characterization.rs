@@ -522,29 +522,42 @@ fn anthropic_custom_wrapper_rejects_extra_or_non_string_input_without_repair() {
 }
 
 #[test]
-fn responses_custom_tool_call_missing_input_fails_without_empty_object_repair() {
-    let error = encode_v3_responses_semantic_as_anthropic_request(json!({
+fn responses_custom_tool_call_missing_input_preserves_correction_without_empty_object_repair() {
+    let request = encode_v3_responses_semantic_as_anthropic_request(json!({
         "model":"MiniMax-M3",
         "input":[
             {"type":"custom_tool_call","call_id":"call_missing","name":"apply_patch"},
             {"type":"custom_tool_call_output","call_id":"call_missing","output":"done"}
         ]
     }))
-    .expect_err("custom tool input is required for the registered wrapper");
-    assert!(format!("{error:?}").contains("custom_tool_call.input"));
+    .expect("missing original input and matching client result remain paired");
+    assert_eq!(request["messages"][0]["content"][0]["id"], "call_missing");
+    assert!(request["messages"][0]["content"][0].get("input").is_none());
+    assert_eq!(
+        request["messages"][1]["content"][0]["tool_use_id"],
+        "call_missing"
+    );
+    assert_eq!(request["messages"][1]["content"][0]["content"], "done");
 }
 
 #[test]
-fn responses_custom_tool_call_non_string_input_fails_without_relabel_or_repair() {
-    let error = encode_v3_responses_semantic_as_anthropic_request(json!({
+fn responses_custom_tool_call_non_string_input_is_preserved_without_relabel_or_repair() {
+    let request = encode_v3_responses_semantic_as_anthropic_request(json!({
         "model":"MiniMax-M3",
         "input":[
             {"type":"custom_tool_call","call_id":"call_object","name":"apply_patch","input":{"patch":"raw"}},
             {"type":"custom_tool_call_output","call_id":"call_object","output":"done"}
         ]
     }))
-    .expect_err("custom wrapper accepts only the exact raw string input");
-    assert!(format!("{error:?}").contains("custom_tool_call.input"));
+    .expect("custom wrapper preserves the exact present JSON input");
+    assert_eq!(
+        request["messages"][0]["content"][0]["input"],
+        json!({"input":{"patch":"raw"}})
+    );
+    assert_eq!(
+        request["messages"][1]["content"][0]["tool_use_id"],
+        "call_object"
+    );
 }
 
 #[test]
@@ -2541,13 +2554,6 @@ fn anthropic_terminal_projection_rejects_missing_unknown_and_contradictory_value
             "stop_reason":"end_turn",
             "stop_sequence":"unexpected"
         }),
-        json!({
-            "id":"msg_malformed_details",
-            "role":"assistant",
-            "content":[{"type":"text","text":"refusal"}],
-            "stop_reason":"refusal",
-            "stop_details":"not-an-object"
-        }),
     ];
 
     for payload in malformed {
@@ -2555,10 +2561,42 @@ fn anthropic_terminal_projection_rejects_missing_unknown_and_contradictory_value
             .expect_err("malformed terminal truth must fail at the Anthropic codec owner");
         assert!(
             error.to_string().contains("stop_reason")
-                || error.to_string().contains("stop_sequence")
-                || error.to_string().contains("stop_details"),
+                || error.to_string().contains("stop_sequence"),
             "{error}"
         );
+    }
+}
+
+#[test]
+fn anthropic_terminal_projection_preserves_opaque_details() {
+    for reason in [
+        "end_turn",
+        "refusal",
+        "max_tokens",
+        "pause_turn",
+        "tool_use",
+    ] {
+        for details in [
+            json!({"vendor":[1,null]}),
+            json!(" exact\nopaque "),
+            json!([false, 2]),
+            json!(12.5),
+            json!(true),
+            json!(null),
+        ] {
+            let message = json!({"id":"msg_opaque","role":"assistant",
+                "content":if reason == "tool_use" {
+                    json!([{"type":"text","text":" exact body "},{"type":"tool_use","id":"call_opaque","name":"lookup","input":{"q":"exact"}}])
+                } else { json!([{"type":"text","text":" exact body "}]) },
+                "stop_reason":reason,"stop_details":details});
+            let response = project_v3_anthropic_message_as_responses_response(&message).unwrap();
+            assert_eq!(
+                response.get("stop_details"),
+                Some(&details),
+                "{reason}: {response}"
+            );
+            assert_eq!(response["output"][0]["content"][0]["text"], " exact body ");
+        }
     }
 }
 

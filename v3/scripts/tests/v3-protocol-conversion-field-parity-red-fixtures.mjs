@@ -39,6 +39,7 @@ const files = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_reasoning_effort.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests.rs',
@@ -57,6 +58,7 @@ const files = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_provider_tests.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs',
   'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   'v3/crates/routecodex-v3-runtime/tests/responses_relay_field_parity_integration.rs',
@@ -642,7 +644,7 @@ const cases = [
   },
   {
     name: 'DeepSeek max effort compatibility projection regresses to high',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_reasoning_effort.rs',
     from: '"xhigh" | "max" => "max",',
     to: '"xhigh" | "max" => "high",',
     diagnostic: /"xhigh" \| "max" => "max"/u,
@@ -753,10 +755,10 @@ const cases = [
     file: 'docs/architecture/v3-mainline-call-map.yml',
     from: `caller_symbol: build_v3_openai_chat_assistant_tool_call_message
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
-    callee_symbol: project_v3_responses_arguments_to_openai_chat_wire`,
+    callee_symbol: project_v3_responses_tool_call_to_openai_chat`,
     to: `caller_symbol: responses_openai_chat_field_parity_unpaired_malformed_arguments_preserve_exact_string_without_reselect
     caller_file: v3/crates/routecodex-v3-runtime/tests/responses_relay_field_parity_integration.rs
-    callee_symbol: project_v3_responses_arguments_to_openai_chat_wire`,
+    callee_symbol: project_v3_responses_tool_call_to_openai_chat`,
     diagnostic: /malformed-arguments runtime edge caller_symbol|build_v3_openai_chat_assistant_tool_call_message/u,
   },
   {
@@ -773,15 +775,15 @@ const cases = [
   {
     name: 'OpenAI Chat malformed arguments exact preservation replaced by JSON-string rewrapping',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs',
-    from: 'arguments.to_string()',
-    to: 'serde_json::to_string(&Value::String(arguments.to_string())).unwrap()',
+    from: '.map(|arguments| match arguments {\n                Value::String(text) => text.clone()',
+    to: '.map(|arguments| match arguments {\n                Value::String(text) => serde_json::to_string(&Value::String(text.clone())).unwrap()',
     diagnostic: /responses_arguments_payload_projection|forbidden|serde_json::to_string/u,
   },
   {
     name: 'Malformed arguments are replaced with an empty object',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs',
-    from: 'arguments.to_string()',
-    to: '"{}".to_string()',
+    from: '.map(|arguments| match arguments {\n                Value::String(text) => text.clone()',
+    to: '.map(|arguments| match arguments {\n                Value::String(text) => "{}".to_string()',
     diagnostic: /responses_arguments_payload_projection|forbidden|Map::new|json/u,
   },
   {
@@ -820,8 +822,8 @@ const cases = [
   {
     name: 'Malformed projection reintroduces matching parse-failure special case',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs',
-    from: 'fn project_v3_responses_arguments_to_openai_chat_wire(arguments: &str) -> String {',
-    to: 'fn project_v3_responses_arguments_to_openai_chat_wire(arguments: &str) -> String {\n    let matching_parse_feedback = arguments.contains("failed to parse function arguments");',
+    from: ') -> Value {\n    let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();',
+    to: ') -> Value {\n    let matching_parse_feedback = true;\n    let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();',
     diagnostic: /responses_arguments_payload_projection|forbidden|matching_parse_feedback|tool_result|function_call_output/u,
   },
   {
@@ -1002,10 +1004,10 @@ const cases = [
   },
   {
     name: 'Resp03 registered incomplete terminal regression is removed',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs',
-    from: 'responses_resp03_accepts_registered_incomplete_terminal_and_rejects_malformed_details',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_provider_tests.rs',
+    from: 'responses_resp03_accepts_incomplete_terminal_with_optional_or_opaque_details',
     to: 'responses_resp03_incomplete_terminal_regression_removed',
-    diagnostic: /responses_resp03_accepts_registered_incomplete_terminal_and_rejects_malformed_details/u,
+    diagnostic: /responses_resp03_accepts_incomplete_terminal_with_optional_or_opaque_details/u,
   },
   {
     name: 'Focused Responses continuation namespace gate is unwired from parity CI',

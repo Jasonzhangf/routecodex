@@ -1,6 +1,74 @@
 use super::*;
 use serde_json::json;
 
+#[test]
+fn responses_tool_values_remain_lossless_in_items_and_done_events() {
+    let values = [
+        json!({"q":" exact \n","nested":[1,2]}),
+        json!([1,{"keep":true}]),
+        json!(null),
+        json!(true),
+        json!(7),
+        json!("{\"q\":\"exact\"}"),
+        json!("{\"q\":"),
+        json!(""),
+    ];
+    for kind in ["function_call", "custom_tool_call"] {
+        let field = if kind == "function_call" {
+            "arguments"
+        } else {
+            "input"
+        };
+        let event_type = if kind == "function_call" {
+            "response.function_call_arguments.done"
+        } else {
+            "response.custom_tool_call_input.done"
+        };
+        for value in &values {
+            let mut original =
+                json!({"type":kind,"id":"item_original","call_id":"call_original","name":"lookup"});
+            original[field] = value.clone();
+            assert_eq!(
+                classify_v3_responses_sse_output_item(&original)
+                    .unwrap()
+                    .to_normalized_value(),
+                original
+            );
+            original["output_index"] = json!(0);
+            let mut reducer = V3ResponsesSseReducerState::default();
+            reducer.apply_event(&json!({"type":"response.output_item.added","output_index":0,"item":{"type":kind,"id":"item_original","call_id":"call_original","name":"lookup"}})).unwrap();
+            let mut done = json!({"type":event_type,"item_id":"item_original","output_index":0});
+            done[field] = value.clone();
+            reducer.apply_event(&done).unwrap();
+            assert_eq!(reducer.items[0].item().to_normalized_value(), original);
+            let delta_type = if kind == "function_call" {
+                "response.function_call_arguments.delta"
+            } else {
+                "response.custom_tool_call_input.delta"
+            };
+            reducer.apply_event(&json!({"type":delta_type,"item_id":"item_original","output_index":0,"delta":" retained tail"})).unwrap();
+            let prefix = value
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| value.to_string());
+            assert_eq!(
+                reducer.items[0].item().to_normalized_value()[field],
+                format!("{prefix} retained tail")
+            );
+            reducer.apply_event(&done).unwrap();
+            assert_eq!(reducer.items[0].item().to_normalized_value(), original);
+        }
+        let absent =
+            json!({"type":kind,"id":"item_original","call_id":"call_original","name":"lookup"});
+        assert_eq!(
+            classify_v3_responses_sse_output_item(&absent)
+                .unwrap()
+                .to_normalized_value(),
+            absent
+        );
+    }
+}
+
 struct RewriteResponsesHook {
     notified: bool,
 }

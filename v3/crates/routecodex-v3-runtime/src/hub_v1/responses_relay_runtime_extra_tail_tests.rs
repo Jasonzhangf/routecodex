@@ -1,6 +1,145 @@
 use super::*;
 
 #[tokio::test]
+async fn anthropic_provider_sse_duplicate_message_start_before_content_merges_metadata() {
+    let observation = V3RuntimeStreamObservation::default();
+    let provider = Box::pin(stream::iter(vec![
+            Ok(br#"event: message_start
+data: {"type":"message_start","message":{"id":"msg_dup","type":"message","role":"assistant","content":[],"model":"claude-fable-5","usage":{"input_tokens":7}}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: message_start
+data: {"type":"message_start","message":{"model":"claude-fable-5","id":"msg_dup","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"cache_read_input_tokens":5,"output_tokens":0,"service_tier":"standard"}}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"duplicate start tolerated"}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+"#
+            .to_vec()),
+            Ok(br#"event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":3}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: message_stop
+data: {"type":"message_stop"}
+
+"#
+            .to_vec()),
+        ]));
+    let response = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+        V3HubProviderWireProtocol::Anthropic,
+        provider,
+        &observation,
+    )
+    .await
+    .expect("compatible duplicate message_start must be provider codec compatible");
+
+    assert_eq!(response["id"], "msg_dup");
+    assert_eq!(response["model"], "claude-fable-5");
+    assert_eq!(response["status"], "completed");
+    // Responses objects carry no `finish_reason`; terminality is `status` alone.
+    assert!(response.get("finish_reason").is_none(), "{response}");
+    assert_eq!(
+        response["output"][0]["content"][0]["text"],
+        "duplicate start tolerated"
+    );
+    // Anthropic provider usage folds cache reads into the Responses client
+    // `input_tokens`, exposes `input_tokens_details.cached_tokens`, and must not
+    // leak the Anthropic-private cache fields.
+    let usage = &response["usage"];
+    assert_eq!(usage["input_tokens"], 12);
+    assert_eq!(usage["output_tokens"], 3);
+    assert_eq!(usage["total_tokens"], 15);
+    assert_eq!(usage["input_tokens_details"]["cached_tokens"], 5);
+    assert!(usage.get("cache_read_input_tokens").is_none());
+    assert!(usage.get("cache_creation_input_tokens").is_none());
+}
+
+#[tokio::test]
+async fn anthropic_provider_sse_duplicate_message_start_eof_without_stop_still_fails() {
+    let observation = V3RuntimeStreamObservation::default();
+    let provider = Box::pin(stream::iter(vec![
+            Ok(br#"event: message_start
+data: {"type":"message_start","message":{"id":"msg_dup_eof","type":"message","role":"assistant","model":"claude-fable-5","content":[],"usage":{"input_tokens":7}}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: message_start
+data: {"type":"message_start","message":{"model":"claude-fable-5","id":"msg_dup_eof","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"output_tokens":0}}}
+
+"#
+            .to_vec()),
+        ]));
+    let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+        V3HubProviderWireProtocol::Anthropic,
+        provider,
+        &observation,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(error
+        .to_string()
+        .contains("Anthropic provider event stream ended without message_stop"));
+    assert!(!error.to_string().contains("duplicate message_start"));
+}
+
+#[tokio::test]
+async fn anthropic_provider_sse_duplicate_message_start_different_id_fails() {
+    let observation = V3RuntimeStreamObservation::default();
+    let provider = Box::pin(stream::iter(vec![
+            Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_one\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}\n\n".to_vec()),
+            Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_two\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}\n\n".to_vec()),
+        ]));
+    let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+        V3HubProviderWireProtocol::Anthropic,
+        provider,
+        &observation,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(error
+        .to_string()
+        .contains("duplicate message_start with different id"));
+}
+
+#[tokio::test]
+async fn anthropic_provider_sse_duplicate_message_start_after_content_start_fails() {
+    let observation = V3RuntimeStreamObservation::default();
+    let provider = Box::pin(stream::iter(vec![
+            Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_after_content\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}\n\n".to_vec()),
+            Ok(b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n".to_vec()),
+            Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_after_content\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}\n\n".to_vec()),
+        ]));
+    let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+        V3HubProviderWireProtocol::Anthropic,
+        provider,
+        &observation,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(error
+        .to_string()
+        .contains("duplicate message_start after content_block_start"));
+}
+
+#[tokio::test]
 async fn responses_provider_sse_codex_rate_limits_extension_does_not_abort_stream() {
     let observation = V3RuntimeStreamObservation::default();
     let provider = Box::pin(stream::iter(vec![

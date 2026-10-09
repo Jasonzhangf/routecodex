@@ -448,29 +448,6 @@ pub fn provider_request_failure(
     }
 }
 
-pub fn provider_terminal_admission_failure(
-    status: u16,
-    failure: crate::hub_v1::V3ProviderTerminalAdmissionFailure,
-) -> V3RelayProviderFailure {
-    V3RelayProviderFailure {
-        status,
-        // Callers pass the raw status of the HTTP response whose body was
-        // inadmissible, so this IS a real upstream HTTP status.
-        provider_status: Some(status),
-        client_response: json!({
-            "error": {
-                "code": failure.code,
-                "message": failure.message,
-            }
-        }),
-        source_stage: "V3ProviderRespInbound01Raw",
-        terminal_projection: None,
-        terminal_disposition: None,
-        error_type_fn: extract_error_code_style,
-        error_message_fn: extract_message_code_style,
-    }
-}
-
 /// provider 运行时失败（共享版；gemini/openai/responses 形状；client_disconnect
 /// 仍 health-neutral 投影 499）。
 pub fn provider_runtime_failure(

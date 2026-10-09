@@ -174,37 +174,6 @@ fn apply_v3_typed_responses_event(
             format!("V3 Responses Relay response event type {event_type} is unsupported"),
         ));
     }
-    if event.get("type").and_then(Value::as_str) == Some("response.incomplete") {
-        let reason = event
-            .pointer("/response/incomplete_details/reason")
-            .or_else(|| event.pointer("/incomplete_details/reason"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty());
-        if !matches!(reason, Some("max_output_tokens" | "content_filter")) {
-            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-                "Responses SSE response.incomplete requires supported incomplete_details.reason"
-                    .to_owned(),
-            ));
-        }
-        // The admission owner decides which incomplete reasons are genuinely
-        // rejected terminals. `max_output_tokens` is the output-cap terminal,
-        // i.e. the same valid partial output as the Chat aliases and the
-        // Anthropic `max_tokens` stop reason, so it is admitted here and the
-        // reducer materializes `status: incomplete`. Do not unwrap: admission
-        // returning `None` is the admitted path, not an invariant violation.
-        if let Some(failure) =
-            classify_v3_provider_terminal_admission(V3HubProviderWireProtocol::Responses, event)
-        {
-            return Err(
-                V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure {
-                    status: 200,
-                    code: failure.code,
-                    message: failure.message,
-                },
-            );
-        }
-    }
     reducer.apply_event(event).map_err(|error| {
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
     })?;
@@ -724,13 +693,9 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
     }
 
     #[test]
-    fn response_incomplete_content_filter_is_forwarded_as_provider_terminal() {
-        // `content_filter` is the provider's own content filter doing its job, so
-        // the terminal is business data: it must reach the client as
-        // `status=incomplete` + `incomplete_details.reason=content_filter` instead
-        // of entering the provider failure/cooldown path.
+    fn response_incomplete_content_filter_preserves_terminal() {
         let mut reducer = V3ResponsesSseReducerState::default();
-        let terminal = apply_v3_typed_responses_event(
+        let response = apply_v3_typed_responses_event(
             &json!({
                 "type": "response.incomplete",
                 "response": {
@@ -742,33 +707,34 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
             }),
             &mut reducer,
         )
-        .expect("a content_filter terminal must not be a provider failure")
-        .expect("response.incomplete must be terminal");
-        assert_eq!(terminal["status"], "incomplete", "{terminal}");
-        assert_eq!(
-            terminal["incomplete_details"]["reason"], "content_filter",
-            "{terminal}"
-        );
-        assert_eq!(terminal["usage"]["output_tokens"], json!(5), "{terminal}");
+        .expect("content_filter is representable")
+        .expect("incomplete is terminal");
+        assert_eq!(response["status"], "incomplete");
+        assert_eq!(response["incomplete_details"]["reason"], "content_filter");
+        assert_eq!(response["usage"]["output_tokens"], json!(5));
     }
 
     #[test]
-    fn response_incomplete_without_or_unknown_reason_fails_fast() {
+    fn response_incomplete_preserves_unknown_reason() {
         for payload in [
             json!({
                 "type": "response.incomplete",
-                "response": {"id": "resp_bad_1", "status": "incomplete"}
+                "response": {"id": "resp_unknown_1", "status": "incomplete", "incomplete_details":{"reason":"provider_specific_reason"}}
             }),
             json!({
                 "type": "response.incomplete",
-                "incomplete_details": {"reason": "internal_error"},
-                "response": {"id": "resp_bad_2", "status": "incomplete"}
+                "response": {"id": "resp_unknown_2", "status": "incomplete", "incomplete_details":{"reason":"internal_error"}}
             }),
         ] {
             let mut reducer = V3ResponsesSseReducerState::default();
-            let error = apply_v3_typed_responses_event(&payload, &mut reducer)
-                .expect_err("malformed/unknown incomplete terminal must fail fast");
-            assert!(error.to_string().contains("response.incomplete"));
+            let response = apply_v3_typed_responses_event(&payload, &mut reducer)
+                .expect("reason is opaque business data")
+                .expect("incomplete is terminal");
+            assert_eq!(response["status"], "incomplete");
+            assert_eq!(
+                response["incomplete_details"],
+                payload["response"]["incomplete_details"]
+            );
         }
     }
 

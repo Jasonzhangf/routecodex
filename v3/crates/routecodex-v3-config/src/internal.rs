@@ -75,8 +75,6 @@ struct ErrorHandling {
     #[serde(default)]
     recoverable_http_statuses: Vec<u16>,
     #[serde(default)]
-    recoverable_failure_threshold: u32,
-    #[serde(default)]
     recoverable_cooldown_ms: u64,
     #[serde(default)]
     recoverable_probe_interval_ms: u64,
@@ -95,7 +93,6 @@ pub struct V3InternalErrorHandlingPolicy {
     pub transient_stages: Vec<String>,
     pub transient_wait_ms: Vec<u64>,
     pub recoverable_http_statuses: Vec<u16>,
-    pub recoverable_failure_threshold: u32,
     pub recoverable_cooldown_ms: u64,
     pub recoverable_probe_interval_ms: u64,
     pub unrecoverable_http_statuses: Vec<u16>,
@@ -190,7 +187,6 @@ pub fn v3_internal_error_handling() -> &'static V3InternalErrorHandlingPolicy {
             .transient_wait_ms
             .windows(2)
             .all(|pair| pair[0] < pair[1]));
-        assert!(config.recoverable_failure_threshold > 0);
         assert!(config.recoverable_cooldown_ms > 0);
         assert_eq!(config.recoverable_probe_interval_ms, 15 * 60_000);
         assert!(config.unrecoverable_failure_threshold > 0);
@@ -200,7 +196,6 @@ pub fn v3_internal_error_handling() -> &'static V3InternalErrorHandlingPolicy {
             transient_stages: config.transient_stages.clone(),
             transient_wait_ms: config.transient_wait_ms.clone(),
             recoverable_http_statuses: config.recoverable_http_statuses.clone(),
-            recoverable_failure_threshold: config.recoverable_failure_threshold,
             recoverable_cooldown_ms: config.recoverable_cooldown_ms,
             recoverable_probe_interval_ms: config.recoverable_probe_interval_ms,
             unrecoverable_http_statuses: config.unrecoverable_http_statuses.clone(),
@@ -455,7 +450,7 @@ mod tests {
     }
 
     // 503（upstream unavailable）是单一可恢复类：声明表与 provider action 阈值必须
-    // 一致（连续三次同样失败才冷却），只有 401..403 账户/计费类首次即冷却。503 曾
+    // 一致（连续两次同样失败才冷却），只有 401..403 账户/计费类首次即冷却。503 曾
     // 同时出现在 unrecoverable_http_statuses 与可恢复阈值路径，形成两套冲突声明。
     #[test]
     fn upstream_unavailable_status_is_recoverable_with_the_declared_threshold() {
@@ -470,7 +465,6 @@ mod tests {
             ),
             V3InternalErrorCategory::Recoverable
         );
-        assert_eq!(policy.recoverable_failure_threshold, 3);
         assert_eq!(policy.unrecoverable_failure_threshold, 1);
         for status in [401_u16, 402, 403] {
             assert_eq!(

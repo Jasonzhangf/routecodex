@@ -138,19 +138,17 @@ pub(super) fn chat_tool_call_to_responses_input_item(
     let arguments = function
         .and_then(|entry| entry.get("arguments"))
         .or_else(|| row.get("arguments"))
-        .cloned()
-        .unwrap_or_else(|| Value::String("{}".to_string()));
-    let arguments_text = arguments
-        .as_str()
-        .map(str::to_string)
-        .unwrap_or_else(|| serde_json::to_string(&arguments).unwrap_or_else(|_| "{}".to_string()));
+        .cloned();
+    let arguments_text = match arguments.as_ref() {
+        Some(Value::String(text)) => Some(text.clone()),
+        Some(arguments) => {
+            Some(serde_json::to_string(arguments).map_err(|error| error.to_string())?)
+        }
+        None => None,
+    };
     if responses_tool_call_type == "custom_tool_call" {
         let item_id = responses_custom_item_id(row, call_id);
-        let input = serde_json::from_str::<Value>(&arguments_text)
-            .ok()
-            .and_then(|value| value.get("input").cloned())
-            .unwrap_or_else(|| Value::String(arguments_text.clone()));
-        return Ok(Some(Value::Object(Map::from_iter([
+        let mut item = Map::from_iter([
             (
                 "type".to_string(),
                 Value::String("custom_tool_call".to_string()),
@@ -158,30 +156,45 @@ pub(super) fn chat_tool_call_to_responses_input_item(
             ("id".to_string(), Value::String(item_id)),
             ("call_id".to_string(), Value::String(call_id.to_string())),
             ("name".to_string(), Value::String(name.clone())),
-            ("input".to_string(), input),
-        ]))));
+        ]);
+        if let Some(arguments_text) = arguments_text.as_deref() {
+            let input = serde_json::from_str::<Value>(arguments_text)
+                .ok()
+                .and_then(|value| value.get("input").cloned())
+                .unwrap_or_else(|| Value::String(arguments_text.to_string()));
+            item.insert("input".to_string(), input);
+        }
+        return Ok(Some(Value::Object(item)));
     }
 
     if responses_tool_call_type == "tool_search_call" {
-        let arguments = serde_json::from_str::<Value>(&arguments_text).map_err(|error| {
-            format!(
-                "MalformedOutboundField target_protocol=responses path=$.input[].tool_search_call.arguments: {error}"
-            )
-        })?;
         let mut item = Map::from_iter([
             (
                 "type".to_string(),
                 Value::String("tool_search_call".to_string()),
             ),
             ("call_id".to_string(), Value::String(call_id.to_string())),
-            ("arguments".to_string(), arguments),
         ]);
+        if let Some(arguments_text) = arguments_text {
+            let raw_string = row
+                .get("routecodex_chat_extension")
+                .and_then(|extension| extension.get("responses_arguments_serialized"))
+                .and_then(Value::as_bool)
+                == Some(false);
+            let arguments = if raw_string {
+                Value::String(arguments_text)
+            } else {
+                serde_json::from_str::<Value>(&arguments_text)
+                    .unwrap_or(Value::String(arguments_text))
+            };
+            item.insert("arguments".to_string(), arguments);
+        }
         project_responses_item_extension_fields(row, &mut item);
         return Ok(Some(Value::Object(item)));
     }
 
     let item_id = responses_function_item_id(row, call_id);
-    Ok(Some(Value::Object(Map::from_iter([
+    let mut item = Map::from_iter([
         (
             "type".to_string(),
             Value::String("function_call".to_string()),
@@ -189,8 +202,11 @@ pub(super) fn chat_tool_call_to_responses_input_item(
         ("id".to_string(), Value::String(item_id)),
         ("call_id".to_string(), Value::String(call_id.to_string())),
         ("name".to_string(), Value::String(name)),
-        ("arguments".to_string(), Value::String(arguments_text)),
-    ]))))
+    ]);
+    if let Some(arguments_text) = arguments_text {
+        item.insert("arguments".to_string(), Value::String(arguments_text));
+    }
+    Ok(Some(Value::Object(item)))
 }
 
 fn responses_item_id_from_chat_extension(row: &Map<String, Value>) -> Option<&str> {

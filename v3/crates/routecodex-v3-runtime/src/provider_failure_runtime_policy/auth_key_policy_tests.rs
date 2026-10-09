@@ -142,8 +142,7 @@ fn runtime_policy_blocks_account_errors_immediately_and_recoverable_after_three(
             .unwrap();
         assert_eq!(
             record.state,
-            if index == 2 { "cooldown" } else { "healthy" },
-            "a recoverable 500 must not cool the provider before three same-class failures; index={index}"
+            if index == 0 { "healthy" } else { "cooldown" }
         );
         assert_eq!(record.failure_count, index as u32 + 1);
     }
@@ -355,7 +354,7 @@ fn account_http_403_policy_blocks_auth_key_on_first_failure_in_runtime_bridge() 
 }
 
 #[test]
-fn anthropic_response_body_decode_failure_cools_only_failed_model_after_three_same_errors() {
+fn anthropic_response_body_decode_failure_cools_only_failed_model_after_repeat() {
     let mut authoring = parse_v3_config_02_authoring(
         r#"
 version = 3
@@ -405,7 +404,7 @@ targets = [
     )
     .expect("failure session scope");
 
-    for attempt in 0..3 {
+    for attempt in 0..2 {
         let now_ms = 100 + attempt as u64;
         let record = health
             .record_provider_failure_record_with_policy(
@@ -432,8 +431,8 @@ targets = [
             .available;
         assert_eq!(
             model_available,
-            attempt < 2,
-            "a recoverable response-body decode failure must not cool the model before three same-class failures; attempt={attempt}"
+            attempt == 0,
+            "a recoverable response-body decode failure must not cool the model before two same-class failures; attempt={attempt}"
         );
         assert!(
             health

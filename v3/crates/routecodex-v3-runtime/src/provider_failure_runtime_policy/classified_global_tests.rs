@@ -8,7 +8,7 @@ use routecodex_v3_error::{
 use routecodex_v3_provider_responses::V3ProviderRecoveryKind;
 
 #[test]
-fn classified_global_health_cools_recoverable_after_three_same_errors() {
+fn classified_global_health_honors_recoverable_repeat_and_terminal_first_failure() {
     let mut manifest = global_pool_alive_manifest("global_status_policy_classified");
     for group in manifest.route_groups.values_mut() {
         for pool in group.pools.values_mut() {
@@ -27,7 +27,7 @@ fn classified_global_health_cools_recoverable_after_three_same_errors() {
     let recoverable_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let classified =
         classified_provider_error("V3ProviderRespInbound01Raw", "provider_http_error", 429);
-    for attempt in 0..3 {
+    for attempt in 0..2 {
         let now_ms = 10_000 + attempt as u64;
         recoverable_health
             .record_provider_global_health_for_classified_error(
@@ -45,8 +45,8 @@ fn classified_global_health_cools_recoverable_after_three_same_errors() {
             .available;
         assert_eq!(
             available,
-            attempt < 2,
-            "429 must stay available for the first two same-class failures and cool on the third; attempt={attempt}"
+            attempt == 0,
+            "429 must stay available for the first same-class failure and cool on the second; attempt={attempt}"
         );
     }
 
@@ -150,7 +150,7 @@ fn classified_provider_error(
 }
 
 #[test]
-fn recoverable_http_429_blocks_after_three_same_global_failures() {
+fn recoverable_http_429_blocks_after_second_global_failure() {
     let mut manifest = global_pool_alive_manifest("recoverable_http_429_global_threshold");
     for group in manifest.route_groups.values_mut() {
         for pool in group.pools.values_mut() {
@@ -171,7 +171,7 @@ fn recoverable_http_429_blocks_after_three_same_global_failures() {
         .scheduling_projection("first", "key1", "gpt-test", 100, 1, 0)
         .expect("initial health projection");
 
-    for attempt in 0..3 {
+    for attempt in 0..2 {
         let now_ms = 10_000 + attempt as u64;
         health
             .record_provider_failure_record_with_policy(
@@ -197,8 +197,8 @@ fn recoverable_http_429_blocks_after_three_same_global_failures() {
         let available = projection.available;
         assert_eq!(
             available,
-            attempt < 2,
-            "provider must stay selectable for the first two 429s and be excluded on the third; attempt={attempt}, available={available:?}"
+            attempt == 0,
+            "provider must be excluded only after consecutive second 429; attempt={attempt}"
         );
     }
 }

@@ -304,7 +304,7 @@ requireAll(text.responsesLocalTests, files.responsesLocalTests, [
   'responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nodes',
   'assert_eq!(captures.len(), 2);',
   'Responses Relay client SSE transport must not raw-pass provider argument event payloads around Hub',
-  'responses_relay_provider_duplicate_tool_identity_projects_typed_error_after_exhaustion',
+  'responses_relay_provider_duplicate_tool_identity_preserves_single_candidate_response',
 ]);
 
 requireAll(text.functionMap, files.functionMap, [featureId, lifecycleId]);

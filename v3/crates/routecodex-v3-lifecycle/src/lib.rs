@@ -747,7 +747,16 @@ impl V3ManagedLifecycle {
     where
         F: FnMut(V3ManagedLifecycleObservation),
     {
+        // One declared budget covers owner lookup, control preparation/ACK and
+        // replacement observation. Ordinary Status keeps its separate budget.
+        let deadline = tokio::time::Instant::now() + timeout;
         let (declaration, manifest) = self.declaration(executable_path.as_ref())?;
+        if tokio::time::Instant::now() >= deadline {
+            return Err(V3LifecycleError::Timeout(format!(
+                "restart {}",
+                declaration.instance_id
+            )));
+        }
         let instance_dir = self.instance_dir(&declaration.instance_id);
         ensure_private_dir(&instance_dir)?;
         let _lock = acquire_operation_lock(&instance_dir, "restart")?;
@@ -781,13 +790,21 @@ impl V3ManagedLifecycle {
                                 V3ManagedRunState::Starting,
                                 Some("restart bootstrapped stopped owned runtime".to_string()),
                             )?;
-                            return self
-                                .spawn_managed_child_after_state_published(
+                            return tokio::time::timeout_at(
+                                deadline,
+                                self.spawn_managed_child_after_state_published(
                                     executable_path.as_ref(),
                                     &declaration,
-                                    timeout,
-                                )
-                                .await;
+                                    deadline.saturating_duration_since(tokio::time::Instant::now()),
+                                ),
+                            )
+                            .await
+                            .map_err(|_| {
+                                V3LifecycleError::Timeout(format!(
+                                    "restart {}",
+                                    declaration.instance_id
+                                ))
+                            })?;
                         }
                     }
                     return Err(V3LifecycleError::NotRunning(
@@ -824,6 +841,7 @@ impl V3ManagedLifecycle {
             self.force_snapshot_stages.clone(),
             self.force_sse_dump,
             transfer.as_mut(),
+            deadline,
         )
         .await
         {
@@ -854,13 +872,18 @@ impl V3ManagedLifecycle {
                         detail: Some("restart recovered stale owned runtime".to_string()),
                     },
                 });
-                return self
-                    .spawn_managed_child_after_state_published(
+                return tokio::time::timeout_at(
+                    deadline,
+                    self.spawn_managed_child_after_state_published(
                         executable_path.as_ref(),
                         &declaration,
-                        timeout,
-                    )
-                    .await;
+                        deadline.saturating_duration_since(tokio::time::Instant::now()),
+                    ),
+                )
+                .await
+                .map_err(|_| {
+                    V3LifecycleError::Timeout(format!("restart {}", declaration.instance_id))
+                })?;
             }
             Err(error) => return Err(error),
         };
@@ -887,9 +910,14 @@ impl V3ManagedLifecycle {
                 detail: Some("control accepted".to_string()),
             },
         );
-        let deadline = tokio::time::Instant::now() + timeout;
         let mut restart_transition_observed = false;
         loop {
+            if tokio::time::Instant::now() >= deadline {
+                return Err(V3LifecycleError::Timeout(format!(
+                    "restart {}",
+                    declaration.instance_id
+                )));
+            }
             let status_path = instance_dir.join("status.json");
             if status_path.exists() {
                 let status: V3ManagedStatusRecord = read_json(&status_path)?;
@@ -903,7 +931,9 @@ impl V3ManagedLifecycle {
                     )));
                 }
             }
-            if let Ok(status) = self.query_live(&declaration).await {
+            if let Ok(Ok(status)) =
+                tokio::time::timeout_at(deadline, self.query_live(&declaration)).await
+            {
                 if status.state == V3ManagedRunState::Running {
                     let nonce_changed = pid_cache_start_nonce_changed(
                         &instance_dir,
@@ -918,13 +948,10 @@ impl V3ManagedLifecycle {
                     observe_status_if_changed(&mut observe, &mut last_observed_status, &status);
                 }
             }
-            if tokio::time::Instant::now() >= deadline {
-                return Err(V3LifecycleError::Timeout(format!(
-                    "restart {}",
-                    declaration.instance_id
-                )));
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            tokio::time::sleep_until(
+                deadline.min(tokio::time::Instant::now() + Duration::from_millis(50)),
+            )
+            .await;
         }
     }
 

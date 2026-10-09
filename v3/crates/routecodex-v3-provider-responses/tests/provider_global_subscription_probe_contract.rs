@@ -19,17 +19,17 @@ fn fail(store: &V3ProviderHealthStore, session_id: &str, model_id: &str, now_ms:
 }
 
 #[test]
-fn first_failure_blocks_same_key_across_sessions() {
+fn second_failure_blocks_same_key_across_sessions() {
     let store = V3ProviderHealthStore::default();
     fail(&store, "session-a", "model-a", 10);
     assert!(
-        !store
+        store
             .availability_for_session(
                 &scope("session-a"),
                 "provider-a",
                 Some("key-a"),
                 Some("model-a"),
-                12,
+                10,
             )
             .available
     );
@@ -81,7 +81,8 @@ fn different_keys_do_not_combine_but_same_key_blocks_models() {
 fn cooldown_expiry_only_makes_probe_due_and_success_probe_restores() {
     let store = V3ProviderHealthStore::default();
     fail(&store, "session-a", "model-a", 1);
-    let first_due = 5_001;
+    fail(&store, "session-a", "model-a", 2);
+    let first_due = 5_002;
     assert!(store
         .provider_cooldown_probe_keys_due(first_due - 1)
         .unwrap()
@@ -131,7 +132,8 @@ fn cooldown_expiry_only_makes_probe_due_and_success_probe_restores() {
 fn failed_probe_keeps_blocked_and_stretches_next_deadline() {
     let store = V3ProviderHealthStore::default();
     fail(&store, "session-a", "model-a", 1);
-    let first_due = 5_001;
+    fail(&store, "session-a", "model-a", 2);
+    let first_due = 5_002;
     assert!(store
         .acquire_provider_cooldown_probe("provider-a", Some("key-a"), None)
         .unwrap()
@@ -162,7 +164,7 @@ fn failed_probe_keeps_blocked_and_stretches_next_deadline() {
         1
     );
     let blocked = store
-        .cooldown_entries(first_due + 1)
+        .cooldown_entries(first_due + 10_000 - 1)
         .into_iter()
         .find(|entry| entry.provider_id == "provider-a")
         .expect("provider-a cooldown entry");
@@ -173,6 +175,7 @@ fn failed_probe_keeps_blocked_and_stretches_next_deadline() {
 fn probe_acquisition_is_single_flight() {
     let store = V3ProviderHealthStore::default();
     fail(&store, "session-a", "model-a", 1);
+    fail(&store, "session-a", "model-a", 2);
     assert!(store
         .acquire_provider_cooldown_probe("provider-a", Some("key-a"), None)
         .unwrap()

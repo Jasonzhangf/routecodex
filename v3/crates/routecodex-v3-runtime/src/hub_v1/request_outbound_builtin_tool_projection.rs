@@ -48,9 +48,7 @@ fn is_hosted_web_search_choice(choice: &Value) -> bool {
     )
 }
 
-pub(super) fn promote_tool_search_output_tools_to_provider_tools(
-    payload: &mut Value,
-) -> Result<(), String> {
+pub(super) fn collect_tool_search_output_tools(payload: &Value) -> Result<Vec<Value>, String> {
     let mut discovered = Vec::new();
     if let Some(messages) = payload.get("messages").and_then(Value::as_array) {
         for (index, message) in messages.iter().enumerate() {
@@ -100,6 +98,13 @@ pub(super) fn promote_tool_search_output_tools_to_provider_tools(
             discovered.extend(tools.iter().cloned());
         }
     }
+    Ok(discovered)
+}
+
+pub(super) fn promote_tool_search_output_tools_to_provider_tools(
+    payload: &mut Value,
+) -> Result<(), String> {
+    let discovered = collect_tool_search_output_tools(payload)?;
     if discovered.is_empty() {
         return Ok(());
     }

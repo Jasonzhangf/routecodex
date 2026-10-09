@@ -234,9 +234,9 @@ fn validate_v3_provider_probe_json(
                         .get("incomplete_details")
                         .and_then(|details| details.get("reason"))
                         .and_then(serde_json::Value::as_str)
-                        .is_some_and(
-                            crate::hub_v1::responses_incomplete_reason_is_admitted_terminal,
-                        ))
+                        .is_some_and(|reason| {
+                            matches!(reason.trim(), "max_output_tokens" | "content_filter")
+                        }))
         }
         "openai_chat" => object
             .get("choices")

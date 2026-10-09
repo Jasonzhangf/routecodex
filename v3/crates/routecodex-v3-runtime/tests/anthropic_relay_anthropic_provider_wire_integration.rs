@@ -854,6 +854,118 @@ async fn anthropic_relay_anthropic_provider_tool_use_missing_name_fails_without_
     assert_eq!(output.client_response["error"]["code"], "network_error");
 }
 
+/// A successful provider cyber refusal is representable business output.
+/// Preserve its terminal details without selecting the available backup.
+struct AnthropicCyberRefusalJsonTransport {
+    attempts: Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl ResponsesTransport for AnthropicCyberRefusalJsonTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let provider_id = request.provider_id().to_string();
+        self.attempts.lock().unwrap().push(provider_id.clone());
+        let body = if provider_id == "flaky" {
+            json!({
+                "id":"msg_cyber_refusal",
+                "type":"message",
+                "role":"assistant",
+                "model":"MiniMax-M3",
+                "content":[],
+                "stop_reason":"refusal",
+                "stop_details":{"type":"refusal","category":"cyber","explanation":"policy"},
+                "usage":{"input_tokens":7,"output_tokens":0}
+            })
+        } else {
+            json!({
+                "id":"msg_after_cyber",
+                "type":"message",
+                "role":"assistant",
+                "model":"MiniMax-M3",
+                "content":[{"type":"text","text":"cyber reselect ok"}],
+                "stop_reason":"end_turn",
+                "usage":{"input_tokens":7,"output_tokens":3}
+            })
+        };
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            serde_json::to_vec(&body).unwrap(),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn anthropic_relay_cyber_refusal_json_preserves_output_without_reselection() {
+    ensure_isolated_provider_state_dir();
+    let server_id = "anthropic_wire_cyber_refusal_json";
+    let manifest = anthropic_reselect_manifest(server_id);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let transport = AnthropicCyberRefusalJsonTransport {
+        attempts: Mutex::new(Vec::new()),
+    };
+    let output = execute_v3_anthropic_relay_runtime_with_client_headers_provider_health(
+        &manifest,
+        V3AnthropicRelayRuntimeInput {
+            server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            toolreason_observation_session_id: None,
+            request_id: "req-anthropic-cyber-refusal-json-preserved".into(),
+            payload: json!({
+                "model":"MiniMax-M3",
+                "max_tokens":64,
+                "messages":[{"role":"user","content":"Reply OK only."}],
+                "stream":false
+            }),
+        },
+        &transport,
+        Vec::new(),
+        provider_health.runtime_health(),
+    )
+    .await
+    .unwrap();
+
+    let attempts = transport.attempts.lock().unwrap().clone();
+    assert_eq!(
+        attempts,
+        ["flaky"],
+        "successful refusal must not trigger another provider attempt"
+    );
+    assert_eq!(output.status, 200);
+    assert!(
+        !output.node_trace.contains(&"V3TargetLocalReselected"),
+        "node_trace={:?}",
+        output.node_trace
+    );
+    assert_eq!(
+        output.client_response,
+        json!({
+            "id":"msg_cyber_refusal",
+            "type":"message",
+            "role":"assistant",
+            "model":"MiniMax-M3",
+            "content":[],
+            "stop_reason":"refusal",
+            "stop_details":{"type":"refusal","category":"cyber","explanation":"policy"},
+            "usage":{"input_tokens":7,"output_tokens":0}
+        })
+    );
+}
+
 fn manifest(server_id: &str) -> routecodex_v3_config::V3Config05ManifestPublished {
     compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(

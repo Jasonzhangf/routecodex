@@ -299,27 +299,39 @@ fn malformed_tool_call_fails_inside_response_chat_process() {
 }
 
 #[test]
-fn duplicate_response_tool_identity_fails_inside_response_chat_process() {
+fn duplicate_response_tool_identity_preserves_function_and_custom_calls() {
     let hooks = compile_v3_hub_relay_response_hooks();
-    let resp02 = hooks
-        .normalize(relay_raw(
-            json!({
-                "status": "requires_action",
-                "output": [
-                    {"type":"function_call","call_id":"dup","name":"lookup"},
-                    {"type":"function_call","call_id":"dup","name":"lookup_again"}
-                ]
-            }),
-            V3HubTransportIntent::Json,
-        ))
-        .unwrap();
-    assert!(matches!(
-        hooks.govern(resp02, &V3HubRelayResponseHookProfile::empty()),
-        Err(V3HubRelayResponseError::MalformedToolCall {
-            reason: "duplicate call_id/id",
-            ..
-        })
-    ));
+    for (kind, argument_field, arguments) in [
+        (
+            "function_call",
+            "arguments",
+            [
+                "{\"query\":\"first\",\"items\":[1,2]}",
+                "{\"query\":\"second\",\"items\":[3,4]}",
+            ],
+        ),
+        (
+            "custom_tool_call",
+            "input",
+            ["first\ncomplete input", "second\ncomplete input"],
+        ),
+    ] {
+        let mut output = json!([
+            {"type":kind,"id":"item_a","call_id":"dup","name":"lookup"},
+            {"type":kind,"id":"item_b","call_id":"dup","name":"lookup_again"}
+        ]);
+        output[0][argument_field] = json!(arguments[0]);
+        output[1][argument_field] = json!(arguments[1]);
+        let payload = json!({"status":"completed","output":output});
+        let resp02 = hooks
+            .normalize(relay_raw(payload.clone(), V3HubTransportIntent::Json))
+            .unwrap();
+        let resp03 = hooks
+            .govern(resp02, &V3HubRelayResponseHookProfile::empty())
+            .expect("serialized duplicate identities must remain representable");
+        assert_eq!(resp03.tool_call_count(), 2);
+        assert_eq!(resp03.finalized_payload(), &payload);
+    }
 }
 
 #[test]

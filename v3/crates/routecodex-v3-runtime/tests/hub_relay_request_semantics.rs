@@ -315,7 +315,6 @@ fn openai_chat_tool_identity_is_governed_at_req04_after_normalization() {
 
     for invalid in [
         json!({"messages":[{"role":"assistant","tool_calls":[{"type":"function","function":{"name":"x","arguments":"{}"}}]}]}),
-        json!({"messages":[{"role":"assistant","tool_calls":[{"id":"dup","type":"function","function":{"name":"x","arguments":"{}"}},{"id":"dup","type":"function","function":{"name":"y","arguments":"{}"}}]}]}),
         json!({"messages":[{"role":"tool","tool_call_id":"orphan","content":"x"}]}),
     ] {
         assert!(matches!(
@@ -329,6 +328,14 @@ fn openai_chat_tool_identity_is_governed_at_req04_after_normalization() {
             })
         ));
     }
+    let duplicate = json!({"messages":[{"role":"assistant","tool_calls":[{"id":"dup","type":"function","function":{"name":"x","arguments":"{}"}},{"id":"dup","type":"function","function":{"name":"y","arguments":"{}"}}]}]});
+    let governed = hooks
+        .run(
+            raw_for(duplicate.clone(), V3HubEntryProtocol::OpenAiChat),
+            &V3HubServertoolRequestProfile::disabled(),
+        )
+        .unwrap();
+    assert_eq!(governed.payload()["messages"], duplicate["messages"]);
 }
 
 #[test]
@@ -453,4 +460,131 @@ fn malformed_tool_output_and_required_hook_failure_are_explicit() {
         ),
         Err(V3HubRelayRequestError::RequiredHookFailed { .. })
     ));
+}
+
+fn mixed_kind_duplicate_responses_input(custom_declared_first: bool) -> Value {
+    let function_call =
+        json!({"type":"function_call","call_id":"dup","name":"lookup","arguments":"{}"});
+    let custom_call =
+        json!({"type":"custom_tool_call","call_id":"dup","name":"render","input":"freeform"});
+    let function_output =
+        json!({"type":"function_call_output","call_id":"dup","output":"function ok"});
+    let custom_output =
+        json!({"type":"custom_tool_call_output","call_id":"dup","output":"custom ok"});
+    let input = if custom_declared_first {
+        vec![custom_call, function_call, custom_output, function_output]
+    } else {
+        vec![function_call, custom_call, function_output, custom_output]
+    };
+    json!({"model":"gpt-5.5","input":input})
+}
+
+#[test]
+fn mixed_kind_duplicate_call_id_survives_canonical_chat_branch_in_either_order() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    for custom_declared_first in [false, true] {
+        let governed = hooks
+            .run(
+                raw_for(
+                    mixed_kind_duplicate_responses_input(custom_declared_first),
+                    V3HubEntryProtocol::Responses,
+                ),
+                &V3HubServertoolRequestProfile::disabled(),
+            )
+            .expect("mixed function/custom duplicate call_id must not be rejected at Req04");
+
+        assert_eq!(governed.tool_output_count(), 2);
+        assert!(governed.payload().get("input").is_none());
+        let messages = governed.payload()["messages"].as_array().unwrap();
+
+        let declared_kinds: Vec<Option<&str>> = messages
+            .iter()
+            .filter_map(|message| message.get("tool_calls").and_then(Value::as_array))
+            .flatten()
+            .filter(|call| call.get("id").and_then(Value::as_str) == Some("dup"))
+            .map(|call| {
+                call.pointer("/routecodex_chat_extension/responses_tool_call_type")
+                    .and_then(Value::as_str)
+            })
+            .collect();
+        assert_eq!(
+            declared_kinds.len(),
+            2,
+            "both declared calls must survive: {messages:?}"
+        );
+        assert!(
+            declared_kinds.contains(&Some("custom_tool_call")),
+            "custom declaration must be preserved: {messages:?}"
+        );
+        assert!(
+            declared_kinds.contains(&None),
+            "function declaration must be preserved: {messages:?}"
+        );
+
+        let tool_outputs: Vec<(&str, Option<&str>)> = messages
+            .iter()
+            .filter(|message| message.get("role").and_then(Value::as_str) == Some("tool"))
+            .filter(|message| message.get("tool_call_id").and_then(Value::as_str) == Some("dup"))
+            .map(|message| {
+                (
+                    message
+                        .get("content")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                    message
+                        .pointer("/routecodex_chat_extension/responses_tool_output_type")
+                        .and_then(Value::as_str),
+                )
+            })
+            .collect();
+        assert_eq!(
+            tool_outputs.len(),
+            2,
+            "both matching results must survive: {messages:?}"
+        );
+        assert!(
+            tool_outputs.contains(&("function ok", Some("function_call_output"))),
+            "function result must pair without kind adjudication: {messages:?}"
+        );
+        assert!(
+            tool_outputs.contains(&("custom ok", Some("custom_tool_call_output"))),
+            "custom result must pair without kind adjudication: {messages:?}"
+        );
+    }
+}
+
+#[test]
+fn mixed_kind_duplicate_call_id_survives_raw_input_branch_in_either_order() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    for custom_declared_first in [false, true] {
+        let governed = hooks
+            .run(
+                raw_for(
+                    mixed_kind_duplicate_responses_input(custom_declared_first),
+                    V3HubEntryProtocol::OpenAiChat,
+                ),
+                &V3HubServertoolRequestProfile::disabled(),
+            )
+            .expect("mixed function/custom duplicate call_id must not be rejected at Req04");
+
+        assert_eq!(governed.tool_output_count(), 2);
+        let input = governed.payload()["input"]
+            .as_array()
+            .expect("raw input preserved");
+        assert_eq!(
+            input.len(),
+            4,
+            "both declarations and both results must be preserved in order: {input:?}"
+        );
+        assert!(input.iter().any(|item| {
+            item.get("type").and_then(Value::as_str) == Some("function_call_output")
+                && item.get("call_id").and_then(Value::as_str) == Some("dup")
+                && item.get("output").and_then(Value::as_str) == Some("function ok")
+        }));
+        assert!(input.iter().any(|item| {
+            item.get("type").and_then(Value::as_str) == Some("custom_tool_call_output")
+                && item.get("call_id").and_then(Value::as_str) == Some("dup")
+                && item.get("output").and_then(Value::as_str) == Some("custom ok")
+        }));
+    }
 }

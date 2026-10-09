@@ -59,7 +59,7 @@ fn direct_provider_failure_blocks_after_configured_threshold() {
         },
     );
 
-    for offset in 0..3 {
+    for offset in 0..2 {
         record_v3_direct_provider_failure_record(
             &health,
             &session,
@@ -74,8 +74,8 @@ fn direct_provider_failure_blocks_after_configured_threshold() {
             .expect("direct health projection");
         assert_eq!(
             projection.available,
-            offset < 2,
-            "the first two same-key failures stay available; the third enters cooldown"
+            offset == 0,
+            "the first same-key failure stays available; the second enters cooldown"
         );
     }
 
@@ -83,12 +83,12 @@ fn direct_provider_failure_blocks_after_configured_threshold() {
         .store()
         .scheduling_projection("openai", "key1", "gpt-test", 100, 100, 200)
         .expect("direct health projection");
-    assert_eq!(projection.score_milli, 85);
-    // 统一错误模型：连续 3 次 recoverable 失败（429/5xx 阈值 3）进入全局
+    assert_eq!(projection.score_milli, 90);
+    // 统一错误模型：连续 2 次 recoverable 失败（429/5xx 阈值 2）进入全局
     // 冷却，等待后台探活或真实成功恢复；分数衰减保留为诊断信息。
     assert!(
         !projection.available,
-        "three consecutive 502 failures must trigger threshold cooldown"
+        "two consecutive 502 failures must trigger threshold cooldown"
     );
 }
 
@@ -119,11 +119,11 @@ fn direct_provider_failure_thresholds_cover_400_and_401_classes() {
     };
 
     // Every typed provider failure enters the shared health history. A
-    // recoverable class (400) must not exclude the provider before three
+    // recoverable class (400) must not exclude the provider before two
     // consecutive same-class failures; the typed irrecoverable account class
     // (401) still cools on its first failure.
     for (status, code, threshold) in [
-        (400u16, "provider_http_400", 3u32),
+        (400u16, "provider_http_400", 2u32),
         (401, "provider_http_401", 1),
     ] {
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);

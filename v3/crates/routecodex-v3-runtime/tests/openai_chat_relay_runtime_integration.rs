@@ -568,13 +568,8 @@ impl ResponsesTransport for IncompleteWireThenChatSuccessTransport {
                     Ok::<Vec<u8>, V3ProviderError>(b"data: [DONE]\n\n".to_vec()),
                 ]
             } else {
-                // A well-formed Anthropic stream whose terminal is a genuine
-                // provider refusal. The previous fixture started at
-                // content_block_delta with no message_start, so the transducer
-                // rejected it before terminal admission ran and the test passed
-                // without exercising reselection at all. `max_tokens` is no
-                // longer a rejecting terminal (it is valid partial output), so
-                // the rejection arm under test is `refusal`.
+                // A well-formed refusal stream preserves its text and terminal
+                // meaning through the Chat projection without reselection.
                 vec![
                     Ok::<Vec<u8>, V3ProviderError>(
                         b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg-primary-refusal\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"MiniMax-M3\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}\n\n".to_vec(),
@@ -921,7 +916,7 @@ async fn responses_provider_empty_incomplete_reaches_chat_terminal() {
 }
 
 #[tokio::test]
-async fn openai_chat_provider_content_filter_terminal_commits_primary_partial_output() {
+async fn openai_chat_provider_incomplete_preserves_original_attempt() {
     use futures_util::StreamExt;
     let server_id = "openai_chat_wire_content_filter";
     let manifest = manifest_with_two_providers_for_scope(server_id, true);
@@ -948,23 +943,11 @@ async fn openai_chat_provider_content_filter_terminal_commits_primary_partial_ou
         &transport,
     )
     .await
-    .expect("a content_filter terminal is a legal provider terminal");
-
-    // `content_filter` is the provider's own filter doing its job. The primary
-    // terminal is forwarded with its partial output instead of being judged a
-    // provider failure, so no reselection happens.
+    .expect("incomplete OpenAI Chat provider attempt must pass through");
     let provider_ids = transport.provider_ids.lock().unwrap().clone();
     assert_eq!(output.status, 200, "{provider_ids:?} {output:?}");
-    assert_eq!(
-        provider_ids,
-        [format!("{server_id}_primary")],
-        "an admitted content_filter terminal must not reselect"
-    );
-    assert!(
-        !output.node_trace.contains(&"V3TargetLocalReselected"),
-        "content_filter terminal must not reselect: {:?}",
-        output.node_trace
-    );
+    assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
+    assert_eq!(provider_ids, [format!("{server_id}_primary")]);
     let V3OpenAiChatRelayClientBody::Sse(stream) = output.client_body else {
         panic!("expected Chat SSE client body");
     };
@@ -975,16 +958,16 @@ async fn openai_chat_provider_content_filter_terminal_commits_primary_partial_ou
         .map(String::from_utf8)
         .collect::<Result<String, _>>()
         .unwrap();
+    assert!(!text.contains("secondary-after-incomplete"), "{text}");
     assert!(text.contains("primary-partial-must-not-commit"), "{text}");
     assert!(
         text.contains("\"finish_reason\":\"content_filter\""),
         "{text}"
     );
-    assert!(!text.contains("secondary-after-incomplete"), "{text}");
 }
 
 #[tokio::test]
-async fn anthropic_provider_refusal_terminal_commits_primary_partial_output() {
+async fn anthropic_provider_refusal_preserves_original_attempt() {
     use futures_util::StreamExt;
     let server_id = "anthropic_wire_refusal_terminal";
     let manifest = manifest_with_two_anthropic_providers_for_scope(server_id);
@@ -1011,23 +994,11 @@ async fn anthropic_provider_refusal_terminal_commits_primary_partial_output() {
         &transport,
     )
     .await
-    .expect("an Anthropic refusal terminal is a legal provider terminal");
-
-    // `refusal` is the model declining to answer. It is a provider terminal, so
-    // the primary attempt is forwarded with its partial output and no reselection
-    // happens.
+    .expect("a refused Anthropic provider attempt must pass through");
     let provider_ids = transport.provider_ids.lock().unwrap().clone();
     assert_eq!(output.status, 200, "{provider_ids:?} {output:?}");
-    assert_eq!(
-        provider_ids,
-        [format!("{server_id}_primary")],
-        "an admitted refusal terminal must not reselect"
-    );
-    assert!(
-        !output.node_trace.contains(&"V3TargetLocalReselected"),
-        "refusal terminal must not reselect: {:?}",
-        output.node_trace
-    );
+    assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
+    assert_eq!(provider_ids, [format!("{server_id}_primary")]);
     let V3OpenAiChatRelayClientBody::Sse(stream) = output.client_body else {
         panic!("expected Chat SSE client body");
     };
@@ -1038,12 +1009,12 @@ async fn anthropic_provider_refusal_terminal_commits_primary_partial_output() {
         .map(String::from_utf8)
         .collect::<Result<String, _>>()
         .unwrap();
+    assert!(!text.contains("secondary-after-incomplete"), "{text}");
     assert!(text.contains("primary-partial-must-not-commit"), "{text}");
     assert!(
         text.contains("\"finish_reason\":\"content_filter\""),
         "{text}"
     );
-    assert!(!text.contains("secondary-after-incomplete"), "{text}");
 }
 
 #[tokio::test]

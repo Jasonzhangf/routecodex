@@ -65,6 +65,7 @@ features:
   - legacy model-specific entries remain isolated during migration
   - health score changes never modify configured priority or move a candidate across priority buckets
   - after prolonged backup success traffic, a semantic probe recovery returns the primary to Target selection immediately
+  - One recoverable provider failure leaves the identity eligible; two consecutive failures admit cooldown, and real success resets the pre-cooldown streak.
   required_negative:
   - v3 persistence without probe_model_id fails explicitly
   - duplicate v4 key health identities fail instead of silently overwriting control truth
@@ -72,6 +73,7 @@ features:
   - mainline caller/callee symbols, edge owners, and resource writer/reader bindings must resolve to the registered modules
   - key health state never enters provider or client payload
   required_gates:
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_first_failure_cooldown_blackbox -- --nocapture
   - npm run test:v3-provider-health-contract
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime recovered_primary_failback_is_not_starved_by_backup_successes -- --nocapture
   - npm run verify:v3-resource-map
@@ -262,6 +264,7 @@ features:
   - config-path restart transfers only to a typed target declaration with the exact same listener set; listener drift is rejected
   - top-level lifecycle commands without -c resolve ~/.rcc/config.toml and --snap forces snapshots
   - foreground start forces startup and common HTTP request console even when config log_console is false
+  - Restart control handshake and replacement acknowledgement share the configured absolute operation deadline; ordinary Status retains its two-second control timeout.
   - routecodex dev shim may enable snap/debug by default while rcc/rccv3 stable shims require explicit --snap/--debug and restart.plan.json remains previous-release compatible
   required_integration:
   - actual CLI start/status/duplicate-start/restart/stop on temporary aggregate listeners
@@ -291,6 +294,7 @@ features:
   - lifecycle state, argv, log, and evidence contain no resolved secret
   - live managed 5555 restart with concurrent V2 health and real JSON/SSE Responses
   required_gates:
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test managed_restart_control_budget_blackbox -- --nocapture
   - npm run verify:v3-managed-server-lifecycle
   - npm run verify:v3-dagpipe-feature-graphs
   - npm run test:v3-managed-server-lifecycle-red-fixtures
@@ -467,7 +471,7 @@ features:
   - npm run verify:v3-architecture-ci
 - feature_id: v3.provider_compat_profile_loading
   change_risk: high
-  owner_scope: Provider compatibility profiles, fail-fast normal-payload boundary validation, and provider-declared output-cap projection between Hub provider semantic/raw nodes and the provider wire/client semantic nodes.
+  owner_scope: Provider compatibility profiles, fail-fast normal-payload boundary validation, provider-declared output-cap projection, and provider-configurable reasoning-effort override between Hub provider semantic/raw nodes and the provider wire/client semantic nodes.
   contract:
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-function-map.yml
@@ -479,10 +483,13 @@ features:
   - Anthropic Goaichat requests preserve standard hosted web_search type/name/options and ordinary tool/history identity without synthesizing function envelopes after standard projection; client-authored extensions remain unchanged.
   - Public HTTP Responses (JSON/SSE), Chat and Messages consumers preserve the 380-tool inventory, schemas, long names, write_stdin and retired update_plan history, and complete execution plus matching follow-up with exactly one accepted upstream attempt per turn; provider switching cannot mask a shape regression.
   - When the client supplied no output limit, the provider-declared model output cap is projected into the provider wire payload; a client-supplied output limit is never overwritten on any registered provider protocol.
+  - When a provider-directory TOML declares `provider.v3.reasoning_effort`, the configured value becomes the final OpenAI Chat `reasoning_effort` or Responses `reasoning.effort` provider wire value; a configured `medium` overrides a client `xhigh`, and a configured `low` overrides the absence of a client effort.
+  - When no provider reasoning-effort policy is declared, the client/protocol/compat effort result is preserved unchanged.
   required_negative:
   - Top-level semantics, processed, and processingMetadata fail at both request and response compat entrypoints.
   - Compat does not strip, reconstruct, or route control state and does not own Chat Process or SSE semantics.
   - Compat does not own retry, provider switching or health; typed Error owns request-local compatibility handling.
+  - Unsupported provider protocols (Anthropic, Gemini) with an explicit reasoning-effort policy fail Config compile before `V3Config05ManifestPublished`; the policy value never reaches runtime or provider wire for unsupported protocols.
   - Generic chat:glm Anthropic passthrough and other provider protocols never receive Goaichat private hosted-tool fields.
   - Goaichat compatibility never adds function envelopes to native hosted declarations, adds type/function envelopes to ordinary Anthropic declarations, or restores retired historical tools to the callable inventory.
   black_box_regression:
@@ -496,6 +503,8 @@ features:
   required_gates:
   - npm run test:v3-provider-compat-profile-loading
   - npm run test:v3-goaichat-hosted-tool-history-blackbox
+  - npm run test:v3-provider-reasoning-effort-policy-blackbox
+  - npm run test:v3-provider-reasoning-effort-policy-config-failures
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
@@ -1892,6 +1901,8 @@ features:
   required_blackbox:
   - responses_additional_tools_refreshes_same_namespace_tool_before_chat_projection
   - responses_chat_long_namespace_names_round_trip_on_first_attempt_json_and_sse
+  - responses_discovered_custom_tools_restore_kind_and_identity_json_and_sse
+  - invalid_custom_arguments_reach_client_and_recover_json_and_sse
   - responses_additional_tools_refreshes_nested_mcpx_alias_before_chat_projection
   - openai_chat_nested_mcpx_function_call_restores_dotted_client_namespace
   - responses_provider_sse_restores_declared_mcp_identity_for_tool_followup
@@ -3183,11 +3194,12 @@ features:
   - matched HTTP 401 and HTTP 403 provider error policies with scope=auth_key record provider+auth_alias failures without model identity and cool the key after the first failure
   - a 401 auth-key cooldown blocks scheduling and session availability for another model under the same provider/auth_alias while sibling keys remain available
   - 401 auth-key business cooldown remains until semantic probe success, while its first recovery probe is due after 5 seconds and later failures advance the shared 5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s ladder
-  - a recoverable typed provider failure cools its identity only after three consecutive failures carrying the same typed fingerprint; a different fingerprint restarts the consecutive streak and mixed fingerprints never add up to one cooldown
+  - a recoverable typed provider failure cools its identity only after its declared threshold of consecutive failures carrying the same typed fingerprint, default two; a different fingerprint restarts the consecutive streak and mixed fingerprints never add up to one cooldown
   - a provider-declared terminal with no visible output is forwarded as-is and never becomes a provider failure: Responses incomplete max_output_tokens/content_filter, Anthropic max_tokens/refusal, and the OpenAI Chat wire terminal including an empty-content content_filter finish
   - Direct and Relay atomically admit the highest-priority health-and-capacity-eligible provider, immediately skipping full candidates without a capacity wait
   - Public `/v1/responses` switches to a spare provider while the first provider remains held; all-full pools terminate promptly without an extra upstream request
   - Concurrency exclusions are request-local and health-neutral; reselect stays inside the captured Target09 candidate set without Router reentry
+  - A full preferred candidate does not disable the caller-authorized semantic recovery of another eligible cooled candidate in Direct or Relay
   - Business leases remain bounded and release after completion, error, cancellation, or stream drop; due scheduled probes retain their separate bounded admission
   required_negative:
   - stale successful or failed probe generations cannot mutate newer provider health state
@@ -3196,7 +3208,7 @@ features:
   - zero or greater-than-30-minute provider health probe_interval_ms values fail config compilation
   - model-less auth-key cooldown state never enters provider or client payload or MetadataCenter
   - Crossing the adaptive budget cannot record provider failure health, auth-key cooldown, model cooldown, MetadataCenter state, or provider/client payload truth
-  - Capacity saturation cannot trigger health rescue probes, provider-action waits, oversubscription, or escape from an explicit provider.model pin
+  - Capacity saturation cannot trigger health rescue probes for the full candidate, provider-action waits, oversubscription, or escape from an explicit provider.model pin
   - WebSocketV2 session-slot contention cannot retain provider capacity, starve another request that owns the session, or leak its session slot or provider lease on cancellation
   required_gates:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --lib
@@ -3205,6 +3217,7 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --lib -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime runtime_policy_maps_account_and_recoverable_http_classes_to_global_health -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime cooldown_exhaustion --lib -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server pool_empty_recovery -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_provider_concurrency_ -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_direct_provider_http_error_never_reaches_the_client -- --exact --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime provider_concurrency --lib -- --nocapture
@@ -3228,7 +3241,7 @@ features:
   status: implementation_in_progress
   change_risk: critical
   owner_kind: rust_v3_provider_terminal_response_error_policy
-  owner_scope: Provider terminal JSON/materialized SSE classification through the existing Error01-06 and provider-action-gate path before provider-success record and Resp03 client commit.
+  owner_scope: Genuine provider errors enter Error01-06 before client commit; representable successful JSON and SSE terminals retain their provider meaning.
   owner_modules:
   - v3/crates/routecodex-v3-config
   - v3/crates/routecodex-v3-runtime
@@ -3241,17 +3254,18 @@ features:
   - docs/architecture/manifests/v3.provider_action_gate.mainline.yml
   required_positive:
   - Provider-local full path compiles into the unified provider error action manifest with injected provider scope while legacy action remains compatible.
-  - Bounded Chat Anthropic and Responses terminal facts match once and retain exact policy identity/path through retry backoff and final projection.
+  - Genuine Chat, Anthropic and Responses errors retain their typed source through recovery and transport termination.
   - Configured backoff is a minimum combined with provider-action-gate delay by max rather than addition.
-  - Only a non-matching successful response records provider success and reaches Resp03 client commit.
-  - Responses, OpenAI Chat, and Anthropic provider terminals split into exactly two classes. Admitted provider business terminals are forwarded faithfully with their partial output and never enter Error01-06 or provider cooldown: a Responses `response.incomplete` carrying `content_filter` or `max_output_tokens`, an Anthropic `max_tokens` or `refusal` stop reason, and an OpenAI Chat `finish_reason` of `length`/`max_tokens`/`max_output_tokens`/`content_filter`. They project as `status=incomplete` plus `incomplete_details.reason` on the Responses entry and as terminal Chat frames (`finish_reason=length` for output cap, `finish_reason=content_filter` for `content_filter`) on the Chat entry, on every entry. The OpenAI Chat wire terminal is owned by the Chat codec, which maps its own frame; this admission owner never turns a Chat `finish_reason` into a provider failure. Unrepresentable terminals (unknown or missing `response.incomplete` reason, any other Anthropic stop reason) enter Error01-06 and reselect before any client commit.
+  - Successful provider responses reach client commit without content, refusal, incomplete, empty-output, zero-usage or tool-argument adjudication.
+  - Responses incomplete reasons, Chat content_filter and refusal, and Anthropic refusal remain representable provider output on Direct and Relay paths.
   required_negative:
   - Id model and metadata strings cannot trigger content matching.
   - Error policy directive cannot enter normal provider/client payload MetadataCenter or SSE/Server ownership.
   - Error05 cannot re-match a response-content policy from compressed error message.
   - Retry exhaustion cannot project before route/default exhaustion and cannot project more than once.
-  - A non-admitted provider terminal cannot project partial output or record provider success.
+  - Genuine provider HTTP or native SSE errors cannot reach the client as HTTP errors, protocol error events or fabricated successful completion.
   required_gates:
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox -- --nocapture
   - npm run test:v3-provider-action-gate
   - npm run verify:v3-provider-action-gate
   - npm run test:v3-provider-action-gate-red-fixtures
@@ -3853,20 +3867,18 @@ features:
   status: source_gate_verified
   change_risk: high
   owner_kind: rust_project_v3_runtime_chat_process_gate
-  owner_scope: Black-box and unit verification for the exact whole-item Anthropic DSML control frame on the Responses Relay SSE materialization path; suspect/incomplete/literal text is preserved and complete frames are governed without client-visible provider failure.
+  owner_scope: Public HTTP and unit verification preserves complete and literal Anthropic text without stripping, rejection or provider reselection.
   owner_modules:
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_anthropic_control_text.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs
   - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
   - v3/crates/routecodex-v3-error/src/tests.rs
   mainline_bindings:
   - v3-hub-relay-resp-03
   required_contract:
-  - only a whole output_text/message item starting with the exact `<thinking>` opening and ending with the exact three-line DSML closing block is treated as control material
-  - incomplete, suspect, quoted, and whole-item paired-thinking literals are forwarded unchanged
-  - complete control frames with visible prose keep that prose and drop only the frame
-  - complete control frames without visible/native output use the existing exhausted NoResponse transport boundary and never project provider failure to the client
-  - the rule is bound to Responses Relay SSE materialization through the typed source_provider_protocol witness; Anthropic JSON paths remain unchanged
+  - complete, incomplete, suspect, quoted and literal DSML-looking business text is forwarded unchanged
+  - representable business text never causes provider rejection, reselection or a fabricated terminal error
+  - genuine HTTP and native protocol errors retain the existing internal Error chain and client transport-break boundary
   required_gates:
   - npm run verify:v3-architecture-ci
   - npm run verify:v3-resource-map
@@ -3876,8 +3888,9 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib anthropic_
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-error --lib
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_relay_suspect_anthropic_text_is_preserved_without_reselection
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_relay_anthropic_dsml_complete_text
   - git diff --check
   completion_rule:
-    source: Complete when the classifier, source witness, black-box matrix, runtime and error tests, and all map/resource/mainline gates pass on the exact candidate.
+    source: Complete when the faithful-text public HTTP cases, runtime and error tests, and affected map/resource/mainline gates pass on the exact candidate.
     runtime: No live claim is made without installed-binary restart and same-entry replay.
     forbidden_claim: Do not claim live closure from source tests alone.

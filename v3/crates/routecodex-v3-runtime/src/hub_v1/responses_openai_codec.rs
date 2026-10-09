@@ -728,6 +728,33 @@ fn build_v3_openai_chat_assistant_tool_call_message(
         .ok_or_else(|| {
             "Responses function_call is missing name before OpenAI Chat encoding".to_string()
         })?;
+    let tool_call = project_v3_responses_tool_call_to_openai_chat(item, call_id, name);
+    let mut message = Map::new();
+    message.insert("role".to_string(), Value::String("assistant".to_string()));
+    message.insert("content".to_string(), Value::String(String::new()));
+    message.insert("tool_calls".to_string(), Value::Array(vec![tool_call]));
+    if let Some(reasoning_content) = join_v3_openai_chat_reasoning_segments(
+        collect_v3_openai_chat_reasoning_segments(
+            item.get("reasoning_content")
+                .or_else(|| item.get("reasoning_text"))
+                .or_else(|| item.get("thinking")),
+        )
+        .as_slice(),
+    ) {
+        message.insert(
+            "reasoning_content".to_string(),
+            Value::String(reasoning_content),
+        );
+    }
+    Ok(Value::Object(message))
+}
+
+/// The request and response adapters use the same reversible Chat encoding.
+pub(crate) fn project_v3_responses_tool_call_to_openai_chat(
+    item: &Map<String, Value>,
+    call_id: &str,
+    name: &str,
+) -> Value {
     let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();
     let name = if let Some(namespace) = read_v3_non_empty_str(item.get("namespace")) {
         if item_type == "custom_tool_call" {
@@ -739,27 +766,28 @@ fn build_v3_openai_chat_assistant_tool_call_message(
         name.to_string()
     };
     let arguments = if item_type == "custom_tool_call" {
-        let input = item.get("input").ok_or_else(|| {
-            "Responses custom_tool_call is missing input before OpenAI Chat encoding".to_string()
-        })?;
-        let input = match input {
-            Value::String(text) => Value::String(text.clone()),
-            other => {
-                Value::String(serde_json::to_string(other).map_err(|error| error.to_string())?)
-            }
-        };
-        serde_json::to_string(&json!({ "input": input })).map_err(|error| error.to_string())?
+        item.get("input")
+            .map(|input| json!({ "input": input }).to_string())
     } else {
-        let arguments = read_v3_responses_function_call_arguments_for_openai_chat(item)?;
-        project_v3_responses_arguments_to_openai_chat_wire(arguments.as_str())
+        item.get("arguments")
+            .or_else(|| {
+                item.get("function")
+                    .and_then(|function| function.get("arguments"))
+            })
+            .map(|arguments| match arguments {
+                Value::String(text) => text.clone(),
+                other => other.to_string(),
+            })
     };
-    let mut message = Map::new();
-    message.insert("role".to_string(), Value::String("assistant".to_string()));
-    message.insert("content".to_string(), Value::String(String::new()));
+    let mut function = Map::new();
+    function.insert("name".to_string(), Value::String(name));
+    if let Some(arguments) = arguments {
+        function.insert("arguments".to_string(), Value::String(arguments));
+    }
     let mut tool_call = json!({
         "id": call_id,
         "type": "function",
-        "function": {"name": name, "arguments": arguments}
+        "function": Value::Object(function)
     });
     let responses_item_id = read_v3_non_empty_str(item.get("id"));
     if item_type == "custom_tool_call" || responses_item_id.is_some() {
@@ -783,42 +811,7 @@ fn build_v3_openai_chat_assistant_tool_call_message(
             );
         }
     }
-    message.insert("tool_calls".to_string(), Value::Array(vec![tool_call]));
-    if let Some(reasoning_content) = join_v3_openai_chat_reasoning_segments(
-        collect_v3_openai_chat_reasoning_segments(
-            item.get("reasoning_content")
-                .or_else(|| item.get("reasoning_text"))
-                .or_else(|| item.get("thinking")),
-        )
-        .as_slice(),
-    ) {
-        message.insert(
-            "reasoning_content".to_string(),
-            Value::String(reasoning_content),
-        );
-    }
-    Ok(Value::Object(message))
-}
-
-fn read_v3_responses_function_call_arguments_for_openai_chat(
-    item: &Map<String, Value>,
-) -> Result<String, String> {
-    let arguments = item
-        .get("arguments")
-        .or_else(|| {
-            item.get("function")
-                .and_then(Value::as_object)
-                .and_then(|function| function.get("arguments"))
-        })
-        .ok_or("Responses function_call is missing arguments before OpenAI Chat encoding")?;
-    match arguments {
-        Value::String(text) => Ok(text.clone()),
-        other => serde_json::to_string(other).map_err(|error| error.to_string()),
-    }
-}
-
-fn project_v3_responses_arguments_to_openai_chat_wire(arguments: &str) -> String {
-    arguments.to_string()
+    tool_call
 }
 
 fn build_v3_openai_chat_tool_result_message(item: &Map<String, Value>) -> Result<Value, String> {
@@ -1019,13 +1012,28 @@ fn build_v3_openai_chat_hosted_tool_assistant_tool_call_message(
     kind: V3OpenAiChatHostedToolHistoryKind,
 ) -> Result<Value, String> {
     let arguments_value = build_v3_openai_chat_hosted_tool_arguments_value(item, kind);
-    let arguments = serde_json::to_string(&arguments_value).map_err(|error| error.to_string())?;
-    let function_name = kind.openai_chat_function_name();
     let mut extension = Map::new();
     extension.insert(
         "responses_tool_call_type".to_string(),
         Value::String(kind.responses_item_type().to_string()),
     );
+    let mut function = json!({"name":kind.openai_chat_function_name()});
+    if let Some(arguments_value) = arguments_value {
+        let raw_string = matches!(kind, V3OpenAiChatHostedToolHistoryKind::ToolSearch)
+            && arguments_value.is_string();
+        let arguments = if raw_string {
+            arguments_value.as_str().unwrap().to_string()
+        } else {
+            serde_json::to_string(&arguments_value).map_err(|error| error.to_string())?
+        };
+        function["arguments"] = Value::String(arguments);
+        if matches!(kind, V3OpenAiChatHostedToolHistoryKind::ToolSearch) {
+            extension.insert(
+                "responses_arguments_serialized".to_string(),
+                Value::Bool(!raw_string),
+            );
+        }
+    }
     copy_v3_responses_item_extension_fields(item, &mut extension);
     Ok(json!({
         "role": "assistant",
@@ -1033,10 +1041,7 @@ fn build_v3_openai_chat_hosted_tool_assistant_tool_call_message(
         "tool_calls": [{
             "id": call_id,
             "type": "function",
-            "function": {
-                "name": function_name,
-                "arguments": arguments
-            },
+            "function": function,
             "routecodex_chat_extension": Value::Object(extension)
         }]
     }))
@@ -1090,18 +1095,21 @@ fn copy_v3_responses_item_extension_fields(
 fn build_v3_openai_chat_hosted_tool_arguments_value(
     item: &Map<String, Value>,
     kind: V3OpenAiChatHostedToolHistoryKind,
-) -> Value {
+) -> Option<Value> {
     let source = match kind {
         V3OpenAiChatHostedToolHistoryKind::WebSearch => item.get("action"),
         V3OpenAiChatHostedToolHistoryKind::ToolSearch => {
             item.get("arguments").or_else(|| item.get("action"))
         }
     };
-    match source {
+    if matches!(kind, V3OpenAiChatHostedToolHistoryKind::ToolSearch) {
+        return source.cloned();
+    }
+    Some(match source {
         Some(Value::Object(object)) => Value::Object(object.clone()),
         Some(value) => json!({ "value": value }),
         None => Value::Object(Map::new()),
-    }
+    })
 }
 
 fn build_v3_openai_chat_hosted_tool_result_message(

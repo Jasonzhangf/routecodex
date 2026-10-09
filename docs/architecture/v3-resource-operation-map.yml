@@ -424,7 +424,7 @@ resources:
     semantic_contract:
       context_admission: Target09 carries the typed request input token count as side-channel route evidence; Target10 compares it with each candidate max_context_tokens before availability or transport and records context_window_exceeded for candidates that cannot admit the request.
       priority_schedule: Target09 captures the server-scoped schedule and Target10 applies the local-time provider tier only as an effective-priority adjustment inside the selected route pool.
-      payload_boundary: requestInputTokens and max_context_tokens are control-side admission facts and must not enter provider wire payload or client response payload. The provider-declared output cap is the single candidate field that is a provider wire parameter rather than a control-side admission fact; Target09 attaches it from the published model declaration, Target10 carries it unchanged, and ProviderReqCompat06ProviderCompat may project it into the provider wire payload only when the client supplied no output limit.
+      payload_boundary: requestInputTokens and max_context_tokens are control-side admission facts and must not enter provider wire payload or client response payload. The provider-declared output cap and the provider-declared reasoning-effort policy are candidate fields that may influence provider wire parameters; Target09 attaches them from the published provider/model declarations, Target10 carries them unchanged, and ProviderReqCompat06ProviderCompat may project the output cap only when the client supplied no output limit and may apply the configured reasoning effort after standard projection and existing compat mappings.
     allowed_writers: [V3Target09CandidateSetExpanded]
     allowed_readers: [V3Target10ConcreteProviderSelected, V3Error03TargetLocalAction]
     forbidden_writers: [routecodex-v3-virtual-router, routecodex-v3-server, routecodex-v3-provider-responses]
@@ -443,6 +443,7 @@ resources:
       tier_progression: a higher numeric priority tier is selectable only when every lower-priority candidate is unavailable in the current session
       context_admission: Target10 scales route request_input_tokens by the candidate model context_token_estimate_scale_bps (default 10000 and never below 10000) before comparing max_context_tokens; an omitted max_context_tokens compiles to the documented 200000-token default, below 90 percent keeps configured order, 90 through 100 percent remains eligible but is demoted below normal candidates in the same route tier, route-tier precedence still beats a lower-tier normal candidate, and above 100 percent is filtered before transport
       protocol_decision_inputs: providerType and provider.responses.process from the selected Target10 truth; process=chat is a Relay execution requirement, not a provider id special case.
+      provider_request_policy: the selected candidate carries the compiled provider reasoning-effort policy; ProviderReqCompat06ProviderCompat is the only runtime owner that applies it to the provider wire payload, and an unsupported protocol policy is rejected by Config compile before manifest publication.
     allowed_writers: [V3Target10ConcreteProviderSelected]
     allowed_readers: [V3Execution11ProtocolDecision, V3ResponsesDirect11Policy, ProviderReqCompat06ProviderCompat, V3Provider12ResponsesWirePayload, build_v3_openai_chat_transport_request_from_v3_provider_08]
     forbidden_writers: [routecodex-v3-virtual-router, routecodex-v3-server, V3Resp15ClientPayload]
@@ -977,6 +978,8 @@ resources:
     owner_crate: routecodex-v3-runtime
     owner_node: V3ProviderReqOutbound08WirePayload
     identity: [requestId, providerProtocol, providerId, modelId]
+    semantic_contract:
+      configured_reasoning_effort: ProviderReqCompat06ProviderCompat writes the selected provider's compiled reasoning-effort policy after standard protocol projection and existing compat mappings; an omitted policy preserves the existing client/protocol/compat value. The value applies only to OpenAI Chat and Responses providers because unsupported protocols fail Config compile before manifest publication.
     allowed_writers: [ProviderReqCompat06ProviderCompat, V3ProviderReqOutbound08WirePayload]
     allowed_readers: [V3ProviderReqOutbound09TransportRequest, build_v3_openai_chat_transport_request_from_v3_provider_08]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-debug, V3HubReqInbound02Normalized, V3HubReqChatProcess04Governed]
@@ -1219,7 +1222,7 @@ resources:
       health_window: latest 100 calls for this provider+authAlias+model
       score_contract: clamp(configured_priority + sum(deltas), 0, 150)
       deltas: { normal_http: 1, recoverable_including_502: -5, account_401_403: -20 }
-      cooldown_condition: a recoverable typed provider failure blocks the exact providerId+authAlias+model identity only after three consecutive failures of the same typed fingerprint; typed irrecoverable account/billing classes (401..403) block on their first occurrence; the dynamic cooldown/probe ladder is selected from the continuous same-fingerprint failure streak and meaningful observed failure rate
+      cooldown_condition: an isolated recoverable failure does not block the exact providerId+authAlias+model identity; the default second consecutive same-fingerprint failure creates cooldown, real success clears the streak, and explicit terminal policies retain their declared threshold; the dynamic cooldown/probe ladder is selected from continuous same-fingerprint failure streak and meaningful observed failure rate
       revival_rule: only a successful provider transport probe may remove cooldown state
       exhaustion_rescue_rule: the complete candidate set may force one single-flight probe per continuous cooldown block; only a successful probe resets that generation
       generation_state: rescueProbeAttempted remains attached to the providerId+authAlias cooldown block until a successful probe removes the block
@@ -1255,7 +1258,7 @@ resources:
       cross_session: shared
       cross_model_same_key: shared
       sibling_keys: isolated
-      cooldown_condition: a recoverable typed provider failure blocks the providerId+authAlias auth-key identity only after three consecutive failures of the same typed fingerprint; typed irrecoverable account/billing classes (401..403) block on their first occurrence
+      cooldown_condition: a recoverable typed provider failure blocks the providerId+authAlias auth-key identity after its declared threshold of consecutive failures of the same typed fingerprint, default two; typed irrecoverable account/billing classes (401..403) block on their first occurrence
       cooldown_deadline: provider-owned adaptive ladder 5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s
       revival_rule: only a due auth-key probe success clears the auth-key cooldown and consecutive failure counts
       dry_run_rule: dry-run never acquires or sends an auth-key health probe
