@@ -771,6 +771,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         trace.push("V3Transport13ResponsesHttpRequest");
         provider_request_snapshot = Some(transport_request.provider_request_projection());
 
+        default_transport::prepare_direct_sse_attempt(&transport_request, &attempt_budget);
         send_attempts = match attempt_budget.admit_transport_attempt() {
             Ok(attempts) => attempts,
             Err(error) => {
@@ -788,24 +789,20 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 &hook_registry,
             );
         }
-        let provider_raw = match tokio::time::timeout(
-            default_transport::responses_direct_transport_response_timeout(
+        let (first_word_deadline, transport_result) =
+            default_transport::send_direct_provider_headers(
+                transport,
+                transport_request,
+                Some(
+                    default_transport::responses_direct_transport_response_timeout(
+                        manifest,
+                        &policy.target.candidate.provider_id,
+                    ),
+                ),
                 manifest,
-                &policy.target.candidate.provider_id,
-            ),
-            transport.send(transport_request),
-        )
-        .await
-        .unwrap_or_else(|_elapsed| {
-            // provider 挂起（响应头等待超时）：归一化为 transport 错误进入错误链
-            // （reselect 切 provider + health 记录 + 3 次拉黑 15 分钟），避免客户端
-            // 无限重试命中同一挂起 provider；错误只反映 provider 行为。
-            Err(V3ProviderError::Transport {
-                request_id: standardized.request_id.clone(),
-                provider_id: policy.target.candidate.provider_id.clone(),
-                reason: default_transport::V3_DIRECT_TRANSPORT_HANG_REASON.to_string(),
-            })
-        }) {
+            )
+            .await;
+        let provider_raw = match transport_result {
             Ok(raw) => raw,
             Err(V3ProviderError::ConcurrencyBusy { .. }) => {
                 if let Err(error) = runtime_timing.finish_external() {
@@ -1011,6 +1008,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 }
             };
 
+        let provider_raw = crate::hub_v1::guard_v3_provider_sse_first_word_response(
+            provider_raw,
+            direct_response_compat_context.provider_protocol,
+            first_word_deadline,
+            &attempt_budget,
+        );
         let mut response_projection = match hook_registry
             .run_response_projection_with_context(provider_raw, direct_response_compat_context)
             .await

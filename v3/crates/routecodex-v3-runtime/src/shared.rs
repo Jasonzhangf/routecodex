@@ -26,7 +26,7 @@ use std::sync::{Arc, Mutex};
 
 pub(crate) use crate::shared_direct_thinking_compat::project_v3_thinking_tag_text;
 
-/// Direct SSE 首语义帧与帧间超时：provider 返回 200 后挂起时 fail-fast。
+/// Direct SSE 首语义输出时限；首字之后没有帧间或整请求时限。
 /// 未配置时使用 30s compatibility default；慢 provider 可显式覆盖该预算。
 /// 超时归一化为 transport Error01 进入错误链（reselect / Error06 终态投影），
 /// 不在 server/SSE 层裸造错误帧。
@@ -748,7 +748,7 @@ fn observed_sse_client_stream_with_protocol(
     provider_id: String,
     stream: V3ProviderSseStream,
     usage_observation: V3RuntimeStreamObservation,
-    frame_interval_timeout: std::time::Duration,
+    _frame_interval_timeout: std::time::Duration,
     compatibility_profile: Option<&str>,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
     tool_thinking_enabled: bool,
@@ -763,7 +763,6 @@ fn observed_sse_client_stream_with_protocol(
         provider_id: String,
         done: bool,
         terminal_observed: bool,
-        semantic_deadline: tokio::time::Instant,
         compatibility_profile: Option<String>,
         tool_thinking_enabled: bool,
         toolreason_client_projection: bool,
@@ -784,7 +783,6 @@ fn observed_sse_client_stream_with_protocol(
             provider_id,
             done: false,
             terminal_observed: false,
-            semantic_deadline: tokio::time::Instant::now() + frame_interval_timeout,
             compatibility_profile: compatibility_profile.map(ToOwned::to_owned),
             tool_thinking_enabled,
             toolreason_client_projection,
@@ -800,46 +798,7 @@ fn observed_sse_client_stream_with_protocol(
             if state.done {
                 return None;
             }
-            let next = match tokio::time::timeout_at(state.semantic_deadline, state.stream.next())
-                .await
-            {
-                Ok(next) => next,
-                Err(_) if state.terminal_observed => {
-                    if state.tool_thinking_enabled {
-                        crate::hub_v1::finalize_v3_toolreason_observation_at_resp03_with_context(
-                            &state.tool_thinking_tool_names,
-                            &mut state.tool_thinking_pending_reasons,
-                            &mut state.tool_thinking_reason_emitted,
-                            crate::hub_v1::V3ToolreasonObservationContext {
-                                session_id: state.session_id.as_deref(),
-                                request_id: state.request_id.as_deref(),
-                            },
-                        );
-                    }
-                    return None;
-                }
-                Err(_) => {
-                    state.done = true;
-                    let error = build_v3_error_01_source_raised_external(
-                        V3ErrorSourceKind::ProviderFailure,
-                        "V3ProviderResp14Raw",
-                        "provider_response_sse_inter_event_timeout",
-                        "provider response SSE stream did not produce the next frame within timeout",
-                        V3ExternalErrorLink {
-                            kind: V3ExternalErrorKind::Provider,
-                            status: None,
-                            code: Some("PROVIDER_RESPONSE_SSE_INTER_EVENT_TIMEOUT".to_string()),
-                            provider_id: Some(state.provider_id.clone()),
-                            upstream_request_id: None,
-                            message: Some(
-                                "provider response SSE stream did not produce the next frame within timeout"
-                                    .to_string(),
-                            ),
-                        },
-                    );
-                    return Some((Err(error), state));
-                }
-            };
+            let next = state.stream.next().await;
             match next {
                 Some(Ok(chunk)) => {
                     let client_chunk = if state.tool_thinking_enabled {
@@ -880,16 +839,8 @@ fn observed_sse_client_stream_with_protocol(
                         provider_protocol,
                     );
                     let result = match result {
-                        Ok((terminal, semantic)) => {
+                        Ok((terminal, _semantic)) => {
                             state.terminal_observed |= terminal;
-                            if terminal {
-                                state.semantic_deadline =
-                                    tokio::time::Instant::now() + frame_interval_timeout;
-                            }
-                            if semantic && !terminal {
-                                state.semantic_deadline =
-                                    tokio::time::Instant::now() + frame_interval_timeout;
-                            }
                             Ok(chunk)
                         }
                         Err(error) => Err(error),
@@ -1387,6 +1338,8 @@ mod tests {
     use super::*;
     use routecodex_v3_provider_responses::V3ProviderResponseHeader;
 
+    include!("shared_sse_semantic_idle_tests.rs");
+
     #[tokio::test]
     async fn direct_sse_preserves_empty_successful_terminals() {
         for (protocol, wire) in [
@@ -1735,7 +1688,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn direct_sse_projection_times_out_after_provider_stalls_between_frames() {
+    async fn direct_sse_projection_has_no_timeout_after_provider_first_word() {
         let first =
             b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"early\"}\n\n".to_vec();
         let mut stream = observed_sse_client_stream_with_timeout(
@@ -1755,16 +1708,16 @@ mod tests {
             .expect("first frame")
             .expect("valid first frame");
         assert!(std::str::from_utf8(&first).unwrap().contains("early"));
-        let error = stream
-            .next()
-            .await
-            .expect("mid-stream stall must become an explicit error")
-            .expect_err("mid-stream stall must not become silent EOF");
-        assert_eq!(error.code, "provider_response_sse_inter_event_timeout");
+        let result =
+            tokio::time::timeout(std::time::Duration::from_millis(60), stream.next()).await;
+        assert!(
+            result.is_err(),
+            "only explicit caller cancellation bounds a post-first-word stall"
+        );
     }
 
     #[tokio::test]
-    async fn direct_sse_projection_times_out_when_provider_only_sends_keepalives() {
+    async fn direct_sse_projection_has_no_timeout_on_post_first_word_keepalives() {
         let first =
             b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"early\"}\n\n".to_vec();
         let keepalives = futures_util::stream::unfold((), |_| async {
@@ -1792,9 +1745,11 @@ mod tests {
                 }
             }
         })
-        .await
-        .expect("keepalives must not suppress semantic timeout");
-        assert_eq!(result.code, "provider_response_sse_inter_event_timeout");
+        .await;
+        assert!(
+            result.is_err(),
+            "post-first-word keepalives do not install another deadline"
+        );
     }
 
     #[tokio::test]

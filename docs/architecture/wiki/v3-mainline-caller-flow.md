@@ -815,7 +815,7 @@ flowchart TD
 
 ## v3.config.provider_sse_timeout_projection.mainline
 
-Config compiles and publishes the validated per-provider SSE first-frame timeout consumed by the shared Relay guard and Provider HTTP header-wait transport.
+Config publishes one independent semantic first-word interval covering connection, headers and nonsemantic frames. Direct and Relay share the protocol guard; admitted SSE has no total, residence or idle deadline.
 
 Owner feature: `v3.config_interpreter_contract`
 
@@ -831,7 +831,7 @@ flowchart TD
   end
   subgraph c_19_v3_config_provider_sse_timeout_projection_mainline_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
     c_19_v3_config_provider_sse_timeout_projection_mainline_2["v3-runtime::hub_v1<br/>execute_v3_relay_runtime_core<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs</small>"]
-    c_19_v3_config_provider_sse_timeout_projection_mainline_3["v3-runtime::hub_v1<br/>guard_relay_sse_first_frame<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs</small>"]
+    c_19_v3_config_provider_sse_timeout_projection_mainline_3["v3-runtime::hub_v1<br/>guard_v3_provider_sse_first_word<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs</small>"]
   end
   c_19_v3_config_provider_sse_timeout_projection_mainline_0 -->|v3-config-provider-sse-timeout-01<br/>V3ProviderAuthoringConfig → V3ProviderManifest| c_19_v3_config_provider_sse_timeout_projection_mainline_1
   c_19_v3_config_provider_sse_timeout_projection_mainline_2 -->|v3-config-provider-sse-timeout-02<br/>V3Config05ManifestPublished → V3RelaySseFirstFrameGuard| c_19_v3_config_provider_sse_timeout_projection_mainline_3
@@ -841,7 +841,7 @@ flowchart TD
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
 | `v3-config-provider-sse-timeout-01` | `V3ProviderAuthoringConfig` → `V3ProviderManifest` | anchored | compile_providers<br/><small>routecodex-v3-config/src/validate.rs</small> | V3ProviderManifest<br/><small>routecodex-v3-config/src/types.rs</small> | `v3.config_interpreter_contract` |
-| `v3-config-provider-sse-timeout-02` | `V3Config05ManifestPublished` → `V3RelaySseFirstFrameGuard` | anchored | execute_v3_relay_runtime_core<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs</small> | guard_relay_sse_first_frame<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs</small> | `v3.relay_runtime_core` |
+| `v3-config-provider-sse-timeout-02` | `V3Config05ManifestPublished` → `V3RelaySseFirstFrameGuard` | anchored | execute_v3_relay_runtime_core<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs</small> | guard_v3_provider_sse_first_word<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs</small> | `v3.relay_runtime_core` |
 | `v3-config-provider-sse-timeout-03` | `V3Transport13ResponsesHttpRequest` → `V3ProviderResp14Raw` | anchored | ProviderResponsesTransport::send_http<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | send_http_await<br/><small>routecodex-v3-provider-responses/src/shared.rs</small> | `v3.responses_provider_runtime` |
 
 ## v3.config.compact_hub_v1_defaults

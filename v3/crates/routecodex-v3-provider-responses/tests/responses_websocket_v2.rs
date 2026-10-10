@@ -266,6 +266,33 @@ fn target_with_env(url: &str, env: &str) -> V3ResponsesProviderTarget {
 }
 
 #[tokio::test]
+async fn websocket_v2_preserves_configured_first_word_interval_in_request_and_raw_response() {
+    let controlled = start_controlled_websocket(false).await;
+    let mut selected = target(&controlled.url);
+    selected.auth.secret = V3ProviderAuthSecretHandle::ApiKey("websocket-secret".into());
+    selected.sse_first_frame_timeout_ms = Some(60_000);
+    let wire = build_v3_provider_12_responses_wire_payload(
+        "req-ws-first-word-declaration",
+        selected,
+        json!({"model":"model","input":"lookup","stream":true}),
+    )
+    .unwrap();
+    let request = build_v3_transport_13_responses_request_from_v3_provider_12(wire).unwrap();
+    assert_eq!(request.sse_first_frame_timeout_ms(), Some(60_000));
+    let raw = ProviderResponsesTransport::default()
+        .send(request)
+        .await
+        .unwrap();
+    assert_eq!(raw.body_kind(), V3ProviderResponseBodyKind::Sse);
+    assert_eq!(raw.sse_first_frame_timeout_ms(), Some(60_000));
+    let bytes = raw.into_body_bytes().await.unwrap();
+    assert!(std::str::from_utf8(&bytes)
+        .unwrap()
+        .contains("response.completed"));
+    let _ = controlled.shutdown.send(());
+}
+
+#[tokio::test]
 async fn websocket_v2_reuses_one_connection_for_exact_incremental_continuation() {
     let controlled = start_controlled_websocket(false).await;
     std::env::set_var("V3_WS_KEY", "websocket-secret");

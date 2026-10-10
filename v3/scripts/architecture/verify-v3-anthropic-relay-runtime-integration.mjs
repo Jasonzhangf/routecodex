@@ -161,7 +161,7 @@ for (const node of [
 
 for (const phrase of [
   'compile_v3_hub_v1_static_registry()',
-  'transport.send(transport_request),',
+  'transport.send(transport_request)',
   'V3_ERROR_CHAIN_NODE_IDS',
   'materialize_v3_provider_sse_as_canonical_response',
   'project_v3_responses_json_as_anthropic_events',
@@ -206,7 +206,7 @@ requireOrder(runtime, runtimePath, [
   'trace.push("V3ProviderReqOutbound08WirePayload")',
   'build_v3_transport_13_responses_http_request_from_v3_provider_12(',
   'trace.push("V3ProviderReqOutbound09TransportRequest")',
-  'transport.send(transport_request),',
+  'transport.send(transport_request)',
 ]);
 
 requireText(server, serverPath, '.route("/v1/messages", post(pending_endpoint))');

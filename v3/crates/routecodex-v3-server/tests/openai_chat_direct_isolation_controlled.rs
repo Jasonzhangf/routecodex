@@ -13,6 +13,8 @@ use serde_json::{json, Value};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::{mpsc, oneshot, Mutex};
 
+#[path = "support/openai_chat_direct_first_word.rs"]
+mod direct_first_word;
 #[path = "../../../crates/routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
 mod hub_v1_fixture;
 use hub_v1_fixture::{hub_v1_server_execution, hub_v1_test_declaration};
@@ -22,6 +24,7 @@ static TEST_LOCK: Mutex<()> = Mutex::const_new(());
 #[derive(Debug)]
 struct ProviderCapture {
     body: Value,
+    accept: Option<String>,
 }
 
 #[derive(Clone)]
@@ -31,13 +34,22 @@ struct ProviderState {
 
 async fn controlled_openai_chat_upstream(
     State(state): State<Arc<ProviderState>>,
-    _headers: HeaderMap,
+    headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response<Body> {
     state
         .captures
-        .send(ProviderCapture { body: body.clone() })
+        .send(ProviderCapture {
+            body: body.clone(),
+            accept: headers
+                .get("accept")
+                .map(|value| value.to_str().unwrap().to_string()),
+        })
         .unwrap();
+
+    if let Some(response) = direct_first_word::controlled_response(&body).await {
+        return response;
+    }
 
     if body.pointer("/messages/0/content").and_then(Value::as_str) == Some("fail") {
         return Response::builder()
@@ -399,6 +411,15 @@ fn manifest_with_profile(
     upstream_port: u16,
     compatibility_profile: Option<&str>,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
+    manifest_with_policy(server_port, upstream_port, compatibility_profile, "")
+}
+
+fn manifest_with_policy(
+    server_port: u16,
+    upstream_port: u16,
+    compatibility_profile: Option<&str>,
+    timeout_policy: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
     // The shared hub_v1 fixture now defaults openai_chat to Direct, which is the
     // behavior under test: a chat entry with a chat-wire provider must run the
     // isolated Direct skeleton.
@@ -423,6 +444,7 @@ endpoints = ["openai_chat"]
 type = "openai_chat"
 base_url = "http://127.0.0.1:{upstream_port}/v1"
 default_model = "chat-wire-model"
+{timeout_policy}
 {compatibility_profile}auth = {{ type = "api_key", entries = [{{ alias = "controlled", env = "V3_OPENAI_CHAT_CONTROLLED_KEY" }}] }}
 [providers.controlled.models.chat-wire-model]
 wire_name = "chat-wire-model"

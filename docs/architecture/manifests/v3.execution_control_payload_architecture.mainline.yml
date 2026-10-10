@@ -57,7 +57,8 @@ budget_contract:
   per_attempt: required
   per_request: required
   process_global: required
-  residence_or_deadline: required
+  residence_or_deadline: non_sse_only
+  sse_deadline: semantic_first_word_only
   reserve_before_append_or_copy: true
   provider_attempt_and_client_replay_share_request_budget: true
   server_budget_construction: forbidden

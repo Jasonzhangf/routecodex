@@ -215,32 +215,33 @@ async fn guard_rejects_late_malformed_responses_frame_before_client_output() {
     );
 }
 
-/// 空闲守卫：正常 provider 流逐帧透传、EOF 原样结束（不改变语义）。
+/// First-word guard preserves normal provider bytes and EOF.
 #[tokio::test]
-async fn guard_idle_passes_through_chunks_until_eof() {
+async fn guard_first_word_passes_through_chunks_until_eof() {
     let stream: routecodex_v3_provider_responses::V3ProviderSseStream =
         Box::pin(futures_util::stream::iter(vec![
-            Ok(b"data: a\n\n".to_vec()),
-            Ok(b"data: b\n\n".to_vec()),
+            Ok(b"data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n".to_vec()),
+            Ok(b"data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"b\"}}]}\n\n".to_vec()),
         ]));
-    let mut guarded = guard_v3_provider_sse_idle(
+    let mut guarded = super::relay_runtime_shared::guard_v3_provider_sse_first_word(
         "req-idle-ok",
         "provider-1",
+        V3HubProviderWireProtocol::OpenAiChat,
         stream,
-        std::time::Duration::from_secs(5),
+        tokio::time::Instant::now() + std::time::Duration::from_secs(5),
     );
     let first = guarded
         .next()
         .await
         .expect("first frame")
         .expect("frame ok");
-    assert_eq!(first, b"data: a\n\n".to_vec());
+    assert_eq!(first, b"data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n".to_vec());
     let second = guarded
         .next()
         .await
         .expect("second frame")
         .expect("frame ok");
-    assert_eq!(second, b"data: b\n\n".to_vec());
+    assert_eq!(second, b"data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"b\"}}]}\n\n".to_vec());
     assert!(
         guarded.next().await.is_none(),
         "stream must end after provider frames"
@@ -250,48 +251,45 @@ async fn guard_idle_passes_through_chunks_until_eof() {
 /// 空闲守卫：provider 流数据挂起（无新帧）超过窗口 -> 产出 Transport 错误并终止
 /// （进入 provider 失败链切 provider），而不是无限等待。
 #[tokio::test]
-async fn guard_idle_times_out_on_hung_stream() {
+async fn guard_first_word_times_out_on_hung_stream() {
     let stream: routecodex_v3_provider_responses::V3ProviderSseStream =
         Box::pin(futures_util::stream::pending());
-    let mut guarded = guard_v3_provider_sse_idle(
+    let mut guarded = super::relay_runtime_shared::guard_v3_provider_sse_first_word(
         "req-idle-hung",
         "provider-1",
+        V3HubProviderWireProtocol::OpenAiChat,
         stream,
-        std::time::Duration::from_millis(50),
+        tokio::time::Instant::now() + std::time::Duration::from_millis(50),
     );
     let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), guarded.next()).await;
     match outcome {
         Ok(Some(Err(V3ProviderError::Transport { reason, .. }))) => {
             assert!(
-                reason.contains("idle timeout"),
-                "hung stream must produce idle timeout transport error, got {reason}"
-            );
-            assert!(
-                reason.contains("50ms"),
-                "idle timeout error must report the configured window, got {reason}"
+                reason.contains("semantic first frame"),
+                "hung stream must produce semantic first-word timeout, got {reason}"
             );
         }
         other => panic!("hung stream must produce Transport error, got {other:?}"),
     }
     assert!(
         guarded.next().await.is_none(),
-        "guard must terminate stream after idle timeout"
+        "guard must terminate stream after first-word timeout"
     );
 }
 
-/// 首帧已提交后 provider 再挂起：后续 idle guard 仍必须生效，避免客户端
-/// 在已收到部分响应后无限等待。
+/// After first semantic output the guard applies no time cutoff.
 #[tokio::test]
-async fn guard_idle_times_out_after_first_frame() {
+async fn guard_first_word_does_not_time_out_after_first_frame() {
     let stream: routecodex_v3_provider_responses::V3ProviderSseStream = Box::pin(
-        futures_util::stream::iter(vec![Ok(b"data: first\n\n".to_vec())])
+        futures_util::stream::iter(vec![Ok(b"data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"first\"}}]}\n\n".to_vec())])
             .chain(futures_util::stream::pending()),
     );
-    let mut guarded = guard_v3_provider_sse_idle(
+    let mut guarded = super::relay_runtime_shared::guard_v3_provider_sse_first_word(
         "req-idle-after-first",
         "provider-1",
+        V3HubProviderWireProtocol::OpenAiChat,
         stream,
-        std::time::Duration::from_millis(50),
+        tokio::time::Instant::now() + std::time::Duration::from_millis(50),
     );
     assert_eq!(
         guarded
@@ -299,37 +297,33 @@ async fn guard_idle_times_out_after_first_frame() {
             .await
             .expect("first frame")
             .expect("first frame must pass"),
-        b"data: first\n\n".to_vec()
+        b"data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"first\"}}]}\n\n".to_vec()
     );
-    let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), guarded.next()).await;
-    match outcome {
-        Ok(Some(Err(V3ProviderError::Transport { reason, .. }))) => {
-            assert!(
-                reason.contains("idle timeout"),
-                "unexpected reason: {reason}"
-            );
-        }
-        other => panic!("post-first-frame hang must produce Transport error, got {other:?}"),
-    }
+    let outcome = tokio::time::timeout(std::time::Duration::from_millis(100), guarded.next()).await;
+    assert!(
+        outcome.is_err(),
+        "caller cancellation is the only time bound after first word"
+    );
 }
 
 #[tokio::test]
-async fn relay_attempt_deadline_stops_continuous_non_terminal_stream() {
+async fn relay_first_word_deadline_stops_continuous_keepalives() {
     let stream: routecodex_v3_provider_responses::V3ProviderSseStream = Box::pin(
-        futures_util::stream::iter(vec![Ok(b"data: response.created\n\n".to_vec())]).chain(
+        futures_util::stream::iter(vec![Ok(b": keepalive\n\n".to_vec())]).chain(
             futures_util::stream::unfold((), |_| async {
                 Some((
-                    Ok::<Vec<u8>, V3ProviderError>(b"data: response.progress\n\n".to_vec()),
+                    Ok::<Vec<u8>, V3ProviderError>(b"data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n".to_vec()),
                     (),
                 ))
             }),
         ),
     );
-    let mut stream = guard_v3_provider_sse_attempt_deadline(
+    let mut stream = super::relay_runtime_shared::guard_v3_provider_sse_first_word(
         "req-residence-deadline",
         "provider-1",
+        V3HubProviderWireProtocol::OpenAiChat,
         stream,
-        std::time::Instant::now() + std::time::Duration::from_millis(50),
+        tokio::time::Instant::now() + std::time::Duration::from_millis(50),
     );
     let result = tokio::time::timeout(std::time::Duration::from_secs(2), async {
         loop {
@@ -344,7 +338,7 @@ async fn relay_attempt_deadline_stops_continuous_non_terminal_stream() {
     assert!(matches!(
         result,
         Some(Err(V3ProviderError::Transport { reason, .. }))
-            if reason.contains("residence deadline")
+            if reason.contains("semantic first frame")
     ));
 }
 

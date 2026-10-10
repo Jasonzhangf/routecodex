@@ -1,7 +1,7 @@
 use futures_util::Stream;
 use std::fmt;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
@@ -129,14 +129,26 @@ impl V3RequestExecutionControl {
         self.attempt_budget.clone()
     }
 
-    pub fn deadline_unix_ms(&self) -> Result<u64, V3AttemptStoreError> {
+    /// Auxiliary work has its own bounded dispatch interval after an SSE
+    /// attempt. It cannot inherit an expired parent request lifetime. JSON
+    /// retains the original request deadline for the same auxiliary operation.
+    pub fn auxiliary_operation_deadline_unix_ms(&self) -> Result<u64, V3AttemptStoreError> {
         let now = Instant::now();
-        if now >= self.attempt_budget.inner.deadline {
-            return Err(V3AttemptStoreError::LocalResourceExhausted(
-                "request execution deadline has expired".to_string(),
-            ));
-        }
-        let remaining = self.attempt_budget.inner.deadline.duration_since(now);
+        let remaining = if self
+            .attempt_budget
+            .inner
+            .sse_first_word_only
+            .load(Ordering::Acquire)
+        {
+            self.attempt_budget.inner.limits.residence_timeout
+        } else {
+            if now >= self.attempt_budget.inner.deadline {
+                return Err(V3AttemptStoreError::LocalResourceExhausted(
+                    "request execution deadline has expired".to_string(),
+                ));
+            }
+            self.attempt_budget.inner.deadline.duration_since(now)
+        };
         let now_unix_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|error| {
@@ -154,7 +166,7 @@ impl V3RequestExecutionControl {
             })
             .ok_or_else(|| {
                 V3AttemptStoreError::InvalidAttemptState(
-                    "request execution deadline overflowed Unix milliseconds".to_string(),
+                    "auxiliary operation deadline overflowed Unix milliseconds".to_string(),
                 )
             })
     }
@@ -172,6 +184,7 @@ struct V3AttemptBudgetInner {
     request_resident_bytes: AtomicUsize,
     process_resident_bytes: V3ProcessResidentBytes,
     deadline: Instant,
+    sse_first_word_only: AtomicBool,
 }
 
 enum V3ProcessResidentBytes {
@@ -243,6 +256,7 @@ impl V3AttemptBudget {
                 request_resident_bytes: AtomicUsize::new(0),
                 process_resident_bytes,
                 deadline: Instant::now() + limits.residence_timeout,
+                sse_first_word_only: AtomicBool::new(false),
             }),
         }
     }
@@ -259,7 +273,7 @@ impl V3AttemptBudget {
     }
 
     fn ensure_resident(&self) -> Result<(), V3AttemptStoreError> {
-        if Instant::now() >= self.inner.deadline {
+        if self.residence_expired() {
             return Err(V3AttemptStoreError::LocalResourceExhausted(
                 "provider SSE attempt exceeded the request residence deadline".to_string(),
             ));
@@ -267,8 +281,18 @@ impl V3AttemptBudget {
         Ok(())
     }
 
-    pub(crate) fn residence_deadline(&self) -> Instant {
-        self.inner.deadline
+    /// SSE has one semantic first-word deadline at the protocol stream owner.
+    /// Its request-local reservations retain all capacity/attempt limits, but
+    /// never impose a second wall-clock deadline, including across retries.
+    pub(crate) fn use_sse_first_word_policy(&self) {
+        self.inner
+            .sse_first_word_only
+            .store(true, Ordering::Release);
+    }
+
+    pub(crate) fn residence_expired(&self) -> bool {
+        !self.inner.sse_first_word_only.load(Ordering::Acquire)
+            && Instant::now() >= self.inner.deadline
     }
 
     pub(crate) fn admit_transport_attempt(&self) -> Result<usize, V3AttemptStoreError> {

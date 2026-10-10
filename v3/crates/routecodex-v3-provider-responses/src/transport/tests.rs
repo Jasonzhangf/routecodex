@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "tests/sse_lifetime.rs"]
+mod sse_lifetime;
+
 #[test]
 fn provider_default_http_read_timeout_matches_fifteen_minute_local_budget() {
     assert_eq!(

@@ -41,18 +41,171 @@ pub(crate) fn v3_relay_transport_response_timeout_from_ms(
     std::time::Duration::from_millis(request_timeout_ms.filter(|&ms| ms > 0).unwrap_or(300_000))
 }
 
-/// The published SSE timeout covers both first frame and inter-frame idle time.
-pub(crate) fn v3_provider_sse_idle_timeout(
+/// One absolute semantic first-word interval, including response headers.
+pub(crate) fn v3_provider_sse_first_word_timeout(
     manifest: &V3Config05ManifestPublished,
     provider_id: &str,
 ) -> Result<std::time::Duration, String> {
-    manifest.providers.get(provider_id).and_then(|provider| provider.sse_first_frame_timeout_ms)
-        .filter(|timeout_ms| *timeout_ms > 0).map(std::time::Duration::from_millis)
+    manifest
+        .providers
+        .get(provider_id)
+        .and_then(|provider| provider.sse_first_frame_timeout_ms)
+        .filter(|timeout_ms| *timeout_ms > 0)
+        .map(std::time::Duration::from_millis)
         .ok_or_else(|| {
             format!(
-                "published provider SSE first-frame/inter-frame timeout is missing for provider {provider_id}"
+                "published provider SSE first-word timeout is missing for provider {provider_id}"
             )
         })
+}
+
+/// Protocol classification owns progress. Headers, comments, empty role deltas
+/// and transport closeout never renew this deadline; after semantic output
+/// there is no total or inter-frame timeout. The raw bytes remain untouched.
+pub(crate) fn guard_v3_provider_sse_first_word(
+    request_id: &str,
+    provider_id: &str,
+    protocol: crate::hub_v1::V3HubProviderWireProtocol,
+    stream: routecodex_v3_provider_responses::V3ProviderSseStream,
+    deadline: tokio::time::Instant,
+) -> routecodex_v3_provider_responses::V3ProviderSseStream {
+    struct State {
+        stream: routecodex_v3_provider_responses::V3ProviderSseStream,
+        decoder: SseIncrementalDecoder,
+        first_word_seen: bool,
+        failed: bool,
+    }
+    let request_id = request_id.to_string();
+    let provider_id = provider_id.to_string();
+    Box::pin(futures_util::stream::unfold(
+        State {
+            stream,
+            decoder: SseIncrementalDecoder::new(SseTransportLimits::default()),
+            first_word_seen: false,
+            failed: false,
+        },
+        move |mut state| {
+            let request_id = request_id.clone();
+            let provider_id = provider_id.clone();
+            async move {
+                if state.failed {
+                    return None;
+                }
+                if !state.first_word_seen && tokio::time::Instant::now() >= deadline {
+                    state.failed = true;
+                    return Some((Err(V3ProviderError::Transport {
+                        request_id,
+                        provider_id,
+                        reason: "provider SSE stream did not produce a semantic first frame within timeout".to_string(),
+                    }), state));
+                }
+                let next = if state.first_word_seen {
+                    state.stream.next().await
+                } else {
+                    match tokio::time::timeout_at(deadline, state.stream.next()).await {
+                        Ok(next) => next,
+                        Err(_) => {
+                            state.failed = true;
+                            return Some((Err(V3ProviderError::Transport {
+                                request_id,
+                                provider_id,
+                                reason: "provider SSE stream did not produce a semantic first frame within timeout".to_string(),
+                            }), state));
+                        }
+                    }
+                };
+                let chunk = match next {
+                    Some(Ok(chunk)) => chunk,
+                    Some(Err(error)) => {
+                        state.failed = true;
+                        return Some((Err(error), state));
+                    }
+                    None => return None,
+                };
+                if !state.first_word_seen {
+                    let result = (|| -> Result<bool, String> {
+                        let frames = state
+                            .decoder
+                            .push(build_v3_sse_transport_in_01_raw_chunk(&chunk))
+                            .map_err(|error| error.to_string())?;
+                        let mut progress = false;
+                        for frame in frames {
+                            let Ok(data) =
+                                crate::hub_v1::normalize_v3_provider_sse_json_data_for_event_name(
+                                    protocol,
+                                    frame.frame().fields(),
+                                )
+                            else {
+                                continue;
+                            };
+                            if data.trim() == "[DONE]"
+                                || crate::hub_v1::is_v3_provider_sse_transport_keepalive_data(&data)
+                            {
+                                continue;
+                            }
+                            // This guard observes progress; it is not an extra
+                            // semantic validator. The downstream protocol owner
+                            // retains its existing error/passage decisions.
+                            let outcome =
+                                crate::hub_v1::classify_v3_provider_sse_json_data(protocol, &data)
+                                    .unwrap_or(None);
+                            progress |= matches!(outcome, Some(
+                                crate::hub_v1::V3ProviderResponsesJsonFrameOutcome::StartClientStream
+                                | crate::hub_v1::V3ProviderResponsesJsonFrameOutcome::Terminal
+                                | crate::hub_v1::V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput
+                                | crate::hub_v1::V3ProviderResponsesJsonFrameOutcome::Failure { .. }
+                            ));
+                        }
+                        Ok(progress)
+                    })();
+                    match result {
+                        Ok(progress) => state.first_word_seen = progress,
+                        Err(reason) => {
+                            state.failed = true;
+                            return Some((
+                                Err(V3ProviderError::MalformedSse {
+                                    request_id,
+                                    provider_id,
+                                    reason,
+                                }),
+                                state,
+                            ));
+                        }
+                    }
+                }
+                Some((Ok(chunk), state))
+            }
+        },
+    ))
+}
+
+/// Direct protocol hooks receive the same first-word guard as Relay. Rebuild
+/// only the transport envelope and preserve every header and raw payload byte.
+pub(crate) fn guard_v3_provider_sse_first_word_response(
+    raw: V3ProviderResp14Raw,
+    protocol: crate::hub_v1::V3HubProviderWireProtocol,
+    deadline: tokio::time::Instant,
+    budget: &crate::nodes::V3AttemptBudget,
+) -> V3ProviderResp14Raw {
+    if raw.body_kind() != routecodex_v3_provider_responses::V3ProviderResponseBodyKind::Sse {
+        return raw;
+    }
+    budget.use_sse_first_word_policy();
+    let request_id = raw.request_id().to_string();
+    let provider_id = raw.provider_id().to_string();
+    let status = raw.status();
+    let headers = raw.headers().to_vec();
+    let profile = raw.compatibility_profile().map(ToOwned::to_owned);
+    let timeout = raw.sse_first_frame_timeout_ms();
+    let routecodex_v3_provider_responses::V3ProviderResponseBody::Sse(stream) = raw.into_body()
+    else {
+        unreachable!()
+    };
+    let stream =
+        guard_v3_provider_sse_first_word(&request_id, &provider_id, protocol, stream, deadline);
+    V3ProviderResp14Raw::from_sse(request_id, provider_id, status, headers, stream)
+        .with_compatibility_profile(profile)
+        .with_sse_first_frame_timeout_ms(timeout)
 }
 
 /// 统一的 relay provider 失败结构（替代各协议 `V3*RelayProviderFailure` 副本）。

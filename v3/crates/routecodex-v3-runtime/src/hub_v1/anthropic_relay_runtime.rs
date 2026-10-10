@@ -778,6 +778,11 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         if let Err(timing_error) = runtime_timing.start_external() {
             return Err(V3AnthropicRelayRuntimeError::Target(timing_error));
         }
+        let provider_sse = transport_request.stream_intent()
+            == routecodex_v3_provider_responses::V3ResponsesStreamIntent::Sse;
+        if provider_sse {
+            attempt_budget.use_sse_first_word_policy();
+        }
         attempt_budget.admit_transport_attempt().map_err(|error| {
             V3AnthropicRelayRuntimeError::ExecutionControlRequest(error.to_string())
         })?;
@@ -787,20 +792,34 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             }
             None => transport_request,
         };
-        let transport_result = match tokio::time::timeout(
-            v3_relay_transport_response_timeout(manifest, &selected_target_provider_id),
-            transport.send(transport_request),
-        )
-        .await
-        {
-            Err(_) => Err(V3ProviderError::Transport {
-                request_id: input.request_id.clone(),
-                provider_id: selected_target_provider_id.clone(),
-                reason: "provider transport did not return response headers within timeout"
-                    .to_string(),
-            }),
-            Ok(result) => result,
+        let first_word_deadline = tokio::time::Instant::now()
+            + if provider_sse {
+                crate::hub_v1::relay_runtime_shared::v3_provider_sse_first_word_timeout(
+                    manifest,
+                    &selected_target_provider_id,
+                )
+                .map_err(V3AnthropicRelayRuntimeError::Target)?
+            } else {
+                v3_relay_transport_response_timeout(manifest, &selected_target_provider_id)
+            };
+        let response_deadline = if provider_sse {
+            first_word_deadline
+        } else {
+            tokio::time::Instant::now()
+                + v3_relay_transport_response_timeout(manifest, &selected_target_provider_id)
         };
+        let transport_result =
+            match tokio::time::timeout_at(response_deadline, transport.send(transport_request))
+                .await
+            {
+                Err(_) => Err(V3ProviderError::Transport {
+                    request_id: input.request_id.clone(),
+                    provider_id: selected_target_provider_id.clone(),
+                    reason: "provider transport did not return response headers within timeout"
+                        .to_string(),
+                }),
+                Ok(result) => result,
+            };
         let provider_raw = match transport_result {
             Ok(raw) => raw,
             Err(V3ProviderError::ConcurrencyBusy { .. }) => {
@@ -903,29 +922,15 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         let provider_status = provider_raw.status();
         match provider_raw.into_body() {
             V3ProviderResponseBody::Sse(stream) => {
-                let sse_idle_timeout =
-                    crate::hub_v1::relay_runtime_core::v3_provider_sse_idle_timeout(
-                        manifest,
-                        &selected_target_provider_id,
-                    )
-                    .map_err(V3AnthropicRelayRuntimeError::Target)?;
-                let stream =
-                    crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_attempt_deadline(
-                        &input.request_id,
-                        &selected_target_provider_id,
-                        stream,
-                        attempt_budget.residence_deadline(),
-                    );
-                let chunks = match collect_v3_anthropic_relay_provider_sse_chunks(
-                    crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_idle(
-                        &input.request_id,
-                        &selected_target_provider_id,
-                        stream,
-                        sse_idle_timeout,
-                    ),
-                )
-                .await
-                {
+                attempt_budget.use_sse_first_word_policy();
+                let stream = crate::hub_v1::relay_runtime_shared::guard_v3_provider_sse_first_word(
+                    &input.request_id,
+                    &selected_target_provider_id,
+                    provider_wire_protocol,
+                    stream,
+                    first_word_deadline,
+                );
+                let chunks = match collect_v3_anthropic_relay_provider_sse_chunks(stream).await {
                     Ok(chunks) => chunks,
                     Err(error) => {
                         let failure = provider_runtime_failure(error, &selected_target_provider_id);
@@ -947,7 +952,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         if let Some(failure) = terminal_failure {
                             return Ok(provider_failure_output(failure, trace));
                         }
-                        if attempt_budget.residence_deadline() <= std::time::Instant::now() {
+                        if attempt_budget.residence_expired() {
                             return Ok(provider_failure_output(
                                 terminalize_provider_failure(failure, last_external_http.clone()),
                                 trace,

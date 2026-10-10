@@ -40,7 +40,7 @@ pub(crate) fn build_v3_web_search_hook_request<S: V3WebSearchHookScopeSource + ?
         content_types,
         scope: scope.web_search_hook_scope(),
         deadline_unix_ms: execution_control
-            .deadline_unix_ms()
+            .auxiliary_operation_deadline_unix_ms()
             .map_err(|_| WebSearchHookContractError::DeadlineExpired)?,
         policy_id: policy_id.to_string(),
     };
@@ -103,9 +103,13 @@ mod tests {
     use serde_json::json;
 
     fn execution_control() -> V3RequestExecutionControl {
+        execution_control_with_residence_timeout(60_000)
+    }
+
+    fn execution_control_with_residence_timeout(timeout_ms: u64) -> V3RequestExecutionControl {
         let manifest = compile_v3_config_05_manifest(
             parse_v3_config_02_authoring(
-                r#"
+                &r#"
 version = 3
 [pipelines.hub_v1]
 skeleton = "hub_v1"
@@ -127,7 +131,7 @@ auth = { type = "api_key", entries = [{ alias = "key", env = "TEST_KEY" }] }
 capabilities = ["text"]
 [route_groups.default.pools.default]
 targets = [{ kind = "provider_model", provider = "test", model = "test-model", priority = 1 }]
-"#,
+"#.replace("residence_timeout_ms = 60000", &format!("residence_timeout_ms = {timeout_ms}")),
             )
             .unwrap(),
         )
@@ -175,6 +179,53 @@ targets = [{ kind = "provider_model", provider = "test", model = "test-model", p
                 "metadata-center-local-search",
             ),
             Err(WebSearchHookContractError::MissingQuery)
+        );
+    }
+
+    #[tokio::test]
+    async fn long_sse_sidecar_dispatch_gets_a_fresh_bounded_operation_deadline() {
+        let control = execution_control_with_residence_timeout(50);
+        control.attempt_budget().use_sse_first_word_policy();
+        tokio::time::sleep(std::time::Duration::from_millis(75)).await;
+        let before = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        let request = build_v3_web_search_hook_request_from_value(
+            "req-long-sse",
+            "call-web-search",
+            &json!({"query":"routecodex"}),
+            &scope(),
+            &control,
+            "metadata-center-local-search",
+        )
+        .expect("completed long SSE must not expire a new sidecar dispatch");
+        let after = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        assert!((before + 50..=after + 50).contains(&request.deadline_unix_ms));
+        assert!(request.validate_at(before).is_ok());
+        assert!(
+            request.validate_at(request.deadline_unix_ms + 1).is_err(),
+            "auxiliary operation remains bounded"
+        );
+    }
+
+    #[tokio::test]
+    async fn expired_json_still_rejects_sidecar_dispatch() {
+        let control = execution_control_with_residence_timeout(50);
+        tokio::time::sleep(std::time::Duration::from_millis(75)).await;
+        assert_eq!(
+            build_v3_web_search_hook_request_from_value(
+                "req-expired-json",
+                "call-web-search",
+                &json!({"query":"routecodex"}),
+                &scope(),
+                &control,
+                "metadata-center-local-search",
+            ),
+            Err(WebSearchHookContractError::DeadlineExpired)
         );
     }
 }
