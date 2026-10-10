@@ -1,0 +1,61 @@
+{
+  "changes": [
+    {
+      "request": {
+        "authorization": {
+          "original_text": "/goal\n  身份：本目标编排者；先判定宿主——DSH 走 dsh-create，Codex Desktop/TUI\n  走 codex-orchestrator。\n  目标：把 RouteCodex 仓库内三个 AppSDK 受管根（根 .appsdk、\n  v3/.appsdk、v4/.appsdk）统一升级到 appsdk 0.1.0014，让治理合同、验证\n  准入、CI 与 Git hook 入口一致，并把升级结果合入 origin/main。\n  范围与约束：只改 .appsdk/**、.appsdk-prepare.json、docs/goals/**、\n  v3/.appsdk/**、v4/.appsdk/**、.github/workflows/test.yml、.githooks/\n  **、与准入直接相关的 package.json。禁改运行时/协议/provider/payload/\n  Rust 语义；禁触 .agent-collab/、~/.collab/、~/.appsdk/、daemon 生命周\n  期；禁 appsdk init（会触发全局注册与 Collab 初始化）、禁 --fresh\n  --discard-legacy 及任何 reset/破坏性迁移；禁手工删 journals/mailbox/\n  身份/任务/claim/worktree；禁 --no-verify、改 hooksPath、删 hook、降级\n  断言；禁覆盖他人 worktree/分支/进程。\n  依据：docs/goals/routecodex-governance-unification-plan.md（含第 8 节\n  T0 结论与本轮范围修订）。\n  验收：根/v3/v4 的 sdk.lock 与 project.json#/sdk/version 均为\n  0.1.0014，sdk.bin 不提交；根、v3 的 appsdk verify --admission 返回\n  ok:true；v4 合同级错误（NON_CANONICAL_RECORD_CONTRACT_SET /\n  INVALID_DECLARED_ZONE_CONTRACT /\n  PROJECT_SDK_VERSION_PIN_MISMATCH）全部消失，交付级\n  ACTIVE_ARTIFACT_MISSING 作为 typed 缺口如实保留（需后续生成 v4 active\n  制品）；CI 不再 clone 旧 v0.1.5 且对三根做版本一致准入；hook\n  绑定真实暂存/推送内容；变更经独立 Review PASS 合入 origin/main\n  并有远端回执。\n  笔记：/Volumes/Intel/playground/routecodex/governance-upgrade-\n  20261010/docs/goals/routecodex-governance-unification-plan.md\n  与 .worker-runs/governance-upgrade-20261010/ 下各 worker note.md；按\n  coding-principals 绑定总目标、本轮验收和节点结果的目标影响。恢复/派\n  单/收口先读有效记录，由 planner 据结果更新剩余目标，不以局部 DONE 关\n  闭总目标。\n  开发节奏：本轮交付“三根治理升级 + CI/hook 准入一致”这条可用主线；后续\n  目标 B（requirements.json）、C（治理/门禁类 backlog）、D（结案经验审\n  计）、E（v4 active 制品使交付级 admission 通过）。首次派单前划定本轮\n  范围，先交付可用主线，再按目标逐轮完善。\n  执行：observation 后交独立 gpt-6.1-sol planner 规划，先画受影响 DAG\n  简图，按当前约束形成最小充分模型和最短必要流程，再按依赖并发实现、自\n  检、debug 和黑盒验证。完整功能/修复完成作者验收后，每次正式代码提交/\n  合并前按 Review 合同独立复核修改正确性；不能因未到 milestone 免审，\n  milestone 同次审整体架构。不按每次编辑或内部节点派审，不用 Review 代\n  替作者排障。长期目标结束时做一次独立经验审计。派单、回报、等待时及时\n  补位；局部阻塞只停真实下游，任务实质变化才重规划。细则见统一编排及\n  Plan 合同。执行 peer 优先，负责任务验收和资源回收；未注册 Collab 不找\n  Master。\n  直接执行本任务，不再为它生成一层提示词。",
+          "role": "user",
+          "source": "/Users/fanzhang/.codex/attachments/ec38fd7c-aa3b-4531-825e-f9f0466579ec/pasted-text-1.txt (active goal, 2026-10-10)"
+        },
+        "base_version": 0,
+        "operation": "create",
+        "project_id": "routecodex",
+        "request_id": "req-20261010-routecodex-governance-unification",
+        "requirement_id": "routecodex-governance-unification",
+        "text": "/goal\n  身份：本目标编排者；先判定宿主——DSH 走 dsh-create，Codex Desktop/TUI\n  走 codex-orchestrator。\n  目标：把 RouteCodex 仓库内三个 AppSDK 受管根（根 .appsdk、\n  v3/.appsdk、v4/.appsdk）统一升级到 appsdk 0.1.0014，让治理合同、验证\n  准入、CI 与 Git hook 入口一致，并把升级结果合入 origin/main。\n  范围与约束：只改 .appsdk/**、.appsdk-prepare.json、docs/goals/**、\n  v3/.appsdk/**、v4/.appsdk/**、.github/workflows/test.yml、.githooks/\n  **、与准入直接相关的 package.json。禁改运行时/协议/provider/payload/\n  Rust 语义；禁触 .agent-collab/、~/.collab/、~/.appsdk/、daemon 生命周\n  期；禁 appsdk init（会触发全局注册与 Collab 初始化）、禁 --fresh\n  --discard-legacy 及任何 reset/破坏性迁移；禁手工删 journals/mailbox/\n  身份/任务/claim/worktree；禁 --no-verify、改 hooksPath、删 hook、降级\n  断言；禁覆盖他人 worktree/分支/进程。\n  依据：docs/goals/routecodex-governance-unification-plan.md（含第 8 节\n  T0 结论与本轮范围修订）。\n  验收：根/v3/v4 的 sdk.lock 与 project.json#/sdk/version 均为\n  0.1.0014，sdk.bin 不提交；根、v3 的 appsdk verify --admission 返回\n  ok:true；v4 合同级错误（NON_CANONICAL_RECORD_CONTRACT_SET /\n  INVALID_DECLARED_ZONE_CONTRACT /\n  PROJECT_SDK_VERSION_PIN_MISMATCH）全部消失，交付级\n  ACTIVE_ARTIFACT_MISSING 作为 typed 缺口如实保留（需后续生成 v4 active\n  制品）；CI 不再 clone 旧 v0.1.5 且对三根做版本一致准入；hook\n  绑定真实暂存/推送内容；变更经独立 Review PASS 合入 origin/main\n  并有远端回执。\n  笔记：/Volumes/Intel/playground/routecodex/governance-upgrade-\n  20261010/docs/goals/routecodex-governance-unification-plan.md\n  与 .worker-runs/governance-upgrade-20261010/ 下各 worker note.md；按\n  coding-principals 绑定总目标、本轮验收和节点结果的目标影响。恢复/派\n  单/收口先读有效记录，由 planner 据结果更新剩余目标，不以局部 DONE 关\n  闭总目标。\n  开发节奏：本轮交付“三根治理升级 + CI/hook 准入一致”这条可用主线；后续\n  目标 B（requirements.json）、C（治理/门禁类 backlog）、D（结案经验审\n  计）、E（v4 active 制品使交付级 admission 通过）。首次派单前划定本轮\n  范围，先交付可用主线，再按目标逐轮完善。\n  执行：observation 后交独立 gpt-6.1-sol planner 规划，先画受影响 DAG\n  简图，按当前约束形成最小充分模型和最短必要流程，再按依赖并发实现、自\n  检、debug 和黑盒验证。完整功能/修复完成作者验收后，每次正式代码提交/\n  合并前按 Review 合同独立复核修改正确性；不能因未到 milestone 免审，\n  milestone 同次审整体架构。不按每次编辑或内部节点派审，不用 Review 代\n  替作者排障。长期目标结束时做一次独立经验审计。派单、回报、等待时及时\n  补位；局部阻塞只停真实下游，任务实质变化才重规划。细则见统一编排及\n  Plan 合同。执行 peer 优先，负责任务验收和资源回收；未注册 Collab 不找\n  Master。\n  直接执行本任务，不再为它生成一层提示词。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "/goal\n  身份：本目标编排者；先判定宿主——DSH 走 dsh-create，Codex Desktop/TUI\n  走 codex-orchestrator。\n  目标：把 RouteCodex 仓库内三个 AppSDK 受管根（根 .appsdk、\n  v3/.appsdk、v4/.appsdk）统一升级到 appsdk 0.1.0014，让治理合同、验证\n  准入、CI 与 Git hook 入口一致，并把升级结果合入 origin/main。\n  范围与约束：只改 .appsdk/**、.appsdk-prepare.json、docs/goals/**、\n  v3/.appsdk/**、v4/.appsdk/**、.github/workflows/test.yml、.githooks/\n  **、与准入直接相关的 package.json。禁改运行时/协议/provider/payload/\n  Rust 语义；禁触 .agent-collab/、~/.collab/、~/.appsdk/、daemon 生命周\n  期；禁 appsdk init（会触发全局注册与 Collab 初始化）、禁 --fresh\n  --discard-legacy 及任何 reset/破坏性迁移；禁手工删 journals/mailbox/\n  身份/任务/claim/worktree；禁 --no-verify、改 hooksPath、删 hook、降级\n  断言；禁覆盖他人 worktree/分支/进程。\n  依据：docs/goals/routecodex-governance-unification-plan.md（含第 8 节\n  T0 结论与本轮范围修订）。\n  验收：根/v3/v4 的 sdk.lock 与 project.json#/sdk/version 均为\n  0.1.0014，sdk.bin 不提交；根、v3 的 appsdk verify --admission 返回\n  ok:true；v4 合同级错误（NON_CANONICAL_RECORD_CONTRACT_SET /\n  INVALID_DECLARED_ZONE_CONTRACT /\n  PROJECT_SDK_VERSION_PIN_MISMATCH）全部消失，交付级\n  ACTIVE_ARTIFACT_MISSING 作为 typed 缺口如实保留（需后续生成 v4 active\n  制品）；CI 不再 clone 旧 v0.1.5 且对三根做版本一致准入；hook\n  绑定真实暂存/推送内容；变更经独立 Review PASS 合入 origin/main\n  并有远端回执。\n  笔记：/Volumes/Intel/playground/routecodex/governance-upgrade-\n  20261010/docs/goals/routecodex-governance-unification-plan.md\n  与 .worker-runs/governance-upgrade-20261010/ 下各 worker note.md；按\n  coding-principals 绑定总目标、本轮验收和节点结果的目标影响。恢复/派\n  单/收口先读有效记录，由 planner 据结果更新剩余目标，不以局部 DONE 关\n  闭总目标。\n  开发节奏：本轮交付“三根治理升级 + CI/hook 准入一致”这条可用主线；后续\n  目标 B（requirements.json）、C（治理/门禁类 backlog）、D（结案经验审\n  计）、E（v4 active 制品使交付级 admission 通过）。首次派单前划定本轮\n  范围，先交付可用主线，再按目标逐轮完善。\n  执行：observation 后交独立 gpt-6.1-sol planner 规划，先画受影响 DAG\n  简图，按当前约束形成最小充分模型和最短必要流程，再按依赖并发实现、自\n  检、debug 和黑盒验证。完整功能/修复完成作者验收后，每次正式代码提交/\n  合并前按 Review 合同独立复核修改正确性；不能因未到 milestone 免审，\n  milestone 同次审整体架构。不按每次编辑或内部节点派审，不用 Review 代\n  替作者排障。长期目标结束时做一次独立经验审计。派单、回报、等待时及时\n  补位；局部阻塞只停真实下游，任务实质变化才重规划。细则见统一编排及\n  Plan 合同。执行 peer 优先，负责任务验收和资源回收；未注册 Collab 不找\n  Master。\n  直接执行本任务，不再为它生成一层提示词。",
+          "role": "user",
+          "source": "/Users/fanzhang/.codex/attachments/ec38fd7c-aa3b-4531-825e-f9f0466579ec/pasted-text-1.txt (active goal, 2026-10-10)"
+        },
+        "requirement_id": "routecodex-governance-unification",
+        "status": "active",
+        "text": "/goal\n  身份：本目标编排者；先判定宿主——DSH 走 dsh-create，Codex Desktop/TUI\n  走 codex-orchestrator。\n  目标：把 RouteCodex 仓库内三个 AppSDK 受管根（根 .appsdk、\n  v3/.appsdk、v4/.appsdk）统一升级到 appsdk 0.1.0014，让治理合同、验证\n  准入、CI 与 Git hook 入口一致，并把升级结果合入 origin/main。\n  范围与约束：只改 .appsdk/**、.appsdk-prepare.json、docs/goals/**、\n  v3/.appsdk/**、v4/.appsdk/**、.github/workflows/test.yml、.githooks/\n  **、与准入直接相关的 package.json。禁改运行时/协议/provider/payload/\n  Rust 语义；禁触 .agent-collab/、~/.collab/、~/.appsdk/、daemon 生命周\n  期；禁 appsdk init（会触发全局注册与 Collab 初始化）、禁 --fresh\n  --discard-legacy 及任何 reset/破坏性迁移；禁手工删 journals/mailbox/\n  身份/任务/claim/worktree；禁 --no-verify、改 hooksPath、删 hook、降级\n  断言；禁覆盖他人 worktree/分支/进程。\n  依据：docs/goals/routecodex-governance-unification-plan.md（含第 8 节\n  T0 结论与本轮范围修订）。\n  验收：根/v3/v4 的 sdk.lock 与 project.json#/sdk/version 均为\n  0.1.0014，sdk.bin 不提交；根、v3 的 appsdk verify --admission 返回\n  ok:true；v4 合同级错误（NON_CANONICAL_RECORD_CONTRACT_SET /\n  INVALID_DECLARED_ZONE_CONTRACT /\n  PROJECT_SDK_VERSION_PIN_MISMATCH）全部消失，交付级\n  ACTIVE_ARTIFACT_MISSING 作为 typed 缺口如实保留（需后续生成 v4 active\n  制品）；CI 不再 clone 旧 v0.1.5 且对三根做版本一致准入；hook\n  绑定真实暂存/推送内容；变更经独立 Review PASS 合入 origin/main\n  并有远端回执。\n  笔记：/Volumes/Intel/playground/routecodex/governance-upgrade-\n  20261010/docs/goals/routecodex-governance-unification-plan.md\n  与 .worker-runs/governance-upgrade-20261010/ 下各 worker note.md；按\n  coding-principals 绑定总目标、本轮验收和节点结果的目标影响。恢复/派\n  单/收口先读有效记录，由 planner 据结果更新剩余目标，不以局部 DONE 关\n  闭总目标。\n  开发节奏：本轮交付“三根治理升级 + CI/hook 准入一致”这条可用主线；后续\n  目标 B（requirements.json）、C（治理/门禁类 backlog）、D（结案经验审\n  计）、E（v4 active 制品使交付级 admission 通过）。首次派单前划定本轮\n  范围，先交付可用主线，再按目标逐轮完善。\n  执行：observation 后交独立 gpt-6.1-sol planner 规划，先画受影响 DAG\n  简图，按当前约束形成最小充分模型和最短必要流程，再按依赖并发实现、自\n  检、debug 和黑盒验证。完整功能/修复完成作者验收后，每次正式代码提交/\n  合并前按 Review 合同独立复核修改正确性；不能因未到 milestone 免审，\n  milestone 同次审整体架构。不按每次编辑或内部节点派审，不用 Review 代\n  替作者排障。长期目标结束时做一次独立经验审计。派单、回报、等待时及时\n  补位；局部阻塞只停真实下游，任务实质变化才重规划。细则见统一编排及\n  Plan 合同。执行 peer 优先，负责任务验收和资源回收；未注册 Collab 不找\n  Master。\n  直接执行本任务，不再为它生成一层提示词。",
+        "version": 1
+      },
+      "version": 1
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "批准",
+          "role": "user",
+          "source": "Codex thread 01a11bcd-618f-7d43-a247-dd405697d08f, user message 2026-10-10; authorized object defined in docs/goals/routecodex-governance-unification-plan.md sections 10.1/11.3: contracts/**, v3/contracts/**, v4/contracts/**, .gitignore !v4/.appsdk/contracts/memory/"
+        },
+        "base_version": 0,
+        "operation": "create",
+        "project_id": "routecodex",
+        "request_id": "req-20261010-routecodex-governance-scope-authorization",
+        "requirement_id": "routecodex-governance-scope-authorization",
+        "text": "批准"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "批准",
+          "role": "user",
+          "source": "Codex thread 01a11bcd-618f-7d43-a247-dd405697d08f, user message 2026-10-10; authorized object defined in docs/goals/routecodex-governance-unification-plan.md sections 10.1/11.3: contracts/**, v3/contracts/**, v4/contracts/**, .gitignore !v4/.appsdk/contracts/memory/"
+        },
+        "requirement_id": "routecodex-governance-scope-authorization",
+        "status": "active",
+        "text": "批准",
+        "version": 1
+      },
+      "version": 2
+    }
+  ],
+  "project_id": "routecodex",
+  "schema_version": 1,
+  "version": 2
+}
