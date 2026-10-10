@@ -1027,15 +1027,11 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             )
             .await
         });
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        assert!(
-            !held.is_finished(),
-            "{case} cooldown-only exhaustion must hold until a rescue probe succeeds"
-        );
-        revive_cooled_provider(&provider_health, server_id).await;
+        // Even an empty Gemini response is a successful HTTP 2xx probe.
+        // The actual rescue probe must restore eligibility without manual release.
         let revived = tokio::time::timeout(Duration::from_secs(2), held)
             .await
-            .expect("held request must wake after provider recovery")
+            .expect("held request must wake after HTTP 2xx probe recovery")
             .expect("held request task must not panic")
             .expect("probe-revived provider must accept the held request");
         let probe_request = tokio::time::timeout(Duration::from_secs(2), probe_server)
