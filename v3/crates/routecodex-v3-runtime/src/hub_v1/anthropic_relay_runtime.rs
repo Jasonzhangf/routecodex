@@ -800,9 +800,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 )
                 .map_err(V3AnthropicRelayRuntimeError::Target)?
             } else {
-                std::time::Duration::from_millis(
-                    routecodex_v3_config::default_provider_sse_first_frame_timeout_ms(),
-                )
+                v3_relay_transport_response_timeout(manifest, &selected_target_provider_id)
             };
         let response_deadline = if provider_sse {
             first_word_deadline

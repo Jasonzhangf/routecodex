@@ -799,6 +799,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         &policy.target.candidate.provider_id,
                     ),
                 ),
+                manifest,
             )
             .await;
         let provider_raw = match transport_result {

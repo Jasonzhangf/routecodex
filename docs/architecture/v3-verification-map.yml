@@ -1614,6 +1614,7 @@ features:
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
   - v3/crates/routecodex-v3-server/tests/openai_chat_relay_controlled.rs
   - v3/crates/routecodex-v3-server/tests/openai_chat_direct_isolation_controlled.rs
+  - v3/crates/routecodex-v3-server/tests/support/openai_chat_direct_first_word.rs
   - v3/crates/routecodex-v3-cli/tests/h2_chat_direct_isolation.rs
   design:
   - docs/goals/v3-openai-chat-relay-runtime-integration-plan.md
@@ -1635,6 +1636,7 @@ features:
   - loopback upstream receives exactly one POST /v1/chat/completions per valid request
   - Server JSON response preserves controlled provider semantics
   - Server does not commit SSE response headers or frames before the controlled provider attempt reaches a valid terminal
+  - Generic Chat Direct consumes the selected provider's published nondefault first-word timeout across header and semantic-frame acquisition; delayed JSON headers remain governed by JSON policy, and a timely SSE first word permits later silence through complete buffered terminal output.
   - Server 429 response exposes Error01-06 and does not wrap success
   - OpenAI Chat Relay has no secondary SSE accept worker and never serializes Error06 JSON as a normal Chat completion data frame
   - rejected metadata_center request produces zero upstream captures

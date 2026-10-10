@@ -490,9 +490,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 )
                 .map_err(V3ResponsesRelayRuntimeError::Target)?
             } else {
-                std::time::Duration::from_millis(
-                    routecodex_v3_config::default_provider_sse_first_frame_timeout_ms(),
-                )
+                v3_relay_transport_response_timeout(manifest, &selected_target_provider_id)
             };
         let response_deadline = if provider_sse {
             first_word_deadline

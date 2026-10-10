@@ -546,8 +546,13 @@ where
             None => transport_request,
         };
         let (first_word_deadline, transport_result) =
-            default_transport::send_direct_provider_headers(transport, transport_request, None)
-                .await;
+            default_transport::send_direct_provider_headers(
+                transport,
+                transport_request,
+                None,
+                manifest,
+            )
+            .await;
         let provider_raw = match transport_result {
             Ok(raw) => raw,
             Err(V3ProviderError::ConcurrencyBusy { .. }) => {

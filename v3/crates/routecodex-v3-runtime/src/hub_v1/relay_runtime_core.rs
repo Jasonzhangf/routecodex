@@ -810,9 +810,7 @@ where
                 )
                 .map_err(V3RelayCoreError::Target)?
             } else {
-                std::time::Duration::from_millis(
-                    routecodex_v3_config::default_provider_sse_first_frame_timeout_ms(),
-                )
+                attempt_timeout
             };
         let attempt_deadline = if provider_sse {
             first_word_deadline

@@ -19,7 +19,9 @@ async fn delayed_body_upstream(sse: bool) -> (String, tokio::task::JoinHandle<()
         if sse {
             socket.write_all(b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n").await.unwrap();
             tokio::time::sleep(Duration::from_millis(120)).await;
-            let _ = socket.write_all(b"data: {\"type\":\"response.completed\"}\n\n").await;
+            let _ = socket
+                .write_all(b"data: {\"type\":\"response.completed\"}\n\n")
+                .await;
         } else {
             socket.write_all(b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n").await.unwrap();
             tokio::time::sleep(Duration::from_millis(120)).await;
@@ -44,14 +46,19 @@ fn request(url: String, intent: V3ResponsesStreamIntent) -> V3Transport13Respons
         Some(Duration::from_millis(40)),
         60_000,
         Some(200),
-    ).unwrap()
+    )
+    .unwrap()
 }
 
 #[tokio::test]
 async fn sse_body_survives_total_and_client_idle_limits() {
     let (url, upstream) = delayed_body_upstream(true).await;
-    let transport = ProviderResponsesTransport::with_http_read_timeout_for_test(Duration::from_millis(30));
-    let raw = transport.send(request(url, V3ResponsesStreamIntent::Sse)).await.unwrap();
+    let transport =
+        ProviderResponsesTransport::with_http_read_timeout_for_test(Duration::from_millis(30));
+    let raw = transport
+        .send(request(url, V3ResponsesStreamIntent::Sse))
+        .await
+        .unwrap();
     let V3ProviderResponseBody::Sse(mut stream) = raw.into_body() else {
         panic!("expected actual provider SSE");
     };
@@ -59,7 +66,9 @@ async fn sse_body_survives_total_and_client_idle_limits() {
     while let Some(chunk) = stream.next().await {
         bytes.extend(chunk.expect("SSE progress is not governed by total or idle timeout"));
     }
-    assert!(String::from_utf8(bytes).unwrap().contains("response.completed"));
+    assert!(String::from_utf8(bytes)
+        .unwrap()
+        .contains("response.completed"));
     upstream.await.unwrap();
 }
 
@@ -67,7 +76,10 @@ async fn sse_body_survives_total_and_client_idle_limits() {
 async fn json_body_retains_request_timeout() {
     let (url, upstream) = delayed_body_upstream(false).await;
     let transport = ProviderResponsesTransport::default();
-    let error = transport.send(request(url, V3ResponsesStreamIntent::Json)).await.unwrap_err();
+    let error = transport
+        .send(request(url, V3ResponsesStreamIntent::Json))
+        .await
+        .unwrap_err();
     assert!(format!("{error:?}").contains("timed out"), "{error:?}");
     upstream.await.unwrap();
 }

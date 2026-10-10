@@ -42,8 +42,9 @@ pub(crate) use relay_runtime_shared::{
     guard_v3_provider_sse_first_word_response, handle_provider_failure,
     provider_pool_exhausted_source, provider_request_failure, provider_runtime_failure,
     provider_target, push_sse_response_chain_trace, server_routing_group,
-    terminalize_provider_failure, wrap_v3_relay_client_sse_usage_observation,
-    V3RelayCommittedSseStream, V3RelayProjectedSseStream, V3RelayProviderFailure,
+    terminalize_provider_failure, v3_provider_sse_first_word_timeout,
+    wrap_v3_relay_client_sse_usage_observation, V3RelayCommittedSseStream,
+    V3RelayProjectedSseStream, V3RelayProviderFailure,
 };
 mod relay_runtime_core;
 pub(crate) use relay_runtime_core::{

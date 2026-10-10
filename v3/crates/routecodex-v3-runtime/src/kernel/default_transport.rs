@@ -26,26 +26,41 @@ pub(super) async fn send_direct_provider_headers<T: ResponsesTransport + ?Sized>
     transport: &T,
     request: V3Transport13ResponsesHttpRequest,
     json_timeout: Option<std::time::Duration>,
+    manifest: &V3Config05ManifestPublished,
 ) -> (
     tokio::time::Instant,
     Result<V3ProviderResp14Raw, V3ProviderError>,
 ) {
     let started = tokio::time::Instant::now();
-    let first_word_deadline = started
-        + std::time::Duration::from_millis(
-            request
-                .sse_first_frame_timeout_ms()
-                .unwrap_or_else(routecodex_v3_config::default_provider_sse_first_frame_timeout_ms),
-        );
-    let deadline = if request.stream_intent()
-        == routecodex_v3_provider_responses::V3ResponsesStreamIntent::Sse
-    {
+    let request_id = request.request_id().to_string();
+    let provider_id = request.provider_id().to_string();
+    let provider_sse =
+        request.stream_intent() == routecodex_v3_provider_responses::V3ResponsesStreamIntent::Sse;
+    let first_word_timeout = if provider_sse {
+        match crate::hub_v1::v3_provider_sse_first_word_timeout(manifest, &provider_id) {
+            Ok(timeout) => timeout,
+            Err(reason) => {
+                return (
+                    started,
+                    Err(V3ProviderError::InternalTransport {
+                        request_id,
+                        provider_id,
+                        lane: routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Request,
+                        reason,
+                    }),
+                );
+            }
+        }
+    } else {
+        json_timeout
+            .unwrap_or_else(|| responses_direct_transport_response_timeout(manifest, &provider_id))
+    };
+    let first_word_deadline = started + first_word_timeout;
+    let deadline = if provider_sse {
         Some(first_word_deadline)
     } else {
         json_timeout.map(|timeout| started + timeout)
     };
-    let request_id = request.request_id().to_string();
-    let provider_id = request.provider_id().to_string();
     let result = match deadline {
         Some(deadline) => tokio::time::timeout_at(deadline, transport.send(request))
             .await

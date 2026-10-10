@@ -277,7 +277,7 @@ resources:
     owner_node: V3Config05ManifestPublished
     identity: [providerId, sseFirstFrameTimeoutMs]
     allowed_writers: [compile_providers]
-    allowed_readers: [guard_relay_sse_first_frame, guard_v3_provider_sse_first_word, guard_v3_provider_sse_first_word_response, v3_provider_sse_first_word_timeout, build_v3_transport_13_responses_http_request_from_v3_provider_12, build_v3_transport_13_responses_request_from_v3_provider_12, V3Transport13ResponsesRequest::sse_first_frame_timeout_ms, ProviderResponsesTransport::send_http, ProviderResponsesTransport::send, build_v3_anthropic_messages_transport_request_from_v3_provider_08_with_provider_headers, build_v3_openai_chat_transport_request_from_v3_provider_08, build_v3_gemini_transport_09]
+    allowed_readers: [guard_relay_sse_first_frame, guard_v3_provider_sse_first_word, guard_v3_provider_sse_first_word_response, v3_provider_sse_first_word_timeout, send_direct_provider_headers, build_v3_transport_13_responses_http_request_from_v3_provider_12, build_v3_transport_13_responses_request_from_v3_provider_12, V3Transport13ResponsesRequest::sse_first_frame_timeout_ms, ProviderResponsesTransport::send_http, ProviderResponsesTransport::send, build_v3_anthropic_messages_transport_request_from_v3_provider_08_with_provider_headers, build_v3_openai_chat_transport_request_from_v3_provider_08, build_v3_gemini_transport_09]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-provider-responses, routecodex-v3-error, routecodex-v3-debug]
     may_enter_provider_body: false
     may_enter_client_body: false
