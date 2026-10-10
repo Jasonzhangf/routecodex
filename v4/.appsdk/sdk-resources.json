@@ -1,46 +1,394 @@
 {
-  "bundle_digest": "sha256:ddb43f02b4e23b5b59fb5f047a331a371c1bd55c48aa979620e6fcc9bebd7751",
-  "manifest_digest": "sha256:cf083c7ff083015d0c7db2e2efd0297555a6c459cc84ed2e9a795081c7a89d48",
+  "bundle_digest": "sha256:868fe60e645e4215c87a511c04f940589d7d1096e1835e8d444da44357a85bd4",
+  "manifest_digest": "sha256:098e3fc2b0b82006bf064402927b0548aed7bd0231117a8b9b4c8755c736d918",
   "resources": [
     {
       "class": "contracts",
-      "digest": "sha256:cf083c7ff083015d0c7db2e2efd0297555a6c459cc84ed2e9a795081c7a89d48",
+      "digest": "sha256:098e3fc2b0b82006bf064402927b0548aed7bd0231117a8b9b4c8755c736d918",
       "path": ".appsdk/contracts/sdk-bundle.manifest.json",
       "source": "contracts/sdk-bundle.manifest.json"
     },
     {
       "class": "contracts",
-      "digest": "sha256:96e9092d674b0dce2a256ab0af273f0708ee2eb4e5317b51bd1b183f85cb2f7b",
+      "digest": "sha256:fa1322a44c27a0b23e7b4f0ca05d0046e440103b9765052881cffe21657412f1",
       "path": ".appsdk/contracts/project.schema.json",
       "source": "contracts/project.schema.json"
     },
     {
       "class": "contracts",
-      "digest": "sha256:527adb458ed54aa3c3eea4f97a0077a8b880b9b9fa8254a7dffdfd85d63e10ca",
+      "digest": "sha256:6f5c48410f7ddb93b85d7f39e360f36ead51deef5149e6d19bde164db04ad4f3",
+      "path": ".appsdk/contracts/test-governance.schema.json",
+      "source": "contracts/test-governance.schema.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:f089f7ecd0f7b7e8871a0fd663b76314f98656d9b57c2efc925f5cf0c846d7b5",
+      "path": ".appsdk/contracts/communication/communication-request.schema.json",
+      "source": "contracts/communication/communication-request.schema.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:305892e994c96f91ef3d561c3a7e42948c6127ec79f08c3c38652037b4d00c96",
+      "path": ".appsdk/contracts/communication/communication-event.schema.json",
+      "source": "contracts/communication/communication-event.schema.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:a2a2c73a4dc3852ccdd9d04d3de8020b42f135c247dfdac09f186bd80bed831c",
+      "path": ".appsdk/contracts/communication/communication-capabilities.schema.json",
+      "source": "contracts/communication/communication-capabilities.schema.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:bc6492b1b8b620257170aaa1b78e3b751131ae8fd81ba6b07dfbd6d28b634fb8",
+      "path": ".appsdk/contracts/dagpipe/fix-lifecycle.graph.json",
+      "source": "contracts/dagpipe/fix-lifecycle.graph.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:00044af2c700c128791b7b6a7fe167c70455a534df9311021da28ea00b2359dd",
+      "path": ".appsdk/contracts/dagpipe/notification.graph.json",
+      "source": "contracts/dagpipe/notification.graph.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:141464dbc8c7ac97626f4b74e7267b3ef8a326881d5066f415f0aaf74f2b821c",
       "path": ".appsdk/contracts/development-scenarios.manifest.json",
       "source": "contracts/development-scenarios.manifest.json"
     },
     {
       "class": "contracts",
-      "digest": "sha256:4568668437b4e0b44db4709d27e31c2783c8a6e4ccd828273a4675775f69ca1f",
+      "digest": "sha256:7b332471eec64a3cbb9f33590d2763bceb728e29f928c4edd9b91f54d1c05c23",
+      "path": ".appsdk/contracts/guidance/guidance-manifest.schema.json",
+      "source": "contracts/guidance/guidance-manifest.schema.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:a1460dd4a46a57ce82e5f5f83821ff49457f2c76f5cce68f0817a118dc5cbf40",
+      "path": ".appsdk/contracts/guidance/tour-review.schema.json",
+      "source": "contracts/guidance/tour-review.schema.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:6e939328d1881d2520279084d89b57b1cd5537c9969835a47cd410a950cce0d8",
+      "path": ".appsdk/contracts/memory/memory-entry.schema.json",
+      "source": "contracts/memory/memory-entry.schema.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:18015233a1b50bad56ce619106e39d657bb8f73ea398a0752304416df798cb7d",
+      "path": ".appsdk/contracts/maps/resource-map.json",
+      "source": "contracts/maps/resource-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:27a744a16b13c5d4a1966d91a43495bdf756830851f81a62b192dd1e4525e6a8",
+      "path": ".appsdk/contracts/maps/function-map.json",
+      "source": "contracts/maps/function-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:1fa26a50e5966751838c8209bd14a581203c46d74a283e4207520b48b515002f",
+      "path": ".appsdk/contracts/maps/mainline-call-map.json",
+      "source": "contracts/maps/mainline-call-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:518630726f1140baaa1d4530dfb92ac9b90bd96f79b6a043769d3a19e9196327",
+      "path": ".appsdk/contracts/maps/verification-map.json",
+      "source": "contracts/maps/verification-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:8a6ecdfcae0d23f4c07b800a16ff80d287e83905eeeb3dcdc7a006036755e626",
+      "path": ".appsdk/contracts/migrations/sdk-0.1.5-to-0.1.6.json",
+      "source": "contracts/migrations/sdk-0.1.5-to-0.1.6.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:7e55d9f373660ed764490054dd9351383481d30fadd19523d7b3411b20df41f1",
+      "path": ".appsdk/contracts/migrations/sdk-0.1.6-to-0.1.0007.json",
+      "source": "contracts/migrations/sdk-0.1.6-to-0.1.0007.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:b3b42c2720ec2acaa52ee176627a583595899a99fed8f0471cd15b6c14f0b412",
+      "path": ".appsdk/contracts/migrations/sdk-0.1.0007-to-0.1.0008.json",
+      "source": "contracts/migrations/sdk-0.1.0007-to-0.1.0008.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:b634878da69518d9f5255f88d84970ee44e273187d5a78bcf3c004228599b701",
+      "path": ".appsdk/contracts/migrations/sdk-0.1.0008-to-0.1.0009.json",
+      "source": "contracts/migrations/sdk-0.1.0008-to-0.1.0009.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:1b1bfad8960409b65946385922cdb15834a9f465349e85ec35be735269cb2dd9",
+      "path": ".appsdk/contracts/migrations/sdk-0.1.0009-to-0.1.0010.json",
+      "source": "contracts/migrations/sdk-0.1.0009-to-0.1.0010.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:ffd4271a9f6a81a4ec1cbe4cedc4f8d89fe590a42a06a30600ed868cb9494317",
+      "path": ".appsdk/contracts/migrations/sdk-0.1.0010-to-0.1.0011.json",
+      "source": "contracts/migrations/sdk-0.1.0010-to-0.1.0011.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:a9b36794e04328e30697f587d9f1ffe6722420001a761f6d55b8d100b427db1e",
+      "path": ".appsdk/contracts/migrations/sdk-0.1.0011-to-0.1.0012.json",
+      "source": "contracts/migrations/sdk-0.1.0011-to-0.1.0012.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:022061281d05b48442d91ea805d30f89230fb3df36e9ba29ee90254d31ce2b2f",
+      "path": ".appsdk/contracts/migrations/sdk-0.1.0012-to-0.1.0013.json",
+      "source": "contracts/migrations/sdk-0.1.0012-to-0.1.0013.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:525d11851afdebab0b0097643a4e3084adfbfc33c37caca094224e304ee6bbdb",
+      "path": ".appsdk/contracts/migrations/sdk-0.1.0013-to-0.1.0014.json",
+      "source": "contracts/migrations/sdk-0.1.0013-to-0.1.0014.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:b493940feebd3319c1e952548915660eef82877faf4cad9f9657f213ec9a2cf0",
+      "path": ".appsdk/contracts/migrations/0.1.0013/governance-maps/resource-map.json",
+      "source": "contracts/migrations/0.1.0013/governance-maps/resource-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:27a744a16b13c5d4a1966d91a43495bdf756830851f81a62b192dd1e4525e6a8",
+      "path": ".appsdk/contracts/migrations/0.1.0013/governance-maps/function-map.json",
+      "source": "contracts/migrations/0.1.0013/governance-maps/function-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:1fa26a50e5966751838c8209bd14a581203c46d74a283e4207520b48b515002f",
+      "path": ".appsdk/contracts/migrations/0.1.0013/governance-maps/mainline-call-map.json",
+      "source": "contracts/migrations/0.1.0013/governance-maps/mainline-call-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:518630726f1140baaa1d4530dfb92ac9b90bd96f79b6a043769d3a19e9196327",
+      "path": ".appsdk/contracts/migrations/0.1.0013/governance-maps/verification-map.json",
+      "source": "contracts/migrations/0.1.0013/governance-maps/verification-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:0c1cb507efc42b30b66f0d53de590df7b662f6e00e32ff86aca2680eee659a89",
+      "path": ".appsdk/contracts/migrations/0.1.0012/governance-maps/resource-map.json",
+      "source": "contracts/migrations/0.1.0012/governance-maps/resource-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:27a744a16b13c5d4a1966d91a43495bdf756830851f81a62b192dd1e4525e6a8",
+      "path": ".appsdk/contracts/migrations/0.1.0012/governance-maps/function-map.json",
+      "source": "contracts/migrations/0.1.0012/governance-maps/function-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:1fa26a50e5966751838c8209bd14a581203c46d74a283e4207520b48b515002f",
+      "path": ".appsdk/contracts/migrations/0.1.0012/governance-maps/mainline-call-map.json",
+      "source": "contracts/migrations/0.1.0012/governance-maps/mainline-call-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:d2fe634510e4326114a8fc2d77850846e743db7c245a409d88f619d8b2ae3847",
+      "path": ".appsdk/contracts/migrations/0.1.0012/governance-maps/verification-map.json",
+      "source": "contracts/migrations/0.1.0012/governance-maps/verification-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:f7b1d655be410b65ef1e50136fa85f823fea375f1733ed5d879ef1836fa0449f",
+      "path": ".appsdk/contracts/migrations/0.1.0011/governance-maps/resource-map.json",
+      "source": "contracts/migrations/0.1.0011/governance-maps/resource-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:27a744a16b13c5d4a1966d91a43495bdf756830851f81a62b192dd1e4525e6a8",
+      "path": ".appsdk/contracts/migrations/0.1.0011/governance-maps/function-map.json",
+      "source": "contracts/migrations/0.1.0011/governance-maps/function-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:1fa26a50e5966751838c8209bd14a581203c46d74a283e4207520b48b515002f",
+      "path": ".appsdk/contracts/migrations/0.1.0011/governance-maps/mainline-call-map.json",
+      "source": "contracts/migrations/0.1.0011/governance-maps/mainline-call-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:d2fe634510e4326114a8fc2d77850846e743db7c245a409d88f619d8b2ae3847",
+      "path": ".appsdk/contracts/migrations/0.1.0011/governance-maps/verification-map.json",
+      "source": "contracts/migrations/0.1.0011/governance-maps/verification-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:4269569fede09097245c4d416a37f70753d01856917ba5995ad185cf84bacc3a",
+      "path": ".appsdk/contracts/migrations/0.1.0010/governance-maps/resource-map.json",
+      "source": "contracts/migrations/0.1.0010/governance-maps/resource-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:45f5819b21bfdcde2dba12e10b1f059030b922e438f05f8604302509e8d994ce",
+      "path": ".appsdk/contracts/migrations/0.1.0010/governance-maps/function-map.json",
+      "source": "contracts/migrations/0.1.0010/governance-maps/function-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:9e9a21ba1c5b8dd25ef565e6b02211baabba3568e1fa89e8944134a115847684",
+      "path": ".appsdk/contracts/migrations/0.1.0010/governance-maps/mainline-call-map.json",
+      "source": "contracts/migrations/0.1.0010/governance-maps/mainline-call-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:50c066c17541851618c620865fce1df4214624534b8eb508c6e8a720eba695e3",
+      "path": ".appsdk/contracts/migrations/0.1.0010/governance-maps/verification-map.json",
+      "source": "contracts/migrations/0.1.0010/governance-maps/verification-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:67f189bf15330e542bc82349b78a1d7e29ec050b112ecffa165173b078d9204e",
+      "path": ".appsdk/contracts/migrations/0.1.5/governance-maps/resource-map.json",
+      "source": "contracts/migrations/0.1.5/governance-maps/resource-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:69f16dfe5d056634f6164cd325dbdbdf134588890b69f101c0d9045e6a01d776",
+      "path": ".appsdk/contracts/migrations/0.1.5/governance-maps/function-map.json",
+      "source": "contracts/migrations/0.1.5/governance-maps/function-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:c36e4f9d5cff527d7f98b339772a53c87f420db58bb2215b6b68210e01124673",
+      "path": ".appsdk/contracts/migrations/0.1.5/governance-maps/mainline-call-map.json",
+      "source": "contracts/migrations/0.1.5/governance-maps/mainline-call-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:8dcc1e9444f62f7e407fa1e37a6c8d004de55587950f8e600dc5f3c711981230",
+      "path": ".appsdk/contracts/migrations/0.1.5/governance-maps/verification-map.json",
+      "source": "contracts/migrations/0.1.5/governance-maps/verification-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:6cbb62a74955e7d15d8337b55b3f450c0c4e956d951bf5ce1bf506bd1f1b0166",
+      "path": ".appsdk/contracts/migrations/0.1.6/governance-maps/resource-map.json",
+      "source": "contracts/migrations/0.1.6/governance-maps/resource-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:11e13c74049336bf4cd641ed1f6cd1e9fec2a3129e2dd9b932ff606f1ca757af",
+      "path": ".appsdk/contracts/migrations/0.1.6/governance-maps/function-map.json",
+      "source": "contracts/migrations/0.1.6/governance-maps/function-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:be26a641397b43c9125803b38bc19436608ec10c9dcd0ba9036150ffa9bd87bd",
+      "path": ".appsdk/contracts/migrations/0.1.6/governance-maps/mainline-call-map.json",
+      "source": "contracts/migrations/0.1.6/governance-maps/mainline-call-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:08da294bef2f2228193686a36356a205a281a3e7f2f3dfd8b34a133cd98c5f1c",
+      "path": ".appsdk/contracts/migrations/0.1.6/governance-maps/verification-map.json",
+      "source": "contracts/migrations/0.1.6/governance-maps/verification-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:05bd659f2ff634de66cef0cf93bcfea64d14afeef3ed27541c6aecd687e72a72",
+      "path": ".appsdk/contracts/migrations/0.1.0007/governance-maps/resource-map.json",
+      "source": "contracts/migrations/0.1.0007/governance-maps/resource-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:963a8a2a0d80e7482a63ffd5e7a04ce1029e75666a670b9747cf7cabcbe3d430",
+      "path": ".appsdk/contracts/migrations/0.1.0007/governance-maps/function-map.json",
+      "source": "contracts/migrations/0.1.0007/governance-maps/function-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:5d04ef3b62980469685851859ba494cd2a3382008f79fc1c3b3f001c70ad362e",
+      "path": ".appsdk/contracts/migrations/0.1.0007/governance-maps/mainline-call-map.json",
+      "source": "contracts/migrations/0.1.0007/governance-maps/mainline-call-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:2a273f5e9b69486365d97350a28e0a07fc83dc2c5d40bd55b6cea793e856e377",
+      "path": ".appsdk/contracts/migrations/0.1.0007/governance-maps/verification-map.json",
+      "source": "contracts/migrations/0.1.0007/governance-maps/verification-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:4073e213121c8b6296ac68a1188de6935d03a930a6090dd355dfdbb30b92a31a",
+      "path": ".appsdk/contracts/migrations/0.1.0008/governance-maps/resource-map.json",
+      "source": "contracts/migrations/0.1.0008/governance-maps/resource-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:45f5819b21bfdcde2dba12e10b1f059030b922e438f05f8604302509e8d994ce",
+      "path": ".appsdk/contracts/migrations/0.1.0008/governance-maps/function-map.json",
+      "source": "contracts/migrations/0.1.0008/governance-maps/function-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:9e9a21ba1c5b8dd25ef565e6b02211baabba3568e1fa89e8944134a115847684",
+      "path": ".appsdk/contracts/migrations/0.1.0008/governance-maps/mainline-call-map.json",
+      "source": "contracts/migrations/0.1.0008/governance-maps/mainline-call-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:46e272026960bf6c37d8111bc11e886e73bc4b911e1e53f0d3347413b768e732",
+      "path": ".appsdk/contracts/migrations/0.1.0008/governance-maps/verification-map.json",
+      "source": "contracts/migrations/0.1.0008/governance-maps/verification-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:f535a7571224889863a5c68508dac87956095b0ac65dafd0d1c110a88f3fd36d",
+      "path": ".appsdk/contracts/migrations/0.1.0009/governance-maps/resource-map.json",
+      "source": "contracts/migrations/0.1.0009/governance-maps/resource-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:45f5819b21bfdcde2dba12e10b1f059030b922e438f05f8604302509e8d994ce",
+      "path": ".appsdk/contracts/migrations/0.1.0009/governance-maps/function-map.json",
+      "source": "contracts/migrations/0.1.0009/governance-maps/function-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:9e9a21ba1c5b8dd25ef565e6b02211baabba3568e1fa89e8944134a115847684",
+      "path": ".appsdk/contracts/migrations/0.1.0009/governance-maps/mainline-call-map.json",
+      "source": "contracts/migrations/0.1.0009/governance-maps/mainline-call-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:46e272026960bf6c37d8111bc11e886e73bc4b911e1e53f0d3347413b768e732",
+      "path": ".appsdk/contracts/migrations/0.1.0009/governance-maps/verification-map.json",
+      "source": "contracts/migrations/0.1.0009/governance-maps/verification-map.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:ae910c4426c8bccc22c9e2256e8ca9842eb39c2caa783428afec5c9a2d44c5d5",
       "path": ".appsdk/contracts/transitions/zone-transition.manifest.json",
       "source": "contracts/transitions/zone-transition.manifest.json"
     },
     {
       "class": "contracts",
-      "digest": "sha256:022127d852ce023adb317d0bb08541e7715f35a4c992454bcc8dcf28ed7ca8ba",
+      "digest": "sha256:49a5fdd7f76123da88a675defda4d9495b4a05219c0d3a10511f26feb4b193f9",
       "path": ".appsdk/contracts/lifecycle-state-machines.manifest.json",
       "source": "contracts/lifecycle-state-machines.manifest.json"
     },
     {
       "class": "contracts",
-      "digest": "sha256:04e7af1fb42e0021f62c9ca161748c8820b98c280b144d2ba81ce46386da148e",
+      "digest": "sha256:960badd539e333d78c8bd603fcf853a5f2c6d8e689af6e620b977b9a7f9e5227",
       "path": ".appsdk/contracts/records/record-graph.contract.json",
       "source": "contracts/records/record-graph.contract.json"
     },
     {
       "class": "contracts",
-      "digest": "sha256:f716a1c9f9ac9618348e73dccca7bbc4011c150bf351daeabcd4ee8182f2e560",
+      "digest": "sha256:c44169d3a6a8f0611a918f73cac6e03ea05e33414cb89287fba2e6e0b192b388",
       "path": ".appsdk/contracts/records/worktree-record.schema.json",
       "source": "contracts/records/worktree-record.schema.json"
     },
@@ -52,9 +400,15 @@
     },
     {
       "class": "contracts",
-      "digest": "sha256:9bdc0a79d609dbdf21c59409135afbed5abd3d206da93044d5aa392c19a6aeb5",
+      "digest": "sha256:d6e09466db2184e655f361697ff3c8218b47c7386f6dd138341915d154569b67",
       "path": ".appsdk/contracts/records/evidence-record.schema.json",
       "source": "contracts/records/evidence-record.schema.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:c8d083c2ba451780a7dde91f47b864a8290dfa93bc1cc2dbe5c098582508eb73",
+      "path": ".appsdk/contracts/records/test-scenario-result-record.schema.json",
+      "source": "contracts/records/test-scenario-result-record.schema.json"
     },
     {
       "class": "contracts",
@@ -64,7 +418,19 @@
     },
     {
       "class": "contracts",
-      "digest": "sha256:77273a675d812f47c701be7ea23db54b776b544530ba311605cebbcc8821ba5b",
+      "digest": "sha256:1ef1ad050535ff9e3f8bf996e56710c744da1b9cb2a89646b754ad6db6ea634f",
+      "path": ".appsdk/contracts/records/goal-clarification-record.schema.json",
+      "source": "contracts/records/goal-clarification-record.schema.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:a6b4c549cc213031d339dd25f8e135a7f8e84f5684072d3a8c64517004433281",
+      "path": ".appsdk/contracts/records/user-requirement-request.schema.json",
+      "source": "contracts/records/user-requirement-request.schema.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:8ad5f97c8f471475183b7609a0b46f91ff23fc8da38b1f70b1ad50b8ebb7ef76",
       "path": ".appsdk/contracts/records/review-record.schema.json",
       "source": "contracts/records/review-record.schema.json"
     },
@@ -76,7 +442,7 @@
     },
     {
       "class": "contracts",
-      "digest": "sha256:dc5904fbfe0c7c5df72087c39cea04b0de715a9ac0d925e42f1a2a5623df3fd9",
+      "digest": "sha256:1f4f88cacb42990cc2e292ae0b4c54d155ea592ce6d06f2bf887c2b79465b954",
       "path": ".appsdk/contracts/records/pre-review-validation-record.schema.json",
       "source": "contracts/records/pre-review-validation-record.schema.json"
     },
@@ -118,13 +484,19 @@
     },
     {
       "class": "contracts",
+      "digest": "sha256:434d68f4dbdad2e3bd027350f00e2b84677ae98ae67f21bb0b76847cabce6f6b",
+      "path": ".appsdk/contracts/records/collab-live-closure-record.schema.json",
+      "source": "contracts/records/collab-live-closure-record.schema.json"
+    },
+    {
+      "class": "contracts",
       "digest": "sha256:cc3aef39558bd54911f8cedbd051bfccbc245d421da0d043ec9ce1728067bd45",
       "path": ".appsdk/contracts/records/merge-record.schema.json",
       "source": "contracts/records/merge-record.schema.json"
     },
     {
       "class": "contracts",
-      "digest": "sha256:e8e308452e793aa60d36b115eb6e05bf92ebdad152ebee617a2ba7d70888abd9",
+      "digest": "sha256:911a60fc09df1177215df3f4c33b213e4305260aa7895f804556ec54c7823fd0",
       "path": ".appsdk/contracts/records/promotion-record.schema.json",
       "source": "contracts/records/promotion-record.schema.json"
     },
@@ -141,22 +513,70 @@
       "source": "contracts/records/regression-report.schema.json"
     },
     {
+      "class": "contracts",
+      "digest": "sha256:eb801cb9117725083dae93249ba7ee0fc354bd5165a39c1e065a3bb41006859f",
+      "path": ".appsdk/contracts/records/plan-record.schema.json",
+      "source": "contracts/records/plan-record.schema.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:9e19a8e5c585d66681d6cc1f3245a6fd3d5f28d3cf6aca3285c6d57a29adfc52",
+      "path": ".appsdk/contracts/records/plan-revision-record.schema.json",
+      "source": "contracts/records/plan-revision-record.schema.json"
+    },
+    {
+      "class": "contracts",
+      "digest": "sha256:49e6db2faf8660f56b541359c391358ed3352bc445977d9e9ded8bc09b6350b7",
+      "path": ".appsdk/contracts/records/step-execution-record.schema.json",
+      "source": "contracts/records/step-execution-record.schema.json"
+    },
+    {
       "class": "docs",
-      "digest": "sha256:07d63d1f5b4a8f01799176a6922a73ef470b4d85b74567a5234cb436d41ff98c",
+      "digest": "sha256:03207804ae25e27d4407e39b55ac8ee6fe77cb167d29bf98f0fe8e84b1207ec0",
       "path": ".appsdk/docs/design/appsdk-project-integration.md",
       "source": "docs/design/appsdk-project-integration.md"
     },
     {
       "class": "docs",
-      "digest": "sha256:82d78e2773fc577e68adbc2e24ac31727eb68639d4d793b7bbc982f64ff3ed65",
+      "digest": "sha256:37869946f63ad055067ebd7f467837da6276213c4f9d6718e92185e977718da5",
+      "path": ".appsdk/docs/design/optional-test-governance.md",
+      "source": "docs/design/optional-test-governance.md"
+    },
+    {
+      "class": "docs",
+      "digest": "sha256:29cfa6193d953f7eb06d8e87bf7bdae4324b7d2034597fe9a1ed6ee69f004d8c",
+      "path": ".appsdk/docs/design/apps-sdk-communication.md",
+      "source": "docs/design/apps-sdk-communication.md"
+    },
+    {
+      "class": "docs",
+      "digest": "sha256:2156fd67c6b411bba3be50691115363af390c22439954ab9c777c1ef32819df4",
       "path": ".appsdk/docs/design/fix-lifecycle-v2.md",
       "source": "docs/design/fix-lifecycle-v2.md"
     },
     {
       "class": "docs",
-      "digest": "sha256:6568d2494d9b6c9448c947b87b1021575ad7fa08e32e4621d2e12ab225b06576",
+      "digest": "sha256:03ce24748785988df1ceac07d0b27efd34fc871ecf68a632d4f80956dde715e7",
       "path": ".appsdk/docs/design/development-scenarios.md",
       "source": "docs/design/development-scenarios.md"
+    },
+    {
+      "class": "docs",
+      "digest": "sha256:e880ed56924f092e24a4f32ed1542f06a8f5cf2b38d7b9d75918a045e7d95b0d",
+      "path": ".appsdk/docs/design/appsdk-guidance-framework.md",
+      "source": "docs/design/appsdk-guidance-framework.md"
+    },
+    {
+      "class": "docs",
+      "digest": "sha256:b9f4724c839d0312f8c8c3e29dc3ad941325d7132f6771f84388643545f39d42",
+      "path": ".appsdk/docs/test-design/appsdk-guidance-framework.md",
+      "source": "docs/test-design/appsdk-guidance-framework.md"
+    },
+    {
+      "class": "docs",
+      "digest": "sha256:403b032b001b3b072889f5c6f795c12ebbb360681e095360e31acff3e3c69f0c",
+      "path": ".appsdk/docs/architecture/development-process-control-harness.md",
+      "source": "docs/architecture/development-process-control-harness.md"
     },
     {
       "class": "docs",
@@ -165,19 +585,121 @@
       "source": "docs/architecture/appsdk-governance-architecture.md"
     },
     {
+      "class": "docs",
+      "digest": "sha256:7c69da6074ead5628d4152f287321f65986cc9b73091a4702854fa3d9db80bf0",
+      "path": ".appsdk/docs/design/project-memory.md",
+      "source": "docs/design/project-memory.md"
+    },
+    {
+      "class": "docs",
+      "digest": "sha256:be380c111d550170a5b66b0361fd2cdd41e1b4d7e1fe7cbed30ce1e0894de6de",
+      "path": ".appsdk/docs/design/appsdk-global-registry.md",
+      "source": "docs/design/appsdk-global-registry.md"
+    },
+    {
       "class": "rules",
-      "digest": "sha256:39ac39e7c3aef40e4229504e57156b255c2bef9e5041c76ac46ea04f353874e4",
+      "digest": "sha256:fea5be938055d2a41a921cff25dfcf154a7df645f747c4470e38e57ab7dce91c",
       "path": ".appsdk/rules/appsdk-project-governance.md",
       "source": "skills/appsdk-project-governance/SKILL.md"
     },
     {
       "class": "skills",
-      "digest": "sha256:39ac39e7c3aef40e4229504e57156b255c2bef9e5041c76ac46ea04f353874e4",
+      "digest": "sha256:fea5be938055d2a41a921cff25dfcf154a7df645f747c4470e38e57ab7dce91c",
       "path": ".appsdk/skills/appsdk-project-governance/SKILL.md",
       "source": "skills/appsdk-project-governance/SKILL.md"
+    },
+    {
+      "class": "skills",
+      "digest": "sha256:caeea787723f1e9bf6b0cfb9d506f1a59c8cf680de5f125b08f604b75c0ba2d4",
+      "path": ".appsdk/skills/appsdk-project-governance/agents/openai.yaml",
+      "source": "skills/appsdk-project-governance/agents/openai.yaml"
+    },
+    {
+      "class": "skills",
+      "digest": "sha256:565eb018676581216e97017506401734c10e60244fe3def4d7dc3fe64c9252c3",
+      "path": ".appsdk/skills/appsdk-project-governance/appsdk-guidance.json",
+      "source": "skills/appsdk-project-governance/appsdk-guidance.json"
+    },
+    {
+      "class": "skills",
+      "digest": "sha256:ad14d33e7e1abb42072d8c22c2ab1b4236b2544f658ac566be0bc2277f6f2f68",
+      "path": ".appsdk/skills/appsdk-project-governance/references/bootstrap-migration.md",
+      "source": "skills/appsdk-project-governance/references/bootstrap-migration.md"
+    },
+    {
+      "class": "skills",
+      "digest": "sha256:7bd973e57e149f28e137933bcd5033d33e967f8d58836aec39140a4659689e78",
+      "path": ".appsdk/skills/appsdk-project-governance/references/command-surface.md",
+      "source": "skills/appsdk-project-governance/references/command-surface.md"
+    },
+    {
+      "class": "skills",
+      "digest": "sha256:6aeba3519dd65cfafa5b9c5c6962c5dfcd2bf604c1762dc28ff0376c79a4b24a",
+      "path": ".appsdk/skills/appsdk-project-governance/references/contracts-and-failures.md",
+      "source": "skills/appsdk-project-governance/references/contracts-and-failures.md"
+    },
+    {
+      "class": "skills",
+      "digest": "sha256:360fc78310d3c5b86e40e93b02301ea0f80af59418ac297309e4ca11d402c94b",
+      "path": ".appsdk/skills/appsdk-project-governance/references/development-debug.md",
+      "source": "skills/appsdk-project-governance/references/development-debug.md"
+    },
+    {
+      "class": "skills",
+      "digest": "sha256:04ab122f2d91e31fc7e928701f134d16d600658bd710bd50bc7fa4b2fae2273e",
+      "path": ".appsdk/skills/appsdk-project-governance/references/goal-prompt.md",
+      "source": "skills/appsdk-project-governance/references/goal-prompt.md"
+    },
+    {
+      "class": "skills",
+      "digest": "sha256:f99489bd4a42613c2b8057544ac2ac9cfa46b1c32cb609ce1bf72c3cd54a73ea",
+      "path": ".appsdk/skills/appsdk-project-governance/references/init-prompts.md",
+      "source": "skills/appsdk-project-governance/references/init-prompts.md"
+    },
+    {
+      "class": "skills",
+      "digest": "sha256:0be5085bc51909f6cf32f14b0555cb9ce56a71a3b9f512c835e42378e3e51a2a",
+      "path": ".appsdk/skills/appsdk-project-governance/references/process-control-harness.md",
+      "source": "skills/appsdk-project-governance/references/process-control-harness.md"
+    },
+    {
+      "class": "skills",
+      "digest": "sha256:b9967a608432282fffb1908a696ed0143f09a85ff5a5ed846a52311d78903ae4",
+      "path": ".appsdk/skills/appsdk-project-governance/references/review-delivery.md",
+      "source": "skills/appsdk-project-governance/references/review-delivery.md"
+    },
+    {
+      "class": "skills",
+      "digest": "sha256:a1e634e4a5ec8cb1cd1ec6a1ff29d828a59dad9b61816760738e4269a9e23d73",
+      "path": ".appsdk/skills/appsdk-project-governance/references/authoritative-review-template.md",
+      "source": "skills/appsdk-project-governance/references/authoritative-review-template.md"
+    },
+    {
+      "class": "skills",
+      "digest": "sha256:3cee6eb1142427e81d0d762da31694578ae0b2786e76713bbdd6d2d9cfb7674b",
+      "path": ".appsdk/skills/appsdk-project-governance/references/state-paths.md",
+      "source": "skills/appsdk-project-governance/references/state-paths.md"
+    },
+    {
+      "class": "skills",
+      "digest": "sha256:d99648503a9e6433b7f29e7528abda505fddd8e0386186c07dd0f1a209d929a9",
+      "path": ".appsdk/skills/appsdk-project-governance/references/subagents-config.md",
+      "source": "skills/appsdk-project-governance/references/subagents-config.md"
+    },
+    {
+      "class": "skills",
+      "digest": "sha256:609935299de8141bd25a38e02f6ae4dc4852ae3b330d52c33debf36044a71c8b",
+      "path": ".appsdk/skills/appsdk-migration/SKILL.md",
+      "source": "skills/appsdk-migration/SKILL.md"
+    },
+    {
+      "class": "skills",
+      "digest": "sha256:aed7e89edd4d233778eafdfe66b7fd0e0be45cd1e13a9edfba8e061bcbce4dbf",
+      "path": ".appsdk/skills/project-memory/SKILL.md",
+      "source": "skills/project-memory/SKILL.md"
     }
   ],
   "schema_version": 1,
   "sdk": "appsdk",
-  "version": "0.1.5"
+  "version": "0.1.0014"
 }

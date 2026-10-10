@@ -1,6 +1,9 @@
 #!/usr/bin/env sh
 set -eu
 
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
 current="$(git symbolic-ref --short HEAD 2>/dev/null || true)"
 case "$current" in
   main|master)
@@ -27,11 +30,22 @@ verify_candidate_blob() {
   fi
 }
 
+verify_appsdk_admission() {
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/routecodex-pre-commit-appsdk.XXXXXX")"
+  trap 'rm -rf -- "$tmp"' 0 1 2 3 15
+  git_dir="$(git rev-parse --absolute-git-dir)"
+  git checkout-index --all --prefix="$tmp/"
+  printf 'gitdir: %s\n' "$git_dir" > "$tmp/.git"
+  GIT_OPTIONAL_LOCKS=0 node "$tmp/.githooks/verify-appsdk-admission.mjs" "$tmp"
+}
+
 if command -v npm >/dev/null 2>&1 && test -f package.json; then
   verify_candidate_blob .githooks/pre-commit
   verify_candidate_blob package.json
   verify_candidate_blob scripts/verify-fast.mjs
+  verify_candidate_blob .githooks/verify-appsdk-admission.mjs
   ROUTECODEX_GATE_DIFF_MODE=staged npm run --silent verify:fast
+  verify_appsdk_admission
 else
   echo "RouteCodex governance: cannot run Git main protection verification (npm/package.json missing)." >&2
   exit 1

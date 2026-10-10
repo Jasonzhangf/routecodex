@@ -1,8 +1,20 @@
 #!/usr/bin/env sh
 set -eu
 
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
 z40="0000000000000000000000000000000000000000"
 remote_name="${1:-origin}"
+appsdk_tmp=""
+
+cleanup_appsdk_tmp() {
+  if [ -n "$appsdk_tmp" ]; then
+    rm -rf -- "$appsdk_tmp"
+  fi
+}
+
+trap cleanup_appsdk_tmp 0 1 2 3 15
 
 verify_pushed_blob() {
   commit="$1"
@@ -21,6 +33,17 @@ verify_pushed_blob() {
   fi
 }
 
+verify_appsdk_commit() {
+  commit="$1"
+  appsdk_tmp="$(mktemp -d "${TMPDIR:-/tmp}/routecodex-pre-push-appsdk.XXXXXX")"
+  git_dir="$(git rev-parse --absolute-git-dir)"
+  git archive --format=tar "$commit" | tar -xf - -C "$appsdk_tmp"
+  printf 'gitdir: %s\n' "$git_dir" > "$appsdk_tmp/.git"
+  GIT_OPTIONAL_LOCKS=0 node "$appsdk_tmp/.githooks/verify-appsdk-admission.mjs" "$appsdk_tmp"
+  rm -rf -- "$appsdk_tmp"
+  appsdk_tmp=""
+}
+
 while read -r local_ref local_sha remote_ref remote_sha; do
   case "$remote_ref" in
     refs/heads/main|refs/heads/master)
@@ -35,7 +58,9 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     verify_pushed_blob "$local_sha" .githooks/pre-push
     verify_pushed_blob "$local_sha" package.json
     verify_pushed_blob "$local_sha" scripts/verify-fast.mjs
+    verify_pushed_blob "$local_sha" .githooks/verify-appsdk-admission.mjs
     ROUTECODEX_GATE_DIFF_MODE= ROUTECODEX_GATE_REMOTE_NAME="$remote_name" ROUTECODEX_GATE_DIFF_BASE="$remote_sha" ROUTECODEX_GATE_DIFF_HEAD="$local_sha" npm run --silent verify:fast
+    verify_appsdk_commit "$local_sha"
   else
     echo "RouteCodex governance: cannot run Git main protection verification (npm/package.json missing)." >&2
     exit 1
