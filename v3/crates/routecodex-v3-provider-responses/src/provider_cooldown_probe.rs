@@ -18,6 +18,8 @@ pub struct V3ProviderCooldownProbeKey {
 
 #[derive(Debug, Clone)]
 pub struct V3ProviderCooldownProbeState {
+    /// Cause of this cooldown, independent of subsequent failure history.
+    pub cooldown_cause: Option<crate::global_cooldown::V3ProviderCooldownFailureClass>,
     pub blocked_until_ms: Option<u64>,
     pub next_probe_at_ms: Option<u64>,
     pub probe_interval_ms: u64,

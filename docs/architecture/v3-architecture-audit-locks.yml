@@ -450,8 +450,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-29T20:40:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:487da1203d72afc7ff984d1e24ab4ee9703a739e8170ee883c23526d1abaf70e
-    last_manual_authorization_id: auth-20260830-v3-execution-control-provider-global
+    fingerprint: sha256:e8451e88f85861c9f3b9f77781c263b43ddb90586660c1ec5eec03b0d7c28245
+    last_manual_authorization_id: auth-20261010-status-only-provider-probe-stopgap
 manual_authorizations:
   - authorization_id: auth-20260929-v3-hooks-sidecar-chain-lock
     item_id: chain:v3.rcc_internal_hooks_sidecar
@@ -1279,3 +1279,11 @@ manual_authorizations:
     reason: "Jason explicitly required that provider concurrency must not block business requests, provider errors must not cause meaningless waits, provider switching must retain storm control, and only cooldown may wait. Terminal provider-error projection commits the action-gate generation without waiting for provider-action admission, and now records and commits under one lock so a concurrent success cannot invalidate that disposition. Retry/reselect action admission and its rate limit remain in place. Provider cooldown semantics, chain owner, nodes, and resources remain unchanged."
     fingerprint_before: sha256:78d79632e9ad17d590ec3c2f631ba01361706cea83a84914532e3e367c72531b
     fingerprint_after: sha256:10acfd36a3dd8f2c41e5fc1cca7ca16c7b6714631f741a07335b321f3e2bb81c
+
+  - authorization_id: auth-20261010-status-only-provider-probe-stopgap
+    item_id: chain:v3.provider_global_subscription_probe
+    approved_by: Jason
+    approved_at: '2026-10-10T07:32:46-07:00'
+    reason: "Jason explicitly requested: probe 只要简单的 ping pong，只要求 2xx 响应就算成功; 429 需要连续三次才冷却，有成功立马恢复; 先止血. This bounded refresh binds only the shared Provider status-only probe transport call; the scheduled generation and recovery lifecycle remains fixed. Configuration abstraction is deferred."
+    fingerprint_before: sha256:487da1203d72afc7ff984d1e24ab4ee9703a739e8170ee883c23526d1abaf70e
+    fingerprint_after: sha256:e8451e88f85861c9f3b9f77781c263b43ddb90586660c1ec5eec03b0d7c28245

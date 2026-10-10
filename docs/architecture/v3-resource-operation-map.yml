@@ -1222,7 +1222,7 @@ resources:
     semantic_contract:
       cross_session_same_model: shared
       cross_model_same_key: isolated
-      revival_rule: only matching-model probe success removes cooldown
+      revival_rule: matching-model HTTP 2xx probe success removes cooldown; business success also clears matching-model 429-owned cooldown
     allowed_writers: [V3ProviderHealthStore::record_provider_failure_action, V3ProviderHealthStore::record_provider_key_success, V3ProviderHealthStore::complete_probe_success, V3ProviderHealthStore::complete_probe_failure]
     allowed_readers: [V3ProviderHealthStore::scheduling_projection, V3ProviderHealthStore::provider_cooldown_probe_keys, V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::acquire_provider_cooldown_probe_if_due, V3ProviderHealthStore::provider_cooldown_probe_next_deadline_ms]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, request.normal_payload, response.client_payload]
@@ -1241,10 +1241,10 @@ resources:
       health_window: latest 100 calls for this provider+authAlias+model
       score_contract: clamp(configured_priority + sum(deltas), 0, 150)
       deltas: { normal_http: 1, recoverable_including_502: -5, account_401_403: -20 }
-      cooldown_condition: ordinary 429 requires three consecutive same-fingerprint failures of the exact providerId+authAlias+modelId; other typed failures retain declared thresholds; real success clears that identity's streak
+      cooldown_condition: every HTTP 429 requires three consecutive HTTP 429 failures of the exact providerId+authAlias+modelId regardless of body code or fingerprint; other typed failures retain declared thresholds; real success clears that identity's streak
       revival_rule: only a successful provider transport probe may remove cooldown state
       exhaustion_rescue_rule: the complete candidate set may force one single-flight probe per continuous cooldown block; only a successful probe resets that generation
-      generation_state: rescueProbeAttempted remains attached to the providerId+authAlias+modelId cooldown block until a successful semantic probe removes the block
+      generation_state: rescueProbeAttempted remains attached to the providerId+authAlias+modelId cooldown block until an HTTP 2xx probe or matching 429-owned business success removes the block
       in_flight_rule: if another request owns a cooldown probe, this request skips the cooled candidate and continues to the selected later tier without waiting
       dry_run_rule: dry-run never acquires or sends a rescue probe
     allowed_writers: [V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::acquire_provider_cooldown_probe_if_due, V3ProviderHealthStore::acquire_provider_cooldown_rescue_probe, V3ProviderHealthStore::cancel_provider_cooldown_probe_at_generation, V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation]
@@ -1277,9 +1277,9 @@ resources:
       cross_session: shared
       cross_model_same_key: isolated
       sibling_keys: isolated
-      cooldown_condition: ordinary 429 blocks only after three consecutive same-fingerprint failures of this complete identity; other typed failures retain declared thresholds
+      cooldown_condition: every HTTP 429 blocks only after three consecutive HTTP 429 failures of this complete identity regardless of body code or fingerprint; other typed failures retain declared thresholds
       cooldown_deadline: provider-owned adaptive ladder 5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s
-      revival_rule: only semantic probe success clears the matching identity's cooldown and consecutive failure counts; Zen probes use the selected private streaming profile
+      revival_rule: HTTP 2xx probe success clears the matching identity's cooldown and consecutive failure counts; matching business success immediately clears 429-owned cooldown; Zen probes use the selected private streaming profile
       dry_run_rule: dry-run never acquires or sends an auth-key health probe
     allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy, V3ProviderHealthStore::record_provider_failure_in_session_with_policy, V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::acquire_provider_cooldown_probe_if_due, V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation]
     allowed_readers: [V3ProviderHealthStore::scheduling_projection, V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_keys, V3ProviderHealthStore::provider_cooldown_probe_keys_due, V3ProviderHealthStore::provider_cooldown_probe_next_deadline_ms]

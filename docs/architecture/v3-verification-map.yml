@@ -3203,18 +3203,18 @@ features:
   - resolve_v3_relay_target_outcome_with_admission_rescue
   required_positive:
   - one typed permit generation owns each scheduled or rescue probe and successful completion atomically resets score, streak, delta window, cooldown, and probe backoff state
-  - each health-excluded provider+auth_alias+model identity stays visible in the cooldown pool; due waiting and in-flight probes are cooldown substates until exact semantic recovery
-  - overdue_probe_stays_visible_until_semantic_recovery_and_same_key_dispatch exercises the public managed listener, stalled probe visibility, spare-key routing, negative nonterminal probe and recovered same-key business dispatch
-  - Responses, OpenAI Chat, Anthropic, and Gemini probes require their protocol-specific terminal success shape before recovery
+  - each health-excluded provider+auth_alias+model identity stays visible in the cooldown pool; due waiting and in-flight probes are cooldown substates until exact HTTP 2xx probe recovery
+  - 429 cooldown and HTTP 2xx recovery cases exercise the public managed listener, exact-key business failures, stalled probe visibility, spare-key routing, and automatically recovered same-key business dispatch
+  - Responses, OpenAI Chat, Anthropic, and Gemini probes send a simple ping and accept every HTTP 2xx response without reading the success body or validating content type, JSON, embedded errors, terminal status, or pong text
   - the first transient recovery probe is independently due after the provider-owned probe interval even when the business cooldown deadline is longer
   - failed provider-health probes advance only next_probe_at_ms and never extend the original blocked_until_ms
   - every ordinary and long-policy probe interval is capped at 30 minutes; a configured provider health probe_interval_ms is an optional maximum and cannot exceed 30 minutes
   - cc-sol and kdns providers configured with probe_interval_ms=120000 run the bounded ladder but never wait longer than two minutes between recovery probes
   - matched HTTP 401 and HTTP 403 automatic cooldown policies retain the exact selected provider+auth_alias+model identity
   - every automatic failure excludes and cools only the failed complete candidate; untried sibling keys, models and providers remain available
-  - 401 auth-key business cooldown remains until semantic probe success, while its first recovery probe is due after 5 seconds and later failures advance the shared 5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s ladder
-  - ordinary 429 requires three consecutive same-fingerprint failures of the exact provider+auth_alias+model identity; success or a different fingerprint resets its streak; other failures retain typed thresholds
-  - zen_429_three_failures_and_semantic_streaming_recovery_public exercises public HTTP business failures, real private-profile streaming probes, negative nonterminal/error streams and semantic recovery before a successful next business request
+  - 401 auth-key business cooldown remains until HTTP 2xx probe success, while its first recovery probe is due after 5 seconds and later failures advance the shared 5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s ladder
+  - every HTTP 429 requires three consecutive HTTP 429 failures of the exact provider+auth_alias+model identity regardless of body code or fingerprint; success or a non-429 failure resets its streak; success immediately clears its exact 429-owned cooldown; other failures retain typed thresholds
+  - private-profile probes preserve provider-specific request compatibility and accept HTTP 2xx before a successful next business request
   - a provider-declared terminal with no visible output is forwarded as-is and never becomes a provider failure: Responses incomplete max_output_tokens/content_filter, Anthropic max_tokens/refusal, and the OpenAI Chat wire terminal including an empty-content content_filter finish
   - Direct and Relay atomically admit the highest-priority health-and-capacity-eligible provider, immediately skipping full candidates without a capacity wait
   - Public `/v1/responses` switches to a spare provider while the first provider remains held; all-full pools terminate promptly without an extra upstream request
@@ -3223,8 +3223,8 @@ features:
   - Business leases remain bounded and release after completion, error, cancellation, or stream drop; due scheduled probes retain their separate bounded admission
   required_negative:
   - stale successful or failed probe generations cannot mutate newer provider health state
-  - HTTP 2xx with an error object, malformed JSON, nonterminal status, or missing protocol terminal shape cannot recover a provider
-  - an early due probe does not make the provider available before semantic probe success
+  - Non-2xx probe responses and connection failures preserve cooldown; business response parsing is unaffected by status-only probes
+  - an early due probe does not make the provider available before HTTP 2xx probe success
   - zero or greater-than-30-minute provider health probe_interval_ms values fail config compilation
   - automatic model-less cooldown state never blocks other complete identities or enters provider/client payload or MetadataCenter; explicit manual administration retains its declared scope
   - Crossing the adaptive budget cannot record provider failure health, auth-key cooldown, model cooldown, MetadataCenter state, or provider/client payload truth
@@ -3233,6 +3233,7 @@ features:
   required_gates:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test provider_account_pool_blackbox
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --lib
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_probe_status_contract
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_probe_backoff_ladder_contract -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_global_subscription_probe_contract -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test cooldown_manual_actions_managed -- --test-threads=1 --nocapture

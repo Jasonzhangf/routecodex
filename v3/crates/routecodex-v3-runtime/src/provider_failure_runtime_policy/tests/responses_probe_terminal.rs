@@ -165,13 +165,13 @@ async fn responses_content_filter_probe_terminal_clears_provider_cooldown() {
 }
 
 #[tokio::test]
-async fn responses_unknown_probe_terminal_preserves_provider_cooldown() {
+async fn responses_unknown_probe_terminal_clears_provider_cooldown() {
     assert!(
-        !responses_probe_terminal_clears_cooldown(
+        responses_probe_terminal_clears_cooldown(
             "responses_probe_terminal_unknown_reason",
             r#"{"status":"incomplete","incomplete_details":{"reason":"mystery"}}"#,
         )
         .await,
-        "an unknown Responses probe terminal must preserve the provider cooldown"
+        "HTTP 200 must clear cooldown regardless of Responses terminal semantics"
     );
 }

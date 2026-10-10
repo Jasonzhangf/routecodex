@@ -52,7 +52,7 @@ fn ordinary_429_requires_three_consecutive_failures_of_exact_identity() {
         store
             .record_provider_failure_action("p", "a", "m", &different, 107)
             .unwrap()
-            .available
+            .cooldown
     );
 }
 use routecodex_v3_provider_responses::{

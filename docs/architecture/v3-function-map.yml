@@ -4762,15 +4762,18 @@ features:
   - v3/crates/routecodex-v3-error/src/subscription.rs
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/probe_schedule.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health/manual.rs
   - v3/crates/routecodex-v3-provider-responses/src/probe_backoff.rs
   - v3/crates/routecodex-v3-provider-responses/src/provider_cooldown_probe.rs
   - v3/crates/routecodex-v3-provider-responses/src/adaptive_concurrency.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport.rs
+  - v3/crates/routecodex-v3-provider-responses/src/transport/probe.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport_admission.rs
   - v3/crates/routecodex-v3-provider-responses/src/error.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport/websocket.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport/tests.rs
   - v3/crates/routecodex-v3-provider-responses/tests/provider_health_probe_contract.rs
+  - v3/crates/routecodex-v3-provider-responses/tests/provider_probe_status_contract.rs
   - v3/crates/routecodex-v3-provider-responses/tests/responses_websocket_v2.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
@@ -4807,6 +4810,7 @@ features:
   - v3-rd-target-select-responses-relay-admission-rescue
   - v3-rd-target-select-anthropic-relay-admission-rescue
   - v3-provider-admission-lease-lifecycle
+  - v3-provider-global-probe-http-status
   entry_symbols:
   - build_v3_provider_global_error_fingerprint
   - build_v3_provider_global_error_fingerprint_from_classified
@@ -4835,6 +4839,7 @@ features:
   - V3PreAcquiredProviderAdmission::release
   - V3AdaptiveConcurrencyPermitGuard::drop
   - V3ProviderResponsesTransport::send
+  - ProviderResponsesTransport::send_probe
   - execute_v3_anthropic_relay_runtime_inner
   - probe_v3_provider_global_target
   - spawn_v3_server_aggregate
@@ -4846,11 +4851,13 @@ features:
   - v3/crates/routecodex-v3-provider-responses/src/health_tests.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/persistence.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/probe_schedule.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health/manual.rs
   - v3/crates/routecodex-v3-provider-responses/src/probe.rs
   - v3/crates/routecodex-v3-provider-responses/src/probe_backoff.rs
   - v3/crates/routecodex-v3-provider-responses/src/provider_cooldown_probe.rs
   - v3/crates/routecodex-v3-provider-responses/src/adaptive_concurrency.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport.rs
+  - v3/crates/routecodex-v3-provider-responses/src/transport/probe.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport_admission.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport/websocket.rs
   - v3/crates/routecodex-v3-provider-responses/src/error.rs
@@ -4862,6 +4869,7 @@ features:
   - v3/crates/routecodex-v3-server/tests/cooldown_manual_actions_managed.rs
   - v3/crates/routecodex-v3-server/tests/support/cooldown_probe_binary_state.rs
   - v3/crates/routecodex-v3-provider-responses/tests/provider_health_probe_contract.rs
+  - v3/crates/routecodex-v3-provider-responses/tests/provider_probe_status_contract.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
@@ -4896,6 +4904,7 @@ features:
   required_gates:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test provider_account_pool_blackbox
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --lib
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_probe_status_contract
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_global_subscription_probe_contract -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test cooldown_manual_actions_managed -- --test-threads=1 --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime runtime_policy_maps_account_and_recoverable_http_classes_to_global_health -- --nocapture

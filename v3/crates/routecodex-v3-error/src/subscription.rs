@@ -82,8 +82,9 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
     let failure_fingerprint = build_v3_provider_failure_identity_from_classified(classified);
     // Real recoverable failures count toward the shared repeat threshold.
     // Authentication/account failures retain their immediate typed boundary.
-    if matches!(status, Some(401..=403))
-        || is_irrecoverable_provider_failure_code(&classified.source.code)
+    if status != Some(429)
+        && (matches!(status, Some(401..=403))
+            || is_irrecoverable_provider_failure_code(&classified.source.code))
     {
         let cooldown_ms = 5_000;
         return V3ProviderFailureAction {
@@ -334,7 +335,15 @@ mod tests {
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
         assert_eq!(action.failure_threshold, 0);
 
-        for (code, status) in [("insufficient_quota", 429), ("account_disabled", 403)] {
+        let quota = build_v3_provider_failure_action_from_v3_error_02(&classified(
+            "V3ProviderReqOutbound09TransportRequest",
+            "insufficient_quota",
+            429,
+        ));
+        assert_eq!(quota.recovery, V3ProviderRecoveryKind::RecoverableCounted);
+        assert_eq!(quota.failure_threshold, 3);
+
+        for (code, status) in [("account_disabled", 403)] {
             let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
                 "V3ProviderReqOutbound09TransportRequest",
                 code,

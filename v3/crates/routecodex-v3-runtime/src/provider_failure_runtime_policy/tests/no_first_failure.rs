@@ -224,11 +224,7 @@ fn no_first_failure_local_response_source_never_becomes_transport_health() {
 
 #[test]
 fn no_first_failure_irrecoverable_quota_and_auth_keep_immediate_boundary() {
-    for (status, code) in [
-        (401, "invalid_api_key"),
-        (429, "insufficient_quota"),
-        (0, "account_disabled"),
-    ] {
+    for (status, code) in [(401, "invalid_api_key"), (0, "account_disabled")] {
         let failure = source(V3ErrorSourceKind::ProviderFailure, code, status);
         let classified = build_v3_error_02_classified_from_v3_error_01(failure);
         let action = apply_v3_internal_provider_failure_policy(
@@ -253,4 +249,38 @@ fn no_first_failure_irrecoverable_quota_and_auth_keep_immediate_boundary() {
                 .cooldown
         );
     }
+}
+
+#[test]
+fn quota_429_waits_for_three_failures_then_business_success_recovers() {
+    let store = V3ProviderHealthStore::default();
+    let failure = source(
+        V3ErrorSourceKind::ProviderFailure,
+        "insufficient_quota",
+        429,
+    );
+    let classified = build_v3_error_02_classified_from_v3_error_01(failure);
+    let action = apply_v3_internal_provider_failure_policy(
+        build_v3_provider_failure_action_from_v3_error_02(&classified),
+        classified.source.source_stage,
+        429,
+        "insufficient_quota",
+    );
+    assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
+    assert_eq!(action.failure_threshold, 3);
+    for time in 100..103 {
+        assert_eq!(
+            store
+                .record_provider_failure_action("p", "k", "m", &action, time)
+                .unwrap()
+                .cooldown,
+            time == 102
+        );
+    }
+    assert!(
+        store
+            .record_provider_key_success("p", "k", "m", 103)
+            .unwrap()
+            .available
+    );
 }

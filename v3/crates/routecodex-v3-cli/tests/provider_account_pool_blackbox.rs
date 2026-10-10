@@ -67,7 +67,7 @@ async fn recovery_peer(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn zen_429_three_failures_and_semantic_streaming_recovery_public() {
+async fn zen_429_three_failures_and_http_2xx_streaming_recovery_public() {
     let _guard = TEST_LOCK.lock().await;
     let _counter = CounterEnvironment::new();
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -144,23 +144,11 @@ async fn zen_429_three_failures_and_semantic_streaming_recovery_public() {
         }
     }
     assert_eq!(business.load(std::sync::atomic::Ordering::SeqCst), 3);
-    // Force the existing schedule due. The runtime still owns the real probe.
-    for invalid in ["data: [DONE]\n\n", ": keepalive\n\n", "data: not-json\n\n", "data: {\"error\":{\"code\":\"denied\",\"message\":\"denied\"}}\n\n", "data: {\"id\":\"probe\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\n"] {
-        while rx.try_recv().is_ok() {}
-        *probe_body.lock().await = invalid.into();
-        let scheduled: Value = client.post(format!("{base}/_routecodex/health/cooldown-pool/probe")).json(&json!({"provider_id":"poolpeer","auth_alias":"pool-key-01","model_id":"model"})).send().await.unwrap().json().await.unwrap();
-        assert_eq!(scheduled["scheduled"], true);
-        tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        let pool: Value = client.get(format!("{base}/_routecodex/health/cooldown-pool")).send().await.unwrap().json().await.unwrap();
-        assert!(!pool["entries"].as_array().unwrap().is_empty(), "invalid probe revived account: {invalid}");
-    }
-    *probe_body.lock().await = "data: {\"id\":\"probe\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n".into();
-    client
-        .post(format!("{base}/_routecodex/health/cooldown-pool/probe"))
-        .json(&json!({"provider_id":"poolpeer","auth_alias":"pool-key-01","model_id":"model"}))
-        .send()
+    // Recovery is scheduled automatically after the third business 429.
+    // A nonterminal 2xx SSE response is sufficient, regardless of its body.
+    tokio::time::timeout(Duration::from_secs(15), rx.recv())
         .await
+        .unwrap()
         .unwrap();
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -179,7 +167,7 @@ async fn zen_429_three_failures_and_semantic_streaming_recovery_public() {
         }
     })
     .await
-    .expect("semantic probe must restore identity");
+    .expect("HTTP 2xx probe must restore identity");
     let reply = client
         .post(format!("{base}/v1/responses"))
         .json(&request(false))
@@ -429,10 +417,10 @@ async fn peer_provider(
     let stream = body.get("stream").and_then(Value::as_bool).unwrap_or(false);
     let expected_probe = match peer.mode {
         Mode::Direct => {
-            json!({"model":"wire-pool-model","input":[{"role":"user","content":[{"type":"input_text","text":"routecodex health probe"}]}],"max_output_tokens":1,"stream":false})
+            json!({"model":"wire-pool-model","input":[{"role":"user","content":[{"type":"input_text","text":"ping; reply pong"}]}],"stream":false})
         }
         Mode::Relay => {
-            json!({"model":"wire-pool-model","messages":[{"role":"user","content":"routecodex health probe"}],"max_tokens":1,"stream":false})
+            json!({"model":"wire-pool-model","messages":[{"role":"user","content":"ping; reply pong"}],"max_tokens":1,"stream":false})
         }
     };
     if body == expected_probe && account != "invalid" {

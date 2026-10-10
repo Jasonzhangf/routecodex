@@ -75,6 +75,7 @@ impl V3ProviderHealthPersistenceWriter {
                                 !matches!(
                                     key.failure_class,
                                     V3ProviderCooldownFailureClass::Semantic
+                                        | V3ProviderCooldownFailureClass::RateLimit
                                         | V3ProviderCooldownFailureClass::ProbeLong
                                         | V3ProviderCooldownFailureClass::ManualAuth
                                 )
@@ -446,6 +447,10 @@ fn provider_cooldown_persistence_entries(
                     model_id: probe.probe_model_id.clone(),
                     failure_class: if state.auth_key_cooldowns.contains_key(key) {
                         V3ProviderCooldownFailureClass::ManualAuth
+                    } else if probe.cooldown_cause
+                        == Some(V3ProviderCooldownFailureClass::RateLimit)
+                    {
+                        V3ProviderCooldownFailureClass::RateLimit
                     } else if probe.long_probe_backoff {
                         V3ProviderCooldownFailureClass::ProbeLong
                     } else {
