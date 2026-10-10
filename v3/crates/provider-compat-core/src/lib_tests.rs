@@ -152,10 +152,12 @@ fn minimax_response_profile_harvests_invoke_xml_tool_call() {
 }
 
 #[test]
-fn minimax_response_profile_rejects_malformed_text_tool_envelope() {
+fn minimax_response_profile_preserves_malformed_text_tool_envelope() {
     let input = ReqOutboundCompatInput {
         payload: json!({
             "object": "response",
+            "id": "resp_minimax_malformed_1",
+            "status": "completed",
             "output": [{
                 "type": "message",
                 "role": "assistant",
@@ -163,7 +165,8 @@ fn minimax_response_profile_rejects_malformed_text_tool_envelope() {
                     "type": "output_text",
                     "text": "<get_goal></invoke></tool_call>"
                 }]
-            }]
+            }],
+            "metadata": {"client_visible": "kept"}
         }),
         adapter_context: AdapterContext {
             compatibility_profile: Some("chat:minimax".to_string()),
@@ -172,9 +175,15 @@ fn minimax_response_profile_rejects_malformed_text_tool_envelope() {
         },
         explicit_profile: None,
     };
-    let error =
-        run_resp_inbound_stage3_compat(input).expect_err("malformed tool syntax must fail fast");
-    assert!(error.contains("malformed text tool-call envelope"));
+    let result = run_resp_inbound_stage3_compat(input)
+        .expect("model-authored malformed tool text must not be rejected at compat");
+    assert_eq!(result.applied_profile.as_deref(), Some("chat:minimax"));
+    assert_eq!(result.payload["status"], "completed");
+    assert_eq!(
+        result.payload["output"][0]["content"][0]["text"],
+        "<get_goal></invoke></tool_call>"
+    );
+    assert_eq!(result.payload["metadata"]["client_visible"], "kept");
 }
 
 #[test]
@@ -209,17 +218,19 @@ fn minimax_response_profile_strips_provider_sentinel_from_anthropic_text() {
 }
 
 #[test]
-fn cc_response_profile_projects_known_diagnostic_text_to_empty_natural_stop() {
+fn cc_response_profile_preserves_known_diagnostic_text_verbatim() {
     let diagnostic = "检测到请求较复杂已自动路由到硬推理模型\nNoticing frequent 'deadlock detected' messages in the logs\nVerifying config.v3.toml provider configurationPlanning removal of inline provider";
     let input = ReqOutboundCompatInput {
         payload: json!({
             "object": "response",
             "id": "resp_cc_diagnostic_1",
+            "status": "completed",
             "output": [{
                 "type": "message",
                 "role": "assistant",
                 "content": [{"type": "output_text", "text": diagnostic}]
-            }]
+            }],
+            "metadata": {"client_visible": "kept"}
         }),
         adapter_context: AdapterContext {
             compatibility_profile: Some("responses:cc".to_string()),
@@ -231,11 +242,14 @@ fn cc_response_profile_projects_known_diagnostic_text_to_empty_natural_stop() {
     let result = run_resp_inbound_stage3_compat(input).unwrap();
     assert_eq!(result.applied_profile.as_deref(), Some("responses:cc"));
     assert_eq!(result.payload["status"], "completed");
-    assert_eq!(result.payload["finish_reason"], "stop");
-    assert!(result.payload["output"].as_array().unwrap().is_empty());
+    assert_eq!(
+        result.payload["output"][0]["content"][0]["text"],
+        diagnostic
+    );
+    assert_eq!(result.payload["metadata"]["client_visible"], "kept");
     let serialized = serde_json::to_string(&result.payload).unwrap();
-    assert!(!serialized.contains("deadlock detected"));
-    assert!(!serialized.contains("Verifying config.v3.toml"));
+    assert!(serialized.contains("deadlock detected"));
+    assert!(serialized.contains("Verifying config.v3.toml"));
 }
 
 #[test]
