@@ -2,7 +2,7 @@
 
 > **当前状态（2026-10-10 更新，恢复时以此为准）**
 >
-> - 主线已交付并合入 `origin/main = 82f9be04c92b4f49b870db884f13344e62e57096`：
+> - 主线已交付并合入 `origin/main = 7f949fb497e10700a336c9671e541bed74e92ff9`：
 >   A 三根 SDK 升到 0.1.0014（PR #380）、B requirements ledger（PR #381）、
 >   C zone-transition 历史别名刷新（PR #382）。
 > - C：`7c73e4b`、`2efe942` 已 close；其余 backlog 项保持 typed open，
