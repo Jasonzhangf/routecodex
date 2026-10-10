@@ -81,7 +81,11 @@ async fn probe_preserves_non_2xx_status_body_and_network_errors() {
         let task = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut bytes = vec![0; 4096];
-            socket.read(&mut bytes).await.unwrap();
+            let read = socket.read(&mut bytes).await.unwrap();
+            assert!(
+                read > 0,
+                "probe request must arrive before response headers"
+            );
             socket.write_all(format!("HTTP/1.1 {status} Failure\r\nContent-Length: 4\r\nx-evidence: kept\r\n\r\noops").as_bytes()).await.unwrap();
         });
         let error = ReqwestResponsesTransport::default()
@@ -201,7 +205,11 @@ async fn streaming_probe_non_2xx_unfinished_body_keeps_status_and_releases_admis
         let task = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut bytes = vec![0; 4096];
-            socket.read(&mut bytes).await.unwrap();
+            let read = socket.read(&mut bytes).await.unwrap();
+            assert!(
+                read > 0,
+                "probe request must arrive before response headers"
+            );
             socket.write_all(format!("HTTP/1.1 {status} Failure\r\nContent-Length: 100000\r\nx-evidence: kept\r\n\r\npartial").as_bytes()).await.unwrap();
             let _ = release_rx.await;
         });

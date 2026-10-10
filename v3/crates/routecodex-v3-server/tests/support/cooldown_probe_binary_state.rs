@@ -26,7 +26,10 @@ async fn upstream(
 ) -> Response {
     let auth = headers["authorization"].to_str().unwrap().to_string();
     assert_eq!(body["model"], "test");
-    let probe = body.to_string().contains("ping; reply pong") || body.to_string().contains("Reply exactly OK. Do not call tools.");
+    let probe = body.to_string().contains("ping; reply pong")
+        || body
+            .to_string()
+            .contains("Reply exactly OK. Do not call tools.");
     peer.receipts.send((auth.clone(), probe)).unwrap();
     if auth == "Bearer controlled-secret" {
         if body.to_string().contains("held success") {
@@ -189,7 +192,8 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
     assert!(
         entries.iter().any(|entry| entry["auth_alias"] == "key"
             && entry["model_id"] == "test"
-            && (entry["state"] == "probing" || (fail_streaming_probe && entry["state"] == "waiting"))),
+            && (entry["state"] == "probing"
+                || (fail_streaming_probe && entry["state"] == "waiting"))),
         "overdue in-flight identity must stay in pool: {entries:?}"
     );
     assert!(business(&client, &managed).await.contains("spare-secret"));
