@@ -2,6 +2,9 @@
 
 ## Required order
 
+This is the runtime bug-fix lifecycle when its delivery/promotion phases are in
+scope. Ordinary documents and local reviews do not run the full freeze chain.
+
 ```text
 goal admitted
   -> clean isolated worktree from approved base
@@ -9,12 +12,12 @@ goal admitted
   -> formal fix in the unique owner
   -> fix candidate verification
   -> development whitebox PASS
-  -> build / install / restart
+  -> build / applicable install and restart
   -> deployed public-entrypoint blackbox PASS
   -> pre-review validation PASS
   -> architecture review PASS
-  -> unchanged-candidate effectiveness replay PASS
-  -> merge queue admission when parallel development is enabled
+  -> unchanged-candidate effectiveness evidence PASS (reuse when valid)
+  -> merge queue admission when that integration mode is enabled
   -> tested integration identity verification
   -> local and remote mainline receipt
   -> compile / Active / Protected / Freeze
@@ -29,6 +32,39 @@ Playground is the logical experiment lifecycle. The clean Git worktree is the ph
 - Candidate commit missing from the tested integration blocks promotion. In single-worker mode, the merged tree must equal the reviewed/effectiveness-tested candidate tree. In parallel mode, the final main tree may contain other accepted work, but the merged commit/tree must exactly equal IntegrationRecord and remain reachable from both local and recorded remote main refs.
 - Compile and publish never consume Playground or an unmerged candidate branch.
 
+## Phase re-entry and evidence reuse
+
+Every phase is a separately persisted loop. The phase input identity includes
+the candidate/tree, module scope, dependency records, artifact and environment
+bindings, map hashes, evidence references, and the phase-specific mainline or
+cleanup identifiers. AppSDK validates that identity and the upstream graph on
+each call.
+
+When an existing phase projection is PASS and its identity and evidence
+freshness still match, the producer returns `reused: true` and skips the
+external action for that phase. The read-only `verify` command may still walk
+the full record graph to check hashes, references, timestamps, and expiry; that
+walk does not rerun tests, deployment, merge, or publication. A reuse result is
+therefore an exact cache decision, not fresh execution evidence.
+
+Any candidate, dependency, map, artifact, environment, input, or freshness
+drift invalidates that phase and every downstream phase. Immutable PASS records
+remain as historical witnesses; AppSDK rejects the stale identity until a new
+candidate-bound projection is produced. `fail`, `unknown`, malformed, or
+expired projections never count as PASS. Repeating the same non-PASS identity
+returns `LIFECYCLE_CHAIN_STAGE_NOT_PASS`; a changed identity archives the old
+projection in append-only
+`.appsdk/records/attempts/<module>/<phase>.jsonl` and re-enters the phase. A
+partial Worktree/Reproduction/baseline record set, conflicting attempt history,
+or tampered hash fails closed.
+
+The producer applies this transition to every downstream phase, including
+merge and promotion: only an exact identity is a cache hit. A stale PASS is
+preserved with its original record hash and timestamp, while the replacement
+must be produced from the current candidate and pass the phase's upstream
+graph. This makes re-entry bounded to the first invalidated phase instead of
+forcing a full lifecycle rerun or accepting an old PASS as current truth.
+
 ## Record graph
 
 ```text
@@ -36,7 +72,7 @@ WorktreeRecord
   -> ReproductionRecord
   -> EvidenceRecord[]
   -> FixCandidateRecord
-  -> PreReviewValidationRecord (whitebox + evidence-backed install/restart + deployed blackbox)
+  -> PreReviewValidationRecord (whitebox + applicable service receipts + public-entrypoint blackbox)
   -> Architecture ReviewRecord
   -> EffectivenessRecord
   -> CollaborationRecord (parallel)
@@ -49,9 +85,11 @@ WorktreeRecord
   -> FreezeRecord
 ```
 
-Required evidence phases are `baseline_reproduction`, `fix_candidate`, `positive_intervention`, `negative_intervention`, and `post_architecture_effectiveness`. Every referenced evidence ID must resolve to a distinct record.
+Required evidence covers baseline reproduction, candidate, positive and negative interventions, and public-entrypoint effectiveness. Effectiveness may reuse validated candidate interventions and `deployed_blackbox` with the same input/artifact and valid lifetime; alternatively use post-review replay. Each ID resolves to one record, and the same valid record can be referenced across phases without copying it. Review confidence is optional annotation.
 
-The pre-review gate additionally requires `development_whitebox`, `deployment_install`, `deployment_restart`, and `deployed_blackbox` EvidenceRecords for the exact candidate. It enforces whitebox ≤ install ≤ restart ≤ deployed blackbox ≤ validation time. Issue lifecycle states such as `pre_review_validated` are derived projections of validated records; they are not module promotion stages.
+The pre-review gate requires `development_whitebox` and `deployed_blackbox` for the exact candidate/artifact/environment. Module `deployment_operations` selects required install/restart receipts; omission preserves both, `[]` requires neither. Every supplied receipt is verified, and causality remains whitebox ≤ applicable receipts ≤ blackbox ≤ validation. The module declaration is artifact-bound. Issue lifecycle states such as `pre_review_validated` are derived record projections, not module promotion stages.
+
+The WorktreeRecord captures the isolated worktree's observed starting head. A later FixCandidate may be a descendant of that head when the candidate remains bound to the same worktree, base commit, scope, evidence, and current source identity. The graph accepts that ancestry relation; it does not rewrite or delete the historical WorktreeRecord and still requires the candidate commit/tree and all review/effectiveness evidence to match exactly.
 
 ## Compatibility
 

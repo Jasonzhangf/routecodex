@@ -192,19 +192,22 @@ jobs:
           RCCV4_REAL_RUNTIME_ADMISSION_MODE: contract
         run: npm --prefix v4 run verify:ci
 
-  v4-appsdk-admission:
-    needs: scope
-    if: needs.scope.outputs.v4_full == 'true'
+  appsdk-admission:
     runs-on: macos-14
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
       - name: Build global AppSDK from locked release source
         run: |
-          git clone --depth 1 --branch v0.1.5 \
+          git clone --depth 1 --branch v0.1.0014 \
             https://github.com/Jasonzhangf/appsdk.git "$RUNNER_TEMP/appsdk-src"
+          test "$(git -C "$RUNNER_TEMP/appsdk-src" rev-parse HEAD)" = \
+            9dc90303278ddd2a8be5fab8e835d498057ebe6e
           cargo build --release --locked \
             --manifest-path "$RUNNER_TEMP/appsdk-src/rust/Cargo.toml"
           mkdir -p "$HOME/.local/bin"
@@ -212,12 +215,14 @@ jobs:
             "$RUNNER_TEMP/appsdk-src/rust/target/release/appsdk" \
             "$HOME/.local/bin/appsdk"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: V4 AppSDK admission
+      - name: AppSDK hook regression
+        run: npm run --silent test:appsdk-admission-hook
+      - name: AppSDK contract admission
         run: |
           command -v appsdk
           appsdk version
           test -x "$(command -v appsdk)"
-          appsdk verify --admission v4
+          npm run --silent verify:appsdk-admission
 
   v4-scoped:
     needs: scope
