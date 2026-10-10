@@ -81,8 +81,8 @@ async fn serve_two_openai_chat_probes(
 ) -> (String, String) {
     let first = serve_one_openai_chat_probe(
         &listener,
-        "200 OK",
-        r#"{"choices":[{"finish_reason":null}]}"#,
+        "503 Service Unavailable",
+        r#"{"error":{"message":"probe temporarily unavailable"}}"#,
     )
     .await;
     let second = serve_one_openai_chat_probe(&listener, status_line, body).await;
