@@ -1,5 +1,25 @@
 # RouteCodex 治理统一升级计划
 
+> **当前状态（2026-10-10 更新，恢复时以此为准）**
+>
+> - 主线已交付并合入 `origin/main = 82f9be04c92b4f49b870db884f13344e62e57096`：
+>   A 三根 SDK 升到 0.1.0014（PR #380）、B requirements ledger（PR #381）、
+>   C zone-transition 历史别名刷新（PR #382）。
+> - C：`7c73e4b`、`2efe942` 已 close；其余 backlog 项保持 typed open，
+>   见 `.worker-runs/governance-upgrade-20261010/c-backlog/acceptance-and-dispositions.md`。
+> - E（v4 active 制品）：`UPSTREAM_APPSDK` 生产侧缺口。
+>   `appsdk rehydrate-frozen v4 --module routecodex-v4-base-node` 报
+>   `FROZEN_REHYDRATE_ARTIFACT_HASH_MISMATCH`；`active-v2` 归档从未提交，
+>   重建 hash 与记录 hash 不一致，重跑官方命令无法通过。
+>   见 `v4-artifact-e/root-cause-20261010.md`。
+> - D（结案经验审计）：已完成，结论 `materials needed`；
+>   处置见 `retrospective-audit-disposition.md`。
+> - 下文 §1–§11 为历史过程记录，含已纠正的旧事实：
+>   §1 第 3 条不是 v4 当前验收（v4 交付级仍为 typed 缺口）；
+>   §3 的"4 个 frozen 模块"应读作 3 个（base-node/control/edge，`error` 为
+>   `source_implemented`，见 §9.1）；§10.1/§11.3 的范围授权已在 §11.4 生效；
+>   §11 末尾的 Review-6/待合并为历史节点。
+
 ## 1. 总目标与最终验收
 
 把 RouteCodex 仓库内三个 AppSDK 受管项目根统一升级到当前全局 AppSDK
