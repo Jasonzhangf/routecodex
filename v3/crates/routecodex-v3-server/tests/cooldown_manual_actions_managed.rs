@@ -38,6 +38,12 @@ fn temp_home(label: &str) -> PathBuf {
 mod test_ports;
 use test_ports::free_port;
 
+#[path = "support/cooldown_probe_binary_state.rs"]
+mod cooldown_probe_binary_state;
+
+#[path = "../../../crates/routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
+mod hub_v1_fixture;
+
 fn config_source(server_port: u16) -> String {
     format!(
         r#"
@@ -86,6 +92,14 @@ impl Managed {
     }
 
     async fn start_inner(label: &str, with_admin: bool) -> Self {
+        Self::start_source(label, with_admin, config_source).await
+    }
+
+    async fn start_source(
+        label: &str,
+        with_admin: bool,
+        source: impl FnOnce(u16) -> String,
+    ) -> Self {
         std::env::set_var("V3_COOLDOWN_MANUAL_TEST_KEY", "controlled-secret");
         std::env::remove_var("ROUTECODEX_V3_ADMIN_BIND");
         let home = temp_home(label);
@@ -96,11 +110,11 @@ impl Managed {
         let source = if with_admin {
             format!(
                 "{}\n[admin_webui]\nenabled = true\nbind = \"127.0.0.1\"\nport = {}\n",
-                config_source(server_port),
+                source(server_port),
                 free_port()
             )
         } else {
-            config_source(server_port)
+            source(server_port)
         };
         fs::write(&config_path, source).unwrap();
 

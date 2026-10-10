@@ -1511,7 +1511,7 @@ impl V3ProviderHealthStore {
     }
 
     /// Returns all current cooldown entries (session + auth_key + provider-level probes).
-    /// Entries with no remaining time are excluded.
+    /// Expired timed cooldowns are excluded; unrecovered probes stay visible.
     pub fn cooldown_entries(&self, now_ms: u64) -> Vec<V3CooldownPoolEntry> {
         let state = match self.state.read() {
             Ok(s) => s,
@@ -1569,22 +1569,14 @@ impl V3ProviderHealthStore {
         }
         // Provider cooldown probes (global)
         for (key, probe) in &state.provider_cooldown_probes {
-            if !probe.blocked_until_ms.is_some_and(|u| u > now_ms)
-                && !probe.next_probe_at_ms.is_some_and(|n| n > now_ms)
-                && probe.blocked_until_ms.is_some()
-                && probe.blocked_until_ms.is_some_and(|u| u <= now_ms)
-                && probe.next_probe_at_ms.is_some_and(|n| n <= now_ms)
-            {
-                continue;
-            }
             let blocked = probe.blocked_until_ms.is_some_and(|u| u > now_ms);
-            let probing =
-                probe.probe_in_flight || probe.next_probe_at_ms.is_some_and(|n| n > now_ms);
+            // A deadline only makes recovery due. Retained exclusions remain
+            // in the pool while waiting or probing, until semantic recovery.
             let state_str = if probe.probe_in_flight {
                 "probing".to_string()
             } else if blocked {
                 "blocked".to_string()
-            } else if probing {
+            } else if probe.next_probe_at_ms.is_some() || probe.blocked_until_ms.is_some() {
                 "waiting".to_string()
             } else {
                 continue;

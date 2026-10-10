@@ -4859,6 +4859,8 @@ features:
   - v3/crates/routecodex-v3-provider-responses/tests/provider_probe_backoff_ladder_contract.rs
   - v3/crates/routecodex-v3-provider-responses/tests/provider_global_cooldown_persistence_contract.rs
   - v3/crates/routecodex-v3-provider-responses/tests/provider_global_subscription_probe_contract.rs
+  - v3/crates/routecodex-v3-server/tests/cooldown_manual_actions_managed.rs
+  - v3/crates/routecodex-v3-server/tests/support/cooldown_probe_binary_state.rs
   - v3/crates/routecodex-v3-provider-responses/tests/provider_health_probe_contract.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
@@ -4895,6 +4897,7 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test provider_account_pool_blackbox
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --lib
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_global_subscription_probe_contract -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test cooldown_manual_actions_managed -- --test-threads=1 --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime runtime_policy_maps_account_and_recoverable_http_classes_to_global_health -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime cooldown_exhaustion --lib -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime later_tier_selection_skips_in_flight_rescue_probes_without_waiting --lib -- --nocapture

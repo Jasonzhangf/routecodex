@@ -55,6 +55,8 @@
 
 ## Runtime Ownership
 
+- Provider health has two states for each complete `provider.model.key`: routable or visible in the cooldown pool. Due, waiting and in-flight recovery probes remain cooldown substates; expiry alone must not hide an excluded identity. Matching semantic probe success restores routing and removes its cooldown entry atomically.
+
 - Server: listener, HTTP/WebSocket framing, body limits, client disconnect.
 - Runtime: complete request lifecycle, fixed skeleton/node/hook order, provider transport relay, and full-attempt buffering.
 - Inbound: lossless request/response normalization only; no filtering or payload rewriting.
