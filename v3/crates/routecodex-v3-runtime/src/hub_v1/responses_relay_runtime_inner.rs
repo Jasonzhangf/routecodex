@@ -465,6 +465,11 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 }
             }
         }
+        let provider_sse = transport_request.stream_intent()
+            == routecodex_v3_provider_responses::V3ResponsesStreamIntent::Sse;
+        if provider_sse {
+            attempt_budget.use_sse_first_word_policy();
+        }
         provider_send_attempts = handle_error_before_resp03!(attempt_budget
             .admit_transport_attempt()
             .map_err(|error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string())));
@@ -477,19 +482,35 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
             }
             None => transport_request,
         };
-        let transport_result = match tokio::time::timeout(
-            v3_relay_transport_response_timeout(manifest, &selected_target_provider_id),
-            transport.send(transport_request),
-        )
-        .await
-        {
-            Err(_) => Err(V3ProviderError::Transport {
-                request_id: input.request_id.clone(),
-                provider_id: selected_target_provider_id.clone(),
-                reason: V3_RELAY_TRANSPORT_HANG_REASON.to_string(),
-            }),
-            Ok(result) => result,
+        let first_word_deadline = tokio::time::Instant::now()
+            + if provider_sse {
+                crate::hub_v1::relay_runtime_shared::v3_provider_sse_first_word_timeout(
+                    manifest,
+                    &selected_target_provider_id,
+                )
+                .map_err(V3ResponsesRelayRuntimeError::Target)?
+            } else {
+                std::time::Duration::from_millis(
+                    routecodex_v3_config::default_provider_sse_first_frame_timeout_ms(),
+                )
+            };
+        let response_deadline = if provider_sse {
+            first_word_deadline
+        } else {
+            tokio::time::Instant::now()
+                + v3_relay_transport_response_timeout(manifest, &selected_target_provider_id)
         };
+        let transport_result =
+            match tokio::time::timeout_at(response_deadline, transport.send(transport_request))
+                .await
+            {
+                Err(_) => Err(V3ProviderError::Transport {
+                    request_id: input.request_id.clone(),
+                    provider_id: selected_target_provider_id.clone(),
+                    reason: V3_RELAY_TRANSPORT_HANG_REASON.to_string(),
+                }),
+                Ok(result) => result,
+            };
         let provider_raw = match transport_result {
             Ok(raw) => raw,
             Err(V3ProviderError::ConcurrencyBusy { .. }) => {
@@ -861,29 +882,19 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 });
             }
             V3ProviderResponseBody::Sse(stream) => {
-                let sse_idle_timeout =
-                    crate::hub_v1::relay_runtime_core::v3_provider_sse_idle_timeout(
-                        manifest,
-                        &selected_target_provider_id,
-                    )
-                    .map_err(V3ResponsesRelayRuntimeError::Target)?;
-                let stream =
-                    crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_attempt_deadline(
-                        &input.request_id,
-                        &selected_target_provider_id,
-                        stream,
-                        attempt_budget.residence_deadline(),
-                    );
+                attempt_budget.use_sse_first_word_policy();
+                let stream = crate::hub_v1::relay_runtime_shared::guard_v3_provider_sse_first_word(
+                    &input.request_id,
+                    &selected_target_provider_id,
+                    provider_wire_protocol,
+                    stream,
+                    first_word_deadline,
+                );
                 let stream_observation = V3RuntimeStreamObservation::default();
                 let provider_value_result =
                     build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
                         provider_wire_protocol,
-                        crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_idle(
-                            &input.request_id,
-                            &selected_target_provider_id,
-                            stream,
-                            sse_idle_timeout,
-                        ),
+                        stream,
                         &stream_observation,
                         &anthropic_response_projection_context,
                     )
@@ -925,8 +936,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             )
                             .await
                         );
-                        let deadline_expired =
-                            attempt_budget.residence_deadline() <= std::time::Instant::now();
+                        let deadline_expired = attempt_budget.residence_expired();
                         if let Some(failure) = terminal_failure {
                             return Ok(provider_failure_output_with_observation(
                                 failure,

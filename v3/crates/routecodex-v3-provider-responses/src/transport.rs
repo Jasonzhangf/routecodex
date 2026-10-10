@@ -65,10 +65,9 @@ const ANTHROPIC_PROVIDER_HEADER_NAMES: &[&str] = &[
     "x-stainless-retry-count",
     "x-stainless-timeout",
 ];
-// Keep the client-level idle read guard at the maximum supported local cold-start
-// budget. Per-request `RequestBuilder::timeout` and the protocol-specific SSE
-// semantic guards remain the authoritative shorter deadlines for providers that
-// configure them; this guard must not truncate a 15-minute local provider start.
+// JSON keeps its client-level read guard and configured request total timeout.
+// SSE uses a separate client without read/total deadlines; Runtime owns its
+// configured semantic first-word deadline.
 const V3_PROVIDER_HTTP_READ_TIMEOUT_SECS: u64 = 900;
 const V3_PROVIDER_HTTP_POOL_IDLE_TIMEOUT_SECS: u64 = 30;
 const V3_PROVIDER_HTTP_TCP_KEEPALIVE_SECS: u64 = 30;
@@ -98,6 +97,7 @@ pub(crate) enum V3Transport13ResponsesRequestKind {
         url: String,
         auth: V3ProviderAuthHandle,
         stream_intent: V3ResponsesStreamIntent,
+        sse_first_frame_timeout_ms: Option<u64>,
         event: Value,
         initial_concurrency_budget: u32,
         cancellation: Option<V3ProviderCancellation>,
@@ -529,6 +529,7 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
                     url,
                     auth: target.auth,
                     stream_intent,
+                    sse_first_frame_timeout_ms,
                     event: body,
                     initial_concurrency_budget,
                     cancellation: None,
@@ -624,7 +625,8 @@ pub fn build_v3_transport_13_responses_http_request_with_provider_headers_from_p
     )
 }
 
-/// 带 per-request 总超时（覆盖连接、响应头等待与 body 读取；None = 不设置，仅由 client 级 `read_timeout` 兜底）的 transport request 构建。
+/// Builds a transport request with a JSON total timeout. SSE carries this
+/// declaration for projection compatibility and uses its first-word deadline.
 #[allow(clippy::too_many_arguments)]
 pub fn build_v3_transport_13_responses_http_request_from_parts_with_timeout(
     request_id: impl Into<String>,
@@ -671,6 +673,7 @@ pub trait ResponsesTransport: Send + Sync {
 #[derive(Clone)]
 pub struct ProviderResponsesTransport {
     client: reqwest::Client,
+    sse_client: reqwest::Client,
     websocket_sessions: Arc<Mutex<BTreeMap<String, SharedResponsesWebSocket>>>,
     handoff: crate::transport_handoff::V3ProviderTransportAttemptBroker,
 }
@@ -698,6 +701,13 @@ impl ProviderResponsesTransport {
                 .tcp_keepalive(Duration::from_secs(V3_PROVIDER_HTTP_TCP_KEEPALIVE_SECS))
                 .build()
                 .expect("valid V3 provider HTTP client read timeout"),
+            // SSE lifetime is governed by semantic first-word admission in
+            // Runtime. A client read timeout would also kill an admitted stream.
+            sse_client: reqwest::Client::builder()
+                .pool_idle_timeout(Duration::from_secs(V3_PROVIDER_HTTP_POOL_IDLE_TIMEOUT_SECS))
+                .tcp_keepalive(Duration::from_secs(V3_PROVIDER_HTTP_TCP_KEEPALIVE_SECS))
+                .build()
+                .expect("valid V3 provider SSE HTTP client"),
             websocket_sessions: Arc::new(Mutex::new(BTreeMap::new())),
             handoff: crate::transport_handoff::V3ProviderTransportAttemptBroker::default(),
         }
@@ -827,12 +837,13 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 url,
                 auth,
                 stream_intent,
+                sse_first_frame_timeout_ms,
                 event,
                 initial_concurrency_budget: _,
                 cancellation,
                 compatibility_profile,
-            } => {
-                self.send_websocket_v2(
+            } => self
+                .send_websocket_v2(
                     request_id,
                     provider_id,
                     canonical_model_id,
@@ -847,7 +858,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                     compatibility_profile,
                 )
                 .await
-            }
+                .map(|raw| raw.with_sse_first_frame_timeout_ms(sse_first_frame_timeout_ms)),
         };
         let now_ms = current_epoch_ms();
         match result {
@@ -1044,12 +1055,15 @@ impl ProviderResponsesTransport {
         };
         let anthropic_messages = is_anthropic_messages_url(&url);
         let provider_headers = provider_headers.clone();
-        let mut request = self
-            .client
+        let client = match stream_intent {
+            V3ResponsesStreamIntent::Json => &self.client,
+            V3ResponsesStreamIntent::Sse => &self.sse_client,
+        };
+        let mut request = client
             .post(url)
             .header(reqwest::header::ACCEPT, accept)
             .bearer_auth(&secret);
-        if let Some(timeout) = timeout {
+        if let (V3ResponsesStreamIntent::Json, Some(timeout)) = (stream_intent, timeout) {
             request = request.timeout(timeout);
         }
         if anthropic_messages {

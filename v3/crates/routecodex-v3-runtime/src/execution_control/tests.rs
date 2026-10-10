@@ -267,6 +267,35 @@ fn attempt_store_rejects_expired_request_before_reservation() {
 }
 
 #[test]
+fn sse_first_word_policy_preserves_capacity_and_retry_limits_after_legacy_deadline() {
+    let process_bytes = Arc::new(AtomicUsize::new(0));
+    let mut limits = test_limits(8, 8, 8);
+    limits.residence_timeout = Duration::ZERO;
+    let budget = V3AttemptBudget::new_isolated(limits, Arc::clone(&process_bytes));
+    budget.use_sse_first_word_policy();
+    assert!(!budget.residence_expired());
+    for expected in 1..=3 {
+        assert_eq!(budget.admit_transport_attempt().unwrap(), expected);
+    }
+    assert!(
+        budget.admit_transport_attempt().is_err(),
+        "SSE does not bypass attempts"
+    );
+    let mut builder = V3CommittedClientSseBuilder::with_budget(budget.clone()).unwrap();
+    builder.push(vec![1, 2, 3]).unwrap();
+    assert!(
+        builder.push(vec![0; 6]).is_err(),
+        "SSE does not bypass byte caps"
+    );
+    builder.mark_last_frame_as_terminal().unwrap();
+    let stream = builder.seal_after_validated_terminal().unwrap();
+    assert_eq!(budget.request_resident_bytes(), 3);
+    drop(stream);
+    assert_eq!(budget.request_resident_bytes(), 0);
+    assert_eq!(process_bytes.load(Ordering::Acquire), 0);
+}
+
+#[test]
 fn sealed_replay_holds_reservation_until_stream_drop() {
     let process_bytes = Arc::new(AtomicUsize::new(0));
     let budget = V3AttemptBudget::new_isolated(test_limits(8, 8, 8), Arc::clone(&process_bytes));

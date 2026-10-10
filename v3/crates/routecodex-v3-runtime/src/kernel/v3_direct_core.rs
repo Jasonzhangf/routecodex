@@ -401,20 +401,18 @@ where
             manifest.debug.projection_drop_log_file.clone(),
             client_original_body.clone(),
         );
-        let wire = match C::run_request_projection(
-            &policy,
-            request_key_catalog,
-            &projection_drop_context,
-        ) {
-            Ok(value) => value,
-            Err(source) => {
-                return error_output(
-                    source,
-                    trace,
-                    &crate::hooks::register_responses_direct_hooks(),
-                )
-            }
-        };
+        let wire =
+            match C::run_request_projection(&policy, request_key_catalog, &projection_drop_context)
+            {
+                Ok(value) => value,
+                Err(source) => {
+                    return error_output(
+                        source,
+                        trace,
+                        &crate::hooks::register_responses_direct_hooks(),
+                    )
+                }
+            };
         trace.push("V3Provider12ResponsesWirePayload");
         let transport_request = match C::run_provider_transport(wire) {
             Ok(value) => value,
@@ -462,7 +460,8 @@ where
                     selected_admission = match admit_v3_selected_target_after_recovery(&selected) {
                         V3AdmitAfterRecovery::Admitted(admission) => Some(admission),
                         V3AdmitAfterRecovery::Busy => {
-                            failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
+                            failed_candidates
+                                .insert(v3_relay_provider_candidate_key(&selected.candidate));
                             drop(provider_action_permit.take());
                             provider_action_permit_target = None;
                             continue;
@@ -522,6 +521,7 @@ where
                 }
             }
         }
+        default_transport::prepare_direct_sse_attempt(&transport_request, &attempt_budget);
         send_attempts = match attempt_budget.admit_transport_attempt() {
             Ok(attempts) => attempts,
             Err(error) => {
@@ -545,11 +545,18 @@ where
             }
             None => transport_request,
         };
-        let provider_raw = match transport.send(transport_request).await {
+        let (first_word_deadline, transport_result) =
+            default_transport::send_direct_provider_headers(transport, transport_request, None)
+                .await;
+        let provider_raw = match transport_result {
             Ok(raw) => raw,
             Err(V3ProviderError::ConcurrencyBusy { .. }) => {
                 if let Err(error) = runtime_timing.finish_external() {
-                    return error_output(runtime_source("V3RuntimeTimingExternal", error), trace, &crate::hooks::register_responses_direct_hooks());
+                    return error_output(
+                        runtime_source("V3RuntimeTimingExternal", error),
+                        trace,
+                        &crate::hooks::register_responses_direct_hooks(),
+                    );
                 }
                 failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
                 drop(provider_action_permit.take());
@@ -557,7 +564,9 @@ where
                 continue;
             }
             Err(error) => {
-                if let Some(witness) = crate::hub_v1::external_http_witness_from_provider_error(&error) {
+                if let Some(witness) =
+                    crate::hub_v1::external_http_witness_from_provider_error(&error)
+                {
                     last_external_http = Some(witness);
                 }
                 if let Err(timing_error) = runtime_timing.finish_external() {
@@ -897,6 +906,12 @@ where
             };
         let response_projection_context =
             response_projection_context.with_runtime_timing(runtime_timing.clone());
+        let provider_raw = crate::hub_v1::guard_v3_provider_sse_first_word_response(
+            provider_raw,
+            response_projection_context.provider_protocol,
+            first_word_deadline,
+            &attempt_budget,
+        );
         let mut response_projection =
             match C::run_response_projection(provider_raw, response_projection_context).await {
                 Ok(projection) => projection,

@@ -1242,6 +1242,9 @@ features:
   - A successful ten-minute probe increases the budget, a 429 probe decreases it, and SSE leases release only when the raw stream is dropped or exhausted
   - Responses HTTP transport applies the configured provider SSE first-frame timeout to the response-header wait and the timeout reason projects as the health-neutral transient transport hang in both direct and relay failure policies
   - Responses, OpenAI Chat, Anthropic, and Gemini transport builders propagate the configured provider SSE first-frame timeout through the shared transport request
+  - Direct Responses WebSocketV2 preserves the configured first-word interval in its generic request and raw response; connection acquisition and semantic output use one absolute interval, followed by unlimited stream lifetime.
+  - SSE transport has no request total or client read deadline; JSON retains its declared request timeout. First-word acquisition includes headers and nonsemantic frames in one interval.
+  - A real managed Responses-to-Chat listener preserves content, reasoning and tool arguments beyond previous provider total, residence and idle intervals, and still rejects incomplete EOF and truncated HTTP bodies.
   - A Responses selection-time pool exhaustion (every candidate excluded by the context window before any provider attempt) breaks the client transport for both the streaming and the nonstreaming boundary instead of projecting the synthesized 502 `network_error` body, which stays provider-private Error06 evidence
   - A provider terminal disposition records provider-private evidence before the client transport breaks: the real external upstream status, headers, and body are persisted for the failed request, and a terminal with no provider response records that instead of a fabricated status
   required_contract:
@@ -1256,6 +1259,7 @@ features:
   - auth secret values never enter manifest, Debug, Error, Provider wire Debug, transport request Debug, or client payload
   required_gates:
   - npm run test:v3-opencode-zen-provider-headers
+  - npm run test:v3-sse-first-word-websocket-managed
   - npm run test:v3-provider-responses
   - npm run test:v3-provider-adaptive-concurrency
   - npm run test:v3-responses-direct-blackbox
@@ -2589,6 +2593,7 @@ features:
   - GPT-family/native tool-mix mode routes without ServerTool state or ordinary tool stripping.
   - MiniMax/search-only mode starts ServerTool state and strips ordinary tools only inside search dispatch.
   - Captured search result is paired to the original tool_call_id and injected on the next governed request.
+  - Long SSE may dispatch a real hooks sidecar after the old parent residence interval; each fresh auxiliary operation remains bounded, while expired JSON keeps the original parent deadline.
   required_negative:
   - A completed WebSearchResult without call identity is rejected; WebSearchHookRequest scope/deadline binding is required before the adapter executes.
   - A mismatched call id, malformed adapter output, NotApplicable result, missing adapter, expired deadline, or unavailable subagent fails explicitly.
@@ -2603,6 +2608,7 @@ features:
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p servertool-core web_search_contract -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib web_search_hook_ -- --nocapture
+  - npm run test:v3-long-sse-web-search-sidecar
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-hooks -- --nocapture
   - npm run verify:v3-resource-map
   - npm run verify:v3-mainline-caller-flow
@@ -3589,6 +3595,7 @@ features:
   required_gates:
   - npm run verify:v3-execution-control-payload-architecture
   - npm run test:v3-execution-control-payload-architecture-red-fixtures
+  - npm run test:v3-sse-first-word-managed
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime execution_control_payload_architecture -- --nocapture
   completion_boundary: {source_controlled: true, live_cutover: required}
 
@@ -3675,11 +3682,12 @@ features:
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-runtime-module-registry.yml
   required_positive:
-  - Direct and Relay attempts consume one request-level attempt/deadline budget and one immutable target plan.
+  - Direct and Relay attempts consume one request-level attempt/capacity budget and one immutable target plan; SSE uses only a semantic first-word deadline.
+  - Managed /v1/responses regression sse_first_word_managed covers semantic content, reasoning and tool arguments across previous total/residence/idle limits; headers-only keepalives do not renew first-word admission.
   - Responses and Anthropic provider transport admission plus Runtime-sealed client replay consume the same request-local attempt budget; Server only consumes the sealed stream.
   - Anthropic Runtime exposes JSON versus sealed SSE as a non-optional typed body and Server consumes it exhaustively without panic reconstruction.
   - A real local TCP replacement SSE stream remains readable to protocol terminal on the resident Runtime.
-  - Direct and Relay share bounded attempt-store admission for per-attempt, per-request, process-global, and residence/deadline dimensions.
+  - Direct and Relay share bounded attempt-store admission for per-attempt, per-request and process-global capacity dimensions; residence remains independent of SSE lifetime and never cuts off an admitted stream.
   - Protocol terminal plus successful payload seal issues one typed success receipt consumed by provider health, route policy, and client commit.
   - Terminal checks read only small control state and remain constant-cost as raw SSE diagnostics grow.
   - Local resource, observation, client cancellation, persistence, upstream, and protocol failures retain distinct typed attribution.
@@ -3709,6 +3717,7 @@ features:
   required_gates:
   - npm run verify:v3-execution-control-payload-architecture
   - npm run test:v3-execution-control-payload-architecture-red-fixtures
+  - npm run test:v3-sse-first-word-managed
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime execution_control_payload_architecture -- --nocapture
   - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib execution_control_payload_architecture_real_tcp_sse_reselection_stays_on_resident_runtime -- --nocapture
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses health_persistence_isolation -- --nocapture

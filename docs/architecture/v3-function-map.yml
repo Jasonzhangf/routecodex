@@ -810,6 +810,8 @@ features:
   - v3/crates/routecodex-v3-provider-responses/src/wire.rs
   - v3/crates/routecodex-v3-provider-responses/tests/support/wire_unit.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport.rs
+  - v3/crates/routecodex-v3-provider-responses/src/transport_admission.rs
+  - v3/crates/routecodex-v3-provider-responses/src/transport/websocket.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport/tests.rs
   - v3/crates/routecodex-v3-provider-responses/src/raw_response.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_shared.rs
@@ -2217,6 +2219,7 @@ features:
     terminal reuse, and fail-closed discard lifecycle.
   owner_files:
   - v3/crates/routecodex-v3-provider-responses/src/transport.rs
+  - v3/crates/routecodex-v3-provider-responses/src/transport_admission.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport/websocket.rs
   - v3/crates/routecodex-v3-provider-responses/tests/responses_websocket_v2.rs
   resource_bindings:
@@ -2235,6 +2238,7 @@ features:
   - next_websocket_message
   allowed_paths:
   - v3/crates/routecodex-v3-provider-responses/src/transport.rs
+  - v3/crates/routecodex-v3-provider-responses/src/transport_admission.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport/websocket.rs
   - v3/crates/routecodex-v3-provider-responses/tests/responses_websocket_v2.rs
   - docs/goals/v3-responses-websocket-v2-transport-hardening-plan.md
@@ -4644,6 +4648,10 @@ features:
   - routecodex-v3-runtime
   owner_files:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
+  entry_symbols:
+  - v3_provider_sse_first_word_timeout
+  - guard_v3_provider_sse_first_word
+  - guard_v3_provider_sse_first_word_response
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
   forbidden_paths:
@@ -5874,6 +5882,7 @@ features:
   - v3/crates/routecodex-v3-config/src/attempt_store.rs
   - v3/crates/routecodex-v3-runtime/src/execution_control.rs
   - v3/crates/routecodex-v3-runtime/src/execution_control/tests.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/default_transport.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
@@ -5885,6 +5894,8 @@ features:
   - v3.execution.attempt_payload_store
   entry_symbols:
   - V3AttemptBudget::admit_transport_attempt
+  - V3AttemptBudget::use_sse_first_word_policy
+  - V3AttemptBudget::residence_expired
   - V3CommittedClientSseBuilder::push
   - collect_direct_sse_attempt_after_terminal
   - build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05_with_budget
@@ -5893,6 +5904,7 @@ features:
   - v3/crates/routecodex-v3-config/src/attempt_store.rs
   - v3/crates/routecodex-v3-runtime/src/execution_control.rs
   - v3/crates/routecodex-v3-runtime/src/execution_control/tests.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/default_transport.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
   - v3/crates/routecodex-v3-runtime/src/nodes.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs

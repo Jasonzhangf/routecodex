@@ -94,9 +94,11 @@ function validateContracts() {
   requireValue(manifest.sealed_replay_body_contract?.anthropic === 'typed_non_optional', `${manifestRel}: Anthropic sealed replay body must be typed and non-optional`);
   requireValue(manifest.sealed_replay_body_contract?.server_consumption === 'exhaustive_match', `${manifestRel}: Server sealed replay consumption must be exhaustive`);
   requireValue(manifest.sealed_replay_body_contract?.option_stream_with_expect === 'forbidden', `${manifestRel}: optional sealed replay plus expect must be forbidden`);
-  for (const dimension of ['per_attempt', 'per_request', 'process_global', 'residence_or_deadline']) {
+  for (const dimension of ['per_attempt', 'per_request', 'process_global']) {
     requireValue(manifest.budget_contract?.[dimension] === 'required', `${manifestRel}: missing budget ${dimension}`);
   }
+  requireValue(manifest.budget_contract?.residence_or_deadline === 'non_sse_only', `${manifestRel}: residence deadline must not truncate SSE`);
+  requireValue(manifest.budget_contract?.sse_deadline === 'semantic_first_word_only', `${manifestRel}: SSE must use only its semantic first-word deadline`);
   for (const kind of ['Upstream', 'Protocol', 'LocalResourceExhausted', 'ObservationFailure', 'PersistenceFailure', 'ClientCancelled']) {
     requireValue(array(manifest.failure_kinds).includes(kind), `${manifestRel}: missing failure kind ${kind}`);
   }
@@ -339,6 +341,7 @@ function renderMarkdown() {
     `- Per request: \`${manifest.budget_contract.per_request}\``,
     `- Process global: \`${manifest.budget_contract.process_global}\``,
     `- Residence/deadline: \`${manifest.budget_contract.residence_or_deadline}\``,
+    `- SSE deadline: \`${manifest.budget_contract.sse_deadline}\``,
     `- Reserve before append/copy: \`${manifest.budget_contract.reserve_before_append_or_copy}\``,
     `- Initial storage: \`${manifest.budget_contract.initial_storage}\``,
     `- Disk spill: \`${manifest.budget_contract.disk_spill}\``,

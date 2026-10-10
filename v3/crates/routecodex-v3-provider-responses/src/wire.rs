@@ -46,9 +46,9 @@ pub struct V3ResponsesProviderTarget {
     pub responses_transport: V3ResponsesTransportKind,
     pub websocket_v2_url: Option<String>,
     pub provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig,
-    /// per-request 总超时（毫秒）；用于覆盖连接、响应头等待与 body 读取
+    /// JSON request total timeout; SSE uses only the semantic first-word deadline.
     pub request_timeout_ms: u64,
-    /// provider SSE 首帧/帧间隔超时（毫秒）；None = 默认 30s。
+    /// Published SSE semantic first-word timeout, including response-header wait.
     pub sse_first_frame_timeout_ms: Option<u64>,
     pub initial_concurrency_budget: u32,
     /// Retained for config compatibility only; business requests do not wait on concurrency.

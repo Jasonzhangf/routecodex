@@ -195,95 +195,6 @@ async fn guard_relay_sse_first_frame(
     }
 }
 
-/// Relay SSE idle guard: a configured window applies between every two frames.
-pub(crate) fn guard_v3_provider_sse_attempt_deadline(
-    request_id: &str,
-    provider_id: &str,
-    stream: routecodex_v3_provider_responses::V3ProviderSseStream,
-    deadline: std::time::Instant,
-) -> routecodex_v3_provider_responses::V3ProviderSseStream {
-    let request_id = request_id.to_string();
-    let provider_id = provider_id.to_string();
-    Box::pin(futures_util::stream::unfold(
-        (stream, false),
-        move |(mut stream, timed_out)| {
-            let request_id = request_id.clone();
-            let provider_id = provider_id.clone();
-            async move {
-                if timed_out {
-                    return None;
-                }
-                if std::time::Instant::now() >= deadline {
-                    return Some((
-                        Err(V3ProviderError::Transport {
-                            request_id,
-                            provider_id,
-                            reason: "provider SSE attempt exceeded the request residence deadline before a semantic terminal".to_string(),
-                        }),
-                        (stream, true),
-                    ));
-                }
-                match tokio::time::timeout_at(
-                    tokio::time::Instant::from_std(deadline),
-                    stream.next(),
-                )
-                .await
-                {
-                    Ok(Some(chunk)) => Some((chunk, (stream, false))),
-                    Ok(None) => None,
-                    Err(_) => Some((
-                        Err(V3ProviderError::Transport {
-                            request_id,
-                            provider_id,
-                            reason: "provider SSE attempt exceeded the request residence deadline before a semantic terminal".to_string(),
-                        }),
-                        (stream, true),
-                    )),
-                }
-            }
-        },
-    ))
-}
-
-pub(crate) fn guard_v3_provider_sse_idle(
-    request_id: &str,
-    provider_id: &str,
-    stream: routecodex_v3_provider_responses::V3ProviderSseStream,
-    idle_timeout: std::time::Duration,
-) -> routecodex_v3_provider_responses::V3ProviderSseStream {
-    use futures_util::StreamExt;
-    let request_id = request_id.to_string();
-    let provider_id = provider_id.to_string();
-    Box::pin(futures_util::stream::unfold(
-        (stream, false),
-        move |(mut stream, timed_out)| {
-            let request_id = request_id.clone();
-            let provider_id = provider_id.clone();
-            async move {
-                if timed_out {
-                    return None;
-                }
-                match tokio::time::timeout(idle_timeout, stream.next()).await {
-                    Ok(Some(Ok(chunk))) => Some((Ok(chunk), (stream, false))),
-                    Ok(Some(Err(error))) => Some((Err(error), (stream, false))),
-                    Ok(None) => None,
-                    Err(_) => Some((
-                        Err(V3ProviderError::Transport {
-                            request_id: request_id.clone(),
-                            provider_id: provider_id.clone(),
-                            reason: format!(
-                                "provider SSE stream idle timeout (no frame within {}ms)",
-                                idle_timeout.as_millis()
-                            ),
-                        }),
-                        (stream, true),
-                    )),
-                }
-            }
-        },
-    ))
-}
-
 fn observe_v3_provider_sse(
     stream: routecodex_v3_provider_responses::V3ProviderSseStream,
     observation: V3RuntimeStreamObservation,
@@ -308,9 +219,7 @@ fn observe_v3_provider_sse(
     }))
 }
 
-pub(crate) use super::relay_runtime_shared::{
-    v3_provider_sse_idle_timeout, v3_relay_transport_response_timeout_from_ms,
-};
+pub(crate) use super::relay_runtime_shared::v3_relay_transport_response_timeout_from_ms;
 
 pub(crate) fn v3_relay_transport_response_timeout(
     manifest: &V3Config05ManifestPublished,
@@ -872,6 +781,11 @@ where
                 }
             }
         }
+        let provider_sse = transport_request.stream_intent()
+            == routecodex_v3_provider_responses::V3ResponsesStreamIntent::Sse;
+        if provider_sse {
+            attempt_budget.use_sse_first_word_policy();
+        }
         attempt_budget.admit_transport_attempt().map_err(|error| {
             V3RelayCoreError::Target(format!(
                 "V3ExecutionAttemptBudget rejected provider transport attempt: {error}"
@@ -888,7 +802,23 @@ where
         };
         let attempt_timeout =
             v3_relay_transport_response_timeout(manifest, &selected_target_provider_id);
-        let attempt_deadline = tokio::time::Instant::now() + attempt_timeout;
+        let first_word_deadline = tokio::time::Instant::now()
+            + if provider_sse {
+                super::relay_runtime_shared::v3_provider_sse_first_word_timeout(
+                    manifest,
+                    &selected_target_provider_id,
+                )
+                .map_err(V3RelayCoreError::Target)?
+            } else {
+                std::time::Duration::from_millis(
+                    routecodex_v3_config::default_provider_sse_first_frame_timeout_ms(),
+                )
+            };
+        let attempt_deadline = if provider_sse {
+            first_word_deadline
+        } else {
+            tokio::time::Instant::now() + attempt_timeout
+        };
         let provider_raw =
             match tokio::time::timeout_at(attempt_deadline, transport.send(transport_request))
                 .await
@@ -1022,7 +952,7 @@ where
                         if let Some(failure) = terminal_failure {
                             return Ok(C::assemble_failure_output(failure, trace));
                         }
-                        if attempt_budget.residence_deadline() <= std::time::Instant::now() {
+                        if attempt_budget.residence_expired() {
                             return Ok(C::assemble_failure_output(
                                 terminalize_provider_failure(failure, last_external_http.clone()),
                                 trace,
@@ -1138,14 +1068,16 @@ where
                     .providers
                     .get(&selected_target_provider_id)
                     .and_then(|provider| provider.sse_first_frame_timeout_ms);
-                let stream = guard_v3_provider_sse_attempt_deadline(
+                attempt_budget.use_sse_first_word_policy();
+                let stream = super::relay_runtime_shared::guard_v3_provider_sse_first_word(
                     request_id,
                     &selected_target_provider_id,
+                    provider_wire_protocol,
                     stream,
-                    attempt_budget.residence_deadline(),
+                    first_word_deadline,
                 );
                 let first_frame_result = match tokio::time::timeout_at(
-                    attempt_deadline,
+                    first_word_deadline,
                     guard_relay_sse_first_frame(
                         request_id,
                         &selected_target_provider_id,
@@ -1201,9 +1133,7 @@ where
                         if let Some(failure) = terminal_failure {
                             return Ok(C::assemble_failure_output(failure, trace));
                         }
-                        if residence_deadline_error
-                            || attempt_budget.residence_deadline() <= std::time::Instant::now()
-                        {
+                        if residence_deadline_error || attempt_budget.residence_expired() {
                             return Ok(C::assemble_failure_output(
                                 terminalize_provider_failure(failure, last_external_http.clone()),
                                 trace,
@@ -1212,21 +1142,12 @@ where
                         continue;
                     }
                 };
-                // 首帧已收：后续流仍受 idle guard 约束（provider 发一帧后挂起
-                // provider 配置窗口 → 归一化为 Transport 错误进入错误链，客户端不无限等待）。
-                let idle_guarded_stream = guard_v3_provider_sse_idle(
-                    request_id,
-                    &selected_target_provider_id,
-                    guarded_stream,
-                    v3_provider_sse_idle_timeout(manifest, &selected_target_provider_id)
-                        .map_err(V3RelayCoreError::Target)?,
-                );
                 let stream_observation = V3RuntimeStreamObservation::default();
-                let idle_guarded_stream =
-                    observe_v3_provider_sse(idle_guarded_stream, stream_observation.clone());
+                let observed_stream =
+                    observe_v3_provider_sse(guarded_stream, stream_observation.clone());
                 let projected_sse = match C::project_sse(
                     &request_id,
-                    idle_guarded_stream,
+                    observed_stream,
                     provider_wire_protocol,
                     selected_target_compatibility_profile,
                     selected.candidate.web_search_execution_mode,
@@ -1305,17 +1226,7 @@ where
                 })?;
                 let mut projected_sse = projected_sse;
                 let stream_failure = loop {
-                    let next = match tokio::time::timeout_at(attempt_deadline, projected_sse.next())
-                        .await
-                    {
-                        Ok(next) => next,
-                        Err(_) => {
-                            break Some(V3RelayAttemptCollectFailure::ProviderTransport(format!(
-                                "provider SSE stream exceeded the configured request timeout ({}ms) before terminal EOF",
-                                attempt_timeout.as_millis()
-                            )));
-                        }
-                    };
+                    let next = projected_sse.next().await;
                     match next {
                         Some(Ok(frame)) => {
                             if let Err(error) = committed_attempt.push(frame) {
@@ -1397,8 +1308,7 @@ where
                     if let Some(failure) = terminal_failure {
                         return Ok(C::assemble_failure_output(failure, trace));
                     }
-                    let deadline_expired =
-                        attempt_budget.residence_deadline() <= std::time::Instant::now();
+                    let deadline_expired = attempt_budget.residence_expired();
                     if deadline_expired {
                         return Ok(C::assemble_failure_output(
                             terminalize_provider_failure(failure, last_external_http.clone()),

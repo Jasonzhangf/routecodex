@@ -55,7 +55,10 @@ impl V3Transport13ResponsesRequest {
                 sse_first_frame_timeout_ms,
                 ..
             } => *sse_first_frame_timeout_ms,
-            V3Transport13ResponsesRequestKind::WebSocketV2 { .. } => None,
+            V3Transport13ResponsesRequestKind::WebSocketV2 {
+                sse_first_frame_timeout_ms,
+                ..
+            } => *sse_first_frame_timeout_ms,
         }
     }
 }

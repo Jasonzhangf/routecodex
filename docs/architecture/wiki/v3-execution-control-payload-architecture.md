@@ -48,7 +48,8 @@ flowchart LR
 - Per attempt: `required`
 - Per request: `required`
 - Process global: `required`
-- Residence/deadline: `required`
+- Residence/deadline: `non_sse_only`
+- SSE deadline: `semantic_first_word_only`
 - Reserve before append/copy: `true`
 - Initial storage: `bounded_memory_only`
 - Disk spill: `forbidden`

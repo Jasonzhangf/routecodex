@@ -1,6 +1,6 @@
 {
   "name": "routecodex-v3",
-  "version": "0.90.4862",
+  "version": "0.90.4864",
   "private": true,
   "description": "RouteCodex V3 independent build domain",
   "type": "module",
@@ -13,6 +13,9 @@
     "node": ">=20 <26"
   },
   "scripts": {
+    "test:v3-sse-first-word-managed": "CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test sse_first_word_managed -- --test-threads=1 --nocapture",
+    "test:v3-sse-first-word-websocket-managed": "CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test sse_first_word_websocket_managed -- --test-threads=1 --nocapture",
+    "test:v3-long-sse-web-search-sidecar": "CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test long_sse_web_search_sidecar -- --test-threads=1 --nocapture",
     "bump-version": "node scripts/bump-version.mjs",
     "build": "node scripts/build.mjs",
     "test": "node scripts/test.mjs",
