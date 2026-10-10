@@ -469,3 +469,56 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         .unwrap()
         .is_some());
 }
+
+#[test]
+fn persisted_429_cause_recovers_on_business_success_and_stays_removed() {
+    let mut manifest = health_disabled_manifest();
+    manifest
+        .providers
+        .get_mut("p")
+        .unwrap()
+        .health
+        .as_mut()
+        .unwrap()
+        .enabled = true;
+    let path =
+        std::env::temp_dir().join(format!("routecodex-429-cause-{}.json", std::process::id()));
+    let store = V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path.clone());
+    let mut action = routecodex_v3_provider_responses::V3ProviderFailureAction::recoverable("429");
+    action.failure_threshold = 3;
+    action.failure_fingerprint =
+        routecodex_v3_error::build_v3_provider_global_error_fingerprint(429).unwrap();
+    for time in 100..103 {
+        store
+            .record_provider_failure_action("p", "k", "m", &action, time)
+            .unwrap();
+    }
+    store.flush_persistence().unwrap();
+    drop(store);
+    let restored =
+        V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path.clone());
+    assert!(
+        !restored
+            .scheduling_projection("p", "k", "m", 1, 1, 104)
+            .unwrap()
+            .available
+    );
+    assert!(
+        restored
+            .record_provider_key_success("p", "k", "m", 105)
+            .unwrap()
+            .available
+    );
+    restored.flush_persistence().unwrap();
+    drop(restored);
+    let restored =
+        V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path.clone());
+    assert!(
+        restored
+            .scheduling_projection("p", "k", "m", 1, 1, 106)
+            .unwrap()
+            .available
+    );
+    drop(restored);
+    std::fs::remove_file(path).unwrap();
+}

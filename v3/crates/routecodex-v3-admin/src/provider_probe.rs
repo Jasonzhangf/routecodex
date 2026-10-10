@@ -1,5 +1,5 @@
 // feature_id: v3.admin_api
-//! Provider connectivity probe ladder (L1 contract / L2 reachability+auth / L3 semantic).
+//! Provider connectivity probe ladder (L1 contract / L2 reachability+auth / L3 runtime HTTP status).
 //!
 //! Advisory diagnostics only: probe outcomes never mutate runtime provider health truth.
 //!
@@ -21,8 +21,8 @@ use routecodex_v3_config_mgmt::provider::{
     compile_provider_candidate_manifest, read_provider_file, validate_provider_candidate,
 };
 use routecodex_v3_provider_responses::{
-    build_v3_provider_global_probe_request, ProviderResponsesTransport, ResponsesTransport,
-    V3ProviderError, V3ResponsesProviderTarget,
+    build_v3_provider_global_probe_request, ProviderResponsesTransport, V3ProviderError,
+    V3ResponsesProviderTarget,
 };
 use routecodex_v3_runtime::{
     build_v3_provider_global_probe_target, probe_v3_provider_global_target,
@@ -283,7 +283,7 @@ fn stage_label(stage: &str) -> &'static str {
     match stage {
         STAGE_L1 => "L1 contract (offline candidate validation)",
         STAGE_L2 => "L2 reachability + auth",
-        STAGE_L3 => "L3 semantic minimal chat",
+        STAGE_L3 => "L3 runtime HTTP 2xx",
         _ => "unknown stage",
     }
 }
@@ -439,14 +439,11 @@ async fn stage_l2(
             "note": "auth header is attached by the runtime transport; it is never projected here",
         }),
     )];
-    match ProviderResponsesTransport::default().send(built).await {
-        Ok(response) => StageRun::passed(
-            evidence,
-            json!({
-                "status": response.status(),
-                "content_type": response.header_text("content-type").ok().flatten(),
-            }),
-        ),
+    match ProviderResponsesTransport::default()
+        .send_probe(built)
+        .await
+    {
+        Ok(()) => StageRun::passed(evidence, json!({ "http_2xx": true })),
         Err(V3ProviderError::HttpStatus { response }) => StageRun::failed(
             "provider_http_status",
             json!({
@@ -483,7 +480,7 @@ async fn stage_l3(
         }),
     )];
     match probe_v3_provider_global_target(target).await {
-        Ok(()) => StageRun::passed(evidence, json!({ "semantic_probe": "ok" })),
+        Ok(()) => StageRun::passed(evidence, json!({ "http_2xx": true })),
         Err(V3ProviderHealthProbeFailure::Provider(message)) => {
             StageRun::failed("provider_rejected", json!({ "message": message }))
                 .with_evidence(evidence)

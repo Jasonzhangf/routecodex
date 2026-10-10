@@ -44,6 +44,8 @@ use tokio_tungstenite::{
 type ResponsesWebSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type SharedResponsesWebSocket = Arc<Mutex<Option<ResponsesWebSocket>>>;
 mod cancellation;
+mod probe;
+use probe::is_rate_limited;
 mod websocket;
 pub use cancellation::V3ProviderCancellation;
 use websocket::{
@@ -221,13 +223,6 @@ fn current_epoch_ms() -> u64 {
         .map_or(0, |duration| {
             duration.as_millis().min(u64::MAX as u128) as u64
         })
-}
-
-fn is_rate_limited(error: &V3ProviderError) -> bool {
-    matches!(
-        error,
-        V3ProviderError::HttpStatus { response } if response.status == 429
-    )
 }
 
 impl V3Transport13ResponsesRequest {
@@ -1022,10 +1017,10 @@ fn hold_sse_lease(
 
 impl ProviderResponsesTransport {
     #[allow(clippy::too_many_arguments)]
-    async fn send_http(
+    async fn send_http_headers(
         &self,
-        request_id: String,
-        provider_id: String,
+        request_id: &str,
+        provider_id: &str,
         url: reqwest::Url,
         auth: V3ProviderAuthHandle,
         stream_intent: V3ResponsesStreamIntent,
@@ -1034,8 +1029,7 @@ impl ProviderResponsesTransport {
         timeout: Option<Duration>,
         sse_first_frame_timeout_ms: Option<u64>,
         cancellation: Option<V3ProviderCancellation>,
-        compatibility_profile: Option<String>,
-    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+    ) -> Result<reqwest::Response, V3ProviderError> {
         ensure_not_cancelled(&request_id, &provider_id, cancellation.as_ref())?;
         let secret = resolve_secret(&request_id, &provider_id, &auth).await?;
         let accept = match stream_intent {
@@ -1043,7 +1037,6 @@ impl ProviderResponsesTransport {
             V3ResponsesStreamIntent::Sse => "text/event-stream",
         };
         let anthropic_messages = is_anthropic_messages_url(&url);
-        let provider_headers = provider_headers.clone();
         let mut request = self
             .client
             .post(url)
@@ -1060,9 +1053,9 @@ impl ProviderResponsesTransport {
             }
         }
         let send = request.json(&body).send();
-        let response = send_http_await(
-            request_id.clone(),
-            provider_id.clone(),
+        send_http_await(
+            request_id.to_string(),
+            provider_id.to_string(),
             send,
             cancellation.clone(),
             match stream_intent {
@@ -1070,7 +1063,38 @@ impl ProviderResponsesTransport {
                 V3ResponsesStreamIntent::Json => None,
             },
         )
-        .await?;
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn send_http(
+        &self,
+        request_id: String,
+        provider_id: String,
+        url: reqwest::Url,
+        auth: V3ProviderAuthHandle,
+        stream_intent: V3ResponsesStreamIntent,
+        body: Value,
+        provider_headers: Vec<V3ProviderRequestHeader>,
+        timeout: Option<Duration>,
+        sse_first_frame_timeout_ms: Option<u64>,
+        cancellation: Option<V3ProviderCancellation>,
+        compatibility_profile: Option<String>,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let response = self
+            .send_http_headers(
+                &request_id,
+                &provider_id,
+                url,
+                auth,
+                stream_intent,
+                body,
+                provider_headers,
+                timeout,
+                sse_first_frame_timeout_ms,
+                cancellation.clone(),
+            )
+            .await?;
         let status = response.status().as_u16();
         let headers = collect_response_headers(response.headers());
         let response_content_type = content_type(response.headers());

@@ -160,6 +160,18 @@ async fn spawn_mock_upstream<F>(
 where
     F: Fn(&str) -> String + Send + Sync + 'static,
 {
+    spawn_mock_upstream_with_content_type(status, connections, "application/json", body_for).await
+}
+
+async fn spawn_mock_upstream_with_content_type<F>(
+    status: u16,
+    connections: usize,
+    content_type: &'static str,
+    body_for: F,
+) -> (String, Arc<Mutex<Vec<String>>>)
+where
+    F: Fn(&str) -> String + Send + Sync + 'static,
+{
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("mock bind");
     let address = listener.local_addr().expect("mock addr");
     let captured = Arc::new(Mutex::new(Vec::new()));
@@ -206,7 +218,7 @@ where
                 "Unauthorized"
             };
             let response = format!(
-                "HTTP/1.1 {status} {reason}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                "HTTP/1.1 {status} {reason}\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
                 body.len(),
                 body
             );
@@ -515,6 +527,42 @@ async fn probe_stream_never_leaks_secret_material() {
             .contains("authorization: bearer sk-probe-secret-abc123")),
         "L2 must send the real auth header: {captured:?}"
     );
+}
+
+#[tokio::test]
+async fn all_protocol_probe_stages_accept_2xx_non_json() {
+    let (base, _state, home) = bind_test_server().await;
+    for protocol in ["responses", "openai_chat", "anthropic", "gemini"] {
+        let (upstream, _) = spawn_mock_upstream_with_content_type(200, 2, "text/plain", |_| {
+            "not json or pong".into()
+        })
+        .await;
+        let mut config = provider_json("status-probe", &format!("{upstream}/v1"), "sk-test", "m1");
+        config["provider"]["type"] = json!(protocol);
+        let body = http_client()
+            .post(format!("{base}/api/providers/probe"))
+            .header("x-routecodex-admin-token", admin_token(&home))
+            .json(&json!({"config":config,"stages":["l2_reachability_auth","l3_semantic"]}))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        let events = body
+            .lines()
+            .filter_map(|line| line.strip_prefix("data: "))
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        let completed = events
+            .iter()
+            .filter(|event| event["event"] == "stage_result" || event["event"] == "stage_failed")
+            .collect::<Vec<_>>();
+        assert_eq!(completed.len(), 2, "{protocol}: {body}");
+        for event in completed {
+            assert_eq!(event["ok"], true, "{protocol}: {body}");
+        }
+    }
 }
 
 #[tokio::test]

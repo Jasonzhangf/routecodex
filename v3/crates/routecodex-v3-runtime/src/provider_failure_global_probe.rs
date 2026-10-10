@@ -9,8 +9,8 @@ use routecodex_v3_error::{
 };
 use routecodex_v3_provider_responses::{
     adaptive_concurrency::V3AdaptiveConcurrencyController, build_v3_provider_global_probe_request,
-    ReqwestResponsesTransport, ResponsesTransport, V3ProviderAuthHandle,
-    V3ProviderAuthSecretHandle, V3ProviderError, V3ProviderResponseBody, V3ResponsesProviderTarget,
+    ReqwestResponsesTransport, V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError,
+    V3ResponsesProviderTarget,
 };
 
 use crate::provider_failure_runtime_policy::{
@@ -145,10 +145,8 @@ pub(crate) async fn probe_v3_provider_global_target_impl(
     target: V3ResponsesProviderTarget,
 ) -> Result<(), V3ProviderHealthProbeFailure> {
     let provider_id = target.provider_id.clone();
-    let provider_type = target.provider_type.clone();
     let provider_key = format!("{}:{}", target.provider_id, target.auth.alias);
     let initial_concurrency_budget = target.initial_concurrency_budget;
-    let timeout_ms = target.request_timeout_ms;
     let request = build_v3_provider_global_probe_request(
         target,
         format!("provider-global-probe-{provider_id}"),
@@ -163,64 +161,10 @@ pub(crate) async fn probe_v3_provider_global_target_impl(
     let admission = concurrency
         .try_acquire(&provider_key, now_ms)
         .ok_or(V3ProviderHealthProbeFailure::ConcurrencyBusy)?;
-    let response = ReqwestResponsesTransport::default()
-        .send(request.with_pre_acquired_admission(admission))
+    ReqwestResponsesTransport::default()
+        .send_probe(request.with_pre_acquired_admission(admission))
         .await
-        .map_err(provider_probe_error)?;
-    if !(200..=299).contains(&response.status()) {
-        return Err(V3ProviderHealthProbeFailure::Provider(format!(
-            "provider global probe returned {}",
-            response.status()
-        )));
-    }
-    match response.into_body() {
-        V3ProviderResponseBody::Json(json) => {
-            validate_v3_provider_probe_json(&provider_id, &provider_type, &json)
-                .map_err(V3ProviderHealthProbeFailure::Provider)?;
-        }
-        V3ProviderResponseBody::Sse(stream) => {
-            validate_v3_provider_probe_sse(&provider_id, &provider_type, stream, timeout_ms)
-                .await?;
-        }
-    }
-    Ok(())
-}
-
-async fn validate_v3_provider_probe_sse(
-    provider_id: &str,
-    provider_type: &str,
-    stream: routecodex_v3_provider_responses::V3ProviderSseStream,
-    timeout_ms: u64,
-) -> Result<(), V3ProviderHealthProbeFailure> {
-    use crate::hub_v1::V3HubProviderWireProtocol;
-    let protocol = match provider_type {
-        "openai_chat" => V3HubProviderWireProtocol::OpenAiChat,
-        "responses" => V3HubProviderWireProtocol::Responses,
-        "anthropic" => V3HubProviderWireProtocol::Anthropic,
-        other => {
-            return Err(V3ProviderHealthProbeFailure::Provider(format!(
-                "unsupported provider probe stream protocol {other}"
-            )))
-        }
-    };
-    let response = tokio::time::timeout(
-        std::time::Duration::from_millis(timeout_ms),
-        crate::materialize_v3_provider_sse_as_canonical_response(protocol, stream),
-    )
-    .await
-    .map_err(|_| V3ProviderHealthProbeFailure::Provider("provider probe stream timed out".into()))?
-    .map_err(|error| V3ProviderHealthProbeFailure::Provider(error.to_string()))?;
-    // The materializer uses the existing typed decoder and rejects missing
-    // semantic terminals, malformed frames and embedded provider errors.
-    let json = serde_json::to_vec(&response)
-        .map_err(|error| V3ProviderHealthProbeFailure::Internal(error.to_string()))?;
-    let terminal_protocol = if provider_type == "openai_chat" {
-        "openai_chat"
-    } else {
-        "responses"
-    };
-    validate_v3_provider_probe_json(provider_id, terminal_protocol, &json)
-        .map_err(V3ProviderHealthProbeFailure::Provider)
+        .map_err(provider_probe_error)
 }
 
 fn provider_probe_error(error: V3ProviderError) -> V3ProviderHealthProbeFailure {
@@ -240,318 +184,22 @@ fn provider_probe_error(error: V3ProviderError) -> V3ProviderHealthProbeFailure 
     }
 }
 
-fn validate_v3_provider_probe_json(
-    provider_id: &str,
-    provider_type: &str,
-    json: &[u8],
-) -> Result<(), String> {
-    let value = serde_json::from_slice::<serde_json::Value>(json).map_err(|error| {
-        format!("provider global probe returned invalid JSON for {provider_id}: {error}")
-    })?;
-    let object = value.as_object().ok_or_else(|| {
-        format!("provider global probe returned non-object JSON for {provider_id}")
-    })?;
-    // A successful Responses payload reports the absence of an error with an
-    // explicit `error: null` field, so only a real error payload fails the probe.
-    if object.get("error").is_some_and(|error| !error.is_null()) {
-        return Err(format!(
-            "provider global probe returned 2xx with embedded error payload for {provider_id}"
-        ));
-    }
-    let completed = match provider_type {
-        "responses" => {
-            let status = object.get("status").and_then(serde_json::Value::as_str);
-            // The probe spends a one-token budget, so a reasoning model reports the
-            // Responses output-cap terminal (`incomplete` + `max_output_tokens`)
-            // instead of `completed`. The openai_chat, anthropic and gemini arms
-            // already accept their output-cap shapes for the same reason, and the
-            // terminal-admission owner admits both the output-cap reason and
-            // `content_filter` (the provider's own content filter doing its job) as
-            // legal provider terminals. An unrepresentable terminal reason stays a
-            // real provider rejection and must keep the provider cooled.
-            status == Some("completed")
-                || (status == Some("incomplete")
-                    && object
-                        .get("incomplete_details")
-                        .and_then(|details| details.get("reason"))
-                        .and_then(serde_json::Value::as_str)
-                        .is_some_and(|reason| {
-                            matches!(reason.trim(), "max_output_tokens" | "content_filter")
-                        }))
-        }
-        "openai_chat" => object
-            .get("choices")
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|choices| {
-                choices.first().is_some_and(|choice| {
-                    choice
-                        .get("finish_reason")
-                        .and_then(serde_json::Value::as_str)
-                        .is_some_and(|reason| !reason.is_empty())
-                })
-            }),
-        "anthropic" => {
-            object.get("type").and_then(serde_json::Value::as_str) == Some("message")
-                && object
-                    .get("stop_reason")
-                    .and_then(serde_json::Value::as_str)
-                    .is_some_and(|reason| !reason.is_empty())
-        }
-        "gemini" => object
-            .get("candidates")
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|candidates| {
-                candidates.first().is_some_and(|candidate| {
-                    candidate
-                        .get("finishReason")
-                        .and_then(serde_json::Value::as_str)
-                        .is_some_and(|reason| !reason.is_empty())
-                })
-            }),
-        other => return Err(format!("unsupported provider probe protocol {other}")),
-    };
-    completed.then_some(()).ok_or_else(|| {
-        format!(
-            "provider global probe returned no successful terminal payload for {provider_id} ({provider_type})"
-        )
-    })
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{provider_probe_error, validate_v3_provider_probe_json};
+    use super::provider_probe_error;
     use crate::provider_failure_runtime_policy::V3ProviderHealthProbeFailure;
-    use routecodex_v3_provider_responses::V3ProviderError;
-
-    #[tokio::test]
-    async fn streaming_probe_requires_a_real_semantic_terminal() {
-        for (body, expected) in [
-            ("data: {\"id\":\"probe\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n", true),
-            ("data: [DONE]\n\n", false),
-            (": keepalive\n\n", false),
-            ("data: {\"error\":{\"message\":\"denied\",\"code\":\"bad\"}}\n\n", false),
-            ("data: not-json\n\n", false),
-            ("data: {\"id\":\"probe\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\n", false),
-        ] {
-            let bytes = body.as_bytes().to_vec();
-            let stream = Box::pin(futures_util::stream::once(async move { Ok(bytes) }));
-            let result = super::validate_v3_provider_probe_sse("p", "openai_chat", stream, 1000).await;
-            assert_eq!(result.is_ok(), expected, "body={body} result={result:?}");
-        }
-    }
+    use routecodex_v3_provider_responses::{V3ProviderError, V3ProviderInternalTransportLane};
 
     #[test]
     fn internal_transport_errors_remain_internal_probe_failures() {
-        let error = provider_probe_error(V3ProviderError::InternalTransport {
-            request_id: "probe-request".to_string(),
-            provider_id: "provider-a".to_string(),
-            lane: routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Request,
-            reason: "invalid concurrency budget".to_string(),
-        });
         assert!(matches!(
-            error,
-            V3ProviderHealthProbeFailure::Internal(message)
-                if message.contains("invalid concurrency budget")
+            provider_probe_error(V3ProviderError::InternalTransport {
+                request_id: "probe".into(),
+                provider_id: "p".into(),
+                lane: V3ProviderInternalTransportLane::Request,
+                reason: "invalid budget".into(),
+            }),
+            V3ProviderHealthProbeFailure::Internal(_)
         ));
-    }
-
-    #[test]
-    fn websocket_provider_errors_are_provider_probe_failures() {
-        let protocol = provider_probe_error(V3ProviderError::WebSocketProtocol {
-            request_id: "probe-request".to_string(),
-            provider_id: "provider-a".to_string(),
-            reason: "provider protocol error".to_string(),
-        });
-        assert!(matches!(
-            protocol,
-            V3ProviderHealthProbeFailure::Provider(message)
-                if message.contains("provider protocol error")
-        ));
-
-        let event = provider_probe_error(V3ProviderError::WebSocketProviderEvent {
-            request_id: "probe-request".to_string(),
-            provider_id: "provider-a".to_string(),
-            status: Some(503),
-            code: Some("server_error".to_string()),
-            message: "provider unavailable".to_string(),
-        });
-        assert!(matches!(
-            event,
-            V3ProviderHealthProbeFailure::Provider(message)
-                if message.contains("provider unavailable")
-        ));
-    }
-
-    #[test]
-    fn http_200_error_payload_is_probe_failure() {
-        let error = validate_v3_provider_probe_json(
-            "provider-a",
-            "responses",
-            br#"{"error":{"code":"invalid_api_key"}}"#,
-        )
-        .expect_err("embedded provider error must fail the probe");
-        assert!(error.contains("embedded error payload"));
-    }
-
-    #[test]
-    fn malformed_or_failed_json_is_probe_failure() {
-        assert!(validate_v3_provider_probe_json("provider-a", "responses", b"not-json").is_err());
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "responses",
-            br#"{"status":"failed"}"#,
-        )
-        .is_err());
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "responses",
-            br#"{"status":"completed"}"#,
-        )
-        .is_ok());
-    }
-
-    #[test]
-    fn each_provider_protocol_requires_its_terminal_success_shape() {
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "openai_chat",
-            br#"{"choices":[{"finish_reason":"stop"}]}"#,
-        )
-        .is_ok());
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "openai_chat",
-            br#"{"choices":[{}]}"#,
-        )
-        .is_err());
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "openai_chat",
-            br#"{"choices":[{"finish_reason":""}]}"#,
-        )
-        .is_err());
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "anthropic",
-            br#"{"type":"message","stop_reason":"max_tokens"}"#,
-        )
-        .is_ok());
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "gemini",
-            br#"{"candidates":[{"finishReason":"MAX_TOKENS"}]}"#,
-        )
-        .is_ok());
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "anthropic",
-            br#"{"type":"message","stop_reason":""}"#,
-        )
-        .is_err());
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "gemini",
-            br#"{"candidates":[{"finishReason":""}]}"#,
-        )
-        .is_err());
-        assert!(validate_v3_provider_probe_json("provider-a", "openai_chat", br#"{}"#).is_err());
-        assert!(validate_v3_provider_probe_json("provider-a", "anthropic", br#"{}"#).is_err());
-        assert!(validate_v3_provider_probe_json("provider-a", "gemini", br#"{}"#).is_err());
-    }
-
-    #[test]
-    fn responses_probe_accepts_truncated_terminal_payload() {
-        // The probe spends a one-token budget. A reasoning model cannot reach a
-        // terminal answer inside it, and the upstream still reports a terminal
-        // outcome: status=incomplete with a declared reason. The other three
-        // protocol arms already accept their truncated-but-terminal shapes
-        // (finish_reason=max_tokens, stop_reason=max_tokens, finishReason=MAX_TOKENS),
-        // so the responses arm must accept its equivalent or a healthy provider
-        // stays cooled forever.
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "responses",
-            br#"{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}"#,
-        )
-        .is_ok());
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "responses",
-            br#"{"status":"incomplete","incomplete_details":{"reason":" max_output_tokens "}}"#,
-        )
-        .is_ok());
-        // `content_filter` is the provider's own content filter doing its job, so
-        // a provider that answers the probe with it is alive and the probe must
-        // clear cooldown, exactly like the openai_chat/anthropic/gemini arms that
-        // accept any non-empty terminal reason.
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "responses",
-            br#"{"status":"incomplete","incomplete_details":{"reason":"content_filter"}}"#,
-        )
-        .is_ok());
-        // An unrepresentable terminal reason is a real provider rejection and must
-        // not pass the probe, or cooldown would clear for a provider whose real
-        // Responses traffic is rejected.
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "responses",
-            br#"{"status":"incomplete","incomplete_details":{"reason":"mystery"}}"#,
-        )
-        .is_err());
-        // A truncated terminal outcome with no declared reason stays unverifiable.
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "responses",
-            br#"{"status":"incomplete"}"#,
-        )
-        .is_err());
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "responses",
-            br#"{"status":"incomplete","incomplete_details":{"reason":""}}"#,
-        )
-        .is_err());
-        // Non-terminal and non-success statuses remain probe failures.
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "responses",
-            br#"{"status":"cancelled"}"#,
-        )
-        .is_err());
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "responses",
-            br#"{"status":"in_progress"}"#,
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn responses_probe_accepts_null_error_field() {
-        // A successful Responses payload reports the absence of an error with an
-        // explicit null field. Only a real error payload may fail the probe.
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "responses",
-            br#"{"status":"completed","error":null}"#,
-        )
-        .is_ok());
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "responses",
-            br#"{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"error":null}"#,
-        )
-        .is_ok());
-        assert!(validate_v3_provider_probe_json(
-            "provider-a",
-            "responses",
-            br#"{"status":"completed","error":{"code":"invalid_api_key"}}"#,
-        )
-        .is_err());
-        assert!(
-            validate_v3_provider_probe_json("provider-a", "responses", br#"{"error":null}"#,)
-                .is_err()
-        );
     }
 }

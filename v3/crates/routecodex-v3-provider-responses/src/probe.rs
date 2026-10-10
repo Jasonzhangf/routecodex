@@ -9,9 +9,11 @@ use crate::wire::{
 };
 
 pub fn build_v3_provider_global_probe_request(
-    target: V3ResponsesProviderTarget,
+    mut target: V3ResponsesProviderTarget,
     request_id: String,
 ) -> Result<V3Transport13ResponsesRequest, String> {
+    // Recovery probes use the provider HTTP endpoint even for WebSocket business traffic.
+    target.responses_transport = routecodex_v3_config::V3ResponsesTransportKind::Http;
     let mut body = probe_request_body(&target)?;
     if target.provider_type == "openai_chat"
         && target
@@ -31,24 +33,21 @@ fn probe_request_body(target: &V3ResponsesProviderTarget) -> Result<serde_json::
     Ok(match target.provider_type.as_str() {
         "responses" => serde_json::json!({
             "model": target.wire_model,
-            "input": [{"role":"user","content":[{"type":"input_text","text":"routecodex health probe"}]}],
-            "max_output_tokens": 1,
+            "input": [{"role":"user","content":[{"type":"input_text","text":"ping; reply pong"}]}],
             "stream": false,
         }),
         "openai_chat" => serde_json::json!({
             "model": target.wire_model,
-            "messages": [{"role":"user","content":"routecodex health probe"}],
-            "max_tokens": 1,
+            "messages": [{"role":"user","content":"ping; reply pong"}],
             "stream": false,
         }),
         "anthropic" => serde_json::json!({
             "model": target.wire_model,
             "max_tokens": 1,
-            "messages": [{"role":"user","content":"routecodex health probe"}],
+            "messages": [{"role":"user","content":"ping; reply pong"}],
         }),
         "gemini" => serde_json::json!({
-            "contents": [{"role":"user","parts":[{"text":"routecodex health probe"}]}],
-            "generationConfig": {"maxOutputTokens": 1},
+            "contents": [{"role":"user","parts":[{"text":"ping; reply pong"}]}],
         }),
         other => return Err(format!("unsupported provider probe protocol {other}")),
     })
@@ -167,7 +166,23 @@ mod tests {
             "provider authoring headers must reach non-responses cooldown probe requests"
         );
         assert_eq!(request.stream_intent(), V3ResponsesStreamIntent::Json);
-        assert_eq!(request.body()["max_tokens"], 1);
+        assert!(request.body().get("max_tokens").is_none());
+        assert_eq!(request.body()["messages"][0]["content"], "ping; reply pong");
+        let mut responses = target.clone();
+        responses.provider_type = "responses".into();
+        responses.responses_transport = V3ResponsesTransportKind::WebsocketV2;
+        responses.websocket_v2_url = Some("wss://inferaiapi.com/v1/responses".into());
+        let request =
+            build_v3_provider_global_probe_request(responses, "probe-responses".into()).unwrap();
+        assert!(request.body().get("max_output_tokens").is_none());
+        assert_eq!(
+            request.transport_kind(),
+            crate::transport_handoff::V3ProviderTransportKind::Http
+        );
+        assert_eq!(
+            request.body()["input"][0]["content"][0]["text"],
+            "ping; reply pong"
+        );
         let mut zen = target;
         zen.compatibility_profile = Some(provider_compat_core::opencode_zen_tcm::PROFILE.into());
         let request = build_v3_provider_global_probe_request(zen, "probe-zen".into()).unwrap();

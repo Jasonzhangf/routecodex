@@ -22,6 +22,8 @@ nodes:
     owner: routecodex-v3-server
   - id: V3ProviderGlobalProbeExecution
     owner: routecodex-v3-runtime
+  - id: V3ProviderProbeHttpStatus
+    owner: routecodex-v3-provider-responses
   - id: V3ProviderGlobalSubscriptionFailureObservation
     owner: routecodex-v3-runtime
   - id: V3Error02Classified
@@ -35,6 +37,8 @@ edges:
     to: V3ProviderHealthProbePermit
   - from: V3ServerAggregateLifecycle
     to: V3ProviderGlobalProbeExecution
+  - from: V3ProviderGlobalProbeExecution
+    to: V3ProviderProbeHttpStatus
   - from: V3ProviderGlobalProbeExecution
     to: V3ProviderHealthStore
   - from: V3ProviderGlobalSubscriptionFailureObservation

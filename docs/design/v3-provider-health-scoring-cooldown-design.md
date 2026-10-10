@@ -1,6 +1,8 @@
 # V3 Provider Key Health Scoring and Cooldown Design
 
-> 2026-10-07 policy amendment: the prior threshold/fixed-cadence examples in this historical design are superseded by the current runtime contract. An isolated recoverable failure records its exact provider+auth key+model same-fingerprint streak without global cooldown. The default threshold is two consecutive failures; real success clears the streak. Explicit terminal authentication/account and manual-disable policies keep their declared scope and threshold. Recovery after cooldown begins uses the provider-owned ladder `5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s`; continuous failure and failed probes advance it, while successful semantic probe resets it to 5s. Provider health remains the sole owner; probe failure is expected and must not block startup or other sessions.
+> 2026-10-10 stopgap: every HTTP 429 uses three consecutive same-fingerprint failures. Business success clears that streak and its exact 429-owned cooldown. Recovery probes send a simple ping and succeed solely on HTTP 2xx, regardless of response content or content type. Configurability is deferred.
+
+> 2026-10-07 policy amendment: the prior threshold/fixed-cadence examples in this historical design are superseded by the current runtime contract. An isolated recoverable failure records its exact provider+auth key+model same-fingerprint streak without global cooldown. The default threshold is two consecutive failures; real success clears the streak. Explicit terminal authentication/account and manual-disable policies keep their declared scope and threshold. Recovery after cooldown begins uses the provider-owned ladder `5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s`; continuous failure and failed probes advance it, while any HTTP 2xx ping probe resets it to 5s. Provider health remains the sole owner; probe failure is expected and must not block startup or other sessions.
 
 状态：design / source-controlled runtime pending live replay
 
@@ -13,7 +15,7 @@
 1. 错误先分类，再按分类处理。
 2. 不可恢复错误进入 provider subscription 级 global cooldown，用于去毛刺；这不等于永久失败。
 3. 可恢复错误只降低健康分；健康分降到 0 才进入 cooldown，502 属于可恢复错误。
-4. 进程内 cooldown 只有 semantic probe 成功才能解除；重启按当前运行时合同清空 transient health/cooldown epoch。
+4. 进程内 cooldown 由 HTTP 2xx ping probe 成功解除；429 cooldown 也由同身份业务成功立即解除；重启按当前运行时合同清空 transient health/cooldown epoch。
 5. 错误降低健康分，成功提高健康分；health 只决定 availability 和观测，不能改写 configured priority。
 
 设计结果必须保持 V3 控制面/业务 payload 隔离。score、failure streak、cooldown、probe、routing decision 只能存在 Provider health typed resource 或 scheduling projection，不得进入 provider/client normal payload，也不得由 Router 从 payload 重建。
@@ -343,7 +345,7 @@ restart
   -> do not reconstruct health truth from diagnostic persistence
 ```
 
-`blocked_until_ms` 表示业务流量继续 blocked，`next_probe_at_ms` 表示独立 recovery probe 到期。首次 probe 使用 provider-owned probe interval，可早于业务 cooldown；probe failure 只能推进 `next_probe_at_ms`，不得改写原 `blocked_until_ms`。任一 deadline 到达都不得直接恢复调度，只有 semantic probe success 可以清除 block。provider health 的 `probe_interval_ms` 是可选最大探索周期；`cc-sol` 和 `kdns` 系列配置 `120000ms`，即任何失败后的下一次探索间隔最长 2 分钟，较短阶梯仍可更早触发。
+`blocked_until_ms` 表示业务流量继续 blocked，`next_probe_at_ms` 表示独立 recovery probe 到期。首次 probe 使用 provider-owned probe interval，可早于业务 cooldown；probe failure 只能推进 `next_probe_at_ms`，不得改写原 `blocked_until_ms`。任一 deadline 到达都不得直接恢复调度，HTTP 2xx ping probe success 可以清除 block；同身份业务成功也立即清除429-owned block。provider health 的 `probe_interval_ms` 是可选最大探索周期；`cc-sol` 和 `kdns` 系列配置 `120000ms`，即任何失败后的下一次探索间隔最长 2 分钟，较短阶梯仍可更早触发。
 
 ## 8. Same-priority scheduling
 

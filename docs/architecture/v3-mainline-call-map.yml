@@ -7821,7 +7821,7 @@ chains:
 
 - chain_id: v3.provider_global_subscription_probe
   owner_feature_id: v3.provider_global_subscription_probe
-  summary: Managed aggregate lifecycle acquires due provider-global probes and completes recovery or process-lifetime suspension through the typed health resource.
+  summary: Managed aggregate lifecycle acquires due provider-global ping probes; any HTTP 2xx restores the exact identity through typed health without response-body validation.
   manifest: docs/architecture/manifests/v3.provider_global_subscription_probe.mainline.yml
   edges:
   - step_id: v3-provider-global-probe-01
@@ -7871,6 +7871,24 @@ chains:
     semantic_contract:
       - build_v3_provider_global_probe_target is the probe-only Runtime reader that copies the typed provider concurrency capability from the published manifest into the probe target.
       - The probe target preserves acquireTimeoutMs for Responses, OpenAI Chat, Anthropic, and Gemini transport builders; this control value never enters provider, client, MetadataCenter, or Debug payloads.
+
+  - step_id: v3-provider-global-probe-http-status
+    from_node: V3ProviderGlobalProbeExecution
+    to_node: V3ProviderProbeHttpStatus
+    caller_symbol: probe_v3_provider_global_target_impl
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
+    callee_symbol: ProviderResponsesTransport::send_probe
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/transport/probe.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.provider.adaptive_concurrency_admission]
+      produces: []
+      side_channel_reads: [v3.provider.adaptive_concurrency_admission]
+      side_channel_writes: []
+    semantic_contract:
+      - Probe and business transport share HTTP authentication, headers, timeout and cancellation construction.
+      - Probe success is determined solely by HTTP 2xx headers; the success body is dropped unread and cannot gate recovery.
 
   - step_id: v3-provider-global-probe-02-success
     from_node: V3ProviderGlobalProbeExecution
