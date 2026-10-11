@@ -65,7 +65,7 @@ features:
   - legacy model-specific entries remain isolated during migration
   - health score changes never modify configured priority or move a candidate across priority buckets
   - after prolonged backup success traffic, a semantic probe recovery returns the primary to Target selection immediately
-  - One recoverable provider failure leaves the identity eligible; two consecutive failures admit cooldown, and real success resets the pre-cooldown streak.
+  - One recoverable provider failure immediately cools the exact providerId+interfaceId+authAlias+model identity; a successful semantic probe or real success clears the cooldown.
   required_negative:
   - v3 persistence without probe_model_id fails explicitly
   - duplicate v4 key health identities fail instead of silently overwriting control truth
@@ -73,7 +73,7 @@ features:
   - mainline caller/callee symbols, edge owners, and resource writer/reader bindings must resolve to the registered modules
   - key health state never enters provider or client payload
   required_gates:
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_first_failure_cooldown_blackbox -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test first_failure_cooldown_blackbox -- --nocapture
   - npm run test:v3-provider-health-contract
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime recovered_primary_failback_is_not_starved_by_backup_successes -- --nocapture
   - npm run verify:v3-resource-map
@@ -1380,7 +1380,8 @@ features:
       never hard-reject a candidate
   - After genuine web_search/search and multimodal/vision capability validation, Target10 preserves configured candidate order among candidates within their declared context window; an omitted max_context_tokens compiles to the documented 200000-token default, and a candidate whose max_context_tokens is below request_input_tokens is marked context_window_exceeded and skipped before availability/transport. Explicit direct pins and the default-pool floor remain last-resort eligible with the typed overflow reason, while provider health and request-local provider-failure exclusion remain explicit switch inputs
   - A candidate at 90 percent through 100 percent of its context window remains eligible, is demoted only below normal candidates in the same route tier, and still outranks every lower route tier
-  - Request/provider compatibility failures are candidate-scoped across providerId+authAlias+modelId and remain health-neutral, so sibling models in the same provider remain selectable; transport and provider-health failures are provider-scoped across all auth keys/models for the failed provider, while persistent cooldown remains provider-key-model scoped
+  - Request/provider compatibility failures are candidate-scoped across providerId+interfaceId+authAlias+modelId and remain health-neutral, so sibling interfaces/models in the same provider remain selectable; transport and provider-health failures are interface-scoped across all auth keys/models for the failed provider+interface, while persistent cooldown remains provider-interface-key-model scoped
+  - A cooldown or request-local failure on one interface never excludes a sibling interface of the same provider; the fallback request remains able to select the sibling interface with its own endpoint and transport contract
   - A non-null previous_response_id is rejected before routing; it never selects an exact-pin target, local restore, or Target model capability
   - OpenAI Responses request.reasoning is aliased to the thinking route fact before pool matching
   - Target dedupe retains optional/default provenance; the default floor is only a last-resort context-admission fallback and never overrides health cooldown or request-local provider-failure exclusion
@@ -1390,6 +1391,9 @@ features:
   required_gates:
   - npm run test:v3-p5-router-target
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server image_input_blackbox
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target multi_interface_ -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test provider_multi_interface_controlled -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses --test provider_key_health_contract provider_health_cooldown_is_isolated_between_interfaces -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target context_admission_filters_over_limit_candidates -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target -- --nocapture
   - 'cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime nodes::tests:': -- --nocapture

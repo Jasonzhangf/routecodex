@@ -712,6 +712,78 @@ async fn capability_test_reports_a_missing_tool_call_as_failure() {
 }
 
 #[tokio::test]
+async fn capability_test_addresses_a_named_interface_without_a_default() {
+    let (upstream, captured) = spawn_upstream(1, |_| {
+        (
+            200,
+            json!({
+                "choices": [{
+                    "message": { "role": "assistant", "content": "ok" },
+                    "finish_reason": "stop",
+                }],
+            })
+            .to_string(),
+        )
+    })
+    .await;
+    let (base, _state, home) = bind_test_server("http://127.0.0.1:9/v1").await;
+    write_provider(
+        &home,
+        "multi",
+        &format!(
+            r#"
+version = "2.0.0"
+providerId = "multi"
+
+[provider]
+id = "multi"
+enabled = true
+defaultModel = "m1"
+
+[provider.auth]
+type = "apikey"
+apiKey = "sk-multi"
+
+[provider.models."m1"]
+supportsStreaming = true
+
+[provider.interfaces.chat]
+type = "openai_chat"
+baseURL = "{upstream}/v1"
+
+[provider.interfaces.responses]
+type = "responses"
+baseURL = "http://127.0.0.1:9/v1"
+"#
+        ),
+    );
+
+    let token = admin_token(&home);
+    let response = http_client()
+        .post(format!("{base}/api/providers/multi/models/capability-test"))
+        .header("x-routecodex-admin-token", &token)
+        .json(&json!({
+            "model": "m1",
+            "capabilities": ["text"],
+            "interface_id": "chat",
+        }))
+        .send()
+        .await
+        .expect("capability test response");
+    assert_eq!(response.status().as_u16(), 200);
+    let payload: Value = response.json().await.expect("capability test json");
+    assert_eq!(payload["interface_id"], "chat");
+    assert_eq!(payload["results"][0]["passed"], true);
+
+    let captured = captured.lock().unwrap().clone();
+    assert_eq!(captured.len(), 1, "{captured:?}");
+    assert!(
+        captured[0].starts_with("POST /v1/chat/completions HTTP/1.1"),
+        "the named interface's endpoint must receive the probe: {captured:?}"
+    );
+}
+
+#[tokio::test]
 async fn capability_test_reports_upstream_rejection_explicitly() {
     let (upstream, _captured) =
         spawn_upstream(1, |_| (401, json!({ "error": "bad key" }).to_string())).await;

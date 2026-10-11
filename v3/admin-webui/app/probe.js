@@ -42,6 +42,7 @@ function errorText(error) {
  * returns: { element, run(request), retry(), clear(), copy(), text(), isRunning(), result() }
  *
  * request: { id?, config?, model?, authAlias?, stages? }
+ * request: { id?, config?, interfaceId?, model?, authAlias?, stages? }
  */
 export function createProbeTerminal(options = {}) {
   const stageRows = el("div", "probe-stage-rows");
@@ -175,6 +176,7 @@ export function createProbeTerminal(options = {}) {
       ? `/api/providers/${encodeURIComponent(request.id)}/probe`
       : "/api/providers/probe";
     const body = {
+      interface_id: request.interfaceId || null,
       model: request.model || null,
       auth_alias: request.authAlias || null,
       stages: request.stages && request.stages.length ? request.stages : null,

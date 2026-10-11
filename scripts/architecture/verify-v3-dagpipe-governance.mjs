@@ -25,9 +25,9 @@ try { manifest = JSON.parse(readFileSync(manifestPath, 'utf8')); }
 catch (error) { fail(`cannot read manifest: ${error.message}`); }
 if (manifest.target !== 'docs/architecture/dagpipe/v3-proxy-pipeline-target.md') fail('target must be the V3 proxy pipeline design');
 projectFile(manifest.target);
-const expected = ['request', 'response', 'error'];
-if (!Array.isArray(manifest.modules) || manifest.modules.length !== expected.length ||
-    manifest.modules.some((entry, index) => entry.id !== expected[index])) fail('modules must be request, response, error in order');
+const required = ['request', 'response', 'error'];
+if (!Array.isArray(manifest.modules) || manifest.modules.length < required.length ||
+    required.some((id, index) => manifest.modules[index]?.id !== id)) fail('modules must start with request, response, error in order');
 
 const registered = new Set();
 for (const entry of manifest.modules) {
@@ -37,7 +37,8 @@ for (const entry of manifest.modules) {
   }
   if (entry.status !== 'graph' || typeof entry.graph !== 'string') fail(`invalid status/graph for ${entry.id}`);
   const graph = projectFile(entry.graph);
-  if (dirname(graph) !== directory || !graph.endsWith('.graph.json')) fail(`graph must be in DAGPipe directory: ${entry.graph}`);
+  const relativeGraph = relative(directory, graph);
+  if (relativeGraph.startsWith('..') || isAbsolute(relativeGraph) || !graph.endsWith('.graph.json')) fail(`graph must be in DAGPipe directory: ${entry.graph}`);
   if (registered.has(graph)) fail(`graph shared by modules: ${entry.graph}`);
   registered.add(graph);
   const result = spawnSync('dagpipe', ['graph', 'validate', graph], { encoding: 'utf8' });
@@ -53,14 +54,28 @@ for (const entry of extensions) {
   }
   if (entry.status !== 'graph' || typeof entry.graph !== 'string') fail(`invalid status/graph for ${entry.id}`);
   const graph = projectFile(entry.graph);
-  if (dirname(graph) !== directory || !graph.endsWith('.graph.json')) fail(`graph must be in DAGPipe directory: ${entry.graph}`);
+  const relativeGraph = relative(directory, graph);
+  if (relativeGraph.startsWith('..') || isAbsolute(relativeGraph) || !graph.endsWith('.graph.json')) fail(`graph must be in DAGPipe directory: ${entry.graph}`);
   if (registered.has(graph)) fail(`graph shared by modules: ${entry.graph}`);
   registered.add(graph);
   const result = spawnSync('dagpipe', ['graph', 'validate', graph], { encoding: 'utf8' });
   if (result.error || result.status !== 0) fail(`${entry.id} graph validation: ${result.error?.message || result.stderr || result.stdout}`);
   console.log(`[v3-dagpipe] VALID ${entry.id}: ${entry.graph}`);
 }
-for (const name of readdirSync(directory)) {
-  if (name.endsWith('.graph.json') && !registered.has(resolve(directory, name))) fail(`unregistered graph: ${name}`);
+function listGraphFiles(rootDir) {
+  const files = [];
+  for (const entry of readdirSync(rootDir, { withFileTypes: true })) {
+    const full = resolve(rootDir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...listGraphFiles(full));
+    } else if (entry.isFile() && entry.name.endsWith('.graph.json')) {
+      files.push(full);
+    }
+  }
+  return files;
 }
-console.log(`[v3-dagpipe] governance checked; ${registered.size} static graphs registered (${expected.length} modules, ${extensions.length} extensions)`);
+
+for (const graphFile of listGraphFiles(directory)) {
+  if (!registered.has(graphFile)) fail(`unregistered graph: ${relative(directory, graphFile)}`);
+}
+console.log(`[v3-dagpipe] governance checked; ${registered.size} static graphs registered (${manifest.modules.length} modules, ${extensions.length} extensions)`);

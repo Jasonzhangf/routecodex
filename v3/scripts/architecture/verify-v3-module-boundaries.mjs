@@ -251,7 +251,8 @@ for (const path of all) {
   const isProviderOwner = path.includes('routecodex-v3-provider-responses/src/');
   const isProviderHealthRuntimeBoundary =
     path.endsWith('routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs')
-    || path.endsWith('routecodex-v3-runtime/src/provider_failure_runtime_policy.rs');
+    || path.endsWith('routecodex-v3-runtime/src/provider_failure_runtime_policy.rs')
+    || path.endsWith('routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs');
   const isProviderTransportSurface = path.endsWith('routecodex-v3-provider-responses/src/transport.rs')
     || path.endsWith('routecodex-v3-provider-responses/src/transport_admission.rs')
     || path.endsWith('routecodex-v3-provider-responses/src/shared.rs');
@@ -429,7 +430,7 @@ if (/classify_request|resolve_default_pool|resolve_selection_plan|hit_opaque_tar
   fail('Target production source cannot re-enter Virtual Router');
 }
 if (!/pub responses_process: Option<String>/.test(targetSource)
-    || !/responses_process:\s*provider[\s\S]{0,160}\.responses[\s\S]{0,160}\.map\(\|responses\| responses\.process\.clone\(\)\)/.test(targetSource)) {
+    || !/responses_process:\s*interface[\s\S]{0,160}\.responses[\s\S]{0,160}\.map\(\|responses\| responses\.process\.clone\(\)\)/.test(targetSource)) {
   fail('Target candidate must carry provider.responses.process from config manifest into selected provider truth');
 }
 

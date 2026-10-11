@@ -1990,3 +1990,219 @@ targets = [{ kind = "provider_model", provider = "cc", model = "gpt-test", prior
         "v3-native provider cc must stay passthrough unless it declares a profile explicitly"
     );
 }
+
+#[test]
+fn inline_provider_compiles_multi_interface_manifest() {
+    let source = r#"
+version = 3
+
+[servers.primary]
+bind = "127.0.0.1"
+port = 4558
+routing_group = "primary"
+endpoints = ["responses"]
+
+[providers.multi]
+default_model = "gpt-test"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "MULTI_KEY" }] }
+
+[providers.multi.models.gpt-test]
+capabilities = ["text"]
+supports_streaming = true
+
+[providers.multi.interfaces.responses]
+enabled = true
+type = "responses"
+base_url = "https://multi.invalid/v1"
+responses = { process = "chat", streaming = "always", transport = "http" }
+
+[providers.multi.interfaces.chat]
+enabled = true
+type = "openai_chat"
+base_url = "https://multi.invalid/chat/v1"
+compatibility_profile = "chat:test"
+
+[route_groups.primary.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "multi", model = "gpt-test", interface = "chat", priority = 1 }]
+"#;
+
+    let manifest = compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap())
+        .expect("multi-interface inline provider must compile");
+    assert_eq!(manifest.providers["multi"].interfaces.len(), 2);
+    assert_eq!(
+        manifest.providers["multi"].interfaces["chat"].provider_type,
+        "openai_chat"
+    );
+    assert_eq!(
+        manifest.providers["multi"].interfaces["responses"]
+            .responses
+            .as_ref()
+            .expect("responses contract")
+            .process,
+        "chat"
+    );
+    assert_eq!(
+        manifest.route_groups["primary"].pools["default"].targets[0]
+            .interface
+            .as_deref(),
+        Some("chat")
+    );
+}
+
+#[test]
+fn multi_interface_route_target_expands_priority_baselines() {
+    let source = r#"
+version = 3
+
+[servers.primary]
+bind = "127.0.0.1"
+port = 4558
+routing_group = "primary"
+endpoints = ["responses"]
+
+[providers.multi]
+default_model = "gpt-test"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "MULTI_KEY" }] }
+
+[providers.multi.models.gpt-test]
+capabilities = ["text"]
+supports_streaming = true
+
+[[providers.multi.semantic_error_policy]]
+policy_id = "multi_diagnostic"
+[providers.multi.semantic_error_policy.match]
+http_status = 200
+content_contains_any = ["diagnostic"]
+[providers.multi.semantic_error_policy.action]
+kind = "periodic_recovery"
+reason_code = "provider_diagnostic"
+retry_mode = "reselect_before_client_projection"
+cooldown_ms = 300000
+disable_scope = "provider_model"
+
+[providers.multi.interfaces.responses]
+enabled = true
+type = "responses"
+base_url = "https://multi.invalid/v1"
+responses = { process = "chat", streaming = "always", transport = "http" }
+
+[providers.multi.interfaces.chat]
+enabled = true
+type = "openai_chat"
+base_url = "https://multi.invalid/chat/v1"
+
+[route_groups.primary.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "multi", model = "gpt-test", key = "key1", priority = 7 }]
+"#;
+
+    let manifest = compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap())
+        .expect("multi-interface route target must compile");
+    let mut interfaces = manifest
+        .provider_priority_baselines()
+        .into_iter()
+        .map(|baseline| {
+            assert_eq!(baseline.provider_id, "multi");
+            assert_eq!(baseline.auth_alias, "key1");
+            assert_eq!(baseline.model_id, "gpt-test");
+            assert_eq!(baseline.priority, 7);
+            baseline.interface_id
+        })
+        .collect::<Vec<_>>();
+    interfaces.sort();
+    assert_eq!(interfaces, vec!["chat", "responses"]);
+
+    let provider_policy = manifest
+        .error
+        .provider_error_action_policy
+        .iter()
+        .find(|policy| policy.policy_id == "multi_diagnostic")
+        .expect("provider semantic policy must compile");
+    assert_eq!(
+        provider_policy.scope.provider_type, None,
+        "a provider-wide policy for multiple interfaces must not pin the default interface protocol"
+    );
+}
+
+#[test]
+fn legacy_single_interface_normalizes_to_default_interface() {
+    let source = r#"
+version = 3
+
+[servers.primary]
+bind = "127.0.0.1"
+port = 4559
+routing_group = "primary"
+endpoints = ["responses"]
+
+[providers.legacy]
+type = "responses"
+base_url = "https://legacy.invalid/v1"
+default_model = "gpt-test"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "LEGACY_KEY" }] }
+responses = { process = "chat", streaming = "always" }
+
+[providers.legacy.models.gpt-test]
+capabilities = ["text"]
+supports_streaming = true
+
+[route_groups.primary.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "legacy", model = "gpt-test", priority = 1 }]
+"#;
+
+    let manifest = compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap())
+        .expect("legacy provider must compile");
+    let default_interface = &manifest.providers["legacy"].interfaces["default"];
+    assert_eq!(default_interface.provider_type, "responses");
+    assert_eq!(default_interface.base_url, "https://legacy.invalid/v1");
+    assert_eq!(
+        default_interface
+            .responses
+            .as_ref()
+            .expect("legacy responses")
+            .process,
+        "chat"
+    );
+}
+
+#[test]
+fn inline_provider_rejects_scalar_and_interface_dual_truth() {
+    let source = r#"
+version = 3
+
+[servers.primary]
+bind = "127.0.0.1"
+port = 4560
+routing_group = "primary"
+endpoints = ["responses"]
+
+[providers.multi]
+type = "responses"
+base_url = "https://multi.invalid/v1"
+default_model = "gpt-test"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "MULTI_KEY" }] }
+
+[providers.multi.models.gpt-test]
+capabilities = ["text"]
+supports_streaming = true
+
+[providers.multi.interfaces.chat]
+type = "openai_chat"
+base_url = "https://multi.invalid/chat/v1"
+
+[route_groups.primary.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "multi", model = "gpt-test", priority = 1 }]
+"#;
+
+    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap())
+        .expect_err("scalar and interface provider truth must not coexist");
+    assert!(
+        error
+            .to_string()
+            .contains("cannot declare interfaces together with type/baseURL/responses"),
+        "unexpected error: {error}"
+    );
+}

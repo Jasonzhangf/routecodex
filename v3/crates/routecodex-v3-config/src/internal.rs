@@ -450,7 +450,7 @@ mod tests {
     }
 
     // 503（upstream unavailable）是单一可恢复类：声明表与 provider action 阈值必须
-    // 一致（连续两次同样失败才冷却），只有 401..403 账户/计费类首次即冷却。503 曾
+    // 一致（每个 typed provider 失败首次即冷却），与 401..403 账户/计费类相同。503 曾
     // 同时出现在 unrecoverable_http_statuses 与可恢复阈值路径，形成两套冲突声明。
     #[test]
     fn upstream_unavailable_status_is_recoverable_with_the_declared_threshold() {

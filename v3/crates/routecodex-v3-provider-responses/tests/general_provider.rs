@@ -138,6 +138,7 @@ fn target_with_auth(
     V3ResponsesProviderTarget {
         provider_id: provider_id.to_string(),
         provider_type: "responses".to_string(),
+        interface_id: "default".to_string(),
         base_url: base_url.to_string(),
         canonical_model_id: wire_model.to_string(),
         wire_model: wire_model.to_string(),

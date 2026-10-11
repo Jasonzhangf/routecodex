@@ -231,8 +231,8 @@ port = 8777
 [error_handling]
   transient_stages = ["provider.sse_decode", "provider.sse_stream", "provider.transport_transient", "V3ProviderResp14Raw", "V3ProviderRespInbound01Raw", "V3ProviderReqOutbound09TransportRequest", "V3Transport13ResponsesHttpRequest"]
   transient_wait_ms = [1000, 3000, 5000]
-  # 503（upstream unavailable）是可恢复类：与 429/5xx 一样必须连续两次同类失败
-  # 才进入冷却，并共用 provider health 的长探活阶梯。它不属于 typed
+  # 503（upstream unavailable）是可恢复类：与 429/5xx 一样每个 typed provider 失败
+  # 首次即进入冷却，并共用 provider health 的长探活阶梯。它不属于 typed
   # irrecoverable 账户/计费组（401..403）。
   recoverable_http_statuses = [429, 500, 502, 503]
   # Recoverable admission uses the Error owner's shared threshold.

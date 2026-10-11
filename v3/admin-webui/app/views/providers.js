@@ -137,7 +137,7 @@ function renderList(providers) {
   selectAll.setAttribute("aria-label", "Select all providers");
   checkHead.appendChild(selectAll);
   headRow.appendChild(checkHead);
-  for (const label of ["Provider", "Type", "Endpoint", "Status", "Latency", "Models", "Actions"]) {
+  for (const label of ["Provider", "Interfaces", "Status", "Latency", "Models", "Actions"]) {
     headRow.appendChild(el("th", null, label));
   }
   head.appendChild(headRow);
@@ -159,8 +159,14 @@ function renderList(providers) {
       renderProviderBulkBar();
     });
     row.appendChild(el("td", null, provider.id));
-    row.appendChild(el("td", "mono", provider.provider_type));
-    row.appendChild(el("td", "mono", provider.base_url));
+    const interfaces = provider.interfaces && provider.interfaces.length
+      ? provider.interfaces
+      : [{ id: "default", provider_type: provider.provider_type, base_url: provider.base_url, enabled: true }];
+    row.appendChild(el(
+      "td",
+      "mono",
+      interfaces.map((item) => `${item.id} · ${item.provider_type} · ${item.base_url}${item.enabled ? "" : " (disabled)"}`).join("\n"),
+    ));
     const statusCell = el("td");
     statusCell.appendChild(badge(provider.health ? (provider.health.ok ? "healthy" : "failed") : "disabled"));
     row.appendChild(statusCell);
@@ -452,10 +458,9 @@ async function openDetail(id) {
     const config = detail.config;
     const grid = el("div", "detail-grid");
     grid.appendChild(detailField("Name", config.provider_id || config.provider.id));
+    grid.appendChild(detailField("Interfaces", interfaceSummary(config.provider)));
     // The detail payload carries the provider file as serde serializes it
     // (`type`, `baseURL`, `defaultModel`), unlike the list DTO's snake_case.
-    grid.appendChild(detailField("Type", config.provider.type));
-    grid.appendChild(detailField("Endpoint", config.provider.baseURL));
     grid.appendChild(detailField("Default model", config.provider.defaultModel));
     grid.appendChild(detailField("Enabled", String(config.provider.enabled !== false)));
     grid.appendChild(detailField("Timeout (ms)", config.provider.timeout === null || config.provider.timeout === undefined ? "default 300000" : String(config.provider.timeout)));
@@ -496,7 +501,7 @@ async function openDetail(id) {
     for (const ref of detail.references) {
       const row = el("div", "row");
       row.appendChild(el("span", "name", `${ref.group} / ${ref.pool}`));
-      row.appendChild(el("span", "meta", `port ${ref.port} · tier ${ref.priority} · ${ref.model || ""}`));
+      row.appendChild(el("span", "meta", `port ${ref.port} · tier ${ref.priority} · ${ref.model || ""}${ref.interface ? ` · interface ${ref.interface}` : ""}`));
       refPanel.appendChild(row);
     }
     for (const name of detail.forwarder_references) {
@@ -533,6 +538,16 @@ async function openDetail(id) {
   } catch (error) {
     showStatus("err", error.message);
   }
+}
+
+function interfaceSummary(provider) {
+  const interfaces = Object.entries(provider.interfaces || {});
+  if (!interfaces.length) {
+    return `${provider.type || provider.provider_type} · ${provider.baseURL || provider.base_url}`;
+  }
+  return interfaces
+    .map(([id, item]) => `${id} · ${item.type} · ${item.base_url}${item.enabled === false ? " (disabled)" : ""}`)
+    .join("\n");
 }
 
 async function renderRuntimeHealth(host, id) {
@@ -1060,7 +1075,10 @@ function openProbeFor(id) {
   host.appendChild(terminal.element);
   const provider = state.providers.find((item) => item.id === id);
   terminal.run({ id, model: null, stages: PROBE_STAGES });
-  document.getElementById("probe-target").textContent = `provider ${id}${provider ? ` · ${provider.base_url}` : ""}`;
+  const interfaceText = provider && provider.interfaces && provider.interfaces.length
+    ? ` · ${provider.interfaces.map((item) => item.id).join(", ")}`
+    : "";
+  document.getElementById("probe-target").textContent = `provider ${id}${interfaceText}`;
 }
 
 // ---------------------------------------------------------------------------

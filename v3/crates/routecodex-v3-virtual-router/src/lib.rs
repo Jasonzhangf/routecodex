@@ -90,6 +90,9 @@ pub struct V3Router07OpaqueTargetPlanEntry {
     pub target_index: usize,
     pub target_kind: V3RouteTargetKind,
     pub target_id: Option<String>,
+    /// Optional provider interface pin carried from the route target. Target
+    /// expansion uses it to select a single interface candidate set.
+    pub interface: Option<String>,
     /// Captured target scheduling controls for synthetic pools whose targets
     /// do not have a manifest pool for Target to look up.
     pub priority: i32,
@@ -498,6 +501,7 @@ impl V3VirtualRouter {
                     target_index,
                     target_kind: target.kind.clone(),
                     target_id: target.id.clone(),
+                    interface: target.interface.clone(),
                     priority: target.priority.unwrap_or(0),
                     weight: target.weight.unwrap_or(1),
                     direct_provider_model: tier.direct_provider_model.clone().or_else(|| {
@@ -575,6 +579,7 @@ fn build_implicit_capability_pool_tier(
             provider: Some(candidate.provider.clone()),
             model: Some(candidate.model.clone()),
             key: None,
+            interface: None,
             priority: Some(1),
             weight: Some(1),
         });
@@ -702,6 +707,7 @@ fn resolve_v3_direct_model_plan(
                 provider: Some(direct_provider_id.clone()),
                 model: Some(direct_model_id.clone()),
                 key: None,
+                interface: None,
                 priority: Some(1),
                 weight: Some(1),
             }],
@@ -881,12 +887,13 @@ fn swrr_order(
 
 fn semantic_target_key(target: &V3RoutePoolTargetManifest) -> String {
     format!(
-        "{:?}|{}|{}|{}|{}",
+        "{:?}|{}|{}|{}|{}|{}",
         target.kind,
         target.id.as_deref().unwrap_or(""),
         target.provider.as_deref().unwrap_or(""),
         target.model.as_deref().unwrap_or(""),
-        target.key.as_deref().unwrap_or("")
+        target.key.as_deref().unwrap_or(""),
+        target.interface.as_deref().unwrap_or("")
     )
 }
 

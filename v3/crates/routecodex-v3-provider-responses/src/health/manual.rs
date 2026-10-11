@@ -10,7 +10,7 @@ use super::{
     V3ProviderHealthStore,
 };
 use crate::provider_cooldown_probe::{
-    provider_cooldown_probe_key, resolve_provider_cooldown_probe_key,
+    provider_cooldown_probe_key_for_interface, resolve_provider_cooldown_probe_key_for_interface,
     V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
 };
 
@@ -36,12 +36,14 @@ fn invalid_manual_cooldown(detail: impl Into<String>) -> V3ProviderHealthError {
 fn upsert_manual_probe_cooldown(
     state: &mut V3ProviderHealthState,
     provider_id: &str,
+    interface_id: &str,
     auth_alias: Option<&str>,
     model_id: Option<&str>,
     now_ms: u64,
     until_ms: u64,
 ) -> u64 {
-    let key = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
+    let key =
+        provider_cooldown_probe_key_for_interface(provider_id, interface_id, auth_alias, model_id);
     let existing = state.provider_cooldown_probes.get(&key).cloned();
     let configured_max_probe_interval_ms = state
         .failure_policies
@@ -107,9 +109,10 @@ impl V3ProviderHealthStore {
     /// `auth_key` 与失败驱动路径一样写入一对状态：`auth_key_cooldowns` 条目
     /// 加上 `(provider_id, auth_alias, None)` 的 probe 条目；后者既是 selection
     /// 实际读取的键，也是唯一被持久化的那一半。
-    pub fn add_cooldown_entry(
+    pub fn add_cooldown_entry_for_interface(
         &self,
         provider_id: &str,
+        interface_id: &str,
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         kind: &str,
@@ -138,7 +141,12 @@ impl V3ProviderHealthStore {
         let applied_until_ms = if kind == "auth_key" {
             // auth_key 冷却的作用域是 provider + auth_alias；失败驱动路径同样
             // 以 model_id=None 建键，selection 只在该键上读取 auth_key 冷却。
-            let auth_key = provider_cooldown_probe_key(provider_id, auth_alias, None);
+            let auth_key = provider_cooldown_probe_key_for_interface(
+                provider_id,
+                interface_id,
+                auth_alias,
+                None,
+            );
             let until_ms = state
                 .auth_key_cooldowns
                 .get(&auth_key)
@@ -147,6 +155,7 @@ impl V3ProviderHealthStore {
             upsert_manual_probe_cooldown(
                 &mut state,
                 provider_id,
+                interface_id,
                 auth_alias,
                 None,
                 now_ms,
@@ -164,6 +173,7 @@ impl V3ProviderHealthStore {
             upsert_manual_probe_cooldown(
                 &mut state,
                 provider_id,
+                interface_id,
                 auth_alias,
                 model_id,
                 now_ms,
@@ -180,9 +190,10 @@ impl V3ProviderHealthStore {
     /// 只改 `next_probe_at_ms`，不动 `blocked_until_ms`；真正执行探针仍是既有
     /// 后台 probe 循环的唯一路径。identity 没有 probe 状态时返回 `Ok(false)`
     /// 且不写入、不持久化。
-    pub fn trigger_probe_now(
+    pub fn trigger_probe_now_for_interface(
         &self,
         provider_id: &str,
+        interface_id: &str,
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         now_ms: u64,
@@ -191,9 +202,10 @@ impl V3ProviderHealthStore {
             .state
             .write()
             .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
-        let key = resolve_provider_cooldown_probe_key(
+        let key = resolve_provider_cooldown_probe_key_for_interface(
             &state.provider_cooldown_probes,
             provider_id,
+            interface_id,
             auth_alias,
             model_id,
         );
@@ -204,6 +216,39 @@ impl V3ProviderHealthStore {
         persist_cooldown_state(state);
         self.publish_availability_change();
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+impl V3ProviderHealthStore {
+    fn add_cooldown_entry(
+        &self,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        kind: &str,
+        duration_ms: u64,
+        now_ms: u64,
+    ) -> Result<u64, V3ProviderHealthError> {
+        self.add_cooldown_entry_for_interface(
+            provider_id,
+            "default",
+            auth_alias,
+            model_id,
+            kind,
+            duration_ms,
+            now_ms,
+        )
+    }
+
+    fn trigger_probe_now(
+        &self,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        now_ms: u64,
+    ) -> Result<bool, V3ProviderHealthError> {
+        self.trigger_probe_now_for_interface(provider_id, "default", auth_alias, model_id, now_ms)
     }
 }
 
@@ -263,8 +308,12 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         assert_eq!(entry.until_ms, Some(61_000));
         assert_eq!(entry.remaining_ms, Some(60_000));
         let state = store.state.read().expect("provider health state lock");
-        let auth_key =
-            crate::provider_cooldown_probe::provider_cooldown_probe_key("p", Some("k"), None);
+        let auth_key = crate::provider_cooldown_probe::provider_cooldown_probe_key_for_interface(
+            "p",
+            "default",
+            Some("k"),
+            None,
+        );
         assert!(
             state.auth_key_cooldowns.contains_key(&auth_key),
             "manual auth_key add must write the auth_key cooldown map"
@@ -427,8 +476,12 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
             "auth_key scope ignores the model dimension, like a real failure"
         );
         let state = store.state.read().expect("provider health state lock");
-        let auth_key =
-            crate::provider_cooldown_probe::provider_cooldown_probe_key("p", Some("k"), None);
+        let auth_key = crate::provider_cooldown_probe::provider_cooldown_probe_key_for_interface(
+            "p",
+            "default",
+            Some("k"),
+            None,
+        );
         assert!(state.auth_key_cooldowns.contains_key(&auth_key));
         let probe = state
             .provider_cooldown_probes

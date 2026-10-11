@@ -230,6 +230,7 @@ fn responses_http_target() -> V3ResponsesProviderTarget {
     V3ResponsesProviderTarget {
         provider_id: "orangeai".into(),
         provider_type: "responses".into(),
+        interface_id: "default".into(),
         base_url: "https://api2.orangeai.cc/v1".into(),
         canonical_model_id: "glm-5.2".into(),
         wire_model: "glm-5.2".into(),

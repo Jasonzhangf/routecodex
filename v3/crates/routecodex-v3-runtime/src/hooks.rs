@@ -586,6 +586,7 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
         policy.request_id.clone(),
         V3ResponsesProviderTarget {
             provider_id: candidate.provider_id.clone(),
+            interface_id: candidate.interface_id.clone(),
             provider_type: candidate.provider_type.clone(),
             base_url: candidate.base_url.clone(),
             canonical_model_id: candidate.model_id.clone(),
@@ -879,6 +880,7 @@ pub(crate) fn chat_direct_request_projection_hook_with_key_catalog_and_drop_cont
         policy.request_id.clone(),
         V3ResponsesProviderTarget {
             provider_id: candidate.provider_id.clone(),
+            interface_id: candidate.interface_id.clone(),
             provider_type: candidate.provider_type.clone(),
             base_url: candidate.base_url.clone(),
             canonical_model_id: candidate.model_id.clone(),

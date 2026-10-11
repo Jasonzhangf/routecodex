@@ -41,7 +41,7 @@ export function closeAndRemove(dialog) {
 // E5/E4 — add or edit one model
 // ---------------------------------------------------------------------------
 
-export function openModelDialog({ providerId, modelName, entry, detectedCapabilities, isNew, onChanged }) {
+export function openModelDialog({ providerId, modelName, entry, detectedCapabilities, interfaceId, isNew, onChanged }) {
   const existing = entry || {};
   const dialog = dialogShell("model-dialog", isNew ? `Add model — ${modelName}` : `Edit model — ${modelName}`);
 
@@ -231,7 +231,7 @@ export function openModelDialog({ providerId, modelName, entry, detectedCapabili
 
     let failure = null;
     try {
-      const result = await requestCapabilityTest(providerId, modelName, [capability]);
+      const result = await requestCapabilityTest(providerId, modelName, [capability], interfaceId);
       const row = (result?.results || []).find((item) => item.capability === capability);
       if (!row) {
         failure = "capability-test returned no result for this capability";

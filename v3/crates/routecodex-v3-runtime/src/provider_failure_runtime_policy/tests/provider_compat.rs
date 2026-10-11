@@ -167,7 +167,7 @@ async fn relay_provider_compat_failure_keeps_same_provider_sibling_health_neutra
     assert_eq!(result.event.action, "switch_provider");
     assert_eq!(
         result.event.next_provider_key.as_deref(),
-        Some("first:key:sibling")
+        Some("first:default:key:sibling")
     );
     assert!(
         health
@@ -247,7 +247,7 @@ async fn relay_generic_provider_http_400_excludes_only_failed_identity_and_recor
 
     assert_eq!(
         failed_candidates,
-        BTreeSet::from(["first:key:test".to_string()]),
+        BTreeSet::from(["first:default:key:test".to_string()]),
         "generic provider HTTP 400 must exclude only the failed exact candidate"
     );
     assert_ne!(
@@ -336,7 +336,7 @@ async fn relay_upstream_invalid_request_error_keeps_same_provider_sibling_health
     assert_eq!(reselected.candidate.model_id, "sibling");
     assert_eq!(
         failed_candidates,
-        BTreeSet::from(["first:key:test".to_string()]),
+        BTreeSet::from(["first:default:key:test".to_string()]),
         "invalid_request_error must exclude only the exact failed candidate"
     );
     assert_eq!(
@@ -348,7 +348,7 @@ async fn relay_upstream_invalid_request_error_keeps_same_provider_sibling_health
     assert_eq!(result.event.action, "switch_provider");
     assert_eq!(
         result.event.next_provider_key.as_deref(),
-        Some("first:key:sibling")
+        Some("first:default:key:sibling")
     );
     assert!(result.terminal_projection.is_none());
     assert!(same_candidate_retries.is_empty());

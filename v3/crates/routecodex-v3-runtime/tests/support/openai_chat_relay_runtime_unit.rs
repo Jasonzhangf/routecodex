@@ -319,6 +319,7 @@ mod tests {
             failure_session_scope: V3ProviderFailureSessionScope::new("test", "default", "s1")
                 .expect("test scope"),
             provider_id: "test".to_string(),
+            interface_id: "default".to_string(),
             auth_alias: "key".to_string(),
             model_id: "model".to_string(),
             recorded: false,

@@ -2986,6 +2986,7 @@ async fn p6_models_endpoint_lists_gpt55_without_gpt56_catalog() {
             provider: Some("test".to_string()),
             model: Some("gpt-5.5".to_string()),
             key: Some("key".to_string()),
+            interface: None,
             priority: Some(2),
             weight: None,
         });
@@ -3162,6 +3163,7 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
             provider: Some("test".to_string()),
             model: Some("model1".to_string()),
             key: Some("key".to_string()),
+            interface: None,
             priority: Some(1),
             weight: None,
         },
@@ -3171,6 +3173,7 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
             provider: Some("test".to_string()),
             model: Some("model2".to_string()),
             key: Some("key".to_string()),
+            interface: None,
             priority: Some(2),
             weight: None,
         },
@@ -3180,6 +3183,7 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
             provider: Some("test".to_string()),
             model: Some("shared".to_string()),
             key: Some("key".to_string()),
+            interface: None,
             priority: Some(3),
             weight: None,
         },
@@ -3189,6 +3193,7 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
             provider: Some("other".to_string()),
             model: Some("shared".to_string()),
             key: Some("key".to_string()),
+            interface: None,
             priority: Some(4),
             weight: None,
         },
@@ -6599,9 +6604,16 @@ async fn model_entries_never_deliver_provider_or_sse_decode_errors_blackbox() {
                 config.debug.log_file = Some(transport_log.to_string_lossy().into_owned());
                 if endpoint.starts_with("/v1beta/") {
                     let provider = config.providers.get_mut("test").unwrap();
+                    let interface = provider
+                        .interfaces
+                        .get_mut("default")
+                        .expect("p6 provider default interface");
                     provider.provider_type = "gemini".to_owned();
                     provider.base_url = provider_url.trim_end_matches("/v1").to_owned() + "/v1beta";
                     provider.responses = None;
+                    interface.provider_type = provider.provider_type.clone();
+                    interface.base_url = provider.base_url.clone();
+                    interface.responses = None;
                 }
                 if endpoint == "/v1/responses/compact" {
                     let group = config.route_groups.get_mut("default").unwrap();
@@ -6985,7 +6997,13 @@ async fn responses_direct_relay_only_snap_scope_writes_no_codex_sample() {
     let mut manifest = p6_manifest(free_port(), free_port(), &base_url);
     manifest.debug.codex_samples = true;
     manifest.debug.snapshot_direct = false;
-    manifest.providers.get_mut("test").unwrap().responses = None;
+    let provider = manifest.providers.get_mut("test").unwrap();
+    provider.responses = None;
+    provider
+        .interfaces
+        .get_mut("default")
+        .expect("p6 provider default interface")
+        .responses = None;
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let client = reqwest::Client::new();
 
@@ -8045,7 +8063,7 @@ async fn debug_endpoints_project_shared_runtime_state_and_dry_run_no_send() {
     assert_eq!(vr_dry_run["routingPolicyGroup"], "default");
     assert_eq!(
         vr_dry_run["diagnostics"]["decision"]["selectedProviderKey"],
-        "test:key:test"
+        "test:default:key:test"
     );
     assert_eq!(
         vr_dry_run["diagnostics"]["decision"]["wouldReturnProviderNotAvailable"],

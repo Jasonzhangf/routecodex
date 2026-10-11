@@ -235,7 +235,7 @@ forbidBlockLine(
 );
 requireMatch(
   source.resourceMap,
-  /resource_id:\s*v3\.provider\.availability_projection[\s\S]*identity:\s*\[providerId,\s*authAlias,\s*modelId,\s*available,\s*blockedScopes\]/u,
+  /resource_id:\s*v3\.provider\.availability_projection[\s\S]*identity:\s*\[providerId,\s*interfaceId,\s*authAlias,\s*modelId,\s*available,\s*blockedScopes\]/u,
   "Resource map availability projection must expose blocked session scopes rather than pretending provider-global truth",
 );
 const validatedHttpInputResource = extractYamlItem(
@@ -516,7 +516,7 @@ forbidMatch(
 );
 requireMatch(
   `${source.kernel}\n${source.directSse}\n${source.responses}\n${source.openaiChat}\n${source.anthropic}\n${source.gemini}`,
-  /record_post_commit_provider_stream_failure_from_source\([\s\S]*failure_session_scope/u,
+  /record_post_commit_provider_stream_failure_from_source(?:_for_interface)?\([\s\S]*failure_session_scope/u,
   "post-commit failure handling must receive the same typed session scope",
 );
 requireMatch(

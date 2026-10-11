@@ -8,6 +8,8 @@ RouteCodex 的业务目标是透明代理：在不同客户端和上游协议之
 
 本设计覆盖一个客户端请求触发的请求准备与上游尝试、成功响应、来源错误及取消后的资源终结。配置编译、启动探针、调试采样、部署和管理 API 是依赖或旁观者，不纳入业务 payload 图。图中的节点是业务责任，不是 Rust 函数调用；下表另列现有实现线索。
 
+`provider_interface` 是 provider 配置到 target 候选接线的辅助对象流，登记在 `docs/architecture/dagpipe/graphs/provider-multi-interface-wiring.graph.json`。它不是第四个业务对象源，也不改变本文件“请求、响应、错误三源”的模型；它复用现有 V3Config02–V3Config05、V3Target08–V3Target10 owner，并由 `modules.json` 单独登记。
+
 ### 角色、对象与触发
 
 | 角色 | 责任与权限 |
@@ -135,7 +137,7 @@ stateDiagram-v2
 | 分支与重试 | Router/Target 选目标与候选，Runtime 独立决定模式；失败只输出新尝试事件，重试跨执行。 | 两种 owner 的绑定、尝试 ID 的状态机/ARC 绑定与成功、失败测试。 |
 | 透明代理 | 保留可表达语义和扩展；Direct/Relay 改写权限分开；无多余语义拒绝。 | 协议字段正反例、上游 wire 与客户端结果的同入口对照。 |
 | 终点 | 成功、任一来源的终端错误、取消均到资源释放；响应处理失败进入错误图，上游失败不被伪装成 200。 | 真实入口和连接断开回放、错误链与资源关闭收据。 |
-| 图与代码 | 三张目标图已登记；当前 Rust runtime 只编译并运行请求图的 `capture_client_json` Node01 切片。 | 后续节点逐一完成 Operator 注册、SDK compile、实际入口 journal/ARC 与相同语义结果。 |
+| 图与代码 | 三张业务目标图和 `provider_interface` 辅助图已登记；当前 Rust runtime 只编译并运行请求图的 `capture_client_json` Node01 切片。 | 后续节点逐一完成 Operator 注册、SDK compile、实际入口 journal/ARC 与相同语义结果；辅助图不冒充业务图运行证明。 |
 
 ## 现有实现线索与 gap
 

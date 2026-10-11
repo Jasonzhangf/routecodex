@@ -176,7 +176,7 @@ const cases = [
   },
   {
     name: 'provider health success drops success receipt witness',
-    file: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs',
     marker: '        _receipt: &crate::nodes::V3AttemptSuccessReceipt,\n',
     replacement: '        _receipt: &(),\n',
     diagnostic: /provider health success must require success receipt/u,

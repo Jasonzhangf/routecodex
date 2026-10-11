@@ -6,7 +6,7 @@
 // provider health 状态：`POST /api/providers/:id/health-test` 只是一次带 provider
 // 真实凭据的 ad-hoc 上游诊断，结果内联返回，绝不并入 provider health。
 use crate::AppState;
-use axum::extract::{Path as AxumPath, State};
+use axum::extract::{Path as AxumPath, Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use routecodex_v3_config::V2ProviderConfigFile;
@@ -16,7 +16,7 @@ use routecodex_v3_config_mgmt::{
 };
 use routecodex_v3_provider_responses::{discover_v3_provider_models, V3ProviderError};
 use routecodex_v3_runtime::build_v3_provider_global_probe_target;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -44,10 +44,20 @@ pub struct ProviderListItem {
     pub enabled: bool,
     pub provider_type: String,
     pub base_url: String,
+    pub interfaces: Vec<ProviderInterfaceItem>,
     pub default_model: String,
     pub models_count: usize,
     /// 路由引用数（pool tier member + forwarder target）。0 表示该 provider 未被任何路由引用。
     pub reference_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProviderInterfaceItem {
+    pub id: String,
+    pub enabled: bool,
+    pub provider_type: String,
+    pub base_url: String,
+    pub responses_transport: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -58,6 +68,7 @@ pub struct ProviderReference {
     pub priority: i32,
     pub model: Option<String>,
     pub key: Option<String>,
+    pub interface: Option<String>,
     pub kind: String,
 }
 
@@ -88,6 +99,7 @@ pub fn collect_provider_references(
                                 priority: tier.priority,
                                 model: member.model.clone(),
                                 key: member.key.clone(),
+                                interface: member.interface.clone(),
                                 kind: format!("{:?}", member.kind),
                             });
                         }
@@ -128,6 +140,7 @@ async fn list_providers(State(state): State<AppState>) -> Json<Vec<ProviderListI
                 enabled: entry.config.provider.enabled.unwrap_or(true),
                 provider_type: entry.config.provider.provider_type.clone(),
                 base_url: entry.config.provider.base_url.clone(),
+                interfaces: provider_interface_items(&entry.config.provider),
                 default_model: entry.config.provider.default_model.clone(),
                 models_count: entry.config.provider.models.len(),
                 reference_count,
@@ -135,6 +148,38 @@ async fn list_providers(State(state): State<AppState>) -> Json<Vec<ProviderListI
         }
     }
     Json(items)
+}
+
+fn provider_interface_items(
+    provider: &routecodex_v3_config::V2ProviderConfig,
+) -> Vec<ProviderInterfaceItem> {
+    if provider.interfaces.is_empty() {
+        return vec![ProviderInterfaceItem {
+            id: "default".to_string(),
+            enabled: true,
+            provider_type: provider.provider_type.clone(),
+            base_url: provider.base_url.clone(),
+            responses_transport: provider
+                .responses
+                .as_ref()
+                .and_then(|responses| responses.transport)
+                .map(|transport| transport.as_str()),
+        }];
+    }
+    provider
+        .interfaces
+        .iter()
+        .map(|(id, interface)| ProviderInterfaceItem {
+            id: id.clone(),
+            enabled: interface.enabled,
+            provider_type: interface.interface_type.clone(),
+            base_url: interface.base_url.clone(),
+            responses_transport: interface
+                .responses
+                .as_ref()
+                .map(|responses| responses.transport.as_str()),
+        })
+        .collect()
 }
 
 async fn provider_detail(
@@ -271,6 +316,7 @@ async fn provider_runtime_health(
 #[derive(Debug, Clone, Serialize)]
 pub struct AdHocHealthTestResult {
     pub provider_id: String,
+    pub interface_id: String,
     /// 显式声明该结果是 ad-hoc 诊断，不是 provider health 真相。
     pub diagnostic: &'static str,
     /// 该诊断访问的 provider base URL；具体请求路径由 discovery 入口按协议决定。
@@ -283,6 +329,12 @@ pub struct AdHocHealthTestResult {
     pub status: Option<u16>,
     pub latency_ms: u64,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct HealthTestQuery {
+    #[serde(default)]
+    pub interface_id: Option<String>,
 }
 
 /// 上游拒绝状态码：`discover_v3_provider_models` 把非 2xx 响应编码为
@@ -308,13 +360,20 @@ fn discovery_upstream_status(error: &V3ProviderError) -> Option<u16> {
 async fn health_test(
     State(state): State<AppState>,
     AxumPath(id): AxumPath<String>,
+    Query(query): Query<HealthTestQuery>,
 ) -> Result<Json<AdHocHealthTestResult>, (axum::http::StatusCode, String)> {
     let config_dir = config_dir(&state);
     let entry = read_provider_file(&config_dir, &id)
         .map_err(|error| (axum::http::StatusCode::NOT_FOUND, error))?;
     let manifest = compile_provider_candidate_manifest(&id, &entry.config)
         .map_err(|error| (axum::http::StatusCode::UNPROCESSABLE_ENTITY, error))?;
-    let target = build_v3_provider_global_probe_target(&manifest, &id, None, None)
+    let interface_id = crate::provider_probe::resolve_provider_interface_id(
+        &manifest,
+        &id,
+        query.interface_id.as_deref(),
+    )
+    .map_err(|error| (axum::http::StatusCode::UNPROCESSABLE_ENTITY, error))?;
+    let target = build_v3_provider_global_probe_target(&manifest, &id, &interface_id, None, None)
         .map_err(|error| (axum::http::StatusCode::UNPROCESSABLE_ENTITY, error))?;
     let started = std::time::Instant::now();
     let result =
@@ -323,6 +382,7 @@ async fn health_test(
     let latency_ms = started.elapsed().as_millis() as u64;
     let mut outcome = AdHocHealthTestResult {
         provider_id: id,
+        interface_id,
         diagnostic: "ad-hoc authenticated upstream call through the provider auth handle; not provider health truth",
         url: target.base_url.clone(),
         auth_mode: "provider_auth_handle",

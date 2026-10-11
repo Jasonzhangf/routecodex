@@ -739,12 +739,13 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
             .run_due_provider_health_probes(
                 startup_now_ms,
                 true,
-                move |provider_id, auth_alias, model_id| {
+                move |provider_id, interface_id, auth_alias, model_id| {
                     let startup_manifest = Arc::clone(&startup_manifest);
                     async move {
                         let target = build_v3_provider_global_probe_target(
                             &startup_manifest,
                             &provider_id,
+                            &interface_id,
                             auth_alias.as_deref(),
                             model_id.as_deref(),
                         )
@@ -770,12 +771,13 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
                         }
                     };
                     let manifest_for_probe = Arc::clone(&probe_manifest);
-                    let result = probe_health.run_due_provider_health_probes(now_ms, false, move |provider_id, auth_alias, model_id| {
+                    let result = probe_health.run_due_provider_health_probes(now_ms, false, move |provider_id, interface_id, auth_alias, model_id| {
                         let manifest_for_probe = Arc::clone(&manifest_for_probe);
                         async move {
                             let target = build_v3_provider_global_probe_target(
                                 &manifest_for_probe,
                                 &provider_id,
+                                &interface_id,
                                 auth_alias.as_deref(),
                                 model_id.as_deref(),
                             )
@@ -1494,6 +1496,5 @@ fn get_failure_session_scope(
         format!("request-local-{request_id}"),
     )
 }
-
 #[cfg(test)]
 mod tests;

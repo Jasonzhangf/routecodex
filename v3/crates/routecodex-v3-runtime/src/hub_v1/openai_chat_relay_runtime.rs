@@ -525,6 +525,7 @@ pub(crate) struct V3OpenAiChatSseProviderOutcome {
     provider_health: V3ProviderFailureRuntimeHealth,
     failure_session_scope: V3ProviderFailureSessionScope,
     provider_id: String,
+    interface_id: String,
     auth_alias: String,
     model_id: String,
     recorded: bool,
@@ -544,9 +545,10 @@ impl V3OpenAiChatSseProviderOutcome {
             reason,
         );
         self.provider_health
-            .record_post_commit_provider_stream_failure_from_source(
+            .record_post_commit_provider_stream_failure_from_source_for_interface(
                 &self.failure_session_scope,
                 &self.provider_id,
+                &self.interface_id,
                 Some(&self.auth_alias),
                 Some(&self.model_id),
                 &source,
@@ -560,10 +562,11 @@ impl V3OpenAiChatSseProviderOutcome {
             return Ok(());
         }
         self.provider_health
-            .record_provider_success_in_failure_scope(
+            .record_provider_success_in_failure_scope_for_interface(
                 &crate::nodes::V3AttemptSuccessReceipt::from_protocol_terminal_attempt(),
                 &self.failure_session_scope,
                 &self.provider_id,
+                &self.interface_id,
                 Some(&self.auth_alias),
                 Some(&self.model_id),
                 v3_relay_provider_policy_now_epoch_ms()?,
@@ -1414,6 +1417,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         provider_health: &V3ProviderFailureRuntimeHealth,
         failure_session_scope: &V3ProviderFailureSessionScope,
         provider_id: String,
+        interface_id: String,
         auth_alias: String,
         model_id: String,
         recorded: bool,
@@ -1423,6 +1427,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             provider_health: provider_health.clone(),
             failure_session_scope: failure_session_scope.clone(),
             provider_id,
+            interface_id,
             auth_alias,
             model_id,
             recorded,

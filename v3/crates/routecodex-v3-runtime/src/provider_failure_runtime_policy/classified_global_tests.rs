@@ -33,6 +33,7 @@ fn classified_global_health_honors_recoverable_repeat_and_terminal_first_failure
             .record_provider_global_health_for_classified_error(
                 &scope,
                 "first",
+                "default",
                 Some("key1"),
                 Some("gpt-test"),
                 &classified,
@@ -68,6 +69,7 @@ fn classified_global_health_honors_recoverable_repeat_and_terminal_first_failure
         .record_provider_global_health_for_classified_error(
             &scope,
             "first",
+            "default",
             Some("key1"),
             Some("gpt-test"),
             &classified_401,
@@ -85,6 +87,7 @@ fn classified_global_health_honors_recoverable_repeat_and_terminal_first_failure
         .record_provider_global_health_for_classified_error(
             &scope,
             "first",
+            "default",
             Some("key1"),
             Some("gpt-test"),
             &classified_401,
@@ -111,6 +114,7 @@ fn classified_global_health_honors_recoverable_repeat_and_terminal_first_failure
             .record_provider_global_health_for_classified_error(
                 &scope,
                 "first",
+                "default",
                 Some("key1"),
                 Some("gpt-test"),
                 &classified_402,

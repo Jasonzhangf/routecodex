@@ -80,6 +80,14 @@ const read = (file) => {
   try { return fs.readFileSync(abs(file), 'utf8'); }
   catch (error) { fail(`${file}: cannot read: ${error.message}`); return ''; }
 };
+const readWithIncludes = (file, seen = new Set()) => {
+  if (seen.has(file)) return '';
+  seen.add(file);
+  return read(file).replace(/include!\("([^"]+)"\)/g, (_, includeRel) => {
+    const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(file), includeRel));
+    return readWithIncludes(resolved, seen);
+  });
+};
 const readSourceWithSiblingModule = (file) => {
   const primary = read(file);
   const stem = file.replace(/\.rs$/, '');
@@ -380,7 +388,7 @@ for (const [index, edge] of allEdges.entries()) {
     }
     for (const [symbolField, fileField] of [['caller_symbol', 'caller_file'], ['callee_symbol', 'callee_file']]) {
       const symbol = String(edge[symbolField] ?? '').split('::').at(-1);
-      if (symbol && edge[fileField] && fs.existsSync(abs(edge[fileField])) && !read(edge[fileField]).includes(symbol)) {
+      if (symbol && edge[fileField] && fs.existsSync(abs(edge[fileField])) && !readWithIncludes(edge[fileField]).includes(symbol)) {
         fail(`${where}: ${symbolField} ${edge[symbolField]} absent from ${edge[fileField]}`);
       }
     }

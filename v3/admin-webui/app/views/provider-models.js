@@ -9,7 +9,15 @@
 // feature_id: v3.admin_provider_model_authoring (v3/admin-webui/app/views/provider-models.js)
 
 import { el, showStatus } from "../core.js";
-import { REASON, defaultModelOf, describeApiError, limitsText, modelEntries, writeModels } from "./provider-model-api.js";
+import {
+  REASON,
+  capabilityInterfaceId,
+  defaultModelOf,
+  describeApiError,
+  limitsText,
+  modelEntries,
+  writeModels,
+} from "./provider-model-api.js";
 import { capabilityChips } from "./provider-model-capabilities.js";
 import { openModelDialog } from "./provider-model-dialog.js";
 import { openModelPicker } from "./provider-model-picker.js";
@@ -31,6 +39,7 @@ export function renderModelsSection(host, options) {
   const { providerId, config, onChanged } = options;
   const models = modelEntries(config);
   const currentDefault = defaultModelOf(config);
+  const capabilityInterface = capabilityInterfaceId(config);
   const names = Object.keys(models);
 
   const selected = new Set();
@@ -159,6 +168,7 @@ export function renderModelsSection(host, options) {
           modelName: name,
           entry,
           detectedCapabilities: [],
+          interfaceId: capabilityInterface,
           isNew: false,
           onChanged,
         });
@@ -232,6 +242,7 @@ export function renderModelsSection(host, options) {
       modelName: "",
       entry: null,
       detectedCapabilities: [],
+      interfaceId: capabilityInterface,
       isNew: true,
       onChanged,
     });

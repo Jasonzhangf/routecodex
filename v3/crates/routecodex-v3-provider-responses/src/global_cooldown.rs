@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static PERSIST_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
-const SCHEMA_VERSION: u32 = 2;
+const SCHEMA_VERSION: u32 = 3;
 const PROBE_RETRY_INTERVAL_MS: u64 = 5_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
@@ -29,6 +29,8 @@ pub struct V3ProviderCooldownObservation {
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct V3ProviderCooldownKey {
     pub provider_id: String,
+    #[serde(default = "default_interface_id")]
+    pub interface_id: String,
     pub auth_alias: Option<String>,
     pub model_id: Option<String>,
     pub failure_class: V3ProviderCooldownFailureClass,
@@ -58,6 +60,9 @@ impl V3ProviderCooldownProbePermit {
     }
     pub fn auth_alias(&self) -> Option<&str> {
         self.key.auth_alias.as_deref()
+    }
+    pub fn interface_id(&self) -> &str {
+        &self.key.interface_id
     }
     pub fn model_id(&self) -> Option<&str> {
         self.key.model_id.as_deref()
@@ -90,7 +95,7 @@ impl V3ProviderCooldownCoordinator {
         };
         let file: V3ProviderCooldownFile = serde_json::from_slice(&bytes)
             .map_err(|error| format!("decode provider cooldown state: {error}"))?;
-        if !matches!(file.schema_version, 1 | SCHEMA_VERSION) {
+        if !matches!(file.schema_version, 1 | 2 | SCHEMA_VERSION) {
             return Err(format!(
                 "unsupported provider cooldown state schema {}",
                 file.schema_version
@@ -112,6 +117,27 @@ impl V3ProviderCooldownCoordinator {
         now_ms: u64,
         observation: V3ProviderCooldownObservation,
     ) -> Result<(), String> {
+        self.record_failure_for_interface(
+            provider_id,
+            "default",
+            auth_alias,
+            model_id,
+            failure_class,
+            now_ms,
+            observation,
+        )
+    }
+
+    pub fn record_failure_for_interface(
+        &mut self,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        failure_class: V3ProviderCooldownFailureClass,
+        now_ms: u64,
+        observation: V3ProviderCooldownObservation,
+    ) -> Result<(), String> {
         let max_deadline = now_ms.saturating_add(self.max_cooldown_ms);
         let observed_deadline = observation
             .reset_at_ms
@@ -123,7 +149,13 @@ impl V3ProviderCooldownCoordinator {
             .unwrap_or(max_deadline)
             .min(max_deadline);
         self.entries.insert(
-            Self::key(provider_id, auth_alias, model_id, failure_class),
+            Self::key(
+                provider_id,
+                interface_id,
+                auth_alias,
+                model_id,
+                failure_class,
+            ),
             V3ProviderCooldownEntry {
                 blocked_until_ms: observed_deadline,
                 next_probe_at_ms: observed_deadline,
@@ -165,8 +197,20 @@ impl V3ProviderCooldownCoordinator {
         model_id: Option<&str>,
         now_ms: u64,
     ) -> bool {
+        self.availability_for_interface(provider_id, "default", auth_alias, model_id, now_ms)
+    }
+
+    pub fn availability_for_interface(
+        &self,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        now_ms: u64,
+    ) -> bool {
         !self.entries.iter().any(|(key, entry)| {
             key.provider_id == provider_id
+                && key.interface_id == interface_id
                 && key.auth_alias.as_deref() == auth_alias
                 && key.model_id.as_deref() == model_id
                 && (entry.probe_in_flight
@@ -221,8 +265,19 @@ impl V3ProviderCooldownCoordinator {
         auth_alias: Option<&str>,
         model_id: Option<&str>,
     ) -> Result<(), String> {
+        self.remove_for_interface(provider_id, "default", auth_alias, model_id)
+    }
+
+    pub fn remove_for_interface(
+        &mut self,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+    ) -> Result<(), String> {
         self.entries.retain(|key, _| {
             !(key.provider_id == provider_id
+                && key.interface_id == interface_id
                 && key.auth_alias.as_deref() == auth_alias
                 && key.model_id.as_deref() == model_id)
         });
@@ -236,8 +291,20 @@ impl V3ProviderCooldownCoordinator {
         model_id: Option<&str>,
         now_ms: u64,
     ) -> Result<(), String> {
+        self.reschedule_for_interface(provider_id, "default", auth_alias, model_id, now_ms)
+    }
+
+    pub fn reschedule_for_interface(
+        &mut self,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        now_ms: u64,
+    ) -> Result<(), String> {
         for (key, entry) in &mut self.entries {
             if key.provider_id == provider_id
+                && key.interface_id == interface_id
                 && key.auth_alias.as_deref() == auth_alias
                 && key.model_id.as_deref() == model_id
             {
@@ -294,8 +361,19 @@ impl V3ProviderCooldownCoordinator {
         auth_alias: Option<&str>,
         model_id: Option<&str>,
     ) -> Option<u64> {
+        self.max_deadline_ms_for_interface(provider_id, "default", auth_alias, model_id)
+    }
+
+    pub fn max_deadline_ms_for_interface(
+        &self,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+    ) -> Option<u64> {
         self.entries.iter().find_map(|(key, entry)| {
             (key.provider_id == provider_id
+                && key.interface_id == interface_id
                 && key.auth_alias.as_deref() == auth_alias
                 && key.model_id.as_deref() == model_id)
                 .then_some(entry.blocked_until_ms)
@@ -304,15 +382,21 @@ impl V3ProviderCooldownCoordinator {
 
     fn key(
         provider_id: &str,
+        interface_id: &str,
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         failure_class: V3ProviderCooldownFailureClass,
     ) -> V3ProviderCooldownKey {
         V3ProviderCooldownKey {
             provider_id: provider_id.to_string(),
+            interface_id: interface_id.to_string(),
             auth_alias: auth_alias.map(str::to_string),
             model_id: model_id.map(str::to_string),
             failure_class,
         }
     }
+}
+
+fn default_interface_id() -> String {
+    "default".to_string()
 }

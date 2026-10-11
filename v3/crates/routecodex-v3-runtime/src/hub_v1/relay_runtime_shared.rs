@@ -196,11 +196,12 @@ pub fn provider_target(
     };
     Ok(V3ResponsesProviderTarget {
         provider_id: selected.provider_id.clone(),
+        interface_id: selected.interface_id.clone(),
         provider_type: selected.provider_type.clone(),
         base_url: selected.base_url.clone(),
         canonical_model_id: selected.model_id.clone(),
         wire_model: selected.wire_model.clone(),
-        compatibility_profile: provider.compatibility_profile.clone(),
+        compatibility_profile: selected.compatibility_profile.clone(),
         headers: provider.headers.clone(),
         auth: V3ProviderAuthHandle {
             alias: selected.auth_alias.clone(),
@@ -632,8 +633,9 @@ pub(crate) fn build_v3_relay_observability(
         provider_id: Some(selected.candidate.provider_id.clone()),
         auth_alias: Some(selected.candidate.auth_alias.clone()),
         provider_key: Some(format!(
-            "{}:{}:{}",
+            "{}:{}:{}:{}",
             selected.candidate.provider_id,
+            selected.candidate.interface_id,
             selected.candidate.auth_alias,
             selected.candidate.model_id
         )),

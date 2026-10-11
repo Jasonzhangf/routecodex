@@ -1846,6 +1846,9 @@ chains:
       - v3.route.opaque_target
       side_channel_writes:
       - v3.target.candidate_set
+    semantic_contract:
+      - Target09 resolves the route target's optional interface pin against the published provider-interface manifest and expands every enabled interface when the pin is absent; a missing or disabled pinned interface is a typed target error.
+      - Every expanded candidate carries providerId+interfaceId+authAlias+modelId identity, its interface-owned providerType, endpoint, Responses transport, and compatibility profile; provider/model targets with different interface pins are not deduplicated together.
   - step_id: v3-rd-08
     from_node: V3Target09CandidateSetExpanded
     to_node: V3Target10ConcreteProviderSelected
@@ -1868,6 +1871,7 @@ chains:
       - Target10 performs context admission from the typed requestInputTokens carried by Target09 and each candidate max_context_tokens before availability or provider transport; an omitted max_context_tokens compiles to the documented 200000-token default.
       - context_window_exceeded is emitted in Target10 selection evidence; no request or response payload is rewritten.
       - Target10 applies the captured server-scoped provider priority schedule only after health availability projection and only within the selected route pool.
+      - Target10 consumes availability by providerId+interfaceId+authAlias+modelId, so one interface cooling or failing request-locally does not remove a sibling interface of the same provider.
   - step_id: v3-rd-09
     from_node: V3Target10ConcreteProviderSelected
     to_node: V3Execution11ProtocolDecision

@@ -14,6 +14,10 @@ use axum::response::{IntoResponse, Json, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+fn default_interface_id() -> String {
+    "default".to_string()
+}
+
 pub(super) async fn cooldown_pool(State(state): axum::extract::State<AppState>) -> Response {
     let ports = match configured_ports(&state) {
         Ok(ports) => ports,
@@ -68,6 +72,8 @@ pub(super) async fn cooldown_pool(State(state): axum::extract::State<AppState>) 
 pub(super) struct RemoveCooldownRequest {
     port: u16,
     provider_id: String,
+    #[serde(default = "default_interface_id")]
+    interface_id: String,
     #[serde(default)]
     auth_alias: Option<String>,
     #[serde(default)]
@@ -79,6 +85,8 @@ pub(super) struct RemoveCooldownRequest {
 pub(super) struct AddCooldownRequest {
     port: u16,
     provider_id: String,
+    #[serde(default = "default_interface_id")]
+    interface_id: String,
     #[serde(default)]
     auth_alias: Option<String>,
     #[serde(default)]
@@ -91,6 +99,8 @@ pub(super) struct AddCooldownRequest {
 pub(super) struct ProbeCooldownRequest {
     port: u16,
     provider_id: String,
+    #[serde(default = "default_interface_id")]
+    interface_id: String,
     #[serde(default)]
     auth_alias: Option<String>,
     #[serde(default)]
@@ -210,6 +220,7 @@ pub(super) async fn add_cooldown(
     }
     let payload = json!({
         "provider_id": request.provider_id,
+        "interface_id": request.interface_id,
         "auth_alias": request.auth_alias,
         "model_id": request.model_id,
         "kind": request.kind,
@@ -233,6 +244,7 @@ pub(super) async fn probe_cooldown(
     }
     let payload = json!({
         "provider_id": request.provider_id,
+        "interface_id": request.interface_id,
         "auth_alias": request.auth_alias,
         "model_id": request.model_id,
     });

@@ -4,7 +4,7 @@
 
 ## 逐模块登记
 
-`modules.json` 只记录 DAGPipe **静态图登记状态**，不复制节点或 owner 真相。请求、响应、错误是三个独立业务对象源，各自必须有单一输入 ARC 和单一输出 ARC。生命周期由 Runtime/Server 持有，重试启动新尝试，不在静态图中回边。三个 `v3.operation_runner.*.graph.json` 已登记；当前仅请求图的 `capture_client_json` Node01 切片完成 SDK 编译和真实入口接线，其余节点仍须逐一接入。静态图登记不代表整条请求、响应或错误图已运行。
+`modules.json` 只记录 DAGPipe **静态图登记状态**，不复制节点或 owner 真相。请求、响应、错误是三个独立业务对象源，各自必须有单一输入 ARC 和单一输出 ARC。`provider_interface` 是配置到 target 候选接线的辅助对象流，单独登记在 `graphs/`，不替代三个业务对象源。治理命令递归扫描 `docs/architecture/dagpipe` 下所有 `.graph.json`，未登记或未校验的图会失败。生命周期由 Runtime/Server 持有，重试启动新尝试，不在静态图中回边。三个 `v3.operation_runner.*.graph.json` 和 `graphs/provider-multi-interface-wiring.graph.json` 已登记；当前仅请求图的 `capture_client_json` Node01 切片完成 SDK 编译和真实入口接线，其余节点仍须逐一接入。静态图登记不代表整条请求、响应或错误图已运行。
 
 每次只推进一个模块，按以下顺序留下证据：
 
@@ -13,7 +13,5 @@
 3. 在该模块原 owner 下实现并注册 Operator，借 SDK `compile()` 验证合同、ARC 权限及 effect；再核对真实入口和旧样本的成功、错误、取消或流终结证据。只有这些证据齐备，才能报告 SDK 编译或 runtime 接入。状态登记为 `graph` 也不表示后两项完成。
 
 `pending` 模块不会被静态图校验冒充为 PASS；命令会逐项打印 PENDING。图文件出现后必须在 `modules.json` 登记，否则治理命令失败。模块先后由请求、响应、错误的依赖及真实证据决定，不对所有模块一次性改造。额外校验不能拒绝原本可兼容传递的请求或拦截可兼容响应。Node01 的实现与证据见 `../../design/v3-unified-operation-runner-design.md` 和 `npm run verify:v3-operation-runner-dagpipe`。
-
-本目录只承载代理流水线的三个对象源图，`modules.json` 与 `npm run verify:v3-dagpipe-governance` 固定要求且只要求 `request`/`response`/`error` 三张图，并拒绝本目录内的任何未登记 `.graph.json`。**非代理流水线的功能图不得放入本目录**：控制面功能的项目图放在 `../dags/`，仍由同一个 `dagpipe graph validate` 治理校验，不新增第二套治理骨架，也不登记进 `modules.json`。`docs/architecture/dags/` 由 `npm run verify:v3-dagpipe-feature-graphs` 治理：该 gate 枚举目录内全部 `*.graph.json`，逐张执行 `dagpipe graph validate`，任一失败即失败，目录为空同样失败。当前受治理的三张图为 `../dags/v3.admin_provider_onboarding.graph.json`、`../dags/v3.admin_provider_patrol.graph.json`、`../dags/v3.admin_provider_patrol_plan.graph.json`。
 
 执行 V3 DAGPipe 治理 CI 的环境须安装 `dagpipe` CLI；缺少 CLI 时治理命令显式失败。CLI 安装本身不代表图通过，更不代表 SDK 或 runtime 接线。

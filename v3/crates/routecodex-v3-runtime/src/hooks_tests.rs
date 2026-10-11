@@ -58,6 +58,7 @@ fn direct_policy_with_models(
             candidate: V3TargetCandidate {
                 provider_id: "selected-provider".to_string(),
                 provider_type: "responses".to_string(),
+                interface_id: "default".to_string(),
                 auth_alias: "primary".to_string(),
                 model_id: canonical_model.to_string(),
                 wire_model: wire_model.to_string(),

@@ -305,7 +305,7 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
     );
     assert_eq!(
         json_observability.provider_key.as_deref(),
-        Some("controlled:controlled:responses-wire-model")
+        Some("controlled:default:controlled:responses-wire-model")
     );
     assert_eq!(
         json_observability.model_id.as_deref(),
@@ -1639,7 +1639,7 @@ async fn responses_relay_provider_context_error_reselects_next_candidate_before_
     assert_eq!(observability.provider_id.as_deref(), Some("minimax"));
     assert_eq!(
         observability.provider_key.as_deref(),
-        Some("minimax:key1:MiniMax-M3")
+        Some("minimax:default:key1:MiniMax-M3")
     );
     assert_eq!(observability.provider_status, Some(200));
     assert_eq!(observability.attempts, Some(3));
@@ -1650,12 +1650,13 @@ async fn responses_relay_provider_context_error_reselects_next_candidate_before_
         timing.internal.checked_add(timing.external),
         Some(timing.runtime_total)
     );
-    assert_eq!(observability.unavailable_candidates.len(), 1);
-    assert!(
-        observability.unavailable_candidates[0].starts_with("limited:key1:gpt-5.5:availability(")
+    // One recoverable 400 excludes the candidate for this request and, under
+    // the immediate-cooldown contract, cools the exact provider interface
+    // identity: the failed provider is held until its recovery probe succeeds.
+    assert_eq!(
+        observability.unavailable_candidates,
+        vec!["limited:default:key1:gpt-5.5:availability(provider_key_health_cooldown|provider_cooldown_probe_pending|provider_cooldown_probe_pending|request_local_provider_failure)".to_string()]
     );
-    assert!(observability.unavailable_candidates[0].contains("request_local_provider_failure"));
-    assert!(observability.unavailable_candidates[0].contains("provider_cooldown_probe_pending"));
     assert_eq!(
         observability
             .usage
@@ -1665,7 +1666,7 @@ async fn responses_relay_provider_context_error_reselects_next_candidate_before_
     );
     assert_eq!(observability.provider_failure_events.len(), 1);
     let provider_event = &observability.provider_failure_events[0];
-    assert_eq!(provider_event.provider_key, "limited:key1:gpt-5.5");
+    assert_eq!(provider_event.provider_key, "limited:default:key1:gpt-5.5");
     assert_eq!(provider_event.status, 400);
     assert_eq!(provider_event.action, "switch_provider");
 
@@ -1726,17 +1727,19 @@ async fn responses_relay_provider_response_decode_error_reselects_next_candidate
     assert_eq!(observability.provider_status, Some(200));
     assert_eq!(observability.attempts, Some(3));
     assert_eq!(observability.unavailable_candidates.len(), 1);
-    assert!(observability.unavailable_candidates[0].contains("limited:key1:gpt-5.5:availability("));
+    assert!(observability.unavailable_candidates[0]
+        .contains("limited:default:key1:gpt-5.5:availability("));
     assert_eq!(observability.provider_failure_events.len(), 1);
     let provider_event = &observability.provider_failure_events[0];
-    assert_eq!(provider_event.provider_key, "limited:key1:gpt-5.5");
+    assert_eq!(provider_event.provider_key, "limited:default:key1:gpt-5.5");
     assert_eq!(provider_event.status, 502);
     assert_eq!(provider_event.action, "switch_provider");
     assert_eq!(
         provider_event.next_provider_key.as_deref(),
-        Some("minimax:key1:MiniMax-M3")
+        Some("minimax:default:key1:MiniMax-M3")
     );
     assert_eq!(provider_event.failure_count, 1);
+    // A typed provider decode failure immediately cools the exact identity.
     assert_eq!(provider_event.health_state, "cooldown");
     assert!(provider_event.cooldown_until_ms.is_some());
 
@@ -2172,7 +2175,7 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
         .expect("successful reroute must keep provider failure observability");
     assert_eq!(
         observability.provider_key.as_deref(),
-        Some("minimax:key1:MiniMax-M3")
+        Some("minimax:default:key1:MiniMax-M3")
     );
     assert_eq!(observability.provider_failure_events.len(), 1);
     assert_eq!(observability.provider_failure_events[0].failure_count, 1);
@@ -2212,23 +2215,22 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
         .await
         .unwrap();
         assert_eq!(output.status, 200);
-        assert_eq!(
-            output.node_trace.contains(&"V3TargetLocalReselected"),
-            false
-        );
+        // The first recoverable failure already cooled the exact provider
+        // identity, so every later request skips it without a reselect.
+        assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
         let observability = output
             .observability
             .as_ref()
             .expect("cooled provider run must keep route observability");
         assert_eq!(
             observability.provider_key.as_deref(),
-            Some("minimax:key1:MiniMax-M3")
+            Some("minimax:default:key1:MiniMax-M3")
         );
         assert_eq!(observability.attempts, Some(1));
         assert!(observability
             .unavailable_candidates
             .iter()
-            .any(|candidate| candidate.starts_with("limited:key1:gpt-5.5:availability(")));
+            .any(|candidate| candidate.starts_with("limited:default:key1:gpt-5.5:availability(")));
         assert!(
             observability.provider_failure_events.is_empty(),
             "cooled provider must be skipped before network send; observed events: {:?}",

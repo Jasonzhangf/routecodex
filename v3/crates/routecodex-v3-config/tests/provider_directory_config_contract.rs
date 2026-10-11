@@ -130,6 +130,148 @@ fn native_v3_root_loads_referenced_provider_files() {
     fs::remove_dir_all(root).unwrap();
 }
 
+fn write_multi_interface_provider(root: &Path, provider_id: &str, token_file: &Path) -> PathBuf {
+    let path = root
+        .join("provider")
+        .join(provider_id)
+        .join("config.v2.toml");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(
+        &path,
+        format!(
+            r#"version = "2.0.0"
+providerId = "{provider_id}"
+
+[provider]
+id = "{provider_id}"
+enabled = true
+defaultModel = "gpt-test"
+
+[provider.auth]
+type = "apikey"
+entries = [{{ alias = "key1", tokenFile = "{}" }}]
+
+[provider.models."gpt-test"]
+wireName = "gpt-test"
+capabilities = ["text"]
+supportsStreaming = true
+
+[provider.interfaces.responses]
+enabled = true
+type = "responses"
+baseURL = "https://{provider_id}.invalid/v1"
+responses = {{ process = "chat", streaming = "always", transport = "http" }}
+
+[provider.interfaces.chat]
+enabled = true
+type = "openai_chat"
+baseURL = "https://{provider_id}.invalid/chat/v1"
+compatibilityProfile = "chat:test"
+"#,
+            token_file.display()
+        ),
+    )
+    .unwrap();
+    path
+}
+
+#[test]
+fn provider_directory_compiles_multi_interface_provider_files() {
+    let root = temp_root("multi-interface");
+    let token = write_token(&root, "multi");
+    write_multi_interface_provider(&root, "multi", &token);
+    let config_path = root.join("config.v3.toml");
+    fs::write(
+        &config_path,
+        r#"version = 3
+
+[servers.primary]
+bind = "127.0.0.1"
+port = 4555
+routing_group = "primary"
+endpoints = ["responses"]
+
+[route_groups.primary.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "multi", model = "gpt-test", key = "key1", interface = "chat", priority = 1 }]
+"#,
+    )
+    .unwrap();
+
+    let snapshot = V3ConfigStore::new(&config_path)
+        .load_snapshot()
+        .expect("multi-interface provider file must compile");
+    let provider = &snapshot.providers["multi"];
+    assert_eq!(provider.interfaces.len(), 2);
+    assert_eq!(provider.interfaces["chat"].provider_type, "openai_chat");
+    assert_eq!(
+        provider.interfaces["chat"].base_url,
+        "https://multi.invalid/chat/v1"
+    );
+    assert_eq!(
+        provider.interfaces["chat"].compatibility_profile.as_deref(),
+        Some("chat:test")
+    );
+    assert_eq!(
+        provider.interfaces["responses"]
+            .responses
+            .as_ref()
+            .expect("responses contract")
+            .process,
+        "chat"
+    );
+    assert_eq!(
+        snapshot.route_groups["primary"].pools["default"].targets[0]
+            .interface
+            .as_deref(),
+        Some("chat")
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn provider_directory_rejects_scalar_and_interface_dual_truth() {
+    let root = temp_root("multi-interface-dual-truth");
+    let token = write_token(&root, "multi");
+    let provider_path = write_multi_interface_provider(&root, "multi", &token);
+    let provider_text = fs::read_to_string(&provider_path).unwrap().replacen(
+        "defaultModel = \"gpt-test\"",
+        "defaultModel = \"gpt-test\"\ntype = \"responses\"\nbaseURL = \"https://multi.invalid/v1\"",
+        1,
+    );
+    fs::write(&provider_path, provider_text).unwrap();
+    let config_path = root.join("config.v3.toml");
+    fs::write(
+        &config_path,
+        r#"version = 3
+
+[servers.primary]
+bind = "127.0.0.1"
+port = 4555
+routing_group = "primary"
+endpoints = ["responses"]
+
+[route_groups.primary.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "multi", model = "gpt-test", key = "key1", priority = 1 }]
+"#,
+    )
+    .unwrap();
+
+    let error = V3ConfigStore::new(&config_path)
+        .load_snapshot()
+        .expect_err("scalar and interface provider truth must not coexist");
+    assert!(
+        error
+            .to_string()
+            .contains("cannot declare interfaces together with type/baseURL/responses"),
+        "unexpected error: {error}"
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn off_route_directory_default_model_does_not_block_referenced_route() {
     let root = temp_root("off-route-default");

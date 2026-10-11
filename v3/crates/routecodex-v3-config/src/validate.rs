@@ -622,13 +622,12 @@ fn compile_providers(
     let mut provider_error_action_policies = Vec::new();
     for (id, provider) in authoring {
         require_id("provider", &id)?;
-        crate::provider_config::validate_provider_protocol(
-            &id,
-            &provider.provider_type,
-            provider.reasoning_effort,
-        )?;
-        if provider.base_url.trim().is_empty() {
-            return Err(validation(format!("provider {id} base_url is empty")));
+        if !provider.legacy_provider_type.trim().is_empty() {
+            crate::provider_config::validate_provider_protocol(
+                &id,
+                &provider.legacy_provider_type,
+                provider.reasoning_effort,
+            )?;
         }
         if provider.models.is_empty() {
             return Err(validation(format!("provider {id} has no models")));
@@ -653,9 +652,27 @@ fn compile_providers(
             )));
         }
         let auth = compile_auth(&id, provider.auth)?;
-        let provider_type = provider.provider_type;
         let mut models = compile_models(&id, provider.models)?;
-        let responses = compile_provider_responses(&id, provider.responses, &models)?;
+        let interfaces = compile_provider_interfaces(
+            &id,
+            provider.legacy_provider_type,
+            provider.base_url,
+            provider.responses,
+            provider.interfaces,
+            &models,
+        )?;
+        let default_interface = interfaces
+            .values()
+            .filter(|interface| interface.enabled)
+            .find(|interface| interface.id == "default")
+            .or_else(|| interfaces.values().find(|interface| interface.enabled))
+            .ok_or_else(|| {
+                validation(format!("provider {id} must enable at least one interface"))
+            })?;
+        let provider_type = default_interface.provider_type.clone();
+        let base_url = default_interface.base_url.clone();
+        let responses = default_interface.responses.clone();
+        let semantic_policy_provider_type = (interfaces.len() == 1).then(|| provider_type.clone());
         apply_implicit_provider_model_capabilities(&provider_type, &mut models);
         let health = compile_provider_health(&id, provider.health)?;
         let provider_request_cleanup =
@@ -675,7 +692,7 @@ fn compile_providers(
                 policy_id: policy.policy_id,
                 scope: V3ProviderErrorPolicyScopeAuthoringConfig {
                     provider_id: Some(id.clone()),
-                    provider_type: Some(provider_type.clone()),
+                    provider_type: semantic_policy_provider_type.clone(),
                     model_id: None,
                     routing_group: None,
                 },
@@ -690,7 +707,8 @@ fn compile_providers(
                 id,
                 enabled: provider.enabled,
                 provider_type,
-                base_url: provider.base_url.trim_end_matches('/').to_string(),
+                base_url: base_url.trim_end_matches('/').to_string(),
+                interfaces,
                 default_model: provider.default_model,
                 auth,
                 models,
@@ -745,67 +763,7 @@ fn collect_providers_using_default_model(
     providers
 }
 
-fn normalize_v3_provider_compatibility_profile(profile: Option<String>) -> Option<String> {
-    profile
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
-/// v3-native inline provider 的 compatibility profile 编译默认：只允许已
-/// 登记给 v3-native 的条目，避免 v2 provider-directory 的整表默认静默改变
-/// v3-native 既有配置的 wire 行为。已登记条目包括 opencode-go 的
-/// `responses:deepseek-console-go`（Console Go 网关工具映射 + 交错工具段
-/// reasoning 注入契约）和 cc-sol 的 `responses:thinking-tags`（direct
-/// 当前轮 thinking tag / reasoning_content 投影）。
-fn resolve_v3_native_provider_default_compatibility_profile(provider_id: &str) -> Option<String> {
-    match provider_id.trim() {
-        "opencode-go" => Some("responses:deepseek-console-go".to_string()),
-        "cc-sol" => Some("responses:thinking-tags".to_string()),
-        _ => None,
-    }
-}
-
-fn compile_provider_responses(
-    provider_id: &str,
-    responses: Option<V3ProviderResponsesAuthoringConfig>,
-    _models: &BTreeMap<String, V3ProviderModelManifest>,
-) -> Result<Option<V3ProviderResponsesAuthoringConfig>, V3ConfigError> {
-    let Some(responses) = responses else {
-        return Ok(None);
-    };
-
-    match responses.transport {
-        V3ResponsesTransportKind::Http => {
-            if responses.websocket_v2_url.is_some() {
-                return Err(validation(format!(
-                    "provider {provider_id} HTTP transport cannot declare websocket_v2_url"
-                )));
-            }
-        }
-        V3ResponsesTransportKind::WebsocketV2 => {
-            let endpoint = responses
-                .websocket_v2_url
-                .as_deref()
-                .map(str::trim)
-                .filter(|endpoint| !endpoint.is_empty())
-                .ok_or_else(|| {
-                    validation(format!("provider {provider_id} websocket_v2_url is required for websocket_v2 transport"))
-                })?;
-            if !(endpoint.starts_with("ws://") || endpoint.starts_with("wss://")) {
-                return Err(validation(format!(
-                    "provider {provider_id} websocket_v2_url must use ws:// or wss://"
-                )));
-            }
-            if endpoint.chars().any(char::is_whitespace) {
-                return Err(validation(format!(
-                    "provider {provider_id} websocket_v2_url cannot contain whitespace"
-                )));
-            }
-        }
-    }
-
-    Ok(Some(responses))
-}
+include!("validate/provider_interfaces.rs");
 
 fn apply_implicit_provider_model_capabilities(
     provider_type: &str,
@@ -1198,6 +1156,12 @@ fn compile_forwarders(
                             target.key.as_deref(),
                             providers,
                         )?;
+                        validate_provider_interface_ref(
+                            &format!("forwarder {id}"),
+                            provider,
+                            target.interface.as_deref(),
+                            providers,
+                        )?;
                         if target.id.is_some() {
                             return Err(validation(format!(
                                 "forwarder {id} provider_model target cannot define id"
@@ -1216,9 +1180,10 @@ fn compile_forwarders(
                         if target.provider.is_some()
                             || target.model.is_some()
                             || target.key.is_some()
+                            || target.interface.is_some()
                         {
                             return Err(validation(format!(
-                                "forwarder {id} forwarder target cannot define provider/model/key"
+                                "forwarder {id} forwarder target cannot define provider/model/key/interface"
                             )));
                         }
                     }
@@ -1235,6 +1200,7 @@ fn compile_forwarders(
                     provider: target.provider,
                     model: target.model,
                     key: target.key,
+                    interface: target.interface,
                     priority: target.priority,
                     weight: target.weight,
                 });
@@ -1348,6 +1314,7 @@ fn compile_route_groups(
                                 })?;
                                 validate_provider_model_ref(&format!("route group {group_id} pool {pool_id}"), provider, model, providers)?;
                                 validate_auth_alias_ref(&format!("route group {group_id} pool {pool_id}"), provider, target.key.as_deref(), providers)?;
+                                validate_provider_interface_ref(&format!("route group {group_id} pool {pool_id}"), provider, target.interface.as_deref(), providers)?;
                                 if target.id.is_some() {
                                     return Err(validation(format!("route group {group_id} pool {pool_id} provider_model target cannot define id")));
                                 }
@@ -1364,6 +1331,11 @@ fn compile_route_groups(
                                 if target.provider.is_some() || target.model.is_some() || target.key.is_some() {
                                     return Err(validation(format!("route group {group_id} pool {pool_id} forwarder target cannot define provider/model/key")));
                                 }
+                                if target.interface.is_some() {
+                                    return Err(validation(format!(
+                                        "route group {group_id} pool {pool_id} forwarder target cannot define interface"
+                                    )));
+                                }
                             }
                         }
                         validate_selection_weight(
@@ -1378,6 +1350,7 @@ fn compile_route_groups(
                             provider: target.provider,
                             model: target.model,
                             key: target.key,
+                            interface: target.interface,
                             priority: target.priority,
                             weight: target.weight,
                         });
@@ -1638,6 +1611,29 @@ fn validate_auth_alias_ref(
     {
         return Err(validation(format!(
             "{owner} provider {provider_id} references unknown auth alias {alias}"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_provider_interface_ref(
+    owner: &str,
+    provider_id: &str,
+    interface_id: Option<&str>,
+    providers: &BTreeMap<String, V3ProviderManifest>,
+) -> Result<(), V3ConfigError> {
+    let Some(interface_id) = interface_id else {
+        return Ok(());
+    };
+    let provider = &providers[provider_id];
+    let interface = provider.interfaces.get(interface_id).ok_or_else(|| {
+        validation(format!(
+            "{owner} provider {provider_id} references unknown interface {interface_id}"
+        ))
+    })?;
+    if !interface.enabled {
+        return Err(validation(format!(
+            "{owner} provider {provider_id} interface {interface_id} is disabled"
         )));
     }
     Ok(())

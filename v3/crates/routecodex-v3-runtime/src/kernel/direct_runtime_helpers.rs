@@ -55,8 +55,9 @@ fn v3_direct_selected_available_for_send(
 ) -> bool {
     let selected_key = candidate_key(&selected.candidate);
     let selected_available_in_session = session_availability
-        .availability(
+        .availability_for_interface(
             &selected.candidate.provider_id,
+            &selected.candidate.interface_id,
             Some(&selected.candidate.auth_alias),
             Some(&selected.candidate.model_id),
             now_epoch_ms,
@@ -68,8 +69,9 @@ fn v3_direct_selected_available_for_send(
             key != selected_key
                 && !failed_candidates.contains(&key)
                 && session_availability
-                    .availability(
+                    .availability_for_interface(
                         &candidate.provider_id,
+                        &candidate.interface_id,
                         Some(&candidate.auth_alias),
                         Some(&candidate.model_id),
                         now_epoch_ms,
@@ -82,8 +84,9 @@ fn v3_direct_selected_available_for_send(
             && !session_alternative_available
             && !failed_candidates.contains(&selected_key)
             && provider_health
-                .availability(
+                .availability_for_interface(
                     &selected.candidate.provider_id,
+                    &selected.candidate.interface_id,
                     Some(&selected.candidate.auth_alias),
                     Some(&selected.candidate.model_id),
                     now_epoch_ms,
@@ -152,9 +155,10 @@ fn record_v3_direct_provider_failure_record(
         &source.code,
     );
     provider_health
-        .record_provider_failure_record_with_action(
+        .record_provider_failure_record_with_action_for_interface(
             failure_session_scope,
             &selected.candidate.provider_id,
+            &selected.candidate.interface_id,
             Some(&selected.candidate.auth_alias),
             Some(&selected.candidate.model_id),
             Some(&source.message),
@@ -172,10 +176,11 @@ fn record_v3_direct_provider_success(
     now_epoch_ms: u64,
 ) -> Result<(), V3Error01SourceRaised> {
     provider_health
-        .record_provider_success_in_failure_scope(
+        .record_provider_success_in_failure_scope_for_interface(
             receipt,
             failure_session_scope,
             &selected.candidate.provider_id,
+            &selected.candidate.interface_id,
             Some(&selected.candidate.auth_alias),
             Some(&selected.candidate.model_id),
             now_epoch_ms,
@@ -319,8 +324,9 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                         !failed_with_current.contains(&key)
                             && context
                                 .provider_health
-                                .availability(
+                                .availability_for_interface(
                                     &candidate.provider_id,
+                                    &candidate.interface_id,
                                     Some(&candidate.auth_alias),
                                     Some(&candidate.model_id),
                                     context.now_epoch_ms,
@@ -334,8 +340,9 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                         (!failed_with_current.contains(&key)
                             && context
                                 .provider_health
-                                .availability(
+                                .availability_for_interface(
                                     &candidate.provider_id,
+                                    &candidate.interface_id,
                                     Some(&candidate.auth_alias),
                                     Some(&candidate.model_id),
                                     context.now_epoch_ms,
@@ -356,9 +363,10 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         Some(
             context
                 .provider_health
-                .record_provider_action_failure_in_scope(
+                .record_provider_action_failure_in_scope_for_interface(
                     context.failure_session_scope,
                     &selected.candidate.provider_id,
+                    &selected.candidate.interface_id,
                     Some(&selected.candidate.auth_alias),
                     Some(&selected.candidate.model_id),
                     &source.code,
@@ -444,9 +452,10 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
     if context.provider_pinned && health_record.state == "cooldown" {
         context
             .provider_health
-            .record_provider_action_failure_in_scope(
+            .record_provider_action_failure_in_scope_for_interface(
                 context.failure_session_scope,
                 &selected.candidate.provider_id,
+                &selected.candidate.interface_id,
                 Some(&selected.candidate.auth_alias),
                 Some(&selected.candidate.model_id),
                 &source.code,
@@ -459,9 +468,10 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         Some(
             context
                 .provider_health
-                .record_terminal_provider_projection_in_scope(
+                .record_terminal_provider_projection_in_scope_for_interface(
                     context.failure_session_scope,
                     &selected.candidate.provider_id,
+                    &selected.candidate.interface_id,
                     Some(&selected.candidate.auth_alias),
                     Some(&selected.candidate.model_id),
                     &source.code,

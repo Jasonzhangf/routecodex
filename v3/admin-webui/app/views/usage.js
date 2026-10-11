@@ -705,15 +705,16 @@ function renderCooldownListener(listener) {
 function cooldownRow(listener, entry) {
   const tr = el("tr");
   const providerId = entry.provider_id ?? "unknown";
+  const interfaceId = entry.interface_id ?? "default";
   const authAlias = entry.auth_alias || null;
   const modelId = entry.model_id || null;
   const kind = entry.kind ?? "auth_key";
-  const identity = { port: Number(listener.port), provider_id: providerId, auth_alias: authAlias, model_id: modelId, kind };
+  const identity = { port: Number(listener.port), provider_id: providerId, interface_id: interfaceId, auth_alias: authAlias, model_id: modelId, kind };
 
   const providerCell = el("td", "col-provider");
   providerCell.appendChild(el("span", "cooldown-provider mono", providerId));
   const secondary = el("span", "cooldown-secondary");
-  const secondaryParts = [];
+  const secondaryParts = [`interface ${interfaceId}`];
   if (authAlias) secondaryParts.push(`key ${authAlias}`);
   if (modelId) secondaryParts.push(`model ${modelId}`);
   if (entry.reason) secondaryParts.push(entry.reason);
@@ -759,8 +760,9 @@ function cooldownBadge(state) {
   return node;
 }
 
-function cooldownIdentityText({ provider_id, auth_alias, model_id }) {
+function cooldownIdentityText({ provider_id, interface_id, auth_alias, model_id }) {
   const parts = [provider_id ?? "unknown"];
+  if (interface_id) parts.push(`interface ${interface_id}`);
   if (auth_alias) parts.push(`key ${auth_alias}`);
   if (model_id) parts.push(`model ${model_id}`);
   return parts.join(" · ");
@@ -789,7 +791,7 @@ async function runCooldownAction(buttons, run, errorPrefix) {
 async function manualCooldownRelease(identity, buttons) {
   const label = cooldownIdentityText(identity);
   await runCooldownAction(buttons, async () => {
-    const body = { port: identity.port, provider_id: identity.provider_id, kind: identity.kind };
+    const body = { port: identity.port, provider_id: identity.provider_id, interface_id: identity.interface_id || "default", kind: identity.kind };
     if (identity.auth_alias) body.auth_alias = identity.auth_alias;
     if (identity.model_id) body.model_id = identity.model_id;
     const result = await api("/api/observability/cooldown-pool", { method: "POST", body: JSON.stringify(body) });
@@ -801,7 +803,7 @@ async function manualCooldownRelease(identity, buttons) {
 async function manualCooldownProbe(identity, buttons) {
   const label = cooldownIdentityText(identity);
   await runCooldownAction(buttons, async () => {
-    const body = { port: identity.port, provider_id: identity.provider_id };
+    const body = { port: identity.port, provider_id: identity.provider_id, interface_id: identity.interface_id || "default" };
     if (identity.auth_alias) body.auth_alias = identity.auth_alias;
     if (identity.model_id) body.model_id = identity.model_id;
     const result = await api("/api/observability/cooldown-pool/probe", { method: "POST", body: JSON.stringify(body) });
@@ -882,6 +884,7 @@ async function submitCooldownAdd(buttons) {
   if (!errorHost) return;
   const port = Number(document.getElementById("cooldown-add-port")?.value);
   const provider = (document.getElementById("cooldown-add-provider")?.value || "").trim();
+  const interfaceId = (document.getElementById("cooldown-add-interface")?.value || "").trim();
   const auth = (document.getElementById("cooldown-add-auth")?.value || "").trim();
   const model = (document.getElementById("cooldown-add-model")?.value || "").trim();
   const kind = document.getElementById("cooldown-add-kind")?.value || "auth_key";
@@ -893,6 +896,7 @@ async function submitCooldownAdd(buttons) {
   let invalid = null;
   if (!Number.isFinite(port) || port <= 0) invalid = "choose a listener port";
   else if (!provider) invalid = "provider id is required";
+  else if (!interfaceId) invalid = "interface id is required";
   else if (!COOLDOWN_ADD_KINDS.includes(kind)) invalid = "kind must be auth_key or probe";
   else if (!Number.isInteger(durationMs) || durationMs < 1 || durationMs > COOLDOWN_MANUAL_MAX_MS) {
     invalid = `duration must be a whole number of 1..${COOLDOWN_MANUAL_MAX_MS} ms (24 h)`;
@@ -903,7 +907,7 @@ async function submitCooldownAdd(buttons) {
     return;
   }
 
-  const body = { port, provider_id: provider, kind, duration_ms: durationMs };
+  const body = { port, provider_id: provider, interface_id: interfaceId, kind, duration_ms: durationMs };
   if (auth) body.auth_alias = auth;
   if (model) body.model_id = model;
   const label = cooldownIdentityText(body);

@@ -1208,17 +1208,22 @@ struct V3RuntimeAttemptAvailability<'a, R> {
 impl<R: V3ProviderAvailabilityReader> V3ProviderAvailabilityReader
     for V3RuntimeAttemptAvailability<'_, R>
 {
-    fn availability(
+    fn availability_for_interface(
         &self,
         provider_id: &str,
+        interface_id: &str,
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         now_ms: u64,
     ) -> V3ProviderAvailabilityProjection {
-        let mut projection = self
-            .base
-            .availability(provider_id, auth_alias, model_id, now_ms);
-        let key = availability_key(provider_id, auth_alias, model_id);
+        let mut projection = self.base.availability_for_interface(
+            provider_id,
+            interface_id,
+            auth_alias,
+            model_id,
+            now_ms,
+        );
+        let key = availability_key(provider_id, interface_id, auth_alias, model_id);
         if self.failed_candidates.contains(&key) {
             projection.available = false;
             projection
@@ -1227,20 +1232,37 @@ impl<R: V3ProviderAvailabilityReader> V3ProviderAvailabilityReader
         }
         projection
     }
+
+    fn availability(
+        &self,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        now_ms: u64,
+    ) -> V3ProviderAvailabilityProjection {
+        self.availability_for_interface(provider_id, "default", auth_alias, model_id, now_ms)
+    }
 }
 
 fn candidate_key(candidate: &V3TargetCandidate) -> String {
     availability_key(
         &candidate.provider_id,
+        &candidate.interface_id,
         Some(&candidate.auth_alias),
         Some(&candidate.model_id),
     )
 }
 
-fn availability_key(provider_id: &str, auth_alias: Option<&str>, model_id: Option<&str>) -> String {
+fn availability_key(
+    provider_id: &str,
+    interface_id: &str,
+    auth_alias: Option<&str>,
+    model_id: Option<&str>,
+) -> String {
     format!(
-        "{}:{}:{}",
+        "{}:{}:{}:{}",
         provider_id,
+        interface_id,
         auth_alias.unwrap_or(""),
         model_id.unwrap_or("")
     )
@@ -1259,8 +1281,9 @@ fn remaining_available_candidates<R: V3ProviderAvailabilityReader>(
         .iter()
         .filter(|candidate| {
             attempt_availability
-                .availability(
+                .availability_for_interface(
                     &candidate.provider_id,
+                    &candidate.interface_id,
                     Some(&candidate.auth_alias),
                     Some(&candidate.model_id),
                     0,
@@ -1283,8 +1306,9 @@ fn first_remaining_available_candidate_key<R: V3ProviderAvailabilityReader>(
         .iter()
         .find(|candidate| {
             attempt_availability
-                .availability(
+                .availability_for_interface(
                     &candidate.provider_id,
+                    &candidate.interface_id,
                     Some(&candidate.auth_alias),
                     Some(&candidate.model_id),
                     0,

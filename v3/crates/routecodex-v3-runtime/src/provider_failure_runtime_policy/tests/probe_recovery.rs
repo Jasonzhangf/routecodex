@@ -235,7 +235,7 @@ async fn provider_probe_failure_is_local_and_does_not_fail_the_probe_batch() {
         .expect("provider cooldown setup");
 
     health
-        .run_due_provider_health_probes(u64::MAX, true, |_, _, _| async {
+        .run_due_provider_health_probes(u64::MAX, true, |_, _, _, _| async {
             Err(V3ProviderHealthProbeFailure::Provider(
                 "HTTP 503".to_string(),
             ))
@@ -266,7 +266,7 @@ async fn internal_probe_failure_remains_observable() {
         .expect("provider cooldown setup");
 
     let error = health
-        .run_due_provider_health_probes(u64::MAX, true, |_, _, _| async {
+        .run_due_provider_health_probes(u64::MAX, true, |_, _, _, _| async {
             Err(V3ProviderHealthProbeFailure::Internal(
                 "invalid probe target".to_string(),
             ))
@@ -308,7 +308,7 @@ async fn completed_probe_updates_health_before_slower_probe_finishes() {
         let release_slow = release_slow.clone();
         tokio::spawn(async move {
             health
-                .run_due_provider_health_probes(u64::MAX, false, move |provider_id, _, _| {
+                .run_due_provider_health_probes(u64::MAX, false, move |provider_id, _, _, _| {
                     let fast_done = fast_done.clone();
                     let release_slow = release_slow.clone();
                     async move {
@@ -374,7 +374,7 @@ async fn failed_probe_backoff_starts_at_probe_completion_time() {
         .expect("test clock must follow Unix epoch")
         .as_millis() as u64;
     health
-        .run_due_provider_health_probes(started_ms, false, move |_, _, _| {
+        .run_due_provider_health_probes(started_ms, false, move |_, _, _, _| {
             let completion_marker = completion_marker.clone();
             async move {
                 tokio::time::sleep(Duration::from_millis(1_500)).await;

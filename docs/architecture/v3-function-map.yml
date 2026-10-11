@@ -1033,9 +1033,10 @@ features:
   - Target09-to-Target10 selection first reads the session-scoped availability projection
     and request-local Error03 candidate exclusions; global availability may revive
     a multi-candidate plan only after no nonfailed session alternative remains.
-  - Every failed attempt excludes only its exact providerId+authAlias+modelId
-    candidate for the current request; untried sibling keys and models remain
-    selectable. Request/provider compatibility failures remain health-neutral.
+  - Every failed attempt excludes only its exact
+    providerId+interfaceId+authAlias+modelId candidate for the current request;
+    untried sibling keys, interfaces and models remain selectable.
+    Request/provider compatibility failures remain health-neutral.
     Persistent automatic health and recovery use the same complete identity.
   - A Server-preplanned Target10 is revalidated from its captured Target09 candidate
     set at Direct kernel entry, so a provider cooled between planning and transport

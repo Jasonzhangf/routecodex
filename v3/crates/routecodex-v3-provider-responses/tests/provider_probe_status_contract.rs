@@ -132,6 +132,7 @@ async fn every_protocol_builder_uses_the_same_status_only_transport() {
             let address = listener.local_addr().unwrap();
             let target = V3ResponsesProviderTarget {
                 provider_id: format!("matrix-{protocol}-{status}"),
+                interface_id: "default".into(),
                 provider_type: protocol.into(),
                 base_url: if protocol == "anthropic" {
                     format!("http://{address}")

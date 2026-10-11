@@ -39,6 +39,14 @@ const serverExecutorsRel = 'v3/crates/routecodex-v3-server/src/executors.rs';
 const failures = [];
 
 const readText = (rel) => fs.readFileSync(path.join(repoRoot, rel), 'utf8');
+const readTextWithIncludes = (rel, seen = new Set()) => {
+  if (seen.has(rel)) return '';
+  seen.add(rel);
+  return readText(rel).replace(/include!\("([^"]+)"\)/g, (_, includeRel) => {
+    const resolved = path.normalize(path.join(path.dirname(rel), includeRel));
+    return readTextWithIncludes(resolved, seen);
+  });
+};
 const readYaml = (rel) => YAML.parse(readText(rel)) ?? {};
 const array = (value) => Array.isArray(value) ? value : [];
 const requireValue = (condition, message) => { if (!condition) failures.push(message); };
@@ -185,7 +193,7 @@ function validateSuccessReceiptSource() {
     }
   }
 
-  const providerFailurePolicy = readText(providerFailurePolicyRel);
+  const providerFailurePolicy = readTextWithIncludes(providerFailurePolicyRel);
   requireValue(
     /fn record_provider_success_in_failure_scope\([\s\S]{0,180}&crate::nodes::V3AttemptSuccessReceipt/u.test(providerFailurePolicy),
     `${providerFailurePolicyRel}: provider health success must require success receipt`,

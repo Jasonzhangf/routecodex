@@ -56,10 +56,16 @@ routing_group = "default"
 endpoints = ["responses"]
 
 [providers.test]
-type = "responses"
-base_url = "http://127.0.0.1:9/v1"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_COOLDOWN_MANUAL_TEST_KEY" }}] }}
+
+[providers.test.interfaces.default]
+type = "responses"
+base_url = "http://127.0.0.1:9/v1"
+
+[providers.test.interfaces.chat]
+type = "openai_chat"
+base_url = "http://127.0.0.1:9/v1"
 
 [providers.test.models.test]
 
@@ -247,7 +253,89 @@ async fn manual_add_is_visible_in_the_listener_cooldown_pool() {
         .find(|entry| entry["provider_id"] == json!("test"))
         .expect("manual add must be projected by the listener pool");
     assert_eq!(entry["kind"], json!("probe"));
+    assert_eq!(entry["interface_id"], json!("default"));
     assert_eq!(entry["model_id"], json!("test"));
+
+    managed.finish().await;
+}
+
+#[tokio::test]
+async fn manual_actions_keep_named_interface_identity_isolated() {
+    let _guard = TEST_LOCK.lock().await;
+    let managed = Managed::start("interface-isolation").await;
+    let client = reqwest::Client::new();
+
+    for interface_id in ["chat", "default"] {
+        let (status, body) = post_json(
+            &client,
+            managed.add_url(),
+            json!({
+                "provider_id": "test",
+                "interface_id": interface_id,
+                "auth_alias": "key",
+                "model_id": "test",
+                "kind": "probe",
+                "duration_ms": 60_000,
+            }),
+        )
+        .await;
+        assert_eq!(status, 200, "manual add must succeed: {body}");
+    }
+
+    let entries = pool_entries(&client, managed.pool_url()).await;
+    for interface_id in ["chat", "default"] {
+        assert!(
+            entries.iter().any(|entry| {
+                entry["provider_id"] == json!("test")
+                    && entry["interface_id"] == json!(interface_id)
+                    && entry["kind"] == json!("probe")
+            }),
+            "the pool must preserve the {interface_id} interface identity: {entries:?}"
+        );
+    }
+
+    let (status, body) = post_json(
+        &client,
+        managed.probe_url(),
+        json!({
+            "provider_id": "test",
+            "interface_id": "chat",
+            "auth_alias": "key",
+            "model_id": "test",
+        }),
+    )
+    .await;
+    assert_eq!(status, 200, "named-interface probe must succeed: {body}");
+    assert_eq!(body["scheduled"], json!(true));
+
+    let (status, body) = post_json(
+        &client,
+        managed.pool_url(),
+        json!({
+            "provider_id": "test",
+            "interface_id": "chat",
+            "auth_alias": "key",
+            "model_id": "test",
+            "kind": "probe",
+        }),
+    )
+    .await;
+    assert_eq!(status, 200, "named-interface removal must succeed: {body}");
+    assert_eq!(body["removed"], json!(true));
+
+    let entries = pool_entries(&client, managed.pool_url()).await;
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry["interface_id"] != json!("chat")),
+        "removing chat must not leave a chat entry: {entries:?}"
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry["interface_id"] == json!("default")),
+        "removing chat must not affect the default sibling: {entries:?}"
+    );
 
     managed.finish().await;
 }
@@ -410,6 +498,7 @@ async fn admin_proxy_forwards_manual_cooldown_actions_to_the_listener() {
         json!({
             "port": port,
             "provider_id": "test",
+            "interface_id": "chat",
             "auth_alias": "key",
             "model_id": "test",
             "kind": "probe",
@@ -431,9 +520,11 @@ async fn admin_proxy_forwards_manual_cooldown_actions_to_the_listener() {
     // The listener really holds it.
     let entries = pool_entries(&client, managed.pool_url()).await;
     assert!(
-        entries
-            .iter()
-            .any(|entry| entry["provider_id"] == json!("test") && entry["kind"] == json!("probe")),
+        entries.iter().any(|entry| {
+            entry["provider_id"] == json!("test")
+                && entry["interface_id"] == json!("chat")
+                && entry["kind"] == json!("probe")
+        }),
         "listener must hold the admin-injected cooldown: {entries:?}"
     );
 
@@ -445,6 +536,7 @@ async fn admin_proxy_forwards_manual_cooldown_actions_to_the_listener() {
         json!({
             "port": port,
             "provider_id": "test",
+            "interface_id": "chat",
             "auth_alias": "key",
             "model_id": "test",
         }),
@@ -464,6 +556,7 @@ async fn admin_proxy_forwards_manual_cooldown_actions_to_the_listener() {
         json!({
             "port": port,
             "provider_id": "test",
+            "interface_id": "chat",
             "auth_alias": "key",
             "model_id": "test",
             "kind": "probe",

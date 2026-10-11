@@ -313,6 +313,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
             });
         }
         let selected_target_provider_id = selected.candidate.provider_id.clone();
+        let selected_target_interface_id = selected.candidate.interface_id.clone();
         let selected_target_auth_alias = selected.candidate.auth_alias.clone();
         let selected_target_model_id = selected.candidate.model_id.clone();
         let provider_wire_protocol = handle_error_before_resp03!(
@@ -697,6 +698,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             manifest,
                             server_id: &input.server_id,
                             provider_id: Some(&selected_target_provider_id),
+                            interface_id: Some(&selected_target_interface_id),
                             expected_model_id: &selected_target_model_id,
                             provider_protocol: hook_provider_protocol,
                             source_provider_protocol: provider_wire_protocol,
@@ -804,10 +806,11 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     &local_tool_output_ids.consumed_ids,
                 );
                 handle_error_before_resp03!(provider_health
-                    .record_provider_success_in_failure_scope(
+                    .record_provider_success_in_failure_scope_for_interface(
                         &attempt_success_receipt,
                         &failure_context.failure_session_scope,
                         &selected_target_provider_id,
+                        &selected_target_interface_id,
                         Some(&selected_target_auth_alias),
                         Some(&selected_target_model_id),
                         v3_responses_relay_now_epoch_ms()?,
@@ -966,6 +969,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             manifest,
                             server_id: &input.server_id,
                             provider_id: Some(&selected_target_provider_id),
+                            interface_id: Some(&selected_target_interface_id),
                             expected_model_id: &selected_target_model_id,
                             provider_protocol: hook_provider_protocol,
                             source_provider_protocol: provider_wire_protocol,
@@ -1091,10 +1095,11 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     &local_tool_output_ids.consumed_ids,
                 );
                 handle_error_before_resp03!(provider_health
-                    .record_provider_success_in_failure_scope(
+                    .record_provider_success_in_failure_scope_for_interface(
                         &attempt_success_receipt,
                         &failure_context.failure_session_scope,
                         &selected_target_provider_id,
+                        &selected_target_interface_id,
                         Some(&selected_target_auth_alias),
                         Some(&selected_target_model_id),
                         v3_responses_relay_now_epoch_ms()?,

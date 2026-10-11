@@ -128,7 +128,16 @@ pub struct ProviderProjection {
     pub enabled: bool,
     pub provider_type: String,
     pub base_url: String,
+    pub interfaces: Vec<ProviderInterfaceProjection>,
     pub model_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProviderInterfaceProjection {
+    pub id: String,
+    pub enabled: bool,
+    pub provider_type: String,
+    pub base_url: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -331,6 +340,16 @@ fn read_config_projection(state: &AppState) -> ConfigProjection {
                     enabled: provider.enabled,
                     provider_type: provider.provider_type.clone(),
                     base_url: provider.base_url.clone(),
+                    interfaces: provider
+                        .interfaces
+                        .values()
+                        .map(|interface| ProviderInterfaceProjection {
+                            id: interface.id.clone(),
+                            enabled: interface.enabled,
+                            provider_type: interface.provider_type.clone(),
+                            base_url: interface.base_url.clone(),
+                        })
+                        .collect(),
                     model_count: provider.models.len(),
                 })
                 .collect(),

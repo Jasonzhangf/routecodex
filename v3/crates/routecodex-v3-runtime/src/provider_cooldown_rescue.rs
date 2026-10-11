@@ -176,6 +176,7 @@ impl V3ProviderFailureRuntimeHealth {
         for candidate in candidates {
             let identity = (
                 &candidate.provider_id,
+                &candidate.interface_id,
                 &candidate.auth_alias,
                 &candidate.model_id,
             );
@@ -184,8 +185,9 @@ impl V3ProviderFailureRuntimeHealth {
             }
             let rescue_permit = self
                 .store
-                .acquire_provider_cooldown_rescue_probe(
+                .acquire_provider_cooldown_rescue_probe_for_interface(
                     &candidate.provider_id,
+                    &candidate.interface_id,
                     Some(&candidate.auth_alias),
                     Some(&candidate.model_id),
                 )
@@ -194,8 +196,9 @@ impl V3ProviderFailureRuntimeHealth {
                 Some(permit) => Some(permit),
                 None => self
                     .store
-                    .acquire_provider_cooldown_probe_if_due(
+                    .acquire_provider_cooldown_probe_if_due_for_interface(
                         &candidate.provider_id,
+                        &candidate.interface_id,
                         Some(&candidate.auth_alias),
                         Some(&candidate.model_id),
                         now_ms,
@@ -212,6 +215,7 @@ impl V3ProviderFailureRuntimeHealth {
                     build_v3_provider_global_probe_target(
                         manifest,
                         permit.provider_id(),
+                        permit.interface_id(),
                         permit.auth_alias(),
                         permit.model_id(),
                     )
@@ -224,11 +228,13 @@ impl V3ProviderFailureRuntimeHealth {
                     return Ok(true);
                 };
                 let permit_provider_id = permit.provider_id().to_string();
+                let permit_interface_id = permit.interface_id().to_string();
                 let permit_auth_alias = permit.auth_alias().map(str::to_string);
                 let permit_model_id = permit.model_id().map(str::to_string);
                 let cancellation = V3ProviderProbeCancellationGuard {
                     store: health.store.clone(),
                     provider_id: permit_provider_id.clone(),
+                    interface_id: permit_interface_id.clone(),
                     auth_alias: permit_auth_alias.clone(),
                     model_id: permit_model_id.clone(),
                     expected_generation: permit.expected_generation(),
@@ -236,15 +242,16 @@ impl V3ProviderFailureRuntimeHealth {
                 let result = match target {
                     Ok(Some(target)) => probe_v3_provider_global_target(target).await,
                     Ok(None) => Err(V3ProviderHealthProbeFailure::Internal(format!(
-                        "provider cooldown rescue probe target missing for {provider_id}:{auth_alias}"
+                        "provider cooldown rescue probe target missing for {provider_id}:{permit_interface_id}:{auth_alias}"
                     ))),
                     Err(error) => Err(V3ProviderHealthProbeFailure::Internal(error)),
                 };
                 let completion = match result {
                     Ok(()) => health
                         .store
-                        .complete_provider_cooldown_probe_success_at_generation(
+                        .complete_provider_cooldown_probe_success_at_generation_for_interface(
                             &permit_provider_id,
+                            &permit_interface_id,
                             permit_auth_alias.as_deref(),
                             permit_model_id.as_deref(),
                             v3_relay_provider_policy_now_epoch_ms()?,
@@ -259,8 +266,9 @@ impl V3ProviderFailureRuntimeHealth {
                     Err(_error) => {
                         health
                             .store
-                            .complete_provider_cooldown_probe_failure_at_generation(
+                            .complete_provider_cooldown_probe_failure_at_generation_for_interface(
                                 &permit_provider_id,
+                                &permit_interface_id,
                                 permit_auth_alias.as_deref(),
                                 permit_model_id.as_deref(),
                                 v3_relay_provider_policy_now_epoch_ms()?,
@@ -371,8 +379,9 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
                     let key = v3_relay_provider_candidate_key(candidate);
                     !request_local_excluded_candidates.contains(&key)
                         && provider_health
-                            .availability(
+                            .availability_for_interface(
                                 &candidate.provider_id,
+                                &candidate.interface_id,
                                 Some(&candidate.auth_alias),
                                 Some(&candidate.model_id),
                                 now_ms,
@@ -385,8 +394,9 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
                 key != selected_key
                     && !request_local_excluded_candidates.contains(&key)
                     && provider_health
-                        .availability(
+                        .availability_for_interface(
                             &candidate.provider_id,
+                            &candidate.interface_id,
                             Some(&candidate.auth_alias),
                             Some(&candidate.model_id),
                             now_ms,
@@ -413,8 +423,9 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
                         ) < selected_tier
                             && !request_local_excluded_candidates.contains(&key)
                             && provider_health
-                                .availability(
+                                .availability_for_interface(
                                     &candidate.provider_id,
+                                    &candidate.interface_id,
                                     Some(&candidate.auth_alias),
                                     Some(&candidate.model_id),
                                     now_ms,
@@ -621,8 +632,9 @@ fn next_provider_cooldown_probe_deadline(
     }) {
         let next = provider_health
             .store
-            .provider_cooldown_probe_next_deadline_ms(
+            .provider_cooldown_probe_next_deadline_ms_for_interface(
                 &candidate.provider_id,
+                &candidate.interface_id,
                 Some(&candidate.auth_alias),
                 Some(&candidate.model_id),
             )
@@ -653,8 +665,9 @@ fn v3_exhaustion_is_cooldown_only(
     std::iter::once(first)
         .chain(nonfailed_candidates)
         .all(|candidate| {
-            let projection = availability.availability(
+            let projection = availability.availability_for_interface(
                 &candidate.provider_id,
+                &candidate.interface_id,
                 Some(&candidate.auth_alias),
                 Some(&candidate.model_id),
                 now_ms,

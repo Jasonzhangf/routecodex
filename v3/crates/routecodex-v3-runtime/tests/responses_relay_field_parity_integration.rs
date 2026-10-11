@@ -89,7 +89,7 @@ targets = [{ kind = "provider_model", provider = "chatwire", model = "chat-wire-
         NEXT_PROVIDER_FIXTURE_ID.fetch_add(1, Ordering::Relaxed)
     );
     let provider = authoring.providers.get_mut("chatwire").unwrap();
-    provider.provider_type = protocol.to_owned();
+    provider.legacy_provider_type = protocol.to_owned();
     provider.auth.entries[0].alias = auth_alias.clone();
     authoring
         .route_groups

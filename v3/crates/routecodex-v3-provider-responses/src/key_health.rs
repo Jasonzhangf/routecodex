@@ -4,6 +4,7 @@ use serde::Serialize;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct V3ProviderKeyHealthProjection {
     pub provider_id: String,
+    pub interface_id: String,
     pub auth_alias: String,
     pub model_id: String,
     pub score_milli: u32,
@@ -18,6 +19,7 @@ pub struct V3ProviderKeyHealthProjection {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct V3ProviderSchedulingProjection {
     pub provider_id: String,
+    pub interface_id: String,
     pub auth_alias: String,
     pub model_id: String,
     pub priority: i32,
@@ -33,6 +35,7 @@ pub struct V3ProviderSchedulingProjection {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3ProviderHealthProbePermit {
     provider_id: String,
+    interface_id: String,
     auth_alias: Option<String>,
     model_id: Option<String>,
     expected_generation: u64,
@@ -41,12 +44,14 @@ pub struct V3ProviderHealthProbePermit {
 impl V3ProviderHealthProbePermit {
     pub(crate) fn new(
         provider_id: String,
+        interface_id: String,
         auth_alias: Option<String>,
         model_id: Option<String>,
         expected_generation: u64,
     ) -> Self {
         Self {
             provider_id,
+            interface_id,
             auth_alias,
             model_id,
             expected_generation,
@@ -61,6 +66,10 @@ impl V3ProviderHealthProbePermit {
         self.auth_alias.as_deref()
     }
 
+    pub fn interface_id(&self) -> &str {
+        &self.interface_id
+    }
+
     pub fn model_id(&self) -> Option<&str> {
         self.model_id.as_deref()
     }
@@ -71,6 +80,27 @@ impl V3ProviderHealthProbePermit {
 }
 
 pub trait V3ProviderSchedulingReader {
+    fn scheduling_projection_for_interface(
+        &self,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: &str,
+        model_id: &str,
+        priority: i32,
+        base_weight: u32,
+        now_ms: u64,
+    ) -> V3ProviderSchedulingProjection {
+        let _ = interface_id;
+        self.scheduling_projection(
+            provider_id,
+            auth_alias,
+            model_id,
+            priority,
+            base_weight,
+            now_ms,
+        )
+    }
+
     fn scheduling_projection(
         &self,
         provider_id: &str,
@@ -85,6 +115,7 @@ pub trait V3ProviderSchedulingReader {
 impl V3ProviderSchedulingProjection {
     pub fn new(
         provider_id: &str,
+        interface_id: &str,
         auth_alias: &str,
         model_id: &str,
         priority: i32,
@@ -93,6 +124,7 @@ impl V3ProviderSchedulingProjection {
     ) -> Self {
         Self {
             provider_id: provider_id.to_string(),
+            interface_id: interface_id.to_string(),
             auth_alias: auth_alias.to_string(),
             model_id: model_id.to_string(),
             priority,

@@ -203,7 +203,7 @@ async fn direct_generic_provider_http_400_terminal_exhaustion_enters_provider_ac
     assert!(
         !observation
             .unavailable_candidates
-            .contains(&"first:key:test".to_string()),
+            .contains(&"first:default:key:test".to_string()),
         "generic provider HTTP 400 must retain normal health semantics"
     );
 }
@@ -238,7 +238,7 @@ async fn direct_reselect_can_handoff_to_relay_target_after_provider_failure() {
         plan.decision.mode,
         V3Execution11ProtocolDecisionMode::SameProtocolDirect
     );
-    assert!(plan.protocol_candidate_keys.contains("first:key:test"));
+    assert!(plan.protocol_candidate_keys.contains("first:default:key:test"));
     assert!(!plan.protocol_candidate_keys.contains("chat:key:test"));
 
     let output = execute_v3_responses_direct_runtime_kernel_core(
@@ -281,7 +281,7 @@ async fn direct_reselect_can_handoff_to_relay_target_after_provider_failure() {
     assert!(
         handoff
             .request_local_excluded_candidates
-            .contains("first:key:test"),
+            .contains("first:default:key:test"),
         "Relay must inherit the request-local Direct failure exclusion"
     );
     assert_eq!(

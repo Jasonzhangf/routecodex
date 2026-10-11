@@ -17,6 +17,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router};
 use routecodex_v3_config::V2ProviderConfigFile;
+use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_config_mgmt::provider::{
     compile_provider_candidate_manifest, read_provider_file, validate_provider_candidate,
 };
@@ -48,6 +49,9 @@ pub struct ProbeRequest {
     /// 指定探测的 model（canonical id）；缺省用编译后的第一个 model。
     #[serde(default)]
     pub model: Option<String>,
+    /// 指定探测的 provider interface；缺省用 `default`（单接口）或第一个启用接口。
+    #[serde(default)]
+    pub interface_id: Option<String>,
     /// 指定 auth alias；缺省用编译后的第一个 auth entry。
     #[serde(default)]
     pub auth_alias: Option<String>,
@@ -223,6 +227,7 @@ async fn run_probe(
             stage,
             &id,
             &config,
+            request.interface_id.as_deref(),
             request.model.as_deref(),
             request.auth_alias.as_deref(),
         )
@@ -332,12 +337,13 @@ pub(crate) async fn execute_stages(
     id: &str,
     config: &V2ProviderConfigFile,
     stages: &[String],
+    interface_id: Option<&str>,
     model: Option<&str>,
     auth_alias: Option<&str>,
 ) -> Vec<(String, StageRun)> {
     let mut runs = Vec::with_capacity(stages.len());
     for stage in stages {
-        let run = execute_stage(stage, id, config, model, auth_alias).await;
+        let run = execute_stage(stage, id, config, interface_id, model, auth_alias).await;
         runs.push((stage.clone(), run));
     }
     runs
@@ -348,14 +354,15 @@ pub(crate) async fn execute_stage(
     stage: &str,
     id: &str,
     config: &V2ProviderConfigFile,
+    interface_id: Option<&str>,
     model: Option<&str>,
     auth_alias: Option<&str>,
 ) -> StageRun {
     let started = std::time::Instant::now();
     let mut run = match stage {
         STAGE_L1 => stage_l1(id, config).await,
-        STAGE_L2 => stage_l2(id, config, model, auth_alias).await,
-        STAGE_L3 => stage_l3(id, config, model, auth_alias).await,
+        STAGE_L2 => stage_l2(id, config, interface_id, model, auth_alias).await,
+        STAGE_L3 => stage_l3(id, config, interface_id, model, auth_alias).await,
         other => StageRun::failed(
             "unknown_stage",
             json!({ "message": format!("unknown probe stage {other}") }),
@@ -403,10 +410,11 @@ async fn stage_l1(id: &str, config: &V2ProviderConfigFile) -> StageRun {
 async fn stage_l2(
     id: &str,
     config: &V2ProviderConfigFile,
+    interface_id: Option<&str>,
     model: Option<&str>,
     auth_alias: Option<&str>,
 ) -> StageRun {
-    let target = match probe_target(id, config, model, auth_alias) {
+    let target = match probe_target(id, config, interface_id, model, auth_alias) {
         Ok(target) => target,
         Err(run) => return run,
     };
@@ -463,10 +471,11 @@ async fn stage_l2(
 async fn stage_l3(
     id: &str,
     config: &V2ProviderConfigFile,
+    interface_id: Option<&str>,
     model: Option<&str>,
     auth_alias: Option<&str>,
 ) -> StageRun {
-    let target = match probe_target(id, config, model, auth_alias) {
+    let target = match probe_target(id, config, interface_id, model, auth_alias) {
         Ok(target) => target,
         Err(run) => return run,
     };
@@ -474,6 +483,7 @@ async fn stage_l3(
         "provider_probe_target",
         json!({
             "provider_id": id,
+            "interface_id": target.interface_id,
             "canonical_model_id": target.canonical_model_id,
             "wire_model": target.wire_model,
             "builder": "routecodex_v3_runtime::probe_v3_provider_global_target",
@@ -500,14 +510,54 @@ async fn stage_l3(
 fn probe_target(
     id: &str,
     config: &V2ProviderConfigFile,
+    interface_id: Option<&str>,
     model: Option<&str>,
     auth_alias: Option<&str>,
 ) -> Result<V3ResponsesProviderTarget, StageRun> {
     let manifest = compile_provider_candidate_manifest(id, config).map_err(|error| {
         StageRun::failed("candidate_compile_failed", json!({ "message": error }))
     })?;
-    build_v3_provider_global_probe_target(&manifest, id, auth_alias, model)
+    let interface_id =
+        resolve_provider_interface_id(&manifest, id, interface_id).map_err(|error| {
+            StageRun::failed("probe_target_unavailable", json!({ "message": error }))
+        })?;
+    build_v3_provider_global_probe_target(&manifest, id, &interface_id, auth_alias, model)
         .map_err(|error| StageRun::failed("probe_target_unavailable", json!({ "message": error })))
+}
+
+pub(crate) fn resolve_provider_interface_id(
+    manifest: &V3Config05ManifestPublished,
+    provider_id: &str,
+    requested: Option<&str>,
+) -> Result<String, String> {
+    let provider = manifest
+        .providers
+        .get(provider_id)
+        .ok_or_else(|| format!("probe provider {provider_id} missing"))?;
+    if let Some(interface_id) = requested {
+        return provider
+            .interfaces
+            .get(interface_id)
+            .filter(|interface| interface.enabled)
+            .map(|interface| interface.id.clone())
+            .ok_or_else(|| {
+                format!(
+                    "probe provider {provider_id} interface {interface_id} is absent or disabled"
+                )
+            });
+    }
+    provider
+        .interfaces
+        .get("default")
+        .filter(|interface| interface.enabled)
+        .or_else(|| {
+            provider
+                .interfaces
+                .values()
+                .find(|interface| interface.enabled)
+        })
+        .map(|interface| interface.id.clone())
+        .ok_or_else(|| format!("probe provider {provider_id} has no enabled interface"))
 }
 
 /// 从候选配置收集需要在 evidence 中抹除的明文凭据。

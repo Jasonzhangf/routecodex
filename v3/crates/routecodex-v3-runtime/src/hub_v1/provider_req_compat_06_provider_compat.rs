@@ -100,8 +100,8 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
 ) -> Result<Value, V3ProviderCompatError> {
     project_reasoning_effort_for_selected_target(&mut payload, selected, provider_protocol)?;
     let provider_key = format!(
-        "{}:{}:{}",
-        selected.provider_id, selected.auth_alias, selected.model_id
+        "{}:{}:{}:{}",
+        selected.provider_id, selected.interface_id, selected.auth_alias, selected.model_id
     );
     let result = run_req_outbound_stage3_compat(ReqOutboundCompatInput {
         payload,
@@ -254,6 +254,7 @@ mod tests {
         V3TargetCandidate {
             provider_id: format!("selected-{provider_type}"),
             provider_type: provider_type.to_string(),
+            interface_id: "default".to_string(),
             auth_alias: "primary".to_string(),
             model_id: "canonical-provider-model".to_string(),
             wire_model: "provider-wire-model".to_string(),

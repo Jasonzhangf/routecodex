@@ -437,6 +437,7 @@ fn compile_pool_targets(
                 provider: Some(member.provider),
                 model: Some(member.model),
                 key: None,
+                interface: None,
                 priority: Some(priority),
                 weight: member.weight.or(equal_weight.then_some(1)),
             });

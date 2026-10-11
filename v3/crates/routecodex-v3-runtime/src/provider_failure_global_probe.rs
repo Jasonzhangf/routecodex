@@ -20,6 +20,7 @@ use crate::provider_failure_runtime_policy::{
 pub fn build_v3_provider_global_probe_target(
     manifest: &V3Config05ManifestPublished,
     provider_id: &str,
+    interface_id: &str,
     auth_alias: Option<&str>,
     model_id: Option<&str>,
 ) -> Result<V3ResponsesProviderTarget, String> {
@@ -27,6 +28,13 @@ pub fn build_v3_provider_global_probe_target(
         .providers
         .get(provider_id)
         .ok_or_else(|| format!("probe provider {provider_id} missing"))?;
+    let interface = provider
+        .interfaces
+        .get(interface_id)
+        .filter(|interface| interface.enabled)
+        .ok_or_else(|| {
+            format!("probe provider {provider_id} interface {interface_id} is absent or disabled")
+        })?;
     let auth = provider
         .auth
         .entries
@@ -64,14 +72,18 @@ pub fn build_v3_provider_global_probe_target(
             .next()
             .ok_or_else(|| format!("probe provider {provider_id} has no routed model"))?,
     };
-    let responses = provider.responses.as_ref();
+    let responses = interface.responses.as_ref();
     Ok(V3ResponsesProviderTarget {
         provider_id: provider.id.clone(),
-        provider_type: provider.provider_type.clone(),
-        base_url: provider.base_url.clone(),
+        interface_id: interface.id.clone(),
+        provider_type: interface.provider_type.clone(),
+        base_url: interface.base_url.clone(),
         canonical_model_id: model.id.clone(),
         wire_model: model.wire_name.clone(),
-        compatibility_profile: provider.compatibility_profile.clone(),
+        compatibility_profile: interface
+            .compatibility_profile
+            .clone()
+            .or_else(|| provider.compatibility_profile.clone()),
         headers: provider.headers.clone(),
         auth: V3ProviderAuthHandle {
             alias: auth.alias.clone(),
@@ -100,6 +112,7 @@ impl V3ProviderFailureRuntimeHealth {
         &self,
         scope: &V3ProviderFailureSessionScope,
         provider_id: &str,
+        interface_id: &str,
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         classified: &V3Error02Classified,
@@ -122,16 +135,18 @@ impl V3ProviderFailureRuntimeHealth {
             status,
             &classified.source.code,
         );
-        self.record_provider_key_failure_action(
+        self.record_provider_key_failure_action_for_interface(
             provider_id,
+            interface_id,
             auth_alias,
             model_id,
             &action,
             now_ms,
         )?;
-        let _ = self.record_provider_failure_in_session_without_health_cooldown(
+        let _ = self.record_provider_failure_in_session_without_health_cooldown_for_interface(
             scope,
             provider_id,
+            interface_id,
             auth_alias,
             model_id,
             Some(fingerprint.reason_code.as_str()),

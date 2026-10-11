@@ -4,7 +4,7 @@ use crate::provider_priority_schedule::V3ProviderPriorityScheduleAuthoringConfig
 use crate::runtime_config::{V3RuntimeAuthoringConfig, V3RuntimeManifest};
 use crate::V3ReasoningEffort;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -551,8 +551,15 @@ pub struct V3ProviderAuthoringConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
     #[serde(rename = "type")]
-    pub provider_type: String,
+    #[serde(default)]
+    pub legacy_provider_type: String,
+    #[serde(default)]
     pub base_url: String,
+    /// Per-interface protocol/endpoint/transport authoring. When non-empty,
+    /// this is the single source for candidate expansion; legacy scalar
+    /// `type`/`baseURL`/`responses` must not be declared alongside it.
+    #[serde(default)]
+    pub interfaces: BTreeMap<String, V3ProviderInterfaceAuthoringConfig>,
     pub default_model: String,
     pub auth: V3ProviderAuthAuthoringConfig,
     pub models: BTreeMap<String, V3ProviderModelAuthoringConfig>,
@@ -751,8 +758,23 @@ pub struct V3ProviderResponsesAuthoringConfig {
     pub streaming: V3StreamingPolicy,
     #[serde(default)]
     pub transport: V3ResponsesTransportKind,
-    #[serde(default)]
+    #[serde(default, alias = "websocketV2URL", alias = "websocketV2Url")]
     pub websocket_v2_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct V3ProviderInterfaceAuthoringConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(rename = "type")]
+    pub interface_type: String,
+    #[serde(alias = "baseURL", alias = "baseUrl")]
+    pub base_url: String,
+    #[serde(default)]
+    pub responses: Option<V3ProviderResponsesAuthoringConfig>,
+    #[serde(default, alias = "compatibilityProfile")]
+    pub compatibility_profile: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -818,6 +840,8 @@ pub struct V3ForwarderTargetAuthoringConfig {
     pub model: Option<String>,
     #[serde(default)]
     pub key: Option<String>,
+    #[serde(default)]
+    pub interface: Option<String>,
     #[serde(default)]
     pub priority: Option<i32>,
     #[serde(default)]
@@ -910,6 +934,8 @@ pub struct V3RoutePoolTargetAuthoringConfig {
     #[serde(default)]
     pub key: Option<String>,
     #[serde(default)]
+    pub interface: Option<String>,
+    #[serde(default)]
     pub priority: Option<i32>,
     #[serde(default)]
     pub weight: Option<u32>,
@@ -978,6 +1004,7 @@ pub struct V3Config05ManifestPublished {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3ProviderPriorityBaseline {
     pub provider_id: String,
+    pub interface_id: String,
     pub auth_alias: String,
     pub model_id: String,
     pub priority: i32,
@@ -1038,19 +1065,61 @@ pub struct V3CapabilityModelCandidate {
 
 impl V3Config05ManifestPublished {
     pub fn provider_priority_baselines(&self) -> Vec<V3ProviderPriorityBaseline> {
-        self.route_groups
+        let mut baselines = Vec::new();
+        let mut seen = BTreeSet::new();
+        for target in self
+            .route_groups
             .values()
             .flat_map(|group| group.pools.values())
             .flat_map(|pool| pool.targets.iter())
-            .filter_map(|target| {
-                Some(V3ProviderPriorityBaseline {
-                    provider_id: target.provider.clone()?,
-                    auth_alias: target.key.clone()?,
-                    model_id: target.model.clone()?,
-                    priority: target.priority?,
-                })
-            })
-            .collect()
+        {
+            let Some(provider_id) = target.provider.clone() else {
+                continue;
+            };
+            let Some(auth_alias) = target.key.clone() else {
+                continue;
+            };
+            let Some(model_id) = target.model.clone() else {
+                continue;
+            };
+            let Some(priority) = target.priority else {
+                continue;
+            };
+            let interface_ids = match target.interface.as_ref() {
+                Some(interface_id) => vec![interface_id.clone()],
+                None => self
+                    .providers
+                    .get(&provider_id)
+                    .map(|provider| {
+                        provider
+                            .interfaces
+                            .iter()
+                            .filter(|(_, interface)| interface.enabled)
+                            .map(|(interface_id, _)| interface_id.clone())
+                            .collect::<Vec<_>>()
+                    })
+                    .filter(|interface_ids| !interface_ids.is_empty())
+                    .unwrap_or_else(|| vec!["default".to_string()]),
+            };
+            for interface_id in interface_ids {
+                let key = (
+                    provider_id.clone(),
+                    interface_id.clone(),
+                    auth_alias.clone(),
+                    model_id.clone(),
+                );
+                if seen.insert(key) {
+                    baselines.push(V3ProviderPriorityBaseline {
+                        provider_id: provider_id.clone(),
+                        interface_id,
+                        auth_alias: auth_alias.clone(),
+                        model_id: model_id.clone(),
+                        priority,
+                    });
+                }
+            }
+        }
+        baselines
     }
 
     /// Splits `requested` on its first `.` and resolves the leading segment
@@ -1186,12 +1255,21 @@ pub struct V3ServerExecutionManifest {
 pub struct V3ProviderManifest {
     pub id: String,
     pub enabled: bool,
+    /// Derived projection of the selected default interface for legacy
+    /// scalar consumers. Multi-interface providers populate `interfaces`;
+    /// this scalar is not a second source of truth.
     pub provider_type: String,
+    /// Derived projection of the selected default interface for legacy
+    /// scalar consumers.
     pub base_url: String,
+    /// Canonical per-interface protocol/endpoint/transport manifest.
+    pub interfaces: BTreeMap<String, V3ProviderInterfaceManifest>,
+    /// Derived projection of the selected default interface for legacy
+    /// scalar consumers.
+    pub responses: Option<V3ProviderResponsesAuthoringConfig>,
     pub default_model: String,
     pub auth: V3ProviderAuthManifest,
     pub models: BTreeMap<String, V3ProviderModelManifest>,
-    pub responses: Option<V3ProviderResponsesAuthoringConfig>,
     pub concurrency: Option<V3ProviderConcurrencyAuthoringConfig>,
     pub health: Option<V3ProviderHealthAuthoringConfig>,
     pub provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig,
@@ -1203,6 +1281,16 @@ pub struct V3ProviderManifest {
     /// provider SSE 首帧/帧间隔超时（毫秒）；None = 默认 30s。
     pub sse_first_frame_timeout_ms: Option<u64>,
     pub headers: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3ProviderInterfaceManifest {
+    pub id: String,
+    pub enabled: bool,
+    pub provider_type: String,
+    pub base_url: String,
+    pub responses: Option<V3ProviderResponsesAuthoringConfig>,
+    pub compatibility_profile: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1272,6 +1360,7 @@ pub struct V3ForwarderTargetManifest {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub key: Option<String>,
+    pub interface: Option<String>,
     pub priority: Option<i32>,
     pub weight: Option<u32>,
 }
@@ -1399,100 +1488,4 @@ pub struct V3ClientErrorProjectionManifest {
     pub message_mode: V3ClientErrorProjectionMessageMode,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3RouteGroupManifest {
-    pub id: String,
-    pub pools: BTreeMap<String, V3RoutePoolManifest>,
-    pub compact_route_object: Option<String>,
-    pub route_policies: Vec<V3RoutePolicyManifest>,
-    pub features: BTreeMap<String, bool>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3RoutePolicyManifest {
-    pub id: String,
-    pub precedence: i32,
-    pub condition: V3RouteConditionManifest,
-    pub action: V3RouteActionManifest,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum V3RouteConditionManifest {
-    CurrentCompaction,
-    SearchPoolTurnRatioAtLeast {
-        window_turns: usize,
-        numerator: usize,
-        denominator: usize,
-    },
-    ToolExecutionErrorTurnsAtLeast {
-        window_turns: usize,
-        count: usize,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3RouteActionManifest {
-    pub select_route_pool: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3RoutePoolManifest {
-    pub id: String,
-    pub selection: V3SelectionPolicy,
-    pub route_object: Option<String>,
-    pub match_rule: Option<V3RoutePoolMatchManifest>,
-    pub targets: Vec<V3RoutePoolTargetManifest>,
-    pub features: BTreeMap<String, bool>,
-}
-
-impl V3RouteGroupManifest {
-    pub fn route_pool_for_object(&self, route_object: &str) -> Option<&str> {
-        self.pools.values().find_map(|pool| {
-            (pool.route_object.as_deref() == Some(route_object)).then_some(pool.id.as_str())
-        })
-    }
-
-    pub fn compact_route_pool(&self) -> Option<&str> {
-        self.compact_route_object
-            .as_deref()
-            .and_then(|route_object| self.route_pool_for_object(route_object))
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3RoutePoolMatchManifest {
-    pub precedence: i32,
-    pub entry_protocol: Option<String>,
-    pub models: Vec<String>,
-    pub required_capabilities: Vec<String>,
-    pub min_input_tokens: Option<u64>,
-    pub max_input_tokens: Option<u64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3RoutePoolTargetManifest {
-    pub kind: V3RouteTargetKind,
-    pub id: Option<String>,
-    pub provider: Option<String>,
-    pub model: Option<String>,
-    pub key: Option<String>,
-    pub priority: Option<i32>,
-    pub weight: Option<u32>,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-fn default_hub_v1_skeleton() -> String {
-    "hub_v1".to_string()
-}
-
-fn default_all_entry_protocols() -> Vec<String> {
-    vec![
-        "responses".to_string(),
-        "anthropic".to_string(),
-        "gemini".to_string(),
-        "openai_chat".to_string(),
-    ]
-}
+include!("types/route_manifest.rs");
