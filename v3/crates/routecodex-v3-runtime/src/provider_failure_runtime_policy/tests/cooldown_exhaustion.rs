@@ -20,8 +20,13 @@ async fn busy_preferred_candidate_preserves_cooled_peer_recovery() {
             acquire_timeout_ms: 60_000,
             stale_lease_ms: 300_000,
         });
+    set_provider_interface_base_url(
+        &mut manifest,
+        second_id,
+        "default",
+        format!("http://{}/v1", listener.local_addr().unwrap()),
+    );
     let second = manifest.providers.get_mut(second_id).unwrap();
-    second.base_url = format!("http://{}/v1", listener.local_addr().unwrap());
     second.auth.entries[0].env = Some("V3_BUSY_PREFERRED_COOLED_PEER_KEY".into());
     std::env::set_var("V3_BUSY_PREFERRED_COOLED_PEER_KEY", "test-key");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -95,6 +100,31 @@ async fn busy_preferred_candidate_preserves_cooled_peer_recovery() {
     std::env::remove_var("V3_BUSY_PREFERRED_COOLED_PEER_KEY");
 }
 
+fn set_provider_interface_base_url(
+    manifest: &mut V3Config05ManifestPublished,
+    provider_id: &str,
+    interface_id: &str,
+    base_url: String,
+) {
+    let provider = manifest
+        .providers
+        .get_mut(provider_id)
+        .expect("provider fixture must exist");
+    provider
+        .interfaces
+        .get_mut(interface_id)
+        .expect("provider interface fixture must exist")
+        .base_url = base_url;
+    if interface_id == "default" {
+        provider.base_url = provider
+            .interfaces
+            .get(interface_id)
+            .expect("default interface fixture must exist")
+            .base_url
+            .clone();
+    }
+}
+
 fn all_candidate_keys(expanded: &V3Target09CandidateSetExpanded) -> BTreeSet<String> {
     expanded
         .candidates
@@ -110,8 +140,9 @@ fn put_all_candidates_in_provider_cooldown(
     for candidate in &expanded.candidates {
         health
             .store
-            .record_provider_cooldown_failure(
+            .record_provider_cooldown_failure_for_interface(
                 &candidate.provider_id,
+                &candidate.interface_id,
                 Some(&candidate.auth_alias),
                 Some(&candidate.model_id),
                 "controlled cooldown-only exhaustion",
@@ -282,6 +313,28 @@ fn request_local_provider_failure_excludes_only_failed_candidate() {
     assert_ne!(selected.candidate.auth_alias, failed_key);
 }
 
+#[test]
+fn request_local_exclusion_identity_preserves_sibling_interface() {
+    // Request-local exclusion is keyed by the exact
+    // provider:interface:auth:model identity, so excluding the default
+    // interface must leave a sibling interface candidate selectable.
+    let default_key = v3_relay_provider_candidate_key_parts_for_interface(
+        "primary",
+        "default",
+        Some("key1"),
+        Some("gpt-test"),
+    );
+    let sibling_key = v3_relay_provider_candidate_key_parts_for_interface(
+        "primary",
+        "sibling",
+        Some("key1"),
+        Some("gpt-test"),
+    );
+    assert_ne!(default_key, sibling_key);
+    let excluded = BTreeSet::from([default_key]);
+    assert!(!excluded.contains(&sibling_key));
+}
+
 #[tokio::test]
 async fn fresh_cooldown_only_exhaustion_runs_one_rescue_probe_and_resumes_same_request() {
     let server_id = "fresh_cooldown_only_exhaustion";
@@ -295,8 +348,8 @@ async fn fresh_cooldown_only_exhaustion_runs_one_rescue_probe_and_resumes_same_r
             .expect("provider probe listener address")
     );
     let mut manifest = global_pool_alive_manifest(server_id);
+    set_provider_interface_base_url(&mut manifest, "first", "default", base_url);
     let provider = manifest.providers.get_mut("first").expect("first provider");
-    provider.base_url = base_url;
     provider.auth.entries[0].env = Some("ROUTECODEX_V3_FRESH_COOLDOWN_PROBE_KEY".into());
     std::env::set_var(
         "ROUTECODEX_V3_FRESH_COOLDOWN_PROBE_KEY",
@@ -363,11 +416,11 @@ async fn stale_rescue_probe_completion_does_not_abort_reselection_of_next_provid
     );
     let mut manifest = global_pool_alive_manifest(server_id);
     for provider_id in ["first", "second"] {
+        set_provider_interface_base_url(&mut manifest, provider_id, "default", base_url.clone());
         let provider = manifest
             .providers
             .get_mut(provider_id)
             .expect("configured provider");
-        provider.base_url = base_url.clone();
         provider.auth.entries[0].env = Some("ROUTECODEX_V3_STALE_RESCUE_PROBE_KEY".into());
     }
     std::env::set_var(
@@ -695,8 +748,8 @@ async fn cooldown_only_exhaustion_retries_when_next_probe_is_due() {
             .expect("provider probe listener address")
     );
     let mut manifest = global_pool_alive_manifest(server_id);
+    set_provider_interface_base_url(&mut manifest, "first", "default", base_url);
     let provider = manifest.providers.get_mut("first").expect("first provider");
-    provider.base_url = base_url;
     provider.auth.entries[0].env = Some("ROUTECODEX_V3_DUE_RETRY_PROBE_KEY".into());
     std::env::set_var("ROUTECODEX_V3_DUE_RETRY_PROBE_KEY", "routecodex-test-key");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -1082,17 +1135,23 @@ async fn auth_key_cooldown_holds_selection_until_successful_probe_recovery() {
 async fn later_tier_selection_skips_in_flight_rescue_probes_without_waiting() {
     let server_id = "later_tier_probe";
     let mut manifest = global_pool_alive_manifest(server_id);
-    manifest
-        .providers
-        .get_mut("first")
-        .expect("first provider")
-        .base_url = "http://127.0.0.1:1/v1".to_string();
+    set_provider_interface_base_url(
+        &mut manifest,
+        "first",
+        "default",
+        "http://127.0.0.1:1/v1".to_string(),
+    );
     let mut third_provider = manifest
         .providers
         .get("second")
         .expect("second provider")
         .clone();
-    third_provider.base_url = "http://third.invalid/v1".to_string();
+    set_provider_interface_base_url(
+        &mut manifest,
+        "second",
+        "default",
+        "http://third.invalid/v1".to_string(),
+    );
     manifest
         .providers
         .insert("third".to_string(), third_provider);
@@ -1132,7 +1191,6 @@ async fn later_tier_selection_skips_in_flight_rescue_probes_without_waiting() {
     second.pool_ids = vec!["default".to_string()];
     let mut third = second.clone();
     third.provider_id = "third".to_string();
-    third.base_url = "http://third.invalid/v1".to_string();
     third.pool_ids = vec!["emergency".to_string()];
     expanded.candidates.push(third);
     let target_kind = expanded
@@ -1149,6 +1207,7 @@ async fn later_tier_selection_skips_in_flight_rescue_probes_without_waiting() {
             target_index: 0,
             target_kind: target_kind.clone(),
             target_id: None,
+            interface: None,
             priority: 1,
             weight: 1,
             direct_provider_model: Some(("second".to_string(), "gpt-test".to_string())),
@@ -1161,6 +1220,7 @@ async fn later_tier_selection_skips_in_flight_rescue_probes_without_waiting() {
             target_index: 0,
             target_kind: target_kind.clone(),
             target_id: None,
+            interface: None,
             priority: 1,
             weight: 1,
             direct_provider_model: Some(("third".to_string(), "gpt-test".to_string())),
@@ -1265,11 +1325,12 @@ async fn later_tier_selection_does_not_wait_for_probe_transport_admission() {
     let first_provider = "later_tier_busy_first";
     let mut manifest =
         global_pool_alive_manifest_with_provider_names(server_id, None, first_provider, "second");
-    manifest
-        .providers
-        .get_mut(first_provider)
-        .expect("first provider")
-        .base_url = "http://127.0.0.1:1/v1".to_string();
+    set_provider_interface_base_url(
+        &mut manifest,
+        first_provider,
+        "default",
+        "http://127.0.0.1:1/v1".to_string(),
+    );
     manifest
         .providers
         .get_mut(first_provider)
@@ -1329,6 +1390,7 @@ async fn later_tier_selection_does_not_wait_for_probe_transport_admission() {
             target_index: 0,
             target_kind,
             target_id: None,
+            interface: None,
             priority: 1,
             weight: 1,
             direct_provider_model: Some(("second".to_string(), "gpt-test".to_string())),
@@ -1447,6 +1509,7 @@ async fn busy_preferred_candidate_reselects_later_tier_without_capacity_wait() {
             target_index: 0,
             target_kind,
             target_id: None,
+            interface: None,
             priority: 1,
             weight: 1,
             direct_provider_model: Some(("second".to_string(), "gpt-test".to_string())),

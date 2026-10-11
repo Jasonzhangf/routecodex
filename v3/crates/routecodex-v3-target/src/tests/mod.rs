@@ -21,20 +21,22 @@ struct Availability {
 }
 
 impl V3ProviderAvailabilityReader for Availability {
-    fn availability(
+    fn availability_for_interface(
         &self,
         provider_id: &str,
+        interface_id: &str,
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         _now_ms: u64,
     ) -> V3ProviderAvailabilityProjection {
         let label = format!(
-            "{provider_id}:{}:{}",
+            "{provider_id}:{interface_id}:{}:{}",
             auth_alias.unwrap_or(""),
             model_id.unwrap_or("")
         );
         V3ProviderAvailabilityProjection {
             provider_id: provider_id.into(),
+            interface_id: interface_id.into(),
             auth_alias: auth_alias.map(Into::into),
             model_id: model_id.map(Into::into),
             available: !self.blocked.contains(&label),
@@ -45,6 +47,16 @@ impl V3ProviderAvailabilityReader for Availability {
                 .into_iter()
                 .collect(),
         }
+    }
+
+    fn availability(
+        &self,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        now_ms: u64,
+    ) -> V3ProviderAvailabilityProjection {
+        self.availability_for_interface(provider_id, "default", auth_alias, model_id, now_ms)
     }
 }
 
@@ -134,6 +146,7 @@ fn weighted_priority_forwarder_manifest() -> V3Config05ManifestPublished {
             provider: Some("a".into()),
             model: Some("m".into()),
             key: Some("ka".into()),
+            interface: None,
             priority: Some(1),
             weight: Some(1),
         },
@@ -143,6 +156,7 @@ fn weighted_priority_forwarder_manifest() -> V3Config05ManifestPublished {
             provider: Some("b".into()),
             model: Some("m".into()),
             key: Some("kb".into()),
+            interface: None,
             priority: Some(1),
             weight: Some(3),
         },
@@ -152,6 +166,7 @@ fn weighted_priority_forwarder_manifest() -> V3Config05ManifestPublished {
             provider: Some("c".into()),
             model: Some("m".into()),
             key: Some("kc".into()),
+            interface: None,
             priority: Some(2),
             weight: Some(100),
         },
@@ -175,6 +190,7 @@ fn provider_priority_schedule_manifest() -> V3Config05ManifestPublished {
             provider: Some("a".into()),
             model: Some("m".into()),
             key: Some("ka".into()),
+            interface: None,
             priority: Some(100),
             weight: Some(1),
         },
@@ -184,6 +200,7 @@ fn provider_priority_schedule_manifest() -> V3Config05ManifestPublished {
             provider: Some("b".into()),
             model: Some("m".into()),
             key: Some("kb".into()),
+            interface: None,
             priority: Some(50),
             weight: Some(1),
         },
@@ -193,6 +210,7 @@ fn provider_priority_schedule_manifest() -> V3Config05ManifestPublished {
             provider: Some("c".into()),
             model: Some("m".into()),
             key: Some("kc".into()),
+            interface: None,
             priority: Some(10),
             weight: Some(1),
         },
@@ -246,7 +264,7 @@ fn provider_priority_schedule_switches_tier_without_bypassing_availability() {
     assert_eq!(off_peak.candidate.provider_id, "a");
 
     let a_blocked = Availability {
-        blocked: BTreeSet::from(["a:ka:m".into()]),
+        blocked: BTreeSet::from(["a:default:ka:m".into()]),
     };
     let blocked_off_peak = target
         .select_available(
@@ -383,7 +401,7 @@ fn weighted_forwarder_advances_to_lower_priority_only_after_higher_tier_exhausts
     assert_eq!(selected.candidate.provider_id, "c");
 
     let one_priority_one_available = Availability {
-        blocked: BTreeSet::from(["b:kb:m".into()]),
+        blocked: BTreeSet::from(["b:default:kb:m".into()]),
     };
     let selected = target
         .select_available(
@@ -395,7 +413,7 @@ fn weighted_forwarder_advances_to_lower_priority_only_after_higher_tier_exhausts
     assert_eq!(selected.candidate.provider_id, "c");
 
     let only_priority_two_available = Availability {
-        blocked: BTreeSet::from(["a:ka:m".into(), "b:kb:m".into()]),
+        blocked: BTreeSet::from(["a:default:ka:m".into(), "b:default:kb:m".into()]),
     };
     let selected = target
         .select_available(
@@ -472,11 +490,11 @@ fn direct_provider_model_expands_pinned_provider_but_respects_health_cooldown() 
     assert_eq!(selected.candidate.provider_id, "a");
     assert_eq!(selected.candidate.model_id, "m");
 
-    let cooled = direct_selected("a.m", BTreeSet::from(["a:ka:m".into()]))
+    let cooled = direct_selected("a.m", BTreeSet::from(["a:default:ka:m".into()]))
         .expect_err("health cooldown must veto an explicit pin");
     assert_eq!(
         cooled.attempted_candidates,
-        vec!["a:ka:m:availability(a:ka:m)"],
+        vec!["a:default:ka:m:availability(a:default:ka:m)"],
         "cooldown must be reported as target exhaustion"
     );
 }
@@ -523,6 +541,7 @@ fn synthetic_direct_target_preserves_configured_priority_for_health_selection() 
             let mut projection =
                 routecodex_v3_provider_responses::V3ProviderSchedulingProjection::new(
                     provider_id,
+                    "default",
                     auth_alias,
                     model_id,
                     priority,
@@ -557,6 +576,7 @@ fn direct_provider_model_never_selects_an_unavailable_candidate_without_a_scope_
             let mut projection =
                 routecodex_v3_provider_responses::V3ProviderSchedulingProjection::new(
                     provider_id,
+                    "default",
                     auth_alias,
                     model_id,
                     priority,
@@ -598,7 +618,7 @@ fn direct_provider_model_never_selects_an_unavailable_candidate_without_a_scope_
         .expect_err("unavailable direct candidate must remain unavailable");
     assert_eq!(
         exhausted.attempted_candidates,
-        vec!["a:ka:m:health_cooldown"]
+        vec!["a:default:ka:m:health_cooldown"]
     );
 }
 
@@ -639,6 +659,7 @@ fn direct_provider_model_respects_request_local_exclusion() {
         ) -> V3ProviderAvailabilityProjection {
             V3ProviderAvailabilityProjection {
                 provider_id: provider_id.into(),
+                interface_id: "default".into(),
                 auth_alias: auth_alias.map(Into::into),
                 model_id: model_id.map(Into::into),
                 available: false,
@@ -651,7 +672,7 @@ fn direct_provider_model_respects_request_local_exclusion() {
         .unwrap_err();
     assert_eq!(
         exhausted.attempted_candidates,
-        vec!["a:ka:m:availability(request_local_provider_failure)"]
+        vec!["a:default:ka:m:availability(request_local_provider_failure)"]
     );
 }
 
@@ -972,8 +993,8 @@ targets = [
             expanded,
             &Availability {
                 blocked: BTreeSet::from([format!(
-                    "{}:{}:{}",
-                    "minimax_anthropic", "key1", "MiniMax-M3"
+                    "{}:{}:{}:{}",
+                    "minimax_anthropic", "default", "key1", "MiniMax-M3"
                 )]),
             },
             0,
@@ -1098,7 +1119,7 @@ fn nested_forwarder_expands_and_reselects_inside_same_route_hit() {
         .select_available(
             expanded,
             &Availability {
-                blocked: BTreeSet::from(["a:ka:m".into()]),
+                blocked: BTreeSet::from(["a:default:ka:m".into()]),
             },
             0,
         )
@@ -1122,7 +1143,7 @@ fn optional_exhaustion_continues_inside_captured_default_floor() {
         .select_available(
             expanded,
             &Availability {
-                blocked: BTreeSet::from(["a:ka:m".into()]),
+                blocked: BTreeSet::from(["a:default:ka:m".into()]),
             },
             0,
         )
@@ -1236,7 +1257,7 @@ fn health_cooldown_removes_default_floor_candidate_from_selection() {
         .select_available(
             expanded(),
             &Availability {
-                blocked: BTreeSet::from(["b:kb:m".into()]),
+                blocked: BTreeSet::from(["b:default:kb:m".into()]),
             },
             0,
         )
@@ -1247,7 +1268,7 @@ fn health_cooldown_removes_default_floor_candidate_from_selection() {
         .select_available(
             expanded(),
             &Availability {
-                blocked: BTreeSet::from(["a:ka:m".into(), "b:kb:m".into()]),
+                blocked: BTreeSet::from(["a:default:ka:m".into(), "b:default:kb:m".into()]),
             },
             0,
         )
@@ -1268,6 +1289,7 @@ fn default_floor_does_not_reselect_request_local_failed_candidate() {
         ) -> V3ProviderAvailabilityProjection {
             V3ProviderAvailabilityProjection {
                 provider_id: provider_id.into(),
+                interface_id: "default".into(),
                 auth_alias: auth_alias.map(Into::into),
                 model_id: model_id.map(Into::into),
                 available: false,
@@ -1282,8 +1304,8 @@ fn default_floor_does_not_reselect_request_local_failed_candidate() {
     assert_eq!(
         exhausted.attempted_candidates,
         vec![
-            "b:kb:m:availability(request_local_provider_failure)".to_string(),
-            "a:ka:m:availability(request_local_provider_failure)".to_string(),
+            "b:default:kb:m:availability(request_local_provider_failure)".to_string(),
+            "a:default:ka:m:availability(request_local_provider_failure)".to_string(),
         ]
     );
 }
@@ -1368,7 +1390,7 @@ targets = [
         .select_available(
             expanded,
             &Availability {
-                blocked: BTreeSet::from(["vision:key:m".into()]),
+                blocked: BTreeSet::from(["vision:default:key:m".into()]),
             },
             0,
         )
@@ -1378,7 +1400,7 @@ targets = [
     assert!(selected
         .unavailable_candidates
         .iter()
-        .any(|reason| reason == "vision:key:m:availability(vision:key:m)"));
+        .any(|reason| reason == "vision:default:key:m:availability(vision:default:key:m)"));
 }
 
 #[test]
@@ -1526,7 +1548,7 @@ targets = [{ kind = "provider_model", provider = "text", model = "m", key = "key
         .select_available(
             expanded,
             &Availability {
-                blocked: BTreeSet::from(["search:key:m".to_string()]),
+                blocked: BTreeSet::from(["search:default:key:m".to_string()]),
             },
             0,
         )
@@ -1598,7 +1620,7 @@ targets = [
         .select_available(
             expanded,
             &Availability {
-                blocked: BTreeSet::from(["search:key:m".to_string()]),
+                blocked: BTreeSet::from(["search:default:key:m".to_string()]),
             },
             0,
         )
@@ -1739,7 +1761,7 @@ targets = [
         .select_available(
             expanded,
             &Availability {
-                blocked: BTreeSet::from(["long:key:m".into()]),
+                blocked: BTreeSet::from(["long:default:key:m".into()]),
             },
             0,
         )
@@ -2601,4 +2623,208 @@ targets = [{ kind = "provider_model", provider = "multi", model = "m", priority 
         aliases_at(0),
         "rotation is periodic in entry count"
     );
+}
+
+fn multi_interface_manifest() -> V3Config05ManifestPublished {
+    let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.multi]
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "key", env = "MULTI_KEY" }] }
+[providers.multi.models.m]
+capabilities = ["text"]
+supports_streaming = true
+[providers.multi.interfaces.responses]
+type = "responses"
+base_url = "http://multi.invalid/v1"
+responses = { process = "chat", streaming = "always", transport = "http" }
+[providers.multi.interfaces.chat]
+type = "openai_chat"
+base_url = "http://multi.invalid/chat/v1"
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "multi", model = "m", key = "key", priority = 1 }]
+"#;
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap())
+        .expect("multi-interface manifest")
+}
+
+fn expand_multi_interface_manifest(
+    manifest: &V3Config05ManifestPublished,
+) -> V3Target09CandidateSetExpanded {
+    let router = V3VirtualRouter::default();
+    let classified = router
+        .classify_request_with_facts(
+            manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: None,
+                capabilities: BTreeSet::new(),
+                input_tokens: 10,
+                route_classification: test_route("default", &["default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    V3TargetInterpreter::default()
+        .expand_candidates(
+            manifest,
+            V3TargetInterpreter::default().classify_kind(hit),
+            0,
+        )
+        .unwrap()
+}
+
+#[test]
+fn multi_interface_provider_expands_every_enabled_interface() {
+    let manifest = multi_interface_manifest();
+    let expanded = expand_multi_interface_manifest(&manifest);
+    let interfaces: BTreeSet<String> = expanded
+        .candidates
+        .iter()
+        .map(|candidate| candidate.interface_id.clone())
+        .collect();
+    assert_eq!(
+        interfaces,
+        BTreeSet::from(["chat".into(), "responses".into()])
+    );
+    assert!(expanded
+        .candidates
+        .iter()
+        .any(|candidate| candidate.base_url == "http://multi.invalid/chat/v1"));
+    assert!(expanded
+        .candidates
+        .iter()
+        .any(|candidate| candidate.base_url == "http://multi.invalid/v1"));
+}
+
+#[test]
+fn multi_interface_provider_expands_only_pinned_interface() {
+    let mut manifest = multi_interface_manifest();
+    manifest
+        .route_groups
+        .get_mut("g")
+        .expect("group")
+        .pools
+        .get_mut("default")
+        .expect("pool")
+        .targets[0]
+        .interface = Some("chat".to_string());
+    let expanded = expand_multi_interface_manifest(&manifest);
+    assert_eq!(expanded.candidates.len(), 1);
+    assert_eq!(expanded.candidates[0].interface_id, "chat");
+    assert_eq!(
+        expanded.candidates[0].base_url,
+        "http://multi.invalid/chat/v1"
+    );
+}
+
+#[test]
+fn multi_interface_missing_or_disabled_pin_is_typed_interface_error() {
+    let error = {
+        let mut missing = multi_interface_manifest();
+        missing
+            .route_groups
+            .get_mut("g")
+            .expect("group")
+            .pools
+            .get_mut("default")
+            .expect("pool")
+            .targets[0]
+            .interface = Some("missing".to_string());
+        let router = V3VirtualRouter::default();
+        let classified = router
+            .classify_request_with_facts(
+                &missing,
+                "s",
+                "/v1/responses",
+                V3RouterRequestFacts {
+                    entry_protocol: "responses".into(),
+                    client_model: None,
+                    capabilities: BTreeSet::new(),
+                    input_tokens: 10,
+                    route_classification: test_route("default", &["default"]),
+                },
+            )
+            .unwrap();
+        let plan = router
+            .resolve_route_pool_plan(&missing, classified)
+            .unwrap();
+        let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+        V3TargetInterpreter::default()
+            .expand_candidates(
+                &missing,
+                V3TargetInterpreter::default().classify_kind(hit),
+                0,
+            )
+            .expect_err("missing interface pin must be a typed target error")
+    };
+    assert!(matches!(
+        error,
+        V3TargetError::InterfaceMissing {
+            provider_id,
+            interface_id
+        } if provider_id == "multi" && interface_id == "missing"
+    ));
+
+    let mut disabled = multi_interface_manifest();
+    disabled
+        .route_groups
+        .get_mut("g")
+        .expect("group")
+        .pools
+        .get_mut("default")
+        .expect("pool")
+        .targets[0]
+        .interface = Some("chat".to_string());
+    disabled
+        .providers
+        .get_mut("multi")
+        .expect("provider")
+        .interfaces
+        .get_mut("chat")
+        .expect("interface")
+        .enabled = false;
+    let router = V3VirtualRouter::default();
+    let classified = router
+        .classify_request_with_facts(
+            &disabled,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: None,
+                capabilities: BTreeSet::new(),
+                input_tokens: 10,
+                route_classification: test_route("default", &["default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&disabled, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    let error = V3TargetInterpreter::default()
+        .expand_candidates(
+            &disabled,
+            V3TargetInterpreter::default().classify_kind(hit),
+            0,
+        )
+        .expect_err("disabled interface pin must be a typed target error");
+    assert!(matches!(
+        error,
+        V3TargetError::InterfaceMissing {
+            provider_id,
+            interface_id
+        } if provider_id == "multi" && interface_id == "chat"
+    ));
 }

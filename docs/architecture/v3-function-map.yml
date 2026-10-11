@@ -1033,9 +1033,10 @@ features:
   - Target09-to-Target10 selection first reads the session-scoped availability projection
     and request-local Error03 candidate exclusions; global availability may revive
     a multi-candidate plan only after no nonfailed session alternative remains.
-  - Every failed attempt excludes only its exact providerId+authAlias+modelId
-    candidate for the current request; untried sibling keys and models remain
-    selectable. Request/provider compatibility failures remain health-neutral.
+  - Every failed attempt excludes only its exact
+    providerId+interfaceId+authAlias+modelId candidate for the current request;
+    untried sibling keys, interfaces and models remain selectable.
+    Request/provider compatibility failures remain health-neutral.
     Persistent automatic health and recovery use the same complete identity.
   - A Server-preplanned Target10 is revalidated from its captured Target09 candidate
     set at Direct kernel entry, so a provider cooled between planning and transport
@@ -3957,13 +3958,19 @@ features:
   - v3.front.request_activity_gate
   mainline_bindings:
   - v3-client-sse-head-commit-01
+  - v3-client-body-eof-front-held
+  - v3-client-front-flush-completed
   entry_symbols:
   - accept_v3_client_sse_transport
   - V3DirectSseAccept01ClientChannel
   - V3DirectSseAccept03ProjectedClientFrame
   - V3ClientSseChannelStream
   - build_v3_client_sse_data_frame
-  - V3_EXEC_INFLIGHT_DRAIN
+  - V3ServerRequestActivityGate::begin_maintenance
+  - V3ServerMaintenanceGuard::wait_for_quiescence
+  - V3StableFrontSocket::hold_activity_until_flush
+  - V3FrontHttpIo::poll_flush
+  - write_front_command
   - write_front_response_frame
   - V3_FRONT_CLOSE_FLUSH
   allowed_paths:

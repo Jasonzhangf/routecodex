@@ -46,7 +46,7 @@ pub fn project_v3_virtual_router_status<R: V3ProviderAvailabilityReader>(
             "source": "process_local_provider_health",
             "nowMs": now_ms
         },
-        "forwarders": manifest.forwarders.values().map(|forwarder| forwarder_status_snapshot(forwarder, availability, now_ms)).collect::<Vec<Value>>()
+        "forwarders": manifest.forwarders.values().map(|forwarder| forwarder_status_snapshot(manifest, forwarder, availability, now_ms)).collect::<Vec<Value>>()
     }))
 }
 
@@ -197,7 +197,7 @@ fn route_pool_status_snapshot(
         .iter()
         .filter_map(|target| target.id.as_ref())
         .filter_map(|id| manifest.forwarders.get(id))
-        .map(|forwarder| forwarder_status_snapshot(forwarder, availability, now_ms))
+        .map(|forwarder| forwarder_status_snapshot(manifest, forwarder, availability, now_ms))
         .collect::<Vec<Value>>();
     let configured_targets = pool
         .targets
@@ -240,6 +240,7 @@ fn route_pool_status_snapshot(
 }
 
 fn forwarder_status_snapshot(
+    manifest: &V3Config05ManifestPublished,
     forwarder: &V3ForwarderManifest,
     availability: &impl V3ProviderAvailabilityReader,
     now_ms: u64,
@@ -247,7 +248,18 @@ fn forwarder_status_snapshot(
     let targets = forwarder
         .targets
         .iter()
-        .map(|target| forwarder_target_status_snapshot(target, availability, now_ms))
+        .flat_map(|target| {
+            provider_target_statuses(
+                manifest,
+                &forwarder_target_label(target),
+                target.provider.as_deref(),
+                target.interface.as_deref(),
+                target.key.as_deref(),
+                target.model.as_deref(),
+                availability,
+                now_ms,
+            )
+        })
         .collect::<Vec<Value>>();
     let target_provider_keys = forwarder
         .targets
@@ -275,21 +287,6 @@ fn forwarder_status_snapshot(
         "available": forwarder.enabled && targets.iter().any(|target| target.get("available").and_then(Value::as_bool) == Some(true)),
         "targets": targets
     })
-}
-
-fn forwarder_target_status_snapshot(
-    target: &V3ForwarderTargetManifest,
-    availability: &impl V3ProviderAvailabilityReader,
-    now_ms: u64,
-) -> Value {
-    provider_target_status_snapshot(
-        forwarder_target_label(target),
-        target.provider.as_deref(),
-        target.key.as_deref(),
-        target.model.as_deref(),
-        availability,
-        now_ms,
-    )
 }
 
 fn route_target_provider_keys(
@@ -320,57 +317,16 @@ fn route_target_provider_statuses(
     now_ms: u64,
 ) -> Vec<Value> {
     match target.kind {
-        V3RouteTargetKind::ProviderModel => {
-            let Some(provider_id) = target.provider.as_deref() else {
-                return vec![provider_target_status_snapshot(
-                    route_pool_target_label(target),
-                    None,
-                    target.key.as_deref(),
-                    target.model.as_deref(),
-                    availability,
-                    now_ms,
-                )];
-            };
-            let Some(key) = target.key.as_deref() else {
-                let Some(provider) = manifest.providers.get(provider_id) else {
-                    return vec![provider_target_status_snapshot(
-                        route_pool_target_label(target),
-                        Some(provider_id),
-                        None,
-                        target.model.as_deref(),
-                        availability,
-                        now_ms,
-                    )];
-                };
-                return provider
-                    .auth
-                    .entries
-                    .iter()
-                    .map(|entry| {
-                        provider_target_status_snapshot(
-                            format_provider_key(
-                                Some(provider_id),
-                                Some(entry.alias.as_str()),
-                                target.model.as_deref(),
-                            ),
-                            Some(provider_id),
-                            Some(entry.alias.as_str()),
-                            target.model.as_deref(),
-                            availability,
-                            now_ms,
-                        )
-                    })
-                    .collect();
-            };
-            vec![provider_target_status_snapshot(
-                route_pool_target_label(target),
-                Some(provider_id),
-                Some(key),
-                target.model.as_deref(),
-                availability,
-                now_ms,
-            )]
-        }
+        V3RouteTargetKind::ProviderModel => provider_target_statuses(
+            manifest,
+            &route_pool_target_label(target),
+            target.provider.as_deref(),
+            target.interface.as_deref(),
+            target.key.as_deref(),
+            target.model.as_deref(),
+            availability,
+            now_ms,
+        ),
         V3RouteTargetKind::Forwarder => target
             .id
             .as_ref()
@@ -379,7 +335,18 @@ fn route_target_provider_statuses(
                 forwarder
                     .targets
                     .iter()
-                    .map(|target| forwarder_target_status_snapshot(target, availability, now_ms))
+                    .flat_map(|target| {
+                        provider_target_statuses(
+                            manifest,
+                            &forwarder_target_label(target),
+                            target.provider.as_deref(),
+                            target.interface.as_deref(),
+                            target.key.as_deref(),
+                            target.model.as_deref(),
+                            availability,
+                            now_ms,
+                        )
+                    })
                     .collect::<Vec<Value>>()
             })
             .unwrap_or_else(|| {
@@ -399,9 +366,99 @@ fn route_target_provider_statuses(
     }
 }
 
+// Expand a configured provider target into the concrete interface x auth
+// identities the Target Interpreter would actually select. Interface expansion
+// happens whether or not an auth key is pinned, so an interface-omitted target
+// never collapses onto a phantom "default" identity that does not exist.
+fn provider_target_statuses(
+    manifest: &V3Config05ManifestPublished,
+    configured_label: &str,
+    provider: Option<&str>,
+    interface: Option<&str>,
+    key: Option<&str>,
+    model: Option<&str>,
+    availability: &impl V3ProviderAvailabilityReader,
+    now_ms: u64,
+) -> Vec<Value> {
+    let Some(provider_id) = provider else {
+        return vec![provider_target_status_snapshot(
+            configured_label.to_string(),
+            None,
+            interface,
+            key,
+            model,
+            availability,
+            now_ms,
+        )];
+    };
+    let Some(provider_manifest) = manifest.providers.get(provider_id) else {
+        return vec![provider_target_status_snapshot(
+            configured_label.to_string(),
+            Some(provider_id),
+            interface,
+            key,
+            model,
+            availability,
+            now_ms,
+        )];
+    };
+    let interfaces = match interface {
+        Some(interface_id) => provider_manifest
+            .interfaces
+            .get(interface_id)
+            .filter(|interface| interface.enabled)
+            .map(|interface| interface.id.as_str())
+            .into_iter()
+            .collect::<Vec<_>>(),
+        None => provider_manifest
+            .interfaces
+            .values()
+            .filter(|interface| interface.enabled)
+            .map(|interface| interface.id.as_str())
+            .collect::<Vec<_>>(),
+    };
+    let keys = match key {
+        Some(key) => vec![Some(key)],
+        None => provider_manifest
+            .auth
+            .entries
+            .iter()
+            .map(|entry| Some(entry.alias.as_str()))
+            .collect::<Vec<_>>(),
+    };
+    if interfaces.is_empty() || keys.is_empty() {
+        return vec![provider_target_status_snapshot(
+            configured_label.to_string(),
+            Some(provider_id),
+            interface,
+            key,
+            model,
+            availability,
+            now_ms,
+        )];
+    }
+    interfaces
+        .into_iter()
+        .flat_map(|interface_id| {
+            keys.iter().map(move |key| {
+                provider_target_status_snapshot(
+                    format_provider_key(Some(provider_id), Some(interface_id), *key, model),
+                    Some(provider_id),
+                    Some(interface_id),
+                    *key,
+                    model,
+                    availability,
+                    now_ms,
+                )
+            })
+        })
+        .collect()
+}
+
 fn provider_target_status_snapshot(
     provider_key: String,
     provider: Option<&str>,
+    interface_id: Option<&str>,
     key: Option<&str>,
     model: Option<&str>,
     availability: &impl V3ProviderAvailabilityReader,
@@ -414,7 +471,9 @@ fn provider_target_status_snapshot(
             "reasons": ["provider_missing"]
         });
     };
-    let projection = availability.availability(provider, key, model, now_ms);
+    let interface_id = interface_id.unwrap_or("default");
+    let projection =
+        availability.availability_for_interface(provider, interface_id, key, model, now_ms);
     json!({
         "providerKey": provider_key,
         "available": projection.available,
@@ -429,6 +488,7 @@ fn route_pool_target_label(target: &V3RoutePoolTargetManifest) -> String {
         }
         V3RouteTargetKind::ProviderModel => format_provider_key(
             target.provider.as_deref(),
+            target.interface.as_deref(),
             target.key.as_deref(),
             target.model.as_deref(),
         ),
@@ -442,18 +502,36 @@ fn forwarder_target_label(target: &V3ForwarderTargetManifest) -> String {
         }
         V3RouteTargetKind::ProviderModel => format_provider_key(
             target.provider.as_deref(),
+            target.interface.as_deref(),
             target.key.as_deref(),
             target.model.as_deref(),
         ),
     }
 }
 
-fn format_provider_key(provider: Option<&str>, key: Option<&str>, model: Option<&str>) -> String {
-    match (provider, key, model) {
-        (Some(provider), Some(key), Some(model)) => format!("{provider}.{key}.{model}"),
-        (Some(provider), None, Some(model)) => format!("{provider}.{model}"),
-        (Some(provider), Some(key), None) => format!("{provider}.{key}"),
-        (Some(provider), None, None) => provider.to_string(),
+fn format_provider_key(
+    provider: Option<&str>,
+    interface_id: Option<&str>,
+    key: Option<&str>,
+    model: Option<&str>,
+) -> String {
+    match (provider, interface_id, key, model) {
+        (Some(provider), Some(interface_id), Some(key), Some(model)) => {
+            format!("{provider}.{interface_id}.{key}.{model}")
+        }
+        (Some(provider), Some(interface_id), None, Some(model)) => {
+            format!("{provider}.{interface_id}.{model}")
+        }
+        (Some(provider), Some(interface_id), Some(key), None) => {
+            format!("{provider}.{interface_id}.{key}")
+        }
+        (Some(provider), Some(interface_id), None, None) => {
+            format!("{provider}.{interface_id}")
+        }
+        (Some(provider), None, Some(key), Some(model)) => format!("{provider}.{key}.{model}"),
+        (Some(provider), None, None, Some(model)) => format!("{provider}.{model}"),
+        (Some(provider), None, Some(key), None) => format!("{provider}.{key}"),
+        (Some(provider), None, None, None) => provider.to_string(),
         _ => "unknown".to_string(),
     }
 }
@@ -498,8 +576,8 @@ fn deterministic_sample_from_metadata(metadata: &Value) -> u64 {
 
 fn format_candidate_key(candidate: &V3TargetCandidate) -> String {
     format!(
-        "{}:{}:{}",
-        candidate.provider_id, candidate.auth_alias, candidate.model_id
+        "{}:{}:{}:{}",
+        candidate.provider_id, candidate.interface_id, candidate.auth_alias, candidate.model_id
     )
 }
 
@@ -590,7 +668,7 @@ targets = [{ kind = "provider_model", provider = "test", model = "test", key = "
         assert_eq!(default_pool["availableTargets"], json!([]));
         assert_eq!(
             default_pool["unavailableProviders"][0]["providerKey"],
-            "test.key1.test"
+            "test.default.key1.test"
         );
         assert!(default_pool["unavailableProviders"][0]["reasons"][0]
             .as_str()
@@ -603,7 +681,7 @@ targets = [{ kind = "provider_model", provider = "test", model = "test", key = "
                 .expect("fresh status");
         assert_eq!(
             recovered["routes"]["gateway"]["pools"][0]["availableTargets"][0],
-            "test.key1.test"
+            "test.default.key1.test"
         );
 
         let after_cooldown =
@@ -611,7 +689,7 @@ targets = [{ kind = "provider_model", provider = "test", model = "test", key = "
                 .expect("status");
         assert_eq!(
             after_cooldown["routes"]["gateway"]["pools"][0]["availableTargets"][0],
-            "test.key1.test"
+            "test.default.key1.test"
         );
     }
 
@@ -646,12 +724,12 @@ targets = [{ kind = "provider_model", provider = "test", model = "test", priorit
         let pool = &status["routes"]["gateway"]["pools"][0];
         assert_eq!(
             pool["resolvedTargets"],
-            json!(["test.key1.test", "test.key2.test"])
+            json!(["test.default.key1.test", "test.default.key2.test"])
         );
-        assert_eq!(pool["availableTargets"], json!(["test.key2.test"]));
+        assert_eq!(pool["availableTargets"], json!(["test.default.key2.test"]));
         assert_eq!(
             pool["unavailableProviders"][0]["providerKey"],
-            "test.key1.test"
+            "test.default.key1.test"
         );
         assert_eq!(
             pool["unavailableProviders"][0]["reasons"][0],
@@ -661,6 +739,164 @@ targets = [{ kind = "provider_model", provider = "test", model = "test", priorit
 
     struct CooledAvailability {
         until_ms: u64,
+    }
+
+    #[test]
+    fn virtual_router_status_expands_named_interfaces_for_auth_pinned_targets() {
+        let authoring = parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.a]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "gateway"
+endpoints = ["responses"]
+[providers.multi]
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "k", env = "MULTI_KEY" }] }
+[providers.multi.models.m]
+wire_name = "wire-m"
+capabilities = ["text"]
+[providers.multi.interfaces.chat]
+type = "openai_chat"
+base_url = "http://127.0.0.1:9/v1"
+[providers.multi.interfaces.responses]
+type = "responses"
+base_url = "http://127.0.0.1:9/v1"
+[forwarders.fwd]
+model = "m"
+targets = [{ kind = "provider_model", provider = "multi", model = "m", key = "k", priority = 1 }]
+[route_groups.gateway.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "multi", model = "m", key = "k", priority = 1 }]
+"#,
+        )
+        .expect("config");
+        let manifest = compile_v3_config_05_manifest(authoring).expect("manifest");
+
+        // Both real interfaces are cooled. An interface-omitted, auth-pinned target
+        // must not fall back to a phantom "default" identity and stay available.
+        let both_cooled = MultiInterfaceAvailability {
+            cooled: vec![("chat", "k"), ("responses", "k")],
+        };
+        let status =
+            project_v3_virtual_router_status(&manifest, "a", &both_cooled, 3_001).expect("status");
+        let pool = &status["routes"]["gateway"]["pools"][0];
+        assert_eq!(pool["availableTargets"], json!([]));
+        let mut unavailable = pool["unavailableProviders"]
+            .as_array()
+            .expect("unavailable")
+            .iter()
+            .map(|entry| {
+                entry["providerKey"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string()
+            })
+            .collect::<Vec<_>>();
+        unavailable.sort();
+        assert_eq!(unavailable, vec!["multi.chat.k.m", "multi.responses.k.m"]);
+        assert!(!pool["resolvedTargets"]
+            .as_array()
+            .expect("resolved")
+            .iter()
+            .any(|key| key.as_str() == Some("multi.k.m")));
+
+        // Recovering one interface changes only that interface's status.
+        let chat_recovered = MultiInterfaceAvailability {
+            cooled: vec![("responses", "k")],
+        };
+        let status = project_v3_virtual_router_status(&manifest, "a", &chat_recovered, 3_002)
+            .expect("status");
+        let pool = &status["routes"]["gateway"]["pools"][0];
+        assert_eq!(pool["availableTargets"], json!(["multi.chat.k.m"]));
+        assert_eq!(
+            pool["unavailableProviders"][0]["providerKey"],
+            "multi.responses.k.m"
+        );
+
+        // The forwarder target expands the same interface set.
+        let mut forwarder_keys = status["forwarders"][0]["targets"]
+            .as_array()
+            .expect("forwarder targets")
+            .iter()
+            .map(|entry| {
+                entry["providerKey"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string()
+            })
+            .collect::<Vec<_>>();
+        forwarder_keys.sort();
+        assert_eq!(
+            forwarder_keys,
+            vec!["multi.chat.k.m", "multi.responses.k.m"]
+        );
+        assert_eq!(
+            status["forwarders"][0]["availableProviderKeys"],
+            json!(["multi.chat.k.m"])
+        );
+    }
+
+    struct MultiInterfaceAvailability {
+        cooled: Vec<(&'static str, &'static str)>,
+    }
+
+    impl MultiInterfaceAvailability {
+        fn projection(
+            &self,
+            provider_id: &str,
+            interface_id: &str,
+            auth_alias: Option<&str>,
+            model_id: Option<&str>,
+        ) -> V3ProviderAvailabilityProjection {
+            let blocked = self
+                .cooled
+                .iter()
+                .any(|(iface, alias)| *iface == interface_id && Some(*alias) == auth_alias);
+            V3ProviderAvailabilityProjection {
+                provider_id: provider_id.to_string(),
+                interface_id: interface_id.to_string(),
+                auth_alias: auth_alias.map(str::to_string),
+                model_id: model_id.map(str::to_string),
+                available: !blocked,
+                blocked_scopes: blocked
+                    .then(|| {
+                        format!(
+                            "provider_key:{}:{}:{}:{}:controlled status failure",
+                            provider_id,
+                            interface_id,
+                            auth_alias.unwrap_or("-"),
+                            model_id.unwrap_or("-")
+                        )
+                    })
+                    .into_iter()
+                    .collect(),
+            }
+        }
+    }
+
+    impl V3ProviderAvailabilityReader for MultiInterfaceAvailability {
+        fn availability_for_interface(
+            &self,
+            provider_id: &str,
+            interface_id: &str,
+            auth_alias: Option<&str>,
+            model_id: Option<&str>,
+            _now_ms: u64,
+        ) -> V3ProviderAvailabilityProjection {
+            self.projection(provider_id, interface_id, auth_alias, model_id)
+        }
+
+        fn availability(
+            &self,
+            provider_id: &str,
+            auth_alias: Option<&str>,
+            model_id: Option<&str>,
+            _now_ms: u64,
+        ) -> V3ProviderAvailabilityProjection {
+            self.projection(provider_id, "default", auth_alias, model_id)
+        }
     }
 
     impl V3ProviderAvailabilityReader for CooledAvailability {
@@ -674,6 +910,7 @@ targets = [{ kind = "provider_model", provider = "test", model = "test", priorit
             let blocked = now_ms < self.until_ms;
             V3ProviderAvailabilityProjection {
                 provider_id: provider_id.to_string(),
+                interface_id: "default".to_string(),
                 auth_alias: auth_alias.map(str::to_string),
                 model_id: model_id.map(str::to_string),
                 available: !blocked,
@@ -705,6 +942,7 @@ targets = [{ kind = "provider_model", provider = "test", model = "test", priorit
             let blocked = auth_alias == Some("key1");
             V3ProviderAvailabilityProjection {
                 provider_id: provider_id.to_string(),
+                interface_id: "default".to_string(),
                 auth_alias: auth_alias.map(str::to_string),
                 model_id: model_id.map(str::to_string),
                 available: !blocked,
@@ -767,7 +1005,10 @@ targets = [{ kind = "provider_model", provider = "test", model = "test", key = "
         )
         .expect("dry-run");
         assert_eq!(output["ok"], true);
-        assert_eq!(output["decision"]["selectedProviderKey"], "test:key1:test");
+        assert_eq!(
+            output["decision"]["selectedProviderKey"],
+            "test:default:key1:test"
+        );
         assert_eq!(output["decision"]["selectedPoolId"], "default");
         assert_eq!(output["decision"]["reasoning"], "default_floor");
         assert_eq!(output["decision"]["defaultFloorProtected"], false);

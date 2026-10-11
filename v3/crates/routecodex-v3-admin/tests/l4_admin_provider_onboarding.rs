@@ -1417,6 +1417,90 @@ async fn health_test_authenticates_with_the_configured_provider_credential() {
 }
 
 #[tokio::test]
+async fn health_test_and_discovery_address_the_selected_provider_interface() {
+    const SECRET: &str = "sk-multi-interface-secret";
+    let responses_upstream = "http://127.0.0.1:9".to_string();
+    let (chat_upstream, chat_captured) =
+        spawn_mock_upstream(200, 2, |_| json!({ "data": [{ "id": "m1" }] }).to_string()).await;
+    let (base, _state, home) = bind_test_server().await;
+    write_provider(
+        &home,
+        "multi",
+        &format!(
+            r#"
+version = "2.0.0"
+providerId = "multi"
+
+[provider]
+id = "multi"
+enabled = true
+defaultModel = "m1"
+
+[provider.auth]
+type = "apikey"
+apiKey = "{SECRET}"
+
+[provider.models."m1"]
+supportsStreaming = true
+
+[provider.interfaces.responses]
+type = "responses"
+baseURL = "{responses_upstream}/v1"
+responses = {{ process = "chat", streaming = "always", transport = "http" }}
+
+[provider.interfaces.chat]
+type = "openai_chat"
+baseURL = "{chat_upstream}/v1"
+"#
+        ),
+    );
+
+    let response = http_client()
+        .post(format!(
+            "{base}/api/providers/multi/health-test?interface_id=chat"
+        ))
+        .header("x-routecodex-admin-token", admin_token(&home))
+        .send()
+        .await
+        .expect("health-test response");
+    assert_eq!(response.status().as_u16(), 200);
+    let payload: Value = response.json().await.expect("health-test json");
+    assert_eq!(
+        payload.get("interface_id").and_then(Value::as_str),
+        Some("chat")
+    );
+    let expected_chat_url = format!("{chat_upstream}/v1");
+    assert_eq!(
+        payload.get("url").and_then(Value::as_str),
+        Some(expected_chat_url.as_str())
+    );
+
+    let response = http_client()
+        .post(format!("{base}/api/providers/discover"))
+        .header("x-routecodex-admin-token", admin_token(&home))
+        .json(&json!({
+            "id": "multi",
+            "interface_id": "chat",
+            "model": "m1",
+        }))
+        .send()
+        .await
+        .expect("discovery response");
+    assert_eq!(response.status().as_u16(), 200);
+    let payload: Value = response.json().await.expect("discovery json");
+    assert_eq!(
+        payload.get("interface_id").and_then(Value::as_str),
+        Some("chat")
+    );
+
+    let chat_requests = chat_captured.lock().unwrap().clone();
+    assert_eq!(chat_requests.len(), 2);
+    assert!(chat_requests
+        .iter()
+        .all(|request| request.starts_with("GET /v1/models HTTP/1.1")));
+}
+
+#[tokio::test]
 async fn health_test_reports_the_real_upstream_status_for_a_rejected_credential() {
     let (upstream, captured) = spawn_mock_upstream(401, 1, |_| {
         json!({ "error": { "message": "invalid api key" } }).to_string()

@@ -10,13 +10,21 @@ export function attachProviderActionGateHelpers(context) {
   const { root, failures, files } = context;
 
 const abs = (rel) => path.join(root, rel);
-const read = (rel) => {
+const readSource = (rel) => {
   try {
     return fs.readFileSync(abs(rel), 'utf8');
   } catch (error) {
     failures.push(`${rel}: cannot read: ${error.message}`);
     return '';
   }
+};
+const read = (rel, seen = new Set()) => {
+  if (seen.has(rel)) return '';
+  seen.add(rel);
+  return readSource(rel).replace(/include!\("([^"]+)"\)/g, (_, includeRel) => {
+    const resolved = path.normalize(path.join(path.dirname(rel), includeRel));
+    return read(resolved, seen);
+  });
 };
 const requireText = (text, rel, token) => {
   if (!text.includes(token)) failures.push(`${rel}: missing ${token}`);
@@ -278,7 +286,7 @@ const requiredV3Edges = [
     caller_file: files.policy,
     callee_symbol: 'V3ProviderFailureRuntimeHealth::record_provider_action_failure_in_scope',
     callee_file: files.policy,
-    call_witness: /\bcontext\s*\.\s*provider_health\s*\.\s*record_provider_action_failure_in_scope\s*\(/u,
+    call_witness: /\bcontext\s*\.\s*provider_health\s*\.\s*record_provider_action_failure_in_scope(?:_for_interface)?\s*\(/u,
     status: 'anchored',
     owner_feature_id: 'v3.provider_action_gate',
   },
@@ -302,7 +310,7 @@ const requiredV3Edges = [
     caller_file: files.policy,
     callee_symbol: 'V3ProviderFailureRuntimeHealth::record_terminal_provider_projection_in_scope',
     callee_file: files.policy,
-    call_witness: /\bcontext\s*\.\s*provider_health\s*\.\s*record_terminal_provider_projection_in_scope\s*\(/u,
+    call_witness: /\bcontext\s*\.\s*provider_health\s*\.\s*record_terminal_provider_projection_in_scope(?:_for_interface)?\s*\(/u,
     status: 'anchored',
     owner_feature_id: 'v3.provider_action_gate',
   },
@@ -619,7 +627,7 @@ const requiredV3Edges = [
     caller_file: files.directHelpers,
     callee_symbol: 'V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope',
     callee_file: files.policy,
-    call_witness: /\bprovider_health\s*\.\s*record_provider_success_in_failure_scope\s*\(/u,
+    call_witness: /\bprovider_health\s*\.\s*record_provider_success_in_failure_scope(?:_for_interface)?\s*\(/u,
     status: 'anchored',
     owner_feature_id: 'v3.provider_action_gate',
   },
@@ -667,7 +675,7 @@ const requiredV3Edges = [
     caller_file: files.openaiChat,
     callee_symbol: 'V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope',
     callee_file: files.policy,
-    call_witness: /\bself\s*\.\s*provider_health\s*\.\s*record_provider_success_in_failure_scope\s*\(/u,
+    call_witness: /\bself\s*\.\s*provider_health\s*\.\s*record_provider_success_in_failure_scope(?:_for_interface)?\s*\(/u,
     status: 'anchored',
     owner_feature_id: 'v3.provider_action_gate',
   },
@@ -691,7 +699,7 @@ const requiredV3Edges = [
     caller_file: files.openaiChat,
     callee_symbol: 'V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source',
     callee_file: files.policy,
-    call_witness: /\bself\s*\.\s*provider_health\s*\.\s*record_post_commit_provider_stream_failure_from_source\s*\(/u,
+    call_witness: /\bself\s*\.\s*provider_health\s*\.\s*record_post_commit_provider_stream_failure_from_source(?:_for_interface)?\s*\(/u,
     status: 'anchored',
     owner_feature_id: 'v3.provider_action_gate',
   },
@@ -715,7 +723,7 @@ const requiredV3Edges = [
     caller_file: files.gemini,
     callee_symbol: 'V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope',
     callee_file: files.policy,
-    call_witness: /\bself\s*\.\s*provider_health\s*\.\s*record_provider_success_in_failure_scope\s*\(/u,
+    call_witness: /\bself\s*\.\s*provider_health\s*\.\s*record_provider_success_in_failure_scope(?:_for_interface)?\s*\(/u,
     status: 'anchored',
     owner_feature_id: 'v3.provider_action_gate',
   },
@@ -739,7 +747,7 @@ const requiredV3Edges = [
     caller_file: files.gemini,
     callee_symbol: 'V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source',
     callee_file: files.policy,
-    call_witness: /\bself\s*\.\s*provider_health\s*\.\s*record_post_commit_provider_stream_failure_from_source\s*\(/u,
+    call_witness: /\bself\s*\.\s*provider_health\s*\.\s*record_post_commit_provider_stream_failure_from_source(?:_for_interface)?\s*\(/u,
     status: 'anchored',
     owner_feature_id: 'v3.provider_action_gate',
   },
@@ -751,7 +759,7 @@ const requiredV3Edges = [
     caller_file: files.responsesInner,
     callee_symbol: 'V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope',
     callee_file: files.policy,
-    call_witness: /\bprovider_health\s*\.\s*record_provider_success_in_failure_scope\s*\(/u,
+    call_witness: /\bprovider_health\s*\.\s*record_provider_success_in_failure_scope(?:_for_interface)?\s*\(/u,
     status: 'anchored',
     owner_feature_id: 'v3.provider_action_gate',
   },
@@ -775,7 +783,7 @@ const requiredV3Edges = [
     caller_file: files.anthropic,
     callee_symbol: 'V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope',
     callee_file: files.policy,
-    call_witness: /\bprovider_health\s*\.\s*record_provider_success_in_failure_scope\s*\(/u,
+    call_witness: /\bprovider_health\s*\.\s*record_provider_success_in_failure_scope(?:_for_interface)?\s*\(/u,
     status: 'anchored',
     owner_feature_id: 'v3.provider_action_gate',
   },

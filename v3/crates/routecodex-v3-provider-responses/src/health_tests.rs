@@ -141,6 +141,43 @@ fn operator_can_remove_exact_identity_cooldown_and_probe_state() {
 }
 
 #[test]
+fn session_cooldown_projection_preserves_interface_identity() {
+    let store = V3ProviderHealthStore::default();
+    let policy = V3ProviderFailurePolicy {
+        failure_threshold: 1,
+        cooldown_ms: 60_000,
+        probe_interval_ms: 5_000,
+        max_probe_interval_ms: None,
+        long_probe_backoff: false,
+        until_restart: false,
+        cooldown_scope: V3ProviderFailureCooldownScope::Session,
+    };
+    store
+        .record_provider_failure_in_session_with_policy_for_interface(
+            &session("session-a"),
+            "provider-a",
+            "chat",
+            Some("key-a"),
+            Some("gpt-5.5"),
+            Some("controlled failure"),
+            None,
+            100,
+            Some(policy),
+        )
+        .unwrap();
+
+    let entry = store
+        .cooldown_entries(100)
+        .into_iter()
+        .find(|entry| entry.kind == "session")
+        .expect("session cooldown must be projected");
+    assert_eq!(entry.provider_id, "provider-a");
+    assert_eq!(entry.interface_id, "chat");
+    assert_eq!(entry.auth_alias.as_deref(), Some("key-a"));
+    assert_eq!(entry.model_id.as_deref(), Some("gpt-5.5"));
+}
+
+#[test]
 fn failures_in_other_session_share_provider_key_cooldown() {
     let store = V3ProviderHealthStore::default();
     let first = store
@@ -893,6 +930,62 @@ fn quota_concurrency_and_diagnostics_are_provider_owned_inputs() {
     );
     assert_eq!(
         explain_provider_health_reasons(&store, "provider-a", Some("key-a"), Some("gpt-5.5"), 101,),
-        vec!["quota:provider_key_model:provider-a:key-a:gpt-5.5:exhausted"]
+        vec!["quota:provider_key:provider-a:default:key-a:gpt-5.5:exhausted"]
+    );
+}
+
+#[test]
+fn legacy_quota_scope_migrates_to_default_interface_only() {
+    let store = V3ProviderHealthStore::default();
+    store
+        .update_quota_state(
+            &V3ErrorActionScope::ProviderKeyModel {
+                provider_id: "provider-a".to_string(),
+                auth_alias: "key-a".to_string(),
+                model_id: "gpt-5.5".to_string(),
+            },
+            0,
+            Some(1_000),
+        )
+        .unwrap();
+
+    assert!(
+        !store
+            .availability_for_interface(
+                "provider-a",
+                "default",
+                Some("key-a"),
+                Some("gpt-5.5"),
+                101,
+            )
+            .available
+    );
+    assert!(
+        store
+            .availability_for_interface("provider-a", "chat", Some("key-a"), Some("gpt-5.5"), 101,)
+            .available
+    );
+}
+
+#[test]
+fn concurrency_budget_is_shared_across_interfaces() {
+    let store = V3ProviderHealthStore::default();
+    store.update_concurrency_state("provider-a", 2, 2).unwrap();
+
+    assert!(
+        !store
+            .availability_for_interface(
+                "provider-a",
+                "default",
+                Some("key-a"),
+                Some("gpt-5.5"),
+                101,
+            )
+            .available
+    );
+    assert!(
+        !store
+            .availability_for_interface("provider-a", "chat", Some("key-a"), Some("gpt-5.5"), 101,)
+            .available
     );
 }

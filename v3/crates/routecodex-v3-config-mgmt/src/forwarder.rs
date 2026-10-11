@@ -55,6 +55,7 @@ pub fn new_forwarder_with_target(
             provider: Some(provider.to_string()),
             model: Some(provider_model.to_string()),
             key: key.map(str::to_string),
+            interface: None,
             priority: Some(priority),
             weight,
         }],

@@ -464,6 +464,7 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
         provider_health: &V3ProviderFailureRuntimeHealth,
         failure_session_scope: &V3ProviderFailureSessionScope,
         provider_id: String,
+        interface_id: String,
         auth_alias: String,
         model_id: String,
         recorded: bool,
@@ -677,6 +678,7 @@ where
             .as_ref()
             .is_some_and(|target| {
                 target.provider_id != selected.candidate.provider_id
+                    || target.interface_id != selected.candidate.interface_id
                     || target.auth_alias != selected.candidate.auth_alias
                     || target.model_id != selected.candidate.model_id
             })
@@ -686,6 +688,7 @@ where
         }
         attempt_budget.set_transport_attempt_limit(selected.candidate_count);
         let selected_target_provider_id = selected.candidate.provider_id.clone();
+        let selected_target_interface_id = selected.candidate.interface_id.clone();
         let selected_target_auth_alias = selected.candidate.auth_alias.clone();
         let selected_target_model_id = selected.candidate.model_id.clone();
         let selected_target_compatibility_profile =
@@ -1087,10 +1090,11 @@ where
                 let attempt_success_receipt =
                     crate::nodes::V3AttemptSuccessReceipt::from_buffered_terminal_attempt();
                 provider_health
-                    .record_provider_success_in_failure_scope(
+                    .record_provider_success_in_failure_scope_for_interface(
                         &attempt_success_receipt,
                         &failure_session_scope,
                         &selected_target_provider_id,
+                        &selected_target_interface_id,
                         Some(&selected_target_auth_alias),
                         Some(&selected_target_model_id),
                         v3_relay_provider_policy_now_epoch_ms()
@@ -1239,6 +1243,7 @@ where
                         &provider_health,
                         &failure_session_scope,
                         selected_target_provider_id.clone(),
+                        selected_target_interface_id.clone(),
                         selected_target_auth_alias.clone(),
                         selected_target_model_id.clone(),
                         true,
@@ -1420,10 +1425,11 @@ where
                 let attempt_success_receipt =
                     crate::nodes::V3AttemptSuccessReceipt::from_sealed_sse_attempt(&committed_sse);
                 provider_health
-                    .record_provider_success_in_failure_scope(
+                    .record_provider_success_in_failure_scope_for_interface(
                         &attempt_success_receipt,
                         &failure_session_scope,
                         &selected_target_provider_id,
+                        &selected_target_interface_id,
                         Some(&selected_target_auth_alias),
                         Some(&selected_target_model_id),
                         v3_relay_provider_policy_now_epoch_ms()

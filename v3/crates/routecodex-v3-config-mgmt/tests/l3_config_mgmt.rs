@@ -116,6 +116,44 @@ fn route_view_roundtrip_preserves_pool_semantics() {
     assert_eq!(repool.targets[0].key.as_deref(), Some("key1"));
 }
 
+#[test]
+fn route_view_roundtrip_preserves_provider_interface() {
+    let mut authoring = base_authoring();
+    authoring
+        .route_groups
+        .get_mut("routecodex_v3_4444")
+        .unwrap()
+        .pools
+        .get_mut("default")
+        .unwrap()
+        .targets[0]
+        .interface = Some("chat".to_string());
+
+    let groups = route_groups_from_authoring(&authoring);
+    assert_eq!(
+        groups[0].ports[0].pools[0].tiers[0].members[0]
+            .interface
+            .as_deref(),
+        Some("chat")
+    );
+
+    let mut mutated = authoring.clone();
+    apply_route_group_view_to_authoring(&mut mutated, &groups[0]);
+    assert_eq!(
+        mutated
+            .route_groups
+            .get("routecodex_v3_4444")
+            .unwrap()
+            .pools
+            .get("default")
+            .unwrap()
+            .targets[0]
+            .interface
+            .as_deref(),
+        Some("chat")
+    );
+}
+
 fn parse_authoring(raw: &str) -> V3Config02AuthoringParsed {
     routecodex_v3_config::parse_v3_config_02_authoring(raw).expect("parse authoring")
 }
@@ -166,6 +204,7 @@ fn provider_file_write_then_read_roundtrip() {
             provider_type: "openai".into(),
             base_url: "http://127.0.0.1:9999/v1".into(),
             default_model: "model-a".into(),
+            interfaces: Default::default(),
             auth: routecodex_v3_config::V2ProviderAuthConfig {
                 api_key: None,
                 env: Some("TEST_PROVIDER_KEY".into()),
@@ -229,6 +268,7 @@ fn commit_with_backup_creates_backup_and_revision() {
                 provider: Some("p1".into()),
                 model: Some("m1".into()),
                 key: Some("key1".into()),
+                interface: None,
                 priority: 1,
                 weight: None,
             }],
@@ -306,6 +346,7 @@ fn invalid_commit_fails_without_touching_file() {
             provider: Some("ghost-provider".into()),
             model: Some("m9".into()),
             key: None,
+            interface: None,
             priority: Some(9),
             weight: None,
         });

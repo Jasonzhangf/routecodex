@@ -34,6 +34,7 @@ pub struct V3ProviderAuthHandle {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3ResponsesProviderTarget {
     pub provider_id: String,
+    pub interface_id: String,
     pub provider_type: String,
     pub base_url: String,
     pub canonical_model_id: String,

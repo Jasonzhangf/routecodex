@@ -86,7 +86,10 @@ traceable revert/rebuild/restart/replay recovery contract.
 
 For an explicit provider/model pin, set the client request `model` to
 `<provider_id>.<model_id>` (for example `kdns.deepseek-v4.1-flash`); this is
-`provider.model` direct-pin syntax, not route-config `provider/model`.
+`provider.model` direct-pin syntax, not route-config `provider/model`. A known
+`provider_id` with a known model selects that exact provider+model directly,
+skipping route classification and pool selection; an unknown provider prefix
+falls back to normal routing.
 
 ## Report
 

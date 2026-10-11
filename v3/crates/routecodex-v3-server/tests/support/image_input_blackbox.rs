@@ -247,6 +247,7 @@ async fn run_case_shape(
     let vision = manifest.providers.get_mut("test").unwrap();
     if protocol == "anthropic" {
         vision.base_url = vision_url.trim_end_matches("/v1").to_string();
+        vision.interfaces.get_mut("default").unwrap().base_url = vision.base_url.clone();
     }
     vision.models.get_mut("test").unwrap().wire_name = "vision-wire".into();
     if !matches!(pool, PoolState::Empty) {
@@ -262,8 +263,10 @@ async fn run_case_shape(
     }
     let text = manifest.providers.get_mut("fallback").unwrap();
     text.provider_type = protocol.into();
+    text.interfaces.get_mut("default").unwrap().provider_type = protocol.into();
     if protocol == "anthropic" {
         text.base_url = text_url.trim_end_matches("/v1").to_string();
+        text.interfaces.get_mut("default").unwrap().base_url = text.base_url.clone();
     }
     text.models.get_mut("test").unwrap().wire_name = "text-wire".into();
     let group = manifest.route_groups.get_mut("default").unwrap();
@@ -583,6 +586,7 @@ async fn assert_isolated_image_boundary(path: &str, content: Value, retain_image
     vision.wire_name = "vision-wire".into();
     let text = manifest.providers.get_mut("fallback").unwrap();
     text.provider_type = "openai_chat".into();
+    text.interfaces.get_mut("default").unwrap().provider_type = "openai_chat".into();
     text.models.get_mut("test").unwrap().wire_name = "text-wire".into();
     let group = manifest.route_groups.get_mut("default").unwrap();
     group.pools.remove("client_test");

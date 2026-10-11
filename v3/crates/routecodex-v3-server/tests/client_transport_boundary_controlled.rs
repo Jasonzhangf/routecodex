@@ -7,7 +7,8 @@
 //! - `chat_sse_head_commit_never_projects_a_provider_terminal_to_the_client`
 //! - `chat_sse_head_commit_carries_a_json_success_for_an_sse_client`
 //! - `exec_preparation_drains_an_in_flight_client_response_before_closing_transports`
-//! - `exec_preparation_is_bounded_when_a_provider_attempt_never_finishes`
+//! - `exec_preparation_waits_for_real_provider_timeout_without_fabricated_terminal`
+//! - `borrowed_exec_preparation_cancellation_resumes_queued_dispatch_and_pending_sse`
 //!
 //! Every case enters through the real `/v1/chat/completions` listener with a
 //! controlled provider. The controlled provider holds its response until the test
@@ -153,6 +154,10 @@ impl ControlledEntry {
 }
 
 async fn start_controlled_entry() -> ControlledEntry {
+    start_controlled_entry_with_timeout(None).await
+}
+
+async fn start_controlled_entry_with_timeout(request_timeout_ms: Option<u64>) -> ControlledEntry {
     let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let upstream_addr = upstream.local_addr().unwrap();
     let (captures_tx, captures_rx) = mpsc::unbounded_channel();
@@ -175,9 +180,15 @@ async fn start_controlled_entry() -> ControlledEntry {
             .await
             .unwrap();
     });
-    let handle = spawn_v3_server_aggregate(manifest(free_port(), upstream_addr.port()))
-        .await
-        .unwrap();
+    let mut manifest = manifest(free_port(), upstream_addr.port());
+    if let Some(timeout_ms) = request_timeout_ms {
+        manifest
+            .providers
+            .get_mut("controlled")
+            .unwrap()
+            .request_timeout_ms = timeout_ms;
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     ControlledEntry {
         endpoint: format!("http://{}/v1/chat/completions", handle.listeners[0].addr),
         handle,
@@ -527,10 +538,10 @@ async fn exec_preparation_drains_an_in_flight_client_response_before_closing_tra
     std::env::remove_var("ROUTECODEX_HTTP_SSE_KEEPALIVE_MS");
 }
 
-/// The drain must stay bounded. A provider attempt that never finishes must not
-/// hold the exec replacement open, and the client transport is closed then.
+/// The provider request deadline, rather than a restart drain cutoff, ends an
+/// unsuccessful attempt. Its error remains request-local with no client payload.
 #[tokio::test]
-async fn exec_preparation_is_bounded_when_a_provider_attempt_never_finishes() {
+async fn exec_preparation_waits_for_real_provider_timeout_without_fabricated_terminal() {
     let _guard = TEST_LOCK.lock().await;
     let ControlledEntry {
         endpoint,
@@ -538,7 +549,7 @@ async fn exec_preparation_is_bounded_when_a_provider_attempt_never_finishes() {
         mut captures,
         release: _release,
         upstream_shutdown,
-    } = start_controlled_entry().await;
+    } = start_controlled_entry_with_timeout(Some(1200)).await;
     let client = reqwest::Client::new();
     let response = tokio::time::timeout(
         Duration::from_secs(5),
@@ -572,8 +583,8 @@ async fn exec_preparation_is_bounded_when_a_provider_attempt_never_finishes() {
         .expect("exec preparation must never wait forever for an in-flight response");
     let elapsed = started.elapsed();
     assert!(
-        elapsed >= Duration::from_secs(4) && elapsed < Duration::from_secs(15),
-        "exec preparation must drain for a bounded window, waited {elapsed:?}"
+        elapsed >= Duration::from_millis(700) && elapsed < Duration::from_secs(10),
+        "exec preparation must wait for the actual provider request deadline, waited {elapsed:?}"
     );
 
     let mut received = Vec::new();
@@ -588,6 +599,83 @@ async fn exec_preparation_is_bounded_when_a_provider_attempt_never_finishes() {
         !received.contains("data: [DONE]"),
         "an unfinished provider attempt must not project a terminal frame: {received}"
     );
+    let _ = upstream_shutdown.send(());
+    std::env::remove_var("ROUTECODEX_HTTP_SSE_KEEPALIVE_MS");
+}
+
+/// Borrowed preparation must restore queued business dispatch when its caller
+/// cancels, while the already committed SSE remains healthy.
+#[tokio::test]
+async fn borrowed_exec_preparation_cancellation_resumes_queued_dispatch_and_pending_sse() {
+    let _guard = TEST_LOCK.lock().await;
+    let ControlledEntry {
+        endpoint,
+        handle,
+        mut captures,
+        release,
+        upstream_shutdown,
+    } = start_controlled_entry().await;
+    let client = reqwest::Client::new();
+    // First complete a request so this client can reuse its keepalive connection.
+    release.send_replace(true);
+    let warm = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "chat-client-alias", "messages": [{"role":"user", "content":"warm"}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        warm.json::<Value>().await.unwrap()["id"],
+        "chatcmpl-controlled"
+    );
+    captures.recv().await.unwrap();
+    release.send_replace(false);
+    let held = client.post(&endpoint).json(&json!({
+        "model": "chat-client-alias", "messages": [{"role":"user", "content":"held"}], "stream":true
+    })).send().await.unwrap();
+    assert_eq!(held.status(), StatusCode::OK);
+    captures.recv().await.unwrap();
+    let mut preparation = Box::pin(handle.prepare_exec_attempt());
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), &mut preparation)
+            .await
+            .is_err()
+    );
+    let mut queued = Box::pin(client.post(&endpoint).json(&json!({
+        "model": "chat-client-alias", "messages": [{"role":"user", "content":"queued"}], "stream":false
+    })).send());
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), &mut queued)
+            .await
+            .is_err()
+    );
+    assert!(
+        captures.try_recv().is_err(),
+        "queued dispatch must not reach the provider"
+    );
+    drop(preparation);
+    // Poll the queued JSON concurrently: it reaches the still-held provider
+    // before that provider is released, proving cancellation reopened admission.
+    tokio::select! {
+        result = &mut queued => panic!("provider must still be held: {result:?}"),
+        captured = captures.recv() => {
+            assert_eq!(captured.unwrap()["messages"][0]["content"], "queued");
+        }
+        _ = tokio::time::sleep(Duration::from_secs(5)) => panic!("cancelled preparation did not restore dispatch"),
+    }
+    release.send(true).unwrap();
+    let queued = queued.await.unwrap();
+    assert_eq!(queued.status(), StatusCode::OK);
+    assert_eq!(
+        queued.json::<Value>().await.unwrap()["id"],
+        "chatcmpl-controlled"
+    );
+    let held_body = held.text().await.unwrap();
+    assert!(held_body.contains("\"content\":\"first\""), "{held_body}");
+    assert_eq!(held_body.matches("data: [DONE]").count(), 1, "{held_body}");
+    handle.shutdown().await;
     let _ = upstream_shutdown.send(());
     std::env::remove_var("ROUTECODEX_HTTP_SSE_KEEPALIVE_MS");
 }

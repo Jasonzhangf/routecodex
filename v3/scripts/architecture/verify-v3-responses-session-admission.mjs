@@ -120,12 +120,12 @@ requireMatch(
 );
 requireMatch(
   admission,
-  /pub\(crate\) async fn admit\([\s\S]*let notified = self\.notify\.notified\(\);[\s\S]*tokio::pin!\(notified\);[\s\S]*notified\.as_mut\(\)\.enable\(\);[\s\S]*self\.try_admit\(scope\.clone\(\)\)[\s\S]*notified\.await/,
+  /impl V3ResponsesSessionAdmissionGate[\s\S]*pub\(crate\) async fn admit\([\s\S]*let notified = self\.notify\.notified\(\);[\s\S]*tokio::pin!\(notified\);[\s\S]*notified\.as_mut\(\)\.enable\(\);[\s\S]*self\.try_admit\(scope\.clone\(\)\)[\s\S]*notified\.await/,
   "The session admission gate must uniquely own an async predicate wait with lost-wakeup-safe notification ordering",
 );
 requireMatch(
   admission,
-  /pub\(crate\) async fn wait_for_quiescence\(&self\)[\s\S]*let notified = self\.notify\.notified\(\);[\s\S]*tokio::pin!\(notified\);[\s\S]*notified\.as_mut\(\)\.enable\(\);[\s\S]*self\.active\.load\(Ordering::Acquire\) == 0[\s\S]*notified\.await/,
+  /pub\(crate\) async fn wait_for_quiescence\(&self\)[\s\S]*let notified = self\.gate\.notify\.notified\(\);[\s\S]*tokio::pin!\(notified\);[\s\S]*notified\.as_mut\(\)\.enable\(\);[\s\S]*\.active\s*== 0[\s\S]*notified\.await/,
   "The exec drain gate must register its predicate waiter before the quiescence check",
 );
 requireMatch(

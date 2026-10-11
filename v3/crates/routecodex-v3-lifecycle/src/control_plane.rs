@@ -253,6 +253,28 @@ pub(crate) async fn shutdown_managed_runtime(
     Ok(())
 }
 
+async fn wait_for_control_peer_before_exec(stream: &UnixStream) -> Result<(), V3LifecycleError> {
+    let mut byte = [0_u8; 1];
+    loop {
+        stream.readable().await.map_err(V3LifecycleError::Io)?;
+        match stream.try_read(&mut byte) {
+            Ok(0) => {
+                return Err(V3LifecycleError::Validation(
+                    "restart control client disconnected before exec; original owner retained"
+                        .into(),
+                ))
+            }
+            Ok(_) => {
+                return Err(V3LifecycleError::Validation(
+                    "unexpected restart control input before exec".into(),
+                ))
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+}
+
 pub(crate) async fn restart_managed_runtime_in_place(
     instance_dir: &Path,
     handle: &V3ServerAggregateHandle,
@@ -267,10 +289,14 @@ pub(crate) async fn restart_managed_runtime_in_place(
     let target_dir = instances_root.join(&declaration.instance_id);
     V3HooksSidecarSupervisor::ensure_exec_target_available(instance_dir, &target_dir)?;
     let _transfer = bind_previous_release_restart_transfer(instance_dir, &restart_plan)?;
-    let preparation = handle
-        .prepare_exec_attempt()
-        .await
-        .map_err(V3LifecycleError::Validation)?;
+    let preparation = tokio::select! {
+        preparation = handle.prepare_exec_attempt() => {
+            preparation.map_err(V3LifecycleError::Validation)?
+        }
+        cancellation = wait_for_control_peer_before_exec(stream) => {
+            return cancellation;
+        }
+    };
     let front_path = instance_dir.join(FRONT_HANDOFF_FILE);
     let provider_path = instance_dir.join(PROVIDER_HANDOFF_FILE);
     ensure_private_dir(&target_dir)?;

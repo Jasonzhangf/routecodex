@@ -883,7 +883,12 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             .providers
             .get_mut(server_id)
             .expect("probe provider must exist");
-        provider.base_url = base_url;
+        provider.base_url = base_url.clone();
+        provider
+            .interfaces
+            .get_mut("default")
+            .expect("default interface must exist")
+            .base_url = base_url;
         provider.auth.entries[0].env = Some("V3_GEMINI_GATE_FAILURE_PROBE_KEY".into());
         std::env::set_var("V3_GEMINI_GATE_FAILURE_PROBE_KEY", "routecodex-test-key");
 
@@ -1597,7 +1602,7 @@ async fn revive_cooled_provider(
     );
     provider_health
         .runtime_health()
-        .run_due_provider_health_probes(u64::MAX, false, |_, _, _| async { Ok(()) })
+        .run_due_provider_health_probes(u64::MAX, false, |_, _, _, _| async { Ok(()) })
         .await
         .expect("provider health probe must revive cooled model key");
 }

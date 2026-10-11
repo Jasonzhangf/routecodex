@@ -88,8 +88,8 @@ const cases = [
     path: "v3/crates/routecodex-v3-server/src/session_admission.rs",
     mutate: (source) =>
       source.replace(
-        "            notified.as_mut().enable();\n            if self.active.load(Ordering::Acquire) == 0 {",
-        "            if self.active.load(Ordering::Acquire) == 0 {",
+        "            notified.as_mut().enable();\n            if self\n                .gate",
+        "            if self\n                .gate",
       ),
     diagnostic: /exec drain gate must register its predicate waiter/u,
   },

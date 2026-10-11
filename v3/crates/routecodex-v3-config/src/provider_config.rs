@@ -3,10 +3,10 @@ use crate::{
     provider_directory::V3ProviderDirectorySource, validation, V3ConfigError,
     V3ProviderAuthAuthoringConfig, V3ProviderAuthEntryAuthoringConfig, V3ProviderAuthType,
     V3ProviderAuthoringConfig, V3ProviderConcurrencyAuthoringConfig,
-    V3ProviderHealthAuthoringConfig, V3ProviderModelAuthoringConfig,
-    V3ProviderRequestCleanupAuthoringConfig, V3ProviderResponsesAuthoringConfig,
-    V3ProviderSemanticErrorPolicyAuthoringConfig, V3ResponsesTransportKind, V3StreamingPolicy,
-    V3WebSearchExecutionMode,
+    V3ProviderHealthAuthoringConfig, V3ProviderInterfaceAuthoringConfig,
+    V3ProviderModelAuthoringConfig, V3ProviderRequestCleanupAuthoringConfig,
+    V3ProviderResponsesAuthoringConfig, V3ProviderSemanticErrorPolicyAuthoringConfig,
+    V3ResponsesTransportKind, V3StreamingPolicy, V3WebSearchExecutionMode,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -101,23 +101,28 @@ pub(crate) fn compile_provider_directory(
             )));
         }
         let auth = compile_v2_auth(config_dir, provider_id, source_hash, provider.auth)?;
-        let provider_type = match provider.provider_type.as_str() {
-            "openai" | "openai-standard" | "openai_chat" => "openai_chat",
-            "responses" => "responses",
-            "anthropic" => "anthropic",
-            "gemini" => "gemini",
-            value => {
-                return Err(validation(format!(
-                    "v2 provider {provider_id} declares unknown type {value}"
-                )))
+        let has_interfaces = !provider.interfaces.is_empty();
+        let provider_type = if has_interfaces && provider.provider_type.trim().is_empty() {
+            String::new()
+        } else {
+            match provider.provider_type.as_str() {
+                "openai" | "openai-standard" | "openai_chat" => "openai_chat",
+                "responses" => "responses",
+                "anthropic" => "anthropic",
+                "gemini" => "gemini",
+                value => {
+                    return Err(validation(format!(
+                        "v2 provider {provider_id} declares unknown type {value}"
+                    )))
+                }
             }
-        }
-        .to_string();
+            .to_string()
+        };
         let v2_responses = provider.responses.as_ref();
         let compatibility_profile = provider
             .compatibility_profile
             .or_else(|| resolve_v2_provider_default_compatibility_profile(provider_id));
-        let responses = if provider_type == "responses" {
+        let responses = if v2_responses.is_some() || provider_type == "responses" {
             Some(V3ProviderResponsesAuthoringConfig {
                 process: v2_responses
                     .map(|responses| responses.process.clone())
@@ -146,7 +151,7 @@ pub(crate) fn compile_provider_directory(
             provider_id.clone(),
             V3ProviderAuthoringConfig {
                 enabled: provider.enabled.unwrap_or(true),
-                provider_type,
+                legacy_provider_type: provider_type,
                 base_url: provider.base_url,
                 default_model: provider.default_model,
                 auth,
@@ -170,6 +175,7 @@ pub(crate) fn compile_provider_directory(
                     .unwrap_or(DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS),
                 sse_first_frame_timeout_ms: provider.sse_first_frame_timeout_ms,
                 headers: provider.headers,
+                interfaces: provider.interfaces,
             },
         );
         provider_sources.push(V3ProviderDirectorySource {
@@ -464,9 +470,13 @@ pub struct V2ProviderConfig {
     pub id: String,
     pub enabled: Option<bool>,
     #[serde(rename = "type")]
+    #[serde(default)]
     pub provider_type: String,
     #[serde(rename = "baseURL")]
+    #[serde(default)]
     pub base_url: String,
+    #[serde(default)]
+    pub interfaces: BTreeMap<String, V3ProviderInterfaceAuthoringConfig>,
     pub default_model: String,
     pub auth: V2ProviderAuthConfig,
     pub responses: Option<V2ProviderResponsesConfig>,

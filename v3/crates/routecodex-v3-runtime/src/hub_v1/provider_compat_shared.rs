@@ -219,6 +219,7 @@ mod tests {
         let target = V3ResponsesProviderTarget {
             provider_id: "unrelated-deepseek".into(),
             provider_type: "openai_chat".into(),
+            interface_id: "default".into(),
             base_url: "http://upstream.invalid/v1".into(),
             canonical_model_id: "deepseek-v5-preview".into(),
             wire_model: "deepseek-v5-preview".into(),
@@ -266,6 +267,7 @@ mod tests {
             V3ResponsesProviderTarget {
                 provider_id: "kdns-test".into(),
                 provider_type: "openai_chat".into(),
+                interface_id: "default".into(),
                 base_url: "http://upstream.invalid/v1".into(),
                 canonical_model_id: "deepseek-v4.1-flash".into(),
                 wire_model: "deepseek-v4.1-flash".into(),
@@ -305,6 +307,7 @@ mod tests {
             V3ResponsesProviderTarget {
                 provider_id: "inferai-openai".into(),
                 provider_type: "responses".into(),
+                interface_id: "default".into(),
                 base_url: "https://inferaiapi.com/v1".into(),
                 canonical_model_id: "deepseek-v4.1-flash".into(),
                 wire_model: "deepseek-v4.1-flash".into(),
@@ -355,6 +358,7 @@ mod tests {
             "req-openai-chat-provider-headers",
             V3ResponsesProviderTarget {
                 provider_id: "opencode-zen-free".into(),
+                interface_id: "default".into(),
                 provider_type: "openai_chat".into(),
                 base_url: "https://opencode.ai/zen/v1".into(),
                 canonical_model_id: "step-5-preview-free".into(),
@@ -407,6 +411,7 @@ mod tests {
             V3ResponsesProviderTarget {
                 provider_id: "anthropic-test".into(),
                 provider_type: "anthropic".into(),
+                interface_id: "default".into(),
                 base_url: "http://upstream.invalid".into(),
                 canonical_model_id: "claude-sonnet-5".into(),
                 wire_model: "claude-sonnet-5".into(),
@@ -446,6 +451,7 @@ mod tests {
             V3ResponsesProviderTarget {
                 provider_id: "gemini-test".into(),
                 provider_type: "gemini".into(),
+                interface_id: "default".into(),
                 base_url: "http://upstream.invalid".into(),
                 canonical_model_id: "gemini-2.5-flash".into(),
                 wire_model: "gemini-2.5-flash".into(),

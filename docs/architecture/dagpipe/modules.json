@@ -3,7 +3,8 @@
   "modules": [
     { "id": "request", "status": "graph", "graph": "docs/architecture/dagpipe/v3.operation_runner.request.graph.json" },
     { "id": "response", "status": "graph", "graph": "docs/architecture/dagpipe/v3.operation_runner.response.graph.json" },
-    { "id": "error", "status": "graph", "graph": "docs/architecture/dagpipe/v3.operation_runner.error.graph.json" }
+    { "id": "error", "status": "graph", "graph": "docs/architecture/dagpipe/v3.operation_runner.error.graph.json" },
+    { "id": "provider_interface", "status": "graph", "graph": "docs/architecture/dagpipe/graphs/provider-multi-interface-wiring.graph.json" }
   ],
   "extensions": [
     { "id": "dsh-responses-function-call-terminal", "status": "graph", "graph": "docs/architecture/dagpipe/dsh-responses-function-call-terminal.graph.json" }

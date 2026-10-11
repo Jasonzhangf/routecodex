@@ -332,6 +332,12 @@ fn manifest_contains_cooldown_key(
     if !provider.enabled {
         return false;
     }
+    let Some(interface) = provider.interfaces.get(&key.interface_id) else {
+        return false;
+    };
+    if !interface.enabled {
+        return false;
+    }
     if let Some(auth_alias) = key.auth_alias.as_deref() {
         if !provider
             .auth
@@ -443,6 +449,7 @@ fn provider_cooldown_persistence_entries(
             Some((
                 V3ProviderCooldownKey {
                     provider_id: key.provider_id.clone(),
+                    interface_id: key.interface_id.clone(),
                     auth_alias: key.auth_alias.clone(),
                     model_id: probe.probe_model_id.clone(),
                     failure_class: if state.auth_key_cooldowns.contains_key(key) {
@@ -580,6 +587,7 @@ mod tests {
         let manifest = manifest("primary", "127.0.0.1", 1);
         let valid = V3ProviderCooldownKey {
             provider_id: "p".into(),
+            interface_id: "default".into(),
             auth_alias: Some("k".into()),
             model_id: Some("m".into()),
             failure_class: V3ProviderCooldownFailureClass::Semantic,
@@ -596,10 +604,48 @@ mod tests {
             model_id: Some("removed-model".into()),
             ..valid.clone()
         };
+        let stale_interface = V3ProviderCooldownKey {
+            interface_id: "removed-interface".into(),
+            ..valid.clone()
+        };
         assert!(manifest_contains_cooldown_key(&manifest, &valid));
         assert!(!manifest_contains_cooldown_key(&manifest, &stale_provider));
         assert!(!manifest_contains_cooldown_key(&manifest, &stale_auth));
         assert!(!manifest_contains_cooldown_key(&manifest, &stale_model));
+        assert!(!manifest_contains_cooldown_key(&manifest, &stale_interface));
+
+        let mut named_manifest = manifest.clone();
+        let provider = named_manifest
+            .providers
+            .get_mut("p")
+            .expect("fixture provider");
+        let mut chat = provider
+            .interfaces
+            .get("default")
+            .expect("default interface")
+            .clone();
+        chat.id = "chat".to_string();
+        provider.interfaces.insert("chat".to_string(), chat);
+        let named_interface = V3ProviderCooldownKey {
+            interface_id: "chat".into(),
+            ..valid.clone()
+        };
+        assert!(manifest_contains_cooldown_key(
+            &named_manifest,
+            &named_interface
+        ));
+        named_manifest
+            .providers
+            .get_mut("p")
+            .expect("fixture provider")
+            .interfaces
+            .get_mut("chat")
+            .expect("named interface")
+            .enabled = false;
+        assert!(!manifest_contains_cooldown_key(
+            &named_manifest,
+            &named_interface
+        ));
     }
 
     fn manifest(server_id: &str, bind: &str, port: u16) -> V3Config05ManifestPublished {
@@ -797,7 +843,7 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
     fn unsupported_provider_cooldown_schema_disables_persistence_without_overwriting() {
         let root = tempfile::tempdir().expect("create isolated persistence directory");
         let path = root.path().join("provider-cooldowns.json");
-        let contents = br#"{"schema_version": 3, "entries": []}"#;
+        let contents = br#"{"schema_version": 4, "entries": []}"#;
         std::fs::write(&path, contents).expect("write unsupported cooldown state");
         let manifest = manifest("s", "127.0.0.1", 1);
 
@@ -817,7 +863,7 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
             "{alarm}"
         );
         assert!(
-            alarm.contains("unsupported provider cooldown state schema 3"),
+            alarm.contains("unsupported provider cooldown state schema 4"),
             "{alarm}"
         );
         assert_eq!(std::fs::read(&path).expect("read original state"), contents);
@@ -828,7 +874,7 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
         assert!(writer
             .alarm()
             .expect("disabled persistence must retain its first failure")
-            .contains("unsupported provider cooldown state schema 3"));
+            .contains("unsupported provider cooldown state schema 4"));
     }
 
     #[test]

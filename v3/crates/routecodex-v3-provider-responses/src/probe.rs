@@ -134,6 +134,7 @@ mod tests {
         let target = V3ResponsesProviderTarget {
             provider_id: "inferai".into(),
             provider_type: "openai_chat".into(),
+            interface_id: "default".into(),
             base_url: "https://inferaiapi.com/v1".into(),
             canonical_model_id: "deepseek-v4.1-flash".into(),
             wire_model: "deepseek-v4.1-flash".into(),

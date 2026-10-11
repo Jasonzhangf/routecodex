@@ -235,8 +235,41 @@ pub fn validate_provider_candidate(
             );
         }
     }
+    let legacy_base_url_present = !config.provider.base_url.trim().is_empty();
+    let interfaces_present = !config.provider.interfaces.is_empty();
     let base_url = config.provider.base_url.trim().to_string();
-    if base_url.is_empty() {
+    if interfaces_present {
+        if legacy_base_url_present {
+            push_contract_error(
+                &mut errors,
+                "base_url",
+                "baseURL cannot be combined with provider interfaces",
+            );
+        }
+        if config.provider.interfaces.values().all(|i| !i.enabled) {
+            push_contract_error(
+                &mut errors,
+                "interfaces",
+                "at least one provider interface must be enabled",
+            );
+        }
+        for (interface_id, interface) in &config.provider.interfaces {
+            let interface_base_url = interface.base_url.trim();
+            if interface_base_url.is_empty() {
+                push_contract_error(
+                    &mut errors,
+                    &format!("interfaces.{interface_id}.base_url"),
+                    "interface baseURL is required",
+                );
+            } else if !is_http_url(interface_base_url) {
+                push_contract_error(
+                    &mut errors,
+                    &format!("interfaces.{interface_id}.base_url"),
+                    "interface baseURL must be an absolute http(s) URL",
+                );
+            }
+        }
+    } else if base_url.is_empty() {
         push_contract_error(&mut errors, "base_url", "baseURL is required");
     } else if !is_http_url(&base_url) {
         push_contract_error(
@@ -269,7 +302,11 @@ pub fn validate_provider_candidate(
     let mut validation = ProviderCandidateValidation {
         ok: false,
         provider_id: id.to_string(),
-        provider_type: config.provider.provider_type.trim().to_string(),
+        provider_type: if interfaces_present {
+            "interfaces".to_string()
+        } else {
+            config.provider.provider_type.trim().to_string()
+        },
         normalized_type: None,
         base_url,
         default_model,
@@ -579,6 +616,45 @@ supportsStreaming = true
         let result = validate_provider_candidate("fresh", &bad_url);
         assert!(!result.ok);
         assert_eq!(result.errors[0].field, "base_url");
+        assert!(result.compile_error.is_none());
+    }
+
+    #[test]
+    fn candidate_validation_accepts_multi_interface_provider() {
+        let mut config = candidate("multi", "openai_chat");
+        config.provider.provider_type.clear();
+        config.provider.base_url.clear();
+        config.provider.interfaces = std::collections::BTreeMap::from([
+            (
+                "responses".to_string(),
+                routecodex_v3_config::V3ProviderInterfaceAuthoringConfig {
+                    enabled: true,
+                    interface_type: "responses".to_string(),
+                    base_url: "https://multi.invalid/v1".to_string(),
+                    responses: Some(routecodex_v3_config::V3ProviderResponsesAuthoringConfig {
+                        process: "chat".to_string(),
+                        streaming: routecodex_v3_config::V3StreamingPolicy::Always,
+                        transport: routecodex_v3_config::V3ResponsesTransportKind::Http,
+                        websocket_v2_url: None,
+                    }),
+                    compatibility_profile: None,
+                },
+            ),
+            (
+                "chat".to_string(),
+                routecodex_v3_config::V3ProviderInterfaceAuthoringConfig {
+                    enabled: true,
+                    interface_type: "openai_chat".to_string(),
+                    base_url: "https://multi.invalid/chat/v1".to_string(),
+                    responses: None,
+                    compatibility_profile: None,
+                },
+            ),
+        ]);
+
+        let result = validate_provider_candidate("multi", &config);
+        assert!(result.ok, "errors: {:?}", result.errors);
+        assert_eq!(result.provider_type, "interfaces");
         assert!(result.compile_error.is_none());
     }
 

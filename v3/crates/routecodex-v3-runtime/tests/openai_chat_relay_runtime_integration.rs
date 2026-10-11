@@ -2041,7 +2041,12 @@ async fn openai_chat_provider_pool_exhaustion_holds_between_failed_and_successfu
         .providers
         .get_mut(scope)
         .expect("probe provider must exist");
-    provider.base_url = base_url;
+    provider.base_url = base_url.clone();
+    provider
+        .interfaces
+        .get_mut("default")
+        .expect("default interface must exist")
+        .base_url = base_url;
     provider.auth.entries[0].env = Some("ROUTECODEX_V3_POOL_PROBE_TEST_KEY".into());
     provider.health = Some(routecodex_v3_config::V3ProviderHealthAuthoringConfig {
         enabled: true,
@@ -2149,6 +2154,11 @@ async fn openai_chat_provider_probe_success_reselects_and_connects_provider() {
         .get_mut(scope)
         .expect("probe provider must exist");
     provider.base_url = base_url.clone();
+    provider
+        .interfaces
+        .get_mut("default")
+        .expect("default interface must exist")
+        .base_url = base_url.clone();
     provider.auth.entries[0].env = Some("ROUTECODEX_V3_POOL_PROBE_TEST_KEY".into());
     std::env::set_var("ROUTECODEX_V3_POOL_PROBE_TEST_KEY", "routecodex-test-key");
     let provider_health =
@@ -2940,6 +2950,7 @@ fn global_probe_rejects_explicit_unrouted_model() {
     let error = build_v3_provider_global_probe_target(
         &manifest,
         identity,
+        "default",
         Some(identity),
         Some("model-that-is-not-routed"),
     )

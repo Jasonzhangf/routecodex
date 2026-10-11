@@ -59,7 +59,12 @@ async fn responses_probe_terminal_clears_cooldown(scope: &str, body: &'static st
     );
     let mut manifest = global_pool_alive_manifest(scope);
     let provider = manifest.providers.get_mut("first").expect("first provider");
-    provider.base_url = base_url;
+    provider.base_url = base_url.clone();
+    provider
+        .interfaces
+        .get_mut("default")
+        .expect("default provider interface")
+        .base_url = base_url;
     provider.auth.entries[0].env = Some("ROUTECODEX_V3_RESPONSES_PROBE_TERMINAL_KEY".into());
     std::env::set_var(
         "ROUTECODEX_V3_RESPONSES_PROBE_TERMINAL_KEY",

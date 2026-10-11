@@ -3,6 +3,11 @@ use routecodex_v3_error::{
     build_v3_provider_global_error_fingerprint, build_v3_provider_global_failure_policy,
     V3ProviderErrorFingerprint, V3ProviderFailureSessionScope,
 };
+use routecodex_v3_provider_responses::{
+    V3ProviderFailureAction, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
+    V3ProviderHealthStore, V3ProviderKeyHealthStore, V3ProviderRecoveryKind,
+    V3ProviderSchedulingProjection,
+};
 
 #[test]
 fn ordinary_429_requires_three_consecutive_failures_of_exact_identity() {
@@ -55,11 +60,6 @@ fn ordinary_429_requires_three_consecutive_failures_of_exact_identity() {
             .cooldown
     );
 }
-use routecodex_v3_provider_responses::{
-    V3ProviderFailureAction, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
-    V3ProviderHealthStore, V3ProviderKeyHealthStore, V3ProviderRecoveryKind,
-    V3ProviderSchedulingProjection,
-};
 
 #[test]
 fn health_projection_without_history_uses_contract_default_score() {
@@ -107,13 +107,20 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "a", pr
     assert_eq!(first.score_milli, 0);
     assert!(
         !first.cooldown,
-        "the health store consumes the typed threshold as declared; a low-priority key stays available until threshold 3"
+        "one thresholded failure must not cool down a low-priority key"
     );
     assert!(first.available);
+    assert!(store
+        .provider_cooldown_probe_keys(100, false)
+        .expect("probe keys after first failure")
+        .is_empty());
     let first_scheduling = store
         .scheduling_projection("p", "a", "m", 1, 1, 100)
         .expect("first scheduling projection");
-    assert!(first_scheduling.available);
+    assert!(
+        first_scheduling.available,
+        "score zero without a cooldown must remain schedulable"
+    );
     assert_eq!(first_scheduling.score_milli, 0);
     assert_eq!(first_scheduling.effective_weight_milli, 1);
     assert!(first_scheduling.blocked_scopes.is_empty());
@@ -257,7 +264,7 @@ fn mixed_recoverable_fingerprints_do_not_share_an_identity() {
             .expect("recoverable failure")
     };
     // 500 / 502 / 503 各一次：每次换指纹都重启连续计数，三次都是"第 1 次"，
-    // 不得凑成一次 auth-key 冷却。
+    // 不得凑成一次 exact identity 冷却。
     record("model-a", 500, 100);
     record("model-b", 502, 101);
     record("model-c", 503, 102);
@@ -476,7 +483,7 @@ fn two_502_failures_enter_cooldown() {
         .expect("first 502 failure");
     assert!(
         first.cooldown,
-        "first typed provider failure cools exact identity"
+        "a single recoverable 502 must cool the provider immediately"
     );
     assert_eq!(
         store
@@ -536,12 +543,33 @@ fn success_streak_increments_and_failure_resets_it() {
 
 #[test]
 fn health_score_does_not_change_configured_priority_or_weight() {
-    let healthy =
-        V3ProviderSchedulingProjection::new("provider-a", "key-a", "model-a", 1, 1000, 100);
-    let degraded =
-        V3ProviderSchedulingProjection::new("provider-b", "key-b", "model-b", 1, 500, 100);
-    let lower_priority =
-        V3ProviderSchedulingProjection::new("provider-c", "key-c", "model-c", 2, 1000, 100);
+    let healthy = V3ProviderSchedulingProjection::new(
+        "provider-a",
+        "default",
+        "key-a",
+        "model-a",
+        1,
+        1000,
+        100,
+    );
+    let degraded = V3ProviderSchedulingProjection::new(
+        "provider-b",
+        "default",
+        "key-b",
+        "model-b",
+        1,
+        500,
+        100,
+    );
+    let lower_priority = V3ProviderSchedulingProjection::new(
+        "provider-c",
+        "default",
+        "key-c",
+        "model-c",
+        2,
+        1000,
+        100,
+    );
 
     assert_eq!(
         healthy.effective_weight_milli,
@@ -555,10 +583,24 @@ fn health_score_does_not_change_configured_priority_or_weight() {
 
 #[test]
 fn health_score_preserves_configured_priority() {
-    let healthy =
-        V3ProviderSchedulingProjection::new("provider-a", "key-a", "model-a", 10, 1_020, 1);
-    let degraded =
-        V3ProviderSchedulingProjection::new("provider-b", "key-b", "model-b", 10, 900, 1);
+    let healthy = V3ProviderSchedulingProjection::new(
+        "provider-a",
+        "default",
+        "key-a",
+        "model-a",
+        10,
+        1_020,
+        1,
+    );
+    let degraded = V3ProviderSchedulingProjection::new(
+        "provider-b",
+        "default",
+        "key-b",
+        "model-b",
+        10,
+        900,
+        1,
+    );
 
     assert_eq!(healthy.effective_priority, 10);
     assert_eq!(degraded.effective_priority, 10);
@@ -589,18 +631,39 @@ fn health_score_controls_weight_without_changing_priority_bucket() {
 
 #[test]
 fn extreme_positive_health_score_preserves_configured_priority() {
-    let projection =
-        V3ProviderSchedulingProjection::new("provider-a", "key-a", "model-a", 10, 5_000, 1);
+    let projection = V3ProviderSchedulingProjection::new(
+        "provider-a",
+        "default",
+        "key-a",
+        "model-a",
+        10,
+        5_000,
+        1,
+    );
 
     assert_eq!(projection.effective_priority, 10);
 }
 
 #[test]
 fn odd_configured_priorities_are_not_health_adjusted() {
-    let priority_one =
-        V3ProviderSchedulingProjection::new("provider-a", "key-a", "model-a", 1, 5_000, 1);
-    let priority_three =
-        V3ProviderSchedulingProjection::new("provider-b", "key-b", "model-b", 3, 5_000, 1);
+    let priority_one = V3ProviderSchedulingProjection::new(
+        "provider-a",
+        "default",
+        "key-a",
+        "model-a",
+        1,
+        5_000,
+        1,
+    );
+    let priority_three = V3ProviderSchedulingProjection::new(
+        "provider-b",
+        "default",
+        "key-b",
+        "model-b",
+        3,
+        5_000,
+        1,
+    );
 
     assert_eq!(priority_one.effective_priority, 1);
     assert_eq!(priority_three.effective_priority, 3);
@@ -608,15 +671,23 @@ fn odd_configured_priorities_are_not_health_adjusted() {
 
 #[test]
 fn zero_configured_priority_is_not_health_adjusted() {
-    let projection =
-        V3ProviderSchedulingProjection::new("provider-a", "key-a", "model-a", 0, 5_000, 1);
+    let projection = V3ProviderSchedulingProjection::new(
+        "provider-a",
+        "default",
+        "key-a",
+        "model-a",
+        0,
+        5_000,
+        1,
+    );
 
     assert_eq!(projection.effective_priority, 0);
 }
 
 #[test]
 fn score_zero_keeps_a_positive_minimum_scheduling_weight() {
-    let projection = V3ProviderSchedulingProjection::new("provider-a", "key-a", "model-a", 1, 0, 7);
+    let projection =
+        V3ProviderSchedulingProjection::new("provider-a", "default", "key-a", "model-a", 1, 0, 7);
     assert_eq!(projection.effective_weight_milli, 7);
     assert!(projection.available);
 }
@@ -962,4 +1033,49 @@ fn production_failure_actions_keep_distinct_5xx_and_class_identities() {
         );
         assert!(!projection.cooldown);
     }
+}
+
+#[test]
+fn provider_health_cooldown_is_isolated_between_interfaces() {
+    let store = V3ProviderKeyHealthStore::default();
+    let action = V3ProviderFailureAction::recoverable("transport");
+    for now_ms in 100..120 {
+        store
+            .record_provider_failure_action_for_interface(
+                "provider-a",
+                "responses",
+                "key-a",
+                "model-a",
+                &action,
+                now_ms,
+            )
+            .expect("interface failure");
+    }
+
+    let cooled_interface = store
+        .scheduling_projection_for_key_with_interface(
+            "provider-a",
+            "responses",
+            "key-a",
+            "model-a",
+            1,
+            1,
+            900_103,
+        )
+        .expect("cooled interface projection");
+    let sibling_interface = store
+        .scheduling_projection_for_key_with_interface(
+            "provider-a",
+            "chat",
+            "key-a",
+            "model-a",
+            1,
+            1,
+            900_103,
+        )
+        .expect("sibling interface projection");
+
+    assert!(!cooled_interface.available);
+    assert!(sibling_interface.available);
+    assert_eq!(sibling_interface.score_milli, 1);
 }

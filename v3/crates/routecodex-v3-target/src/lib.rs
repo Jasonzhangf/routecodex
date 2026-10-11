@@ -20,6 +20,7 @@ mod tests;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3TargetCandidate {
     pub provider_id: String,
+    pub interface_id: String,
     pub provider_type: String,
     pub auth_alias: String,
     pub model_id: String,
@@ -104,6 +105,11 @@ pub enum V3TargetError {
         provider_id: String,
         auth_alias: String,
     },
+    #[error("provider {provider_id} interface {interface_id} is absent or disabled")]
+    InterfaceMissing {
+        provider_id: String,
+        interface_id: String,
+    },
     #[error("requested model {model_id} has no candidate in the selected target plan")]
     RequestedModelUnavailable { model_id: String },
     #[error("selected target has no concrete candidates")]
@@ -130,6 +136,37 @@ impl<'a, R: V3ProviderAvailabilityReader> V3AvailabilitySchedulingAdapter<'a, R>
 impl<R: V3ProviderAvailabilityReader> V3ProviderSchedulingReader
     for V3AvailabilitySchedulingAdapter<'_, R>
 {
+    fn scheduling_projection_for_interface(
+        &self,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: &str,
+        model_id: &str,
+        priority: i32,
+        base_weight: u32,
+        now_ms: u64,
+    ) -> routecodex_v3_provider_responses::V3ProviderSchedulingProjection {
+        let availability = self.availability.availability_for_interface(
+            provider_id,
+            interface_id,
+            Some(auth_alias),
+            Some(model_id),
+            now_ms,
+        );
+        let mut projection = routecodex_v3_provider_responses::V3ProviderSchedulingProjection::new(
+            provider_id,
+            interface_id,
+            auth_alias,
+            model_id,
+            priority,
+            1_000,
+            base_weight,
+        );
+        projection.available = availability.available;
+        projection.blocked_scopes = availability.blocked_scopes;
+        projection
+    }
+
     fn scheduling_projection(
         &self,
         provider_id: &str,
@@ -139,11 +176,16 @@ impl<R: V3ProviderAvailabilityReader> V3ProviderSchedulingReader
         base_weight: u32,
         now_ms: u64,
     ) -> routecodex_v3_provider_responses::V3ProviderSchedulingProjection {
-        let availability =
-            self.availability
-                .availability(provider_id, Some(auth_alias), Some(model_id), now_ms);
+        let availability = self.availability.availability_for_interface(
+            provider_id,
+            "default",
+            Some(auth_alias),
+            Some(model_id),
+            now_ms,
+        );
         let mut projection = routecodex_v3_provider_responses::V3ProviderSchedulingProjection::new(
             provider_id,
+            "default",
             auth_alias,
             model_id,
             priority,
@@ -164,6 +206,7 @@ struct V3TargetExpansionScope {
     required_capabilities: Vec<String>,
     requested_model_filter: Option<String>,
     visible_model_ids: Vec<String>,
+    interface_filter: Option<String>,
 }
 
 impl V3TargetInterpreter {
@@ -197,6 +240,7 @@ impl V3TargetInterpreter {
                     Some(provider_id),
                     Some(model_id),
                     None,
+                    entry.interface.as_deref(),
                     entry.priority,
                     entry.weight,
                     deterministic_sample,
@@ -207,12 +251,14 @@ impl V3TargetInterpreter {
                         required_capabilities: Vec::new(),
                         requested_model_filter: None,
                         visible_model_ids: Vec::new(),
+                        interface_filter: entry.interface.clone(),
                     },
                 ) {
                     Ok(expanded) => {
                         for candidate in expanded {
                             let key = (
                                 candidate.provider_id.clone(),
+                                candidate.interface_id.clone(),
                                 candidate.auth_alias.clone(),
                                 candidate.model_id.clone(),
                                 candidate_satisfies_required_capabilities(&candidate),
@@ -265,12 +311,14 @@ impl V3TargetInterpreter {
                     required_capabilities,
                     requested_model_filter: requested_model_filter.clone(),
                     visible_model_ids: Vec::new(),
+                    interface_filter: entry.interface.clone(),
                 },
             ) {
                 Ok(expanded) => {
                     for candidate in expanded {
                         let key = (
                             candidate.provider_id.clone(),
+                            candidate.interface_id.clone(),
                             candidate.auth_alias.clone(),
                             candidate.model_id.clone(),
                             candidate_satisfies_required_capabilities(&candidate),
@@ -365,8 +413,9 @@ impl V3TargetInterpreter {
                 .len()
                 .saturating_sub(route_tier_index);
             let route_priority = (route_tier_rank as i32).saturating_mul(1_000_000);
-            let mut projection = scheduling.scheduling_projection(
+            let mut projection = scheduling.scheduling_projection_for_interface(
                 &candidate.provider_id,
+                &candidate.interface_id,
                 &candidate.auth_alias,
                 &candidate.model_id,
                 candidate.priority,
@@ -555,12 +604,16 @@ impl V3TargetInterpreter {
             for unavailable in candidates {
                 if let Some(candidate) = expanded.candidates.iter().find(|candidate| {
                     format!(
-                        "{}:{}:{}:health_cooldown",
-                        candidate.provider_id, candidate.auth_alias, candidate.model_id
+                        "{}:{}:{}:{}:health_cooldown",
+                        candidate.provider_id,
+                        candidate.interface_id,
+                        candidate.auth_alias,
+                        candidate.model_id
                     ) == *unavailable
                 }) {
-                    let projection = availability.availability(
+                    let projection = availability.availability_for_interface(
                         &candidate.provider_id,
+                        &candidate.interface_id,
                         Some(&candidate.auth_alias),
                         Some(&candidate.model_id),
                         now_ms,
@@ -602,6 +655,7 @@ impl V3TargetInterpreter {
                 target.provider.as_deref(),
                 target.model.as_deref(),
                 target.key.as_deref(),
+                target.interface.as_deref(),
                 target.priority.unwrap_or(0),
                 target.weight.unwrap_or(1),
                 sample,
@@ -668,6 +722,7 @@ impl V3TargetInterpreter {
                     target.provider.as_deref(),
                     target.model.as_deref().or(Some(forwarder.model.as_str())),
                     target.key.as_deref(),
+                    target.interface.as_deref(),
                     target.priority.unwrap_or(0),
                     target.weight.unwrap_or(1),
                     sample.wrapping_add(index as u64),
@@ -703,6 +758,7 @@ impl V3TargetInterpreter {
         provider_id: Option<&str>,
         model_id: Option<&str>,
         key: Option<&str>,
+        interface_id: Option<&str>,
         priority: i32,
         weight: u32,
         sample: u64,
@@ -761,59 +817,81 @@ impl V3TargetInterpreter {
             entries.rotate_left(offset);
             entries
         };
+        let interfaces = if let Some(interface_id) = interface_id {
+            vec![provider
+                .interfaces
+                .get(interface_id)
+                .filter(|interface| interface.enabled)
+                .ok_or_else(|| V3TargetError::InterfaceMissing {
+                    provider_id: provider_id.to_string(),
+                    interface_id: interface_id.to_string(),
+                })?]
+        } else {
+            provider
+                .interfaces
+                .values()
+                .filter(|interface| interface.enabled)
+                .collect::<Vec<_>>()
+        };
         Ok(entries
             .into_iter()
-            .map(|entry| V3TargetCandidate {
-                provider_id: provider_id.to_string(),
-                provider_type: provider.provider_type.clone(),
-                auth_alias: entry.alias.clone(),
-                model_id: model.id.clone(),
-                wire_model: model.wire_name.clone(),
-                visible_model_ids: visible_model_ids.clone(),
-                model_capabilities: model.capabilities.clone(),
-                web_search_execution_mode: model.web_search_execution_mode,
-                max_context_tokens: model.max_context_tokens,
-                max_tokens: model.max_tokens,
-                context_token_estimate_scale_bps: model.context_token_estimate_scale_bps,
-                base_url: provider.base_url.clone(),
-                responses_process: provider
-                    .responses
-                    .as_ref()
-                    .map(|responses| responses.process.clone()),
-                responses_transport: provider
-                    .responses
-                    .as_ref()
-                    .map(|responses| responses.transport)
-                    .unwrap_or_default(),
-                websocket_v2_url: provider
-                    .responses
-                    .as_ref()
-                    .and_then(|responses| responses.websocket_v2_url.clone()),
-                provider_request_cleanup: provider.provider_request_cleanup.clone(),
-                reasoning_effort: provider.reasoning_effort,
-                request_timeout_ms: provider.request_timeout_ms,
-                sse_first_frame_timeout_ms: provider.sse_first_frame_timeout_ms,
-                initial_concurrency_budget: provider
-                    .concurrency
-                    .as_ref()
-                    .map_or(8, |concurrency| concurrency.max_in_flight),
-                concurrency_acquire_timeout_ms: provider
-                    .concurrency
-                    .as_ref()
-                    .map_or(60_000, |concurrency| concurrency.acquire_timeout_ms),
-                compatibility_profile: provider.compatibility_profile.clone(),
-                headers: provider.headers.clone(),
-                env_name: entry.env.clone(),
-                token_file: entry.token_file.clone(),
-                secret_file: entry.secret_file.clone(),
-                secret_key: entry.secret_key.clone(),
-                api_key: entry.api_key.clone(),
-                required_capabilities: scope.required_capabilities.clone(),
-                priority,
-                weight: weight.max(1),
-                pool_ids: scope.pool_ids.clone(),
-                default_pool_member: scope.default_pool_member,
-                path: scope.path.clone(),
+            .flat_map(|entry| {
+                interfaces.iter().map(|interface| V3TargetCandidate {
+                    provider_id: provider_id.to_string(),
+                    interface_id: interface.id.clone(),
+                    provider_type: interface.provider_type.clone(),
+                    auth_alias: entry.alias.clone(),
+                    model_id: model.id.clone(),
+                    wire_model: model.wire_name.clone(),
+                    visible_model_ids: visible_model_ids.clone(),
+                    model_capabilities: model.capabilities.clone(),
+                    web_search_execution_mode: model.web_search_execution_mode,
+                    max_context_tokens: model.max_context_tokens,
+                    max_tokens: model.max_tokens,
+                    context_token_estimate_scale_bps: model.context_token_estimate_scale_bps,
+                    base_url: interface.base_url.clone(),
+                    responses_process: interface
+                        .responses
+                        .as_ref()
+                        .map(|responses| responses.process.clone()),
+                    responses_transport: interface
+                        .responses
+                        .as_ref()
+                        .map(|responses| responses.transport)
+                        .unwrap_or_default(),
+                    websocket_v2_url: interface
+                        .responses
+                        .as_ref()
+                        .and_then(|responses| responses.websocket_v2_url.clone()),
+                    provider_request_cleanup: provider.provider_request_cleanup.clone(),
+                    reasoning_effort: provider.reasoning_effort,
+                    request_timeout_ms: provider.request_timeout_ms,
+                    sse_first_frame_timeout_ms: provider.sse_first_frame_timeout_ms,
+                    initial_concurrency_budget: provider
+                        .concurrency
+                        .as_ref()
+                        .map_or(8, |concurrency| concurrency.max_in_flight),
+                    concurrency_acquire_timeout_ms: provider
+                        .concurrency
+                        .as_ref()
+                        .map_or(60_000, |concurrency| concurrency.acquire_timeout_ms),
+                    compatibility_profile: interface
+                        .compatibility_profile
+                        .clone()
+                        .or_else(|| provider.compatibility_profile.clone()),
+                    headers: provider.headers.clone(),
+                    env_name: entry.env.clone(),
+                    token_file: entry.token_file.clone(),
+                    secret_file: entry.secret_file.clone(),
+                    secret_key: entry.secret_key.clone(),
+                    api_key: entry.api_key.clone(),
+                    required_capabilities: scope.required_capabilities.clone(),
+                    priority,
+                    weight: weight.max(1),
+                    pool_ids: scope.pool_ids.clone(),
+                    default_pool_member: scope.default_pool_member,
+                    path: scope.path.clone(),
+                })
             })
             .collect())
     }
@@ -1128,8 +1206,8 @@ fn format_candidate_availability_unavailable(
     projection: &routecodex_v3_provider_responses::V3ProviderAvailabilityProjection,
 ) -> String {
     let key = format!(
-        "{}:{}:{}",
-        candidate.provider_id, candidate.auth_alias, candidate.model_id
+        "{}:{}:{}:{}",
+        candidate.provider_id, candidate.interface_id, candidate.auth_alias, candidate.model_id
     );
     if projection.blocked_scopes.is_empty() {
         return key;
@@ -1146,8 +1224,8 @@ fn format_candidate_scheduling_unavailable(
     projection: &routecodex_v3_provider_responses::V3ProviderSchedulingProjection,
 ) -> String {
     let key = format!(
-        "{}:{}:{}",
-        candidate.provider_id, candidate.auth_alias, candidate.model_id
+        "{}:{}:{}:{}",
+        candidate.provider_id, candidate.interface_id, candidate.auth_alias, candidate.model_id
     );
     if projection.blocked_scopes.is_empty() {
         return format!("{key}:health_cooldown");

@@ -50,11 +50,21 @@ export async function writeModels(providerId, body) {
 }
 
 /** E4 capability test. Read-only on the server: it must never mutate config. */
-export async function requestCapabilityTest(providerId, model, capabilities) {
+export async function requestCapabilityTest(providerId, model, capabilities, interfaceId = null) {
   return api(capabilityTestPath(providerId), {
     method: "POST",
-    body: JSON.stringify({ model, capabilities }),
+    body: JSON.stringify({ model, capabilities, interface_id: interfaceId || null }),
   });
+}
+
+/** Resolve the same default-or-first-enabled interface the server probe path uses. */
+export function capabilityInterfaceId(config) {
+  const interfaces = config?.provider?.interfaces;
+  if (!interfaces || typeof interfaces !== "object" || Array.isArray(interfaces)) return "default";
+  const ids = Object.keys(interfaces);
+  if (!ids.length) return "default";
+  if (interfaces.default && interfaces.default.enabled !== false) return "default";
+  return ids.find((id) => interfaces[id]?.enabled !== false) || null;
 }
 
 export function modelEntries(config) {

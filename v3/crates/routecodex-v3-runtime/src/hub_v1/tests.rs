@@ -257,6 +257,7 @@ fn all_adjacent_builders_form_the_fixed_typed_topology() {
         routecodex_v3_target::V3TargetCandidate {
             provider_id: "provider".into(),
             provider_type: "openai_chat".into(),
+            interface_id: "default".into(),
             auth_alias: "primary".into(),
             model_id: "model".into(),
             wire_model: "wire-model".into(),
@@ -335,6 +336,7 @@ fn direct_req_compat_projects_chat_to_selected_provider_protocol() {
         routecodex_v3_target::V3TargetCandidate {
             provider_id: "provider".into(),
             provider_type: "responses".into(),
+            interface_id: "default".into(),
             auth_alias: "primary".into(),
             model_id: "model".into(),
             wire_model: "wire-model".into(),
@@ -412,6 +414,7 @@ fn provider_req_compat_loads_selected_target_profile() {
         routecodex_v3_target::V3TargetCandidate {
             provider_id: "minimax".into(),
             provider_type: "anthropic".into(),
+            interface_id: "default".into(),
             auth_alias: "key1".into(),
             model_id: "MiniMax-M3".into(),
             wire_model: "MiniMax-M3".into(),
@@ -838,6 +841,7 @@ fn v3_output_cap_test_candidate(
 ) -> routecodex_v3_target::V3TargetCandidate {
     routecodex_v3_target::V3TargetCandidate {
         provider_id: "provider".into(),
+        interface_id: "default".into(),
         provider_type: provider_type.into(),
         auth_alias: "primary".into(),
         model_id: "model".into(),

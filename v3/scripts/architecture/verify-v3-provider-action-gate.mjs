@@ -546,8 +546,12 @@ for (const [name, source, rel] of [
     failures.push(`${rel}: Relay Skeleton provider compat failure bypasses typed Error05`);
   }
 }
-for (const token of [
+requireText(
+  findFunctionBody(text.policy, 'V3ProviderFailureRuntimeHealth::from', files.policy),
+  files.policy,
   'action_gate: V3ProviderActionGate::process_shared()',
+);
+for (const token of [
   'project_v3_client_disconnect',
   'record_provider_action_failure',
   'record_terminal_provider_projection_in_scope',

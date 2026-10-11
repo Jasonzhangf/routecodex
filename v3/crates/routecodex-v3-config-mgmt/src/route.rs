@@ -44,6 +44,8 @@ pub struct RouteMemberView {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interface: Option<String>,
     pub priority: i32,
     pub weight: Option<u32>,
 }
@@ -295,6 +297,7 @@ pub fn pool_view_from_authoring(name: &str, pool: &V3RoutePoolAuthoringConfig) -
             provider: target.provider.clone(),
             model: target.model.clone(),
             key: target.key.clone(),
+            interface: target.interface.clone(),
             priority,
             weight: target.weight,
         });
@@ -364,6 +367,7 @@ fn flatten_tiers(tiers: &[RouteTierView]) -> Vec<V3RoutePoolTargetAuthoringConfi
                 provider: member.provider.clone(),
                 model: member.model.clone(),
                 key: member.key.clone(),
+                interface: member.interface.clone(),
                 priority: Some(member.priority),
                 weight: member.weight,
             });

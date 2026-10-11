@@ -274,6 +274,7 @@ fn target_public_boundary_reports_typed_selection_exhaustion() {
         ) -> V3ProviderSchedulingProjection {
             let mut projection = V3ProviderSchedulingProjection::new(
                 provider_id,
+                "default",
                 auth_alias,
                 model_id,
                 priority,
@@ -309,7 +310,7 @@ fn target_public_boundary_reports_typed_selection_exhaustion() {
 
     assert_eq!(
         exhausted.attempted_candidates,
-        vec!["entry:key:entry-model:availability(health_cooldown)"]
+        vec!["entry:default:key:entry-model:availability(health_cooldown)"]
     );
 }
 

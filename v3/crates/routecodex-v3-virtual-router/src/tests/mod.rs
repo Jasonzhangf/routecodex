@@ -8,6 +8,7 @@ fn target(id: &str, priority: i32, weight: u32) -> V3RoutePoolTargetManifest {
         provider: None,
         model: None,
         key: None,
+        interface: None,
         priority: Some(priority),
         weight: Some(weight),
     }
@@ -175,6 +176,7 @@ fn manifest_with_direct_provider() -> V3Config05ManifestPublished {
             enabled: true,
             provider_type: "responses".into(),
             base_url: "http://127.0.0.1:9/v1".into(),
+            interfaces: BTreeMap::new(),
             default_model: "model-x".into(),
             auth: V3ProviderAuthManifest {
                 auth_type: V3ProviderAuthType::ApiKey,
@@ -1123,6 +1125,7 @@ fn implicit_capability_pool_round_robin_when_no_explicit_pool() {
             enabled: true,
             provider_type: "anthropic".into(),
             base_url: "http://127.0.0.1:9/v1".into(),
+            interfaces: BTreeMap::new(),
             default_model: "MiniMax-M3".into(),
             auth: V3ProviderAuthManifest {
                 auth_type: V3ProviderAuthType::ApiKey,

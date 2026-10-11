@@ -1,0 +1,185 @@
+{
+  "id": "v3.provider_multi_interface.wiring",
+  "version": "1",
+  "inputs": [
+    {
+      "id": "provider-interface-config-revision",
+      "schema": "Any",
+      "schema_ref": "v3.provider_multi_interface.arc.provider_config_revision"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "parse_provider_interface_authoring",
+      "operator": "routecodex.v3.config.parse_v3_config_02_authoring",
+      "operator_version": "1",
+      "inputs": ["provider-interface-config-revision"],
+      "output": {
+        "id": "authoring-parsed",
+        "schema": "Object",
+        "schema_ref": "v3.provider_multi_interface.arc.authoring_parsed"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [],
+        "writes": ["v3.config.authoring_parsed"]
+      }
+    },
+    {
+      "id": "normalize_and_validate_provider_interfaces",
+      "operator": "routecodex.v3.config.validate_v3_config_03_schema_from_v3_config_02",
+      "operator_version": "1",
+      "inputs": ["authoring-parsed"],
+      "output": {
+        "id": "schema-validated",
+        "schema": "Object",
+        "schema_ref": "v3.provider_multi_interface.arc.schema_validated"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.config.authoring_parsed"],
+        "writes": ["v3.config.schema_validated"]
+      }
+    },
+    {
+      "id": "build_provider_interface_registry",
+      "operator": "routecodex.v3.config.build_v3_config_04_resource_registry_from_v3_config_03",
+      "operator_version": "1",
+      "inputs": ["schema-validated"],
+      "output": {
+        "id": "resource-registry",
+        "schema": "Object",
+        "schema_ref": "v3.provider_multi_interface.arc.resource_registry"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.config.schema_validated"],
+        "writes": ["v3.config.resource_registry"]
+      }
+    },
+    {
+      "id": "publish_provider_interface_manifest",
+      "operator": "routecodex.v3.config.publish_v3_config_05_manifest_from_v3_config_04",
+      "operator_version": "1",
+      "inputs": ["resource-registry"],
+      "output": {
+        "id": "provider-interface-manifest",
+        "schema": "Object",
+        "schema_ref": "v3.provider_multi_interface.arc.provider_interface_manifest"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.config.resource_registry"],
+        "writes": ["v3.config.published_manifest"]
+      }
+    },
+    {
+      "id": "resolve_route_interface_scope",
+      "operator": "routecodex.v3.target.resolve_route_interface_scope",
+      "operator_version": "1",
+      "inputs": ["provider-interface-manifest"],
+      "output": {
+        "id": "route-interface-scope",
+        "schema": "Object",
+        "schema_ref": "v3.provider_multi_interface.arc.route_interface_scope"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.config.published_manifest", "v3.route.opaque_target"],
+        "writes": []
+      }
+    },
+    {
+      "id": "expand_interface_candidates",
+      "operator": "routecodex.v3.target.expand_candidates",
+      "operator_version": "1",
+        "inputs": ["provider-interface-manifest", "route-interface-scope"],
+      "output": {
+        "id": "interface-candidate-set",
+        "schema": "Object",
+        "schema_ref": "v3.provider_multi_interface.arc.interface_candidate_set"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [
+          "v3.config.published_manifest",
+          "v3.config.provider_priority_schedule"
+        ],
+        "writes": ["v3.target.candidate_set"]
+      }
+    },
+    {
+      "id": "select_interface_concrete_provider",
+      "operator": "routecodex.v3.target.select_available",
+      "operator_version": "1",
+      "inputs": ["interface-candidate-set"],
+      "output": {
+        "id": "interface-runtime-target",
+        "schema": "Object",
+        "schema_ref": "v3.provider_multi_interface.arc.interface_runtime_target"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [
+          "v3.target.candidate_set",
+          "v3.provider.availability_projection",
+          "v3.error.action_plan",
+          "v3.provider.responses_transport_capability"
+        ],
+        "writes": ["v3.target.concrete_provider"]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "parse_provider_interface_authoring",
+      "to": "normalize_and_validate_provider_interfaces",
+      "arc_id": "authoring-parsed"
+    },
+    {
+      "from": "normalize_and_validate_provider_interfaces",
+      "to": "build_provider_interface_registry",
+      "arc_id": "schema-validated"
+    },
+    {
+      "from": "build_provider_interface_registry",
+      "to": "publish_provider_interface_manifest",
+      "arc_id": "resource-registry"
+    },
+    {
+      "from": "publish_provider_interface_manifest",
+      "to": "resolve_route_interface_scope",
+      "arc_id": "provider-interface-manifest"
+    },
+    {
+      "from": "resolve_route_interface_scope",
+      "to": "expand_interface_candidates",
+      "arc_id": "route-interface-scope"
+    },
+    {
+      "from": "publish_provider_interface_manifest",
+      "to": "expand_interface_candidates",
+      "arc_id": "provider-interface-manifest"
+    },
+    {
+      "from": "expand_interface_candidates",
+      "to": "select_interface_concrete_provider",
+      "arc_id": "interface-candidate-set"
+    }
+  ],
+  "outputs": ["interface-runtime-target"]
+}

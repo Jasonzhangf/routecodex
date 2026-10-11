@@ -587,6 +587,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             provider_action_permit_target = None;
         }
         let selected_target_provider_id = selected.candidate.provider_id.clone();
+        let selected_target_interface_id = selected.candidate.interface_id.clone();
         let selected_target_auth_alias = selected.candidate.auth_alias.clone();
         let selected_target_model_id = selected.candidate.model_id.clone();
         let selected_target_compatibility_profile =
@@ -1070,6 +1071,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     &provider_health,
                     &input.failure_session_scope,
                     &selected_target_provider_id,
+                    &selected_target_interface_id,
                     &selected_target_auth_alias,
                     &selected_target_model_id,
                 )?;
@@ -1283,6 +1285,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     &provider_health,
                     &input.failure_session_scope,
                     &selected_target_provider_id,
+                    &selected_target_interface_id,
                     &selected_target_auth_alias,
                     &selected_target_model_id,
                 )?;
@@ -1341,14 +1344,16 @@ fn record_provider_success_after_response_governance(
     provider_health: &V3ProviderFailureRuntimeHealth,
     failure_session_scope: &V3ProviderFailureSessionScope,
     provider_id: &str,
+    interface_id: &str,
     auth_alias: &str,
     model_id: &str,
 ) -> Result<(), V3AnthropicRelayRuntimeError> {
     provider_health
-        .record_provider_success_in_failure_scope(
+        .record_provider_success_in_failure_scope_for_interface(
             receipt,
             failure_session_scope,
             provider_id,
+            interface_id,
             Some(auth_alias),
             Some(model_id),
             v3_relay_provider_policy_now_epoch_ms()

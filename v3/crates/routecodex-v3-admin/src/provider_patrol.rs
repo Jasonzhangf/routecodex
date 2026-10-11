@@ -43,6 +43,8 @@ pub struct PatrolPlan {
     pub interval_secs: u64,
     /// 参与 patrol 的 stage，必须是 `l1_contract` / `l2_reachability_auth` / `l3_semantic` 的非空子集。
     pub stages: Vec<String>,
+    #[serde(default)]
+    pub interface_id: Option<String>,
     pub model: Option<String>,
     pub auth_alias: Option<String>,
     pub updated_at_epoch_ms: u64,
@@ -55,6 +57,7 @@ impl PatrolPlan {
             enabled: false,
             interval_secs: DEFAULT_INTERVAL_SECS,
             stages: vec![STAGE_L1.to_string(), STAGE_L3.to_string()],
+            interface_id: None,
             model: None,
             auth_alias: None,
             updated_at_epoch_ms: 0,
@@ -347,6 +350,7 @@ impl PatrolRuntime {
                 provider_id,
                 &entry.config,
                 &plan.stages,
+                plan.interface_id.as_deref(),
                 plan.model.as_deref(),
                 plan.auth_alias.as_deref(),
             )
@@ -573,6 +577,8 @@ pub struct PatrolPlanRequest {
     pub interval_secs: u64,
     pub stages: Vec<String>,
     #[serde(default)]
+    pub interface_id: Option<String>,
+    #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
     pub auth_alias: Option<String>,
@@ -589,6 +595,7 @@ async fn put_plan(
         enabled: request.enabled,
         interval_secs: request.interval_secs,
         stages: request.stages,
+        interface_id: request.interface_id,
         model: request.model,
         auth_alias: request.auth_alias,
         updated_at_epoch_ms: 0,

@@ -12,6 +12,7 @@ pub const V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS: u64 = 5_000;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct V3ProviderCooldownProbeKey {
     pub provider_id: String,
+    pub interface_id: String,
     pub auth_alias: Option<String>,
     pub model_id: Option<String>,
 }
@@ -37,30 +38,35 @@ pub struct V3ProviderCooldownProbeState {
     pub rescue_probe_attempted: bool,
 }
 
-pub fn provider_cooldown_probe_key(
+pub fn provider_cooldown_probe_key_for_interface(
     provider_id: &str,
+    interface_id: &str,
     auth_alias: Option<&str>,
     model_id: Option<&str>,
 ) -> V3ProviderCooldownProbeKey {
     V3ProviderCooldownProbeKey {
         provider_id: provider_id.to_string(),
+        interface_id: interface_id.to_string(),
         auth_alias: auth_alias.map(str::to_string),
         model_id: model_id.map(str::to_string),
     }
 }
 
-pub(crate) fn resolve_provider_cooldown_probe_key(
+pub(crate) fn resolve_provider_cooldown_probe_key_for_interface(
     probes: &BTreeMap<V3ProviderCooldownProbeKey, V3ProviderCooldownProbeState>,
     provider_id: &str,
+    interface_id: &str,
     auth_alias: Option<&str>,
     model_id: Option<&str>,
 ) -> V3ProviderCooldownProbeKey {
-    let exact = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
+    let exact =
+        provider_cooldown_probe_key_for_interface(provider_id, interface_id, auth_alias, model_id);
     if probes.contains_key(&exact) {
         return exact;
     }
     if model_id.is_some() {
-        let auth_key = provider_cooldown_probe_key(provider_id, auth_alias, None);
+        let auth_key =
+            provider_cooldown_probe_key_for_interface(provider_id, interface_id, auth_alias, None);
         if probes.contains_key(&auth_key) {
             return auth_key;
         }

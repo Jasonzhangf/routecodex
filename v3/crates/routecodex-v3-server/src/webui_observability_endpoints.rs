@@ -16,6 +16,10 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+fn default_interface_id() -> String {
+    "default".to_string()
+}
+
 fn loopback_guard(
     _state: &V3ListenerState,
     path: &'static str,
@@ -59,6 +63,8 @@ pub(crate) async fn cooldown_pool(
 #[derive(Debug, serde::Deserialize)]
 pub(crate) struct RemoveCooldownRequest {
     pub provider_id: String,
+    #[serde(default = "default_interface_id")]
+    pub interface_id: String,
     #[serde(default)]
     pub auth_alias: Option<String>,
     #[serde(default)]
@@ -84,12 +90,16 @@ pub(crate) async fn remove_cooldown(
         )
             .into_response();
     }
-    let removed = match state.provider_health.store().remove_cooldown_entry(
-        request.provider_id.trim(),
-        request.auth_alias.as_deref(),
-        request.model_id.as_deref(),
-        &request.kind,
-    ) {
+    let removed = match state
+        .provider_health
+        .store()
+        .remove_cooldown_entry_for_interface(
+            request.provider_id.trim(),
+            request.interface_id.trim(),
+            request.auth_alias.as_deref(),
+            request.model_id.as_deref(),
+            &request.kind,
+        ) {
         Ok(removed) => removed,
         Err(error) => {
             return (
@@ -103,6 +113,7 @@ pub(crate) async fn remove_cooldown(
         "ok": true,
         "removed": removed,
         "provider_id": request.provider_id,
+        "interface_id": request.interface_id,
         "auth_alias": request.auth_alias,
         "model_id": request.model_id,
         "kind": request.kind,
@@ -113,6 +124,8 @@ pub(crate) async fn remove_cooldown(
 #[derive(Debug, serde::Deserialize)]
 pub(crate) struct AddCooldownRequest {
     pub provider_id: String,
+    #[serde(default = "default_interface_id")]
+    pub interface_id: String,
     #[serde(default)]
     pub auth_alias: Option<String>,
     #[serde(default)]
@@ -140,14 +153,18 @@ pub(crate) async fn add_cooldown(
         return response;
     }
     let provider_id = request.provider_id.trim().to_string();
-    let until_ms = match state.provider_health.store().add_cooldown_entry(
-        &provider_id,
-        request.auth_alias.as_deref(),
-        request.model_id.as_deref(),
-        &request.kind,
-        request.duration_ms,
-        now_ms(),
-    ) {
+    let until_ms = match state
+        .provider_health
+        .store()
+        .add_cooldown_entry_for_interface(
+            &provider_id,
+            request.interface_id.trim(),
+            request.auth_alias.as_deref(),
+            request.model_id.as_deref(),
+            &request.kind,
+            request.duration_ms,
+            now_ms(),
+        ) {
         Ok(until_ms) => until_ms,
         Err(error) if error.is_invalid_manual_cooldown() => {
             return (
@@ -171,6 +188,7 @@ pub(crate) async fn add_cooldown(
         "ok": true,
         "applied": request.kind,
         "provider_id": provider_id,
+        "interface_id": request.interface_id,
         "auth_alias": request.auth_alias,
         "model_id": applied_model_id,
         "until_ms": until_ms,
@@ -181,6 +199,8 @@ pub(crate) async fn add_cooldown(
 #[derive(Debug, serde::Deserialize)]
 pub(crate) struct ProbeCooldownRequest {
     pub provider_id: String,
+    #[serde(default = "default_interface_id")]
+    pub interface_id: String,
     #[serde(default)]
     pub auth_alias: Option<String>,
     #[serde(default)]
@@ -215,12 +235,16 @@ pub(crate) async fn probe_cooldown(
         )
             .into_response();
     }
-    let scheduled = match state.provider_health.store().trigger_probe_now(
-        &provider_id,
-        request.auth_alias.as_deref(),
-        request.model_id.as_deref(),
-        now_ms(),
-    ) {
+    let scheduled = match state
+        .provider_health
+        .store()
+        .trigger_probe_now_for_interface(
+            &provider_id,
+            request.interface_id.trim(),
+            request.auth_alias.as_deref(),
+            request.model_id.as_deref(),
+            now_ms(),
+        ) {
         Ok(scheduled) => scheduled,
         Err(error) => {
             return (
@@ -234,6 +258,7 @@ pub(crate) async fn probe_cooldown(
         "ok": true,
         "scheduled": scheduled,
         "provider_id": provider_id,
+        "interface_id": request.interface_id,
         "auth_alias": request.auth_alias,
         "model_id": request.model_id,
     }))

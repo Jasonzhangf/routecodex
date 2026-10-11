@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 
@@ -11,6 +11,15 @@ const sourceRoot = process.env.ROUTECODEX_V3_SOURCE_ROOT
 
 function read(relativePath) {
   return readFileSync(resolve(sourceRoot, relativePath), 'utf8');
+}
+
+function readWithIncludes(relativePath, seen = new Set()) {
+  if (seen.has(relativePath)) return '';
+  seen.add(relativePath);
+  return read(relativePath).replace(/include!\("([^"]+)"\)/g, (_, includeRel) => {
+    const resolved = normalize(join(dirname(relativePath), includeRel));
+    return readWithIncludes(resolved, seen);
+  });
 }
 
 function readYaml(relativePath) {
@@ -96,7 +105,7 @@ for (const expected of expectedEdges) {
     ['caller', expected.callerFile, expected.callerSymbol],
     ['callee', expected.calleeFile, expected.calleeSymbol],
   ]) {
-    if (!symbolExists(read(file), symbol)) {
+    if (!symbolExists(readWithIncludes(file), symbol)) {
       failures.push(`${expected.id} ${role} symbol is not source-bound: ${symbol}`);
     }
   }

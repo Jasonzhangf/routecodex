@@ -132,7 +132,7 @@ async fn front_socket_deferred_closeout_keeps_the_sse_head_writable() {
         );
         socket
             .write_tx
-            .send((
+            .send(V3FrontWriteCommand::Frame(
                 b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\r\n\
                   :\n\n"
                     .to_vec(),

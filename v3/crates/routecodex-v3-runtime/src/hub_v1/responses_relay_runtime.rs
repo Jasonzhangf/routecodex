@@ -383,6 +383,7 @@ fn build_v3_runtime_provider_failure_observation_from_policy_event(
     V3RuntimeProviderFailureObservation {
         provider_key: v3_relay_provider_candidate_key_parts(
             &event.candidate.provider_id,
+            Some(&event.candidate.interface_id),
             Some(&event.candidate.auth_alias),
             Some(&event.candidate.model_id),
         ),
@@ -1099,6 +1100,19 @@ fn project_v3_responses_client_completed_response(response: &Value) -> Value {
     projected
 }
 
+pub(super) fn selected_interface_has_responses_contract(
+    manifest: &V3Config05ManifestPublished,
+    provider_id: &str,
+    interface_id: &str,
+) -> bool {
+    manifest
+        .providers
+        .get(provider_id)
+        .and_then(|provider| provider.interfaces.get(interface_id))
+        .and_then(|interface| interface.responses.as_ref())
+        .is_some()
+}
+
 pub(crate) fn provider_target(
     manifest: &V3Config05ManifestPublished,
     selected: &routecodex_v3_target::V3TargetCandidate,
@@ -1139,11 +1153,12 @@ pub(crate) fn provider_target(
     };
     Ok(V3ResponsesProviderTarget {
         provider_id: selected.provider_id.clone(),
+        interface_id: selected.interface_id.clone(),
         provider_type: selected.provider_type.clone(),
         base_url: selected.base_url.clone(),
         canonical_model_id: selected.model_id.clone(),
         wire_model: selected.wire_model.clone(),
-        compatibility_profile: provider.compatibility_profile.clone(),
+        compatibility_profile: selected.compatibility_profile.clone(),
         headers: provider.headers.clone(),
         auth: V3ProviderAuthHandle {
             alias: selected.auth_alias.clone(),
@@ -1159,6 +1174,9 @@ pub(crate) fn provider_target(
     })
 }
 
+#[cfg(test)]
+#[path = "responses_relay_runtime_multi_interface_tests.rs"]
+mod responses_relay_runtime_multi_interface_tests;
 #[cfg(test)]
 #[path = "responses_relay_runtime_tests.rs"]
 mod responses_relay_runtime_tests;

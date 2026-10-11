@@ -428,6 +428,7 @@ fn generate_v2_provider_config_file_writes_camel_case_keys() {
             provider_type: "anthropic".into(),
             base_url: "https://api.example.com/v1".into(),
             default_model: "model-x".into(),
+            interfaces: BTreeMap::new(),
             auth: V2ProviderAuthConfig {
                 api_key: None,
                 env: Some("GEN_PROVIDER_KEY".into()),

@@ -28,6 +28,7 @@ fn direct_provider_failure_blocks_after_configured_threshold() {
         provider: Some("openai".to_string()),
         model: Some("gpt-test".to_string()),
         key: Some("key1".to_string()),
+        interface: None,
         priority: Some(100),
         weight: Some(1),
     };
@@ -112,6 +113,7 @@ fn direct_provider_failure_thresholds_cover_400_and_401_classes() {
         provider: Some("openai".to_string()),
         model: Some("gpt-test".to_string()),
         key: Some("key1".to_string()),
+        interface: None,
         priority: Some(100),
         weight: Some(1),
     };

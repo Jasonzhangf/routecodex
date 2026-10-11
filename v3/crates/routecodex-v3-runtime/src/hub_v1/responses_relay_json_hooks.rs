@@ -9,6 +9,7 @@ pub(crate) struct V3ResponsesRelayJsonResponseHookInput<'a> {
     pub(crate) manifest: &'a V3Config05ManifestPublished,
     pub(crate) server_id: &'a str,
     pub(crate) provider_id: Option<&'a str>,
+    pub(crate) interface_id: Option<&'a str>,
     pub(crate) expected_model_id: &'a str,
     pub(crate) provider_protocol: V3HubProviderWireProtocol,
     pub(crate) source_provider_protocol: V3HubProviderWireProtocol,

@@ -159,7 +159,7 @@ async fn cancelled_scheduled_probe_releases_single_flight_permit() {
         let started = started.clone();
         tokio::spawn(async move {
             health
-                .run_due_provider_health_probes(u64::MAX, false, move |_, _, _| {
+                .run_due_provider_health_probes(u64::MAX, false, move |_, _, _, _| {
                     let started = started.clone();
                     async move {
                         started.notify_one();
@@ -626,6 +626,7 @@ fn unavailable_candidate_is_exhaustion_not_runtime_failure() {
     let mut excluded = BTreeSet::new();
     excluded.insert(v3_relay_provider_candidate_key_parts(
         "primary",
+        None,
         Some("key1"),
         Some("gpt-test"),
     ));
@@ -1160,10 +1161,10 @@ async fn transport_error_selects_untried_same_provider_sibling_key() {
     );
     assert!(state
         .failed_candidates
-        .contains(&"first:key1:gpt-test".to_string()));
+        .contains(&"first:default:key1:gpt-test".to_string()));
     assert!(!state
         .failed_candidates
-        .contains(&"second:key1:gpt-test".to_string()));
+        .contains(&"second:default:key1:gpt-test".to_string()));
 }
 
 #[tokio::test]

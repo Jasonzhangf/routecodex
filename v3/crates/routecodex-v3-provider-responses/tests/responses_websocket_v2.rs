@@ -246,6 +246,7 @@ fn target_with_env(url: &str, env: &str) -> V3ResponsesProviderTarget {
     V3ResponsesProviderTarget {
         provider_id: format!("ws-provider-{env}-{url}"),
         provider_type: "responses".into(),
+        interface_id: "default".into(),
         base_url: "https://http-endpoint.invalid/v1".into(),
         canonical_model_id: "model".into(),
         wire_model: "model".into(),

@@ -53,6 +53,7 @@ mod tests {
         V3TargetCandidate {
             provider_id: "provider-a".to_string(),
             provider_type: "responses".to_string(),
+            interface_id: "default".to_string(),
             auth_alias: "primary".to_string(),
             model_id: "canonical-provider-model".to_string(),
             wire_model: "provider-wire-model".to_string(),

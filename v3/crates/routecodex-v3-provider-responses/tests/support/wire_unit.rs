@@ -19,6 +19,7 @@ mod tests {
             V3ResponsesProviderTarget {
                 provider_id: "neutral-provider".into(),
                 provider_type: "responses".into(),
+                interface_id: "default".into(),
                 base_url: "http://upstream.invalid/v1".into(),
                 canonical_model_id: "canonical-model".into(),
                 wire_model: "upstream-model".into(),
@@ -337,6 +338,7 @@ mod tests {
         let target = V3ResponsesProviderTarget {
             provider_id: "neutral-provider".into(),
             provider_type: "responses".into(),
+            interface_id: "default".into(),
             base_url: "http://upstream.invalid/v1".into(),
             canonical_model_id: "model".into(),
             wire_model: "model".into(),
@@ -1289,6 +1291,7 @@ mod tests {
         V3ResponsesProviderTarget {
             provider_id: "neutral-provider".into(),
             provider_type: "responses".into(),
+            interface_id: "default".into(),
             base_url: "http://upstream.invalid/v1".into(),
             canonical_model_id: "canonical-model".into(),
             wire_model: "upstream-model".into(),

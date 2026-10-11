@@ -293,6 +293,8 @@ pub struct DiscoverModelsRequest {
     #[serde(default)]
     pub auth_alias: Option<String>,
     #[serde(default)]
+    pub interface_id: Option<String>,
+    #[serde(default)]
     pub model: Option<String>,
 }
 
@@ -347,9 +349,22 @@ async fn discover_models(
             error,
         )
     })?;
+    let interface_id = crate::provider_probe::resolve_provider_interface_id(
+        &manifest,
+        &id,
+        request.interface_id.as_deref(),
+    )
+    .map_err(|error| {
+        api_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "probe_target_unavailable",
+            error,
+        )
+    })?;
     let target = build_v3_provider_global_probe_target(
         &manifest,
         &id,
+        &interface_id,
         request.auth_alias.as_deref(),
         request.model.as_deref(),
     )
@@ -367,6 +382,7 @@ async fn discover_models(
         Ok(entries) => Ok(Json(json!({
             "ok": true,
             "provider_id": id,
+            "interface_id": interface_id,
             "provider_type": provider_type,
             "base_url": base_url,
             "auth_alias": auth_alias,

@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-const EXPECTED_VERSION = '0.1.0014';
+const EXPECTED_VERSION = '0.1.0015';
 const EXPECTED_CLI_VERSION = `appsdk ${EXPECTED_VERSION} (rust)`;
 const PROJECT_ROOTS = ['.', 'v3', 'v4'];
 

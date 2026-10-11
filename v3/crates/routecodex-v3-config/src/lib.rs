@@ -336,6 +336,7 @@ fn collect_v3_visible_provider_ids_from_target(
                             provider: child.provider.clone(),
                             model: child.model.clone(),
                             key: child.key.clone(),
+                            interface: child.interface.clone(),
                             priority: child.priority,
                             weight: child.weight,
                         };
@@ -434,6 +435,7 @@ fn collect_v3_catalog_model_refs_from_forwarder_target(
         provider: target.provider.clone(),
         model: target.model.clone(),
         key: target.key.clone(),
+        interface: target.interface.clone(),
         priority: target.priority,
         weight: target.weight,
     };

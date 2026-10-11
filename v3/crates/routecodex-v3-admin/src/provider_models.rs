@@ -13,7 +13,7 @@
 
 use crate::api::providers::{config_dir, now_ms};
 use crate::provider_onboarding::{api_error, candidate_invalid_error, ApiError};
-use crate::provider_probe::SecretRedactor;
+use crate::provider_probe::{resolve_provider_interface_id, SecretRedactor};
 use crate::AppState;
 use axum::extract::{Path as AxumPath, State};
 use axum::http::StatusCode;
@@ -206,6 +206,9 @@ async fn mutate_provider_models(
 pub struct CapabilityTestRequest {
     pub model: String,
     pub capabilities: Vec<String>,
+    /// 指定能力诊断使用的 provider interface；缺省用 default 或第一个启用接口。
+    #[serde(default)]
+    pub interface_id: Option<String>,
     #[serde(default)]
     pub reason: Option<String>,
 }
@@ -282,14 +285,30 @@ async fn test_provider_model_capabilities(
             error,
         )
     })?;
-    let target = build_v3_provider_global_probe_target(&manifest, &id, None, Some(model.as_str()))
-        .map_err(|error| {
-            api_error(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "probe_target_unavailable",
-                error,
-            )
-        })?;
+    let interface_id =
+        resolve_provider_interface_id(&manifest, &id, request.interface_id.as_deref()).map_err(
+            |error| {
+                api_error(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "probe_target_unavailable",
+                    error,
+                )
+            },
+        )?;
+    let target = build_v3_provider_global_probe_target(
+        &manifest,
+        &id,
+        &interface_id,
+        None,
+        Some(model.as_str()),
+    )
+    .map_err(|error| {
+        api_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "probe_target_unavailable",
+            error,
+        )
+    })?;
     let redactor = SecretRedactor::for_candidate(&entry.config);
     let mut results = Vec::with_capacity(request.capabilities.len());
     for capability in &request.capabilities {
@@ -298,6 +317,7 @@ async fn test_provider_model_capabilities(
     Ok(Json(json!({
         "ok": true,
         "provider_id": id,
+        "interface_id": target.interface_id,
         "model": target.canonical_model_id,
         "results": results,
     })))

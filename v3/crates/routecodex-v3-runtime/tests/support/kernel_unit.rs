@@ -1137,7 +1137,7 @@ fn direct_protocol_plan_uses_exact_identity_cooldown_across_sessions() {
     assert_eq!(plan_a.decision.target.unavailable_candidates.len(), 1);
     assert!(
         plan_a.decision.target.unavailable_candidates[0]
-            .starts_with("first:key:test:availability("),
+            .starts_with("first:default:key:test:availability("),
         "{:?}",
         plan_a.decision.target.unavailable_candidates
     );
@@ -1199,7 +1199,7 @@ async fn provider_failure_reselects_without_router_reentry() {
             }
             assert_eq!(
                 self.realtime_events.lock().unwrap().as_slice(),
-                &["first:key:test".to_string()],
+                &["first:default:key:test".to_string()],
                 "provider failure event must be published before the next provider send"
             );
             assert_eq!(request.provider_id(), "second");
@@ -1266,7 +1266,10 @@ async fn provider_failure_reselects_without_router_reentry() {
     );
     assert_eq!(
         route_events.lock().unwrap().as_slice(),
-        &["first:key:test".to_string(), "second:key:test".to_string(),],
+        &[
+            "first:default:key:test".to_string(),
+            "second:default:key:test".to_string(),
+        ],
         "Target must select the recovered provider once after its action permit is admitted"
     );
     assert_eq!(realtime_events.lock().unwrap().len(), 1);
@@ -1307,7 +1310,7 @@ async fn provider_failure_reselects_without_router_reentry() {
         observability.provider_failure_events[0]
             .next_provider_key
             .as_deref(),
-        Some("second:key:test")
+        Some("second:default:key:test")
     );
 }
 
@@ -1561,6 +1564,9 @@ fn responses_provider_process_direct_keeps_same_protocol_direct() {
         .providers
         .get_mut("grok")
         .expect("grok provider")
+        .interfaces
+        .get_mut("default")
+        .expect("grok default interface")
         .responses
         .as_mut()
         .expect("responses config")
