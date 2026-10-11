@@ -202,18 +202,24 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Build global AppSDK from locked release source
+      - name: Build global AppSDK from pinned canonical source
         run: |
-          git clone --depth 1 --branch v0.1.0015 \
+          git clone --no-checkout --depth 1 \
             https://github.com/Jasonzhangf/appsdk.git "$RUNNER_TEMP/appsdk-src"
+          git -C "$RUNNER_TEMP/appsdk-src" fetch --depth 1 origin \
+            5318761dc2e65b416e409d0913321a62e769e7c4
+          git -C "$RUNNER_TEMP/appsdk-src" checkout --detach \
+            5318761dc2e65b416e409d0913321a62e769e7c4
           test "$(git -C "$RUNNER_TEMP/appsdk-src" rev-parse HEAD)" = \
-            ab6e57501316b92f4e84247924ea13cbc809dd06
+            5318761dc2e65b416e409d0913321a62e769e7c4
           cargo build --release --locked \
             --manifest-path "$RUNNER_TEMP/appsdk-src/rust/Cargo.toml"
           mkdir -p "$HOME/.local/bin"
           install -m 0755 \
             "$RUNNER_TEMP/appsdk-src/rust/target/release/appsdk" \
             "$HOME/.local/bin/appsdk"
+          "$HOME/.local/bin/appsdk" version
+          shasum -a 256 "$HOME/.local/bin/appsdk"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: AppSDK hook regression
         run: npm run --silent test:appsdk-admission-hook

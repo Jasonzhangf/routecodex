@@ -133,9 +133,9 @@
       "skills/project-memory/SKILL.md"
     ]
   },
-  "compiler_digest": "sha256:6fc5526023371cb5641528463b89d76bca3fd0fdca866fbf570b5d6dd8693178",
+  "compiler_digest": "sha256:e47ede3ff25a8ce350e3a0f0d570991671fa916651f5049d4a4b5cc2e8df64c0",
   "contract_schema": 1,
-  "digest": "sha256:6fc5526023371cb5641528463b89d76bca3fd0fdca866fbf570b5d6dd8693178",
+  "digest": "sha256:e47ede3ff25a8ce350e3a0f0d570991671fa916651f5049d4a4b5cc2e8df64c0",
   "previous_bundle_digest": "sha256:8f1e5af4b6bc757df2328f02f5de70479e17e157dc475262cacb7c1484161358",
   "previous_bundle_digests": [
     "sha256:8f1e5af4b6bc757df2328f02f5de70479e17e157dc475262cacb7c1484161358",
