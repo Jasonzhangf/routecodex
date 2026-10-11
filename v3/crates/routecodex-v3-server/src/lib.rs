@@ -140,7 +140,7 @@ use serde_json::{json, Map, Value};
 use session_admission::{
     hold_response_body_admission_permit, hold_response_body_request_activity_permit,
     V3ResponsesSessionAdmissionError, V3ResponsesSessionAdmissionGate,
-    V3ResponsesSessionAdmissionPermit, V3ResponsesSessionAdmissionScope,
+    V3ResponsesSessionAdmissionPermit, V3ResponsesSessionAdmissionScope, V3ServerMaintenanceGuard,
     V3ServerRequestActivityGate,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -266,6 +266,7 @@ pub struct V3ServerExecPreparation {
     pub front_checkpoints: Vec<V3RuntimeHandoffCheckpoint>,
     pub codex_sample_persist_failures: Vec<routecodex_v3_debug::V3CodexSamplePersistFailure>,
     _codex_sample_exec_guard: Option<routecodex_v3_debug::V3CodexSampleExecGuard>,
+    _maintenance_guard: Option<V3ServerMaintenanceGuard>,
 }
 
 pub fn build_v3_server_startup_01_listener_set_from_config_05(
@@ -282,16 +283,9 @@ pub fn build_v3_server_startup_01_listener_set_from_config_05(
     }
 }
 
-/// Bounded window an exec replacement gives the client responses that are
-/// already in flight.
-///
-/// The bound keeps the replacement finite when a provider stream or a slow
-/// client would otherwise hold the process open; every remaining in-flight
-/// transport is still closed by `prepare_for_exec` after the window.
-const V3_EXEC_INFLIGHT_DRAIN: std::time::Duration = std::time::Duration::from_secs(5);
-
 impl V3ServerAggregateHandle {
     pub async fn prepare_exec_attempt(&self) -> Result<V3ServerExecPreparation, String> {
+        let maintenance_guard = self.request_activity_gate.begin_maintenance().await;
         self.flush_runtime_persistence();
         let codex_sample_exec_guard = match self.codex_sample_persist_worker.as_ref() {
             Some(worker) => match tokio::time::timeout(
@@ -322,6 +316,7 @@ impl V3ServerAggregateHandle {
             front_checkpoints: self.front_transport_broker.freeze(Instant::now()),
             codex_sample_persist_failures,
             _codex_sample_exec_guard: codex_sample_exec_guard,
+            _maintenance_guard: Some(maintenance_guard),
         })
     }
 
@@ -355,25 +350,15 @@ impl V3ServerAggregateHandle {
         codex_sample_persist_failures
     }
 
-    /// Stop accepting new listener work, then give client responses that are
-    /// already in flight a bounded window to finish before their transports are
-    /// closed.
-    ///
-    /// Active bodies belong to Front/Transport handoff and must be
-    /// checkpointed/reattached by the lifecycle owner; waiting without a bound
-    /// would deadlock restart on a provider stream that is already being
-    /// replaced.
+    /// Stop new business dispatch, wait for accepted requests to finish, then
+    /// close the remaining idle transports before exec replacement.
     pub async fn prepare_for_exec(mut self) -> V3ServerExecPreparation {
+        let maintenance_guard = self.request_activity_gate.begin_maintenance().await;
         for listener in &mut self.listeners {
             if let Some(shutdown) = listener.shutdown.take() {
                 let _ = shutdown.send(());
             }
         }
-        let _ = tokio::time::timeout(
-            V3_EXEC_INFLIGHT_DRAIN,
-            self.request_activity_gate.wait_for_quiescence(),
-        )
-        .await;
         let checkpoints = self.front_transport_broker.freeze(Instant::now());
         // The current exec path does not transfer accepted client descriptors
         // or Hyper connection tasks. Close those transports before replacing
@@ -392,6 +377,7 @@ impl V3ServerAggregateHandle {
             front_checkpoints: checkpoints,
             codex_sample_persist_failures,
             _codex_sample_exec_guard: None,
+            _maintenance_guard: Some(maintenance_guard),
         }
     }
 
@@ -1130,6 +1116,10 @@ async fn pending_endpoint(
 }
 
 async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) -> Response<Body> {
+    let front_socket = request
+        .extensions()
+        .get::<restart_handoff::V3StableFrontSocket>()
+        .cloned();
     let front_connection_identity = request
         .extensions()
         .get::<V3FrontConnectionIdentity>()
@@ -1274,7 +1264,7 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
     } else {
         None
     };
-    let request_activity_permit = state.request_activity_gate.admit();
+    let request_activity_permit = state.request_activity_gate.admit().await;
     // The Runtime owns full-attempt buffering, so no provider payload byte is
     // projected before the runtime outcome exists. The Server owns the client
     // transport: a client that requested SSE must not stay on a silent
@@ -1315,7 +1305,8 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
         }
         None => runtime_outcome.await,
     };
-    let response = hold_response_body_request_activity_permit(response, request_activity_permit);
+    let response =
+        hold_response_body_request_activity_permit(response, request_activity_permit, front_socket);
     match admission_permit {
         Some(permit) => hold_response_body_admission_permit(response, permit),
         None => response,

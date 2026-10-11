@@ -6,10 +6,22 @@ entrypoint:
 nodes:
   - V3ServerSseHeadCommit01ClientHead
   - V3ServerRespOutbound06ClientFrame
+  - V3FrontClientBodyEofHeld
+  - V3Front08ClientTerminalOrError
 edges:
   - step_id: v3-client-sse-head-commit-01
     from_node: V3ServerSseHeadCommit01ClientHead
     to_node: V3ServerRespOutbound06ClientFrame
+    owner_feature_id: v3.client_sse_head_commit
+    status: anchored
+  - step_id: v3-client-body-eof-front-held
+    from_node: V3ServerRespOutbound06ClientFrame
+    to_node: V3FrontClientBodyEofHeld
+    owner_feature_id: v3.client_sse_head_commit
+    status: anchored
+  - step_id: v3-client-front-flush-completed
+    from_node: V3FrontClientBodyEofHeld
+    to_node: V3Front08ClientTerminalOrError
     owner_feature_id: v3.client_sse_head_commit
     status: anchored
 return_path:
@@ -17,6 +29,7 @@ return_path:
   committed: The committed channel carries the projected client payload with SSE transport framing only; the transport module reads the HTTP status and content type and never parses, reclassifies, or rewrites the payload.
   failure: The runtime outcome has no successful client payload, so the committed channel closes the transport without projecting a provider status, error payload, or fabricated success.
   stalled: The provider attempt outlives one keepalive interval, so the channel commits transport-only keepalives until the runtime outcome or an explicit transport break.
+  transport_complete: Body EOF transfers its activity permit to Front; Hyper submits its framing tail before the ordered socket flush acknowledgement releases the permit. Restart cancellation only releases maintenance ownership.
 resource_reads:
   - resource_id: v3.config.http_sse_keepalive_interval
     owner_node: V3Config05ManifestPublished

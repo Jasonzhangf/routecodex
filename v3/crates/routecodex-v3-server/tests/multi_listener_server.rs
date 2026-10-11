@@ -4926,6 +4926,180 @@ async fn responses_same_listener_same_session_waits_for_release_then_returns_ok(
 }
 
 #[tokio::test]
+async fn responses_same_session_waiter_obeys_maintenance_after_active_body_finishes() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home = TestHomeGuard::new("maintenance-session-waiter");
+    let (base_url, mut captures, release, shutdown) = start_controlled_held_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-maintenance-session");
+    let handle = spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &base_url))
+        .await
+        .unwrap();
+    let client = reqwest::Client::new();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let request = json!({"model":"client-test", "input":"held", "stream":true});
+    let first_client = client.clone();
+    let first_endpoint = endpoint.clone();
+    let first_request = request.clone();
+    let first = tokio::spawn(async move {
+        let response = first_client
+            .post(first_endpoint)
+            .header("session-id", "maintenance-session")
+            .json(&first_request)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        response.text().await.unwrap()
+    });
+    timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let mut queued = Box::pin(async {
+        let response = client
+            .post(&endpoint)
+            .header("session-id", "maintenance-session")
+            .json(&request)
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        (status, response.text().await.unwrap())
+    });
+    assert!(timeout(Duration::from_millis(100), &mut queued)
+        .await
+        .is_err());
+    let mut preparation = Box::pin(handle.prepare_exec_attempt());
+    assert!(timeout(Duration::from_millis(100), &mut preparation)
+        .await
+        .is_err());
+    release.add_permits(1);
+    let first_body = timeout(Duration::from_secs(5), first)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(first_body.matches("event: response.completed").count(), 1);
+    let preparation = timeout(Duration::from_secs(5), preparation)
+        .await
+        .unwrap()
+        .unwrap();
+    // The session permit has now dropped. The queued request must still wait
+    // at the aggregate maintenance gate rather than entering Runtime.
+    assert!(timeout(Duration::from_millis(100), &mut queued)
+        .await
+        .is_err());
+    assert!(
+        captures.try_recv().is_err(),
+        "session waiter escaped maintenance"
+    );
+    drop(preparation);
+    tokio::select! {
+        result = &mut queued => panic!("provider body is held: {result:?}"),
+        captured = captures.recv() => { captured.unwrap(); }
+        _ = sleep(Duration::from_secs(5)) => panic!("cancelled maintenance did not resume session waiter"),
+    }
+    release.add_permits(1);
+    let (status, body) = timeout(Duration::from_secs(5), queued).await.unwrap();
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.matches("event: response.completed").count(), 1);
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_keepalive_next_request_waits_for_maintenance_cancellation() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home = TestHomeGuard::new("maintenance-keepalive");
+    let (base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-maintenance-keepalive");
+    let handle = spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &base_url))
+        .await
+        .unwrap();
+    let mut socket = TcpStream::connect(handle.listeners[0].addr).await.unwrap();
+    let body = json!({"model":"client-test", "input":"keepalive", "stream":false}).to_string();
+    let request = format!("POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len());
+    socket.write_all(request.as_bytes()).await.unwrap();
+    let first = timeout(
+        Duration::from_secs(5),
+        read_raw_business_response(&mut socket),
+    )
+    .await
+    .unwrap();
+    assert!(first.starts_with(b"HTTP/1.1 200"));
+    assert!(String::from_utf8(first).unwrap().contains("resp_json"));
+    captures.recv().await.unwrap();
+    let preparation = handle.prepare_exec_attempt().await.unwrap();
+    socket.write_all(request.as_bytes()).await.unwrap();
+    assert!(timeout(Duration::from_millis(100), captures.recv())
+        .await
+        .is_err());
+    drop(preparation);
+    let second = timeout(
+        Duration::from_secs(5),
+        read_raw_business_response(&mut socket),
+    )
+    .await
+    .unwrap();
+    assert!(second.starts_with(b"HTTP/1.1 200"));
+    assert!(String::from_utf8(second).unwrap().contains("resp_json"));
+    captures.recv().await.unwrap();
+    drop(socket);
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+// Read one actual HTTP response without closing the socket. Business bodies
+// can use chunked framing because their activity permit follows a body stream.
+async fn read_raw_business_response(socket: &mut TcpStream) -> Vec<u8> {
+    async fn read_line(socket: &mut TcpStream) -> Vec<u8> {
+        let mut line = Vec::new();
+        while !line.ends_with(b"\r\n") {
+            line.push(socket.read_u8().await.unwrap());
+        }
+        line
+    }
+    let mut wire = Vec::new();
+    while !wire.ends_with(b"\r\n\r\n") {
+        wire.extend(read_line(socket).await);
+    }
+    let head = String::from_utf8(wire.clone())
+        .unwrap()
+        .to_ascii_lowercase();
+    if head.contains("transfer-encoding: chunked") {
+        loop {
+            let size = read_line(socket).await;
+            let size = String::from_utf8(size).unwrap();
+            let size = usize::from_str_radix(size.trim().split(';').next().unwrap(), 16).unwrap();
+            if size == 0 {
+                // Consume trailers through their empty line, leaving the next
+                // response untouched on this same keepalive connection.
+                while read_line(socket).await != b"\r\n" {}
+                return wire;
+            }
+            let start = wire.len();
+            wire.resize(start + size, 0);
+            socket.read_exact(&mut wire[start..]).await.unwrap();
+            let mut crlf = [0; 2];
+            socket.read_exact(&mut crlf).await.unwrap();
+            assert_eq!(crlf, *b"\r\n");
+        }
+    }
+    let length = head
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("content-length:")
+                .map(|value| value.trim().parse::<usize>().unwrap())
+        })
+        .expect("keepalive response must declare chunked framing or Content-Length");
+    let start = wire.len();
+    wire.resize(start + length, 0);
+    socket.read_exact(&mut wire[start..]).await.unwrap();
+    wire
+}
+
+#[tokio::test]
 async fn responses_same_listener_different_session_remains_concurrent() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, release, shutdown) =
@@ -7214,16 +7388,19 @@ async fn responses_direct_exec_cutoff_drains_and_resumes_original_sample_worker(
         std::task::Poll::Ready(())
     })
     .await;
-    let response = client
+    let mut queued = Box::pin(client
         .post(&endpoint)
         .json(&json!({
-            "model": "client-test", "input": "refused while draining accepted jobs", "stream": false
+            "model": "client-test", "input": "queued while draining accepted jobs", "stream": false
         }))
-        .send()
+        .send());
+    assert!(timeout(Duration::from_millis(100), &mut queued)
         .await
-        .unwrap();
-    assert_eq!(response.json::<Value>().await.unwrap()["id"], "resp_json");
-    assert!(captures.recv().await.is_some());
+        .is_err());
+    assert!(
+        captures.try_recv().is_err(),
+        "maintenance must block provider dispatch"
+    );
     drop(sample_lock);
     let preparation = preparation.await.unwrap();
     for marker in ["accepted before cutoff", "second accepted before cutoff"] {
@@ -7244,17 +7421,20 @@ async fn responses_direct_exec_cutoff_drains_and_resumes_original_sample_worker(
             }
         }
     }
-    let response = client
-        .post(&endpoint)
-        .json(&json!({
-            "model": "client-test", "input": "refused during cutoff", "stream": false
-        }))
-        .send()
+    assert!(timeout(Duration::from_millis(100), &mut queued)
         .await
+        .is_err());
+    assert!(
+        captures.try_recv().is_err(),
+        "prepared maintenance must retain admission"
+    );
+    drop(preparation);
+    let response = timeout(Duration::from_secs(5), queued)
+        .await
+        .unwrap()
         .unwrap();
     assert_eq!(response.json::<Value>().await.unwrap()["id"], "resp_json");
     assert!(captures.recv().await.is_some());
-    drop(preparation);
     drop(handle.prepare_exec_attempt().await.unwrap());
     let response = client
         .post(&endpoint)
@@ -7276,10 +7456,8 @@ async fn responses_direct_exec_cutoff_drains_and_resumes_original_sample_worker(
     );
     let failures = handle.shutdown().await;
     assert!(
-        failures
-            .iter()
-            .any(|failure| failure.reason.contains("exec preparation")),
-        "cutoff must explicitly refuse diagnostics: {failures:?}"
+        failures.is_empty(),
+        "queued requests must preserve diagnostics: {failures:?}"
     );
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");

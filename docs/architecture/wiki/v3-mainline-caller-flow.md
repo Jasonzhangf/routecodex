@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 90 functional paths, 531 caller edges.
+Generated view: 90 functional paths, 534 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -79,7 +79,7 @@ flowchart TD
   module_v3_server -->|3 edges / 2 paths| module_v3_error
   module_v3_server -->|4 edges / 3 paths| module_v3_runtime
   module_v3_server -->|6 edges / 5 paths| module_v3_runtime__hub_v1
-  module_v3_server -->|37 edges / 20 paths| module_v3_server
+  module_v3_server -->|40 edges / 20 paths| module_v3_server
   module_v3_server -->|1 edges / 1 paths| module_v3_vendor
   module_v3_target -->|1 edges / 1 paths| module_v3_provider_responses
   module_v3_scripts -->|2 edges / 1 paths| module_docs
@@ -133,7 +133,7 @@ flowchart TD
 | v3-server | v3-error | 3 | `v3.debug_error_foundation.mainline`<br/>`v3.server.startup` |
 | v3-server | v3-runtime | 4 | `v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline` |
 | v3-server | v3-runtime::hub_v1 | 6 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.runtime_timing_observability.mainline` |
-| v3-server | v3-server | 37 | `v3.client_sse_head_commit`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.managed_restart_attempt`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_restart_handoff_skeleton`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
+| v3-server | v3-server | 40 | `v3.client_sse_head_commit`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.managed_restart_attempt`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_restart_handoff_skeleton`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
 | v3-server | v3/vendor | 1 | `v3.server.startup` |
 | v3-target | v3-provider-responses | 1 | `v3.provider_key_health_model_granularity` |
 | v3/scripts | docs | 2 | `v3.live_provider_compat.parity` |
@@ -563,8 +563,8 @@ Owner feature: `v3.managed_server_lifecycle`
 ```mermaid
 flowchart TD
   subgraph c_13_v3_managed_restart_attempt_m_v3_debug["v3-debug"]
-    c_13_v3_managed_restart_attempt_28["v3-debug<br/>V3CodexSamplePersistHandle::quiesce_for_exec<br/><small>routecodex-v3-debug/src/sample_store.rs</small>"]
-    c_13_v3_managed_restart_attempt_29["v3-debug<br/>V3CodexSamplePersistHandle::wait_for_drain<br/><small>routecodex-v3-debug/src/sample_store.rs</small>"]
+    c_13_v3_managed_restart_attempt_29["v3-debug<br/>V3CodexSamplePersistHandle::quiesce_for_exec<br/><small>routecodex-v3-debug/src/sample_store.rs</small>"]
+    c_13_v3_managed_restart_attempt_30["v3-debug<br/>V3CodexSamplePersistHandle::wait_for_drain<br/><small>routecodex-v3-debug/src/sample_store.rs</small>"]
   end
   subgraph c_13_v3_managed_restart_attempt_m_v3_lifecycle["v3-lifecycle"]
     c_13_v3_managed_restart_attempt_0["v3-lifecycle<br/>prepare_previous_release_restart_transfer<br/><small>routecodex-v3-lifecycle/src/exec_restart.rs</small>"]
@@ -572,66 +572,68 @@ flowchart TD
     c_13_v3_managed_restart_attempt_2["v3-lifecycle<br/>restart_managed_runtime_in_place<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small>"]
     c_13_v3_managed_restart_attempt_3["v3-lifecycle<br/>V3ManagedLifecycle::restart_with_observer<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
     c_13_v3_managed_restart_attempt_4["v3-lifecycle<br/>bind_previous_release_restart_transfer<br/><small>routecodex-v3-lifecycle/src/exec_restart.rs</small>"]
-    c_13_v3_managed_restart_attempt_6["v3-lifecycle<br/>V3ManagedLifecycle::run_managed_child_with_declaration<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
-    c_13_v3_managed_restart_attempt_7["v3-lifecycle<br/>V3HooksSidecarSupervisor::cleanup_exec_owner<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small>"]
-    c_13_v3_managed_restart_attempt_8["v3-lifecycle<br/>send_restart_control<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small>"]
-    c_13_v3_managed_restart_attempt_9["v3-lifecycle<br/>send_control_without_timeout<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small>"]
-    c_13_v3_managed_restart_attempt_10["v3-lifecycle<br/>adopt_exec_restart_declaration_change<br/><small>routecodex-v3-lifecycle/src/exec_restart.rs</small>"]
-    c_13_v3_managed_restart_attempt_11["v3-lifecycle<br/>V3HooksSidecarSupervisor::retain_exec_owner<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small>"]
-    c_13_v3_managed_restart_attempt_12["v3-lifecycle<br/>pending_hooks_cleanup_directory<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small>"]
-    c_13_v3_managed_restart_attempt_13["v3-lifecycle<br/>start_managed_hooks_sidecar_cancelable<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small>"]
-    c_13_v3_managed_restart_attempt_14["v3-lifecycle<br/>start_configured_hooks_sidecar_with_timeout_and_cancel<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small>"]
-    c_13_v3_managed_restart_attempt_15["v3-lifecycle<br/>control_restart_plan<br/><small>routecodex-v3-lifecycle/src/restart_plan.rs</small>"]
-    c_13_v3_managed_restart_attempt_16["v3-lifecycle<br/>V3ManagedLifecycle::declaration<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
-    c_13_v3_managed_restart_attempt_17["v3-lifecycle<br/>V3ManagedLifecycle::declaration_with_runtime<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
-    c_13_v3_managed_restart_attempt_19["v3-lifecycle<br/>cleanup_rejected_restart_handoff<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small>"]
-    c_13_v3_managed_restart_attempt_20["v3-lifecycle<br/>adopt_previous_release_restart_declaration_change<br/><small>routecodex-v3-lifecycle/src/exec_restart.rs</small>"]
-    c_13_v3_managed_restart_attempt_21["v3-lifecycle<br/>finish_exec_restart_adoption<br/><small>routecodex-v3-lifecycle/src/exec_restart.rs</small>"]
-    c_13_v3_managed_restart_attempt_22["v3-lifecycle<br/>cleanup_previous_exec_restart_owner<br/><small>routecodex-v3-lifecycle/src/exec_restart.rs</small>"]
-    c_13_v3_managed_restart_attempt_23["v3-lifecycle<br/>write_status<br/><small>routecodex-v3-lifecycle/src/fs_locks.rs</small>"]
-    c_13_v3_managed_restart_attempt_24["v3-lifecycle<br/>verify_published_declaration<br/><small>routecodex-v3-lifecycle/src/fs_locks.rs</small>"]
-    c_13_v3_managed_restart_attempt_25["v3-lifecycle<br/>read_pending_startup_detail<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small>"]
-    c_13_v3_managed_restart_attempt_26["v3-lifecycle<br/>remove_restart_plan_for_previous_control_identity<br/><small>routecodex-v3-lifecycle/src/restart_plan.rs</small>"]
+    c_13_v3_managed_restart_attempt_7["v3-lifecycle<br/>V3ManagedLifecycle::run_managed_child_with_declaration<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
+    c_13_v3_managed_restart_attempt_8["v3-lifecycle<br/>V3HooksSidecarSupervisor::cleanup_exec_owner<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small>"]
+    c_13_v3_managed_restart_attempt_9["v3-lifecycle<br/>send_restart_control<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small>"]
+    c_13_v3_managed_restart_attempt_10["v3-lifecycle<br/>send_control_without_timeout<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small>"]
+    c_13_v3_managed_restart_attempt_11["v3-lifecycle<br/>adopt_exec_restart_declaration_change<br/><small>routecodex-v3-lifecycle/src/exec_restart.rs</small>"]
+    c_13_v3_managed_restart_attempt_12["v3-lifecycle<br/>V3HooksSidecarSupervisor::retain_exec_owner<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small>"]
+    c_13_v3_managed_restart_attempt_13["v3-lifecycle<br/>pending_hooks_cleanup_directory<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small>"]
+    c_13_v3_managed_restart_attempt_14["v3-lifecycle<br/>start_managed_hooks_sidecar_cancelable<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small>"]
+    c_13_v3_managed_restart_attempt_15["v3-lifecycle<br/>start_configured_hooks_sidecar_with_timeout_and_cancel<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small>"]
+    c_13_v3_managed_restart_attempt_16["v3-lifecycle<br/>control_restart_plan<br/><small>routecodex-v3-lifecycle/src/restart_plan.rs</small>"]
+    c_13_v3_managed_restart_attempt_17["v3-lifecycle<br/>V3ManagedLifecycle::declaration<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
+    c_13_v3_managed_restart_attempt_18["v3-lifecycle<br/>V3ManagedLifecycle::declaration_with_runtime<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
+    c_13_v3_managed_restart_attempt_20["v3-lifecycle<br/>cleanup_rejected_restart_handoff<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small>"]
+    c_13_v3_managed_restart_attempt_21["v3-lifecycle<br/>adopt_previous_release_restart_declaration_change<br/><small>routecodex-v3-lifecycle/src/exec_restart.rs</small>"]
+    c_13_v3_managed_restart_attempt_22["v3-lifecycle<br/>finish_exec_restart_adoption<br/><small>routecodex-v3-lifecycle/src/exec_restart.rs</small>"]
+    c_13_v3_managed_restart_attempt_23["v3-lifecycle<br/>cleanup_previous_exec_restart_owner<br/><small>routecodex-v3-lifecycle/src/exec_restart.rs</small>"]
+    c_13_v3_managed_restart_attempt_24["v3-lifecycle<br/>write_status<br/><small>routecodex-v3-lifecycle/src/fs_locks.rs</small>"]
+    c_13_v3_managed_restart_attempt_25["v3-lifecycle<br/>verify_published_declaration<br/><small>routecodex-v3-lifecycle/src/fs_locks.rs</small>"]
+    c_13_v3_managed_restart_attempt_26["v3-lifecycle<br/>read_pending_startup_detail<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small>"]
+    c_13_v3_managed_restart_attempt_27["v3-lifecycle<br/>remove_restart_plan_for_previous_control_identity<br/><small>routecodex-v3-lifecycle/src/restart_plan.rs</small>"]
   end
   subgraph c_13_v3_managed_restart_attempt_m_v3_runtime["v3-runtime"]
-    c_13_v3_managed_restart_attempt_27["v3-runtime<br/>restore_default_provider_transport_handoff_checkpoints<br/><small>routecodex-v3-runtime/src/kernel/default_transport.rs</small>"]
+    c_13_v3_managed_restart_attempt_28["v3-runtime<br/>restore_default_provider_transport_handoff_checkpoints<br/><small>routecodex-v3-runtime/src/kernel/default_transport.rs</small>"]
   end
   subgraph c_13_v3_managed_restart_attempt_m_v3_server["v3-server"]
     c_13_v3_managed_restart_attempt_5["v3-server<br/>V3ServerAggregateHandle::prepare_exec_attempt<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_13_v3_managed_restart_attempt_18["v3-server<br/>V3FrontTransportBroker::freeze<br/><small>routecodex-v3-server/src/restart_handoff.rs</small>"]
-    c_13_v3_managed_restart_attempt_30["v3-server<br/>spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_13_v3_managed_restart_attempt_31["v3-server<br/>build_v3_server_startup_01_listener_set_from_config_05<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_13_v3_managed_restart_attempt_6["v3-server<br/>V3ServerRequestActivityGate::begin_maintenance<br/><small>routecodex-v3-server/src/session_admission.rs</small>"]
+    c_13_v3_managed_restart_attempt_19["v3-server<br/>V3FrontTransportBroker::freeze<br/><small>routecodex-v3-server/src/restart_handoff.rs</small>"]
+    c_13_v3_managed_restart_attempt_31["v3-server<br/>spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_13_v3_managed_restart_attempt_32["v3-server<br/>build_v3_server_startup_01_listener_set_from_config_05<br/><small>routecodex-v3-server/src/lib.rs</small>"]
   end
   c_13_v3_managed_restart_attempt_0 -->|v3-restart-cli-check-hooks-target<br/>V3Lifecycle06LiveControlled → V3LifecycleRestartPrepared| c_13_v3_managed_restart_attempt_1
   c_13_v3_managed_restart_attempt_2 -->|v3-restart-handler-check-hooks-target<br/>V3Lifecycle06LiveControlled → V3LifecycleRestartPrepared| c_13_v3_managed_restart_attempt_1
   c_13_v3_managed_restart_attempt_3 -->|v3-restart-prepare-previous-release-transfer<br/>V3Lifecycle06LiveControlled → V3LifecycleRestartPrepared| c_13_v3_managed_restart_attempt_0
   c_13_v3_managed_restart_attempt_2 -->|v3-restart-bind-transfer-rejection-guard<br/>V3Lifecycle06LiveControlled → V3LifecycleRestartPrepared| c_13_v3_managed_restart_attempt_4
   c_13_v3_managed_restart_attempt_2 -->|v3-restart-prepare-live<br/>V3Lifecycle06LiveControlled → V3LifecycleRestartPrepared| c_13_v3_managed_restart_attempt_5
-  c_13_v3_managed_restart_attempt_6 -->|v3-restart-cleanup-exact-hooks<br/>V3LifecycleRestartExecReentered → V3LifecycleRestartHooksReconciled| c_13_v3_managed_restart_attempt_7
-  c_13_v3_managed_restart_attempt_8 -->|v3-restart-control-exchange<br/>V3Lifecycle02InstanceDeclared → V3Lifecycle06LiveControlled| c_13_v3_managed_restart_attempt_9
-  c_13_v3_managed_restart_attempt_10 -->|v3-restart-retain-hooks-cleanup-owner<br/>V3LifecycleRestartExecReentered → V3LifecycleRestartHooksOwnerRetained| c_13_v3_managed_restart_attempt_11
-  c_13_v3_managed_restart_attempt_7 -->|v3-restart-read-retained-hooks-owner<br/>V3LifecycleRestartHooksOwnerRetained → V3LifecycleRestartHooksOwnerResolved| c_13_v3_managed_restart_attempt_12
-  c_13_v3_managed_restart_attempt_13 -->|v3-restart-gate-hooks-replacement<br/>V3LifecycleRestartHooksOwnerResolved → V3LifecycleRestartHooksReconciled| c_13_v3_managed_restart_attempt_14
-  c_13_v3_managed_restart_attempt_15 -->|v3-restart-plan-declaration<br/>V3Lifecycle06LiveControlled → V3Lifecycle01ValidatedConfig| c_13_v3_managed_restart_attempt_16
-  c_13_v3_managed_restart_attempt_16 -->|v3-restart-declaration-snapshot<br/>V3Lifecycle01ValidatedConfig → V3Lifecycle02InstanceDeclared| c_13_v3_managed_restart_attempt_17
-  c_13_v3_managed_restart_attempt_5 -->|v3-restart-freeze-front<br/>V3LifecycleRestartPrepared → V3RuntimeHandoffCheckpoint| c_13_v3_managed_restart_attempt_18
-  c_13_v3_managed_restart_attempt_2 -->|v3-restart-cleanup-rejected-artifacts<br/>V3LifecycleRestartPrepared → V3Lifecycle06LiveControlled| c_13_v3_managed_restart_attempt_19
-  c_13_v3_managed_restart_attempt_6 -->|v3-restart-adopt-exact-artifacts<br/>V3LifecycleRestartExecReentered → V3Lifecycle05IdentityPublished| c_13_v3_managed_restart_attempt_10
-  c_13_v3_managed_restart_attempt_6 -->|v3-restart-adopt-previous-release-transfer<br/>V3LifecycleRestartExecReentered → V3Lifecycle05IdentityPublished| c_13_v3_managed_restart_attempt_20
-  c_13_v3_managed_restart_attempt_10 -->|v3-restart-current-shared-adoption-finish<br/>V3LifecycleRestartExecReentered → V3Lifecycle05IdentityPublished| c_13_v3_managed_restart_attempt_21
-  c_13_v3_managed_restart_attempt_20 -->|v3-restart-previous-release-shared-adoption-finish<br/>V3LifecycleRestartExecReentered → V3Lifecycle05IdentityPublished| c_13_v3_managed_restart_attempt_21
-  c_13_v3_managed_restart_attempt_21 -->|v3-restart-cleanup-previous-owner<br/>V3Lifecycle05IdentityPublished → V3Lifecycle07GracefullyStopped| c_13_v3_managed_restart_attempt_22
-  c_13_v3_managed_restart_attempt_22 -->|v3-restart-publish-previous-stopped<br/>V3Lifecycle06LiveControlled → V3Lifecycle07GracefullyStopped| c_13_v3_managed_restart_attempt_23
-  c_13_v3_managed_restart_attempt_6 -->|v3-restart-verify-published-declaration<br/>V3LifecycleRestartExecReentered → V3Lifecycle02InstanceDeclared| c_13_v3_managed_restart_attempt_24
-  c_13_v3_managed_restart_attempt_6 -->|v3-restart-read-startup-detail<br/>V3LifecycleRestartExecReentered → V3Lifecycle05IdentityPublished| c_13_v3_managed_restart_attempt_25
-  c_13_v3_managed_restart_attempt_6 -->|v3-restart-retire-previous-plan<br/>V3LifecycleRestartExecReentered → V3Lifecycle05IdentityPublished| c_13_v3_managed_restart_attempt_26
-  c_13_v3_managed_restart_attempt_6 -->|v3-restart-restore-provider-checkpoints<br/>V3LifecycleRestartExecReentered → V3Lifecycle05IdentityPublished| c_13_v3_managed_restart_attempt_27
-  c_13_v3_managed_restart_attempt_6 -->|v3-restart-publish-child-status<br/>V3LifecycleRestartExecReentered → V3Lifecycle06LiveControlled| c_13_v3_managed_restart_attempt_23
-  c_13_v3_managed_restart_attempt_10 -->|v3-restart-publish-adopted-starting<br/>V3Lifecycle05IdentityPublished → V3Lifecycle04ChildSpawned| c_13_v3_managed_restart_attempt_23
-  c_13_v3_managed_restart_attempt_5 -->|v3-restart-wait-sample-persistence<br/>V3LifecycleRestartPrepared → V3CodexSamplePersistFailureReported| c_13_v3_managed_restart_attempt_28
-  c_13_v3_managed_restart_attempt_28 -->|v3-restart-drain-quiesced-samples<br/>V3LifecycleRestartPrepared → V3CodexSamplePersistFailureReported| c_13_v3_managed_restart_attempt_29
-  c_13_v3_managed_restart_attempt_6 -->|v3-restart-start-aggregate<br/>V3LifecycleRestartExecReentered → V3ServerStartup01ListenerSetPreflight| c_13_v3_managed_restart_attempt_30
-  c_13_v3_managed_restart_attempt_30 -->|v3-restart-build-listener-set<br/>V3Config05ManifestPublished → V3ServerStartup01ListenerSetPreflight| c_13_v3_managed_restart_attempt_31
+  c_13_v3_managed_restart_attempt_5 -->|v3-restart-quiesce-live<br/>V3LifecycleRestartPrepared → V3Front08ClientTerminalOrError| c_13_v3_managed_restart_attempt_6
+  c_13_v3_managed_restart_attempt_7 -->|v3-restart-cleanup-exact-hooks<br/>V3LifecycleRestartExecReentered → V3LifecycleRestartHooksReconciled| c_13_v3_managed_restart_attempt_8
+  c_13_v3_managed_restart_attempt_9 -->|v3-restart-control-exchange<br/>V3Lifecycle02InstanceDeclared → V3Lifecycle06LiveControlled| c_13_v3_managed_restart_attempt_10
+  c_13_v3_managed_restart_attempt_11 -->|v3-restart-retain-hooks-cleanup-owner<br/>V3LifecycleRestartExecReentered → V3LifecycleRestartHooksOwnerRetained| c_13_v3_managed_restart_attempt_12
+  c_13_v3_managed_restart_attempt_8 -->|v3-restart-read-retained-hooks-owner<br/>V3LifecycleRestartHooksOwnerRetained → V3LifecycleRestartHooksOwnerResolved| c_13_v3_managed_restart_attempt_13
+  c_13_v3_managed_restart_attempt_14 -->|v3-restart-gate-hooks-replacement<br/>V3LifecycleRestartHooksOwnerResolved → V3LifecycleRestartHooksReconciled| c_13_v3_managed_restart_attempt_15
+  c_13_v3_managed_restart_attempt_16 -->|v3-restart-plan-declaration<br/>V3Lifecycle06LiveControlled → V3Lifecycle01ValidatedConfig| c_13_v3_managed_restart_attempt_17
+  c_13_v3_managed_restart_attempt_17 -->|v3-restart-declaration-snapshot<br/>V3Lifecycle01ValidatedConfig → V3Lifecycle02InstanceDeclared| c_13_v3_managed_restart_attempt_18
+  c_13_v3_managed_restart_attempt_5 -->|v3-restart-freeze-front<br/>V3LifecycleRestartPrepared → V3RuntimeHandoffCheckpoint| c_13_v3_managed_restart_attempt_19
+  c_13_v3_managed_restart_attempt_2 -->|v3-restart-cleanup-rejected-artifacts<br/>V3LifecycleRestartPrepared → V3Lifecycle06LiveControlled| c_13_v3_managed_restart_attempt_20
+  c_13_v3_managed_restart_attempt_7 -->|v3-restart-adopt-exact-artifacts<br/>V3LifecycleRestartExecReentered → V3Lifecycle05IdentityPublished| c_13_v3_managed_restart_attempt_11
+  c_13_v3_managed_restart_attempt_7 -->|v3-restart-adopt-previous-release-transfer<br/>V3LifecycleRestartExecReentered → V3Lifecycle05IdentityPublished| c_13_v3_managed_restart_attempt_21
+  c_13_v3_managed_restart_attempt_11 -->|v3-restart-current-shared-adoption-finish<br/>V3LifecycleRestartExecReentered → V3Lifecycle05IdentityPublished| c_13_v3_managed_restart_attempt_22
+  c_13_v3_managed_restart_attempt_21 -->|v3-restart-previous-release-shared-adoption-finish<br/>V3LifecycleRestartExecReentered → V3Lifecycle05IdentityPublished| c_13_v3_managed_restart_attempt_22
+  c_13_v3_managed_restart_attempt_22 -->|v3-restart-cleanup-previous-owner<br/>V3Lifecycle05IdentityPublished → V3Lifecycle07GracefullyStopped| c_13_v3_managed_restart_attempt_23
+  c_13_v3_managed_restart_attempt_23 -->|v3-restart-publish-previous-stopped<br/>V3Lifecycle06LiveControlled → V3Lifecycle07GracefullyStopped| c_13_v3_managed_restart_attempt_24
+  c_13_v3_managed_restart_attempt_7 -->|v3-restart-verify-published-declaration<br/>V3LifecycleRestartExecReentered → V3Lifecycle02InstanceDeclared| c_13_v3_managed_restart_attempt_25
+  c_13_v3_managed_restart_attempt_7 -->|v3-restart-read-startup-detail<br/>V3LifecycleRestartExecReentered → V3Lifecycle05IdentityPublished| c_13_v3_managed_restart_attempt_26
+  c_13_v3_managed_restart_attempt_7 -->|v3-restart-retire-previous-plan<br/>V3LifecycleRestartExecReentered → V3Lifecycle05IdentityPublished| c_13_v3_managed_restart_attempt_27
+  c_13_v3_managed_restart_attempt_7 -->|v3-restart-restore-provider-checkpoints<br/>V3LifecycleRestartExecReentered → V3Lifecycle05IdentityPublished| c_13_v3_managed_restart_attempt_28
+  c_13_v3_managed_restart_attempt_7 -->|v3-restart-publish-child-status<br/>V3LifecycleRestartExecReentered → V3Lifecycle06LiveControlled| c_13_v3_managed_restart_attempt_24
+  c_13_v3_managed_restart_attempt_11 -->|v3-restart-publish-adopted-starting<br/>V3Lifecycle05IdentityPublished → V3Lifecycle04ChildSpawned| c_13_v3_managed_restart_attempt_24
+  c_13_v3_managed_restart_attempt_5 -->|v3-restart-wait-sample-persistence<br/>V3LifecycleRestartPrepared → V3CodexSamplePersistFailureReported| c_13_v3_managed_restart_attempt_29
+  c_13_v3_managed_restart_attempt_29 -->|v3-restart-drain-quiesced-samples<br/>V3LifecycleRestartPrepared → V3CodexSamplePersistFailureReported| c_13_v3_managed_restart_attempt_30
+  c_13_v3_managed_restart_attempt_7 -->|v3-restart-start-aggregate<br/>V3LifecycleRestartExecReentered → V3ServerStartup01ListenerSetPreflight| c_13_v3_managed_restart_attempt_31
+  c_13_v3_managed_restart_attempt_31 -->|v3-restart-build-listener-set<br/>V3Config05ManifestPublished → V3ServerStartup01ListenerSetPreflight| c_13_v3_managed_restart_attempt_32
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -641,6 +643,7 @@ flowchart TD
 | `v3-restart-prepare-previous-release-transfer` | `V3Lifecycle06LiveControlled` → `V3LifecycleRestartPrepared` | anchored | V3ManagedLifecycle::restart_with_observer<br/><small>routecodex-v3-lifecycle/src/lib.rs</small> | prepare_previous_release_restart_transfer<br/><small>routecodex-v3-lifecycle/src/exec_restart.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-bind-transfer-rejection-guard` | `V3Lifecycle06LiveControlled` → `V3LifecycleRestartPrepared` | anchored | restart_managed_runtime_in_place<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small> | bind_previous_release_restart_transfer<br/><small>routecodex-v3-lifecycle/src/exec_restart.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-prepare-live` | `V3Lifecycle06LiveControlled` → `V3LifecycleRestartPrepared` | anchored | restart_managed_runtime_in_place<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small> | V3ServerAggregateHandle::prepare_exec_attempt<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.managed_server_lifecycle` |
+| `v3-restart-quiesce-live` | `V3LifecycleRestartPrepared` → `V3Front08ClientTerminalOrError` | anchored | V3ServerAggregateHandle::prepare_exec_attempt<br/><small>routecodex-v3-server/src/lib.rs</small> | V3ServerRequestActivityGate::begin_maintenance<br/><small>routecodex-v3-server/src/session_admission.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-cleanup-exact-hooks` | `V3LifecycleRestartExecReentered` → `V3LifecycleRestartHooksReconciled` | anchored | V3ManagedLifecycle::run_managed_child_with_declaration<br/><small>routecodex-v3-lifecycle/src/lib.rs</small> | V3HooksSidecarSupervisor::cleanup_exec_owner<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-control-exchange` | `V3Lifecycle02InstanceDeclared` → `V3Lifecycle06LiveControlled` | anchored | send_restart_control<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small> | send_control_without_timeout<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-retain-hooks-cleanup-owner` | `V3LifecycleRestartExecReentered` → `V3LifecycleRestartHooksOwnerRetained` | anchored | adopt_exec_restart_declaration_change<br/><small>routecodex-v3-lifecycle/src/exec_restart.rs</small> | V3HooksSidecarSupervisor::retain_exec_owner<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small> | `v3.managed_server_lifecycle` |
@@ -2524,13 +2527,21 @@ flowchart TD
   subgraph c_61_v3_client_sse_head_commit_m_v3_server["v3-server"]
     c_61_v3_client_sse_head_commit_0["v3-server<br/>pending_model_request<br/><small>routecodex-v3-server/src/lib.rs</small>"]
     c_61_v3_client_sse_head_commit_1["v3-server<br/>accept_v3_client_sse_transport<br/><small>routecodex-v3-server/src/client_sse_transport.rs</small>"]
+    c_61_v3_client_sse_head_commit_2["v3-server<br/>hold_response_body_request_activity_permit<br/><small>routecodex-v3-server/src/session_admission.rs</small>"]
+    c_61_v3_client_sse_head_commit_3["v3-server<br/>V3StableFrontSocket::hold_activity_until_flush<br/><small>routecodex-v3-server/src/restart_handoff.rs</small>"]
+    c_61_v3_client_sse_head_commit_4["v3-server<br/>V3StableFrontSocket::spawn<br/><small>routecodex-v3-server/src/restart_handoff.rs</small>"]
+    c_61_v3_client_sse_head_commit_5["v3-server<br/>write_front_command<br/><small>routecodex-v3-server/src/restart_handoff.rs</small>"]
   end
   c_61_v3_client_sse_head_commit_0 -->|v3-client-sse-head-commit-01<br/>V3ServerSseHeadCommit01ClientHead → V3ServerRespOutbound06ClientFrame| c_61_v3_client_sse_head_commit_1
+  c_61_v3_client_sse_head_commit_2 -->|v3-client-body-eof-front-held<br/>V3ServerRespOutbound06ClientFrame → V3FrontClientBodyEofHeld| c_61_v3_client_sse_head_commit_3
+  c_61_v3_client_sse_head_commit_4 -->|v3-client-front-flush-completed<br/>V3FrontClientBodyEofHeld → V3Front08ClientTerminalOrError| c_61_v3_client_sse_head_commit_5
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
 | `v3-client-sse-head-commit-01` | `V3ServerSseHeadCommit01ClientHead` → `V3ServerRespOutbound06ClientFrame` | anchored | pending_model_request<br/><small>routecodex-v3-server/src/lib.rs</small> | accept_v3_client_sse_transport<br/><small>routecodex-v3-server/src/client_sse_transport.rs</small> | `v3.client_sse_head_commit` |
+| `v3-client-body-eof-front-held` | `V3ServerRespOutbound06ClientFrame` → `V3FrontClientBodyEofHeld` | anchored | hold_response_body_request_activity_permit<br/><small>routecodex-v3-server/src/session_admission.rs</small> | V3StableFrontSocket::hold_activity_until_flush<br/><small>routecodex-v3-server/src/restart_handoff.rs</small> | `v3.client_sse_head_commit` |
+| `v3-client-front-flush-completed` | `V3FrontClientBodyEofHeld` → `V3Front08ClientTerminalOrError` | anchored | V3StableFrontSocket::spawn<br/><small>routecodex-v3-server/src/restart_handoff.rs</small> | write_front_command<br/><small>routecodex-v3-server/src/restart_handoff.rs</small> | `v3.client_sse_head_commit` |
 
 ## v3.provider_action_gate.mainline
 
@@ -3193,7 +3204,7 @@ flowchart TD
     c_76_v3_runtime_restart_handoff_skeleton_4["v3-server<br/>V3FrontRequestLease<br/><small>routecodex-v3-server/src/restart_handoff.rs</small>"]
     c_76_v3_runtime_restart_handoff_skeleton_5["v3-server<br/>V3FrontRequestLeaseKey<br/><small>routecodex-v3-server/src/restart_handoff.rs</small>"]
     c_76_v3_runtime_restart_handoff_skeleton_6["v3-server<br/>V3ServerAggregateHandle::prepare_for_exec<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_76_v3_runtime_restart_handoff_skeleton_7["v3-server<br/>V3ServerRequestActivityGate::wait_for_quiescence<br/><small>routecodex-v3-server/src/session_admission.rs</small>"]
+    c_76_v3_runtime_restart_handoff_skeleton_7["v3-server<br/>V3ServerRequestActivityGate::begin_maintenance<br/><small>routecodex-v3-server/src/session_admission.rs</small>"]
   end
   c_76_v3_runtime_restart_handoff_skeleton_0 -->|v3-front-client-observation-01<br/>V3Front01StableRequestOwner → V3ClientTransportObservation| c_76_v3_runtime_restart_handoff_skeleton_1
   c_76_v3_runtime_restart_handoff_skeleton_2 -->|v3-front-client-observation-02<br/>V3StableFrontSocket → V3ClientTransportObservation| c_76_v3_runtime_restart_handoff_skeleton_3
@@ -3206,7 +3217,7 @@ flowchart TD
 | `v3-front-client-observation-01` | `V3Front01StableRequestOwner` → `V3ClientTransportObservation` | anchored | serve_v3_front_http_connection<br/><small>routecodex-v3-server/src/restart_handoff.rs</small> | V3ClientTransportObservation::prepared<br/><small>routecodex-v3-server/src/client_transport_observation.rs</small> | `v3.runtime_restart_handoff_skeleton` |
 | `v3-front-client-observation-02` | `V3StableFrontSocket` → `V3ClientTransportObservation` | anchored | V3StableFrontSocket::spawn<br/><small>routecodex-v3-server/src/restart_handoff.rs</small> | V3ClientTransportObservation::wrote<br/><small>routecodex-v3-server/src/client_transport_observation.rs</small> | `v3.runtime_restart_handoff_skeleton` |
 | `v3-runtime-restart-handoff-01` | `V3Front01StableRequestOwner` → `V3Front02RequestLeaseBound` | binding_pending | V3FrontRequestLease<br/><small>routecodex-v3-server/src/restart_handoff.rs</small> | V3FrontRequestLeaseKey<br/><small>routecodex-v3-server/src/restart_handoff.rs</small> | `v3.runtime_restart_handoff_skeleton` |
-| `v3-runtime-restart-handoff-02` | `V3Front02RequestLeaseBound` → `V3Front08ClientTerminalOrError` | binding_pending | V3ServerAggregateHandle::prepare_for_exec<br/><small>routecodex-v3-server/src/lib.rs</small> | V3ServerRequestActivityGate::wait_for_quiescence<br/><small>routecodex-v3-server/src/session_admission.rs</small> | `v3.runtime_restart_handoff_skeleton` |
+| `v3-runtime-restart-handoff-02` | `V3Front02RequestLeaseBound` → `V3Front08ClientTerminalOrError` | binding_pending | V3ServerAggregateHandle::prepare_for_exec<br/><small>routecodex-v3-server/src/lib.rs</small> | V3ServerRequestActivityGate::begin_maintenance<br/><small>routecodex-v3-server/src/session_admission.rs</small> | `v3.runtime_restart_handoff_skeleton` |
 
 ## v3.direct_sse_accept_skeleton
 

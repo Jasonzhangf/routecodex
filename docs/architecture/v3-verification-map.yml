@@ -275,9 +275,11 @@ features:
   - p0_restart_rejects_unwritable_handoff_without_shutdown and p0_restart_rejects_native_exec_and_invalid_inputs_without_shutdown cover explicit rejection, original declaration/nonce/PID/listeners, and the same open public Responses connection.
   - p0_restart_control_disconnect_retains_original_connection_and_owner covers pre-exec cancellation and retained control/front ownership.
   - p0_restart_pending_hooks_cleanup_survives_declaration_changes covers configured hooks identity rejection, A-to-B-to-B-to-C retained cleanup ownership, no duplicate hooks, continued real Responses completion, and recovery to one replacement hooks group.
-  - p0_restart_success_with_hooks_closes_inflight_json_and_sse_then_serves_new_requests covers successful exec with configured hooks and in-flight public JSON/SSE, declared accepted-socket closure, exact replacement identity, unique hooks cleanup, and complete requests after restart.
+  - p0_restart_success_with_hooks_drains_inflight_json_and_sse_then_serves_new_requests covers healthy public JSON/SSE held beyond five seconds, complete client bodies before exec, exact replacement identity, unique hooks cleanup, and complete requests after restart.
+  - p0_restart_operation_budget_cancels_drain_and_resumes_queued_dispatch covers control-budget cancellation retaining pending SSE, queued dispatch recovery, unchanged PID/nonce/hooks owner, and complete Responses after cancellation.
+  - responses_same_session_waiter_obeys_maintenance_after_active_body_finishes and responses_keepalive_next_request_waits_for_maintenance_cancellation cover session waiter dispatch after body completion and the next business request on the exact same HTTP keepalive socket; both run in npm run test:v3-server-maintenance-admission, included by npm run test:v3-responses-session-admission.
   - p0_restart_recovers_historical_sample_failure_and_retains_native_rejection_worker covers real failed diagnostic persistence, repaired filesystem, exact native exec rejection preserving the original connection and identity, resumed sample writes, and subsequent successful official restart.
-  - responses_direct_exec_cutoff_drains_and_resumes_original_sample_worker and responses_direct_exec_sample_drain_timeout_keeps_listener_and_admission cover real HTTP samples bracketed by an OS retention lock, complete accepted artifacts, explicit cutoff refusal, and original-worker recovery after guard release or timeout.
+  - responses_direct_exec_cutoff_drains_and_resumes_original_sample_worker and responses_direct_exec_sample_drain_timeout_keeps_listener_and_admission cover real HTTP samples bracketed by an OS retention lock, complete accepted artifacts, maintenance-queued dispatch without diagnostics refusal, and original-worker recovery after guard release or timeout.
   - responses_direct_historical_sample_failure_does_not_reject_exec_preparation covers real HTTP persistence failure history retained as diagnostic evidence without blocking completed exec drain.
   - managed_child_applies_configured_fd_limit_before_hooks_sidecar proves the real `rccv3 start` entry
     applies `[runtime] fd_limit` to the managed child before an inherited child (hooks sidecar) is launched
@@ -2812,7 +2814,7 @@ features:
   status: source_controlled_blackbox_verified
   change_risk: critical
   owner_kind: rust_v3_server_http_transport_boundary
-  owner_scope: Server-owned client SSE transport channel for a streamed client request while the Runtime still buffers the full provider attempt, plus the bounded exec-replacement drain of in-flight client responses. The channel implements the declared v3.sse.direct.accept_skeleton client accept node in the independent module v3/crates/routecodex-v3-server/src/client_sse_transport.rs.
+  owner_scope: Server-owned client SSE transport channel for a streamed client request while the Runtime still buffers the full provider attempt, plus reversible exec preparation that waits for in-flight client responses. The channel implements the declared v3.sse.direct.accept_skeleton client accept node in the independent module v3/crates/routecodex-v3-server/src/client_sse_transport.rs.
   owner_modules:
   - v3/crates/routecodex-v3-server/src/client_sse_transport.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
@@ -2820,6 +2822,8 @@ features:
   - v3/crates/routecodex-v3-server/src/restart_closeout.rs
   mainline_bindings:
   - v3-client-sse-head-commit-01
+  - v3-client-body-eof-front-held
+  - v3-client-front-flush-completed
   design:
   - docs/architecture/wiki/v3-client-sse-head-commit.md
   contract:
@@ -2834,12 +2838,12 @@ features:
   - The keepalive has exactly one owner at a time: the committed channel while the runtime outcome is pending, and the drained SSE body afterwards.
   - A successful runtime outcome is never turned into a client transport failure; only an outcome with no successful client payload closes the transport, without projecting a provider status, error payload, or fabricated success.
   - A non-SSE client keeps waiting for the runtime outcome and never receives a committed channel.
-  - An exec replacement stops accepting work, drains in-flight client responses for a bounded window, then closes the remaining transports without a fabricated client error.
+  - An exec replacement atomically pauses new business dispatch and waits through active Body EOF, Hyper HTTP tail submission and actual ordered Front write/flush completion before sample preflight and idle transport cleanup; cancellation restores admission without cancelling healthy socket writes or shortening ordinary request deadlines.
   required_reverse:
   - A provider payload byte or provider status never reaches the client before the runtime outcome exists.
   - Provider error detail, internal status, and pool-exhaustion text never appear in a committed client body.
   - The transport module never imports Runtime, provider transport, or payload-parsing code.
-  - The drain never waits forever on a provider attempt that does not finish.
+  - The restart operation budget must never become a body cutoff; control peer cancellation releases maintenance even when a healthy provider attempt remains pending.
   - A committed channel never closes the connection cleanly in place of the typed transport break.
   required_blackbox:
   - The real /v1/chat/completions entry returns a 200 text/event-stream head plus a keepalive comment while the controlled provider attempt is still gated.
@@ -2847,7 +2851,10 @@ features:
   - A non-SSE client on the same entry receives no committed channel and still receives the runtime JSON outcome.
   - An SSE client whose released provider returns a complete JSON document receives that successful payload by SSE transport framing with no transport failure and no error frame.
   - A controlled provider 429 released after the commit produces a client transport failure with no provider detail and no projected error frame.
-  - An exec preparation that races a gated provider response waits for the in-flight client response, delivers its payload and terminal, and stays bounded when the provider never finishes.
+  - exec_preparation_drains_an_in_flight_client_response_before_closing_transports proves preparation waits for a gated provider response and delivers its payload and terminal.
+  - exec_preparation_waits_for_real_provider_timeout_without_fabricated_terminal proves the ordinary provider timeout ends an unsuccessful attempt without projected errors or fabricated completion.
+  - borrowed_exec_preparation_cancellation_resumes_queued_dispatch_and_pending_sse proves borrowed-preflight cancellation restores queued provider dispatch after keepalive reuse and preserves complete pending SSE.
+  - p0_restart_waits_for_backpressured_json_transport and p0_restart_waits_for_backpressured_sse_transport enter public HTTP and official CLI with twelve MiB responses; restart waits while the client pauses reading, then complete HTTP framing, exact output content and one SSE completion arrive before exec.
   required_gates:
   - npm run test:v3-client-sse-head-commit
   - npm run test:v3-client-transport-boundary

@@ -68,14 +68,14 @@ function writeProjectRoots() {
             .map((module_id) => ({ module_id, stage: 'frozen' }))
         : [];
     writeJson(`${prefix}.appsdk/project.json`, {
-      sdk: { name: 'appsdk', version: '0.1.0014' },
+      sdk: { name: 'appsdk', version: '0.1.0015' },
       modules,
     });
-    writeJson(`${prefix}.appsdk/sdk.lock`, { version: '0.1.0014' });
+    writeJson(`${prefix}.appsdk/sdk.lock`, { version: '0.1.0015' });
     writeJson(`${prefix}.appsdk/contracts/sdk-bundle.manifest.json`, {
-      version: '0.1.0014',
+      version: '0.1.0015',
     });
-    writeJson(`${prefix}.appsdk/sdk-resources.json`, { version: '0.1.0014' });
+    writeJson(`${prefix}.appsdk/sdk-resources.json`, { version: '0.1.0015' });
   }
 }
 
@@ -107,20 +107,20 @@ function runRealAppsdkHookRegression() {
       `real AppSDK version probe failed: ${version.error?.message ?? version.status}\n${version.stderr}`,
     );
   }
-  assert.equal(version.stdout.trim(), 'appsdk 0.1.0014 (rust)');
+  assert.equal(version.stdout.trim(), 'appsdk 0.1.0015 (rust)');
   const project = JSON.parse(
     readFileSync(join(realRoot, 'v4/.appsdk/project.json'), 'utf8'),
   );
   const frozenModules = (project.modules ?? []).filter(
     (module) => module.stage === 'frozen',
   );
-  if (project.sdk?.version !== '0.1.0014' || frozenModules.length === 0) {
+  if (project.sdk?.version !== '0.1.0015' || frozenModules.length === 0) {
     if (
       process.env.ROUTECODEX_REAL_APPSDK_ROOT ||
       process.env.ROUTECODEX_REQUIRE_REAL_APPSDK_FIXTURE === '1'
     ) {
       throw new Error(
-        `${realRoot} is not a canonical 0.1.0014 root with frozen v4 modules`,
+        `${realRoot} is not a canonical 0.1.0015 root with frozen v4 modules`,
       );
     }
     console.log(
@@ -270,7 +270,7 @@ try {
       'set -eu',
       'case "${1:-}" in',
       '  version)',
-      "    printf 'appsdk 0.1.0014 (rust)\\n'",
+      "    printf 'appsdk 0.1.0015 (rust)\\n'",
       '    ;;',
       '  verify)',
       '    if [ "${2:-}" = "--review-admission" ]; then',
@@ -336,10 +336,10 @@ try {
   });
   mustRun('git', ['add', '.appsdk/project.json']);
   writeJson('.appsdk/project.json', {
-    sdk: { name: 'appsdk', version: '0.1.0014' },
+    sdk: { name: 'appsdk', version: '0.1.0015' },
   });
   const negativeIndex = runHook('pre-commit', { APPSDK_BIN: fakeAppsdk });
-  expectFailure(negativeIndex, /expected 0\.1\.0014/, 'negative staged index');
+  expectFailure(negativeIndex, /expected 0\.1\.0015/, 'negative staged index');
 
   mustRun('git', ['reset', '-q', 'HEAD', '--', '.appsdk/project.json']);
   writeJson('.appsdk/project.json', {
@@ -349,7 +349,7 @@ try {
   mustRun('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-q', '-m', 'bad contract']);
   const badSha = mustRun('git', ['rev-parse', 'HEAD']).stdout.trim();
   writeJson('.appsdk/project.json', {
-    sdk: { name: 'appsdk', version: '0.1.0014' },
+    sdk: { name: 'appsdk', version: '0.1.0015' },
   });
 
   const negativePush = runHook(
@@ -357,7 +357,7 @@ try {
     { APPSDK_BIN: fakeAppsdk },
     `refs/heads/test ${badSha} refs/heads/test ${goodSha}\n`,
   );
-  expectFailure(negativePush, /expected 0\.1\.0014/, 'negative pushed commit');
+  expectFailure(negativePush, /expected 0\.1\.0015/, 'negative pushed commit');
 
   const verifyFailure = run(
     process.execPath,

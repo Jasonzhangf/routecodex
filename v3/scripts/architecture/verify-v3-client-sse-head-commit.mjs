@@ -5,7 +5,7 @@
  * The Server may commit the client SSE response channel and transport
  * keepalives, but no provider payload byte may be projected before the Runtime's
  * full-attempt outcome, an exec replacement must give in-flight client responses
- * a bounded drain before it closes their transports, and the committed channel
+ * a reversible drain before it closes idle transports, and the committed channel
  * carries the projected successful payload by SSE transport framing.
  *
  * The behaviour lives in the controlled black-box test through the public
@@ -122,8 +122,11 @@ const lib = read('v3/crates/routecodex-v3-server/src/lib.rs');
 if (!lib.includes(headCommitSymbol)) {
   failures.push(`Server entry must call ${headCommitSymbol}`);
 }
-if (!lib.includes('V3_EXEC_INFLIGHT_DRAIN')) {
-  failures.push('Server entry must bound the exec in-flight drain');
+if (!lib.includes('self.request_activity_gate.begin_maintenance().await')) {
+  failures.push('Server exec preparation must wait for reversible maintenance quiescence');
+}
+if (lib.includes('V3_EXEC_INFLIGHT_DRAIN')) {
+  failures.push('Exec preparation must not impose a fixed client body cutoff');
 }
 if (!read('v3/crates/routecodex-v3-server/src/restart_handoff.rs').includes('V3_FRONT_CLOSE_FLUSH')) {
   failures.push('Front write worker must bound the close flush');

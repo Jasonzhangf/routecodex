@@ -745,7 +745,21 @@ chains:
       side_channel_reads: [v3.debug.codex_sample_persist_failure]
       side_channel_writes: []
     semantic_contract:
-    - Caller holds the accepted typed ControlRestartPlan; aggregate delegates reversible sample cutoff and complete drain to Debug, then delegates checkpoint mutation to Front freeze. Lifecycle retains the returned guard through native exec and drops it on rejection; historical diagnostics are report data, not restart admission truth.
+    - Caller holds the accepted typed ControlRestartPlan; aggregate first owns reversible maintenance admission and quiescence through Body EOF, Hyper tail submission and actual Front write/flush completion, then delegates reversible sample cutoff and complete drain to Debug, then delegates checkpoint mutation to Front freeze. Control peer EOF cancels preflight and releases maintenance without cancelling Front writes. Lifecycle retains the returned guard through native exec and drops it on rejection; historical diagnostics are report data, not restart admission truth.
+  - step_id: v3-restart-quiesce-live
+    from_node: V3LifecycleRestartPrepared
+    to_node: V3Front08ClientTerminalOrError
+    caller_symbol: V3ServerAggregateHandle::prepare_exec_attempt
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: V3ServerRequestActivityGate::begin_maintenance
+    callee_file: v3/crates/routecodex-v3-server/src/session_admission.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    resource_flow:
+      consumes: [v3.front.request_activity_gate]
+      produces: []
+      side_channel_reads: [v3.front.request_activity_gate]
+      side_channel_writes: [v3.front.request_activity_gate]
   - step_id: v3-restart-cleanup-exact-hooks
     from_node: V3LifecycleRestartExecReentered
     to_node: V3LifecycleRestartHooksReconciled
@@ -6455,6 +6469,39 @@ chains:
       - v3.front.request_activity_gate
       side_channel_writes: []
 
+  - step_id: v3-client-body-eof-front-held
+    from_node: V3ServerRespOutbound06ClientFrame
+    to_node: V3FrontClientBodyEofHeld
+    caller_symbol: hold_response_body_request_activity_permit
+    caller_file: v3/crates/routecodex-v3-server/src/session_admission.rs
+    callee_symbol: V3StableFrontSocket::hold_activity_until_flush
+    callee_file: v3/crates/routecodex-v3-server/src/restart_handoff.rs
+    status: anchored
+    owner_feature_id: v3.client_sse_head_commit
+    semantic_input: existing request activity permit at successful Body EOF
+    semantic_output: same permit retained by Front until Hyper submits its HTTP tail and flushes; failed or cancelled bodies release their own permit
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads: [v3.front.request_activity_gate]
+      side_channel_writes: [v3.front.request_activity_gate]
+  - step_id: v3-client-front-flush-completed
+    from_node: V3FrontClientBodyEofHeld
+    to_node: V3Front08ClientTerminalOrError
+    caller_symbol: V3StableFrontSocket::spawn
+    caller_file: v3/crates/routecodex-v3-server/src/restart_handoff.rs
+    callee_symbol: write_front_command
+    callee_file: v3/crates/routecodex-v3-server/src/restart_handoff.rs
+    status: anchored
+    owner_feature_id: v3.client_sse_head_commit
+    semantic_input: ordered frames and flush snapshot emitted by V3FrontHttpIo::poll_flush after Hyper submits data and framing tail
+    semantic_output: actual socket write/flush completion releases exactly the captured EOF permits; real write error or disconnect releases failed transport resources without success
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads: [v3.front.request_activity_gate]
+      side_channel_writes: [v3.front.request_activity_gate]
+
 - chain_id: v3.provider_action_gate.mainline
   owner_feature_id: v3.provider_action_gate
   summary: V3 provider action gate serializes provider failure recovery, permit ownership, post-commit SSE success/failure observation, and provider response event-codec terminal evidence; the Server frame owner consumes typed Error01 and performs the sole Error06 client-protocol projection.
@@ -8612,7 +8659,7 @@ chains:
     to_node: V3Front08ClientTerminalOrError
     caller_symbol: V3ServerAggregateHandle::prepare_for_exec
     caller_file: v3/crates/routecodex-v3-server/src/lib.rs
-    callee_symbol: V3ServerRequestActivityGate::wait_for_quiescence
+    callee_symbol: V3ServerRequestActivityGate::begin_maintenance
     callee_file: v3/crates/routecodex-v3-server/src/session_admission.rs
     status: binding_pending
     owner_feature_id: v3.runtime_restart_handoff_skeleton
