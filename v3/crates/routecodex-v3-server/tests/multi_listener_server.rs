@@ -4483,6 +4483,202 @@ data: [DONE]
 }
 
 #[tokio::test]
+async fn responses_relay_native_responses_null_reasoning_content_preserves_business_response_without_reselection(
+) {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-native-null-reasoning-content");
+
+    let check_reasoning_item = |item: &Value, body: &str| {
+        assert_eq!(item["type"], "reasoning", "{body}");
+        assert_eq!(
+            item["summary"][0]["text"], "native reasoning summary",
+            "{body}"
+        );
+        assert_eq!(
+            item.get("content"),
+            Some(&Value::Null),
+            "explicit reasoning.content null must be preserved, not dropped or reselected: {body}"
+        );
+    };
+
+    let cases: [(bool, &'static str, &'static str, Vec<u8>); 2] = [
+        (
+            false,
+            "application/json",
+            "resp_native_null_json",
+            json!({
+                "object": "response",
+                "id": "resp_native_null_json",
+                "status": "completed",
+                "output_text": "native json answer",
+                "output": [
+                    {
+                        "type": "reasoning",
+                        "id": "rs_native_null_json",
+                        "summary": [{"type": "summary_text", "text": "native reasoning summary"}],
+                        "content": null
+                    },
+                    {"type": "output_text", "text": "native json answer"}
+                ]
+            })
+            .to_string()
+            .into_bytes(),
+        ),
+        (
+            true,
+            "text/event-stream",
+            "resp_native_null_sse",
+            concat!(
+                "event: response.created\n",
+                "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_native_null_sse\",\"status\":\"in_progress\"}}\n\n",
+                "event: response.output_item.done\n",
+                "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"reasoning\",\"id\":\"rs_native_null_sse\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"native reasoning summary\"}],\"content\":null}}\n\n",
+                "event: response.completed\n",
+                "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_native_null_sse\",\"status\":\"completed\",\"output\":[{\"type\":\"reasoning\",\"id\":\"rs_native_null_sse\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"native reasoning summary\"}],\"content\":null}]}}\n\n",
+                "data: [DONE]\n\n"
+            )
+            .as_bytes()
+            .to_vec(),
+        ),
+    ];
+
+    for (stream, upstream_content_type, expected_response_id, upstream_body) in cases {
+        let (provider_base_url, mut captures, upstream_shutdown) =
+            start_controlled_terminal_upstream_with_body(
+                StatusCode::OK,
+                upstream_content_type,
+                upstream_body,
+            )
+            .await;
+        let (fallback_base_url, mut fallback_captures, fallback_shutdown) =
+            start_controlled_responses_relay_upstream().await;
+        let manifest = responses_relay_provider_protocol_manifest(
+            free_port(),
+            free_port(),
+            &provider_base_url,
+            "responses",
+            Some(&fallback_base_url),
+        );
+        let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+        let input = if stream {
+            "native null reasoning sse"
+        } else {
+            "native null reasoning json"
+        };
+        let response = reqwest::Client::builder()
+            .timeout(Duration::from_secs(15))
+            .build()
+            .unwrap()
+            .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+            .header(
+                "accept",
+                if stream {
+                    "text/event-stream"
+                } else {
+                    "application/json"
+                },
+            )
+            .json(&json!({
+                "model": "client-test",
+                "input": input,
+                "stream": stream
+            }))
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        let client_content_type = response
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let body = response.text().await.expect(
+            "successful provider business response must finish the client transfer normally",
+        );
+        let capture = timeout(Duration::from_secs(15), captures.recv())
+            .await
+            .expect("native Responses mock must receive provider request")
+            .unwrap();
+        handle.shutdown().await;
+        upstream_shutdown.send(()).unwrap();
+        fallback_shutdown.send(()).unwrap();
+
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(capture.body["model"], "wire-test", "{body}");
+        if stream {
+            assert!(
+                client_content_type.starts_with("text/event-stream"),
+                "{client_content_type}"
+            );
+            let events: Vec<Value> = body
+                .lines()
+                .filter_map(|line| line.strip_prefix("data: "))
+                .filter(|data| *data != "[DONE]")
+                .map(|data| serde_json::from_str(data).expect("client SSE data must be JSON"))
+                .collect();
+            assert!(
+                !events.iter().any(|event| matches!(
+                    event["type"].as_str(),
+                    Some("error" | "response.failed")
+                )),
+                "explicit null reasoning content must not become a client error terminal: {body}"
+            );
+            let done_reasoning = events
+                .iter()
+                .find(|event| {
+                    event["type"] == "response.output_item.done"
+                        && event["item"]["type"] == "reasoning"
+                })
+                .and_then(|event| event.get("item"))
+                .expect("client SSE must emit the native reasoning item");
+            check_reasoning_item(done_reasoning, &body);
+            let completed = events
+                .iter()
+                .find(|event| event["type"] == "response.completed")
+                .expect("client SSE must close with response.completed");
+            assert_eq!(
+                completed["response"]["id"], expected_response_id,
+                "terminal response id must come from the primary provider: {body}"
+            );
+            let completed_reasoning = completed["response"]["output"]
+                .as_array()
+                .and_then(|output| output.iter().find(|item| item["type"] == "reasoning"))
+                .expect("completed response must retain the native reasoning item");
+            check_reasoning_item(completed_reasoning, &body);
+        } else {
+            assert!(
+                client_content_type.starts_with("application/json"),
+                "{client_content_type}"
+            );
+            let payload: Value = serde_json::from_str(&body).unwrap();
+            assert_eq!(
+                payload["id"], expected_response_id,
+                "JSON response id must come from the primary provider: {body}"
+            );
+            assert_eq!(payload["status"], "completed", "{body}");
+            let reasoning = payload["output"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["type"] == "reasoning")
+                .expect("public JSON response must expose the reasoning item");
+            check_reasoning_item(reasoning, &body);
+        }
+        assert!(
+            captures.try_recv().is_err(),
+            "the primary provider must receive exactly one business request"
+        );
+        assert!(
+            fallback_captures.try_recv().is_err(),
+            "a preserved native business response must not trigger provider reselection"
+        );
+    }
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
 async fn responses_relay_provider_503_never_reaches_the_client() {
     let _test_guard = TEST_LOCK.lock().await;
     let (failure_base_url, failure_shutdown) =
