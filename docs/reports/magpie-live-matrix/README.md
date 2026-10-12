@@ -18,6 +18,7 @@ plus tool/history, media, reasoning, usage, field and failure boundaries.
 | [Oracle corrections](oracle-corrections-20261012/receipt.json) | Installed 0.90.4887 | Seven affected replays: six pass, one retained failure. Independent counterexamples still reject lost text, metadata, roles, signatures, media, arguments and IDs. |
 | [Native echo control](native-echo-control-20261012/control-receipt.json) | Installed 0.90.4887 | Actual declared echo executes once; actual call ID and computed output appear in the second provider POST; client completes. Owned process, both listeners, mock and state cleaned up. |
 | [History oracle correction](review-corrections-20261012/media-history/README.md) | Installed 0.90.4887 | Complete role/order and tool-result pairing assertions accept the preserved six-message history. The affected real HTTP replay passes; lost/reordered assistant history and incorrect tool IDs fail the independent controls. |
+| [Infrastructure decomposition](structure-replay-20261012/README.md) | Installed 0.90.4887, different binary hash | All 159 original test identities pass across 15 files after natural extraction for the line gate. Public echo executes once with two provider POSTs; known second-turn mismatches remain. |
 
 The initial raw report is immutable and archived losslessly as deterministic
 gzip (`gzip -n -9`). Decompress with `gzip -dc
