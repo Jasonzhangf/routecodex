@@ -80,9 +80,90 @@
         "version": 2
       },
       "version": 3
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "1. 本项目第一个记忆：客户端和 provider 解耦合，客户端不会收到 provider 的错误，provider 的错误 rcc 内部解决，不传递到客户端。rcc 要么传递正确的响应回客户端，要么无 provider 可用时断掉连接（不是返回错误），不会出现错误返回到客户端的做法",
+          "role": "user",
+          "source": "Current Codex conversation 01a11bcd-618f-7d43-a247-dd405697d08f, user message 2026-10-11"
+        },
+        "base_version": 0,
+        "operation": "create",
+        "project_id": "routecodex",
+        "request_id": "req-20261011-routecodex-client-provider-error-decoupling",
+        "requirement_id": "routecodex-client-provider-error-decoupling",
+        "text": "客户端与 provider 解耦。provider 的 HTTP/error-channel 错误只进入 RCC 内部 typed Error 处理、重试、冷却与诊断，不返回给客户端。RCC 只能向客户端交付 provider 已作为业务/模型内容返回、且客户端协议可忠实表示的响应；若没有可用 provider，或所有候选均无法产生可交付响应，必须中止或关闭该请求的客户端连接，不返回 provider 错误、代理生成的替代错误、HTTP 错误状态、SSE error payload 或伪造成功。内部路由、冷却、重试、provider 状态与诊断信息不得进入 client payload。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "1. 本项目第一个记忆：客户端和 provider 解耦合，客户端不会收到 provider 的错误，provider 的错误 rcc 内部解决，不传递到客户端。rcc 要么传递正确的响应回客户端，要么无 provider 可用时断掉连接（不是返回错误），不会出现错误返回到客户端的做法",
+          "role": "user",
+          "source": "Current Codex conversation 01a11bcd-618f-7d43-a247-dd405697d08f, user message 2026-10-11"
+        },
+        "requirement_id": "routecodex-client-provider-error-decoupling",
+        "status": "active",
+        "text": "客户端与 provider 解耦。provider 的 HTTP/error-channel 错误只进入 RCC 内部 typed Error 处理、重试、冷却与诊断，不返回给客户端。RCC 只能向客户端交付 provider 已作为业务/模型内容返回、且客户端协议可忠实表示的响应；若没有可用 provider，或所有候选均无法产生可交付响应，必须中止或关闭该请求的客户端连接，不返回 provider 错误、代理生成的替代错误、HTTP 错误状态、SSE error payload 或伪造成功。内部路由、冷却、重试、provider 状态与诊断信息不得进入 client payload。",
+        "version": 1
+      },
+      "version": 4
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "我记得我们第二个项目的需求是 本项目是一个代理 它的基本工作是把不同输入端口的请求派发到不同的 provider 进行协议的转换 所以这个项目最基础的需求就是保持兼容性 我们所有的报错 错误处理什么的 要围绕着兼容性来做 不要因为校验或者是我们自己的内部原因破坏会话的完整性\n\n我们对于请求和响应的校验:\n1. 对于请求:前提是保证我们的请求是合法的,不会引起上游的错误,而不是去做拦截。\n2. 对于响应:如果上游正常响应了,我们的目标是把它尽可能完整、兼容地返回到客户端,而不是去做拦截。\n\n保持会话尽可能完整流畅是基本要求。我们要尽可能地保证语义能在不同的协议之间正确地传输 虽然不同协议之间语义可能无法做到完整的兼容 但是我们要尽可能地做匹配 实在不行的情况下 才会在 outbound 的时候做白名单准入\n\n为了达到这个目标 我们其实要做的事情是在 inbound 的时候 全部把请求和响应进行归一化到 chat 这个协议上面 逐字段进行请求和响应的归一化转换 然后在 outbound 的时候逐字段做映射 如果没有 1:1 的映射 做近似映射;如果近似映射也无法做到 才做白名单抛弃也就是只有白名单能过 但是这个白名单是我们逐步审查过的结果\n\n所以,我们整体的架构在请求和响应链路上是三段式:\n1. Inbound:是指归一化。\n2. Chat process:做所有的请求或者响应的治理和处理,转换到这个协议上以后我们才进行处理。\n3. Outbound:是指从 chat process 里面把 chat 协议映射到目标协议。\n\n我们还有一些 provider 它们有一些非标的要求或者属性 它们属于目标的协议 但有一点不标准 所以我们就写到 compat 里面\n\nDirect 保持直通 然后加入最小的中继和 hook 进行必要的处理  你的“未登记明确失败”就违背了兼容性原理 未登记字段不能失败 只会警告 并加入我们的本地沉淀错误 可以定期检查这些错误然后进行修复 而不是失败 我们不做主动的请求修复 而是要做正确的映射 如果我们之前做错了 需要想办法把它修复 但这不是 live 修复\n\n未登记字段会丢弃后告警",
+          "role": "user",
+          "source": "Current Codex conversation 01a11bcd-618f-7d43-a247-dd405697d08f, user messages 2026-10-11"
+        },
+        "base_version": 0,
+        "operation": "create",
+        "project_id": "routecodex",
+        "request_id": "req-20261011-routecodex-protocol-compatibility-normalization",
+        "requirement_id": "routecodex-protocol-compatibility-normalization",
+        "text": "RouteCodex 是透明代理，基本职责是把不同入口协议的请求路由到不同 provider，并在入口协议、Chat Process 内部规范协议、目标 provider 协议之间做字段级转换。兼容性、语义保真和会话连续性是基础约束，不以代理自加业务校验、拦截、猜测修复或 live 修复破坏可表达会话。\n\nDirect 同协议路径保持直通，只在必要处加入最小 Relay 和已登记 hooks。跨协议或需要协议转换时走 Inbound -> Chat Process -> Outbound 三段式：Inbound 只做无损归一化，解码为 Chat canonical 加已登记扩展；Chat Process 只做已声明治理；Outbound 按已登记映射逐字段投影到目标协议。优先 1:1 映射；没有 1:1 时使用已登记兼容映射；不做 live 请求修复，不猜测，不在请求过程中改变映射规则。\n\n未登记字段不是失败条件。Outbound 只把已登记映射或白名单字段送入目标 provider wire；未登记字段丢弃后告警，并写入本地沉淀错误，请求继续，不向客户端返回错误，也不让该字段进入 provider wire。后续通过定期检查沉淀错误，离线补齐正确映射，再经代码或配置变更发布。\n\n响应链路：provider 原始响应先经 Provider Compat 做 provider-private 调整，再进入 Response Inbound 归一化为 Chat canonical 加已登记扩展，经 Response Chat Process 治理后，由 Outbound 逐字段投影到客户端协议。上游正常响应尽可能完整返回；能保留的未登记字段优先保留，无法表示的未登记字段丢弃后告警并写入本地沉淀错误，请求继续，不因映射缺口失败。\n\nProvider Compat 只承载 provider 私有或非标属性，不承担通用映射、工具治理、路由、重试或健康控制。实际信任边界、JSON 不可解析、安全约束和无 provider 可用等真实失败边界不受本规则影响。\n\n本需求不覆盖第一条客户端与 provider 解耦需求。provider 错误仍只进入 RCC 内部 typed Error，不返回客户端；无可用 provider 或无可交付响应时，按第一条中止或关闭连接。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "我记得我们第二个项目的需求是 本项目是一个代理 它的基本工作是把不同输入端口的请求派发到不同的 provider 进行协议的转换 所以这个项目最基础的需求就是保持兼容性 我们所有的报错 错误处理什么的 要围绕着兼容性来做 不要因为校验或者是我们自己的内部原因破坏会话的完整性\n\n我们对于请求和响应的校验:\n1. 对于请求:前提是保证我们的请求是合法的,不会引起上游的错误,而不是去做拦截。\n2. 对于响应:如果上游正常响应了,我们的目标是把它尽可能完整、兼容地返回到客户端,而不是去做拦截。\n\n保持会话尽可能完整流畅是基本要求。我们要尽可能地保证语义能在不同的协议之间正确地传输 虽然不同协议之间语义可能无法做到完整的兼容 但是我们要尽可能地做匹配 实在不行的情况下 才会在 outbound 的时候做白名单准入\n\n为了达到这个目标 我们其实要做的事情是在 inbound 的时候 全部把请求和响应进行归一化到 chat 这个协议上面 逐字段进行请求和响应的归一化转换 然后在 outbound 的时候逐字段做映射 如果没有 1:1 的映射 做近似映射;如果近似映射也无法做到 才做白名单抛弃也就是只有白名单能过 但是这个白名单是我们逐步审查过的结果\n\n所以,我们整体的架构在请求和响应链路上是三段式:\n1. Inbound:是指归一化。\n2. Chat process:做所有的请求或者响应的治理和处理,转换到这个协议上以后我们才进行处理。\n3. Outbound:是指从 chat process 里面把 chat 协议映射到目标协议。\n\n我们还有一些 provider 它们有一些非标的要求或者属性 它们属于目标的协议 但有一点不标准 所以我们就写到 compat 里面\n\nDirect 保持直通 然后加入最小的中继和 hook 进行必要的处理  你的“未登记明确失败”就违背了兼容性原理 未登记字段不能失败 只会警告 并加入我们的本地沉淀错误 可以定期检查这些错误然后进行修复 而不是失败 我们不做主动的请求修复 而是要做正确的映射 如果我们之前做错了 需要想办法把它修复 但这不是 live 修复\n\n未登记字段会丢弃后告警",
+          "role": "user",
+          "source": "Current Codex conversation 01a11bcd-618f-7d43-a247-dd405697d08f, user messages 2026-10-11"
+        },
+        "requirement_id": "routecodex-protocol-compatibility-normalization",
+        "status": "active",
+        "text": "RouteCodex 是透明代理，基本职责是把不同入口协议的请求路由到不同 provider，并在入口协议、Chat Process 内部规范协议、目标 provider 协议之间做字段级转换。兼容性、语义保真和会话连续性是基础约束，不以代理自加业务校验、拦截、猜测修复或 live 修复破坏可表达会话。\n\nDirect 同协议路径保持直通，只在必要处加入最小 Relay 和已登记 hooks。跨协议或需要协议转换时走 Inbound -> Chat Process -> Outbound 三段式：Inbound 只做无损归一化，解码为 Chat canonical 加已登记扩展；Chat Process 只做已声明治理；Outbound 按已登记映射逐字段投影到目标协议。优先 1:1 映射；没有 1:1 时使用已登记兼容映射；不做 live 请求修复，不猜测，不在请求过程中改变映射规则。\n\n未登记字段不是失败条件。Outbound 只把已登记映射或白名单字段送入目标 provider wire；未登记字段丢弃后告警，并写入本地沉淀错误，请求继续，不向客户端返回错误，也不让该字段进入 provider wire。后续通过定期检查沉淀错误，离线补齐正确映射，再经代码或配置变更发布。\n\n响应链路：provider 原始响应先经 Provider Compat 做 provider-private 调整，再进入 Response Inbound 归一化为 Chat canonical 加已登记扩展，经 Response Chat Process 治理后，由 Outbound 逐字段投影到客户端协议。上游正常响应尽可能完整返回；能保留的未登记字段优先保留，无法表示的未登记字段丢弃后告警并写入本地沉淀错误，请求继续，不因映射缺口失败。\n\nProvider Compat 只承载 provider 私有或非标属性，不承担通用映射、工具治理、路由、重试或健康控制。实际信任边界、JSON 不可解析、安全约束和无 provider 可用等真实失败边界不受本规则影响。\n\n本需求不覆盖第一条客户端与 provider 解耦需求。provider 错误仍只进入 RCC 内部 typed Error，不返回客户端；无可用 provider 或无可交付响应时，按第一条中止或关闭连接。",
+        "version": 1
+      },
+      "version": 5
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "我们整个项目的架构里面: 1. 不允许 fallback; 2. 不允许旁路; 3. 不允许在请求和响应的链路上面打洞(也就是把弱传进去,在另外一个地方再把它解出来)。这些通通都是错误的。我们的数据面和控制面必须严格分离。\n\n我说的 fallback 不是项目的设计 而是编码过程里面隐式的 fallback 处理 我们允许显式地针对不同情况进行处理 而不是隐式的 默认的 fallback  第2项 我们显示声明的这些处理是OK的 像我们的健康 我们的metadata center 它就是控制面 它跟数据面就不能走在一起 禁止做payload打洞",
+          "role": "user",
+          "source": "Current Codex conversation 01a11bcd-618f-7d43-a247-dd405697d08f, user messages 2026-10-11"
+        },
+        "base_version": 0,
+        "operation": "create",
+        "project_id": "routecodex",
+        "request_id": "req-20261011-routecodex-no-implicit-fallback-bypass-payload-tunneling",
+        "requirement_id": "routecodex-no-implicit-fallback-bypass-payload-tunneling",
+        "text": "禁止隐式 fallback、旁路，以及请求/响应链路打洞；数据面与控制面严格分离。\n\n1. 不允许 fallback。这里指编码过程中隐式或默认的兜底处理，例如未声明分支上的默认返回、静默降级、猜测修复、dual-path 第二路径。允许对明确枚举的不同情况做显式、声明式的分别处理；每一种处理都必须是显式分支，不得是默认兜底。禁止的是隐式、默认的 fallback，不是产品设计里显式建模的路由或候选处理。\n\n2. 不允许旁路。禁止绕过固定 skeleton 阶段、唯一 owner 或已声明 hook 的第二执行路径；请求、响应、错误必须走各自声明的主线图。\n\n3. 不允许打洞。禁止把控制语义或弱语义写入某个中间业务 payload，再在另一个阶段取出或重建。控制面只能通过显式声明的 typed control resources、Error chain 或 side_channel 传递。\n\n4. 数据面与控制面严格分离。数据面只承载业务请求/响应；控制面承载路由、健康、重试、冷却、错误、debug、continuation 等控制事实。健康、MetadataCenter 等显式声明的控制面资源与数据面不得混在一起；控制面资源不得进入 provider/client 业务 payload，业务 payload 也不得被用来重建控制状态。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "我们整个项目的架构里面: 1. 不允许 fallback; 2. 不允许旁路; 3. 不允许在请求和响应的链路上面打洞(也就是把弱传进去,在另外一个地方再把它解出来)。这些通通都是错误的。我们的数据面和控制面必须严格分离。\n\n我说的 fallback 不是项目的设计 而是编码过程里面隐式的 fallback 处理 我们允许显式地针对不同情况进行处理 而不是隐式的 默认的 fallback  第2项 我们显示声明的这些处理是OK的 像我们的健康 我们的metadata center 它就是控制面 它跟数据面就不能走在一起 禁止做payload打洞",
+          "role": "user",
+          "source": "Current Codex conversation 01a11bcd-618f-7d43-a247-dd405697d08f, user messages 2026-10-11"
+        },
+        "requirement_id": "routecodex-no-implicit-fallback-bypass-payload-tunneling",
+        "status": "active",
+        "text": "禁止隐式 fallback、旁路，以及请求/响应链路打洞；数据面与控制面严格分离。\n\n1. 不允许 fallback。这里指编码过程中隐式或默认的兜底处理，例如未声明分支上的默认返回、静默降级、猜测修复、dual-path 第二路径。允许对明确枚举的不同情况做显式、声明式的分别处理；每一种处理都必须是显式分支，不得是默认兜底。禁止的是隐式、默认的 fallback，不是产品设计里显式建模的路由或候选处理。\n\n2. 不允许旁路。禁止绕过固定 skeleton 阶段、唯一 owner 或已声明 hook 的第二执行路径；请求、响应、错误必须走各自声明的主线图。\n\n3. 不允许打洞。禁止把控制语义或弱语义写入某个中间业务 payload，再在另一个阶段取出或重建。控制面只能通过显式声明的 typed control resources、Error chain 或 side_channel 传递。\n\n4. 数据面与控制面严格分离。数据面只承载业务请求/响应；控制面承载路由、健康、重试、冷却、错误、debug、continuation 等控制事实。健康、MetadataCenter 等显式声明的控制面资源与数据面不得混在一起；控制面资源不得进入 provider/client 业务 payload，业务 payload 也不得被用来重建控制状态。",
+        "version": 1
+      },
+      "version": 6
     }
   ],
   "project_id": "routecodex",
   "schema_version": 1,
-  "version": 3
+  "version": 6
 }
