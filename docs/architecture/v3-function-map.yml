@@ -5877,7 +5877,32 @@ features:
   - real local TCP SSE replacement stream reaches protocol terminal on the resident Runtime
   - no SSE wrapper creates a Runtime or re-enters a full executor
   - one request-level attempt/deadline budget survives Direct, Relay, and typed handoff
+  - shared residence wait returns a ready Provider result before timer, keeps real Provider first, and converts only local expiry to Runtime Error
   - git diff --check
+  residence_deadline_wait_binding:
+    status: source_bound
+    owner_file: v3/crates/routecodex-v3-runtime/src/execution_control.rs
+    symbol: V3AttemptBudget::wait_with_residence_deadline
+    symbol_lines: 274-287
+    source_blob: d7e95c705a504a3ee10c691f554cb82d7e070668
+    visibility: crate_private_reader
+    same_absolute_instant: required
+    callers:
+    - {caller_symbol: send_v3_responses_direct_attempt, caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs, boundary: headers, caller_lines: 39-44, caller_blob: f64ae2ea6394f9469ab3f1483379dfb7c15814b9, invoked_by: execute_v3_responses_direct_runtime_kernel_core_resident}
+    - {caller_symbol: execute_v3_direct_runtime_kernel_core_resident, caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs, boundary: headers, caller_lines: 552-555, caller_blob: 1efc7ca2ffcc64ea6bd4061fa6c5066a1f4e0cce}
+    - {caller_symbol: execute_v3_relay_runtime_core, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs, boundary: headers, caller_lines: 853-861, caller_blob: ed8ef3143707930d4837ffe626f9b2ce000a3e98}
+    - {caller_symbol: execute_v3_responses_relay_runtime_inner, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs, boundary: headers, caller_lines: 486-493, caller_blob: adf66d6ced445a7de7e32fe7402ee59ad8b1dc2b}
+    - {caller_symbol: execute_v3_anthropic_relay_runtime_inner, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs, boundary: headers, caller_lines: 796-804, caller_blob: 878a03cb2217c0519e45a5cb0f526cab3720d26b}
+    - {caller_symbol: execute_v3_direct_runtime_kernel_core_resident, caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs, boundary: recovery, caller_lines: 455-461, caller_blob: 1efc7ca2ffcc64ea6bd4061fa6c5066a1f4e0cce}
+    - {caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident, caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs, boundary: recovery, caller_lines: 429-443, caller_blob: 7fa60407a4b8ae23608190261c9f82177955c3f2}
+    - {caller_symbol: execute_v3_relay_runtime_core, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs, boundary: recovery, caller_lines: 776-786, caller_blob: ed8ef3143707930d4837ffe626f9b2ce000a3e98}
+    - {caller_symbol: execute_v3_responses_relay_runtime_inner, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs, boundary: recovery, caller_lines: 420-428, caller_blob: adf66d6ced445a7de7e32fe7402ee59ad8b1dc2b}
+    - {caller_symbol: execute_v3_anthropic_relay_runtime_inner, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs, boundary: recovery, caller_lines: 726-734, caller_blob: 878a03cb2217c0519e45a5cb0f526cab3720d26b}
+    - {caller_symbol: execute_v3_relay_runtime_core, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs, boundary: first_frame, caller_lines: 1103-1115, caller_blob: ed8ef3143707930d4837ffe626f9b2ce000a3e98}
+    - {caller_symbol: execute_v3_relay_runtime_core, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs, boundary: full_body, caller_lines: 1253-1260, caller_blob: ed8ef3143707930d4837ffe626f9b2ce000a3e98}
+    - {caller_symbol: execute_v3_responses_relay_runtime_inner, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs, boundary: full_body, caller_lines: 881-894, caller_blob: adf66d6ced445a7de7e32fe7402ee59ad8b1dc2b}
+    - {caller_symbol: execute_v3_anthropic_relay_runtime_inner, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs, boundary: full_body, caller_lines: 921-933, caller_blob: 878a03cb2217c0519e45a5cb0f526cab3720d26b}
+    - {caller_symbol: collect_direct_sse_attempt_after_terminal_with_memory, caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs, boundary: full_body, caller_lines: 346-349, caller_blob: f64ae2ea6394f9469ab3f1483379dfb7c15814b9}
 
 - feature_id: v3.execution_attempt_budget_store
   status: active
@@ -5901,6 +5926,7 @@ features:
   - v3.execution.attempt_payload_store
   entry_symbols:
   - V3AttemptBudget::admit_transport_attempt
+  - V3AttemptBudget::wait_with_residence_deadline
   - V3CommittedClientSseBuilder::push
   - collect_direct_sse_attempt_after_terminal
   - build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05_with_budget
@@ -5929,8 +5955,19 @@ features:
   - concurrent attempts share request and process-global reservations
   - seal/discard/cancel/error release reservations exactly once
   - local resource exhaustion never mutates provider health
+  - shared residence wait uses the existing V3AttemptBudget absolute Instant and drops only the pending request future on local expiry
   - npm run verify:v3-execution-control-payload-architecture
   - git diff --check
+  residence_deadline_wait_binding:
+    status: source_bound
+    reader_symbol: V3AttemptBudget::wait_with_residence_deadline
+    reader_file: v3/crates/routecodex-v3-runtime/src/execution_control.rs
+    reader_lines: 274-287
+    reader_blob: d7e95c705a504a3ee10c691f554cb82d7e070668
+    deadline_source: existing V3AttemptBudgetInner.deadline via residence_deadline()
+    local_expiry: RuntimeFailure
+    provider_result: preserve_original_source
+    provider_health_on_local_expiry: forbidden
 
 - feature_id: v3.execution_attempt_success_receipt
   status: active

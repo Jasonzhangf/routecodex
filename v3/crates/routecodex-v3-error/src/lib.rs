@@ -1405,6 +1405,7 @@ pub fn project_v3_pending_endpoint_error(
     projected
 }
 
+mod client_transport_source;
 mod sse_disposition;
 /// Consecutive real failures required by the default recoverable health policy.
 /// Authentication and explicitly terminal policies retain their own threshold.
@@ -1414,6 +1415,11 @@ mod subscription;
 #[cfg(test)]
 mod tests;
 
+pub use client_transport_source::{
+    build_v3_error_01_source_raised_for_client_transport,
+    build_v3_error_02_host_captured_from_client_transport, V3ClientTransportFailure,
+    V3ClientTransportOperation, V3Error02HostCaptured, V3_CLIENT_SOURCE_ERROR_CHAIN_NODE_IDS,
+};
 pub use sse_disposition::{v3_sse_post_commit_disposition, V3SsePostCommitDisposition};
 pub use subscription::{
     build_v3_provider_failure_action_from_v3_error_02, build_v3_provider_global_error_fingerprint,

@@ -9,6 +9,48 @@ use crate::kernel::direct_sse_consumers::{
 };
 use crate::nodes::{V3SseAttemptFrame, V3SseAttemptStream, V3SseFrameDisposition};
 
+pub(super) async fn execute_v3_responses_direct_runtime_kernel_core<
+    T: ResponsesTransport + ?Sized,
+>(
+    state: V3ResponsesDirectRuntimeCoreState,
+    manifest: &V3Config05ManifestPublished,
+    raw: V3Server03HttpRequestRaw,
+    hook_registry: V3HookRegistry,
+    transport: &T,
+) -> V3ResponsesDirectRuntimeOutput {
+    execute_v3_responses_direct_runtime_kernel_core_resident(
+        state,
+        manifest,
+        raw,
+        hook_registry,
+        transport,
+    )
+    .await
+}
+
+pub(super) async fn send_v3_responses_direct_attempt<T: ResponsesTransport + ?Sized>(
+    budget: &crate::nodes::V3AttemptBudget,
+    manifest: &V3Config05ManifestPublished,
+    request_id: &str,
+    provider_id: &str,
+    transport: &T,
+    request: V3Transport13ResponsesHttpRequest,
+) -> Result<Result<V3ProviderResp14Raw, V3ProviderError>, crate::nodes::V3AttemptStoreError> {
+    Ok(budget
+        .wait_with_residence_deadline(tokio::time::timeout(
+            default_transport::responses_direct_transport_response_timeout(manifest, provider_id),
+            transport.send(request),
+        ))
+        .await?
+        .unwrap_or_else(|_| {
+            Err(V3ProviderError::Transport {
+                request_id: request_id.to_string(),
+                provider_id: provider_id.to_string(),
+                reason: default_transport::V3_DIRECT_TRANSPORT_HANG_REASON.to_string(),
+            })
+        }))
+}
+
 fn wrap_direct_sse_provider_event_json_observation_stream(
     source: V3ProviderAttemptSseStream,
     stream_observation: V3RuntimeStreamObservation,
@@ -289,17 +331,23 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
     manifest: Option<&V3Config05ManifestPublished>,
     request_id: Option<&str>,
 ) -> Result<crate::nodes::V3CommittedClientSseStream, V3Error01SourceRaised> {
-    let mut committed = crate::nodes::V3CommittedClientSseBuilder::with_budget(attempt_budget)
-        .map_err(|message| {
-            build_v3_error_01_source_raised(
-                V3ErrorSourceKind::RuntimeFailure,
-                "V3ExecutionAttemptPayloadStore",
-                "direct_sse_attempt_store_rejected",
-                message.to_string(),
-            )
-        })?;
+    let mut committed = crate::nodes::V3CommittedClientSseBuilder::with_budget(
+        attempt_budget.clone(),
+    )
+    .map_err(|message| {
+        build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3ExecutionAttemptPayloadStore",
+            "direct_sse_attempt_store_rejected",
+            message.to_string(),
+        )
+    })?;
     let mut terminal_seen = false;
-    while let Some(frame) = stream.next().await {
+    while let Some(frame) = attempt_budget
+        .wait_with_residence_deadline(stream.next())
+        .await
+        .map_err(|error| runtime_source("V3ExecutionAttemptPayloadStore", error))?
+    {
         // The attempt is complete at the protocol terminal.  A provider
         // transport error or an unterminated tail after the terminal is
         // post-terminal noise and must seal the already-validated attempt

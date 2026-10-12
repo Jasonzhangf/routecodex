@@ -75,22 +75,6 @@ pub use default_transport::{
 };
 include!("kernel/direct_kernel_entrypoints.rs");
 include!("kernel/direct_state.rs");
-async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport + ?Sized>(
-    state: V3ResponsesDirectRuntimeCoreState,
-    manifest: &V3Config05ManifestPublished,
-    raw: V3Server03HttpRequestRaw,
-    hook_registry: V3HookRegistry,
-    transport: &T,
-) -> V3ResponsesDirectRuntimeOutput {
-    execute_v3_responses_direct_runtime_kernel_core_resident(
-        state,
-        manifest,
-        raw,
-        hook_registry,
-        transport,
-    )
-    .await
-}
 async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     T: ResponsesTransport + ?Sized,
 >(
@@ -442,10 +426,22 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             drop(selected_admission.take());
         }
         if let Some(recovery) = pending_provider_action_recovery.take() {
-            match provider_health
-                .wait_for_error05_recovery(&recovery, &selected)
+            let recovery_result = match attempt_budget
+                .wait_with_residence_deadline(
+                    provider_health.wait_for_error05_recovery(&recovery, &selected),
+                )
                 .await
             {
+                Ok(result) => result,
+                Err(error) => {
+                    return error_output(
+                        runtime_source("V3ExecutionAttemptBudget", error),
+                        trace,
+                        &hook_registry,
+                    )
+                }
+            };
+            match recovery_result {
                 Ok(V3ProviderActionRecoveryTransition::Admitted(mut admission)) => {
                     provider_action_permit = admission.take_permit();
                     provider_action_permit_target = Some(selected.candidate.clone());
@@ -788,24 +784,27 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 &hook_registry,
             );
         }
-        let provider_raw = match tokio::time::timeout(
-            default_transport::responses_direct_transport_response_timeout(
+        let transport_result =
+            match direct_runtime_helpers_stream::send_v3_responses_direct_attempt(
+                &attempt_budget,
                 manifest,
+                &standardized.request_id,
                 &policy.target.candidate.provider_id,
-            ),
-            transport.send(transport_request),
-        )
-        .await
-        .unwrap_or_else(|_elapsed| {
-            // provider 挂起（响应头等待超时）：归一化为 transport 错误进入错误链
-            // （reselect 切 provider + health 记录 + 3 次拉黑 15 分钟），避免客户端
-            // 无限重试命中同一挂起 provider；错误只反映 provider 行为。
-            Err(V3ProviderError::Transport {
-                request_id: standardized.request_id.clone(),
-                provider_id: policy.target.candidate.provider_id.clone(),
-                reason: default_transport::V3_DIRECT_TRANSPORT_HANG_REASON.to_string(),
-            })
-        }) {
+                transport,
+                transport_request,
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(error) => {
+                    return error_output(
+                        runtime_source("V3ExecutionAttemptBudget", error),
+                        trace,
+                        &hook_registry,
+                    )
+                }
+            };
+        let provider_raw = match transport_result {
             Ok(raw) => raw,
             Err(V3ProviderError::ConcurrencyBusy { .. }) => {
                 if let Err(error) = runtime_timing.finish_external() {

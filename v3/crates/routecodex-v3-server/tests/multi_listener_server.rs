@@ -10,7 +10,7 @@ use axum::{
 };
 use futures_util::{future::join_all, SinkExt, StreamExt};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
-use routecodex_v3_server::spawn_v3_server_aggregate;
+use routecodex_v3_server::{spawn_v3_server_aggregate, spawn_v3_server_aggregate_with_admin};
 use serde_json::{json, Value};
 use std::os::unix::fs::PermissionsExt;
 use std::{ffi::OsString, fs, net::TcpListener, path::PathBuf, sync::Arc};
@@ -9339,4 +9339,841 @@ async fn v3_listener_survives_real_accept_error_child_blackbox() {
     println!("V3_ACCEPT_ERROR_KEEPS_SERVING=ok");
 
     handle.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------
+// D regression: public `/v1/responses` SSE -> Chat provider relay, provider
+// response-header-timeout reselection.
+//
+// The first candidate captures the real Chat wire request and then withholds its
+// response headers past the declared 50 ms SSE first-frame deadline; the relay
+// must classify that as a genuine provider response-wait failure and reselect the
+// second eligible candidate inside the same opaque target, without ever projecting
+// a provider or internal error frame to the Responses client.
+// ---------------------------------------------------------------------------
+
+/// Owned test-child HOME for this fixture. The server resolves its Codex sample
+/// retention lock and observability store under `HOME`, so binding an owned
+/// directory keeps the run off the real `~/.rcc/codex-samples` lock. This is a
+/// distinct fixture resource: only the exact test child's Command environment
+/// is bound. The parent test process and worker HOME stay unchanged.
+struct OwnedFixtureHomeGuard {
+    path: PathBuf,
+}
+
+impl OwnedFixtureHomeGuard {
+    fn run_child(test: &str, label: &str) -> bool {
+        if std::env::var_os("V3_PROVIDER_FIXTURE_CHILD").is_some() {
+            return false;
+        }
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("build-control")
+            .join("temp")
+            .join("runtime-error-fixture-home")
+            .join(label);
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", test, "--test-threads=1", "--nocapture"])
+            .env("V3_PROVIDER_FIXTURE_CHILD", "1")
+            .env("HOME", &path)
+            .env(
+                "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
+                path.join("request-id-counter.json"),
+            )
+            .output()
+            .expect("spawn owned provider fixture child");
+        eprintln!(
+            "provider fixture {}\n{}\n{}",
+            path.display(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            output.status.success(),
+            "provider fixture child failed: {}",
+            output.status
+        );
+        true
+    }
+
+    fn new() -> Self {
+        assert!(std::env::var_os("V3_PROVIDER_FIXTURE_CHILD").is_some());
+        Self {
+            path: PathBuf::from(std::env::var_os("HOME").unwrap()),
+        }
+    }
+
+    fn owned_config_path(&self) -> PathBuf {
+        self.path.join(".rcc").join("config.toml")
+    }
+}
+
+struct ChatRelayUpstreamState {
+    captures: mpsc::UnboundedSender<ProviderCapture>,
+    release: tokio::sync::watch::Sender<bool>,
+}
+
+/// Real Chat-wire upstream that captures the request and then holds its response
+/// headers indefinitely. The provider's declared SSE first-frame/header deadline
+/// must fire without any client-visible byte being committed from this attempt.
+async fn controlled_chat_header_hold_upstream(
+    State(state): State<Arc<ChatRelayUpstreamState>>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response<Body> {
+    if body["stream"] == false && body["messages"][0]["content"] == "ping; reply pong" {
+        return Response::builder()
+            .status(StatusCode::OK)
+            .body(Body::from("pong"))
+            .unwrap();
+    }
+    let _ = state
+        .captures
+        .send(ProviderCapture::from_http(&headers, body));
+    let mut release = state.release.subscribe();
+    let _ = release.wait_for(|released| *released).await;
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/event-stream")
+        .body(Body::from(b"data: [DONE]\n\n".to_vec()))
+        .unwrap()
+}
+
+/// Complete, legal Chat SSE business response for the reselected candidate.
+async fn controlled_chat_sse_upstream(
+    State(state): State<Arc<ChatRelayUpstreamState>>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response<Body> {
+    if body["stream"] == false && body["messages"][0]["content"] == "ping; reply pong" {
+        return Response::builder()
+            .status(StatusCode::OK)
+            .body(Body::from("pong"))
+            .unwrap();
+    }
+    let _ = state
+        .captures
+        .send(ProviderCapture::from_http(&headers, body));
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/event-stream")
+        .body(Body::from(
+            br#"data: {"id":"chatcmpl-hdr-timeout","object":"chat.completion.chunk","model":"wire-second","choices":[{"index":0,"delta":{"role":"assistant","content":"recovered-second-provider"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-hdr-timeout","object":"chat.completion.chunk","model":"wire-second","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+
+"#
+            .to_vec(),
+        ))
+        .unwrap()
+}
+
+async fn start_controlled_chat_header_hold_upstream() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    tokio::sync::watch::Sender<bool>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let (release_tx, _release_rx) = tokio::sync::watch::channel(false);
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route(
+            "/v1/chat/completions",
+            post(controlled_chat_header_hold_upstream),
+        )
+        .with_state(Arc::new(ChatRelayUpstreamState {
+            captures: captures_tx,
+            release: release_tx.clone(),
+        }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (
+        format!("http://{address}/v1"),
+        captures_rx,
+        release_tx,
+        shutdown_tx,
+    )
+}
+
+async fn start_controlled_chat_sse_upstream() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let (_release_tx, _release_rx) = tokio::sync::watch::channel(true);
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route("/v1/chat/completions", post(controlled_chat_sse_upstream))
+        .with_state(Arc::new(ChatRelayUpstreamState {
+            captures: captures_tx,
+            release: _release_tx,
+        }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}/v1"), captures_rx, shutdown_tx)
+}
+
+fn responses_chat_header_timeout_reselection_manifest(
+    port_a: u16,
+    port_b: u16,
+    first_base_url: &str,
+    second_base_url: &str,
+    residence_timeout_ms: u64,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    // Cross-protocol (Responses client -> Chat provider) must enter the Hub Relay
+    // runtime, so replace the default Responses direct binding with the relay one.
+    let direct_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" }"#;
+    let relay_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "relay", protocol_profile_owner = "v3.hub_relay_runtime_closeout", implemented = true, forbidden_reentry_behavior = "Responses endpoint must enter Hub Relay runtime and must not fall through to Direct/P6 or pending runtime.", runtime_owner_symbol = "execute_v3_responses_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs" }"#;
+    let hub_v1_declaration = HUB_V1_TEST_DECLARATION.replace(direct_binding, relay_binding);
+    let source = format!(
+        r#"
+version = 3
+{hub_v1_declaration}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["responses"]
+[servers.a.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+attempt_store = {{ residence_timeout_ms = {residence_timeout_ms} }}
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["responses"]
+[servers.b.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+attempt_store = {{ residence_timeout_ms = {residence_timeout_ms} }}
+[providers.first]
+type = "openai_chat"
+base_url = "{first_base_url}"
+default_model = "test"
+request_timeout_ms = 1000
+sse_first_frame_timeout_ms = 50
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_HEADER_TIMEOUT_FIRST_KEY" }}] }}
+[providers.first.models.test]
+wire_name = "wire-first"
+[providers.second]
+type = "openai_chat"
+base_url = "{second_base_url}"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_HEADER_TIMEOUT_SECOND_KEY" }}] }}
+[providers.second.models.test]
+wire_name = "wire-second"
+[forwarders.chat_relay]
+model = "test"
+aliases = ["client-test"]
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "first", model = "test", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "second", model = "test", key = "key", priority = 1 }}
+]
+[debug]
+log_console = false
+snapshots = true
+dry_run = true
+retention = {{ raw_requests = 8, raw_responses = 8, events = 128 }}
+[route_groups.default.pools.client_test]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, models = ["client-test"] }}
+targets = [{{ kind = "forwarder", id = "chat_relay", priority = 1 }}]
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "forwarder", id = "chat_relay", priority = 1 }}]
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn responses_chat_header_timeout_reselects_same_target() {
+    if OwnedFixtureHomeGuard::run_child(
+        "responses_chat_header_timeout_reselects_same_target",
+        "provider-red",
+    ) {
+        return;
+    }
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = OwnedFixtureHomeGuard::new();
+    std::env::set_var("V3_HEADER_TIMEOUT_FIRST_KEY", "secret-first");
+    std::env::set_var("V3_HEADER_TIMEOUT_SECOND_KEY", "secret-second");
+
+    let (first_base_url, mut first_captures, first_release, first_shutdown) =
+        start_controlled_chat_header_hold_upstream().await;
+    let (second_base_url, mut second_captures, second_shutdown) =
+        start_controlled_chat_sse_upstream().await;
+
+    let handle = spawn_v3_server_aggregate_with_admin(
+        responses_chat_header_timeout_reselection_manifest(
+            free_port(),
+            free_port(),
+            &first_base_url,
+            &second_base_url,
+            2000,
+        ),
+        None,
+        Some(home_guard.owned_config_path()),
+    )
+    .await
+    .unwrap();
+
+    let client = reqwest::Client::new();
+    let started = std::time::Instant::now();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let (head_tx, head_rx) = oneshot::channel();
+    let send_client = client.clone();
+    let send_task = tokio::spawn(async move {
+        let response = send_client
+            .post(endpoint)
+            .header("accept", "text/event-stream")
+            .json(&json!({
+                "model": "client-test",
+                "input": "header timeout recovery probe",
+                "stream": true
+            }))
+            .send()
+            .await;
+        let _ = head_tx.send(started.elapsed());
+        response
+    });
+
+    // The first candidate receives exactly one real wire request carrying the
+    // preserved business input, then withholds headers past the 50 ms deadline.
+    let first_capture = timeout(Duration::from_secs(5), first_captures.recv())
+        .await
+        .expect("the failed candidate must receive the initial wire request")
+        .unwrap();
+    let t_first = started.elapsed();
+    assert_eq!(
+        first_capture.authorization.as_deref(),
+        Some("Bearer secret-first")
+    );
+    assert_eq!(first_capture.body["model"], "wire-first");
+    assert!(
+        serde_json::to_string(&first_capture.body)
+            .unwrap()
+            .contains("header timeout recovery probe"),
+        "the failed attempt must preserve the business input: {}",
+        first_capture.body
+    );
+    assert!(
+        timeout(Duration::from_millis(250), first_captures.recv())
+            .await
+            .is_err(),
+        "a single header timeout must not retry the same failed candidate"
+    );
+
+    // The reselected candidate receives exactly one real wire request inside the
+    // same opaque target with expected auth/model/input.
+    let second_capture = timeout(Duration::from_secs(5), second_captures.recv())
+        .await
+        .expect("the reselected candidate must receive the recovery wire request")
+        .unwrap();
+    let t_second = started.elapsed();
+    assert_eq!(
+        second_capture.authorization.as_deref(),
+        Some("Bearer secret-second")
+    );
+    assert_eq!(second_capture.body["model"], "wire-second");
+    assert!(
+        serde_json::to_string(&second_capture.body)
+            .unwrap()
+            .contains("header timeout recovery probe"),
+        "the recovery attempt must preserve the business input: {}",
+        second_capture.body
+    );
+    assert!(
+        timeout(Duration::from_millis(250), second_captures.recv())
+            .await
+            .is_err(),
+        "the successful candidate must receive exactly one wire request"
+    );
+
+    // The client sees only the second candidate's business success. No provider
+    // or internal error content may be projected onto the committed channel.
+    let t_head = timeout(Duration::from_secs(15), head_rx)
+        .await
+        .expect("the committed Responses SSE head must arrive")
+        .unwrap();
+    let response = timeout(Duration::from_secs(15), send_task)
+        .await
+        .expect("the client request task must complete")
+        .unwrap()
+        .expect("the client request must succeed");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "text/event-stream"
+    );
+    let client_body = response.text().await.unwrap();
+    let t_body = started.elapsed();
+    println!(
+        "V3_HEADER_TIMEOUT_TIMING head={}ms first_wire={}ms second_wire={}ms body={}ms",
+        t_head.as_millis(),
+        t_first.as_millis(),
+        t_second.as_millis(),
+        t_body.as_millis()
+    );
+    assert!(
+        t_body < Duration::from_secs(5),
+        "reselect must complete promptly: {t_body:?}"
+    );
+    assert!(
+        client_body.contains("event: response.completed"),
+        "the client must receive the business completion: {client_body}"
+    );
+    assert!(
+        client_body.contains("recovered-second-provider"),
+        "the client must receive the reselected candidate's business payload: {client_body}"
+    );
+    assert!(
+        !client_body.contains("[DONE]"),
+        "a Responses client must not receive the Chat wire [DONE]: {client_body}"
+    );
+    for forbidden in ["provider_error", "network_error", "598", "internal"] {
+        assert!(
+            !client_body.contains(forbidden),
+            "the client must not receive provider/internal error content ({forbidden}): {client_body}"
+        );
+    }
+
+    // Neither candidate may receive any further wire request once the request has
+    // committed: the header timeout fails exactly one attempt on the first
+    // candidate, and the reselected candidate is tried exactly once.
+    assert!(
+        first_captures.try_recv().is_err(),
+        "the failed candidate must not receive a second wire request after reselection"
+    );
+    assert!(
+        second_captures.try_recv().is_err(),
+        "the recovered candidate must receive exactly one wire request"
+    );
+
+    // Reselection stays inside the captured opaque target: one Router hit, and the
+    // same-target reselection node is present.
+    let logs: Value = client
+        .get(format!(
+            "http://{}/_routecodex/debug/logs",
+            handle.listeners[0].addr
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let events = logs["logs"].as_array().unwrap();
+    let router_hits = events
+        .iter()
+        .filter(|event| event["node_id"] == "V3Router07OpaqueTargetHitOnce")
+        .count();
+    assert_eq!(
+        router_hits, 1,
+        "provider reselection must not re-enter the Router"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| event["node_id"] == "V3TargetLocalReselected"),
+        "the same-target reselection node must be recorded"
+    );
+    // The recorded order must be: first wire attempt -> same-target reselection ->
+    // recovery wire attempt, proving the provider response-header timeout is what
+    // drove the typed reselection (the 50 ms header deadline fires long before the
+    // 1000 ms request timeout).
+    let sequence_of = |node_id: &str| {
+        events
+            .iter()
+            .filter(|event| event["node_id"] == node_id)
+            .map(|event| event["sequence"].as_u64().expect("event sequence"))
+            .collect::<Vec<_>>()
+    };
+    let transport_sequences = sequence_of("V3ProviderReqOutbound09TransportRequest");
+    let reselected_sequences = sequence_of("V3TargetLocalReselected");
+    assert_eq!(
+        transport_sequences.len(),
+        2,
+        "exactly two provider wire attempts must be recorded"
+    );
+    assert_eq!(
+        reselected_sequences.len(),
+        1,
+        "exactly one same-target reselection must be recorded"
+    );
+    assert!(
+        transport_sequences[0] < reselected_sequences[0]
+            && reselected_sequences[0] < transport_sequences[1],
+        "the failed first wire attempt, the reselection, and the recovery wire attempt must be ordered"
+    );
+
+    // Health side effects are scoped to the exact failed provider.model.key.
+    let cooldown: Value = client
+        .get(format!(
+            "http://{}/_routecodex/health/cooldown-pool",
+            handle.listeners[0].addr
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    println!("V3_HEADER_TIMEOUT_COOLDOWN_POOL={cooldown}");
+    let entries = cooldown["entries"].as_array().unwrap();
+    assert_eq!(
+        entries.len(),
+        1,
+        "only the failed complete identity may be cooled: {cooldown}"
+    );
+    assert!(
+        !entries
+            .iter()
+            .any(|entry| entry["provider_id"] == "second"),
+        "the healthy candidate must not be excluded by the failed candidate's health effect: {cooldown}"
+    );
+    let failed_entry = entries
+        .iter()
+        .find(|entry| entry["provider_id"] == "first")
+        .unwrap_or_else(|| panic!("the failed provider.model.key must be cooled: {cooldown}"));
+    assert_eq!(
+        failed_entry["model_id"], "test",
+        "the health effect must bind the failed provider's model: {cooldown}"
+    );
+    assert_eq!(
+        failed_entry["auth_alias"], "key",
+        "the health effect must bind the failed provider's auth key: {cooldown}"
+    );
+    assert_eq!(failed_entry["interface_id"], "default");
+
+    let _ = first_release.send(true);
+    handle.shutdown().await;
+    first_shutdown.send(()).unwrap();
+    second_shutdown.send(()).unwrap();
+    std::env::remove_var("V3_HEADER_TIMEOUT_FIRST_KEY");
+    std::env::remove_var("V3_HEADER_TIMEOUT_SECOND_KEY");
+}
+
+// ---------------------------------------------------------------------------
+// D regression (negative): a genuine request-residence budget stop must abort
+// truthfully. When the declared residence budget (20 ms) expires before the
+// header-timeout reselection can admit a second attempt, the runtime must not
+// reset the hard deadline to fabricate a retry: exactly the first candidate is
+// tried, the client channel terminates abnormally (no graceful SSE EOF, no
+// fabricated `response.completed`, no `[DONE]`). The 150 ms case separately
+// permits the actual 50 ms header failure, then exhausts during isolated reselect.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn responses_chat_header_timeout_budget_stop_never_fabricates_retry() {
+    if OwnedFixtureHomeGuard::run_child(
+        "responses_chat_header_timeout_budget_stop_never_fabricates_retry",
+        "provider-red-budget",
+    ) {
+        return;
+    }
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_HEADER_TIMEOUT_FIRST_KEY", "secret-first");
+    std::env::set_var("V3_HEADER_TIMEOUT_SECOND_KEY", "secret-second");
+
+    for residence_ms in [150, 20] {
+        assert_responses_header_budget_stop(residence_ms).await;
+    }
+    std::env::remove_var("V3_HEADER_TIMEOUT_FIRST_KEY");
+    std::env::remove_var("V3_HEADER_TIMEOUT_SECOND_KEY");
+}
+
+async fn assert_responses_header_budget_stop(residence_ms: u64) {
+    let mut home_guard = OwnedFixtureHomeGuard::new();
+    home_guard.path = home_guard.path.join(residence_ms.to_string());
+    fs::create_dir_all(&home_guard.path).unwrap();
+
+    let (first_base_url, mut first_captures, first_release, first_shutdown) =
+        start_controlled_chat_header_hold_upstream().await;
+    let (second_base_url, mut second_captures, second_shutdown) =
+        start_controlled_chat_sse_upstream().await;
+
+    let mut manifest = responses_chat_header_timeout_reselection_manifest(
+        free_port(),
+        free_port(),
+        &first_base_url,
+        &second_base_url,
+        residence_ms,
+    );
+    manifest.debug.log_file = Some(
+        home_guard
+            .path
+            .join("debug.log")
+            .to_string_lossy()
+            .into_owned(),
+    );
+    let handle =
+        spawn_v3_server_aggregate_with_admin(manifest, None, Some(home_guard.owned_config_path()))
+            .await
+            .unwrap();
+
+    let client = reqwest::Client::new();
+    let before: Value = client
+        .get(format!(
+            "http://{}/_routecodex/health/cooldown-pool",
+            handle.listeners[0].addr
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        before["entries"],
+        json!([]),
+        "fresh fixture identities must be routable: {before}"
+    );
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let send_client = client.clone();
+    let residence_started = std::time::Instant::now();
+    let response_task = tokio::spawn(async move {
+        send_client
+            .post(endpoint)
+            .header("accept", "text/event-stream")
+            .json(&json!({
+                "model": "client-test",
+                "input": "budget stop probe",
+                "stream": true
+            }))
+            .send()
+            .await
+    });
+
+    // The first candidate still receives its real wire request; the budget stop is
+    // a separate local source, not a rewrite of the provider attempt.
+    let first_capture = timeout(Duration::from_secs(5), first_captures.recv())
+        .await
+        .expect("the first candidate must receive the wire request")
+        .unwrap();
+    assert_eq!(
+        first_capture.authorization.as_deref(),
+        Some("Bearer secret-first")
+    );
+    assert_eq!(first_capture.body["model"], "wire-first");
+    assert_eq!(first_capture.body["stream"], true);
+    assert!(serde_json::to_string(&first_capture.body)
+        .unwrap()
+        .contains("budget stop probe"));
+
+    let records_path = home_guard.path.join(format!(
+        "server-v3-{}.request-records.jsonl",
+        handle.listeners[0].addr.port()
+    ));
+    let read_records = || -> Vec<Value> {
+        fs::read_to_string(&records_path)
+            .unwrap_or_default()
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap()["row"].clone())
+            .collect()
+    };
+    let failure_health = if residence_ms == 150 {
+        timeout(Duration::from_secs(2), async {
+            loop {
+                if read_records()
+                    .iter()
+                    .any(|row| row["event_type"] == "request.provider_attempt_failed")
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("actual header failure must precede the local terminal");
+        let pool: Value = client
+            .get(format!(
+                "http://{}/_routecodex/health/cooldown-pool",
+                handle.listeners[0].addr
+            ))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        fs::write(
+            home_guard.path.join("health-after-provider-failure.json"),
+            serde_json::to_vec_pretty(&pool).unwrap(),
+        )
+        .unwrap();
+        Some(pool)
+    } else {
+        None
+    };
+
+    // The client channel terminates abnormally: a genuine budget stop is not a
+    // graceful SSE EOF and must not fabricate a completion or `[DONE]`.
+    let client_body = response_task
+        .await
+        .unwrap()
+        .expect("the SSE transport head is committed before the runtime outcome")
+        .text()
+        .await;
+    assert!(
+        client_body.is_err(),
+        "a genuine budget stop must abort the client body, not complete it: {client_body:?}"
+    );
+    println!("BUDGET_CLIENT_ABORT residence={residence_ms} cause={client_body:?}");
+    let residence_elapsed = residence_started.elapsed();
+    assert!(residence_elapsed < Duration::from_millis(750),
+        "request residence must stop pending headers/recovery before the 1000ms recovery wait: residence={residence_ms} elapsed={residence_elapsed:?}");
+    println!("BUDGET_RESIDENCE_TIMING residence={residence_ms} elapsed={residence_elapsed:?}");
+
+    // Zero second wire: the hard deadline must not be reset to fake a retry.
+    assert!(
+        timeout(Duration::from_millis(250), first_captures.recv())
+            .await
+            .is_err(),
+        "a genuine budget stop must not retry the failed candidate"
+    );
+    assert!(
+        timeout(Duration::from_millis(250), second_captures.recv())
+            .await
+            .is_err(),
+        "a genuine budget stop must not fabricate a second provider attempt"
+    );
+
+    for resource in ["debug/logs", "debug/snapshots", "health/cooldown-pool"] {
+        let evidence: Value = client
+            .get(format!(
+                "http://{}/_routecodex/{resource}",
+                handle.listeners[0].addr
+            ))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        println!("BUDGET_EVIDENCE residence={residence_ms} {resource}={evidence}");
+        fs::write(
+            home_guard.path.join(resource.replace('/', "-") + ".json"),
+            serde_json::to_vec_pretty(&evidence).unwrap(),
+        )
+        .unwrap();
+    }
+
+    let records = read_records();
+    let terminal = records
+        .iter()
+        .find(|row| row["event_type"] == "request.failed")
+        .expect("actual request-bound Error terminal must be persisted");
+    let rid = terminal["meta"]["request_id"].as_str().unwrap();
+    assert!(
+        terminal["duration_ms"].as_u64().unwrap() < 750,
+        "actual request terminal must be deadline bounded: {terminal}"
+    );
+    assert!(records.iter().all(|row| row["meta"]["request_id"] == rid));
+    assert_eq!(
+        terminal["meta"]["error_category"],
+        "responses_relay_runtime_error"
+    );
+    assert_eq!(terminal["meta"]["error_detail"], "V3 Responses Relay request execution control failed: provider SSE attempt exceeded the request residence deadline");
+    assert_eq!(
+        terminal["meta"]["observed_error"]["chain"]
+            .as_array()
+            .unwrap()
+            .len(),
+        6
+    );
+    let provider_failures: Vec<_> = records
+        .iter()
+        .filter(|row| row["event_type"] == "request.provider_attempt_failed")
+        .collect();
+    let after: Value = serde_json::from_slice(
+        &fs::read(home_guard.path.join("health-cooldown-pool.json")).unwrap(),
+    )
+    .unwrap();
+    println!("BUDGET_ACTUAL_SOURCES residence={residence_ms} rid={rid} provider_failures={provider_failures:?} terminal={terminal} health_before={before} health_after={after}");
+    if residence_ms == 20 {
+        // P1 counterexample: abnormal EOF and zero second wire also pass when
+        // a local stop wrongly causes Provider failure/cooling. These must fail.
+        assert!(provider_failures.is_empty() && after["entries"] == before["entries"],
+            "P1: pure local residence stop must create no Provider failure or health mutation for first/second.default.key.test; actual failures={provider_failures:?}, before={before}, after={after}");
+        assert_eq!(terminal["failed_attempts"], 0);
+        assert_eq!(terminal["switches"], 0);
+    } else {
+        assert_eq!(provider_failures.len(), 1);
+        let failure = provider_failures[0];
+        assert_eq!(failure["meta"]["provider"], "first:default:key:test");
+        assert_eq!(
+            failure["meta"]["observed_error"]["source"],
+            "provider_attempt_failure"
+        );
+        assert_eq!(
+            failure["meta"]["error_category"],
+            "provider_response_header_timeout"
+        );
+        assert!(failure["meta"]["error_detail"].as_str().unwrap().contains("provider did not return response headers within configured SSE first-frame timeout (50ms)"));
+        assert_eq!(failure["meta"]["observed_error"]["failure_count"], 1);
+        assert_eq!(
+            failure["meta"]["observed_error"]["next_provider_key"],
+            "second:default:key:test"
+        );
+        assert!(
+            failure["updated_epoch_ms"].as_u64().unwrap()
+                < terminal["finished_epoch_ms"].as_u64().unwrap()
+        );
+        let mut during = failure_health.unwrap()["entries"]
+            .as_array()
+            .unwrap()
+            .clone();
+        let mut final_entries = after["entries"].as_array().unwrap().clone();
+        assert_eq!(during.len(), 1);
+        for entry in during.iter_mut().chain(final_entries.iter_mut()) {
+            assert_eq!(entry["provider_id"], "first");
+            assert_eq!(entry["interface_id"], "default");
+            assert_eq!(entry["auth_alias"], "key");
+            assert_eq!(entry["model_id"], "test");
+            entry.as_object_mut().unwrap().remove("remaining_ms");
+        }
+        assert_eq!(
+            final_entries, during,
+            "local budget terminal must not add health mutation after actual Provider failure"
+        );
+        println!("BUDGET_PROVIDER_THEN_LOCAL_VERIFIED rid={rid} identity=first:default:key:test zero_second_wire=true");
+    }
+
+    let _ = first_release.send(true);
+    handle.shutdown().await;
+    first_shutdown.send(()).unwrap();
+    second_shutdown.send(()).unwrap();
 }

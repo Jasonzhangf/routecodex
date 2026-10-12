@@ -3,6 +3,76 @@ use futures_util::StreamExt;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use std::sync::{Arc, Mutex};
 
+#[tokio::test]
+async fn execution_control_residence_wait_preserves_ready_provider_results() {
+    let mut limits = test_limits(8, 8, 8);
+    limits.residence_timeout = Duration::ZERO;
+    let budget = V3AttemptBudget::new_isolated(limits, Arc::new(AtomicUsize::new(0)));
+    let success: Result<&str, routecodex_v3_provider_responses::V3ProviderError> = Ok("business");
+    assert_eq!(
+        budget
+            .wait_with_residence_deadline(std::future::ready(success))
+            .await
+            .unwrap()
+            .unwrap(),
+        "business"
+    );
+    let failure = routecodex_v3_provider_responses::V3ProviderError::Transport {
+        request_id: "ready-provider".into(),
+        provider_id: "first".into(),
+        reason: "actual header timeout".into(),
+    };
+    assert!(
+        matches!(budget.wait_with_residence_deadline(std::future::ready(Err::<(), _>(failure))).await,
+        Ok(Err(routecodex_v3_provider_responses::V3ProviderError::Transport { reason, .. })) if reason == "actual header timeout")
+    );
+}
+
+#[tokio::test]
+async fn execution_control_residence_wait_drops_only_request_owned_resources() {
+    let process_bytes = Arc::new(AtomicUsize::new(0));
+    let mut limits = test_limits(8, 8, 16);
+    limits.residence_timeout = Duration::from_millis(20);
+    let budget = V3AttemptBudget::new_isolated(limits, process_bytes.clone());
+    let other = V3AttemptBudget::new_isolated(test_limits(8, 8, 16), process_bytes.clone());
+    let mut builder = V3CommittedClientSseBuilder::with_budget(budget.clone()).unwrap();
+    builder.push(vec![1; 4]).unwrap();
+    let mut other_builder = V3CommittedClientSseBuilder::with_budget(other.clone()).unwrap();
+    other_builder.push(vec![2; 3]).unwrap();
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(1));
+    let permit = semaphore.clone().acquire_owned().await.unwrap();
+    let shared_task = tokio::spawn(async { std::future::pending::<()>().await });
+    let result = budget
+        .wait_with_residence_deadline(async move {
+            let _request_resources = (builder, permit);
+            std::future::pending::<Result<(), routecodex_v3_provider_responses::V3ProviderError>>()
+                .await
+        })
+        .await;
+    assert!(
+        matches!(result, Err(V3AttemptStoreError::LocalResourceExhausted(message)) if message.contains("residence deadline"))
+    );
+    assert_eq!(budget.request_resident_bytes(), 0);
+    assert_eq!(process_bytes.load(Ordering::Acquire), 3);
+    assert_eq!(other.request_resident_bytes(), 3);
+    assert_eq!(semaphore.available_permits(), 1);
+    assert!(
+        !shared_task.is_finished(),
+        "request expiry must not cancel shared work"
+    );
+    assert_eq!(
+        other
+            .wait_with_residence_deadline(std::future::ready(7))
+            .await
+            .unwrap(),
+        7
+    );
+    drop(other_builder);
+    assert_eq!(process_bytes.load(Ordering::Acquire), 0);
+    shared_task.abort();
+    assert!(shared_task.await.unwrap_err().is_cancelled());
+}
+
 fn test_limits(
     attempt_max_bytes: usize,
     request_max_bytes: usize,

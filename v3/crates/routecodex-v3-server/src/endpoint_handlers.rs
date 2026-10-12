@@ -54,7 +54,11 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         Err(response) => return *response,
     };
     let request_id = request_identity.request_id.clone();
-    // One allocation: every terminal branch records this same request identity.
+    if let Some(socket) = front_connection_identity
+        .and_then(|identity| state.front_transport_broker.front_socket(identity))
+    {
+        socket.bind_client_request(request_id.clone());
+    }
     let terminal_evidence = V3ProviderTerminalEvidence {
         entry_protocol: &entry_protocol,
         endpoint: &path,

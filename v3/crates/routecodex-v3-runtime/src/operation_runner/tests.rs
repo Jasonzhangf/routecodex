@@ -340,3 +340,55 @@ fn capture_slice_rejects_declared_resource_reads() {
     let error = capture_slice_from_graph(graph).expect_err("capture effects must be empty");
     assert!(error.message.contains("no resource reads"), "{error}");
 }
+
+#[test]
+fn client_source_outcome_consumer_is_health_neutral_and_ordered() {
+    let failure = routecodex_v3_error::V3ClientTransportFailure {
+        operation: routecodex_v3_error::V3ClientTransportOperation::PeerReset,
+        io_kind: Some("ConnectionReset".to_string()),
+        os_cause: Some("os_error=54: Connection reset by peer".to_string()),
+        connection_id: 42,
+        request_id: "req-client-reset".to_string(),
+        attempt_id: Some("attempt-9".to_string()),
+    };
+
+    let execution = crate::operation_runner::execute_v3_client_source_error_chain(failure).unwrap();
+
+    // The Runtime consumes the corrected six-node chain in reviewed order.
+    assert_eq!(
+        execution.completed_node_ids,
+        routecodex_v3_error::V3_CLIENT_SOURCE_ERROR_CHAIN_NODE_IDS
+    );
+
+    // The typed transport intent is an abort with the real request/connection
+    // identity, and a client-source terminal never mutates provider health.
+    let transport = &execution.transport_outcome;
+    assert_eq!(
+        transport.intent,
+        crate::operation_runner::V3RuntimeTransportIntent::Abort
+    );
+    assert!(transport.health_neutral);
+    assert_eq!(transport.request_id, "req-client-reset");
+    assert_eq!(transport.connection_id, 42);
+    assert_eq!(transport.attempt_id.as_deref(), Some("attempt-9"));
+    assert!(execution.outcome.health_action.is_none());
+    assert_eq!(
+        execution
+            .journal
+            .iter()
+            .filter(|event| matches!(event, pipeline_runtime::Event::OperatorCompleted { .. }))
+            .count(),
+        6
+    );
+    assert_eq!(
+        execution
+            .journal
+            .iter()
+            .filter(|event| matches!(event, pipeline_runtime::Event::ArcWritten { .. }))
+            .count(),
+        6
+    );
+    assert!(execution.journal.iter().any(|event| matches!(event,
+        pipeline_runtime::Event::OperatorStarted { effects, .. }
+        if effects.iter().any(|effect| effect == "v3.error.execution_decision"))));
+}

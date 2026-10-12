@@ -1290,6 +1290,9 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
     let response = match client_sse_channel {
         Some(keepalive_interval) => {
             let outcome_state = Arc::clone(&state);
+            let client_source_closeout = front_socket
+                .as_ref()
+                .map(|socket| socket.client_source_closeout());
             accept_v3_client_sse_transport(
                 runtime_outcome,
                 Box::new(move |outcome| {
@@ -1300,6 +1303,7 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
                     )
                 }),
                 keepalive_interval,
+                client_source_closeout,
             )
             .await
         }

@@ -634,7 +634,34 @@ resources:
       reader: ErrorErr01SourceRaised
       source_rule: retain client transport/disconnect, typed cancellation or internal response origin and original cause; enter all six fixed Error nodes before RuntimeTransportOutcome and typed close receipt, then drain/attempt cleanup/finalizer
       policy: health-neutral; no switch_provider, candidate exclusion or provider cooldown for client/internal-response origin; Server never writes Error decisions or Provider health
-      cancellation_binding: design_pending; no runtime cancellation enum/conversion claim
+      cancellation_binding: the client transport cancellation operation is source-bound (V3ClientTransportOperation::Cancellation); RuntimeCancellation to typed cancellation enum/conversion stays design_pending
+      source_api_owner: routecodex-v3-error
+      capture_owner: routecodex-v3-server
+      allowed_source_files:
+        error: [v3/crates/routecodex-v3-error/src/lib.rs, v3/crates/routecodex-v3-error/src/client_transport_source.rs, v3/crates/routecodex-v3-error/tests/error_chain_contract.rs]
+        server: [v3/crates/routecodex-v3-server/src/restart_handoff.rs, v3/crates/routecodex-v3-server/src/client_sse_transport.rs, v3/crates/routecodex-v3-server/src/lib.rs, v3/crates/routecodex-v3-server/src/frame_builders.rs, v3/crates/routecodex-v3-server/src/restart_closeout.rs, v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs]
+        runtime: [v3/crates/routecodex-v3-runtime/src/foundation.rs, v3/crates/routecodex-v3-runtime/src/execution_control.rs, v3/crates/routecodex-v3-runtime/src/operation_runner]
+      consumer: RuntimeTransportOutcome
+      lifecycle_order: [independent_Error_graph, RuntimeTransportOutcome, ServerAbortOrAlreadyDisconnectedReceipt, drain, RuntimeAttemptCleanup, RuntimeRequestFinalizer]
+      forbidden_control_tunnel: [V3FoundationRuntimeOutput.status, V3FoundationRuntimeOutput.body, V3FoundationRuntimeOutput.error_chain, response.client_payload, MetadataCenter.payload, debug.log]
+      symbol: execute_v3_client_source_error_chain
+      actual_source_anchors:
+        source_api: {symbol: V3ClientTransportFailure, file: v3/crates/routecodex-v3-error/src/client_transport_source.rs, lines: 64-74, anchor_blob: 4843b0af69526df02631a9b2aa2da2e700fe6105}
+        source_raised: {symbol: build_v3_error_01_source_raised_for_client_transport, file: v3/crates/routecodex-v3-error/src/client_transport_source.rs, lines: 98-127, anchor_blob: 4843b0af69526df02631a9b2aa2da2e700fe6105}
+        host_captured: {symbol: build_v3_error_02_host_captured_from_client_transport, file: v3/crates/routecodex-v3-error/src/client_transport_source.rs, lines: 131-144, anchor_blob: 4843b0af69526df02631a9b2aa2da2e700fe6105}
+        sdk_entry: {symbol: execute_v3_client_source_error_chain, file: v3/crates/routecodex-v3-runtime/src/operation_runner/client_source_error.rs, lines: 24-90, anchor_blob: 5df40ee92aa222b050cfcb7a5d8db9cbc73434b3}
+        sdk_operator: {symbol: ClientSourceErrorOperator, file: v3/crates/routecodex-v3-runtime/src/operation_runner/operators/client_source_error.rs, lines: 8-33, anchor_blob: bfd582413b8c2019fa9cfcd85e5dce627cc4ed9c}
+        server_capture: {symbol: v3_front_io_cause, file: v3/crates/routecodex-v3-server/src/restart_closeout.rs, lines: 511-525, anchor_blob: 79ff9a47880f09580ddebb8e7061555645e3f945}
+        server_intent_consumer: {symbol: V3FrontClientSourceCloseout::close_request, file: v3/crates/routecodex-v3-server/src/restart_closeout.rs, lines: 411-508, anchor_blob: 79ff9a47880f09580ddebb8e7061555645e3f945}
+        identity_ingress: {symbol: V3StableFrontSocket::bind_client_request, file: v3/crates/routecodex-v3-server/src/restart_handoff.rs, lines: 1077-1079, anchor_blob: a42b2bdeee2039aaa041d041499f2a5cff5f3acd}
+        runtime_consumer: {symbol: consume_v3_client_source_outcome, file: v3/crates/routecodex-v3-runtime/src/operation_runner/mod.rs, lines: 500-511, anchor_blob: 20118b9f830e3455e05111a93ccee38c93d161a9}
+        runtime_drain: {symbol: drain_v3_client_source_request, file: v3/crates/routecodex-v3-runtime/src/operation_runner/mod.rs, lines: 471-482, anchor_blob: 20118b9f830e3455e05111a93ccee38c93d161a9}
+      anchor_status: settled; anchors bound to the implementation author's settled source
+      binding_facts:
+        sdk_graph_executed: true; execute_v3_client_source_error_chain compiles the canonical error graph JSON through pipeline_runtime::parse_graph_json and compile, then runs six registered ClientSourceErrorOperator instances; the journal proves six OperatorCompleted and six ArcWritten with the execution_decision and client_projection_candidate effects
+        typed_identity: the allocated request_id is bound into the Front typed context by V3StableFrontSocket::bind_client_request before the trace starts, stored by V3FrontClientSourceCloseout::bind_request, and submitted by close_request into V3ClientTransportFailure; no V3DebugTraceScope control read
+        release: close_request applies the typed transport intent, awaits the socket and http close receipt, and awaits the JoinHandle drain before dropping the request identity and recording RuntimeRequestFinalizer
+      pending_scope: the whole three-graph cutover (other Request/Response/Error lanes), the RuntimeCancellation to typed cancellation conversion, and the console observer stay legacy pending
     allowed_writers: [V3Error01SourceRaised, V3Error02Classified, V3Error03TargetLocalAction, V3Error04TargetExhaustionDecision, V3Error05ExecutionDecision, V3Error06ClientProjected]
     allowed_readers: [V3Target09CandidateSetExpanded, V3Server16HttpFrame]
     forbidden_writers: [V3Provider12ResponsesWirePayload, V3Resp15ClientPayload]
@@ -1200,6 +1227,7 @@ resources:
     owner_crate: routecodex-v3-error
     owner_node: V3Error06ClientProjected
     identity: [status, code, errorNode]
+    superseded_semantics: legacy resource; ErrorErr06 is the fixed graph sink and returns internal-error-outcome only. Requirements version 6 supersedes the legacy client-visible projection; the corrected V3 error graph uses v3.error.client_projection_candidate (internal evidence, reader RuntimeTransportOutcome). The legacy V3Server16HttpFrame reader is retained only as an existing runtime/legacy binding pending cutover and never authorizes a new client error payload.
     allowed_writers: [build_v3_error_06_client_projected_from_v3_error_05]
     allowed_readers: [V3Server16HttpFrame]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses]
@@ -3029,8 +3057,9 @@ resources:
       admission_order: Reserve byte/frame capacity before append or copy; release exactly once on seal, discard, cancellation, or terminal error.
       request_scope: Provider transport admission and every Runtime-sealed client replay projection consume the same request-local budget instance; Server may only move the sealed replay and may not construct or reconstruct a budget.
       exhaustion_lane: LocalResourceExhausted in the internal Error chain; never provider ResponseBody and never provider health mutation.
+      shared_wait: V3AttemptBudget::wait_with_residence_deadline (v3/crates/routecodex-v3-runtime/src/execution_control.rs:274-287, blob d7e95c705a504a3ee10c691f554cb82d7e070668) waits a request-owned future on the existing absolute residence Instant; local expiry stays a Runtime Error reader and is neither a health writer nor a new payload/metadata resource.
     allowed_writers: [resident_request_controller, AttemptPayloadStore]
-    allowed_readers: [resident_request_controller, AttemptPayloadStore, V3Error05ExecutionDecision]
+    allowed_readers: [resident_request_controller, AttemptPayloadStore, V3Error05ExecutionDecision, V3AttemptBudget::wait_with_residence_deadline]
     forbidden_writers: [SSE_stream_wrapper, ProviderTransport, observability, health, payload]
     may_enter_provider_body: false
     may_enter_client_body: false

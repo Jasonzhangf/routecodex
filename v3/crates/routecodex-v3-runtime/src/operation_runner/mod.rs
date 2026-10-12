@@ -8,7 +8,9 @@ use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
+mod client_source_error;
 mod operators;
+pub use client_source_error::execute_v3_client_source_error_chain;
 use operators::CaptureClientJsonOperator;
 
 const REQUEST_GRAPH_JSON: &str =
@@ -423,6 +425,89 @@ pub fn execute_v3_operation_runner_request_capture_client_json(
     payload: Value,
 ) -> Result<Value, OperationRunnerError> {
     request_graph_entry()?.capture_client_json(payload)
+}
+
+/// The typed transport intent the Runtime publishes for a client-source terminal.
+///
+/// It is the Runtime's consumed outcome of the corrected client-source Error
+/// chain. The Server reads it only to execute the physical abort (or to confirm an
+/// already-disconnected socket) and to record the close receipt; it never carries
+/// provider health, switch or cooldown semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V3RuntimeTransportIntent {
+    /// Abort the affected request transport; no response byte is committed.
+    Abort,
+    /// The peer is already physically gone; confirm the receipt only.
+    AlreadyDisconnected,
+}
+
+/// Typed Runtime consumer outcome for a client-source terminal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3RuntimeTransportOutcome {
+    pub request_id: String,
+    pub connection_id: u64,
+    pub attempt_id: Option<String>,
+    pub intent: V3RuntimeTransportIntent,
+    /// Client / internal-response sources are always health neutral.
+    pub health_neutral: bool,
+}
+
+/// Server publishes this only after its write half has shut down and its
+/// queued transport commands are released. Runtime cleanup requires it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3ServerTransportCloseReceipt {
+    pub connection_id: u64,
+    pub already_disconnected: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3RuntimeClientCleanupReceipt {
+    pub connection_id: u64,
+    pub task_joined: bool,
+}
+
+/// Draining a cancelled task waits for the owned request future (and its
+/// attempt stores, streams and permits) to be dropped before returning.
+pub async fn drain_v3_client_source_request(
+    receipt: V3ServerTransportCloseReceipt,
+    task: Option<tokio::task::JoinHandle<()>>,
+) -> V3RuntimeClientCleanupReceipt {
+    if let Some(task) = task {
+        let _ = task.await;
+    }
+    V3RuntimeClientCleanupReceipt {
+        connection_id: receipt.connection_id,
+        task_joined: true,
+    }
+}
+
+/// The Runtime consumption of the corrected client-source Error chain.
+///
+/// `completed_node_ids` is the reviewed `error_sequence`; the Runtime only
+/// publishes this after every fixed node executed and the typed internal outcome
+/// exists. The Server records one request-bound node event per completed node.
+#[derive(Debug, Clone, PartialEq)]
+pub struct V3ClientSourceErrorChainExecution {
+    pub outcome: routecodex_v3_error::V3Error06ClientProjected,
+    pub completed_node_ids: [&'static str; 6],
+    pub transport_outcome: V3RuntimeTransportOutcome,
+    pub journal: Vec<pipeline_runtime::Event>,
+}
+
+/// Consume the corrected internal typed outcome into the Runtime transport
+/// intent. Client and internal-response sources never switch, exclude, cool or
+/// otherwise mutate provider health.
+pub fn consume_v3_client_source_outcome(
+    outcome: &routecodex_v3_error::V3Error06ClientProjected,
+    host_captured: &routecodex_v3_error::V3Error02HostCaptured,
+) -> V3RuntimeTransportOutcome {
+    V3RuntimeTransportOutcome {
+        request_id: host_captured.request_id.clone(),
+        connection_id: host_captured.connection_id,
+        attempt_id: host_captured.attempt_id.clone(),
+        intent: V3RuntimeTransportIntent::Abort,
+        health_neutral: outcome.health_action.is_none(),
+    }
 }
 
 #[cfg(test)]

@@ -21,6 +21,7 @@
 //! - An outcome with no successful client payload closes the client transport
 //!   without projecting a provider status, error payload, or fabricated success.
 //!   The real cause stays in the typed Error chain and in the console record.
+use crate::restart_closeout::V3FrontClientSourceCloseout;
 use axum::body::{Body, BodyDataStream};
 use axum::http::{header, StatusCode};
 use axum::response::Response;
@@ -58,6 +59,7 @@ pub(crate) async fn accept_v3_client_sse_transport(
     runtime_outcome: Pin<Box<dyn Future<Output = Response<Body>> + Send>>,
     finalize_runtime_outcome: Box<dyn FnOnce(Response<Body>) -> Response<Body> + Send>,
     keepalive_interval: Duration,
+    client_source_closeout: Option<V3FrontClientSourceCloseout>,
 ) -> Response<Body> {
     let mut runtime_outcome = runtime_outcome;
     match tokio::time::timeout(keepalive_interval, &mut runtime_outcome).await {
@@ -68,7 +70,12 @@ pub(crate) async fn accept_v3_client_sse_transport(
                 let outcome = runtime_outcome.await;
                 let _ = outcome_sender.send(finalize_runtime_outcome(outcome));
             });
-            commit_v3_client_sse_channel(outcome, outcome_task, keepalive_interval)
+            commit_v3_client_sse_channel(
+                outcome,
+                outcome_task,
+                keepalive_interval,
+                client_source_closeout,
+            )
         }
     }
 }
@@ -82,7 +89,15 @@ fn commit_v3_client_sse_channel(
     outcome: oneshot::Receiver<Response<Body>>,
     outcome_task: JoinHandle<()>,
     keepalive_interval: Duration,
+    client_source_closeout: Option<V3FrontClientSourceCloseout>,
 ) -> Response<Body> {
+    let outcome_task = match client_source_closeout.as_ref() {
+        Some(closeout) => {
+            closeout.bind_runtime_task(outcome_task);
+            None
+        }
+        None => Some(outcome_task),
+    };
     let mut interval = tokio::time::interval_at(
         tokio::time::Instant::now() + keepalive_interval,
         keepalive_interval,
@@ -92,7 +107,8 @@ fn commit_v3_client_sse_channel(
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let stream = V3ClientSseChannelStream {
         outcome,
-        outcome_task: Some(outcome_task),
+        outcome_task,
+        client_source_closeout,
         interval,
         keepalive_chunk: build_v3_sse_transport_out_04_keepalive_comment(
             V3_CLIENT_SSE_KEEPALIVE_COMMENT,
@@ -136,6 +152,11 @@ enum V3ClientSseChannelDisposition {
 struct V3ClientSseChannelStream {
     outcome: oneshot::Receiver<Response<Body>>,
     outcome_task: Option<JoinHandle<()>>,
+    /// Corrected client-source Error chain + closeout driver. A committed
+    /// channel that is dropped by the client transport must publish the real
+    /// client-source failure through the fixed Error chain. The closeout owns
+    /// cancellation, physical receipt and awaited resource drain.
+    client_source_closeout: Option<V3FrontClientSourceCloseout>,
     interval: tokio::time::Interval,
     keepalive_chunk: Vec<u8>,
     state: V3ClientSseChannelState,
@@ -239,6 +260,9 @@ impl Stream for V3ClientSseChannelStream {
                             }
                         }
                         Poll::Ready(Err(_)) => {
+                            if let Some(closeout) = this.client_source_closeout.as_ref() {
+                                closeout.drive_internal_channel_loss();
+                            }
                             this.state = V3ClientSseChannelState::Finished;
                             return Poll::Ready(Some(Err(io::Error::other(
                                 "committed client SSE channel lost the runtime outcome channel; the client transport closes without an error frame",
@@ -297,8 +321,30 @@ impl Stream for V3ClientSseChannelStream {
 
 impl Drop for V3ClientSseChannelStream {
     fn drop(&mut self) {
+        // A body dropped before completion requests typed cancellation. The
+        // closeout owns the worker and awaits actual shutdown and resource drain.
+        let premature = !matches!(self.state, V3ClientSseChannelState::Finished);
+        // Release a committed body and any buffered outcome before the async
+        // closeout can claim resource cleanup. Closing the receiver also makes
+        // a racing runtime sender drop its response before its task joins.
+        drop(std::mem::replace(
+            &mut self.state,
+            V3ClientSseChannelState::Finished,
+        ));
+        self.outcome.close();
+        if let Ok(response) = self.outcome.try_recv() {
+            drop(response);
+        }
+        if premature {
+            if let Some(closeout) = self.client_source_closeout.take() {
+                closeout.drive_premature_disconnect();
+            }
+        }
         if let Some(task) = self.outcome_task.take() {
             task.abort();
+            tokio::spawn(async move {
+                let _ = task.await;
+            });
         }
     }
 }
@@ -309,6 +355,32 @@ mod tests {
     use futures_util::StreamExt;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+
+    #[tokio::test]
+    async fn successful_channel_with_typed_closeout_does_not_cancel_its_connection() {
+        let state = crate::restart_closeout::V3FrontTransportCloseoutState::new();
+        let closeout = V3FrontClientSourceCloseout::detached(
+            crate::restart_handoff::V3FrontConnectionIdentity(88),
+            Arc::clone(&state),
+        );
+        closeout.bind_request("successful-request".into());
+        let (tx, rx) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            tx.send(json_outcome(200, "application/json", "{\"ok\":true}"))
+                .unwrap();
+        });
+        let response =
+            commit_v3_client_sse_channel(rx, task, Duration::from_millis(10), Some(closeout));
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(String::from_utf8_lossy(&bytes).contains("{\"ok\":true}"));
+        tokio::task::yield_now().await;
+        assert!(
+            !state.is_closed(),
+            "normal business completion initiated failure closeout"
+        );
+    }
 
     fn json_outcome(status: u16, content_type: &'static str, body: &'static str) -> Response<Body> {
         Response::builder()
@@ -350,6 +422,7 @@ mod tests {
         V3ClientSseChannelStream {
             outcome,
             outcome_task: Some(task),
+            client_source_closeout: None,
             interval,
             keepalive_chunk: b": keepalive\n\n".to_vec(),
             state: V3ClientSseChannelState::AwaitOutcome {
@@ -527,6 +600,7 @@ mod tests {
             runtime_outcome,
             Box::new(|outcome| outcome),
             Duration::from_millis(50),
+            None,
         )
         .await;
         assert_eq!(response.status(), StatusCode::OK);

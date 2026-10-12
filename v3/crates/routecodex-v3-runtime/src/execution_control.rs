@@ -248,7 +248,7 @@ impl V3AttemptBudget {
     }
 
     #[cfg(test)]
-    fn new_isolated(
+    pub(crate) fn new_isolated(
         limits: V3AttemptStoreLimits,
         process_resident_bytes: Arc<AtomicUsize>,
     ) -> Self {
@@ -269,6 +269,21 @@ impl V3AttemptBudget {
 
     pub(crate) fn residence_deadline(&self) -> Instant {
         self.inner.deadline
+    }
+
+    pub(crate) async fn wait_with_residence_deadline<F: std::future::Future>(
+        &self,
+        pending: F,
+    ) -> Result<F::Output, V3AttemptStoreError> {
+        tokio::select! {
+            biased;
+            output = pending => Ok(output),
+            _ = tokio::time::sleep_until(tokio::time::Instant::from_std(self.residence_deadline())) => {
+                Err(V3AttemptStoreError::LocalResourceExhausted(
+                    "provider SSE attempt exceeded the request residence deadline".to_string(),
+                ))
+            }
+        }
     }
 
     pub(crate) fn admit_transport_attempt(&self) -> Result<usize, V3AttemptStoreError> {
