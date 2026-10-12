@@ -4326,6 +4326,161 @@ async fn responses_relay_endpoint_uses_hub_relay_runtime_for_json_and_sse() {
 }
 
 #[tokio::test]
+async fn responses_relay_openai_chat_reasoning_content_survives_public_entry() {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-chat-reasoning-content");
+    let reasoning_text = "Chat reasoning content must survive Responses projection";
+    let check_reasoning_item = |item: &Value, body: &str| {
+        assert_eq!(item["summary"][0]["text"], reasoning_text, "{body}");
+        assert_eq!(item["content"][0]["type"], "reasoning_text", "{body}");
+        assert_eq!(item["content"][0]["text"], reasoning_text, "{body}");
+    };
+    let cases: [(bool, &'static str, Vec<u8>); 2] = [
+        (
+            false,
+            "application/json",
+            json!({
+                "id": "chatcmpl_reasoning_json",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "wire-test",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "visible JSON answer",
+                        "reasoning_content": reasoning_text
+                    },
+                    "finish_reason": "stop"
+                }]
+            })
+            .to_string()
+            .into_bytes(),
+        ),
+        (
+            true,
+            "text/event-stream",
+            format!(
+                r#"data: {{"id":"chatcmpl_reasoning_sse","object":"chat.completion.chunk","created":1,"model":"wire-test","choices":[{{"index":0,"delta":{{"role":"assistant","reasoning_content":"{reasoning_text}"}},"finish_reason":null}}]}}
+
+data: {{"id":"chatcmpl_reasoning_sse","object":"chat.completion.chunk","created":1,"model":"wire-test","choices":[{{"index":0,"delta":{{"content":"visible SSE answer"}},"finish_reason":null}}]}}
+
+data: [DONE]
+
+"#
+            )
+            .into_bytes(),
+        ),
+    ];
+
+    for (stream, upstream_content_type, upstream_body) in cases {
+        let (provider_base_url, mut captures, upstream_shutdown) =
+            start_controlled_terminal_upstream_with_body(
+                StatusCode::OK,
+                upstream_content_type,
+                upstream_body,
+            )
+            .await;
+        let handle = spawn_v3_server_aggregate(responses_relay_provider_protocol_manifest(
+            free_port(),
+            free_port(),
+            &provider_base_url,
+            "openai_chat",
+            None,
+        ))
+        .await
+        .unwrap();
+        let input = if stream {
+            "chat reasoning sse"
+        } else {
+            "chat reasoning json"
+        };
+        let response = reqwest::Client::new()
+            .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+            .header(
+                "accept",
+                if stream {
+                    "text/event-stream"
+                } else {
+                    "application/json"
+                },
+            )
+            .json(&json!({
+                "model": "client-test",
+                "input": input,
+                "stream": stream
+            }))
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        let client_content_type = response
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let body = response.text().await.unwrap();
+        let capture = timeout(Duration::from_secs(5), captures.recv())
+            .await
+            .expect("controlled Chat upstream must receive the request")
+            .unwrap();
+        handle.shutdown().await;
+        upstream_shutdown.send(()).unwrap();
+
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(capture.body["model"], "wire-test", "{body}");
+        assert!(
+            capture.body["messages"].as_array().is_some(),
+            "upstream request must be Chat wire shape: {body}"
+        );
+        if stream {
+            assert!(
+                client_content_type.starts_with("text/event-stream"),
+                "{client_content_type}"
+            );
+            let events: Vec<Value> = body
+                .lines()
+                .filter_map(|line| line.strip_prefix("data: "))
+                .filter(|data| *data != "[DONE]")
+                .map(|data| serde_json::from_str(data).unwrap())
+                .collect();
+            let done_reasoning = events
+                .iter()
+                .find(|event| {
+                    event["type"] == "response.output_item.done"
+                        && event["item"]["type"] == "reasoning"
+                })
+                .and_then(|event| event.get("item"))
+                .expect("public SSE must emit the reasoning output item");
+            check_reasoning_item(done_reasoning, &body);
+            let completed_reasoning = events
+                .iter()
+                .find(|event| event["type"] == "response.completed")
+                .and_then(|event| event["response"]["output"].as_array())
+                .and_then(|output| output.iter().find(|item| item["type"] == "reasoning"))
+                .expect("public SSE completed response must retain the reasoning item");
+            check_reasoning_item(completed_reasoning, &body);
+        } else {
+            assert!(
+                client_content_type.starts_with("application/json"),
+                "{client_content_type}"
+            );
+            let payload: Value = serde_json::from_str(&body).unwrap();
+            let reasoning = payload["output"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["type"] == "reasoning")
+                .expect("public JSON response must expose the reasoning item");
+            check_reasoning_item(reasoning, &body);
+        }
+    }
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
 async fn responses_relay_provider_503_never_reaches_the_client() {
     let _test_guard = TEST_LOCK.lock().await;
     let (failure_base_url, failure_shutdown) =
