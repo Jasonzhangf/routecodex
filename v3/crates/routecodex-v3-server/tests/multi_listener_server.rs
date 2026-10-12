@@ -7468,6 +7468,100 @@ async fn anthropic_messages_provider_failure_never_reaches_the_client() {
 }
 
 #[tokio::test]
+async fn responses_direct_followup_preserves_function_strict_presence() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("strict-presence-followup");
+    // Exact JSON follow-up captured by case-gpt_5-json; only model is routed locally.
+    let mut original: Value = serde_json::from_str(
+        r#"{
+  "model": "gpt-5.5",
+  "stream": false,
+  "reasoning": {"effort": "medium"},
+  "input": [
+    {"role": "user", "content": [{"type": "input_text", "text": "Acceptance marker: PR390_GPT_5_JSON. Think through this task, then call acceptance_add exactly once with a=17 and b=25. Do not calculate the final answer before receiving the tool result. After the tool result, answer with the marker followed by the sum."}]},
+    {"content": [{"text": "The user wants me to call acceptance_add with a=17 and b=25. Let me do that.", "type": "reasoning_text"}], "summary": [{"text": "The user wants me to call acceptance_add with a=17 and b=25. Let me do that.", "type": "summary_text"}], "type": "reasoning"},
+    {"arguments": "{\"a\": 17, \"b\": 25}", "call_id": "call_00_5b97PyhFvP41SWnsrTVR6642", "name": "acceptance_add", "type": "function_call"},
+    {"type": "function_call_output", "call_id": "call_00_5b97PyhFvP41SWnsrTVR6642", "output": "{\"sum\": 42}"}
+  ],
+  "tools": [{"type": "function", "name": "acceptance_add", "description": "Return the sum of the two integer arguments.", "parameters": {"type": "object", "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}}, "required": ["a", "b"], "additionalProperties": false}, "strict": true}],
+  "tool_choice": "none"
+}"#,
+    )
+    .unwrap();
+    original["model"] = json!("client-test");
+    let capture_dir = std::env::temp_dir().join(format!(
+        "routecodex-4ce7349-strict-captures-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&capture_dir).unwrap();
+    println!("strict presence upstream bodies: {}", capture_dir.display());
+
+    let (base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_PROTOCOL_DECISION_KEY", "controlled-strict-presence");
+    let manifest = responses_direct_binding_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        "responses",
+        &base_url,
+        "\"direct\"",
+    );
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .unwrap();
+
+    for (label, strict) in [
+        ("true", Some(json!(true))),
+        ("false", Some(json!(false))),
+        ("absent", None),
+    ] {
+        let mut request = original.clone();
+        let tool = request["tools"][0].as_object_mut().unwrap();
+        if let Some(value) = &strict {
+            tool.insert("strict".to_owned(), value.clone());
+        } else {
+            tool.remove("strict");
+        }
+        let response = client
+            .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+            .json(&request)
+            .send()
+            .await;
+        let received = timeout(Duration::from_secs(5), captures.recv())
+            .await
+            .expect("first provider attempt must reach controlled upstream")
+            .expect("controlled upstream must capture request");
+        let capture_path = capture_dir.join(format!("{label}-upstream-body.json"));
+        fs::write(
+            &capture_path,
+            serde_json::to_vec_pretty(&received.body).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            received.body["tools"][0].get("strict"),
+            strict.as_ref(),
+            "strict presence changed for {label}; body saved at {}",
+            capture_path.display()
+        );
+        assert_eq!(received.body["tools"], request["tools"], "{label}: tools");
+        assert_eq!(received.body["input"], request["input"], "{label}: history");
+        assert_eq!(received.body["tool_choice"], request["tool_choice"]);
+        assert_eq!(received.body["reasoning"], request["reasoning"]);
+        assert_eq!(received.body["stream"], json!(false));
+        let response = response.expect("public Responses request must complete");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value = response.json().await.unwrap();
+        assert_eq!(body["status"], "completed");
+        assert!(captures.try_recv().is_err(), "unexpected extra attempt");
+    }
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+}
+
+#[tokio::test]
 async fn responses_without_snap_authorization_writes_no_codex_sample() {
     let _test_guard = TEST_LOCK.lock().await;
     let home_guard = TestHomeGuard::new("no-snap-authorization");

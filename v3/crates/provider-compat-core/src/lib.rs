@@ -538,6 +538,12 @@ fn normalize_responses_function_tools(root: &mut Map<String, Value>) {
                     .or_else(|| function_obj.and_then(|row| row.get("parameters"))),
             ),
         );
+        if let Some(strict) = tool_obj
+            .get("strict")
+            .or_else(|| function_obj.and_then(|row| row.get("strict")))
+        {
+            normalized_tool.insert("strict".to_string(), strict.clone());
+        }
         normalized.push(Value::Object(normalized_tool));
     }
     root.insert("tools".to_string(), Value::Array(normalized));
