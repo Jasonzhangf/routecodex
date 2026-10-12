@@ -6146,13 +6146,15 @@ features:
   status: node01_capture_runtime_candidate_full_runner_pending
   change_risk: high
   owner_kind: design_architecture
-  owner_scope: Unified operation runner DAGpipe design, lifecycle manifest, exact ErrorErr01-06 binding, typed owner/release table, RuntimeRequestGraphEntry owner for invocation origin, and first runtime slice. The current runtime candidate implements only Node 01 capture_client_json; later nodes remain pending. The first slice owns one Runtime capture operation; Server HTTP and Responses WebSocket are caller/forwarding boundaries only.
+  owner_scope: Unified operation runner DAGpipe design, lifecycle manifest, exact legacy ErrorErr01-06 binding, typed owner/release table, RuntimeRequestGraphEntry owner for invocation origin, and first runtime slice. Graph correction explicitly binds resolve_target origin/prior opaque target reads and request-scoped capturedTierPlan retention, preserves Runtime legacy reader permissions with pending RuntimeTransportOutcome access, and requires client transport/disconnect/cancellation to enter the six fixed Error nodes with health-neutral source provenance before typed abort/cleanup. New bindings remain design_pending. Graph correction preserves provider attempt failure provenance into independent Error recovery; Error05/06 yield error-execution-decision/internal-error-outcome, terminal no-commit directs Server through RuntimeTransportOutcome to abort/disconnect with no response and typed close receipt, never normal empty completion or a termination message; attempt cleanup precedes request finalizer and is not business success. The current runtime candidate implements only Node 01 capture_client_json; later nodes remain pending. The first slice owns one Runtime capture operation; Server HTTP and Responses WebSocket are caller/forwarding boundaries only.
   owner_crate: routecodex-v3-runtime
   owner_file: docs/design/v3-unified-operation-runner-design.md
   resource_bindings:
   - v3.operation_runner.dagpipe_manifest
   - v3.operation_runner.operator_registry
   - v3.operation_runner.execution_mode
+  - v3.route.opaque_target
+  - v3.error.chain
   - v3.operation_runner.request_origin_kind
   - v3.operation_runner.request_inverse_context
   - v3.operation_runner.attempt_projection_context

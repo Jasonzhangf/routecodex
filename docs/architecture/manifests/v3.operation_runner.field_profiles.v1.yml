@@ -9491,6 +9491,7 @@ operator_registry:
       params:
         published_manifest: resource
         route_target: resource
+        request_origin_kind: resource
         opaque_target: resource
     - operator: routecodex.v3.operation.plan_execution
       operator_version: "1"

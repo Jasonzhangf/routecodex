@@ -7,6 +7,39 @@ graphs:
   response: docs/architecture/dagpipe/v3.operation_runner.response.graph.json
   error: docs/architecture/dagpipe/v3.operation_runner.error.graph.json
   error_chain_source: docs/architecture/manifests/error.mainline.yml
+error_chain_source_rule: legacy ErrorErr01-06 symbols and order only; legacy client_payload/projection semantics are superseded by requirements version 6 and the V3 typed internal outcome contract
+source_failure_rule: provider HTTP errors, header wait timeout and transport failures preserve original provider/model/key, request/attempt identity and response-wait/transport provenance into the independent Error graph; switch_provider/reselect starts a new attempt in Runtime, never synthesizes request 598 or an absent upstream HTTP status
+client_transport_rule: Server may accept SSE and send transport-only keepalives before a business outcome; acceptance and projection are not business success; complete deliverable business responses, including valid empty responses, reach client projection; exhaustion means abort/disconnect with no response, never graceful empty EOF, [DONE], successful end, error payload/status or termination event; cleanup does not prove business success
+target_resolution:
+  status: design_pending
+  node: resolve_target
+  origin_resource: v3.operation_runner.request_origin_kind
+  prior_target_resource: v3.route.opaque_target
+  client_entry: select_and_write_once
+  retry: preserve_same_request_target_and_capturedTierPlan
+  internal_followup: preserve_same_request_target_and_capturedTierPlan
+  reselect_owner: TargetInterpreter_within_original_opaque_target
+  missing_control: typed_source_failure_to_ErrorErr01SourceRaised
+  forbidden: [payload_reconstruction, default_client_entry, ordinary_route_reclassification, skip_fixed_node]
+  target_release: RuntimeRequestFinalizer
+client_error_ingress:
+  status: design_pending
+  input_arc: source-failure
+  schema_ref: v3.operation_runner.arc.source_failure
+  error_sequence: [ErrorErr01SourceRaised, ErrorErr02HostCaptured, ErrorErr03RuntimeClassified, ErrorErr04RouterPolicyApplied, ErrorErr05ExecutionDecision, ErrorErr06ClientProjected]
+  source_bindings:
+    client_transport_failure: {observer: Server/SSE, origin: client_transport, policy: terminal_health_neutral}
+    client_disconnect: {observer: Server/SSE, origin: client_disconnect, policy: terminal_health_neutral}
+    cancellation: {observer: RuntimeCancellation, origin: typed_cancellation, policy: terminal_health_neutral}
+    internal_response_failure: {observer: RuntimeResponseProcessing, origin: internal_response, policy: terminal_health_neutral}
+  cancellation_rule: retain existing typed cancellation and original cause; source-failure conversion binding pending, no claim of a runtime cancellation source enum
+  provider_boundary: only an actual bound provider attempt failure admits provider recovery/health policy; provider response-wait/transport provenance remains original
+  forbidden_actions: [switch_provider, candidate_exclusion, provider_cooldown, provider_health_mutation, attribute_internal_response_to_provider]
+  consumer: RuntimeTransportOutcome
+  terminal_consumption: existing typed clientDisconnected; typed cancellation with original cause and design-pending Error conversion; never business response
+  receipt_owner: ServerAbortOrAlreadyDisconnectedReceipt
+  cleanup_order: [independent_Error_graph, RuntimeTransportOutcome, ServerAbortOrAlreadyDisconnectedReceipt, drain, RuntimeAttemptCleanup, RuntimeRequestFinalizer]
+  no_response: no payload, status, end, notification, [DONE], error event or fabricated success; an already disconnected socket is confirmed only
 field_profiles: docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml
 operator_registry_source: docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml
 semantic_matrix: docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml
@@ -15,8 +48,8 @@ metadata_center:
   kind: typed_identity_and_field_provenance_control_not_protocol_metadata_or_business_payload
   slots: [inbound_inverse_context, attempt_projection_context, attempt_declaration_map, explicit_history_pairing, response_field_provenance, response_tool_call_binding]
   writer_policy: each_slot_has_the_single_node_writer_declared_below
-  attempt_policy: failed_attempt_slots_are_released_by_typed_attempt_cleanup_before_next_candidate; successful_attempt_slots_are_released_after_final_client_projection_or_after_servertool_sidecar_execution; terminal_client_error_cancel_or_disconnect_release_attempt_slots_before_request_finalizer; request_inverse_context_and_explicit_history_pairing_remain_until_runtime_request_finalizer
-  finalizer: runtime_request_finalizer_is_the_sole_request_cleanup_owner_and_runs_only_on_final_client_commit_terminal_client_error_cancel_or_disconnect; terminal_client_error_cancel_and_disconnect_run_attempt_cleanup_before_request_finalizer; retry_and_servertool_followup_do_not_trigger_request_scope_release
+  attempt_policy: failed_attempt_slots_are_released_by_typed_attempt_cleanup_before_next_candidate; successful_attempt_slots_are_released_after_final_client_projection_or_after_servertool_sidecar_execution; terminal_client_error_cancel_or_disconnect_release_attempt_slots_before_request_finalizer; opaque_target_with_capturedTierPlan_and_request_inverse_context_and_explicit_history_pairing_remain_until_runtime_request_finalizer
+  finalizer: opaque_target_is_released_only_at_runtime_request_finalizer; runtime_request_finalizer_is_the_sole_request_cleanup_owner_and_runs_only_on_final_client_commit_terminal_client_error_cancel_or_disconnect; terminal_client_error_cancel_and_disconnect_run_attempt_cleanup_before_request_finalizer; retry_and_servertool_followup_do_not_trigger_request_scope_release
   forbidden: [request_body, response_body, provider_wire, protocol_metadata, history_values, debug_snapshot, cross_request_tool_binding]
 legacy_conversion_tables:
   path: v3/crates/routecodex-v3-runtime/tables
@@ -64,7 +97,7 @@ lifecycle_terminals:
   owner: RuntimeRetryLaunch
   condition: error_execution_decision=retry and the error chain admits a bounded action with remaining attempt budget
   consumes: [error-execution-decision]
-  release: failed attempt contexts, response buffers, and provider permits through typed attempt_cleanup before the next candidate; request_inverse_context and explicit_history_pairing remain until RuntimeRequestFinalizer; never reuses graph cycles or response-graph backedges
+  release: failed attempt contexts, response buffers, and provider permits through typed attempt_cleanup before the next candidate; opaque_target and capturedTierPlan, request_inverse_context and explicit_history_pairing remain until RuntimeRequestFinalizer; Target Interpreter reselects only within the original opaque target; never reuses graph cycles or response-graph backedges
 - name: servertool_followup
   owner: RuntimeInternalFollowup
   condition: execution_disposition=servertool_followup
@@ -74,38 +107,42 @@ lifecycle_terminals:
 - name: cancel
   owner: RuntimeCancellation
   condition: cancellation observed after a DAG wave drain before later wave starts
-  consumes: [cancellation]
+  consumes: [cancellation, source-failure, error-execution-decision, internal-error-outcome]
+  ingress: RuntimeCancellation -> source-failure -> independent_Error_graph -> RuntimeTransportOutcome -> ServerAbortOrAlreadyDisconnectedReceipt
+  policy: terminal_health_neutral; no switch_provider, candidate exclusion or provider health mutation
   release: RuntimeAttemptCleanup releases attempt budget, permits, projection contexts, transport buffers, and client frame candidates after drain; RuntimeRequestFinalizer then releases request-scoped control slots
 - name: failure
   owner: ErrorChain
   condition: any fixed node returns typed source failure
   consumes: [source-failure]
-  projects: ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified -> ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision -> ErrorErr06ClientProjected; Error06 emits an empty client stage for retry and a projected candidate for terminal_client_error
-  effect: Runtime consumes error_execution_decision after the graph; retry discards the empty stage and re-enters the request graph, terminal_client_error submits the projected candidate through Server/SSE
-  release: retry releases failed attempt context through typed attempt_cleanup before re-entry; terminal_client_error commits through Server/SSE and then RuntimeAttemptCleanup releases attempt scope before RuntimeRequestFinalizer releases request scope
+  projects: ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified -> ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision -> ErrorErr06ClientProjected; legacy Error06 operator/schema names denote internal-error-outcome only, never a client error candidate
+  effect: Runtime consumes error_execution_decision after the graph; retry cleans the failed attempt and reselects an eligible candidate with a new attempt identity; terminal_client_error means terminal no-commit; Server aborts only the affected transport with no response, without error payload or fabricated success; never graceful empty EOF, [DONE], successful end or termination event; cleanup does not prove business success
+  release: retry releases failed attempt context through typed attempt_cleanup before re-entry; terminal_client_error means terminal no-commit; RuntimeAttemptCleanup releases attempt scope before RuntimeRequestFinalizer releases request scope
 - name: disconnect
   owner: ServerDisconnectReceipt
   condition: client transport disconnects before the first committed client frame or after accepted frames
-  consumes: [accepted_frames]
+  consumes: [accepted_frames, source-failure, error-execution-decision, internal-error-outcome]
+  ingress: Server/SSE -> source-failure -> independent_Error_graph -> RuntimeTransportOutcome -> ServerAbortOrAlreadyDisconnectedReceipt
+  policy: terminal_health_neutral; no switch_provider, candidate exclusion or provider health mutation
   release: RuntimeAttemptCleanup releases attempt-scoped contexts, response buffers, and provider permits before RuntimeRequestFinalizer releases request scope; accepted frames are recorded separately from remote tool execution
 - name: finalize
   owner: RuntimeRequestFinalizer
-  condition: final client commit, terminal_client_error projection submitted, cancel, or disconnect reached
+  condition: final successful client commit, terminal_client_error terminal no-commit, cancel, or disconnect reached after attempt cleanup
   consumes: [request_id, execution_disposition, error_execution_decision]
-  release: inverse context, explicit_history_pairing, execution mode, MetadataCenter request-scoped control slots, and provider permits; request_origin_kind is invocation-scoped storage none and is not consumed or released by RuntimeRequestFinalizer; terminal_client_error, cancel, and disconnect attempt-scoped contexts are already released through typed attempt_cleanup before this finalizer
+  release: opaque target and capturedTierPlan, inverse context, explicit_history_pairing, execution mode, MetadataCenter request-scoped control slots, and provider permits; request_origin_kind is invocation-scoped storage none and is not consumed or released by RuntimeRequestFinalizer; terminal_client_error, cancel, and disconnect attempt-scoped contexts are already released through typed attempt_cleanup before this finalizer
 typed_cleanup_events:
   attempt_cleanup:
     owner: RuntimeAttemptCleanup (same Runtime runner)
-    condition: retry launch, servertool follow-up, final successful client_commit, terminal_client_error, cancel, or disconnect; terminal_client_error cleanup runs after Server/SSE projection is submitted and before RuntimeRequestFinalizer; cancel and disconnect cleanup runs before RuntimeRequestFinalizer
+    condition: retry launch, servertool follow-up, final successful client_commit, terminal_client_error, cancel, or disconnect; terminal_client_error is terminal no-commit; terminal, cancel and disconnect cleanup runs before RuntimeRequestFinalizer
     consumes:
       retry: [attempt_id, error_execution_decision]
       servertool_followup: [attempt_id, execution_disposition, servertool_sidecar_plan]
       client_commit: [attempt_id, execution_disposition]
-      terminal_client_error: [attempt_id, error_execution_decision, error_client_projected_candidate]
-      cancel: [attempt_id, cancellation]
-      disconnect: [attempt_id, accepted_frames]
+      terminal_client_error: [attempt_id, error_execution_decision, internal-error-outcome]
+      cancel: [attempt_id, cancellation, error_execution_decision, internal-error-outcome, typed_close_receipt]
+      disconnect: [attempt_id, accepted_frames, error_execution_decision, internal-error-outcome, typed_close_receipt]
     releases: attempt_projection_context, attempt_declaration_map, response_provenance, response_tool_binding, client_frame_candidate, provider/response buffers, provider permits
-    never: request_inverse_context, explicit_history_pairing, execution_mode, metadata_center request-scoped slots
+    never: opaque_target_with_capturedTierPlan, request_inverse_context, explicit_history_pairing, execution_mode, metadata_center request-scoped slots
     effect: finite typed release between graph invocations or before final request cleanup; no second runner, no graph backedge, no local continuation store; attempt-scoped resources are never released again by RuntimeRequestFinalizer
 servertool_hop:
   owner: RuntimeInternalFollowup
@@ -125,19 +162,28 @@ execution_disposition:
 error_execution_decision:
   owner: ErrorErr05ExecutionDecision
   producer: ErrorErr05ExecutionDecision
-  consumers: [ErrorErr06ClientProjected, RuntimeClientCommit, RuntimeRetryLaunch]
-  finalizer_rule: RuntimeRequestFinalizer consumes this decision only after terminal_client_error projection is submitted; retry launch performs typed attempt_cleanup and never triggers request-scoped cleanup
+  consumers: [ErrorErr06ClientProjected, RuntimeTransportOutcome, RuntimeRetryLaunch, RuntimeAttemptCleanup, RuntimeRequestFinalizer]
+  finalizer_rule: RuntimeRequestFinalizer consumes this decision only after terminal no-commit attempt cleanup; retry launch performs typed attempt_cleanup and never triggers request-scoped cleanup
   legal_values: [retry, terminal_client_error]
   retry_effect: failed attempt context is released; RuntimeRetryLaunch admits one new attempt through the request graph without a response-graph backedge
-  terminal_effect: ErrorErr06 always runs as the fixed graph sink; it returns an empty candidate for retry and a projected candidate for terminal_client_error, which Runtime alone may submit through Server/SSE
-  finalization: terminal_client_error and client_commit reach RuntimeRequestFinalizer after submission; retry launches one new attempt through the request graph after typed attempt_cleanup
+  terminal_effect: ErrorErr06 always runs as the fixed graph sink and returns internal-error-outcome; terminal_client_error is a legacy enum for terminal no-commit, never client error projection; RuntimeTransportOutcome supplies typed abort/disconnect intent to Server, which aborts only the affected transport with no response and records a typed close receipt; no normal empty completion, payload/status or termination event; attempt cleanup precedes request finalizer and release is not business success
+  finalization: terminal_client_error reaches RuntimeRequestFinalizer after attempt cleanup with no client commit; successful client_commit finalizes after submission and attempt cleanup; retry launches one new attempt through the request graph after typed attempt_cleanup
 typed_resources:
+  opaque_target:
+    resource: v3.route.opaque_target
+    producer: resolve_target (Virtual Router)
+    readers: [resolve_target, plan_execution]
+    conditional_write: request_origin_kind=client_entry only
+    reentry: retry and same-request internal_followup read immutable requestId/targetId/capturedTierPlan; no ordinary classification
+    release: RuntimeRequestFinalizer; never attempt_cleanup
+    binding_status: design_pending
   request_origin_kind:
     resource: v3.operation_runner.request_origin_kind
     storage: none
     producer: RuntimeRequestGraphEntry
     readers:
     - normalize_v3_operation_runner_request_losslessly
+    - resolve_target
     legal_values: [client_entry, retry, internal_followup]
     identity: [requestId, invocationId, originKind]
     lifetime: immutable invocation-scoped typed control resource; RuntimeRequestGraphEntry creates client_entry, retry, or internal_followup before every request graph invocation; scope ends naturally when the graph invocation returns, with no MetadataCenter slot and no cross-invocation storage to clean
@@ -223,14 +269,15 @@ typed_resources:
     producer: ErrorErr05ExecutionDecision
     readers:
     - ErrorErr06ClientProjected
-    - runtime_client_commit
+    - RuntimeTransportOutcome
     - RuntimeRetryLaunch
+    - RuntimeAttemptCleanup
     - RuntimeRequestFinalizer
     legal_values: [retry, terminal_client_error]
-    retry_effect: Error06 stages no client error; RuntimeRetryLaunch discards that empty stage and re-enters the request graph without a response-graph backedge
-    terminal_effect: Error06 stages the terminal projection; RuntimeClientCommit alone submits it through Server/SSE
-    finalizer_rule: RuntimeRequestFinalizer reads this decision only after terminal_client_error projection is submitted
-    release: runtime_request_finalizer after terminal projection; retry decision is consumed by RuntimeRetryLaunch and attempt_cleanup before the next candidate
+    retry_effect: Error06 emits internal evidence only; RuntimeRetryLaunch consumes the typed recovery decision, cleans the failed attempt, reselects and starts a new request graph invocation without a backedge
+    terminal_effect: terminal_client_error means terminal no-commit; RuntimeTransportOutcome consumes internal evidence and supplies typed abort/disconnect intent to Server; Server aborts only the affected transport with no response and records a typed close receipt, never client error data or successful completion
+    finalizer_rule: RuntimeRequestFinalizer reads this decision only after terminal no-commit attempt cleanup
+    release: runtime_request_finalizer after terminal no-commit attempt cleanup; retry decision is consumed by RuntimeRetryLaunch and attempt_cleanup before the next candidate
   client_frame_candidate:
     resource: v3.operation_runner.client_frame_candidate
     producer: frame_v3_operation_runner_committed_client_response
@@ -253,10 +300,10 @@ typed_resources:
     resource: v3.error.client_projection_candidate
     producer: ErrorErr06ClientProjected
     readers:
-    - runtime_client_commit
-    staging_only: the error graph sink is a staged error candidate; terminal error is submitted only through Server/SSE
-    retry_rule: Error06 returns an empty candidate for retry; Runtime discards it and re-enters the request graph
-    release: runtime_client_commit for terminal projection; empty retry candidate is released by attempt_cleanup before request re-entry
+    - RuntimeTransportOutcome
+    staging_only: legacy resource and schema names denote internal-error-outcome evidence only; RuntimeTransportOutcome consumes it as typed abort/disconnect intent for Server with a typed close receipt; no response, no client error candidate and no client payload write permission; cleanup does not prove business success
+    retry_rule: Runtime consumes typed recovery, releases failed attempt resources and starts a new eligible attempt while preserving request inverse/history
+    release: attempt_cleanup before terminal no-commit request finalizer or retry request re-entry
 dry_run:
   owner: DebugDryRun
   condition: same runner traverses graphs with Provider transport effect replaced by no-network hook

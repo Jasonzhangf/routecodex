@@ -10,6 +10,8 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../.
 const verifyRel = 'v3/scripts/architecture/verify-v3-operation-runner-dagpipe.mjs';
 const verifyScript = path.join(repo, verifyRel);
 const files = [
+  'docs/architecture/dagpipe/v3-proxy-pipeline-target.md',
+  'docs/design/v3-unified-operation-runner-design.md',
   'docs/architecture/dagpipe/v3.operation_runner.request.graph.json',
   'docs/architecture/dagpipe/v3.operation_runner.response.graph.json',
   'docs/architecture/dagpipe/v3.operation_runner.error.graph.json',
@@ -26,6 +28,386 @@ const files = [
 ];
 
 const mutations = [
+  ...[
+    ['catalog-client-health-mutation', 'docs/architecture/v3-resource-operation-map.yml', (doc) => {
+      doc.resources.find((entry) => entry.resource_id === 'v3.error.chain').design_pending_source_bindings.policy = 'provider_cooldown';
+    }],
+    ['caller-client-switch-provider', 'docs/architecture/v3-mainline-call-map.yml', (doc) => {
+      doc.chains.find((entry) => entry.chain_id === 'v3.operation_runner.dagpipe.error').client_source_failure_bindings.policy = 'switch_provider';
+    }],
+  ].map(([name, rel, mutateDocument]) => ({
+    name,
+    mutate(tmp) {
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      mutateDocument(doc);
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /client source catalog\/caller must preserve health-neutral origin policy/u,
+  })),
+  {
+    name: 'resolve-target-missing-v3.operation_runner.request_origin_kind',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/dagpipe/v3.operation_runner.request.graph.json');
+      const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const node = doc.nodes.find((entry) => entry.id === 'resolve_target');
+      node.resources.reads = node.resources.reads.filter((id) => id !== 'v3.operation_runner.request_origin_kind');
+      fs.writeFileSync(file, JSON.stringify(doc));
+    },
+    expect: /resolve_target must read/u,
+  },
+  {
+    name: 'resolve-target-missing-v3.route.opaque_target',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/dagpipe/v3.operation_runner.request.graph.json');
+      const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const node = doc.nodes.find((entry) => entry.id === 'resolve_target');
+      node.resources.reads = node.resources.reads.filter((id) => id !== 'v3.route.opaque_target');
+      fs.writeFileSync(file, JSON.stringify(doc));
+    },
+    expect: /resolve_target must read/u,
+  },
+  {
+    name: 'target-retry-reclassifies',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      doc.target_resolution.retry = 'ordinary_route_reclassification';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /target_resolution retry must be/u,
+  },
+  {
+    name: 'target-internal_followup-reclassifies',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      doc.target_resolution.internal_followup = 'ordinary_route_reclassification';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /target_resolution internal_followup must be/u,
+  },
+  {
+    name: 'target-missing-control-payload_reconstruction',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      doc.target_resolution.missing_control = 'payload_reconstruction';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /target_resolution missing_control must be/u,
+  },
+  {
+    name: 'target-missing-control-default_client_entry',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      doc.target_resolution.missing_control = 'default_client_entry';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /target_resolution missing_control must be/u,
+  },
+  {
+    name: 'target-missing-control-skip_fixed_node',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      doc.target_resolution.missing_control = 'skip_fixed_node';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /target_resolution missing_control must be/u,
+  },
+  {
+    name: 'target-attempt-cleanup-release',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      doc.typed_cleanup_events.attempt_cleanup.releases += ', opaque_target';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /opaque target conditional write and request lifetime/u,
+  },
+  {
+    name: 'target-finalizer-lifetime-missing',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/v3-resource-operation-map.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      doc.resources.find((entry) => entry.resource_id === 'v3.route.opaque_target').design_pending_contract.lifetime = 'attempt_cleanup';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /opaque target conditional write and request lifetime/u,
+  },
+  {
+    name: 'target-registry-origin-binding-missing',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      delete doc.operator_registry.nodes.find((entry) => entry.operator === 'routecodex.v3.operation.resolve_target').params.request_origin_kind;
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /resolve_target registry request_origin_kind must bind resource/u,
+  },
+  {
+    name: 'terminal-outcome-reader-missing',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/v3-resource-operation-map.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const entry = doc.resources.find((entry) => entry.resource_id === 'v3.error.execution_decision'); entry.allowed_readers = entry.allowed_readers.filter((id) => id !== 'RuntimeTransportOutcome');
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /execution_decision must authorize design_pending RuntimeTransportOutcome/u,
+  },
+  {
+    name: 'terminal-outcome-reader-fake-runtime-cutover',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/v3-resource-operation-map.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      delete doc.resources.find((entry) => entry.resource_id === 'v3.error.execution_decision').design_pending_readers;
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /execution_decision must authorize design_pending RuntimeTransportOutcome/u,
+  },
+  {
+    name: 'terminal-legacy-reader-removed',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/v3-resource-operation-map.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const entry = doc.resources.find((entry) => entry.resource_id === 'v3.error.execution_decision'); entry.allowed_readers = entry.allowed_readers.filter((id) => id !== 'RuntimeClientCommit');
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /execution_decision must preserve legacy reader/u,
+  },
+  {
+    name: 'client_transport_failure-provider-misattribution',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      doc.client_error_ingress.source_bindings.client_transport_failure.origin = 'provider_failure';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /must preserve source and health-neutral policy/u,
+  },
+  {
+    name: 'client_transport_failure-source-binding-missing',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      delete doc.client_error_ingress.source_bindings.client_transport_failure;
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /must preserve source and health-neutral policy/u,
+  },
+  {
+    name: 'client_disconnect-provider-misattribution',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      doc.client_error_ingress.source_bindings.client_disconnect.origin = 'provider_failure';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /must preserve source and health-neutral policy/u,
+  },
+  {
+    name: 'client_disconnect-source-binding-missing',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      delete doc.client_error_ingress.source_bindings.client_disconnect;
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /must preserve source and health-neutral policy/u,
+  },
+  {
+    name: 'cancellation-provider-misattribution',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      doc.client_error_ingress.source_bindings.cancellation.origin = 'provider_failure';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /must preserve source and health-neutral policy/u,
+  },
+  {
+    name: 'cancellation-source-binding-missing',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      delete doc.client_error_ingress.source_bindings.cancellation;
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /must preserve source and health-neutral policy/u,
+  },
+  {
+    name: 'internal_response_failure-provider-misattribution',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      doc.client_error_ingress.source_bindings.internal_response_failure.origin = 'provider_failure';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /must preserve source and health-neutral policy/u,
+  },
+  {
+    name: 'internal_response_failure-source-binding-missing',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      delete doc.client_error_ingress.source_bindings.internal_response_failure;
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /must preserve source and health-neutral policy/u,
+  },
+  {
+    name: 'client-allows-switch_provider',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      doc.client_error_ingress.forbidden_actions = doc.client_error_ingress.forbidden_actions.filter((id) => id !== 'switch_provider');
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /client ingress must forbid switch_provider/u,
+  },
+  {
+    name: 'client-allows-candidate_exclusion',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      doc.client_error_ingress.forbidden_actions = doc.client_error_ingress.forbidden_actions.filter((id) => id !== 'candidate_exclusion');
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /client ingress must forbid candidate_exclusion/u,
+  },
+  {
+    name: 'client-allows-provider_cooldown',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      doc.client_error_ingress.forbidden_actions = doc.client_error_ingress.forbidden_actions.filter((id) => id !== 'provider_cooldown');
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /client ingress must forbid provider_cooldown/u,
+  },
+  {
+    name: 'client-allows-provider_health_mutation',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      doc.client_error_ingress.forbidden_actions = doc.client_error_ingress.forbidden_actions.filter((id) => id !== 'provider_health_mutation');
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /client ingress must forbid provider_health_mutation/u,
+  },
+  {
+    name: 'client-allows-attribute_internal_response_to_provider',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      doc.client_error_ingress.forbidden_actions = doc.client_error_ingress.forbidden_actions.filter((id) => id !== 'attribute_internal_response_to_provider');
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /client ingress must forbid attribute_internal_response_to_provider/u,
+  },
+  {
+    name: 'client-outcome-abort-shortcut',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      doc.client_error_ingress.cleanup_order.shift();
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /client failure must enter independent Error before outcome/u,
+  },
+  {
+    name: 'cancel-direct-finalizer',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      doc.lifecycle_terminals.find((entry) => entry.name === 'cancel').ingress = 'RuntimeRequestFinalizer';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /cancel must enter independent Error before finalizer/u,
+  },
+  {
+    name: 'disconnect-direct-finalizer',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      doc.lifecycle_terminals.find((entry) => entry.name === 'disconnect').ingress = 'RuntimeRequestFinalizer';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /disconnect must enter independent Error before finalizer/u,
+  },
+  {
+    name: 'client-source-catalog-binding-deleted',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/v3-resource-operation-map.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      delete doc.resources.find((entry) => entry.resource_id === 'v3.error.chain').design_pending_source_bindings;
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /client source catalog\/caller must bind independent Error ingress/u,
+  },
+  {
+    name: 'client-source-caller-binding-deleted',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/v3-mainline-call-map.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      delete doc.chains.find((entry) => entry.chain_id === 'v3.operation_runner.dagpipe.error').client_source_failure_bindings;
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /client source catalog\/caller must bind independent Error ingress/u,
+  },
+  {
+    name: 'design-delivery-abort-diagram-bypass',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/design/v3-unified-operation-runner-design.md');
+      const text = fs.readFileSync(file, 'utf8');
+      if (!text.includes('业务交付中 --> 错误链: 客户端传输')) throw new Error('missing diagram anchor');
+      fs.writeFileSync(file, text.replace('业务交付中 --> 错误链: 客户端传输', '业务交付中 --> 连接中止: 客户端传输'));
+    },
+    expect: /client source must not bypass independent Error/u,
+  },
+  {
+    name: 'design-disconnect-finalizer-diagram-bypass',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/design/v3-unified-operation-runner-design.md');
+      const text = fs.readFileSync(file, 'utf8');
+      if (!text.includes('断开记录 --> 错误链:')) throw new Error('missing diagram anchor');
+      fs.writeFileSync(file, text.replace('断开记录 --> 错误链:', '断开记录 --> [*]:'));
+    },
+    expect: /client source must not bypass independent Error/u,
+  },
+  {
+    name: 'design-cancel-finalizer-diagram-bypass',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/design/v3-unified-operation-runner-design.md');
+      const text = fs.readFileSync(file, 'utf8');
+      if (!text.includes('取消排空 --> 错误链:')) throw new Error('missing diagram anchor');
+      fs.writeFileSync(file, text.replace('取消排空 --> 错误链:', '取消排空 --> [*]:'));
+    },
+    expect: /client source must not bypass independent Error/u,
+  },
+  {
+    name: 'target-delivery-abort-diagram-bypass',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/dagpipe/v3-proxy-pipeline-target.md');
+      const text = fs.readFileSync(file, 'utf8');
+      if (!text.includes('业务交付中 --> 错误处理中: 客户端传输')) throw new Error('missing diagram anchor');
+      fs.writeFileSync(file, text.replace('业务交付中 --> 错误处理中: 客户端传输', '业务交付中 --> 连接中止: 客户端传输'));
+    },
+    expect: /client source must not bypass independent Error/u,
+  },
+  {
+    name: 'target-disconnect-finalizer-diagram-bypass',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/dagpipe/v3-proxy-pipeline-target.md');
+      const text = fs.readFileSync(file, 'utf8');
+      if (!text.includes('已取消 --> 错误处理中:')) throw new Error('missing diagram anchor');
+      fs.writeFileSync(file, text.replace('已取消 --> 错误处理中:', '已取消 --> 已释放:'));
+    },
+    expect: /client source must not bypass independent Error/u,
+  },
+
   {
     name: 'runtime-bound-capture-missing-http-call',
     mutate(tmp) {
@@ -877,10 +1259,34 @@ const mutations = [
       const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
       const terminal = doc.lifecycle_terminals.find((entry) => entry.name === 'failure');
       if (!terminal) throw new Error('missing failure terminal');
-      terminal.release = 'terminal_client_error commits through Server/SSE and then RuntimeRequestFinalizer releases request scope';
+      terminal.release = 'terminal_client_error means terminal no-commit; RuntimeRequestFinalizer releases request scope';
       fs.writeFileSync(file, YAML.stringify(doc));
     },
     expect: /terminal_client_error must release attempt scope before request scope/u,
+  },
+  {
+    name: 'terminal-no-response-graceful-empty-completion',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const terminal = doc.lifecycle_terminals.find((entry) => entry.name === 'failure');
+      terminal.effect = 'terminal_client_error means terminal no-commit; Server normally ends empty transport without error payload or fabricated success; RuntimeAttemptCleanup releases attempt scope before RuntimeRequestFinalizer releases request scope; finalizer cleanup counts as completion';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /terminal no-response requires transport abort, never graceful empty completion or cleanup as business success/u,
+  },
+  {
+    name: 'legacy-terminal-error-client-commit',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const terminal = doc.lifecycle_terminals.find((entry) => entry.name === 'failure');
+      terminal.effect = 'terminal_client_error submits the projected candidate through Server/SSE';
+      terminal.release = 'terminal_client_error commits through Server/SSE and then RuntimeAttemptCleanup releases attempt scope before RuntimeRequestFinalizer releases request scope';
+      doc.error_execution_decision.terminal_effect = 'Error06 returns a projected candidate for terminal_client_error, which Runtime alone submits it through Server/SSE';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /terminal no-commit forbids Server\/SSE error commit/u,
   },
   {
     name: 'union-tool-choice-missing-shape-children',

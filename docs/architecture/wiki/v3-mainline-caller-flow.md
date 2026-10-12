@@ -3357,7 +3357,7 @@ flowchart TD
 
 ## v3.operation_runner.dagpipe.request
 
-Design-only DAGpipe request graph; one source client JSON, one exit transport request, with target and execution decision before Chat Process. RuntimeRequestGraphEntry creates immutable request_origin_kind for each request graph invocation before it starts; only normalize reads it. Retry and servertool re-entry preserve the original request_inverse_context and explicit_history_pairing until RuntimeRequestFinalizer; normalize initializes inverse context only for client_entry and never rebuilds it from an internal follow-up payload.
+Design-only DAGpipe request graph; one source client JSON, one exit transport request, with target and execution decision before Chat Process. RuntimeRequestGraphEntry creates immutable request_origin_kind for each request graph invocation before it starts; normalize and resolve_target read it. client_entry selects and conditionally writes one opaque target; retry and same-request internal_followup read the prior target and preserve requestId/targetId/capturedTierPlan, with Target Interpreter reselecting only within the original target. Missing typed origin or matching target enters Error, never payload reconstruction/default entry/node skip. Target and inverse/history live until RuntimeRequestFinalizer, never attempt cleanup. Retry and servertool re-entry preserve the original request_inverse_context and explicit_history_pairing until RuntimeRequestFinalizer; normalize initializes inverse context only for client_entry and never rebuilds it from an internal follow-up payload.
 
 Owner feature: `v3.unified_operation_runner_design`
 Manifest: `docs/architecture/dagpipe/v3.operation_runner.request.graph.json`
@@ -3417,7 +3417,7 @@ flowchart TD
 
 ## v3.operation_runner.dagpipe.error
 
-Design-only DAGpipe error graph; exact ErrorErr01-06 chain with HostCaptured. Error06 stages an optional projection; Runtime consumes Error05 decision after the graph and alone submits terminal error output through Server/SSE. Retry launches a new attempt after typed attempt_cleanup; only terminal_client_error reaches RuntimeRequestFinalizer.
+Design-only DAGpipe error graph; exact legacy ErrorErr01-06 identities/order with HostCaptured. Error05 produces error-execution-decision and Error06 returns internal-error-outcome only. Provider response-wait/transport failure retains original attempt provenance. Server/SSE client transport/disconnect and RuntimeCancellation sources enter all six fixed Error nodes before RuntimeTransportOutcome, Server abort/already-disconnected receipt, drain and cleanup; preserve client/internal-response source and cause, never switch/exclude/cool Provider. Typed clientDisconnected is consumed as internal outcome; cancellation conversion remains design-pending. RuntimeTransportOutcome decision reader is design-pending while existing runtime/legacy reader permissions remain. Runtime consumes switch_provider/reselect recovery within the original opaque target and launches a new attempt after typed attempt_cleanup; terminal_client_error means terminal no-commit; RuntimeTransportOutcome directs Server to abort/disconnect only the affected transport with no response and typed close receipt, never graceful empty EOF, [DONE], successful end, payload/status or termination event; attempt cleanup precedes RuntimeRequestFinalizer and is not business success. Binding remains pending.
 
 Owner feature: `v3.unified_operation_runner_design`
 Manifest: `docs/architecture/dagpipe/v3.operation_runner.error.graph.json`
