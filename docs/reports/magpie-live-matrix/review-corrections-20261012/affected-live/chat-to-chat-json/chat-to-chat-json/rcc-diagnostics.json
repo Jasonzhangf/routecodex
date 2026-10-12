@@ -1,0 +1,15 @@
+{
+  "pid": 24065,
+  "ready": true,
+  "running": false,
+  "exit_receipt": {
+    "pid": 24065,
+    "kind": "exit",
+    "exit_code": 0,
+    "signal": null,
+    "at_epoch_ms": 1791841292412,
+    "error": null
+  },
+  "stdout": "[RouteCodexV3] rccv3 server start --foreground version=0.90.4887 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 config=/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/review-live-verify/chat-to-chat-json/chat-to-chat-json/v3-protocol-live-mock-lifecycle-fmMNnR/config.toml snap=false snapall=false snap_stages= debug=false\n\u001b[36m[server:startup          ][-                   ][-                                   ] ✅ [RouteCodexV3]        14:41:32 Server started\u001b[0m\u001b[2;90m  [sessionID:-]                                                                                    event=started version=0.90.4887 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 addresses=127.0.0.1:49972, 127.0.0.1:49973\u001b[0m\n[RouteCodexV3] Server started version=0.90.4887 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 on 127.0.0.1:49972, 127.0.0.1:49973\n\u001b[38;2;46;56;228m[49972:openai_chat       ][-                   ][default:mock-openai_chat[key1].chat-model] ▶ [/v1/chat/completions] 14:41:32 [#1/1]             route=default target=mock-openai_chat[key1].chat-model reason=pool:default\u001b[0m\u001b[2;90m  [sessionID:rcc-session:request:openai-chat-router-mock.chat-model-20261012T144132333-1-1]        [virtual-router-hit]     14:41:32 req=openai-chat-router-mock.chat-model-20261012T144132333-1-1 event=route_selected route=default target=mock-openai_chat[key1].chat-model reason=pool:default\u001b[0m\n\u001b[38;2;46;56;228m[49972:openai_chat       ][-                   ][default:mock-openai_chat[key1].chat-model] ✅ [/v1/chat/completions] 14:41:32 [#1/1]             status=200 responseStatus=completed finish_reason=stop elapsedMs=43.7 reason=pool:default usage_in=7 usage_out=2 usage_total=9 time_i=30.7ms time_e=5.0ms time_t=43.7ms transport=json\u001b[0m\u001b[2;90m  [sessionID:rcc-session:request:openai-chat-router-mock.chat-model-20261012T144132333-1-1]        ✅ [/v1/chat/completions] 14:41:32 req=openai-chat-router-mock.chat-model-20261012T144132333-1-1 event=completed detail=[usage] status=200 responseStatus=completed finish_reason=stop elapsedMs=43.7 reason=pool:default usage_in=7 usage_out=2 usage_cache=0 usage_total=9 time_i=30.7ms time_e=5.0ms time_t=43.7ms nodes=15 transport=json\u001b[0m\n",
+  "stderr": ""
+}

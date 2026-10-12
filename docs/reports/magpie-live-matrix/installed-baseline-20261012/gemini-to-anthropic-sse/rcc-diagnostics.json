@@ -1,0 +1,15 @@
+{
+  "pid": 85493,
+  "ready": true,
+  "running": false,
+  "exit_receipt": {
+    "pid": 85493,
+    "kind": "exit",
+    "exit_code": 0,
+    "signal": null,
+    "at_epoch_ms": 1791823041201,
+    "error": null
+  },
+  "stdout": "[RouteCodexV3] rccv3 server start --foreground version=0.90.4886 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 config=/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/installed-baseline-20261012/gemini-to-anthropic-sse/v3-protocol-live-mock-lifecycle-FCgomv/config.toml snap=false snapall=false snap_stages= debug=false\n\u001b[36m[server:startup          ][-                   ][-                                   ] ✅ [RouteCodexV3]        09:37:20 Server started\u001b[0m\u001b[2;90m  [sessionID:-]                                                                                    event=started version=0.90.4886 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 addresses=127.0.0.1:56961, 127.0.0.1:56962\u001b[0m\n[RouteCodexV3] Server started version=0.90.4886 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 on 127.0.0.1:56961, 127.0.0.1:56962\n",
+  "stderr": "\u001b[31m[56961:/v1be...ateContent][-                   ][-                                   ] ❌ [/v1beta/models/mock.anthropic-model:streamGenerateContent] 09:37:21 req=openai-chat-router-unknown-20261012T093721182-1-1 event=failed status=404 error=V3E3 subcode=path_not_found node=V3Error06ClientProjected message=HTTP path is not registered\u001b[0m\u001b[2;90m  [sessionID:-]                                                                                    ❌ [/v1beta/models/mock.anthropic-model:streamGenerateContent] 09:37:21 req=openai-chat-router-unknown-20261012T093721182-1-1 event=failed status=404 error=V3E3 subcode=path_not_found node=V3Error06ClientProjected message=HTTP path is not registered\u001b[0m\nV3 Front HTTP connection failed: Custom { kind: Other, error: hyper::Error(BodyWrite, Custom { kind: BrokenPipe, error: \"front socket closed for exec replacement\" }) }\n"
+}

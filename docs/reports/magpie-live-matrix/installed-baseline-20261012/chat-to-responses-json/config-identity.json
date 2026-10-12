@@ -1,0 +1,26 @@
+{
+  "path": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/installed-baseline-20261012/chat-to-responses-json/v3-protocol-live-mock-lifecycle-N48AOq/config.toml",
+  "state": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/installed-baseline-20261012/chat-to-responses-json/v3-protocol-live-mock-lifecycle-N48AOq/state",
+  "listeners": [
+    {
+      "role": "primary",
+      "server_id": "loopback",
+      "host": "127.0.0.1",
+      "port": 56930
+    },
+    {
+      "role": "admin_webui",
+      "server_id": "admin_webui",
+      "host": "127.0.0.1",
+      "port": 56931
+    }
+  ],
+  "admin_bind": "127.0.0.1:56931",
+  "env": {
+    "ROUTECODEX_V3_ADMIN_BIND": "127.0.0.1:56931"
+  },
+  "mode": "relay",
+  "model": "mock.responses-model",
+  "wire_model": "responses-model",
+  "runtime_setup": null
+}

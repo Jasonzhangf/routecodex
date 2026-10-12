@@ -1,0 +1,18 @@
+version = "2.0.0"
+providerId = "mock-gemini"
+
+[provider]
+id = "mock-gemini"
+enabled = true
+type = "gemini"
+baseURL = "http://127.0.0.1:57138/v1beta"
+defaultModel = "gemini-model"
+
+[provider.auth]
+type = "apikey"
+apiKey = "fake-loopback-token"
+
+[provider.models."mock.gemini-model"]
+wireName = "gemini-model"
+capabilities = ["text", "tools", "reasoning", "multimodal"]
+supportsStreaming = true

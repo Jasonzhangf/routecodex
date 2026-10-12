@@ -1,0 +1,15 @@
+{
+  "pid": 84449,
+  "ready": true,
+  "running": false,
+  "exit_receipt": {
+    "pid": 84449,
+    "kind": "exit",
+    "exit_code": 0,
+    "signal": null,
+    "at_epoch_ms": 1791823037365,
+    "error": null
+  },
+  "stdout": "[RouteCodexV3] rccv3 server start --foreground version=0.90.4886 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 config=/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/installed-baseline-20261012/anthropic-to-gemini-sse/v3-protocol-live-mock-lifecycle-lcSfw7/config.toml snap=false snapall=false snap_stages= debug=false\n\u001b[36m[server:startup          ][-                   ][-                                   ] ✅ [RouteCodexV3]        09:37:17 Server started\u001b[0m\u001b[2;90m  [sessionID:-]                                                                                    event=started version=0.90.4886 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 addresses=127.0.0.1:56829, 127.0.0.1:56830\u001b[0m\n[RouteCodexV3] Server started version=0.90.4886 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 on 127.0.0.1:56829, 127.0.0.1:56830\n",
+  "stderr": "[v3-projection-drop] {\"ts\":1791823037348,\"request_id\":\"anthropic-messages-router-mock.gemini-model-20261012T093717311-1-1\",\"entry_port\":\"56829\",\"target_protocol\":\"gemini\",\"stage\":\"outbound_target_protocol_projection\",\"json_path\":\"$.max_completion_tokens\",\"reason\":\"unmapped_target_protocol_field_unrepresentable\",\"source_value\":null,\"canonical_value\":64,\"drop_site\":\"project_outbound_payload_for_target_protocol_inner_with_drops\"}\nV3 Front HTTP connection failed: Custom { kind: Other, error: hyper::Error(User(Body), Error { inner: Error { inner: Error { inner: Error { inner: Custom { kind: Other, error: \"provider pool exhausted; SSE transport unavailable\" } } } } }) }\n"
+}

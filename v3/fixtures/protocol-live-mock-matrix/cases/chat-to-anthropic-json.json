@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "case_id": "chat-to-anthropic-json",
+  "cell": {"entry_protocol": "openai_chat", "provider_protocol": "anthropic", "transport": "json", "mode": "relay"},
+  "client_request": {
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "headers": {"content-type": "application/json"},
+    "body": {"model": "mock.anthropic-model", "messages": [{"role": "system", "content": "be brief"}, {"role": "user", "content": "hello"}], "max_tokens": 64, "stream": false}
+  },
+  "expected_provider": {
+    "paths": ["/v1/messages"],
+    "method": "POST",
+    "auth_required": true,
+    "body_must": {"model": "anthropic-model", "system": "be brief", "messages": [{"role": "user", "content": "hello"}], "max_tokens": 64},
+    "body_must_not": ["routecodex_internal", "metadata_center", "debug_snapshot"],
+    "exact": null
+  },
+  "upstream_response": {
+    "protocol": "anthropic",
+    "mode": "json",
+    "status": 200,
+    "content_type": "application/json",
+    "body": {"id": "msg_chat_to_anthropic_json", "type": "message", "role": "assistant", "stop_reason": "end_turn", "content": [{"type": "text", "text": "ok"}], "usage": {"input_tokens": 7, "output_tokens": 2}}
+  },
+  "expected_client": {
+    "transport": "complete",
+    "status": 200,
+    "body_must": {"choices.0.message.content": "ok", "choices.0.finish_reason": "stop", "usage.prompt_tokens": 7},
+    "body_must_not": ["provider_error", "internal_error", "routecodex_internal", "metadata_center"],
+    "semantic_terminal_required": true
+  },
+  "assertions": {"provider_attempt_count": 1, "probe_attempts_may_occur": true, "no_control_leakage": true},
+  "source": {
+    "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
+    "files": ["internal/gateway/testdata/upstream_bodies/chat-to-anthropic.json"],
+    "tests": ["internal/gateway/translate_stream_test.go::TestChatTranslationUsageBeforeUnindexedChoice"],
+    "adaptation": "Oracle delta: complete ordered messages and system use Anthropic plain-text representation equivalence only; metadata remains strict. Raw initial baseline retained."
+  },
+  "contract_differences": []
+}

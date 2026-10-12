@@ -1,0 +1,74 @@
+{
+  "case_id": "terminal-content-filter",
+  "turn": 1,
+  "turn_id": null,
+  "provider_captures": [
+    {
+      "phase": "case",
+      "case_id": "terminal-content-filter",
+      "turn": 0,
+      "attempt": 0,
+      "attempt_kind": "business",
+      "protocol": "responses",
+      "method": "POST",
+      "path": "/v1/responses",
+      "query": "",
+      "headers": {
+        "accept": "application/json",
+        "authorization": "Bearer fake-loopback-token",
+        "content-type": "application/json",
+        "host": "127.0.0.1:57257",
+        "content-length": "134"
+      },
+      "content_type": "application/json",
+      "raw_body": "{\"input\":[{\"content\":[{\"text\":\"hello\",\"type\":\"input_text\"}],\"role\":\"user\",\"type\":\"message\"}],\"model\":\"responses-model\",\"stream\":false}",
+      "body": {
+        "input": [
+          {
+            "content": [
+              {
+                "text": "hello",
+                "type": "input_text"
+              }
+            ],
+            "role": "user",
+            "type": "message"
+          }
+        ],
+        "model": "responses-model",
+        "stream": false
+      },
+      "body_parsed": true,
+      "captured_at_epoch_ms": 1791823048727,
+      "response_script": {
+        "protocol": "responses",
+        "mode": "json",
+        "status": 200,
+        "content_type": "application/json",
+        "body": {
+          "id": "resp_content_filter",
+          "status": "incomplete",
+          "incomplete_details": {
+            "reason": "content_filter"
+          },
+          "output": [
+            {
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "partial"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "attempt_repeated": false
+    }
+  ],
+  "business_attempts": 1,
+  "scripted_attempts": 1,
+  "probe_attempts": 0
+}

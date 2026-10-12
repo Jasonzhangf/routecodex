@@ -1,0 +1,9 @@
+{
+  "case_id": "anthropic-to-chat-json",
+  "turn": 1,
+  "turn_id": null,
+  "provider_captures": [],
+  "business_attempts": 0,
+  "scripted_attempts": 1,
+  "probe_attempts": 0
+}
