@@ -1238,7 +1238,10 @@ async fn public_entry_client_body_cancellation_without_io_enters_error_before_fi
             .expect("spawn the isolated client-body-cancel child");
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        eprintln!("[client-body-cancel] owned fixture home: {}", home.display());
+        eprintln!(
+            "[client-body-cancel] owned fixture home: {}",
+            home.display()
+        );
         eprintln!("[client-body-cancel] child stdout:\n{stdout}");
         eprintln!("[client-body-cancel] child stderr:\n{stderr}");
         assert!(
@@ -1520,7 +1523,9 @@ async fn run_client_body_cancel_scenario(home: &Path) {
         "the closeout {CORRECTED_CLOSEOUT:?} must be request-bound for {rid}; observed node ids: {ordered_ids:?}"
     );
     assert!(
-        closeout_first.windows(2).all(|window| window[0] < window[1]),
+        closeout_first
+            .windows(2)
+            .all(|window| window[0] < window[1]),
         "the closeout must run in order; positions {closeout_first:?} from {ordered_ids:?}"
     );
     assert!(
