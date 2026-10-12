@@ -864,6 +864,7 @@ pub enum V3ResponsesSseItemPayload {
     Reasoning {
         summary: Vec<V3ResponsesSseReasoningSummary>,
         summary_present: bool,
+        content: Option<Value>,
     },
     FunctionCall {
         call_id: Option<String>,
@@ -960,6 +961,7 @@ impl V3ResponsesSseOutputItem {
                     })
                     .collect(),
                 summary_present: true,
+                content: None,
             },
             extensions: self.extensions,
             rewritten_content: None,
@@ -989,6 +991,7 @@ impl V3ResponsesSseOutputItem {
                     })
                     .collect(),
                 summary_present: true,
+                content: None,
             },
             extensions: Vec::new(),
             rewritten_content: None,
@@ -1027,12 +1030,16 @@ impl V3ResponsesSseOutputItem {
             V3ResponsesSseItemPayload::Reasoning {
                 summary,
                 summary_present,
+                content,
             } => {
                 if *summary_present {
                     value.insert(
                         "summary".to_owned(),
                         Value::Array(summary.iter().map(reasoning_summary_value).collect()),
                     );
+                }
+                if let Some(content) = content {
+                    value.insert("content".to_owned(), content.clone());
                 }
             }
             V3ResponsesSseItemPayload::FunctionCall {
@@ -1257,6 +1264,7 @@ pub fn classify_v3_responses_sse_output_item(
         V3ResponsesSseOutputItemKind::Reasoning => V3ResponsesSseItemPayload::Reasoning {
             summary: parse_reasoning_summary(object.get("summary"))?,
             summary_present: object.contains_key("summary"),
+            content: object.get("content").cloned(),
         },
         V3ResponsesSseOutputItemKind::FunctionCall => V3ResponsesSseItemPayload::FunctionCall {
             call_id: string_field(object, "call_id"),
