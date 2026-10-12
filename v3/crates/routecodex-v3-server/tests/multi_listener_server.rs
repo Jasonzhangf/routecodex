@@ -4365,6 +4365,8 @@ async fn responses_relay_openai_chat_reasoning_content_survives_public_entry() {
 
 data: {{"id":"chatcmpl_reasoning_sse","object":"chat.completion.chunk","created":1,"model":"wire-test","choices":[{{"index":0,"delta":{{"content":"visible SSE answer"}},"finish_reason":null}}]}}
 
+data: {{"id":"chatcmpl_reasoning_sse","object":"chat.completion.chunk","created":1,"model":"wire-test","choices":[{{"index":0,"delta":{{}},"finish_reason":"stop"}}]}}
+
 data: [DONE]
 
 "#
