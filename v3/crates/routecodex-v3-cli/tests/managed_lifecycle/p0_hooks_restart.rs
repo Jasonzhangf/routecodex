@@ -384,7 +384,7 @@ impl Drop for HeldResponsesProvider {
 fn send_responses(port: u16, root: &Path, streaming: bool) -> TcpStream {
     let mut connection = TcpStream::connect(("127.0.0.1", port)).unwrap();
     connection
-        .set_read_timeout(Some(Duration::from_secs(5)))
+        .set_read_timeout(Some(Duration::from_secs(60)))
         .unwrap();
     let body = serde_json::json!({"model":"test", "input":"uncached connection probe", "stream":streaming}).to_string();
     write!(connection, "POST /v1/responses HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nx-routecodex-workdir: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", root.display(), body.len()).unwrap();

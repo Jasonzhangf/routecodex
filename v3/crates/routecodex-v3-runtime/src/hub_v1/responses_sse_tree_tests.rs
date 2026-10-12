@@ -469,3 +469,241 @@ fn responses_reducer_rejects_output_item_event_without_item() {
         .unwrap_err();
     assert_eq!(error, V3ResponsesSseTreeError::MissingOutputItem);
 }
+
+/// Ordered fingerprint of reasoning `content` texts. Uses the std hasher so the
+/// assertion needs no new dependency; exact `Value` equality is asserted too.
+fn reasoning_content_fingerprint(texts: &[&str]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    texts.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn normalized_reasoning_output_item(reasoning: &serde_json::Value) -> serde_json::Value {
+    let document = json!({
+        "object": "response",
+        "id": "resp_openai_chat_relay",
+        "status": "completed",
+        "output": [reasoning.clone()]
+    });
+    let normalized = V3ResponsesJsonDocument::from_json(&document)
+        .expect("builder-produced Responses document must normalize")
+        .to_normalized_value();
+    normalized["output"][0].clone()
+}
+
+#[test]
+fn responses_builder_reasoning_content_survives_typed_json_normalization() {
+    // Exact item shape emitted by the Chat->Responses reasoning builder
+    // (`responses_openai_chat_conversion.rs`,
+    // `build_v3_responses_reasoning_item_from_openai_chat_message`) for a preserved
+    // lifeai Chat response: `summary` and `content` carry the same reasoning text so
+    // the client can echo `content` on the next turn. `run_json_response_hooks`
+    // normalizes this document through `V3ResponsesJsonDocument`, so the typed tree
+    // must keep `content`; the current tree excludes it and drops it.
+    let builder_reasoning = json!({
+        "type": "reasoning",
+        "summary": [
+            {"type": "summary_text", "text": "first reasoning part"},
+            {"type": "summary_text", "text": "second reasoning part"}
+        ],
+        "content": [
+            {"type": "reasoning_text", "text": "first reasoning part"},
+            {"type": "reasoning_text", "text": "second reasoning part"}
+        ]
+    });
+
+    let item = normalized_reasoning_output_item(&builder_reasoning);
+    assert_eq!(item["type"], "reasoning");
+    assert_eq!(item["summary"], builder_reasoning["summary"]);
+    assert_eq!(
+        item["content"], builder_reasoning["content"],
+        "typed JSON normalization must preserve reasoning.content emitted by the Chat->Responses builder"
+    );
+
+    let normalized_texts: Vec<&str> = item["content"]
+        .as_array()
+        .expect("normalized reasoning item must keep its content array")
+        .iter()
+        .map(|entry| entry["text"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        normalized_texts,
+        vec!["first reasoning part", "second reasoning part"]
+    );
+    assert_eq!(
+        reasoning_content_fingerprint(&normalized_texts),
+        reasoning_content_fingerprint(&["first reasoning part", "second reasoning part"])
+    );
+    // `content` stays distinct from `summary`: no duplicate entry and no text mixing.
+    assert_eq!(item["content"].as_array().unwrap().len(), 2);
+    assert_eq!(item["summary"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn responses_reasoning_content_survives_when_distinct_from_summary() {
+    // Constructed shape lock, not a claimed historical DSH sample: content must be
+    // carried on its own and never reconstructed by mirroring summary. This blocks a
+    // guess-dedup / summary-mirroring repair for the confirmed builder-content loss.
+    let reasoning = json!({
+        "type": "reasoning",
+        "summary": [{"type": "summary_text", "text": "short summary"}],
+        "content": [
+            {"type": "reasoning_text", "text": "full reasoning part one"},
+            {"type": "reasoning_text", "text": "full reasoning part two"}
+        ]
+    });
+
+    let item = normalized_reasoning_output_item(&reasoning);
+    assert_eq!(item["summary"], reasoning["summary"]);
+    assert_eq!(
+        item["content"], reasoning["content"],
+        "distinct reasoning.content must survive typed JSON normalization without mirroring summary"
+    );
+}
+
+#[test]
+fn responses_reasoning_content_survives_output_item_done_sse_round_trip() {
+    let reasoning = json!({
+        "type": "reasoning",
+        "summary": [{"type": "summary_text", "text": "reasoning for the tool call"}],
+        "content": [{"type": "reasoning_text", "text": "reasoning for the tool call"}]
+    });
+
+    let item = classify_v3_responses_sse_output_item(&reasoning).unwrap();
+    let bytes =
+        project_v3_responses_sse_item_sse(Some("response.output_item.done".to_owned()), &item)
+            .unwrap();
+    let mut decoder = routecodex_v3_sse::SseIncrementalDecoder::new(
+        routecodex_v3_sse::SseTransportLimits::default(),
+    );
+    let frame = decoder
+        .push(routecodex_v3_sse::build_v3_sse_transport_in_01_raw_chunk(
+            &bytes,
+        ))
+        .unwrap()
+        .pop()
+        .unwrap();
+    let object = crate::sse_object_pipeline::SseObjectFrame::from_frame(&frame);
+    assert_eq!(object.event_name(), Some("response.output_item.done"));
+    assert_eq!(
+        object.data_value(),
+        Some(&reasoning),
+        "response.output_item.done SSE projection must preserve reasoning.content"
+    );
+}
+
+#[test]
+fn responses_reasoning_content_round_trips_all_json_shapes_losslessly() {
+    let cases = [
+        ("absent", None, false),
+        ("null", Some(json!(null)), true),
+        ("string", Some(json!("reasoning text")), true),
+        ("number", Some(json!(17)), true),
+        ("bool", Some(json!(true)), true),
+        ("object", Some(json!({"nested": [1, null, "kept"]})), true),
+        ("empty_array", Some(json!([])), true),
+        (
+            "standard_reasoning_text_array",
+            Some(json!([
+                {"type": "reasoning_text", "text": "first"},
+                {"type": "reasoning_text", "text": "second"}
+            ])),
+            true,
+        ),
+        (
+            "arbitrary_json_array",
+            Some(json!([
+                {"type": "reasoning_text", "text": "typed part"},
+                "opaque scalar",
+                3,
+                null,
+                {"provider_extension": {"keep": true}}
+            ])),
+            true,
+        ),
+    ];
+
+    for (label, expected_content, content_present) in cases {
+        let summary = json!([
+            {"type": "summary_text", "text": format!("{label} summary")}
+        ]);
+        let mut reasoning = json!({
+            "type": "reasoning",
+            "summary": summary.clone()
+        });
+        if let Some(content) = expected_content.as_ref() {
+            reasoning["content"] = content.clone();
+        }
+
+        let document = json!({
+            "object": "response",
+            "id": "resp_reasoning_shapes",
+            "status": "completed",
+            "output": [reasoning.clone()]
+        });
+        let normalized = V3ResponsesJsonDocument::from_json(&document)
+            .unwrap_or_else(|error| panic!("{label}: JSON document must normalize: {error:?}"))
+            .to_normalized_value();
+        let normalized_item = normalized["output"]
+            .as_array()
+            .and_then(|output| output.first())
+            .unwrap_or_else(|| panic!("{label}: normalized JSON output item missing"));
+        assert_eq!(
+            normalized_item.get("content"),
+            expected_content.as_ref(),
+            "{label}: JSON document must preserve reasoning.content presence and exact JSON value"
+        );
+        assert_eq!(
+            normalized_item.get("summary"),
+            Some(&summary),
+            "{label}: JSON document must preserve summary independently"
+        );
+
+        let item = classify_v3_responses_sse_output_item(&reasoning)
+            .unwrap_or_else(|error| panic!("{label}: SSE item must classify: {error:?}"));
+        assert_eq!(
+            item.to_normalized_value().get("content"),
+            expected_content.as_ref(),
+            "{label}: SSE item must preserve reasoning.content presence and exact JSON value"
+        );
+        let bytes =
+            project_v3_responses_sse_item_sse(Some("response.output_item.done".to_owned()), &item)
+                .unwrap_or_else(|error| panic!("{label}: SSE item must project: {error:?}"));
+        let mut decoder = routecodex_v3_sse::SseIncrementalDecoder::new(
+            routecodex_v3_sse::SseTransportLimits::default(),
+        );
+        let frame = decoder
+            .push(routecodex_v3_sse::build_v3_sse_transport_in_01_raw_chunk(
+                &bytes,
+            ))
+            .unwrap_or_else(|error| panic!("{label}: SSE frame must decode: {error:?}"))
+            .pop()
+            .unwrap_or_else(|| panic!("{label}: SSE frame must be present"));
+        let object = crate::sse_object_pipeline::SseObjectFrame::from_frame(&frame);
+        let projected = object
+            .data_value()
+            .unwrap_or_else(|| panic!("{label}: SSE data must be present"));
+        assert_eq!(
+            projected.get("content"),
+            expected_content.as_ref(),
+            "{label}: SSE projection must preserve reasoning.content presence and exact JSON value"
+        );
+        assert_eq!(
+            projected.get("summary"),
+            Some(&summary),
+            "{label}: SSE projection must preserve summary independently"
+        );
+        if content_present {
+            assert!(
+                projected.get("content").is_some(),
+                "{label}: present content must not disappear"
+            );
+        } else {
+            assert!(
+                projected.get("content").is_none(),
+                "{label}: absent content must not be synthesized"
+            );
+        }
+    }
+}
