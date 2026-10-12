@@ -6382,8 +6382,7 @@ async fn responses_direct_http_429_reselects_same_target_without_client_error() 
     let _test_guard = TEST_LOCK.lock().await;
     let (first_base_url, mut first_attempts, first_shutdown) =
         start_controlled_capturing_rate_limit_upstream().await;
-    let (second_base_url, mut second_captures, second_shutdown) =
-        start_controlled_upstream().await;
+    let (second_base_url, mut second_captures, second_shutdown) = start_controlled_upstream().await;
     std::env::set_var("V3_P6_RESELECT_FIRST_KEY", "secret-first");
     std::env::set_var("V3_P6_RESELECT_SECOND_KEY", "secret-second");
     let handle = spawn_v3_server_aggregate(p6_reselection_manifest(
