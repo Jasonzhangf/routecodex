@@ -2563,6 +2563,69 @@ async fn start_controlled_capturing_failure_upstream() -> (
     (format!("http://{address}/v1"), captures_rx, shutdown_tx)
 }
 
+const RATE_LIMIT_PROVIDER_BODY: &[u8] =
+    br#"{"error":{"code":"provider_only_429","message":"first provider must stay internal"},"provider_only_marker":"client-must-not-see-429"}"#;
+
+struct RateLimitAttemptCapture {
+    request: ProviderCapture,
+    response_status: StatusCode,
+    response_body: Vec<u8>,
+}
+
+#[derive(Clone)]
+struct CapturingRateLimitState {
+    attempts: mpsc::UnboundedSender<RateLimitAttemptCapture>,
+}
+
+async fn controlled_capturing_rate_limit_upstream(
+    State(state): State<Arc<CapturingRateLimitState>>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response<Body> {
+    state
+        .attempts
+        .send(RateLimitAttemptCapture {
+            request: ProviderCapture::from_http(&headers, body),
+            response_status: StatusCode::TOO_MANY_REQUESTS,
+            response_body: RATE_LIMIT_PROVIDER_BODY.to_vec(),
+        })
+        .unwrap();
+    Response::builder()
+        .status(StatusCode::TOO_MANY_REQUESTS)
+        .header("content-type", "application/json")
+        .header("retry-after", "17")
+        .body(Body::from(RATE_LIMIT_PROVIDER_BODY))
+        .unwrap()
+}
+
+async fn start_controlled_capturing_rate_limit_upstream() -> (
+    String,
+    mpsc::UnboundedReceiver<RateLimitAttemptCapture>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (attempts_tx, attempts_rx) = mpsc::unbounded_channel();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route(
+            "/v1/responses",
+            post(controlled_capturing_rate_limit_upstream),
+        )
+        .with_state(Arc::new(CapturingRateLimitState {
+            attempts: attempts_tx,
+        }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}/v1"), attempts_rx, shutdown_tx)
+}
+
 #[path = "../../../crates/routecodex-v3-runtime/tests/support/test_ports.rs"]
 mod test_ports;
 use test_ports::free_port;
@@ -6312,6 +6375,140 @@ async fn p6_provider_failure_reselects_inside_target_without_router_reentry() {
     handle.shutdown().await;
     failed_shutdown.send(()).unwrap();
     shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn responses_direct_http_429_reselects_same_target_without_client_error() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (first_base_url, mut first_attempts, first_shutdown) =
+        start_controlled_capturing_rate_limit_upstream().await;
+    let (second_base_url, mut second_captures, second_shutdown) =
+        start_controlled_upstream().await;
+    std::env::set_var("V3_P6_RESELECT_FIRST_KEY", "secret-first");
+    std::env::set_var("V3_P6_RESELECT_SECOND_KEY", "secret-second");
+    let handle = spawn_v3_server_aggregate(p6_reselection_manifest(
+        free_port(),
+        free_port(),
+        &first_base_url,
+        &second_base_url,
+        "V3_P6_RESELECT_FIRST_KEY",
+        "V3_P6_RESELECT_SECOND_KEY",
+    ))
+    .await
+    .unwrap();
+
+    let addr = handle.listeners[0].addr;
+    let payload = serde_json::to_vec(&json!({
+        "model": "client-test",
+        "input": "429 must reselect inside the captured target"
+    }))
+    .unwrap();
+    let mut socket = TcpStream::connect(addr).await.unwrap();
+    socket
+        .write_all(
+            format!(
+                "POST /v1/responses HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                payload.len()
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    socket.write_all(&payload).await.unwrap();
+    let client_wire = timeout(
+        Duration::from_secs(5),
+        read_raw_business_response(&mut socket),
+    )
+    .await
+    .expect("429 reselection must produce a terminal client response");
+    let client_text = String::from_utf8_lossy(&client_wire);
+    let (client_head, client_body) = client_text
+        .split_once("\r\n\r\n")
+        .expect("client response must contain HTTP head and body");
+    assert!(
+        client_head.starts_with("HTTP/1.1 200 OK\r\n"),
+        "429 reselection must deliver the second provider's success status: {client_head}"
+    );
+    assert!(
+        client_head
+            .lines()
+            .any(|line| line.eq_ignore_ascii_case("content-type: application/json")),
+        "second provider business response must use its JSON content type: {client_head}"
+    );
+    let client_body: Value = serde_json::from_str(client_body).unwrap();
+    assert_eq!(client_body["id"], "resp_json");
+    assert_eq!(client_body["output_text"], "ok");
+    assert!(
+        !client_text.contains("provider_only_429")
+            && !client_text.contains("client-must-not-see-429")
+            && !client_text.contains("HTTP/1.1 429")
+            && !client_text.contains("event: error")
+            && !client_text.contains("[DONE]")
+            && !client_text.contains("\"error\""),
+        "provider 429 status, body, SSE error, or fabricated failure terminal reached the client: {client_text}"
+    );
+
+    let first_attempt = timeout(Duration::from_secs(3), first_attempts.recv())
+        .await
+        .expect("first provider must receive the initial request")
+        .unwrap();
+    assert_eq!(first_attempt.response_status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(first_attempt.response_body, RATE_LIMIT_PROVIDER_BODY);
+    assert_eq!(
+        first_attempt.request.authorization.as_deref(),
+        Some("Bearer secret-first")
+    );
+    assert_eq!(first_attempt.request.body["model"], "wire-first");
+    assert!(
+        timeout(Duration::from_millis(100), first_attempts.recv())
+            .await
+            .is_err(),
+        "one 429 must not trigger a duplicate attempt against the same provider"
+    );
+
+    let second_capture = timeout(Duration::from_secs(3), second_captures.recv())
+        .await
+        .expect("second provider must receive the reselected request")
+        .unwrap();
+    assert_eq!(
+        second_capture.authorization.as_deref(),
+        Some("Bearer secret-second")
+    );
+    assert_eq!(second_capture.body["model"], "wire-second");
+    assert!(
+        second_capture.body["input"]
+            .to_string()
+            .contains("429 must reselect inside the captured target"),
+        "second provider must receive the original request input: {}",
+        second_capture.body
+    );
+
+    let logs: Value = reqwest::Client::new()
+        .get(format!("http://{addr}/_routecodex/debug/logs"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let events = logs["logs"].as_array().unwrap();
+    let router_hits = events
+        .iter()
+        .filter(|event| event["node_id"] == "V3Router07OpaqueTargetHitOnce")
+        .count();
+    assert_eq!(router_hits, 1, "429 recovery must not re-enter Router");
+    assert!(
+        events
+            .iter()
+            .any(|event| event["node_id"] == "V3TargetLocalReselected"),
+        "429 recovery must reselect inside the captured opaque target"
+    );
+
+    std::env::remove_var("V3_P6_RESELECT_FIRST_KEY");
+    std::env::remove_var("V3_P6_RESELECT_SECOND_KEY");
+    handle.shutdown().await;
+    first_shutdown.send(()).unwrap();
+    second_shutdown.send(()).unwrap();
 }
 
 #[tokio::test]
