@@ -92,9 +92,10 @@ pub struct V3Error02HostCaptured {
 }
 
 /// Build `ErrorErr01SourceRaised` from the Server-submitted client transport
-/// failure. Client transport failures are always health-neutral: they map to the
-/// existing `ClientDisconnect` source kind, whose action plan never mutates
-/// provider health.
+/// failure. Socket I/O failures keep the existing `ClientDisconnect` source
+/// kind; a committed client body dropped before completion with no captured I/O
+/// keeps the distinct `ClientCancellation` origin. Both are health neutral and
+/// never mutate provider health.
 pub fn build_v3_error_01_source_raised_for_client_transport(
     failure: &V3ClientTransportFailure,
 ) -> V3Error01SourceRaised {
@@ -116,11 +117,16 @@ pub fn build_v3_error_01_source_raised_for_client_transport(
         | V3ClientTransportOperation::Flush
         | V3ClientTransportOperation::PeerEof
         | V3ClientTransportOperation::PeerReset
-        | V3ClientTransportOperation::ReadError
-        | V3ClientTransportOperation::Cancellation => build_v3_error_01_source_raised(
+        | V3ClientTransportOperation::ReadError => build_v3_error_01_source_raised(
             V3ErrorSourceKind::ClientDisconnect,
             "V3ServerClientTransportBoundary",
             "client_transport_failure",
+            message,
+        ),
+        V3ClientTransportOperation::Cancellation => build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ClientCancellation,
+            "V3ServerClientTransportBoundary",
+            "client_body_cancellation",
             message,
         ),
     }

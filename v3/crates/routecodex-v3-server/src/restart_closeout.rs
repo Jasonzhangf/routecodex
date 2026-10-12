@@ -595,4 +595,152 @@ mod resource_tests {
         assert_eq!(execution.completed_node_ids.len(), 6);
         assert!(execution.transport_outcome.health_neutral);
     }
+
+    #[tokio::test]
+    async fn client_body_cancellation_without_io_enters_error_before_finalizer() {
+        // A committed client body dropped before completion with no captured
+        // socket I/O is its own Cancellation origin. It must never be labeled
+        // ClientDisconnect, and it must enter the fixed Error chain before the
+        // request finalizer with no Provider effect and no client error/success.
+        let failure = V3ClientTransportFailure {
+            operation: V3ClientTransportOperation::Cancellation,
+            io_kind: None,
+            os_cause: Some("committed client body dropped before completion".into()),
+            connection_id: 43,
+            request_id: "cancelled-request".into(),
+            attempt_id: None,
+        };
+        let source =
+            routecodex_v3_error::build_v3_error_01_source_raised_for_client_transport(&failure);
+        assert_ne!(
+            source.source_kind,
+            routecodex_v3_error::V3ErrorSourceKind::ClientDisconnect,
+            "a no-I/O body cancellation must not be labeled ClientDisconnect"
+        );
+        assert_eq!(source.code, "client_body_cancellation");
+        assert_eq!(source.source_stage, "V3ServerClientTransportBoundary");
+        assert_eq!(
+            routecodex_v3_error::v3_sse_post_commit_disposition(&source),
+            routecodex_v3_error::V3SsePostCommitDisposition::CloseEof
+        );
+
+        let state = V3FrontTransportCloseoutState::new();
+        let (tx, rx) = oneshot::channel();
+        let closeout = V3FrontClientSourceCloseout::new(
+            None,
+            V3FrontConnectionIdentity(43),
+            Arc::clone(&state),
+            Arc::new(Mutex::new(Some(tx))),
+        );
+        closeout.bind_request("cancelled-request".into());
+        let released = Arc::new(AtomicBool::new(false));
+        let resource = RequestResource(Arc::clone(&released));
+        let (started_tx, started_rx) = oneshot::channel();
+        closeout.bind_runtime_task(tokio::spawn(async move {
+            let _resource = resource;
+            let _ = started_tx.send(());
+            std::future::pending::<()>().await;
+        }));
+        started_rx.await.unwrap();
+        let driver = closeout.clone();
+        let completion = tokio::spawn(async move {
+            driver
+                .close_request(V3FrontClientTransportCause {
+                    operation: V3ClientTransportOperation::Cancellation,
+                    io_kind: None,
+                    os_cause: Some("committed client body dropped before completion".into()),
+                })
+                .await
+        });
+        // The affected transport is aborted; the socket receipt is still absent.
+        rx.await.unwrap();
+        assert!(
+            !state.request_finalized.load(Ordering::Acquire),
+            "socket receipt is still absent"
+        );
+        state.mark_socket_closed();
+        tokio::task::yield_now().await;
+        assert!(
+            !state.request_finalized.load(Ordering::Acquire),
+            "HTTP read half is still live"
+        );
+        state.mark_http_closed();
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while !state.request_finalized.load(Ordering::Acquire) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(
+            released.load(Ordering::Acquire),
+            "runtime future resource survived finalizer"
+        );
+        assert!(closeout.runtime_task.lock().unwrap().is_none());
+        assert!(closeout.request_id.lock().unwrap().is_none());
+
+        let execution = completion.await.unwrap().unwrap().unwrap();
+        assert_eq!(
+            execution.completed_node_ids,
+            routecodex_v3_error::V3_CLIENT_SOURCE_ERROR_CHAIN_NODE_IDS
+        );
+        assert_eq!(execution.transport_outcome.request_id, "cancelled-request");
+        assert_eq!(execution.transport_outcome.connection_id, 43);
+        assert_eq!(
+            execution.transport_outcome.intent,
+            routecodex_v3_runtime::operation_runner::V3RuntimeTransportIntent::Abort
+        );
+        assert!(execution.transport_outcome.health_neutral);
+        // Error06 carries the truthful internal classification and never a
+        // Provider health action, and it is not a success payload.
+        assert_eq!(execution.outcome.error_class, "client_cancellation");
+        assert!(execution.outcome.health_action.is_none());
+        assert_eq!(execution.outcome.status, 499);
+        assert!(execution.outcome.status >= 400);
+        assert!(execution.outcome.body.get("ok").is_none());
+
+        // A later independent request on a new connection still enters the fixed
+        // chain and finalizes: the cancellation closeout does not poison state.
+        let later_state = V3FrontTransportCloseoutState::new();
+        let (later_tx, later_rx) = oneshot::channel();
+        let later_closeout = V3FrontClientSourceCloseout::new(
+            None,
+            V3FrontConnectionIdentity(44),
+            Arc::clone(&later_state),
+            Arc::new(Mutex::new(Some(later_tx))),
+        );
+        later_closeout.bind_request("later-request".into());
+        let later_released = Arc::new(AtomicBool::new(false));
+        let later_resource = RequestResource(Arc::clone(&later_released));
+        let (later_started_tx, later_started_rx) = oneshot::channel();
+        later_closeout.bind_runtime_task(tokio::spawn(async move {
+            let _resource = later_resource;
+            let _ = later_started_tx.send(());
+            std::future::pending::<()>().await;
+        }));
+        later_started_rx.await.unwrap();
+        let later_driver = later_closeout.clone();
+        let later_completion = tokio::spawn(async move {
+            later_driver
+                .close_request(V3FrontClientTransportCause {
+                    operation: V3ClientTransportOperation::PeerReset,
+                    io_kind: Some("ConnectionReset".into()),
+                    os_cause: Some("os_error=54: Connection reset by peer".into()),
+                })
+                .await
+        });
+        later_rx.await.unwrap();
+        later_state.mark_socket_closed();
+        later_state.mark_http_closed();
+        let later_execution = later_completion.await.unwrap().unwrap().unwrap();
+        assert_eq!(
+            later_execution.completed_node_ids,
+            routecodex_v3_error::V3_CLIENT_SOURCE_ERROR_CHAIN_NODE_IDS
+        );
+        assert_eq!(
+            later_execution.transport_outcome.request_id,
+            "later-request"
+        );
+        assert!(later_released.load(Ordering::Acquire));
+    }
 }

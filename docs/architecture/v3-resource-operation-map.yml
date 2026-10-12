@@ -634,11 +634,24 @@ resources:
       reader: ErrorErr01SourceRaised
       source_rule: retain client transport/disconnect, typed cancellation or internal response origin and original cause; enter all six fixed Error nodes before RuntimeTransportOutcome and typed close receipt, then drain/attempt cleanup/finalizer
       policy: health-neutral; no switch_provider, candidate exclusion or provider cooldown for client/internal-response origin; Server never writes Error decisions or Provider health
-      cancellation_binding: the client transport cancellation operation is source-bound (V3ClientTransportOperation::Cancellation); RuntimeCancellation to typed cancellation enum/conversion stays design_pending
+      cancellation_binding: the client transport cancellation operation (V3ClientTransportOperation::Cancellation) is source-bound; the client body-Drop cancellation is bound to build_v3_error_01_source_raised_for_client_transport and a two-test split (the --lib classification regression client_body_cancellation_without_io_enters_error_before_finalizer and the public-entry behavior test public_entry_client_body_cancellation_without_io_enters_error_before_finalizer), and is never labeled ClientDisconnect; the public test cannot observe Error01 source_kind and does not replace the --lib classification regression; RuntimeCancellation to typed cancellation enum/conversion stays design_pending
+      client_body_cancellation_source:
+        origin: cancellation
+        caller_edge: V3ClientSseChannelStream::drop [state is not Finished] -> V3FrontClientSourceCloseout::drive_premature_disconnect -> V3ClientTransportOperation::Cancellation (io_kind none, os_cause "committed client body dropped before completion") -> V3FrontClientSourceCloseout::run/close_request -> execute_v3_client_source_error_chain(V3ClientTransportFailure)
+        distinction: a premature committed client SSE body Drop with no recorded socket I/O is client-body cancellation, not socket I/O disconnect and not internal_response_channel_loss
+        socket_io_disconnect: write/flush/peer_eof/peer_reset/read_error stay the Server/SSE socket I/O disconnect source; a real captured I/O cause is kept as the first cause and is not overwritten by a later body Drop
+        internal_response_channel_loss: V3ClientTransportOperation::InternalChannelLoss stays the internal-response source, not client-body cancellation
+        runtime_cancellation_ingress: RuntimeCancellation (origin typed_cancellation) has no bound production producer and stays separate and design_pending
+        source_converter: {symbol: build_v3_error_01_source_raised_for_client_transport, file: v3/crates/routecodex-v3-error/src/client_transport_source.rs, lines: 99-133, anchor_blob: 2db73925ed5622cc58f3b1b7aa2532afa770f79e}
+        post_commit_disposition: {symbol: v3_sse_post_commit_disposition, file: v3/crates/routecodex-v3-error/src/sse_disposition.rs, lines: 10-24, anchor_blob: cf88e9271fcb9f4e0f98c59bbf063607f3dd7920}
+        focused_consumer_test: {id: client_body_cancellation_without_io_enters_error_before_finalizer, package: routecodex-v3-server, target: lib, role: classification_regression, status: required}
+        public_entry_behavior_test: {id: public_entry_client_body_cancellation_without_io_enters_error_before_finalizer, file: v3/crates/routecodex-v3-server/tests/client_transport_boundary_controlled.rs, status: required}
+        test_split_rule: the focused consumer test is the Error01 source-kind classification regression in routecodex-v3-server --lib and is added by the implementation author; the public HTTP-entry test proves raw-TCP FIN/no-I/O source behavior, the six-node Error chain and physical closeout, no provider effect, no client error/end/success frame, and later-request survival; the public test cannot observe Error01 source_kind and does not replace the focused consumer test
+        policy: terminal_health_neutral; no switch_provider, candidate exclusion or provider cooldown
       source_api_owner: routecodex-v3-error
       capture_owner: routecodex-v3-server
       allowed_source_files:
-        error: [v3/crates/routecodex-v3-error/src/lib.rs, v3/crates/routecodex-v3-error/src/client_transport_source.rs, v3/crates/routecodex-v3-error/tests/error_chain_contract.rs]
+        error: [v3/crates/routecodex-v3-error/src/lib.rs, v3/crates/routecodex-v3-error/src/client_transport_source.rs, v3/crates/routecodex-v3-error/src/sse_disposition.rs, v3/crates/routecodex-v3-error/tests/error_chain_contract.rs]
         server: [v3/crates/routecodex-v3-server/src/restart_handoff.rs, v3/crates/routecodex-v3-server/src/client_sse_transport.rs, v3/crates/routecodex-v3-server/src/lib.rs, v3/crates/routecodex-v3-server/src/frame_builders.rs, v3/crates/routecodex-v3-server/src/restart_closeout.rs, v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs]
         runtime: [v3/crates/routecodex-v3-runtime/src/foundation.rs, v3/crates/routecodex-v3-runtime/src/execution_control.rs, v3/crates/routecodex-v3-runtime/src/operation_runner]
       consumer: RuntimeTransportOutcome
@@ -646,13 +659,13 @@ resources:
       forbidden_control_tunnel: [V3FoundationRuntimeOutput.status, V3FoundationRuntimeOutput.body, V3FoundationRuntimeOutput.error_chain, response.client_payload, MetadataCenter.payload, debug.log]
       symbol: execute_v3_client_source_error_chain
       actual_source_anchors:
-        source_api: {symbol: V3ClientTransportFailure, file: v3/crates/routecodex-v3-error/src/client_transport_source.rs, lines: 64-74, anchor_blob: 4843b0af69526df02631a9b2aa2da2e700fe6105}
-        source_raised: {symbol: build_v3_error_01_source_raised_for_client_transport, file: v3/crates/routecodex-v3-error/src/client_transport_source.rs, lines: 98-127, anchor_blob: 4843b0af69526df02631a9b2aa2da2e700fe6105}
-        host_captured: {symbol: build_v3_error_02_host_captured_from_client_transport, file: v3/crates/routecodex-v3-error/src/client_transport_source.rs, lines: 131-144, anchor_blob: 4843b0af69526df02631a9b2aa2da2e700fe6105}
-        sdk_entry: {symbol: execute_v3_client_source_error_chain, file: v3/crates/routecodex-v3-runtime/src/operation_runner/client_source_error.rs, lines: 24-90, anchor_blob: 5df40ee92aa222b050cfcb7a5d8db9cbc73434b3}
+        source_api: {symbol: V3ClientTransportFailure, file: v3/crates/routecodex-v3-error/src/client_transport_source.rs, lines: 64-74, anchor_blob: 2db73925ed5622cc58f3b1b7aa2532afa770f79e}
+        source_raised: {symbol: build_v3_error_01_source_raised_for_client_transport, file: v3/crates/routecodex-v3-error/src/client_transport_source.rs, lines: 99-133, anchor_blob: 2db73925ed5622cc58f3b1b7aa2532afa770f79e}
+        host_captured: {symbol: build_v3_error_02_host_captured_from_client_transport, file: v3/crates/routecodex-v3-error/src/client_transport_source.rs, lines: 137-150, anchor_blob: 2db73925ed5622cc58f3b1b7aa2532afa770f79e}
+        sdk_entry: {symbol: execute_v3_client_source_error_chain, file: v3/crates/routecodex-v3-runtime/src/operation_runner/client_source_error.rs, lines: 24-90, anchor_blob: 3bba9a63964d0799925d2b6ccf3c7179b4d190fd}
         sdk_operator: {symbol: ClientSourceErrorOperator, file: v3/crates/routecodex-v3-runtime/src/operation_runner/operators/client_source_error.rs, lines: 8-33, anchor_blob: bfd582413b8c2019fa9cfcd85e5dce627cc4ed9c}
-        server_capture: {symbol: v3_front_io_cause, file: v3/crates/routecodex-v3-server/src/restart_closeout.rs, lines: 511-525, anchor_blob: 79ff9a47880f09580ddebb8e7061555645e3f945}
-        server_intent_consumer: {symbol: V3FrontClientSourceCloseout::close_request, file: v3/crates/routecodex-v3-server/src/restart_closeout.rs, lines: 411-508, anchor_blob: 79ff9a47880f09580ddebb8e7061555645e3f945}
+        server_capture: {symbol: v3_front_io_cause, file: v3/crates/routecodex-v3-server/src/restart_closeout.rs, lines: 511-525, anchor_blob: 4b6533ae4ddde7ec6aeecf6183da151da4a62d0e}
+        server_intent_consumer: {symbol: V3FrontClientSourceCloseout::close_request, file: v3/crates/routecodex-v3-server/src/restart_closeout.rs, lines: 411-508, anchor_blob: 4b6533ae4ddde7ec6aeecf6183da151da4a62d0e}
         identity_ingress: {symbol: V3StableFrontSocket::bind_client_request, file: v3/crates/routecodex-v3-server/src/restart_handoff.rs, lines: 1077-1079, anchor_blob: a42b2bdeee2039aaa041d041499f2a5cff5f3acd}
         runtime_consumer: {symbol: consume_v3_client_source_outcome, file: v3/crates/routecodex-v3-runtime/src/operation_runner/mod.rs, lines: 500-511, anchor_blob: 20118b9f830e3455e05111a93ccee38c93d161a9}
         runtime_drain: {symbol: drain_v3_client_source_request, file: v3/crates/routecodex-v3-runtime/src/operation_runner/mod.rs, lines: 471-482, anchor_blob: 20118b9f830e3455e05111a93ccee38c93d161a9}
@@ -661,7 +674,7 @@ resources:
         sdk_graph_executed: true; execute_v3_client_source_error_chain compiles the canonical error graph JSON through pipeline_runtime::parse_graph_json and compile, then runs six registered ClientSourceErrorOperator instances; the journal proves six OperatorCompleted and six ArcWritten with the execution_decision and client_projection_candidate effects
         typed_identity: the allocated request_id is bound into the Front typed context by V3StableFrontSocket::bind_client_request before the trace starts, stored by V3FrontClientSourceCloseout::bind_request, and submitted by close_request into V3ClientTransportFailure; no V3DebugTraceScope control read
         release: close_request applies the typed transport intent, awaits the socket and http close receipt, and awaits the JoinHandle drain before dropping the request identity and recording RuntimeRequestFinalizer
-      pending_scope: the whole three-graph cutover (other Request/Response/Error lanes), the RuntimeCancellation to typed cancellation conversion, and the console observer stay legacy pending
+      pending_scope: the whole three-graph cutover (other Request/Response/Error lanes), the RuntimeCancellation to typed cancellation conversion (producer still unbound), and the console observer stay legacy pending; the client body-Drop cancellation is bound as its own Server/SSE source
     allowed_writers: [V3Error01SourceRaised, V3Error02Classified, V3Error03TargetLocalAction, V3Error04TargetExhaustionDecision, V3Error05ExecutionDecision, V3Error06ClientProjected]
     allowed_readers: [V3Target09CandidateSetExpanded, V3Server16HttpFrame]
     forbidden_writers: [V3Provider12ResponsesWirePayload, V3Resp15ClientPayload]

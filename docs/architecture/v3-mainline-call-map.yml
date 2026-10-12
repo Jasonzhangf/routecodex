@@ -9397,7 +9397,7 @@ chains:
 - chain_id: v3.operation_runner.dagpipe.error
   owner_feature_id: v3.unified_operation_runner_design
   manifest: docs/architecture/dagpipe/v3.operation_runner.error.graph.json
-  summary: Design-only DAGpipe error graph; exact legacy ErrorErr01-06 identities/order with HostCaptured. Error05 produces error-execution-decision and Error06 returns internal-error-outcome only. Provider response-wait/transport failure retains original attempt provenance. Server/SSE client transport/disconnect and RuntimeCancellation sources enter all six fixed Error nodes before RuntimeTransportOutcome, Server abort/already-disconnected receipt, drain and cleanup; preserve client/internal-response source and cause, never switch/exclude/cool Provider. Typed clientDisconnected is consumed as internal outcome; cancellation conversion remains design-pending. RuntimeTransportOutcome decision reader is design-pending while existing runtime/legacy reader permissions remain. Runtime consumes switch_provider/reselect recovery within the original opaque target and launches a new attempt after typed attempt_cleanup; terminal_client_error means terminal no-commit; RuntimeTransportOutcome directs Server to abort/disconnect only the affected transport with no response and typed close receipt, never graceful empty EOF, [DONE], successful end, payload/status or termination event; attempt cleanup precedes RuntimeRequestFinalizer and is not business success. Binding remains pending.
+  summary: Design-only DAGpipe error graph; exact legacy ErrorErr01-06 identities/order with HostCaptured. Error05 produces error-execution-decision and Error06 returns internal-error-outcome only. Provider response-wait/transport failure retains original attempt provenance. Server/SSE client transport/disconnect, the client body-Drop cancellation, and RuntimeCancellation sources enter all six fixed Error nodes before RuntimeTransportOutcome, Server abort/already-disconnected receipt, drain and cleanup; preserve client/internal-response source and cause, never switch/exclude/cool Provider. The client body-Drop cancellation (no captured socket I/O) is a distinct Cancellation origin bound to build_v3_error_01_source_raised_for_client_transport and a two-test split; the --lib classification regression client_body_cancellation_without_io_enters_error_before_finalizer and the public-entry behavior test public_entry_client_body_cancellation_without_io_enters_error_before_finalizer. The public behavior test proves the observable abort/closeout path but cannot observe Error01 source_kind and does not replace the classification regression. The client body-Drop cancellation is never labeled ClientDisconnect; the RuntimeCancellation conversion remains design-pending. Typed clientDisconnected is consumed as internal outcome. RuntimeTransportOutcome decision reader is design-pending while existing runtime/legacy reader permissions remain. Runtime consumes switch_provider/reselect recovery within the original opaque target and launches a new attempt after typed attempt_cleanup; terminal_client_error means terminal no-commit; RuntimeTransportOutcome directs Server to abort/disconnect only the affected transport with no response and typed close receipt, never graceful empty EOF, [DONE], successful end, payload/status or termination event; attempt cleanup precedes RuntimeRequestFinalizer and is not business success. Binding remains pending.
   entry_contract:
     node: ErrorErr01SourceRaised
     owner_doc: docs/design/v3-unified-operation-runner-design.md
@@ -9482,16 +9482,28 @@ chains:
     path: ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified -> ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision -> ErrorErr06ClientProjected -> RuntimeTransportOutcome -> ServerAbortOrAlreadyDisconnectedReceipt -> drain -> RuntimeAttemptCleanup -> RuntimeRequestFinalizer
     policy: preserve original cause; client/internal-response origin is health-neutral, no switch_provider or candidate exclusion; the client transport cancellation operation is source-bound, while RuntimeCancellation to typed cancellation input/conversion stays pending
     response_rule: abort or confirm already disconnected with no response, payload, status, end or notification
+    client_body_cancellation_source:
+      origin: cancellation
+      caller_edge: V3ClientSseChannelStream::drop [state is not Finished] -> V3FrontClientSourceCloseout::drive_premature_disconnect -> V3ClientTransportOperation::Cancellation (io_kind none, os_cause "committed client body dropped before completion") -> V3FrontClientSourceCloseout::run/close_request -> execute_v3_client_source_error_chain(V3ClientTransportFailure)
+      distinction: a premature committed client SSE body Drop with no recorded socket I/O is client-body cancellation; it stays a distinct Cancellation origin and is never labeled ClientDisconnect
+      socket_io_disconnect: write/flush/peer_eof/peer_reset/read_error stay the Server/SSE socket I/O disconnect source; a real captured I/O cause is kept as the first cause and is not overwritten by a later body Drop
+      internal_response_channel_loss: V3ClientTransportOperation::InternalChannelLoss stays the internal-response source, not client-body cancellation
+      runtime_cancellation_ingress: RuntimeCancellation (origin typed_cancellation) has no bound production producer and stays separate and design_pending
+      source_converter: {symbol: build_v3_error_01_source_raised_for_client_transport, file: v3/crates/routecodex-v3-error/src/client_transport_source.rs, lines: 99-133, anchor_blob: 2db73925ed5622cc58f3b1b7aa2532afa770f79e}
+      post_commit_disposition: {symbol: v3_sse_post_commit_disposition, file: v3/crates/routecodex-v3-error/src/sse_disposition.rs, lines: 10-24, anchor_blob: cf88e9271fcb9f4e0f98c59bbf063607f3dd7920}
+      focused_consumer_test: {id: client_body_cancellation_without_io_enters_error_before_finalizer, package: routecodex-v3-server, target: lib, role: classification_regression, status: required}
+      public_entry_behavior_test: {id: public_entry_client_body_cancellation_without_io_enters_error_before_finalizer, file: v3/crates/routecodex-v3-server/tests/client_transport_boundary_controlled.rs, status: required}
+      test_split_rule: the focused consumer test is the Error01 source-kind classification regression in routecodex-v3-server --lib and is added by the implementation author; the public HTTP-entry test proves raw-TCP FIN/no-I/O source behavior, the six-node Error chain and physical closeout, no provider effect, no client error/end/success frame, and later-request survival; the public test cannot observe Error01 source_kind and does not replace the focused consumer test
     allowed_source_bindings:
       typed_source_api:
         owner_crate: routecodex-v3-error
         owner_feature_id: v3.debug_error_foundation
-        allowed_files: [v3/crates/routecodex-v3-error/src/lib.rs, v3/crates/routecodex-v3-error/src/client_transport_source.rs, v3/crates/routecodex-v3-error/tests/error_chain_contract.rs]
+        allowed_files: [v3/crates/routecodex-v3-error/src/lib.rs, v3/crates/routecodex-v3-error/src/client_transport_source.rs, v3/crates/routecodex-v3-error/src/sse_disposition.rs, v3/crates/routecodex-v3-error/tests/error_chain_contract.rs]
         role: unique typed source constructor; Server submits the real client transport cause and identity here
         symbol: V3ClientTransportFailure
         symbol_file: v3/crates/routecodex-v3-error/src/client_transport_source.rs
         symbol_lines: 64-74
-        anchor_blob: 4843b0af69526df02631a9b2aa2da2e700fe6105
+        anchor_blob: 2db73925ed5622cc58f3b1b7aa2532afa770f79e
         anchor_status: settled
         binding_state: typed_source_actual
       server_capture_observer:
@@ -9502,7 +9514,7 @@ chains:
         symbol: v3_front_io_cause
         symbol_file: v3/crates/routecodex-v3-server/src/restart_closeout.rs
         symbol_lines: 511-525
-        anchor_blob: 79ff9a47880f09580ddebb8e7061555645e3f945
+        anchor_blob: 4b6533ae4ddde7ec6aeecf6183da151da4a62d0e
         anchor_status: settled
         binding_state: transport_intent_actual
         transport_intent_consumer: close_request (restart_closeout.rs 411-508) applies Abort (abort_without_response plus signal_socket_close) or AlreadyDisconnected and records the typed ServerAbortOrAlreadyDisconnectedReceipt from is_peer_disconnected (481-484)
