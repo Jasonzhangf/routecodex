@@ -13,7 +13,16 @@ use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_aut
 use routecodex_v3_server::{spawn_v3_server_aggregate, spawn_v3_server_aggregate_with_admin};
 use serde_json::{json, Value};
 use std::os::unix::fs::PermissionsExt;
-use std::{ffi::OsString, fs, net::TcpListener, path::PathBuf, sync::Arc};
+use std::{
+    ffi::OsString,
+    fs,
+    net::TcpListener,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -1387,6 +1396,62 @@ targets = [{{ kind = "provider_model", provider = "anthropic", model = "anthropi
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
 }
 
+fn anthropic_residence_manifest(
+    port_a: u16,
+    port_b: u16,
+    provider_base_url: &str,
+    residence_timeout_ms: u64,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
+    let source = format!(
+        r#"
+version = 3
+{hub_v1_declaration}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["anthropic"]
+[servers.a.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+attempt_store = {{ residence_timeout_ms = {residence_timeout_ms} }}
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["anthropic"]
+[servers.b.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+attempt_store = {{ residence_timeout_ms = {residence_timeout_ms} }}
+[providers.anthropic]
+type = "anthropic"
+base_url = "{provider_base_url}"
+default_model = "anthropic-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_P6_ANTHROPIC_KEY" }}] }}
+[providers.anthropic.models.anthropic-wire]
+wire_name = "anthropic-wire"
+aliases = ["anthropic-client"]
+capabilities = ["text", "tools"]
+supports_streaming = true
+supports_thinking = false
+max_tokens = 4096
+max_context_tokens = 128000
+[route_groups.default.pools.anthropic_client]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "anthropic", models = ["anthropic-client"] }}
+targets = [{{ kind = "provider_model", provider = "anthropic", model = "anthropic-wire", key = "key", priority = 1 }}]
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "anthropic", model = "anthropic-wire", key = "key", priority = 1 }}]
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
 #[derive(Debug)]
 struct ProviderCapture {
     authorization: Option<String>,
@@ -1449,6 +1514,32 @@ fn header_text(headers: &HeaderMap, name: &str) -> Option<String> {
         .get(name)
         .and_then(|value| value.to_str().ok())
         .map(ToOwned::to_owned)
+}
+
+/// The aggregate health probe is a runtime-owned provider attempt, distinct from a
+/// client request captured by the same async channel.
+fn is_anthropic_health_probe_capture(capture: &ProviderCapture) -> bool {
+    capture.body.get("messages") == Some(&json!([{"role":"user","content":"ping; reply pong"}]))
+}
+
+/// Skip bounded captures until the real client request is found; probes are expected
+/// traffic on this shared channel and are not counted as client attempts.
+async fn recv_anthropic_client_attempt(
+    captures: &mut mpsc::UnboundedReceiver<ProviderCapture>,
+) -> ProviderCapture {
+    let limit = 8;
+    for _ in 0..limit {
+        let Some(capture) = timeout(Duration::from_secs(2), captures.recv())
+            .await
+            .expect("the provider capture channel must stay open")
+        else {
+            panic!("the provider must receive the later client wire request");
+        };
+        if !is_anthropic_health_probe_capture(&capture) {
+            return capture;
+        }
+    }
+    panic!("the recovered client attempt was not captured among the bounded probe attempts");
 }
 
 async fn assert_no_remote_continuation_provider_send(
@@ -6864,6 +6955,85 @@ async fn responses_direct_http_429_reselects_same_target_without_client_error() 
 }
 
 #[tokio::test]
+async fn responses_direct_all_provider_http_429_closes_without_client_response() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (first_base_url, mut first_attempts, first_shutdown) =
+        start_controlled_capturing_rate_limit_upstream().await;
+    let (second_base_url, mut second_attempts, second_shutdown) =
+        start_controlled_capturing_rate_limit_upstream().await;
+    std::env::set_var("V3_P6_RESELECT_FIRST_KEY", "secret-first");
+    std::env::set_var("V3_P6_RESELECT_SECOND_KEY", "secret-second");
+    let handle = spawn_v3_server_aggregate(p6_reselection_manifest(
+        free_port(),
+        free_port(),
+        &first_base_url,
+        &second_base_url,
+        "V3_P6_RESELECT_FIRST_KEY",
+        "V3_P6_RESELECT_SECOND_KEY",
+    ))
+    .await
+    .unwrap();
+
+    let addr = handle.listeners[0].addr;
+    let payload = serde_json::to_vec(&json!({
+        "model": "client-test",
+        "input": "when every provider returns 429, send no provider error to client"
+    }))
+    .unwrap();
+    let mut socket = TcpStream::connect(addr).await.unwrap();
+    socket
+        .write_all(
+            format!(
+                "POST /v1/responses HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                payload.len()
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    socket.write_all(&payload).await.unwrap();
+
+    let mut client_wire = Vec::new();
+    timeout(Duration::from_secs(5), socket.read_to_end(&mut client_wire))
+        .await
+        .expect("exhausted provider errors must close the client connection")
+        .expect("read client close");
+    assert!(
+        client_wire.is_empty(),
+        "exhausted provider 429 must not produce an HTTP response, status, headers, or body: {:?}",
+        String::from_utf8_lossy(&client_wire)
+    );
+
+    let first_attempt = timeout(Duration::from_secs(3), first_attempts.recv())
+        .await
+        .expect("first provider must receive the initial request")
+        .unwrap();
+    assert_eq!(first_attempt.response_status, StatusCode::TOO_MANY_REQUESTS);
+    let second_attempt = timeout(Duration::from_secs(3), second_attempts.recv())
+        .await
+        .expect("second provider must receive the reselected request")
+        .unwrap();
+    assert_eq!(
+        second_attempt.response_status,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    assert_eq!(second_attempt.request.body["model"], "wire-second");
+    assert!(
+        second_attempt.request.body["input"]
+            .to_string()
+            .contains("when every provider returns 429"),
+        "reselection must preserve the original input: {}",
+        second_attempt.request.body
+    );
+
+    std::env::remove_var("V3_P6_RESELECT_FIRST_KEY");
+    std::env::remove_var("V3_P6_RESELECT_SECOND_KEY");
+    handle.shutdown().await;
+    first_shutdown.send(()).unwrap();
+    second_shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
 async fn responses_relay_direct_relay_nested_handoff_drains_before_http_projection() {
     let _test_guard = TEST_LOCK.lock().await;
     let (failed_base_url, failed_shutdown) =
@@ -7661,6 +7831,291 @@ async fn anthropic_messages_provider_failure_never_reaches_the_client() {
     std::env::remove_var("V3_P6_ANTHROPIC_KEY");
     json_handle.shutdown().await;
     failure_shutdown.send(()).unwrap();
+}
+
+struct AnthropicResidenceUpstreamState {
+    captures: mpsc::UnboundedSender<ProviderCapture>,
+    attempts: AtomicUsize,
+}
+
+async fn controlled_anthropic_residence_upstream(
+    State(state): State<Arc<AnthropicResidenceUpstreamState>>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response<Body> {
+    state
+        .captures
+        .send(ProviderCapture::from_http(&headers, body))
+        .unwrap();
+    let attempt = state.attempts.fetch_add(1, Ordering::SeqCst);
+    if attempt >= 2 {
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from(anthropic_sse_text_fixture(
+                "residence recovered",
+                false,
+            )))
+            .unwrap();
+    }
+    let first = br#"event: message_start
+data: {"type":"message_start","message":{"id":"msg_residence","type":"message","role":"assistant","model":"anthropic-wire","content":[],"usage":{"input_tokens":1}}}
+
+"#
+    .to_vec();
+    let delta = br#"event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"progress"}}
+
+"#
+    .to_vec();
+    let stream = futures_util::stream::once(async move { Ok::<_, std::io::Error>(first) }).chain(
+        futures_util::stream::unfold((), move |_| {
+            let delta = delta.clone();
+            async move { Some((Ok::<_, std::io::Error>(delta), ())) }
+        }),
+    );
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/event-stream")
+        .body(Body::from_stream(stream))
+        .unwrap()
+}
+
+async fn start_controlled_anthropic_residence_upstream() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route(
+            "/v1/messages",
+            post(controlled_anthropic_residence_upstream),
+        )
+        .with_state(Arc::new(AnthropicResidenceUpstreamState {
+            captures: captures_tx,
+            attempts: AtomicUsize::new(0),
+        }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}/v1"), captures_rx, shutdown_tx)
+}
+
+async fn assert_anthropic_residence_client_closes_without_payload(
+    response: Result<reqwest::Response, reqwest::Error>,
+) {
+    let Ok(mut response) = response else {
+        return;
+    };
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    let mut wire = Vec::new();
+    let mut saw_keepalive = false;
+    loop {
+        match timeout(Duration::from_secs(2), response.chunk()).await {
+            Ok(Ok(Some(chunk))) => {
+                wire.extend_from_slice(&chunk);
+                saw_keepalive |= chunk.starts_with(b":");
+            }
+            Ok(Err(_)) => break,
+            Ok(Ok(None)) => panic!(
+                "residence expiry must abort the SSE transfer, not complete it: {}",
+                String::from_utf8_lossy(&wire)
+            ),
+            Err(_) => panic!(
+                "residence expiry must close the client transport before the watchdog: {}",
+                String::from_utf8_lossy(&wire)
+            ),
+        }
+    }
+    let text = String::from_utf8_lossy(&wire);
+    assert!(
+        saw_keepalive,
+        "the committed SSE channel must carry a transport keepalive before closeout: {text:?}"
+    );
+    assert!(
+        !text
+            .lines()
+            .any(|line| !line.is_empty() && !line.starts_with(':')),
+        "only transport keepalives may reach the client: {text:?}"
+    );
+    for forbidden in [
+        "error",
+        "provider",
+        "transport break",
+        "response.failed",
+        "[DONE]",
+        "response.completed",
+        "message_stop",
+        "content_block_delta",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "{forbidden} reached the client: {text:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn anthropic_relay_continuous_non_terminal_sse_residence_closes_without_client_payload() {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("ROUTECODEX_HTTP_SSE_KEEPALIVE_MS", "50");
+    std::env::set_var("V3_P6_ANTHROPIC_KEY", "secret-anthropic-residence");
+    let (provider_url, mut captures, provider_shutdown) =
+        start_controlled_anthropic_residence_upstream().await;
+    let provider_base_url = provider_url
+        .strip_suffix("/v1")
+        .expect("controlled provider base URL must end in /v1")
+        .to_string();
+    let handle = spawn_v3_server_aggregate(anthropic_residence_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+        250,
+    ))
+    .await
+    .unwrap();
+    let client = reqwest::Client::new();
+    let endpoint = format!("http://{}/v1/messages", handle.listeners[0].addr);
+
+    let streaming = timeout(
+        Duration::from_secs(2),
+        client
+            .post(&endpoint)
+            .header("anthropic-version", "2023-06-01")
+            .json(&json!({
+                "model": "anthropic-client",
+                "max_tokens": 64,
+                "messages": [{"role": "user", "content": "residence probe"}],
+                "stream": true
+            }))
+            .send(),
+    )
+    .await
+    .expect("streaming residence probe must not hang the client");
+    assert_anthropic_residence_client_closes_without_payload(streaming).await;
+    let first = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("the provider must receive the streaming wire request")
+        .unwrap();
+    assert_eq!(first.body["stream"], true);
+    assert!(
+        serde_json::to_string(&first.body)
+            .unwrap()
+            .contains("residence probe"),
+        "the provider wire request must carry the streaming probe: {:?}",
+        first.body
+    );
+
+    let non_streaming = timeout(
+        Duration::from_secs(2),
+        client
+            .post(&endpoint)
+            .header("anthropic-version", "2023-06-01")
+            .json(&json!({
+                "model": "anthropic-client",
+                "max_tokens": 64,
+                "messages": [{"role": "user", "content": "residence probe"}],
+                "stream": false
+            }))
+            .send(),
+    )
+    .await
+    .expect("non-streaming residence probe must not hang the client");
+    assert!(
+        non_streaming.is_err(),
+        "a local residence deadline must close the non-streaming client without an HTTP response"
+    );
+    let second = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("the provider must receive the non-streaming wire request")
+        .unwrap();
+    assert_eq!(second.body["stream"], false);
+    // A local residence deadline must not retry or reselect the provider. The shared
+    // capture channel may still deliver the aggregate's advisory health probe; only a
+    // real client attempt would prove a retry or reselection.
+    while let Ok(Some(extra)) = timeout(Duration::from_millis(250), captures.recv()).await {
+        assert!(
+            is_anthropic_health_probe_capture(&extra),
+            "a local residence deadline must not retry or reselect the provider: {:?}",
+            extra.body
+        );
+    }
+
+    let health: Value = client
+        .get(format!(
+            "http://{}/_routecodex/health/cooldown-pool",
+            handle.listeners[0].addr
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    // A local residence deadline must not create provider failure/cooldown or retry.
+    // The aggregate startup's advisory probe entry (kind=probe, failure_count=0) is preserved.
+    let entries = health["entries"].as_array().unwrap();
+    assert!(
+        entries.iter().all(|entry| {
+            entry["provider_id"] != "anthropic"
+                || (entry["kind"].as_str() == Some("probe")
+                    && entry["failure_count"].as_u64() == Some(0))
+        }),
+        "a local residence deadline must not mutate provider health: {health}"
+    );
+
+    let recovered = timeout(
+        Duration::from_secs(2),
+        client
+            .post(&endpoint)
+            .header("anthropic-version", "2023-06-01")
+            .json(&json!({
+                "model": "anthropic-client",
+                "max_tokens": 64,
+                "messages": [{"role": "user", "content": "residence recovered"}],
+                "stream": true
+            }))
+            .send(),
+    )
+    .await
+    .expect("a later request on the same aggregate must not hang")
+    .expect("a later request on the same aggregate must be served");
+    assert_eq!(recovered.status(), StatusCode::OK);
+    assert_eq!(recovered.headers()["content-type"], "text/event-stream");
+    let recovered_body = timeout(Duration::from_secs(2), recovered.text())
+        .await
+        .expect("the later successful response must complete")
+        .unwrap();
+    assert!(
+        recovered_body.contains("message_stop"),
+        "the later request must receive the real provider terminal: {recovered_body}"
+    );
+    // The capture channel is shared with the aggregate's advisory provider health probe,
+    // so consume bounded captures until the real recovered client attempt arrives.
+    let third = recv_anthropic_client_attempt(&mut captures).await;
+    assert!(
+        third.accept.as_deref() == Some("text/event-stream")
+            && third.body["stream"] == true
+            && serde_json::to_string(&third.body)
+                .unwrap()
+                .contains("residence recovered"),
+        "the later provider wire request must be streaming and carry the recovered prompt: {third:?}"
+    );
+
+    handle.shutdown().await;
+    provider_shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_ANTHROPIC_KEY");
+    std::env::remove_var("ROUTECODEX_HTTP_SSE_KEEPALIVE_MS");
 }
 
 #[tokio::test]
