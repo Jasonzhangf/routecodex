@@ -191,9 +191,9 @@ async fn start_capture_upstream(
 /// Pool target priority is descending numeric (higher number first), so the
 /// `priority = 2` target is the primary candidate in each pool.
 ///
-/// `max_context_tokens` bounds every candidate so the same manifest can drive
-/// the success path (large window) or a reachable selection failure (small
-/// window).
+/// `max_context_tokens` supplies advisory estimates. Selection failure uses
+/// declared search capability exhaustion with enabled providers, not a local
+/// context-window rejection.
 fn req03_opaque_route_manifest(
     server_port: u16,
     alpha_base_url: &str,
@@ -593,29 +593,122 @@ async fn req03_route_selection_failure_observes_typed_error_without_client_error
     let (beta_base_url, beta_shutdown, beta_task) =
         start_capture_upstream("beta", captures_tx.clone()).await;
 
-    // A window far smaller than the request forces a selection-time pool
-    // exhaustion: no candidate is admitted, so no provider attempt exists and
-    // the client boundary is a transport break. This is a reachable failure of
-    // the same request-entry route path, not an invented anomaly.
     let request_marker = "REQ03_OPAQUE_ROUTE_SELECTION_FAILURE_MARKER";
-    let manifest = req03_opaque_route_manifest(free_port(), &alpha_base_url, &beta_base_url, 2_000);
-    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
-    let addr = handle.listeners[0].addr;
     let client = reqwest::Client::new();
-
     let long_input = format!(
         "{request_marker} {}",
         "context window exhaustion probe ".repeat(600)
     );
+    let call_id = "call_req03_declared_search";
+    let search_arguments = r#"{"query":"route","path":"src"}"#;
+    let request_payload = json!({
+        "model": "req03-responses",
+        "input": [
+            {"role": "user", "content": long_input},
+            {
+                "type": "function_call",
+                "name": "search_files",
+                "call_id": call_id,
+                "arguments": search_arguments
+            },
+            {
+                "type": "function_call_output",
+                "call_id": call_id,
+                "output": "src/lib.rs"
+            }
+        ],
+        "tools": [{
+            "type": "function",
+            "name": "search_files",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "path": {"type": "string"}
+                },
+                "required": ["query", "path"]
+            }
+        }],
+        "stream": false
+    });
+
+    // The same business history succeeds without a declared search requirement.
+    // Both providers remain enabled and context estimates remain advisory.
+    let control_manifest =
+        req03_opaque_route_manifest(free_port(), &alpha_base_url, &beta_base_url, 2_000);
+    let control_handle = spawn_v3_server_aggregate(control_manifest).await.unwrap();
+    let control_addr = control_handle.listeners[0].addr;
+    let control_response = timeout(
+        Duration::from_secs(5),
+        client
+            .post(format!("http://{control_addr}/v1/responses"))
+            .json(&request_payload)
+            .send(),
+    )
+    .await
+    .expect("the control request must complete")
+    .expect("the control request must receive a business response");
+    assert_eq!(control_response.status(), StatusCode::OK);
+    let control_body: Value = control_response.json().await.unwrap();
+    assert_eq!(control_body["status"], "completed");
+    assert!(
+        serde_json::to_string(&control_body)
+            .unwrap()
+            .contains("req03 opaque route fidelity ok"),
+        "the control must return the upstream business content: {control_body}"
+    );
+    let control_capture = timeout(Duration::from_secs(5), captures_rx.recv())
+        .await
+        .expect("the control provider capture must arrive")
+        .expect("the control provider capture channel must remain live");
+    assert_eq!(control_capture.provider, "alpha");
+    assert!(
+        serde_json::to_string(&control_capture.body)
+            .unwrap()
+            .contains(request_marker),
+        "the original marker must reach the control upstream"
+    );
+    let control_call = find_chat_tool_call(&control_capture.body, call_id)
+        .expect("the paired search call must reach the control upstream");
+    assert_eq!(control_call["function"]["name"], "search_files");
+    assert_eq!(control_call["function"]["arguments"], search_arguments);
+    let control_result = find_chat_tool_result(&control_capture.body, call_id)
+        .expect("the paired search result must reach the control upstream");
+    assert_eq!(control_result["content"], "src/lib.rs");
+    assert!(
+        captures_rx.try_recv().is_err(),
+        "the control must produce exactly one provider request"
+    );
+    let control_failures = timeout(Duration::from_secs(5), control_handle.shutdown())
+        .await
+        .expect("control aggregate server shutdown must complete");
+    assert!(
+        control_failures.is_empty(),
+        "control sample persistence failures: {control_failures:?}"
+    );
+
+    // Target10 rejects all expanded candidates, including the default tier,
+    // because neither model declares the required search capability.
+    let mut manifest =
+        req03_opaque_route_manifest(free_port(), &alpha_base_url, &beta_base_url, 2_000);
+    manifest
+        .route_groups
+        .get_mut("req03")
+        .unwrap()
+        .pools
+        .get_mut("responses_route")
+        .unwrap()
+        .match_rule
+        .as_mut()
+        .unwrap()
+        .required_capabilities = vec!["search".into()];
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let addr = handle.listeners[0].addr;
     let client_observation = timeout(
         Duration::from_secs(5),
         client
             .post(format!("http://{addr}/v1/responses"))
-            .json(&json!({
-                "model": "req03-responses",
-                "input": long_input,
-                "stream": false
-            }))
+            .json(&request_payload)
             .send(),
     )
     .await

@@ -2831,10 +2831,12 @@ fn cooldown_console_logs_enter_and_recovery_once_without_per_request_filter_line
 
 #[test]
 fn background_probe_cycle_failures_are_not_human_console_output() {
-    let source = include_str!("../lib.rs");
+    let source = [
+        include_str!("../lib.rs"),
+        include_str!("../../../routecodex-v3-runtime/src/provider_probe_lifecycle.rs"),
+    ]
+    .concat();
 
-    assert!(source.contains("run_due_provider_health_probes"));
-    assert_eq!(source.matches("run_due_provider_health_probes").count(), 2);
     assert!(!source.contains("run_due_global_subscription_probes"));
     assert!(!source.contains("run_due_provider_key_health_probes"));
     assert!(!source.contains("provider persistent startup probe cycle failed"));

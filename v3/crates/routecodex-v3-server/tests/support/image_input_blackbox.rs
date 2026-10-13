@@ -199,8 +199,9 @@ async fn run_case_shape(
     image_only: bool,
     tool_output: Option<Value>,
 ) {
-    // External HTTP providers capture the complete request. Selection exhaustion
-    // uses a real declared context limit, without changing private health state.
+    // External HTTP providers capture the complete request. Exhausted image
+    // pools use an explicit declared unavailable provider, preserving the real
+    // multimodal capability declaration.
     let completion = json!({
         "id":"chat_image_ok","object":"chat.completion","model":"image-wire",
         "choices":[{"index":0,"message":{"role":"assistant","content":"image-blackbox-ok"},"finish_reason":"stop"}],
@@ -259,7 +260,7 @@ async fn run_case_shape(
             .push("multimodal".into());
     }
     if matches!(pool, PoolState::Exhausted | PoolState::MixedExhausted) {
-        vision.models.get_mut("test").unwrap().max_context_tokens = Some(1);
+        vision.enabled = false;
     }
     let text = manifest.providers.get_mut("fallback").unwrap();
     text.provider_type = protocol.into();
