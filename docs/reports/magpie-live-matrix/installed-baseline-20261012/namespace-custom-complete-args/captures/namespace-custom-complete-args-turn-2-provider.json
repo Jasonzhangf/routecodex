@@ -1,0 +1,9 @@
+{
+  "case_id": "namespace-custom-complete-args",
+  "turn": 2,
+  "turn_id": "namespace-followup",
+  "provider_captures": [],
+  "business_attempts": 0,
+  "scripted_attempts": 1,
+  "probe_attempts": 0
+}

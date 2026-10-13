@@ -1,0 +1,398 @@
+{
+  "triage_schema_version": 1,
+  "role": "GCM author-verification observer (not formal Reviewer)",
+  "scope": "Read-only triage of the integrated-48 installed baseline failures. No product/source/fixture/report edits. No live rerun (raw samples unchanged).",
+  "evidence_root": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/installed-baseline-20261012",
+  "fixture_root": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/v3/fixtures/protocol-live-mock-matrix",
+  "harness_root": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/v3/scripts/tests/protocol-live-mock",
+  "baseline": {
+    "report": "docs/reports/magpie-live-matrix/installed-baseline-20261012/baseline-report.json",
+    "status": "baseline_completed_with_failures",
+    "total": 48,
+    "passed": 12,
+    "failed": 36,
+    "not_run": 0,
+    "infra_failure": 0,
+    "product_failures": 187,
+    "note": "187 is the assertion-mismatch count, not a defect count.",
+    "source_magpie_sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
+    "runtime": "rccv3 0.90.4886 (crate 0.1.0), installed, sha256 282e05b774026bbbea7ceb8cdeaee9364576b13e61396be30e97950587680851",
+    "source_identity_note": "RCC source identity is NOT inferred from the installed binary; source_identity.sha 88715b2f is the repo HEAD only.",
+    "raw_red_baseline_preserved": true
+  },
+  "summary": {
+    "by_bucket": {
+      "wire_representation_delta_needs_contract_clarification": 5,
+      "fixture_oracle_or_testinfra_author_defect": 6,
+      "confirmed_product_observation": 21,
+      "unresolved_product_observation": 4
+    },
+    "headline": "36 failed != 36 operator bugs. 5 are strict-oracle wire-representation deltas (meaning preserved), 6 are fixture/oracle/harness defects (no product meaning loss), 25 are real product observations.",
+    "dominant_real_defect": "Outbound projection to the gemini target (and the gemini entry path) and anthropic->openai_chat is not wired in the installed build.",
+    "no_golden_edits": "No expected/fixture/helper was edited. Any accepted change must retain the raw red baseline and independently test the counterexample."
+  },
+  "groups": [
+    {
+      "group_id": "G1",
+      "bucket": "wire_representation_delta_needs_contract_clarification",
+      "title": "Provider-wire textshape deltas that are protocol-valid alternative representations",
+      "product_meaning_preserved": true,
+      "cases": [
+        "anthropic-to-anthropic-json",
+        "chat-to-anthropic-json",
+        "chat-to-responses-json",
+        "media-anthropic-older-turn-tool-image",
+        "namespace-custom-complete-args"
+      ],
+      "findings": [
+        {
+          "case_id": "anthropic-to-anthropic-json",
+          "provider_body_delta": "messages.0.content: expected \"hello\" (string); actual [{\"type\":\"text\",\"text\":\"hello\"}]",
+          "protocol_note": "Anthropic Messages content accepts a bare string OR a one-text-block array; both denote the same single text block.",
+          "classification": "representation_delta",
+          "evidence": [
+            "anthropic-to-anthropic-json/provider-captures.json",
+            "anthropic-to-anthropic-json/captures/anthropic-to-anthropic-json-turn-1-provider.json"
+          ],
+          "oracle_note": "Assertion messages.0.content == \"hello\" is over-strict; content is present and correctly typed."
+        },
+        {
+          "case_id": "chat-to-anthropic-json",
+          "provider_body_delta": "system: expected system.0.text == \"be brief\"; actual system == \"be brief\" (bare string)",
+          "protocol_note": "Anthropic Messages system accepts a bare string OR a text-block array.",
+          "classification": "representation_delta",
+          "evidence": ["chat-to-anthropic-json/provider-captures.json"]
+        },
+        {
+          "case_id": "chat-to-responses-json",
+          "provider_body_delta": "System handling: expected top-level instructions == \"be brief\" plus input.0.role == \"user\"; actual keeps system as input[0] role=system and omits instructions; max_tokens is mapped to max_output_tokens.",
+          "protocol_note": "Responses API accepts a system/developer input message OR a top-level instructions field; both are semantically equivalent. max_tokens->max_output_tokens is a correct field mapping.",
+          "classification": "representation_delta",
+          "evidence": ["chat-to-responses-json/provider-captures.json"]
+        },
+        {
+          "case_id": "media-anthropic-older-turn-tool-image",
+          "provider_body_delta": "The native image data URI is preserved exactly (image url matched). The only mismatch is the final user message index, because the oracle assumed a different merge of the assistant-text and tool_result turns.",
+          "protocol_note": "Native image bytes, MIME and data URI are preserved; no description substitution.",
+          "classification": "representation_delta",
+          "evidence": ["media-anthropic-older-turn-tool-image/provider-captures.json"]
+        },
+        {
+          "case_id": "namespace-custom-complete-args",
+          "provider_body_delta": "tools[0] is exec_command (declared first), so expected tools.0/tools.1 names are off-by-one; actual tools = [exec_command, collaboration__spawn_agent, collaboration__freeform].",
+          "protocol_note": "All three declared tools are present and namespace-prefixed; only the assertion indices are wrong.",
+          "classification": "representation_delta",
+          "evidence": ["namespace-custom-complete-args/provider-captures.json"]
+        }
+      ]
+    },
+    {
+      "group_id": "G2",
+      "bucket": "fixture_oracle_or_testinfra_author_defect",
+      "title": "Assertion/harness defects that do not prove product meaning loss",
+      "product_meaning_preserved": true,
+      "cases": [
+        "provider-error-exhaustion",
+        "provider-fault-stream-cut",
+        "tool-followup-responses-to-chat",
+        "responses-to-anthropic-sse",
+        "responses-to-chat-sse",
+        "chat-to-responses-sse"
+      ],
+      "findings": [
+        {
+          "case_id": "provider-error-exhaustion",
+          "defect": "assertClientResult counts the placeholder observation {kind:'unknown',ok:false,error:'empty_body'} as a parsed observation, producing 'expected closed transport but received a parsed observation'.",
+          "product_actual": "Provider reached (mock.unavailable-model -> wireModel unavailable-model), returned 429; RCC logged result=terminal_default_floor_exhausted and closed the client connection (status null, closed=true, ECONNRESET, 0 bytes). This is the required behavior.",
+          "owner_correction": "harness assertions.mjs: treat an observation with ok===false (empty_body) as absent when transport===closed.",
+          "evidence": [
+            "provider-error-exhaustion/captures/provider-error-exhaustion-turn-1-client.json",
+            "provider-error-exhaustion/rcc-diagnostics.json",
+            "provider-error-exhaustion/provider-captures.json"
+          ]
+        },
+        {
+          "case_id": "provider-fault-stream-cut",
+          "defect": "Case asserts provider_attempt_count=2 but declares no runtime_setup for a second candidate. RCC policy is same_candidate_retries=0 and the direct pin builds a one-target pool.",
+          "product_actual": "1 attempt; provider stream cut (fault=stream_cut_before_content); RCC logged terminal_default_floor_exhausted; client aborted with no provider error leaked.",
+          "owner_correction": "Add a runtime_setup declaring an alternative provider/auth identity for the second attempt, or lower the asserted attempt count to 1. Do not weaken silently. Already flagged in docs/reports/magpie-live-matrix-corpus-inventory.md 'Current gaps'.",
+          "evidence": ["provider-fault-stream-cut/provider-captures.json", "provider-fault-stream-cut/rcc-diagnostics.json"]
+        },
+        {
+          "case_id": "tool-followup-responses-to-chat",
+          "defect": "deriveResponsesSemantic dedups output items only by id; streamed function_call items carry only call_id, so one logical call yields 3 output_items. The echo consumer then sees calls.length=3 and fails 'echo consumer requires exactly one observed call'.",
+          "product_actual": "Turn 1 assertions PASSED; the client emitted exactly one function_call (output_item.added + function_call_arguments.done + output_item.done for output_index 0, call_echo_1).",
+          "owner_correction": "protocol-semantics.mjs ensureResponsesOutputItem: dedup by call_id/item_id as well as id (or dedup in tool-consumer.mjs extractToolCalls).",
+          "evidence": [
+            "tool-followup-responses-to-chat/captures/tool-followup-responses-to-chat-turn-1-client.json",
+            "v3/scripts/tests/protocol-live-mock/protocol-semantics.mjs",
+            "v3/scripts/tests/protocol-live-mock/tool-consumer.mjs"
+          ]
+        },
+        {
+          "case_id": "responses-to-anthropic-sse",
+          "defect": "The upstream script has no response.output_text.delta; deriveResponsesSemantic only sets top-level text from that event, so text resolves to undefined even though the client relayed the text in response.output_item.done content. The fixture also asserts chat key finish_reason on an anthropic-entry stream.",
+          "product_actual": "Client SSE body contained the message text.",
+          "owner_correction": "Extend deriveResponsesSemantic to hoist text from output_item.done/completed item content, or add a response.output_text.delta event to the script; fix the fixture to assert the anthropic text key.",
+          "evidence": ["responses-to-anthropic-sse/captures/responses-to-anthropic-sse-turn-1-client.json"]
+        },
+        {
+          "case_id": "responses-to-chat-sse",
+          "defect": "Same missing text extraction as above; the fixture also asserts finish_reason, which the responses semantic model does not produce (it produces status).",
+          "product_actual": "Client SSE body contained the message text.",
+          "owner_correction": "Same as responses-to-anthropic-sse; fix the fixture terminal key to the responses status.",
+          "evidence": ["responses-to-chat-sse/captures/responses-to-chat-sse-turn-1-client.json"]
+        },
+        {
+          "case_id": "chat-to-responses-sse",
+          "defect": "Fixture asserts usage.prompt_tokens=7, but the client request has no stream_options.include_usage and the sibling passing chat-to-chat-sse does not emit usage either.",
+          "product_actual": "Client chat SSE stream carried text \"ok\" and finish_reason \"stop\"; no usage chunk. All other assertions passed.",
+          "owner_correction": "Drop the usage assertion, or set stream_options.include_usage=true on the client request if usage forwarding is required.",
+          "evidence": [
+            "chat-to-responses-sse/captures/chat-to-responses-sse-turn-1-client.json",
+            "chat-to-chat-sse/captures/chat-to-chat-sse-turn-1-client.json"
+          ]
+        }
+      ]
+    },
+    {
+      "group_id": "G3a",
+      "bucket": "confirmed_product_observation",
+      "title": "Outbound projection to the gemini target is absent (body left chat-shaped; auth carrier missing; request dropped)",
+      "cases": [
+        "chat-to-gemini-json",
+        "chat-to-gemini-sse",
+        "responses-to-gemini-json",
+        "responses-to-gemini-sse",
+        "anthropic-to-gemini-json",
+        "anthropic-to-gemini-sse",
+        "reasoning-provided-signature-not-invented",
+        "reasoning-signature-anthropic-to-gemini"
+      ],
+      "findings": [
+        {
+          "case_id": "chat-to-gemini-json",
+          "observed": "Provider path correct (/v1beta/models/gemini-model:generateContent) but raw body = {\"messages\":[{\"content\":\"hello\",\"role\":\"user\"}]} (chat-shaped, not gemini contents); auth = Authorization: Bearer only (no x-goog-api-key/key=).",
+          "diagnostics": [
+            "provider body_must contents.0.role mismatch",
+            "provider body_must contents.0.parts.0.text mismatch",
+            "provider auth missing or empty for gemini carrier"
+          ],
+          "evidence": ["chat-to-gemini-json/provider-captures.json", "chat-to-gemini-json/provider.toml"]
+        },
+        {
+          "case_id": "chat-to-gemini-sse",
+          "observed": "Provider body chat-shaped (messages, not contents); path used :generateContent while the fixture binds :streamGenerateContent (unbound endpoint); auth missing gemini carrier.",
+          "diagnostics": [
+            "provider path /v1beta/models/gemini-model:generateContent not in expected paths [/v1beta/models/gemini-model:streamGenerateContent]",
+            "provider body_must contents.0.parts.0.text mismatch",
+            "provider auth missing or empty for gemini carrier"
+          ],
+          "evidence": ["chat-to-gemini-sse/provider-captures.json"]
+        },
+        {
+          "case_id": "responses-to-gemini-json",
+          "observed": "Provider body chat-shaped (messages); auth missing gemini carrier. Client output is gemini-shaped JSON (candidates/finishReason/usageMetadata) although the fixture expects responses-shaped output.0.content.0.text.",
+          "diagnostics": [
+            "provider body_must contents.0.role mismatch",
+            "provider body_must contents.0.parts.0.text mismatch",
+            "provider auth missing or empty for gemini carrier",
+            "client body_must output.0.content.0.text missing",
+            "client body_must status missing"
+          ],
+          "evidence": [
+            "responses-to-gemini-json/provider-captures.json",
+            "responses-to-gemini-json/captures/responses-to-gemini-json-turn-1-client.json"
+          ]
+        },
+        {
+          "case_id": "responses-to-gemini-sse",
+          "observed": "No provider business attempt (biz=0); RCC logged event=failed status=502 subcode=network_error; client got 200 text/event-stream aborted with body ':' only.",
+          "evidence": [
+            "responses-to-gemini-sse/rcc-diagnostics.json",
+            "responses-to-gemini-sse/captures/responses-to-gemini-sse-turn-1-client.json"
+          ]
+        },
+        {
+          "case_id": "anthropic-to-gemini-json",
+          "observed": "No provider business attempt (biz=0). stderr shows a v3-projection-drop for $.max_completion_tokens (target_protocol=gemini) then the client socket hung up. Request never delivered to provider.",
+          "evidence": [
+            "anthropic-to-gemini-json/rcc-diagnostics.json",
+            "anthropic-to-gemini-json/captures/anthropic-to-gemini-json-turn-1-client.json"
+          ]
+        },
+        {
+          "case_id": "anthropic-to-gemini-sse",
+          "observed": "No provider business attempt (biz=0); projection drop of $.max_completion_tokens; client 200 text/event-stream aborted with body ':' only.",
+          "evidence": [
+            "anthropic-to-gemini-sse/rcc-diagnostics.json",
+            "anthropic-to-gemini-sse/captures/anthropic-to-gemini-sse-turn-1-client.json"
+          ]
+        },
+        {
+          "case_id": "reasoning-provided-signature-not-invented",
+          "observed": "anthropic->gemini relay; no provider business attempt (biz=0); projection drop of $.max_completion_tokens; client socket hang up.",
+          "evidence": ["reasoning-provided-signature-not-invented/rcc-diagnostics.json"]
+        },
+        {
+          "case_id": "reasoning-signature-anthropic-to-gemini",
+          "observed": "anthropic->gemini relay; no provider business attempt (biz=0); projection drop of $.max_completion_tokens; client socket hang up.",
+          "evidence": ["reasoning-signature-anthropic-to-gemini/rcc-diagnostics.json"]
+        }
+      ],
+      "group_note": "Gemini target is not projected to gemini wire (contents/parts) in any of the 8 cases; auth carrier is not gemini-native. Whether gemini-target translation is in scope for this build is a contract question, but the observed behavior is not a faithful relay."
+    },
+    {
+      "group_id": "G3b",
+      "bucket": "confirmed_product_observation",
+      "title": "Gemini entry endpoint not registered (HTTP 404 path_not_found, no provider attempt)",
+      "cases": [
+        "gemini-to-anthropic-json",
+        "gemini-to-anthropic-sse",
+        "gemini-to-chat-json",
+        "gemini-to-chat-sse",
+        "gemini-to-gemini-json",
+        "gemini-to-gemini-sse",
+        "gemini-to-responses-json",
+        "gemini-to-responses-sse",
+        "media-gemini-function-response-file",
+        "media-gemini-function-response-image"
+      ],
+      "findings": [
+        {
+          "case_id": "all gemini-entry cases",
+          "observed": "RCC logged event=failed status=404 subcode=path_not_found node=V3Error06ClientProjected message='HTTP path is not registered' for /v1beta/models/<model>:generateContent (and :streamGenerateContent). Provider attempt count 0. Client got socket hang up.",
+          "diagnostic_note": "Logs also show request_id prefix 'openai-chat-router-unknown', which suggests the gemini inbound path is unregistered in this server/endpoint config rather than the client sending a malformed path. Mechanism is not confirmed; do not assert a stage root cause.",
+          "evidence": [
+            "gemini-to-gemini-json/rcc-diagnostics.json",
+            "gemini-to-chat-json/rcc-diagnostics.json",
+            "media-gemini-function-response-file/rcc-diagnostics.json"
+          ]
+        }
+      ],
+      "group_note": "The corpus inventory already flags the streaming gemini endpoint as a coverage gap; the JSON variant fails the same way, so the gap is broader than streaming."
+    },
+    {
+      "group_id": "G3c",
+      "bucket": "confirmed_product_observation",
+      "title": "anthropic -> openai_chat outbound projection rejects unmapped fields (request never delivered)",
+      "cases": ["anthropic-to-chat-json"],
+      "findings": [
+        {
+          "case_id": "anthropic-to-chat-json",
+          "observed": "RCC logged event=failed status=598 error=V3E3 subcode=provider_request_payload_invalid node=V3Error06ClientProjected message='provider compat profile compat:passthrough failed at request_protocol: UnmappedOutboundFields target_protocol=openai_chat paths=$.request.anthropic_request'. Provider attempt count 0. Client socket hang up.",
+          "note": "The relay failed to project the anthropic request into openai_chat, then closed the client connection (no provider error surfaced). Contrast the SSE variant (anthropic-to-chat-sse) which DID reach the provider.",
+          "evidence": [
+            "anthropic-to-chat-json/rcc-diagnostics.json",
+            "anthropic-to-chat-json/captures/anthropic-to-chat-json-turn-1-client.json"
+          ]
+        }
+      ]
+    },
+    {
+      "group_id": "G3d",
+      "bucket": "unresolved_product_observation",
+      "title": "responses -> responses direct path: no provider attempt, client gets nothing",
+      "cases": ["responses-to-responses-json", "responses-to-responses-sse"],
+      "findings": [
+        {
+          "case_id": "responses-to-responses-json",
+          "observed": "Provider attempt count 0; provider-captures empty; client status null, socket hang up. stderr contains only the generic 'front socket closed for exec replacement' line; no typed RCC error event.",
+          "evidence": [
+            "responses-to-responses-json/rcc-diagnostics.json",
+            "responses-to-responses-json/captures/responses-to-responses-json-turn-1-client.json"
+          ]
+        },
+        {
+          "case_id": "responses-to-responses-sse",
+          "observed": "Provider attempt count 0; client 200 text/event-stream aborted with body ':' only; no typed RCC error event.",
+          "evidence": [
+            "responses-to-responses-sse/rcc-diagnostics.json",
+            "responses-to-responses-sse/captures/responses-to-responses-sse-turn-1-client.json"
+          ]
+        }
+      ],
+      "group_note": "A direct same-protocol responses path producing zero provider attempts is unexpected. Mechanism not determined; recorded as an unresolved product observation."
+    },
+    {
+      "group_id": "G4",
+      "bucket": "unresolved_product_observation",
+      "title": "Client SSE relay delivers an empty/keepalive-only stream after a successful provider attempt",
+      "cases": ["chat-to-anthropic-sse", "usage-cache-writes-chat-entry"],
+      "findings": [
+        {
+          "case_id": "chat-to-anthropic-sse",
+          "observed": "Provider reached (path /v1/messages, stream=true) and returned a scripted anthropic SSE stream, but the client got status 200 text/event-stream with body ':' only (aborted, complete=false). No text delivered.",
+          "evidence": [
+            "chat-to-anthropic-sse/provider-captures.json",
+            "chat-to-anthropic-sse/captures/chat-to-anthropic-sse-turn-1-client.json"
+          ]
+        },
+        {
+          "case_id": "usage-cache-writes-chat-entry",
+          "observed": "chat->anthropic SSE; provider reached; client got 200 text/event-stream body ':' only (aborted). No text/usage delivered.",
+          "evidence": ["usage-cache-writes-chat-entry/captures/usage-cache-writes-chat-entry-turn-1-client.json"]
+        }
+      ],
+      "group_note": "Both share the client-side keepalive-only signature after a successful provider attempt. The upstream provider stream completed normally in chat-to-anthropic-sse; the loss is on the client-facing SSE emission/relay. Mechanism not confirmed. Note anthropic-to-chat-sse PASSED, so the chat-target SSE relay works in at least one direction."
+    },
+    {
+      "group_id": "G6",
+      "bucket": "confirmed_product_observation",
+      "title": "responses upstream -> anthropic client SSE keeps the frame skeleton but drops the text delta",
+      "cases": ["anthropic-to-responses-sse"],
+      "findings": [
+        {
+          "case_id": "anthropic-to-responses-sse",
+          "observed": "Upstream responses SSE carried response.output_text.delta \"ok\". The anthropic client stream contained message_start with content:[], message_delta (stop_reason=end_turn) and message_stop, but NO content_block_delta, so the assistant text never reached the client. stop_reason and usage were preserved.",
+          "diagnostics": ["client body_must text missing"],
+          "note": "Contrast with the PASSING anthropic-to-anthropic-sse and anthropic-to-responses-json. The text is genuinely absent from the client bytes, so this is a real meaning loss, not an oracle over-strictness.",
+          "evidence": [
+            "anthropic-to-responses-sse/captures/anthropic-to-responses-sse-turn-1-client.json",
+            "anthropic-to-responses-sse/provider-captures.json"
+          ]
+        }
+      ]
+    },
+    {
+      "group_id": "G5",
+      "bucket": "confirmed_product_observation",
+      "title": "Responses client output item is a flattened output_text part instead of a message item (chat upstream)",
+      "cases": ["responses-to-chat-json"],
+      "findings": [
+        {
+          "case_id": "responses-to-chat-json",
+          "observed": "Client body output[0] = {\"type\":\"output_text\",\"text\":\"ok\"} (plus top-level output_text) instead of the Responses message item {\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}. Assertion output.0.content.0.text is missing.",
+          "note": "The sibling responses-to-anthropic-json PASSES with the canonical message shape, so the chat-upstream path emits a non-canonical Responses output item. Candidate defect; confirm against the Responses output-item schema.",
+          "evidence": [
+            "responses-to-chat-json/captures/responses-to-chat-json-turn-1-client.json",
+            "responses-to-anthropic-json/captures/responses-to-anthropic-json-turn-1-client.json"
+          ]
+        }
+      ]
+    }
+  ],
+  "verified_passing_families": [
+    {
+      "family": "unregistered",
+      "cases": ["unregistered-request-field-continuation", "unregistered-response-field-preserved"],
+      "note": "Unregistered request field excluded from provider wire with continuation; representable response field retained. Correct per requirement routecodex-protocol-compatibility-normalization."
+    },
+    {
+      "family": "terminal",
+      "cases": ["terminal-content-filter", "terminal-length"],
+      "note": "Passed."
+    },
+    {
+      "family": "usage",
+      "cases": ["usage-missing-or-null-preserved"],
+      "note": "Passed."
+    },
+    {
+      "family": "same-protocol",
+      "cases": ["chat-to-chat-json", "chat-to-chat-sse", "anthropic-to-anthropic-sse", "anthropic-to-responses-json", "responses-to-anthropic-json"],
+      "note": "Direct/relay same-protocol and several relay cells pass, which anchors the passing semantic model."
+    }
+  ],
+  "no_guessed_root_cause": true
+}

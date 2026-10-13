@@ -1,0 +1,35 @@
+TAP version 13
+# Subtest: older-turn tool-image oracle keeps the complete OpenAI Chat history
+ok 1 - older-turn tool-image oracle keeps the complete OpenAI Chat history
+  ---
+  duration_ms: 1.566958
+  type: 'test'
+  ...
+# Subtest: archived real provider capture is accepted only with the assistant history intact
+ok 2 - archived real provider capture is accepted only with the assistant history intact
+  ---
+  duration_ms: 0.212125
+  type: 'test'
+  ...
+# Subtest: negative controls: removing or reordering the assistant turn fails
+ok 3 - negative controls: removing or reordering the assistant turn fails
+  ---
+  duration_ms: 0.161417
+  type: 'test'
+  ...
+# Subtest: negative control: breaking the tool-result pairing fails
+ok 4 - negative control: breaking the tool-result pairing fails
+  ---
+  duration_ms: 0.071459
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 89.977833
+EXIT=0

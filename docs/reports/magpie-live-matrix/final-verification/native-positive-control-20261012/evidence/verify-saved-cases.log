@@ -1,0 +1,33 @@
+{
+  "case_id": "tool-followup-responses-to-chat",
+  "turn": 1,
+  "client_status": 200,
+  "body_len": 1272,
+  "parse_kind": "sse",
+  "parse_ok": true,
+  "output_item_count": 1,
+  "output_item_call_ids": [
+    "call_echo_1"
+  ],
+  "observed_tool_calls": [
+    {
+      "id": "call_echo_1",
+      "name": "echo",
+      "type": "function_call",
+      "arguments": "{\"text\":\"ping\"}"
+    }
+  ]
+}
+{
+  "case_id": "namespace-custom-complete-args",
+  "turn": 1,
+  "client_status": null,
+  "body_len": 0,
+  "parse_kind": "unknown",
+  "parse_ok": false,
+  "output_item_count": 0,
+  "output_item_call_ids": [],
+  "observed_tool_calls": []
+}
+
+SUMMARY [{"case_id":"tool-followup-responses-to-chat","status":200,"calls":1},{"case_id":"namespace-custom-complete-args","status":null,"calls":0}]

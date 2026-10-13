@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "case_id": "anthropic-to-chat-sse",
+  "cell": {"entry_protocol": "anthropic", "provider_protocol": "openai_chat", "transport": "sse", "mode": "relay"},
+  "client_request": {
+    "method": "POST",
+    "path": "/v1/messages",
+    "headers": {"content-type": "application/json"},
+    "body": {"model": "mock.chat-model", "max_tokens": 64, "messages": [{"role": "user", "content": "hello"}], "stream": true}
+  },
+  "expected_provider": {
+    "paths": ["/v1/chat/completions"],
+    "method": "POST",
+    "auth_required": true,
+    "body_must": {"model": "chat-model", "stream": true},
+    "body_must_not": ["routecodex_internal", "metadata_center", "debug_snapshot"],
+    "exact": null
+  },
+  "upstream_response": {
+    "protocol": "openai_chat",
+    "mode": "sse",
+    "status": 200,
+    "content_type": "text/event-stream",
+    "sse_events": [
+      {"data": {"id": "chatcmpl_anthropic_to_chat_sse", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {"role": "assistant", "content": "ok"}}]}},
+      {"data": {"id": "chatcmpl_anthropic_to_chat_sse", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}},
+      {"data": "[DONE]"}
+    ]
+  },
+  "expected_client": {
+    "transport": "complete",
+    "status": 200,
+    "body_must": {"text": "ok", "stop_reason": "end_turn"},
+    "body_must_not": ["provider_error", "internal_error", "routecodex_internal", "metadata_center"],
+    "semantic_terminal_required": true
+  },
+  "assertions": {"provider_attempt_count": 1, "probe_attempts_may_occur": true, "no_control_leakage": true},
+  "source": {
+    "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
+    "files": ["internal/gateway/testdata/upstream_bodies/anthropic-to-chat.json"],
+    "tests": ["internal/gateway/translate_stream_test.go::TestChatTranslationKeepsFirstChoice"],
+    "adaptation": "Chat SSE stimulus; expected Anthropic client stream terminal is protocol-derived."
+  },
+  "contract_differences": []
+}

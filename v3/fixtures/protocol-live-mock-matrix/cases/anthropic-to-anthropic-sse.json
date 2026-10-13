@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "case_id": "anthropic-to-anthropic-sse",
+  "cell": {"entry_protocol": "anthropic", "provider_protocol": "anthropic", "transport": "sse", "mode": "direct"},
+  "client_request": {
+    "method": "POST",
+    "path": "/v1/messages",
+    "headers": {"content-type": "application/json"},
+    "body": {"model": "mock.anthropic-model", "max_tokens": 64, "messages": [{"role": "user", "content": "hello"}], "stream": true}
+  },
+  "expected_provider": {
+    "paths": ["/v1/messages"],
+    "method": "POST",
+    "auth_required": true,
+    "body_must": {"model": "anthropic-model", "stream": true},
+    "body_must_not": ["routecodex_internal", "metadata_center", "debug_snapshot"],
+    "exact": null
+  },
+  "upstream_response": {
+    "protocol": "anthropic",
+    "mode": "sse",
+    "status": 200,
+    "content_type": "text/event-stream",
+    "sse_events": [
+      {"event": "message_start", "data": {"type": "message_start", "message": {"id": "msg_direct_sse", "type": "message", "role": "assistant", "content": [], "usage": {"input_tokens": 7, "output_tokens": 0}}}},
+      {"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "ok"}}},
+      {"event": "message_delta", "data": {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 2}}},
+      {"event": "message_stop", "data": {"type": "message_stop"}}
+    ]
+  },
+  "expected_client": {
+    "transport": "complete",
+    "status": 200,
+    "body_must": {"text": "ok", "stop_reason": "end_turn"},
+    "body_must_not": ["provider_error", "internal_error", "routecodex_internal", "metadata_center"],
+    "semantic_terminal_required": true
+  },
+  "assertions": {"provider_attempt_count": 1, "probe_attempts_may_occur": true, "no_control_leakage": true},
+  "source": {
+    "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
+    "files": ["internal/gateway/testdata/upstream_bodies/anthropic.json"],
+    "tests": ["internal/gateway/translate_stream_test.go::TestStreamedCallStopsForTool"],
+    "adaptation": "Direct Anthropic SSE preserves provider event meaning and terminal."
+  },
+  "contract_differences": []
+}

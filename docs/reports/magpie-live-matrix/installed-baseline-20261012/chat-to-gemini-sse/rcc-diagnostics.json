@@ -1,0 +1,15 @@
+{
+  "pid": 84936,
+  "ready": true,
+  "running": false,
+  "exit_receipt": {
+    "pid": 84936,
+    "kind": "exit",
+    "exit_code": 0,
+    "signal": null,
+    "at_epoch_ms": 1791823039978,
+    "error": null
+  },
+  "stdout": "[RouteCodexV3] rccv3 server start --foreground version=0.90.4886 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 config=/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/installed-baseline-20261012/chat-to-gemini-sse/v3-protocol-live-mock-lifecycle-RmoPsw/config.toml snap=false snapall=false snap_stages= debug=false\n\u001b[36m[server:startup          ][-                   ][-                                   ] ✅ [RouteCodexV3]        09:37:19 Server started\u001b[0m\u001b[2;90m  [sessionID:-]                                                                                    event=started version=0.90.4886 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 addresses=127.0.0.1:56919, 127.0.0.1:56920\u001b[0m\n[RouteCodexV3] Server started version=0.90.4886 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 on 127.0.0.1:56919, 127.0.0.1:56920\n\u001b[38;2;77;218;137m[56919:openai_chat       ][-                   ][default:mock-gemini[key1].gemini-model] ▶ [/v1/chat/completions] 09:37:19 [#1/1]             route=default target=mock-gemini[key1].gemini-model reason=pool:default\u001b[0m\u001b[2;90m  [sessionID:rcc-session:request:openai-chat-router-mock.gemini-model-20261012T093719922-1-1]      [virtual-router-hit]     09:37:19 req=openai-chat-router-mock.gemini-model-20261012T093719922-1-1 event=route_selected route=default target=mock-gemini[key1].gemini-model reason=pool:default\u001b[0m\n",
+  "stderr": "V3 Front HTTP connection failed: Custom { kind: Other, error: hyper::Error(User(Body), Error { inner: Error { inner: Error { inner: Error { inner: Custom { kind: Other, error: \"provider pool exhausted; SSE transport unavailable\" } } } } }) }\n"
+}

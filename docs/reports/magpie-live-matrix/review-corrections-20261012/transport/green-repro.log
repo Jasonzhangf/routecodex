@@ -1,0 +1,3 @@
+valid_complete: ok=true diagnostics=[]
+matching_json_then_econnreset: ok=false diagnostics=["client transport error: socket hang up","client transport aborted before completion","client response is not complete (complete=false)","client response end was not received","client transport closed before completion"]
+matching_sse_terminal_then_timeout: ok=false diagnostics=["client transport error: request timed out after 10000ms","client response is not complete (complete=false)","client response end was not received","client transport closed before completion"]

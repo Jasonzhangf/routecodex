@@ -1,0 +1,52 @@
+TAP version 13
+# Subtest: runCase passes a single-turn case through the supplied real HTTP adapter and writes raw evidence
+ok 1 - runCase passes a single-turn case through the supplied real HTTP adapter and writes raw evidence
+  ---
+  duration_ms: 4.990125
+  type: 'test'
+  ...
+# Subtest: runCase uses the provider sequence assertion only when auth_orders is declared
+ok 2 - runCase uses the provider sequence assertion only when auth_orders is declared
+  ---
+  duration_ms: 1.938958
+  type: 'test'
+  ...
+# Subtest: runCase rejects wrong request client/terminal evidence and wrong provider attempt count
+ok 3 - runCase rejects wrong request client/terminal evidence and wrong provider attempt count
+  ---
+  duration_ms: 3.831334
+  type: 'test'
+  ...
+# Subtest: runCase executes the declared echo once from the actual response and sends actual call id/output
+ok 4 - runCase executes the declared echo once from the actual response and sends actual call id/output
+  ---
+  duration_ms: 2.897792
+  type: 'test'
+  ...
+# Subtest: runCase keeps the case-wide terminal and forbidden contract for a turn with expected_client_must
+ok 5 - runCase keeps the case-wide terminal and forbidden contract for a turn with expected_client_must
+  ---
+  duration_ms: 6.094125
+  type: 'test'
+  ...
+# Subtest: runCase classifies setup and missing capabilities as explicit non-product outcomes
+ok 6 - runCase classifies setup and missing capabilities as explicit non-product outcomes
+  ---
+  duration_ms: 0.645542
+  type: 'test'
+  ...
+# Subtest: runCase keeps failed parse diagnostics separate from parsed client observations
+ok 7 - runCase keeps failed parse diagnostics separate from parsed client observations
+  ---
+  duration_ms: 1.604084
+  type: 'test'
+  ...
+1..7
+# tests 7
+# suites 0
+# pass 7
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 107.733292
