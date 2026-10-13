@@ -1,0 +1,26 @@
+{
+  "path": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/installed-baseline-20261012/gemini-to-chat-json/v3-protocol-live-mock-lifecycle-MMVv1C/config.toml",
+  "state": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/installed-baseline-20261012/gemini-to-chat-json/v3-protocol-live-mock-lifecycle-MMVv1C/state",
+  "listeners": [
+    {
+      "role": "primary",
+      "server_id": "loopback",
+      "host": "127.0.0.1",
+      "port": 56971
+    },
+    {
+      "role": "admin_webui",
+      "server_id": "admin_webui",
+      "host": "127.0.0.1",
+      "port": 56972
+    }
+  ],
+  "admin_bind": "127.0.0.1:56972",
+  "env": {
+    "ROUTECODEX_V3_ADMIN_BIND": "127.0.0.1:56972"
+  },
+  "mode": "relay",
+  "model": "mock.chat-model",
+  "wire_model": "chat-model",
+  "runtime_setup": null
+}

@@ -1,0 +1,26 @@
+{
+  "path": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/installed-baseline-20261012/anthropic-to-chat-sse/v3-protocol-live-mock-lifecycle-kooBDS/config.toml",
+  "state": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/installed-baseline-20261012/anthropic-to-chat-sse/v3-protocol-live-mock-lifecycle-kooBDS/state",
+  "listeners": [
+    {
+      "role": "primary",
+      "server_id": "loopback",
+      "host": "127.0.0.1",
+      "port": 56797
+    },
+    {
+      "role": "admin_webui",
+      "server_id": "admin_webui",
+      "host": "127.0.0.1",
+      "port": 56798
+    }
+  ],
+  "admin_bind": "127.0.0.1:56798",
+  "env": {
+    "ROUTECODEX_V3_ADMIN_BIND": "127.0.0.1:56798"
+  },
+  "mode": "relay",
+  "model": "mock.chat-model",
+  "wire_model": "chat-model",
+  "runtime_setup": null
+}

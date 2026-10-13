@@ -1,0 +1,421 @@
+// Loopback mock provider for the protocol live-mock matrix.
+//
+// This module owns one node:http listener and the scripted provider responses
+// for a single case/turn. It is import-safe: the listener starts only when the
+// caller invokes startMockProvider(). It never calls RCC, Magpie, the network,
+// or a production provider, and it retains raw request evidence for callers.
+import { createServer } from 'node:http';
+
+const PROTOCOLS = Object.freeze(['openai_chat', 'responses', 'anthropic', 'gemini']);
+const PROTOCOL_SET = new Set(PROTOCOLS);
+const SCRIPT_MODES = new Set(['json', 'sse', 'fault']);
+const FAULT_TRUNCATE = new Set(['truncate', 'stream_cut', 'stream_cut_before_content']);
+
+export const MOCK_PROVIDER_PATHS = Object.freeze({
+  openai_chat: Object.freeze(['/v1/chat/completions']),
+  responses: Object.freeze(['/v1/responses', '/v1/responses/compact']),
+  anthropic: Object.freeze(['/v1/messages']),
+  gemini: Object.freeze([':generateContent', ':streamGenerateContent']),
+});
+
+export class MockProviderError extends Error {
+  constructor(code, message, statusCode = 400) {
+    super(message);
+    this.name = 'MockProviderError';
+    this.code = code;
+    this.statusCode = statusCode;
+  }
+}
+
+// startMockProvider(options) -> Promise<handle>
+//
+// options.port      fixed port, or 0 for an ephemeral port (default 0)
+// options.host      bind host (default 127.0.0.1)
+// options.isProbe   optional ({method,path,query,headers,body,rawBody,phase,caseId,turn}) => boolean
+//                   narrow explicit probe classifier; replaces the default
+//                   catalog/health GET classification when provided
+export async function startMockProvider(options = {}) {
+  const host = options.host ?? '127.0.0.1';
+  const state = {
+    phase: 'startup',
+    fixture: null,
+    turn: 0,
+    attemptByTurn: new Map(),
+    captures: [],
+  };
+  const sockets = new Set();
+  const server = createServer((request, response) => {
+    handleRequest(request, response, options, state).catch((error) => {
+      sendFacilityError(response, error);
+    });
+  });
+  server.on('connection', (socket) => {
+    sockets.add(socket);
+    socket.once('close', () => sockets.delete(socket));
+  });
+  await listen(server, options.port ?? 0, host);
+  const address = server.address();
+  const port = typeof address === 'object' && address ? address.port : Number(options.port ?? 0);
+
+  return {
+    port,
+    url: `http://${host}:${port}`,
+    get phase() {
+      return state.phase;
+    },
+    setActiveCase(fixture, turnIndex = 0) {
+      if (!isPlainObject(fixture) || typeof fixture.case_id !== 'string' || fixture.case_id.length === 0) {
+        throw new MockProviderError('mock_invalid_fixture', 'setActiveCase requires a fixture with a string case_id');
+      }
+      if (!PROTOCOL_SET.has(fixture.cell?.provider_protocol)) {
+        throw new MockProviderError('mock_invalid_fixture', `fixture provider_protocol must be one of ${PROTOCOLS.join(', ')}`);
+      }
+      state.fixture = fixture;
+      state.turn = nonNegativeInteger(turnIndex, 'turnIndex');
+      state.attemptByTurn.clear();
+      state.phase = 'case';
+      return { case_id: fixture.case_id, turn: state.turn, phase: 'case' };
+    },
+    setTurn(turnIndex) {
+      state.turn = nonNegativeInteger(turnIndex, 'turnIndex');
+      return { turn: state.turn, phase: state.phase };
+    },
+    getCaptures(caseId) {
+      const all = state.captures.map(cloneValue);
+      if (caseId === undefined) return all;
+      return all.filter((capture) => capture.case_id === caseId);
+    },
+    async close() {
+      for (const socket of sockets) socket.destroy();
+      sockets.clear();
+      server.closeAllConnections?.();
+      await closeServer(server);
+    },
+  };
+}
+
+async function handleRequest(request, response, options, state) {
+  const rawBody = await readBody(request);
+  const bodyText = rawBody.toString('utf8');
+  const url = new URL(request.url ?? '/', 'http://127.0.0.1');
+  const headers = lowerHeaders(request.headers);
+  let body = null;
+  let bodyParsed = false;
+  if (bodyText.length > 0) {
+    try {
+      body = JSON.parse(bodyText);
+      bodyParsed = true;
+    } catch {
+      bodyParsed = false;
+    }
+  }
+
+  const businessPath = isKnownBusinessPath(url.pathname);
+  const probe = businessPath ? false : classifyProbe(request.method, url, headers, body, state, options);
+  const capture = {
+    phase: state.phase,
+    case_id: state.phase === 'case' && state.fixture ? state.fixture.case_id : null,
+    turn: state.turn,
+    attempt: null,
+    attempt_kind: businessPath ? 'business' : probe ? 'probe' : 'unknown',
+    protocol: classifyProtocol(url.pathname),
+    method: request.method,
+    path: url.pathname,
+    query: url.search,
+    headers,
+    content_type: headers['content-type'] ?? null,
+    raw_body: bodyText,
+    body,
+    body_parsed: bodyParsed,
+    captured_at_epoch_ms: Date.now(),
+    response_script: null,
+  };
+
+  if (probe) {
+    capture.response_script = { mode: 'probe', status: 200 };
+    state.captures.push(capture);
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ object: 'list', data: [] }));
+    return;
+  }
+
+  if (!businessPath) {
+    state.captures.push(capture);
+    throw new MockProviderError('mock_provider_unknown_contract', `unsupported mock provider request: ${request.method} ${url.pathname}`, 404);
+  }
+
+  if (request.method !== 'POST') {
+    state.captures.push(capture);
+    throw new MockProviderError('mock_provider_contract_mismatch', `business attempt must use POST: ${request.method} ${url.pathname}`);
+  }
+
+  if (state.phase !== 'case' || !state.fixture) {
+    state.captures.push(capture);
+    throw new MockProviderError('mock_provider_no_active_case', `business request before setActiveCase: ${request.method} ${url.pathname}`);
+  }
+
+  const providerProtocol = state.fixture.cell.provider_protocol;
+  if (!isPathForProtocol(url.pathname, providerProtocol)) {
+    state.captures.push(capture);
+    throw new MockProviderError(
+      'mock_provider_contract_mismatch',
+      `path ${url.pathname} does not match active fixture provider ${providerProtocol}`,
+    );
+  }
+
+  const attemptIndex = state.attemptByTurn.get(state.turn) ?? 0;
+  state.attemptByTurn.set(state.turn, attemptIndex + 1);
+  const scripts = scriptsForTurn(state.fixture, state.turn);
+  const { script, repeated } = scriptAt(scripts, attemptIndex);
+  capture.attempt = attemptIndex;
+  capture.attempt_repeated = repeated;
+  capture.response_script = cloneValue(script);
+  state.captures.push(capture);
+
+  await sendScript(script, response);
+}
+
+function scriptsForTurn(fixture, turn) {
+  const turnFixture = Array.isArray(fixture.turns) ? fixture.turns[turn] : null;
+  const upstream = turnFixture?.upstream_response ?? fixture.upstream_response;
+  return scriptsOf(upstream);
+}
+
+function scriptsOf(upstream) {
+  if (!isPlainObject(upstream)) throw new MockProviderError('mock_invalid_upstream_response', 'upstream_response must be an object');
+  if (!PROTOCOL_SET.has(upstream.protocol)) {
+    throw new MockProviderError('mock_invalid_upstream_protocol', `unsupported upstream protocol: ${upstream.protocol ?? 'missing'}`);
+  }
+  if (Array.isArray(upstream.attempts)) {
+    if (upstream.attempts.length === 0) throw new MockProviderError('mock_invalid_upstream_response', 'attempts must be a non-empty array');
+    return upstream.attempts.map((attempt, index) => normalizeScript(attempt, upstream, `attempts[${index}]`));
+  }
+  return [normalizeScript(upstream, null, 'upstream_response')];
+}
+
+function normalizeScript(source, inherited, label) {
+  if (!isPlainObject(source)) throw new MockProviderError('mock_invalid_attempt', `${label} must be an object`);
+  const mode = source.mode ?? source.kind ?? (Array.isArray(source.body) || isPlainObject(source.body) ? 'json' : Array.isArray(source.sse_events) || Array.isArray(source.chunks) ? 'sse' : null);
+  if (!SCRIPT_MODES.has(mode)) throw new MockProviderError('mock_invalid_attempt_mode', `${label} has unsupported mode: ${mode ?? 'missing'}`);
+  const script = {
+    ...source,
+    mode,
+    status: source.status ?? inherited?.status ?? 200,
+    content_type: source.content_type ?? inherited?.content_type ?? (mode === 'sse' ? 'text/event-stream' : 'application/json'),
+  };
+  if (mode === 'json' && !isPlainObject(script.body) && !Array.isArray(script.body)) {
+    throw new MockProviderError('mock_invalid_attempt', `${label} needs an object body for json mode`);
+  }
+  if (mode === 'sse' && !Array.isArray(script.chunks) && !Array.isArray(script.sse_events)) {
+    throw new MockProviderError('mock_invalid_attempt', `${label} needs chunks or sse_events for sse mode`);
+  }
+  if (mode === 'fault') {
+    script.fault = source.fault ?? inherited?.fault;
+    if (typeof script.fault !== 'string' || script.fault.length === 0) {
+      throw new MockProviderError('mock_invalid_attempt', `${label} needs a non-empty fault string`);
+    }
+    if (script.close_after_bytes === undefined && inherited?.close_after_bytes !== undefined) {
+      script.close_after_bytes = inherited.close_after_bytes;
+    }
+    if (script.close_after_bytes !== undefined) script.close_after_bytes = nonNegativeInteger(script.close_after_bytes, `${label}.close_after_bytes`);
+  }
+  if (!Number.isInteger(script.status) || script.status < 100 || script.status > 599) {
+    throw new MockProviderError('mock_invalid_attempt', `${label}.status must be an HTTP status code`);
+  }
+  return script;
+}
+
+function scriptAt(scripts, index) {
+  if (index < scripts.length) return { script: scripts[index], repeated: false };
+  return { script: scripts[scripts.length - 1], repeated: true };
+}
+
+async function sendScript(script, response) {
+  if (script.mode === 'json') {
+    response.writeHead(script.status, { 'content-type': script.content_type });
+    response.end(JSON.stringify(script.body));
+    return;
+  }
+  if (script.mode === 'sse') {
+    if (script.fault === 'reset') {
+      response.socket?.destroy();
+      return;
+    }
+    response.writeHead(script.status, { 'content-type': script.content_type });
+    const fragments = sseFragments(script);
+    if (script.fault && FAULT_TRUNCATE.has(script.fault)) {
+      writeTruncated(response, fragments, script.close_after_bytes);
+      return;
+    }
+    if (script.fault === 'hold-open') {
+      response.write(fragments[0] ?? '');
+      return;
+    }
+    for (const fragment of fragments) response.write(fragment);
+    response.end();
+    return;
+  }
+  // fault mode
+  if (script.fault === 'reset') {
+    response.socket?.destroy();
+    return;
+  }
+  if (FAULT_TRUNCATE.has(script.fault)) {
+    response.writeHead(script.status, { 'content-type': script.content_type ?? 'text/event-stream' });
+    const fragments = Array.isArray(script.chunks) || Array.isArray(script.sse_events) ? sseFragments(script) : [`data: ${JSON.stringify({ fault: script.fault })}\n\n`];
+    writeTruncated(response, fragments, script.close_after_bytes);
+    return;
+  }
+  if (script.fault === 'hold-open') {
+    response.writeHead(script.status, { 'content-type': script.content_type ?? 'text/event-stream' });
+    response.write('data: {"status":"holding"}\n\n');
+    return;
+  }
+  response.writeHead(script.status, { 'content-type': script.content_type ?? 'application/json' });
+  response.end(JSON.stringify(script.body ?? { error: { message: script.fault } }));
+}
+
+function writeTruncated(response, fragments, closeAfterBytes) {
+  let bytes = 0;
+  for (const fragment of fragments) {
+    if (typeof fragment !== 'string') throw new MockProviderError('mock_invalid_sse_chunk', 'SSE fragments must be raw strings');
+    const chunk = Buffer.from(fragment, 'utf8');
+    if (closeAfterBytes !== undefined && bytes + chunk.byteLength > closeAfterBytes) {
+      const remaining = closeAfterBytes - bytes;
+      if (remaining > 0) response.write(chunk.subarray(0, remaining));
+      response.end();
+      return;
+    }
+    response.write(chunk);
+    bytes += chunk.byteLength;
+    if (closeAfterBytes !== undefined && bytes >= closeAfterBytes) {
+      response.end();
+      return;
+    }
+  }
+  response.end();
+}
+
+function sseFragments(script) {
+  if (Array.isArray(script.chunks)) {
+    for (const chunk of script.chunks) {
+      if (typeof chunk !== 'string') throw new MockProviderError('mock_invalid_sse_chunk', 'chunks must be raw strings');
+    }
+    return script.chunks;
+  }
+  return script.sse_events.map(renderSseEvent);
+}
+
+function renderSseEvent(event) {
+  if (typeof event === 'string') return event.endsWith('\n\n') ? event : `${event}\n\n`;
+  if (!isPlainObject(event)) throw new MockProviderError('mock_invalid_sse_event', 'sse_events entries must be strings or objects');
+  if (typeof event.raw === 'string') return event.raw;
+  const lines = [];
+  if (typeof event.event === 'string' && event.event.length > 0) lines.push(`event: ${event.event}`);
+  lines.push(`data: ${renderSseData(event.data)}`);
+  return `${lines.join('\n')}\n\n`;
+}
+
+function renderSseData(data) {
+  if (typeof data === 'string') return data;
+  if (data === undefined) return '';
+  return JSON.stringify(data);
+}
+
+function classifyProbe(method, url, headers, body, state, options) {
+  if (typeof options.isProbe === 'function') {
+    const verdict = options.isProbe({
+      method,
+      path: url.pathname,
+      query: url.search,
+      headers,
+      body,
+      phase: state.phase,
+      caseId: state.fixture?.case_id ?? null,
+      turn: state.turn,
+    });
+    return verdict === true;
+  }
+  if (method !== 'GET') return false;
+  return url.pathname === '/health'
+    || url.pathname === '/healthz'
+    || url.pathname === '/v1/models'
+    || url.pathname === '/v1beta/models'
+    || url.pathname === '/v1/responses/models';
+}
+
+function isKnownBusinessPath(path) {
+  return PROTOCOLS.some((protocol) => isPathForProtocol(path, protocol));
+}
+
+function isPathForProtocol(path, protocol) {
+  if (!PROTOCOL_SET.has(protocol)) return false;
+  if (protocol === 'gemini') {
+    return path.startsWith('/v1beta/models/')
+      && (path.includes(':generateContent') || path.includes(':streamGenerateContent'));
+  }
+  return MOCK_PROVIDER_PATHS[protocol].includes(path);
+}
+
+function classifyProtocol(path) {
+  for (const protocol of PROTOCOLS) {
+    if (isPathForProtocol(path, protocol)) return protocol;
+  }
+  return 'unknown';
+}
+
+async function readBody(request) {
+  const chunks = [];
+  for await (const chunk of request) chunks.push(chunk);
+  return Buffer.concat(chunks);
+}
+
+function lowerHeaders(headers) {
+  const result = {};
+  for (const [key, value] of Object.entries(headers ?? {})) result[key.toLowerCase()] = value;
+  return result;
+}
+
+function nonNegativeInteger(value, label) {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new MockProviderError('mock_invalid_integer', `${label} must be a non-negative integer`);
+  }
+  return parsed;
+}
+
+function isPlainObject(value) {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function cloneValue(value) {
+  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+}
+
+function sendFacilityError(response, error) {
+  if (response.headersSent) {
+    if (!response.writableEnded) response.end();
+    return;
+  }
+  const statusCode = error instanceof MockProviderError ? error.statusCode : 500;
+  const code = error instanceof MockProviderError ? error.code : 'mock_provider_internal_error';
+  response.writeHead(statusCode, { 'content-type': 'application/json' });
+  response.end(JSON.stringify({ error: code, message: error.message }));
+}
+
+function listen(server, port, host) {
+  return new Promise((resolve, reject) => {
+    const onError = (error) => reject(error);
+    server.once('error', onError);
+    server.listen(port, host, () => {
+      server.off('error', onError);
+      resolve();
+    });
+  });
+}
+
+function closeServer(server) {
+  return new Promise((resolve) => {
+    server.close(() => resolve());
+  });
+}

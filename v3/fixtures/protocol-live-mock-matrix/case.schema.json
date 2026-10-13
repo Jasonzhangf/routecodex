@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "protocol-live-mock-matrix.case.schema.json",
+  "title": "protocol-live-mock-matrix runner-interface case",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version",
+    "case_id",
+    "cell",
+    "client_request",
+    "expected_provider",
+    "upstream_response",
+    "expected_client",
+    "assertions",
+    "source"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "case_id": {"type": "string", "pattern": "^[a-z0-9-]+$"},
+    "cell": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entry_protocol", "provider_protocol", "transport", "mode"],
+      "properties": {
+        "entry_protocol": {"enum": ["openai_chat", "responses", "anthropic", "gemini"]},
+        "provider_protocol": {"enum": ["openai_chat", "responses", "anthropic", "gemini"]},
+        "transport": {"enum": ["json", "sse"]},
+        "mode": {"enum": ["direct", "relay"]}
+      }
+    },
+    "client_request": {"type": "object"},
+    "expected_provider": {
+      "type": "object",
+      "properties": {
+        "paths": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "method": {"const": "POST"},
+        "auth_required": {"type": "boolean"},
+        "auth_orders": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {"type": "string", "minLength": 1}
+          }
+        },
+        "body_must": {"type": "object"},
+        "body_must_not": {"type": "array", "items": {"type": "string"}},
+        "exact": {}
+      }
+    },
+    "upstream_response": {"type": "object"},
+    "expected_client": {"type": "object"},
+    "assertions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider_attempt_count", "probe_attempts_may_occur", "no_control_leakage"],
+      "properties": {
+        "provider_attempt_count": {"type": "integer", "minimum": 0},
+        "probe_attempts_may_occur": {"type": "boolean"},
+        "no_control_leakage": {"type": "boolean"}
+      }
+    },
+    "source": {"type": "object"},
+    "contract_differences": {"type": "array", "items": {"type": "object"}},
+    "runtime_setup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider_id", "model", "wire_model", "candidate_ids"],
+      "properties": {
+        "provider_id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
+        "model": {"type": "string", "minLength": 1},
+        "wire_model": {"type": "string", "minLength": 1},
+        "candidate_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"}
+        },
+        "all_candidates_fail": {"type": "boolean"}
+      }
+    },
+    "turns": {"type": "array"},
+    "tool_followup": {"type": "object"}
+  }
+}

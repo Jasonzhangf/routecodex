@@ -1,0 +1,15 @@
+{
+  "pid": 45250,
+  "ready": true,
+  "running": false,
+  "exit_receipt": {
+    "pid": 45250,
+    "kind": "exit",
+    "exit_code": 0,
+    "signal": null,
+    "at_epoch_ms": 1791840031918,
+    "error": null
+  },
+  "stdout": "[RouteCodexV3] rccv3 server start --foreground version=0.90.4887 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 config=/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/review-history/live/media-anthropic-older-turn-tool-image/v3-protocol-live-mock-lifecycle-N7mbqt/config.toml snap=false snapall=false snap_stages= debug=false\n\u001b[36m[server:startup          ][-                   ][-                                   ] ✅ [RouteCodexV3]        14:20:31 Server started\u001b[0m\u001b[2;90m  [sessionID:-]                                                                                    event=started version=0.90.4887 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 addresses=127.0.0.1:58204, 127.0.0.1:58205\u001b[0m\n[RouteCodexV3] Server started version=0.90.4887 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 on 127.0.0.1:58204, 127.0.0.1:58205\n\u001b[38;2;96;227;59m[58204:anthropic         ][-                   ][multimodal:mock-openai_chat[key1].chat-model] ▶ [/v1/messages]         14:20:31 [#1/1]             route=multimodal target=mock-openai_chat[key1].chat-model reason=pool:multimodal\u001b[0m\u001b[2;90m  [sessionID:rcc-session:request:anthropic-messages-router-mock.chat-model-20261012T142031613-1-1] [virtual-router-hit]     14:20:31 req=anthropic-messages-router-mock.chat-model-20261012T142031613-1-1 event=route_selected route=multimodal target=mock-openai_chat[key1].chat-model reason=pool:multimodal\u001b[0m\n\u001b[38;2;96;227;59m[58204:anthropic         ][-                   ][multimodal:mock-openai_chat[key1].chat-model] ✅ [/v1/messages]        14:20:31 [#1/1]             status=200 responseStatus=completed finish_reason=end_turn elapsedMs=44.2 reason=pool:multimodal usage_in=1 usage_out=1 usage_total=2 time_i=30.9ms time_e=3.6ms time_t=44.2ms transport=json\u001b[0m\u001b[2;90m  [sessionID:rcc-session:request:anthropic-messages-router-mock.chat-model-20261012T142031613-1-1] ✅ [/v1/messages]        14:20:31 req=anthropic-messages-router-mock.chat-model-20261012T142031613-1-1 event=completed detail=[usage] status=200 responseStatus=completed finish_reason=end_turn elapsedMs=44.2 reason=pool:multimodal usage_in=1 usage_out=1 usage_cache=0 usage_total=2 time_i=30.9ms time_e=3.6ms time_t=44.2ms nodes=15 transport=json\u001b[0m\n",
+  "stderr": ""
+}

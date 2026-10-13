@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "case_id": "responses-to-responses-json",
+  "cell": {"entry_protocol": "responses", "provider_protocol": "responses", "transport": "json", "mode": "direct"},
+  "client_request": {
+    "method": "POST",
+    "path": "/v1/responses",
+    "headers": {"content-type": "application/json"},
+    "body": {"model": "mock.responses-model", "instructions": "be brief", "input": [{"role": "user", "content": [{"type": "input_text", "text": "hello"}]}], "stream": false}
+  },
+  "expected_provider": {
+    "paths": ["/v1/responses"],
+    "method": "POST",
+    "auth_required": true,
+    "body_must": {"model": "responses-model", "instructions": "be brief", "input.0.content.0.text": "hello", "stream": false},
+    "body_must_not": ["routecodex_internal", "metadata_center", "debug_snapshot"],
+    "exact": null
+  },
+  "upstream_response": {
+    "protocol": "responses",
+    "mode": "json",
+    "status": 200,
+    "content_type": "application/json",
+    "body": {"id": "resp_direct_json", "status": "completed", "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}], "usage": {"input_tokens": 7, "output_tokens": 2, "total_tokens": 9}}
+  },
+  "expected_client": {
+    "transport": "complete",
+    "status": 200,
+    "body_must": {"output.0.content.0.text": "ok", "status": "completed", "usage.input_tokens": 7},
+    "body_must_not": ["provider_error", "internal_error", "routecodex_internal", "metadata_center"],
+    "semantic_terminal_required": true
+  },
+  "assertions": {"provider_attempt_count": 1, "probe_attempts_may_occur": true, "no_control_leakage": true},
+  "source": {
+    "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
+    "files": ["internal/gateway/testdata/upstream_bodies/responses.json"],
+    "tests": ["internal/gateway/wire_test.go::TestUpstreamNameReachesTheVendorOnly"],
+    "adaptation": "Fixed Responses input is reused; expected is the Responses protocol shape and whitelist, Direct path."
+  },
+  "contract_differences": []
+}

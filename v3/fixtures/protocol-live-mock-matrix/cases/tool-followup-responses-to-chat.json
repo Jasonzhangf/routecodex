@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "case_id": "tool-followup-responses-to-chat",
+  "cell": {"entry_protocol": "responses", "provider_protocol": "openai_chat", "transport": "sse", "mode": "relay"},
+  "client_request": {
+    "method": "POST",
+    "path": "/v1/responses",
+    "headers": {"content-type": "application/json"},
+    "body": {
+      "model": "mock.chat-model",
+      "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "call echo then report"}]}],
+      "tools": [{"type": "function", "name": "echo", "description": "Return the provided text unchanged.", "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}}],
+      "stream": true
+    }
+  },
+  "expected_provider": {
+    "paths": ["/v1/chat/completions"],
+    "method": "POST",
+    "auth_required": true,
+    "body_must": {"model": "chat-model", "messages.0.role": "user", "tools.0.function.name": "echo", "stream": true},
+    "body_must_not": ["routecodex_internal", "metadata_center", "debug_snapshot"],
+    "exact": null
+  },
+  "upstream_response": {
+    "protocol": "openai_chat",
+    "mode": "sse",
+    "status": 200,
+    "content_type": "text/event-stream",
+    "sse_events": [
+      {"data": {"id": "chatcmpl_tool_turn_1", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "id": "call_echo_1", "type": "function", "function": {"name": "echo", "arguments": ""}}]}}]}},
+      {"data": {"id": "chatcmpl_tool_turn_1", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "function": {"arguments": "{\"text\":\"ping\"}"}}]}}]}},
+      {"data": {"id": "chatcmpl_tool_turn_1", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]}},
+      {"data": "[DONE]"}
+    ]
+  },
+  "expected_client": {
+    "transport": "complete",
+    "status": 200,
+    "body_must": {"item.type": "function_call", "item.name": "echo", "item.call_id": "call_echo_1", "item.arguments": "{\"text\":\"ping\"}"},
+    "body_must_not": ["provider_error", "internal_error", "routecodex_internal", "metadata_center"],
+    "semantic_terminal_required": true
+  },
+  "assertions": {"provider_attempt_count": 1, "probe_attempts_may_occur": true, "no_control_leakage": true},
+  "source": {
+    "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
+    "files": ["internal/gateway/namespace_search_test.go", "internal/gateway/translate_stream_test.go"],
+    "tests": ["internal/gateway/namespace_search_test.go::TestResponsesCallArgsFromDone", "internal/gateway/translate_stream_test.go::TestParallelToolCallIDs"],
+    "adaptation": "The stream shape and complete-arguments requirement are borrowed; the consumer here is a no-side-effect echo tool with the declared schema only."
+  },
+  "contract_differences": [
+    {"source_behavior": "Magpie has provider-specific search/namespace paths that can take over a call.", "rcc_requirement": "Preserve the tool identity and full arguments; only the client executes the declared echo consumer."}
+  ],
+  "turns": [
+    {
+      "turn_id": "tool-call",
+      "purpose": "First provider turn returns a function_call for the declared echo tool.",
+      "client_request": {
+        "method": "POST",
+        "path": "/v1/responses",
+        "headers": {"content-type": "application/json"},
+        "body": {
+          "model": "mock.chat-model",
+          "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "call echo then report"}]}],
+          "tools": [{"type": "function", "name": "echo", "description": "Return the provided text unchanged.", "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}}],
+          "stream": true
+        }
+      },
+      "expected_client_must": {"item.type": "function_call", "item.name": "echo", "item.call_id": "call_echo_1", "item.arguments": "{\"text\":\"ping\"}"}
+    },
+    {
+      "turn_id": "tool-output-followup",
+      "purpose": "The client executes echo with no side effects and submits the output in the next request.",
+      "client_request": {
+        "method": "POST",
+        "path": "/v1/responses",
+        "headers": {"content-type": "application/json"},
+        "body": {
+          "model": "mock.chat-model",
+          "input": [
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "call echo then report"}]},
+            {"type": "function_call", "call_id": "call_echo_1", "name": "echo", "arguments": "{\"text\":\"ping\"}"},
+            {"type": "function_call_output", "call_id": "call_echo_1", "output": "ping"}
+          ],
+          "stream": false
+        }
+      },
+      "expected_provider_exact": {
+        "model": "chat-model",
+        "messages": [
+          {"role": "user", "content": "call echo then report"},
+          {"role": "assistant", "tool_calls": [{"id": "call_echo_1", "type": "function", "function": {"name": "echo", "arguments": "{\"text\":\"ping\"}"}}]},
+          {"role": "tool", "tool_call_id": "call_echo_1", "content": "ping"}
+        ],
+        "stream": false
+      },
+      "upstream_response": {
+        "protocol": "openai_chat",
+        "mode": "json",
+        "status": 200,
+        "content_type": "application/json",
+        "body": {"id": "chatcmpl_tool_turn_2", "object": "chat.completion", "choices": [{"index": 0, "message": {"role": "assistant", "content": "done"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 11, "completion_tokens": 2, "total_tokens": 13}}
+      },
+      "expected_client_contract": {
+        "transport": "complete",
+        "status": 200,
+        "body_must_not": ["provider_error", "internal_error", "routecodex_internal", "metadata_center"],
+        "semantic_terminal_required": true
+      },
+      "expected_client_must": {"output.0.content.0.text": "done", "status": "completed"}
+    }
+  ],
+  "tool_followup": {
+    "consumer": "echo",
+    "side_effect": "none",
+    "input": {"text": "ping"},
+    "expected_output": "ping",
+    "assert_no_synthesized_tool_result": true,
+    "assert_tool_executed_once": true
+  }
+}

@@ -1,0 +1,67 @@
+[
+  {
+    "phase": "case",
+    "case_id": "chat-to-chat-json",
+    "turn": 0,
+    "attempt": 0,
+    "attempt_kind": "business",
+    "protocol": "openai_chat",
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "query": "",
+    "headers": {
+      "accept": "application/json",
+      "authorization": "Bearer fake-loopback-token",
+      "content-type": "application/json",
+      "host": "127.0.0.1:57480",
+      "content-length": "155"
+    },
+    "content_type": "application/json",
+    "raw_body": "{\"max_tokens\":64,\"messages\":[{\"content\":\"be brief\",\"role\":\"system\"},{\"content\":\"hello\",\"role\":\"user\"}],\"model\":\"chat-model\",\"stream\":false,\"temperature\":1}",
+    "body": {
+      "max_tokens": 64,
+      "messages": [
+        {
+          "content": "be brief",
+          "role": "system"
+        },
+        {
+          "content": "hello",
+          "role": "user"
+        }
+      ],
+      "model": "chat-model",
+      "stream": false,
+      "temperature": 1
+    },
+    "body_parsed": true,
+    "captured_at_epoch_ms": 1791829997860,
+    "response_script": {
+      "protocol": "openai_chat",
+      "mode": "json",
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "id": "chatcmpl_chat_direct_json",
+        "object": "chat.completion",
+        "model": "chat-model",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "ok"
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 7,
+          "completion_tokens": 2,
+          "total_tokens": 9
+        }
+      }
+    },
+    "attempt_repeated": false
+  }
+]

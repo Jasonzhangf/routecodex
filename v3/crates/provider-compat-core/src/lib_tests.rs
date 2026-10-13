@@ -23,7 +23,10 @@ fn responses_function_normalization_preserves_strict_presence() {
             };
             let mut payload = json!({"tools": [tool]});
             normalize_responses_function_tools(payload.as_object_mut().unwrap());
-            assert_eq!(payload["tools"][0], expected, "nested={nested}, strict={strict:?}");
+            assert_eq!(
+                payload["tools"][0], expected,
+                "nested={nested}, strict={strict:?}"
+            );
         }
     }
 }
