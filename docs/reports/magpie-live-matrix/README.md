@@ -31,8 +31,10 @@ differences were legitimate representations or harness defects. Later results
 use revised fixtures/helpers and a newer installed binary; they do not replace
 the initial counts or establish a single new aggregate matrix count.
 
-The runner source began at `88715b2fe` and the final candidate combines
-`f7fc9e17b`. These Git revisions describe source, not installed-binary provenance.
+The runner source began at `88715b2fe`; the originally reviewed P1 candidate
+combined `f7fc9e17b`. Later integration also combined `500407cb4` and carried a
+whitespace-only fix in an inherited Rust test assertion. These Git revisions
+describe source, not installed-binary provenance.
 Each replay records its own binary version/hash, configuration, provider captures,
 client bytes and cleanup. Absolute paths in raw receipts identify the original
 run locations; adjacent archived files preserve the evidence.
