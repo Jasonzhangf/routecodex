@@ -3,6 +3,9 @@ use super::*;
 #[path = "responses_relay_runtime_extra_tests_notifications.rs"]
 mod notification_tests;
 
+#[path = "responses_relay_internal_transport_tests.rs"]
+mod internal_transport_tests;
+
 #[test]
 fn malformed_tool_output_missing_call_id_projects_client_400_not_598() {
     let payload = serde_json::json!({
@@ -311,40 +314,6 @@ fn provider_runtime_http_status_preserves_upstream_429_for_policy_projection() {
     // A real upstream 429 takes the typed upstream code, not a catch-all.
     assert_eq!(failure.policy_error_type, "provider_http_429");
     assert_eq!(failure.provider_status, Some(429));
-}
-
-#[test]
-fn provider_internal_transport_request_lane_projects_598_without_provider_policy() {
-    let failure = super::responses_relay_failures::provider_runtime_failure(
-        V3ProviderError::InternalTransport {
-            request_id: "req-internal".to_string(),
-            provider_id: "goaichat".to_string(),
-            lane: routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Request,
-            reason: "handoff transition failed".to_string(),
-        },
-        "goaichat",
-        None,
-    );
-    assert_eq!(failure.status, 598);
-    assert!(failure.terminal_projection.is_some());
-    assert!(failure.terminal_disposition.is_none());
-}
-
-#[test]
-fn provider_internal_transport_response_lane_projects_599_without_provider_policy() {
-    let failure = super::responses_relay_failures::provider_runtime_failure(
-        V3ProviderError::InternalTransport {
-            request_id: "req-internal".to_string(),
-            provider_id: "goaichat".to_string(),
-            lane: routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Response,
-            reason: "provider frame sequence mismatch".to_string(),
-        },
-        "goaichat",
-        None,
-    );
-    assert_eq!(failure.status, 599);
-    assert!(failure.terminal_projection.is_some());
-    assert!(failure.terminal_disposition.is_none());
 }
 
 fn test_provider_request(

@@ -618,6 +618,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
         }
         let provider_status = provider_raw.status();
+        selected_observability.provider_status = Some(provider_status);
         let provider_id = provider_raw.provider_id().to_string();
         match provider_raw.into_body() {
             V3ProviderResponseBody::Json(bytes) => {
@@ -682,6 +683,46 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     } else {
                         provider_wire_protocol
                     };
+                // Complete-attempt success acceptance for the buffered JSON
+                // provider body: a materialized attempt with no deliverable
+                // business content is an internal 502 for the Error chain, not
+                // a normal empty completion.
+                if !crate::hub_v1::v3_provider_attempt_has_deliverable_business_content(
+                    hook_provider_protocol,
+                    &hook_provider_value,
+                ) {
+                    let failure =
+                        handle_error_before_resp03!(provider_response_stream_relay_failure(
+                            crate::hub_v1::empty_provider_attempt_failure(hook_provider_protocol),
+                            &input.request_id,
+                            &selected_target_provider_id,
+                            Some(selected_observability.clone()),
+                        ));
+                    drop(_provider_action_permit.take());
+                    let terminal_failure = handle_error_before_resp03!(
+                        handle_v3_responses_relay_provider_failure(
+                            &failure_context,
+                            selected,
+                            failure,
+                            &mut V3ResponsesRelayProviderRetryState {
+                                failed_candidates: &mut failed_candidates,
+                                same_candidate_retries: &mut same_candidate_retries,
+                                retry_selected: &mut retry_selected,
+                                pending_recovery: &mut pending_provider_action_recovery,
+                                provider_failure_events: &mut provider_failure_events,
+                                provider_failure_event_sink: provider_failure_event_sink.as_ref(),
+                                selected_observability: &selected_observability,
+                                trace: &mut trace,
+                                last_external_http: &mut last_external_http,
+                            },
+                        )
+                        .await
+                    );
+                    if let Some(failure) = terminal_failure {
+                        return Ok(provider_failure_output(failure, trace, 0));
+                    }
+                    continue;
+                }
                 let request_web_search_state = match request_web_search_state.clone() {
                     Some(state) => Some(state),
                     None => match server_tool_state.as_ref() {

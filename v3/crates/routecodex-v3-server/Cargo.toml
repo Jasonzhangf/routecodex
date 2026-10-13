@@ -23,5 +23,7 @@ tokio.workspace = true
 tower-service.workspace = true
 
 [dev-dependencies]
+async-trait.workspace = true
 reqwest.workspace = true
+routecodex-v3-provider-responses = { path = "../routecodex-v3-provider-responses" }
 tokio-tungstenite.workspace = true

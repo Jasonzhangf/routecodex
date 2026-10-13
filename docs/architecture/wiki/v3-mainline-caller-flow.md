@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 91 functional paths, 544 caller edges.
+Generated view: 92 functional paths, 553 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -66,7 +66,7 @@ flowchart TD
   module_v3_runtime__hub_v1 -->|2 edges / 2 paths| module_v3_error
   module_v3_runtime__hub_v1 -->|8 edges / 6 paths| module_v3_provider_responses
   module_v3_runtime__hub_v1 -->|31 edges / 5 paths| module_v3_runtime
-  module_v3_runtime__hub_v1 -->|130 edges / 26 paths| module_v3_runtime__hub_v1
+  module_v3_runtime__hub_v1 -->|137 edges / 27 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|1 edges / 1 paths| module_provider_compat_core
   module_v3_runtime -->|2 edges / 1 paths| module_routecodex_v3_agent_memory
   module_v3_runtime -->|3 edges / 3 paths| module_routecodex_v3_route_classifier
@@ -74,8 +74,8 @@ flowchart TD
   module_v3_runtime -->|5 edges / 1 paths| module_v3_debug
   module_v3_runtime -->|8 edges / 5 paths| module_v3_error
   module_v3_runtime -->|19 edges / 8 paths| module_v3_provider_responses
-  module_v3_runtime -->|56 edges / 17 paths| module_v3_runtime
-  module_v3_runtime -->|47 edges / 12 paths| module_v3_runtime__hub_v1
+  module_v3_runtime -->|57 edges / 18 paths| module_v3_runtime
+  module_v3_runtime -->|48 edges / 13 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|3 edges / 1 paths| module_v3_target
   module_v3_runtime -->|5 edges / 2 paths| module_v3_virtual_router
   module_v3_server -->|1 edges / 1 paths| module_routecodex_v3_sse
@@ -125,7 +125,7 @@ flowchart TD
 | v3-runtime::hub_v1 | v3-error | 2 | `v3.provider_global_subscription_probe`<br/>`v3.route_policy.condition_evaluation` |
 | v3-runtime::hub_v1 | v3-provider-responses | 8 | `v3-provider-admission-lease-lifecycle`<br/>`v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry` |
 | v3-runtime::hub_v1 | v3-runtime | 31 | `v3.provider_action_gate.mainline`<br/>`v3.provider_admission_rescue_entrypoints`<br/>`v3.provider_global_subscription_probe`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding` |
-| v3-runtime::hub_v1 | v3-runtime::hub_v1 | 130 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.config.provider_sse_timeout_projection.mainline`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_pipeline.v1.relay_request_source_slice`<br/>`v3.hub_pipeline.v1.relay_response_source_slice`<br/>`v3.hub_pipeline.v1.request`<br/>`v3.hub_pipeline.v1.response`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.openai_chat_sse_typed_tree`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_conversion_field_parity.outbound_helper_bindings`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_compat.request_invalid_error_source`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.responses_chat_sse_typed_tree`<br/>`v3.responses_provider_event.terminal_merge`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.servertool_center.skeleton`<br/>`v3.sse.protocol_codec_projection_boundary`<br/>`v3.tool_thinking_hook_skeleton.mainline`<br/>`v3.web_search_servertool_state_machine` |
+| v3-runtime::hub_v1 | v3-runtime::hub_v1 | 137 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.config.provider_sse_timeout_projection.mainline`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_pipeline.v1.relay_request_source_slice`<br/>`v3.hub_pipeline.v1.relay_response_source_slice`<br/>`v3.hub_pipeline.v1.request`<br/>`v3.hub_pipeline.v1.response`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.openai_chat_sse_typed_tree`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_conversion_field_parity.outbound_helper_bindings`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_compat.request_invalid_error_source`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.responses_chat_sse_typed_tree`<br/>`v3.responses_provider_event.terminal_merge`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.servertool_center.skeleton`<br/>`v3.sse.protocol_codec_projection_boundary`<br/>`v3.tool_thinking_hook_skeleton.mainline`<br/>`v3.web_search_servertool_state_machine` |
 | v3-runtime | provider-compat-core | 1 | `v3.sse_error_and_direct_consumer_pre_wiring` |
 | v3-runtime | routecodex-v3-agent-memory | 2 | `v3.memory_raw_capture` |
 | v3-runtime | routecodex-v3-route-classifier | 3 | `v3.route_classifier.facts_classification`<br/>`v3.route_policy.condition_evaluation`<br/>`vr.current_turn_typed_route_facts` |
@@ -133,8 +133,8 @@ flowchart TD
 | v3-runtime | v3-debug | 5 | `v3.debug_error_foundation.mainline` |
 | v3-runtime | v3-error | 8 | `v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.hub_relay.response_failure_entry`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.route_policy.condition_evaluation` |
 | v3-runtime | v3-provider-responses | 19 | `v3-provider-admission-lease-lifecycle`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.selected_provider_model_binding` |
-| v3-runtime | v3-runtime | 56 | `v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.direct.request_key_hooks`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.execution_control_payload_architecture`<br/>`v3.memory_raw_capture`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_admission_rescue_entrypoints`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_direct_full_attempt_commit`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.sse_error_and_direct_consumer_pre_wiring`<br/>`v3.target.session_global_selection`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
-| v3-runtime | v3-runtime::hub_v1 | 47 | `v3.hub_pipeline.v1.hook_registry_compile`<br/>`v3.hub_pipeline.v1.relay_payload_copy_runtime_probes`<br/>`v3.hub_relay.tool_servertool_multiturn_parity`<br/>`v3.protocol.anthropic.characterization`<br/>`v3.protocol.gemini.characterization`<br/>`v3.protocol.openai_chat.characterization`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
+| v3-runtime | v3-runtime | 57 | `v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.direct.request_key_hooks`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.execution_control_payload_architecture`<br/>`v3.memory_raw_capture`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_admission_rescue_entrypoints`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_direct_full_attempt_commit`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.sse_error_and_direct_consumer_pre_wiring`<br/>`v3.target.session_global_selection`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
+| v3-runtime | v3-runtime::hub_v1 | 48 | `v3.hub_pipeline.v1.hook_registry_compile`<br/>`v3.hub_pipeline.v1.relay_payload_copy_runtime_probes`<br/>`v3.hub_relay.tool_servertool_multiturn_parity`<br/>`v3.protocol.anthropic.characterization`<br/>`v3.protocol.gemini.characterization`<br/>`v3.protocol.openai_chat.characterization`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
 | v3-runtime | v3-target | 3 | `v3.responses_direct.required_mainline` |
 | v3-runtime | v3-virtual-router | 5 | `v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation` |
 | v3-server | routecodex-v3-sse | 1 | `v3.sse.http_keepalive_boundary` |
@@ -2474,7 +2474,7 @@ flowchart TD
 
 ## v3.runtime_timing_observability.mainline
 
-Responses Direct/Relay Runtime starts one monotonic state, accumulates every provider attempt, publishes only at governed terminal or Direct SSE clean EOF, and exposes a read-only Server projection.
+Responses Direct/Relay Runtime starts one monotonic state, accumulates every provider attempt, publishes only at successful whole-attempt closeout, and exposes a read-only Server projection. Direct SSE frame terminals close external time without finalizing the runtime before collector admission and sealing.
 
 Owner feature: `v3.runtime_timing_observability`
 Manifest: `docs/architecture/manifests/v3.runtime_timing_observability.mainline.yml`
@@ -2487,21 +2487,20 @@ flowchart TD
     c_59_v3_runtime_timing_observability_mainline_3["v3-runtime<br/>finish_runtime<br/><small>routecodex-v3-runtime/src/runtime_timing.rs</small>"]
     c_59_v3_runtime_timing_observability_mainline_7["v3-runtime<br/>execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
     c_59_v3_runtime_timing_observability_mainline_10["v3-runtime<br/>wrap_direct_sse_provider_event_json_observation_stream<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
-    c_59_v3_runtime_timing_observability_mainline_11["v3-runtime<br/>wrap_direct_sse_provider_event_json_observation_stream<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs</small>"]
-    c_59_v3_runtime_timing_observability_mainline_12["v3-runtime<br/>wrap_direct_sse_provider_event_json_observation_stream_with_compat<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs</small>"]
-    c_59_v3_runtime_timing_observability_mainline_13["v3-runtime<br/>with_additional_attempts<br/><small>routecodex-v3-runtime/src/runtime_timing.rs</small>"]
+    c_59_v3_runtime_timing_observability_mainline_11["v3-runtime<br/>finish_v3_direct_runtime_timing<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_timing.rs</small>"]
+    c_59_v3_runtime_timing_observability_mainline_12["v3-runtime<br/>with_additional_attempts<br/><small>routecodex-v3-runtime/src/runtime_timing.rs</small>"]
   end
   subgraph c_59_v3_runtime_timing_observability_mainline_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
     c_59_v3_runtime_timing_observability_mainline_0["v3-runtime::hub_v1<br/>execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small>"]
     c_59_v3_runtime_timing_observability_mainline_4["v3-runtime::hub_v1<br/>record_timing<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs</small>"]
-    c_59_v3_runtime_timing_observability_mainline_15["v3-runtime::hub_v1<br/>execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small>"]
+    c_59_v3_runtime_timing_observability_mainline_14["v3-runtime::hub_v1<br/>execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small>"]
   end
   subgraph c_59_v3_runtime_timing_observability_mainline_m_v3_server["v3-server"]
     c_59_v3_runtime_timing_observability_mainline_5["v3-server<br/>complete_relay_sse<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small>"]
     c_59_v3_runtime_timing_observability_mainline_6["v3-server<br/>merge_v3_runtime_stream_observation<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small>"]
     c_59_v3_runtime_timing_observability_mainline_8["v3-server<br/>emit_relay_sse_complete_console_lines<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small>"]
     c_59_v3_runtime_timing_observability_mainline_9["v3-server<br/>emit_v3_request_complete_console_line<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small>"]
-    c_59_v3_runtime_timing_observability_mainline_14["v3-server<br/>execute_responses_direct_server_outcome<br/><small>routecodex-v3-server/src/responses_direct_server_outcome.rs</small>"]
+    c_59_v3_runtime_timing_observability_mainline_13["v3-server<br/>execute_responses_direct_server_outcome<br/><small>routecodex-v3-server/src/responses_direct_server_outcome.rs</small>"]
   end
   c_59_v3_runtime_timing_observability_mainline_0 -->|v3-runtime-timing-01<br/>V3RuntimeTimingStart → V3RuntimeTimingExternalAttempt| c_59_v3_runtime_timing_observability_mainline_1
   c_59_v3_runtime_timing_observability_mainline_0 -->|v3-runtime-timing-02<br/>V3RuntimeTimingExternalAttempt → V3RuntimeTimingExternalComplete| c_59_v3_runtime_timing_observability_mainline_2
@@ -2514,9 +2513,9 @@ flowchart TD
   c_59_v3_runtime_timing_observability_mainline_7 -->|v3-runtime-timing-09<br/>V3RuntimeTimingStart → V3RuntimeTimingExternalAttempt| c_59_v3_runtime_timing_observability_mainline_1
   c_59_v3_runtime_timing_observability_mainline_10 -->|v3-runtime-timing-10<br/>V3RuntimeTimingExternalAttempt → V3RuntimeTimingExternalComplete| c_59_v3_runtime_timing_observability_mainline_2
   c_59_v3_runtime_timing_observability_mainline_11 -->|v3-runtime-timing-11<br/>V3RuntimeTimingExternalComplete → V3RuntimeTimingTerminal| c_59_v3_runtime_timing_observability_mainline_3
-  c_59_v3_runtime_timing_observability_mainline_12 -->|v3-runtime-timing-12<br/>V3RuntimeTimingTerminal → V3RuntimeTimingStreamObservation| c_59_v3_runtime_timing_observability_mainline_4
-  c_59_v3_runtime_timing_observability_mainline_7 -->|v3-runtime-timing-13<br/>V3RuntimeTimingExternalComplete → V3RuntimeTimingProtocolHandoff| c_59_v3_runtime_timing_observability_mainline_13
-  c_59_v3_runtime_timing_observability_mainline_14 -->|v3-runtime-timing-14<br/>V3RuntimeTimingProtocolHandoff → V3RuntimeTimingExternalAttempt| c_59_v3_runtime_timing_observability_mainline_15
+  c_59_v3_runtime_timing_observability_mainline_11 -->|v3-runtime-timing-12<br/>V3RuntimeTimingTerminal → V3RuntimeTimingStreamObservation| c_59_v3_runtime_timing_observability_mainline_4
+  c_59_v3_runtime_timing_observability_mainline_7 -->|v3-runtime-timing-13<br/>V3RuntimeTimingExternalComplete → V3RuntimeTimingProtocolHandoff| c_59_v3_runtime_timing_observability_mainline_12
+  c_59_v3_runtime_timing_observability_mainline_13 -->|v3-runtime-timing-14<br/>V3RuntimeTimingProtocolHandoff → V3RuntimeTimingExternalAttempt| c_59_v3_runtime_timing_observability_mainline_14
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -2531,8 +2530,8 @@ flowchart TD
 | `v3-runtime-timing-08` | `V3RuntimeTimingObservability` → `V3RuntimeTimingServerProjection` | anchored | emit_relay_sse_complete_console_lines<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small> | emit_v3_request_complete_console_line<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small> | `v3.runtime_timing_observability` |
 | `v3-runtime-timing-09` | `V3RuntimeTimingStart` → `V3RuntimeTimingExternalAttempt` | anchored | execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | start_external<br/><small>routecodex-v3-runtime/src/runtime_timing.rs</small> | `v3.runtime_timing_observability` |
 | `v3-runtime-timing-10` | `V3RuntimeTimingExternalAttempt` → `V3RuntimeTimingExternalComplete` | anchored | wrap_direct_sse_provider_event_json_observation_stream<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | finish_external<br/><small>routecodex-v3-runtime/src/runtime_timing.rs</small> | `v3.runtime_timing_observability` |
-| `v3-runtime-timing-11` | `V3RuntimeTimingExternalComplete` → `V3RuntimeTimingTerminal` | anchored | wrap_direct_sse_provider_event_json_observation_stream<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs</small> | finish_runtime<br/><small>routecodex-v3-runtime/src/runtime_timing.rs</small> | `v3.runtime_timing_observability` |
-| `v3-runtime-timing-12` | `V3RuntimeTimingTerminal` → `V3RuntimeTimingStreamObservation` | anchored | wrap_direct_sse_provider_event_json_observation_stream_with_compat<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs</small> | record_timing<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs</small> | `v3.runtime_timing_observability` |
+| `v3-runtime-timing-11` | `V3RuntimeTimingExternalComplete` → `V3RuntimeTimingTerminal` | anchored | finish_v3_direct_runtime_timing<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_timing.rs</small> | finish_runtime<br/><small>routecodex-v3-runtime/src/runtime_timing.rs</small> | `v3.runtime_timing_observability` |
+| `v3-runtime-timing-12` | `V3RuntimeTimingTerminal` → `V3RuntimeTimingStreamObservation` | anchored | finish_v3_direct_runtime_timing<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_timing.rs</small> | record_timing<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs</small> | `v3.runtime_timing_observability` |
 | `v3-runtime-timing-13` | `V3RuntimeTimingExternalComplete` → `V3RuntimeTimingProtocolHandoff` | anchored | execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | with_additional_attempts<br/><small>routecodex-v3-runtime/src/runtime_timing.rs</small> | `v3.runtime_timing_observability` |
 | `v3-runtime-timing-14` | `V3RuntimeTimingProtocolHandoff` → `V3RuntimeTimingExternalAttempt` | anchored | execute_responses_direct_server_outcome<br/><small>routecodex-v3-server/src/responses_direct_server_outcome.rs</small> | execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small> | `v3.runtime_timing_observability` |
 
@@ -3662,3 +3661,52 @@ flowchart TD
 | `v3-admin-patrol-run-02` | `V3AdminPatrolDueBatch` → `V3AdminPatrolResult` | anchored | PatrolRuntime::run_due<br/><small>routecodex-v3-admin/src/provider_patrol.rs</small> | PatrolRuntime::run<br/><small>routecodex-v3-admin/src/provider_patrol.rs</small> | `v3.config_management` |
 | `v3-admin-patrol-run-03` | `V3AdminPatrolResult` → `V3AdminPatrolStageEvidence` | anchored | PatrolRuntime::run<br/><small>routecodex-v3-admin/src/provider_patrol.rs</small> | execute_stages<br/><small>routecodex-v3-admin/src/provider_probe.rs</small> | `v3.config_management` |
 | `v3-admin-patrol-run-04` | `V3AdminPatrolStageEvidence` → `V3AdminPatrolStageReport` | anchored | execute_stages<br/><small>routecodex-v3-admin/src/provider_probe.rs</small> | execute_stage<br/><small>routecodex-v3-admin/src/provider_probe.rs</small> | `v3.config_management` |
+
+## v3.provider_response_error_policy_closeout
+
+A complete provider attempt with no deliverable business content becomes an internal typed 502 in the existing Error chain before client commit. Relay SSE, Relay JSON, Direct JSON, and Direct SSE call the shared complete-attempt business-content judgment; no client error or empty completion is produced.
+
+Owner feature: `v3.provider_response_error_policy_closeout`
+
+```mermaid
+flowchart TD
+  subgraph c_91_v3_provider_response_error_policy_closeout_m_v3_runtime["v3-runtime"]
+    c_91_v3_provider_response_error_policy_closeout_11["v3-runtime<br/>project_provider_raw_to_client_payload_inner<br/><small>routecodex-v3-runtime/src/shared.rs</small>"]
+    c_91_v3_provider_response_error_policy_closeout_12["v3-runtime<br/>collect_direct_sse_attempt_after_terminal_with_memory<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs</small>"]
+    c_91_v3_provider_response_error_policy_closeout_13["v3-runtime<br/>direct_sse_chunk_has_business_content<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs</small>"]
+  end
+  subgraph c_91_v3_provider_response_error_policy_closeout_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
+    c_91_v3_provider_response_error_policy_closeout_0["v3-runtime::hub_v1<br/>execute_v3_relay_runtime_core<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs</small>"]
+    c_91_v3_provider_response_error_policy_closeout_1["v3-runtime::hub_v1<br/>v3_provider_json_attempt_has_deliverable_business_content<br/><small>routecodex-v3-runtime/src/hub_v1/provider_attempt_business_content.rs</small>"]
+    c_91_v3_provider_response_error_policy_closeout_2["v3-runtime::hub_v1<br/>observe_v3_provider_sse<br/><small>routecodex-v3-runtime/src/hub_v1/provider_attempt_business_content.rs</small>"]
+    c_91_v3_provider_response_error_policy_closeout_3["v3-runtime::hub_v1<br/>V3RuntimeStreamObservation::record_provider_business_content<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs</small>"]
+    c_91_v3_provider_response_error_policy_closeout_4["v3-runtime::hub_v1<br/>V3RuntimeStreamObservation::has_provider_business_content<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs</small>"]
+    c_91_v3_provider_response_error_policy_closeout_5["v3-runtime::hub_v1<br/>closeout_anthropic_relay_normalized_response<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime/response_closeout.rs</small>"]
+    c_91_v3_provider_response_error_policy_closeout_6["v3-runtime::hub_v1<br/>observe_relay_client_sse_usage_chunk<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs</small>"]
+    c_91_v3_provider_response_error_policy_closeout_7["v3-runtime::hub_v1<br/>V3RuntimeStreamObservation::record_semantic_terminal<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs</small>"]
+    c_91_v3_provider_response_error_policy_closeout_8["v3-runtime::hub_v1<br/>build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs</small>"]
+    c_91_v3_provider_response_error_policy_closeout_9["v3-runtime::hub_v1<br/>empty_provider_attempt_failure<br/><small>routecodex-v3-runtime/src/hub_v1/provider_attempt_business_content.rs</small>"]
+    c_91_v3_provider_response_error_policy_closeout_10["v3-runtime::hub_v1<br/>execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small>"]
+  end
+  c_91_v3_provider_response_error_policy_closeout_0 -->|v3-relay-json-business-admission-01<br/>V3ProviderRespInbound01Raw → V3Error01SourceRaised| c_91_v3_provider_response_error_policy_closeout_1
+  c_91_v3_provider_response_error_policy_closeout_2 -->|v3-relay-sse-business-control-01<br/>V3ProviderRespInbound01Raw → V3RuntimeStreamObservation| c_91_v3_provider_response_error_policy_closeout_3
+  c_91_v3_provider_response_error_policy_closeout_0 -->|v3-relay-sse-business-admission-01<br/>V3RuntimeStreamObservation → V3Error01SourceRaised| c_91_v3_provider_response_error_policy_closeout_4
+  c_91_v3_provider_response_error_policy_closeout_5 -->|v3-anthropic-json-business-admission-01<br/>V3HubRespInbound02Normalized → V3Error01SourceRaised| c_91_v3_provider_response_error_policy_closeout_1
+  c_91_v3_provider_response_error_policy_closeout_6 -->|v3-gemini-prompt-filter-terminal-control-01<br/>V3HubRespOutbound05ClientSemantic → V3RuntimeStreamObservation| c_91_v3_provider_response_error_policy_closeout_7
+  c_91_v3_provider_response_error_policy_closeout_8 -->|v3-hub-relay-sse-empty-attempt-01<br/>V3ProviderRespInbound01Raw → V3Error01SourceRaised| c_91_v3_provider_response_error_policy_closeout_9
+  c_91_v3_provider_response_error_policy_closeout_10 -->|v3-hub-relay-json-empty-attempt-01<br/>V3ProviderRespInbound01Raw → V3Error01SourceRaised| c_91_v3_provider_response_error_policy_closeout_9
+  c_91_v3_provider_response_error_policy_closeout_11 -->|v3-direct-json-empty-attempt-01<br/>V3ProviderResp14Raw → V3Error01SourceRaised| c_91_v3_provider_response_error_policy_closeout_1
+  c_91_v3_provider_response_error_policy_closeout_12 -->|v3-direct-sse-empty-attempt-01<br/>V3ProviderResp14Raw → V3Error01SourceRaised| c_91_v3_provider_response_error_policy_closeout_13
+```
+
+| Step | Node edge | Status | Caller | Callee | Owner |
+| --- | --- | --- | --- | --- | --- |
+| `v3-relay-json-business-admission-01` | `V3ProviderRespInbound01Raw` → `V3Error01SourceRaised` | anchored | execute_v3_relay_runtime_core<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs</small> | v3_provider_json_attempt_has_deliverable_business_content<br/><small>routecodex-v3-runtime/src/hub_v1/provider_attempt_business_content.rs</small> | `v3.provider_response_error_policy_closeout` |
+| `v3-relay-sse-business-control-01` | `V3ProviderRespInbound01Raw` → `V3RuntimeStreamObservation` | anchored | observe_v3_provider_sse<br/><small>routecodex-v3-runtime/src/hub_v1/provider_attempt_business_content.rs</small> | V3RuntimeStreamObservation::record_provider_business_content<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs</small> | `v3.provider_response_error_policy_closeout` |
+| `v3-relay-sse-business-admission-01` | `V3RuntimeStreamObservation` → `V3Error01SourceRaised` | anchored | execute_v3_relay_runtime_core<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs</small> | V3RuntimeStreamObservation::has_provider_business_content<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs</small> | `v3.provider_response_error_policy_closeout` |
+| `v3-anthropic-json-business-admission-01` | `V3HubRespInbound02Normalized` → `V3Error01SourceRaised` | anchored | closeout_anthropic_relay_normalized_response<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime/response_closeout.rs</small> | v3_provider_json_attempt_has_deliverable_business_content<br/><small>routecodex-v3-runtime/src/hub_v1/provider_attempt_business_content.rs</small> | `v3.provider_response_error_policy_closeout` |
+| `v3-gemini-prompt-filter-terminal-control-01` | `V3HubRespOutbound05ClientSemantic` → `V3RuntimeStreamObservation` | anchored | observe_relay_client_sse_usage_chunk<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs</small> | V3RuntimeStreamObservation::record_semantic_terminal<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs</small> | `v3.provider_response_error_policy_closeout` |
+| `v3-hub-relay-sse-empty-attempt-01` | `V3ProviderRespInbound01Raw` → `V3Error01SourceRaised` | anchored | build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs</small> | empty_provider_attempt_failure<br/><small>routecodex-v3-runtime/src/hub_v1/provider_attempt_business_content.rs</small> | `v3.provider_response_error_policy_closeout` |
+| `v3-hub-relay-json-empty-attempt-01` | `V3ProviderRespInbound01Raw` → `V3Error01SourceRaised` | anchored | execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small> | empty_provider_attempt_failure<br/><small>routecodex-v3-runtime/src/hub_v1/provider_attempt_business_content.rs</small> | `v3.provider_response_error_policy_closeout` |
+| `v3-direct-json-empty-attempt-01` | `V3ProviderResp14Raw` → `V3Error01SourceRaised` | anchored | project_provider_raw_to_client_payload_inner<br/><small>routecodex-v3-runtime/src/shared.rs</small> | v3_provider_json_attempt_has_deliverable_business_content<br/><small>routecodex-v3-runtime/src/hub_v1/provider_attempt_business_content.rs</small> | `v3.provider_response_error_policy_closeout` |
+| `v3-direct-sse-empty-attempt-01` | `V3ProviderResp14Raw` → `V3Error01SourceRaised` | anchored | collect_direct_sse_attempt_after_terminal_with_memory<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs</small> | direct_sse_chunk_has_business_content<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs</small> | `v3.provider_response_error_policy_closeout` |

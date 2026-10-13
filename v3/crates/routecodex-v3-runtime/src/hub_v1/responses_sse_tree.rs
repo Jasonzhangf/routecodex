@@ -1281,22 +1281,20 @@ pub fn classify_v3_responses_sse_output_item(
             &["type", "id", "output_index", "status"],
         )),
     };
-    let extensions = event_extensions(
-        object,
-        &[
-            "type",
-            "id",
-            "output_index",
-            "status",
-            "text",
-            "content",
-            "summary",
-            "call_id",
-            "name",
-            "arguments",
-            "input",
-        ],
-    );
+    // Only fields represented by this item's typed payload are consumed.
+    // In particular, message-level text is an opaque business extension,
+    // rather than the OutputText variant's typed text field.
+    let payload_fields: &[&str] = match kind {
+        V3ResponsesSseOutputItemKind::OutputText => &["text"],
+        V3ResponsesSseOutputItemKind::Message => &["content"],
+        V3ResponsesSseOutputItemKind::Reasoning => &["summary", "content"],
+        V3ResponsesSseOutputItemKind::FunctionCall => &["call_id", "name", "arguments"],
+        V3ResponsesSseOutputItemKind::CustomToolCall => &["call_id", "name", "input"],
+        _ => &[],
+    };
+    let mut consumed_fields = vec!["type", "id", "output_index", "status"];
+    consumed_fields.extend_from_slice(payload_fields);
+    let extensions = event_extensions(object, &consumed_fields);
     Ok(V3ResponsesSseOutputItem {
         kind,
         identity: V3ResponsesSseItemIdentity {

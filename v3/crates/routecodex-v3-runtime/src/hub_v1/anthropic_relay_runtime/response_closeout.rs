@@ -58,6 +58,12 @@ where
     // 在 resp02 被 govern move 前克隆归一化 payload（含原始 tool_use——
     // Mode B hosted web_search 透传分支需要未剥离的 web_search tool_use）。
     let resp02_payload = resp02.provider_raw().payload.0.clone();
+    if !crate::hub_v1::v3_provider_json_attempt_has_deliverable_business_content(
+        resp02.provider_raw().provider_protocol,
+        &resp02_payload,
+    ) {
+        return Err(V3AnthropicRelayRuntimeError::ProviderResponseEmpty);
+    }
     let stream_observation = V3RuntimeStreamObservation::default();
     crate::hub_v1::record_v3_toolreason_observation_at_resp03(
         &resp02_payload,

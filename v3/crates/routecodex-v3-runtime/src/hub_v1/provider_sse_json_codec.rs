@@ -382,11 +382,19 @@ pub(super) fn response_terminal_has_client_output(event: &Value) -> Result<bool,
 }
 
 pub(super) fn response_output_item_has_client_output(item: &Value) -> Result<bool, String> {
+    let item_value = item;
     let item = item
         .as_object()
         .ok_or_else(|| "provider Responses output item must be an object".to_string())?;
     match item.get("type").and_then(Value::as_str) {
         Some("message") => {
+            if item.get("content").is_none()
+                && ["text", "reasoning", "reasoning_content", "reasoning_text"]
+                    .iter()
+                    .any(|field| item.get(*field).is_some())
+            {
+                return Ok(super::provider_attempt_business_content::v3_responses_output_item_has_deliverable_content(item_value));
+            }
             let content = item
                 .get("content")
                 .and_then(Value::as_array)
@@ -728,12 +736,16 @@ pub(crate) fn classify_v3_provider_gemini_json_event(
     if event.get("error").is_some() {
         return classify_provider_error_object(event, "gemini_provider_error");
     }
+    let prompt_blocked = super::v3_gemini_prompt_feedback_is_terminal(event);
+    if event.get("candidates").is_none() && prompt_blocked {
+        return Ok(V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput);
+    }
     let candidates = event
         .get("candidates")
         .and_then(Value::as_array)
         .ok_or_else(|| "provider Gemini SSE event requires candidates array".to_string())?;
     let mut has_output = false;
-    let mut terminal = false;
+    let mut terminal = prompt_blocked;
     for candidate in candidates {
         let candidate = candidate
             .as_object()
