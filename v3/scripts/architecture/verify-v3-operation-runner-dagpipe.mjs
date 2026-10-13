@@ -1372,6 +1372,15 @@ const errorGraphRel = 'docs/architecture/dagpipe/v3.operation_runner.error.graph
 // when the graph is present, never block Node 01.
 if (fs.existsSync(path.join(root, errorGraphRel))) {
   const errorGraph = JSON.parse(fs.readFileSync(path.join(root, errorGraphRel), 'utf8'));
+  const decisionNode = errorGraph.nodes?.find((node) => node.id === 'error_err05_execution_decision');
+  const outcomeNode = errorGraph.nodes?.find((node) => node.id === 'error_err06_client_projected');
+  if (decisionNode?.output?.id !== 'error-execution-decision'
+      || decisionNode?.output?.schema_ref !== 'v3.operation_runner.arc.error_execution_decision'
+      || JSON.stringify(outcomeNode?.inputs) !== JSON.stringify(['error-execution-decision'])
+      || outcomeNode?.output?.id !== 'internal-error-outcome'
+      || JSON.stringify(errorGraph.outputs) !== JSON.stringify(['internal-error-outcome'])) {
+    failures.push(`${errorGraphRel}: Error05/06 must expose typed decision and internal outcome only`);
+  }
 const expectedErrorResources = {
   error_err01_source_raised: {
     reads: [],
@@ -1450,8 +1459,150 @@ if (!/RuntimeAttemptCleanup releases/.test(cancelRelease) || !/RuntimeRequestFin
 
 const failureTerminal = (lifecycleManifest.lifecycle_terminals ?? []).find((entry) => entry?.name === 'failure');
 const failureRelease = failureTerminal?.release ?? '';
-if (!/terminal_client_error commits through Server\/SSE and then RuntimeAttemptCleanup/.test(failureRelease) || !/RuntimeRequestFinalizer releases request scope/.test(failureRelease)) {
+if (!/terminal_client_error means terminal no-commit; RuntimeAttemptCleanup releases attempt scope before RuntimeRequestFinalizer releases request scope/.test(failureRelease)) {
   failures.push('v3.operation_runner.lifecycle.manifest.yml: terminal_client_error must release attempt scope before request scope');
+}
+const terminalNoCommitContracts = [
+  failureTerminal?.projects, failureTerminal?.effect, failureRelease,
+  lifecycleManifest.error_execution_decision?.terminal_effect,
+  lifecycleManifest.error_execution_decision?.finalizer_rule,
+  lifecycleManifest.typed_resources?.error_execution_decision?.terminal_effect,
+  lifecycleManifest.typed_resources?.error_execution_decision?.finalizer_rule,
+  lifecycleManifest.typed_resources?.error_client_projected_candidate?.staging_only,
+  lifecycleManifest.typed_resources?.error_client_projected_candidate?.release,
+  lifecycleManifest.typed_cleanup_events?.attempt_cleanup?.condition,
+];
+if (!/terminal no-commit/.test(failureTerminal?.effect ?? '')
+    || !/without error payload or fabricated success/.test(failureTerminal?.effect ?? '')
+    || terminalNoCommitContracts.some((text) => /commits through Server\/SSE|submits (?:the projected candidate|it) through Server\/SSE|projected candidate for terminal_client_error|projection is submitted|stages the terminal projection|terminal error is submitted|after terminal projection/.test(text ?? ''))) {
+  failures.push('v3.operation_runner.lifecycle.manifest.yml: terminal no-commit forbids Server/SSE error commit');
+}
+if (!/Server aborts only the affected transport with no response/.test(failureTerminal?.effect ?? '')
+    || !/never graceful empty EOF, \[DONE\], successful end or termination event/.test(failureTerminal?.effect ?? '')
+    || !/cleanup does not prove business success/.test(failureTerminal?.effect ?? '')) {
+  failures.push('v3.operation_runner.lifecycle.manifest.yml: terminal no-response requires transport abort, never graceful empty completion or cleanup as business success');
+}
+
+// Focused design-only edge checks. No payload admission or runtime cutover.
+const resolveTarget = requestGraph.nodes?.find((node) => node.id === 'resolve_target');
+for (const resource of ['v3.operation_runner.request_origin_kind', 'v3.route.opaque_target']) {
+  if (!resolveTarget?.resources?.reads?.includes(resource)) failures.push(`resolve_target must read ${resource}`);
+}
+const targetContract = lifecycleManifest.target_resolution ?? {};
+const targetExpected = {
+  status: 'design_pending', node: 'resolve_target',
+  origin_resource: 'v3.operation_runner.request_origin_kind', prior_target_resource: 'v3.route.opaque_target',
+  client_entry: 'select_and_write_once', retry: 'preserve_same_request_target_and_capturedTierPlan',
+  internal_followup: 'preserve_same_request_target_and_capturedTierPlan',
+  reselect_owner: 'TargetInterpreter_within_original_opaque_target',
+  missing_control: 'typed_source_failure_to_ErrorErr01SourceRaised', target_release: 'RuntimeRequestFinalizer',
+};
+for (const [key, value] of Object.entries(targetExpected)) {
+  if (targetContract[key] !== value) failures.push(`target_resolution ${key} must be ${value}`);
+}
+for (const forbidden of ['payload_reconstruction', 'default_client_entry', 'ordinary_route_reclassification', 'skip_fixed_node']) {
+  if (!targetContract.forbidden?.includes(forbidden)) failures.push(`target_resolution must forbid ${forbidden}`);
+}
+const resolveParams = operatorRegistry.get('routecodex.v3.operation.resolve_target@1')?.params;
+for (const param of ['request_origin_kind', 'opaque_target']) {
+  if (resolveParams?.[param] !== 'resource') failures.push(`resolve_target registry ${param} must bind resource`);
+}
+const resourceEntry = (id) => resourceMap.resources?.find((entry) => entry.resource_id === id);
+const opaqueTarget = resourceEntry('v3.route.opaque_target');
+const originResource = resourceEntry('v3.operation_runner.request_origin_kind');
+for (const declaration of [originResource, lifecycleManifest.typed_resources?.request_origin_kind]) {
+  if (JSON.stringify(declaration?.legal_values) !== JSON.stringify(['client_entry', 'retry', 'internal_followup'])) {
+    failures.push('typed origin must explicitly declare client_entry/retry/internal_followup');
+  }
+}
+if (!originResource?.allowed_readers?.includes('resolve_target')
+    || !lifecycleManifest.typed_resources?.request_origin_kind?.readers?.includes('resolve_target')) {
+  failures.push('typed origin catalog/lifecycle must authorize resolve_target');
+}
+for (const reader of ['resolve_target', 'plan_execution']) {
+  if (!opaqueTarget?.allowed_readers?.includes(reader) || !opaqueTarget?.design_pending_contract?.readers?.includes(reader)) {
+    failures.push(`opaque target catalog must authorize pending ${reader}`);
+  }
+}
+if (!/request_origin_kind=client_entry only/.test(opaqueTarget?.design_pending_contract?.conditional_writer ?? '')
+    || !/request_origin_kind=client_entry only/.test(lifecycleManifest.typed_resources?.opaque_target?.conditional_write ?? '')
+    || !/request-scoped until RuntimeRequestFinalizer; never released by attempt_cleanup/.test(opaqueTarget?.design_pending_contract?.lifetime ?? '')
+    || !/RuntimeRequestFinalizer; never attempt_cleanup/.test(lifecycleManifest.typed_resources?.opaque_target?.release ?? '')
+    || !/opaque_target/.test(lifecycleManifest.typed_cleanup_events?.attempt_cleanup?.never ?? '')
+    || /opaque_target|capturedTierPlan/.test(lifecycleManifest.typed_cleanup_events?.attempt_cleanup?.releases ?? '')) {
+  failures.push('opaque target conditional write and request lifetime must survive attempt cleanup');
+}
+const callerTarget = requestChain?.request_typed_resource_edges?.opaque_target;
+if (callerTarget?.status !== 'binding_pending'
+    || !callerTarget?.readers?.includes('V3OperationRunnerResolveTarget')
+    || !/client_entry only; retry\/internal_followup preserve same requestId\/targetId\/capturedTierPlan/.test(callerTarget?.conditional_write ?? '')
+    || !/RuntimeRequestFinalizer; never attempt_cleanup/.test(callerTarget?.release ?? '')) {
+  failures.push('caller opaque target reentry must preserve typed request target until finalizer');
+}
+const decisionResource = resourceEntry('v3.error.execution_decision');
+if (!decisionResource?.allowed_readers?.includes('RuntimeTransportOutcome')
+    || !decisionResource?.design_pending_readers?.includes('RuntimeTransportOutcome')) {
+  failures.push('execution_decision must authorize design_pending RuntimeTransportOutcome');
+}
+for (const reader of ['V3Error06ClientProjected', 'RuntimeClientCommit', 'RuntimeRetryLaunch', 'RuntimeAttemptCleanup', 'RuntimeRequestFinalizer']) {
+  if (!decisionResource?.allowed_readers?.includes(reader)) failures.push(`execution_decision must preserve legacy reader ${reader}`);
+}
+const ingress = lifecycleManifest.client_error_ingress ?? {};
+const fixedErrorSequence = ['ErrorErr01SourceRaised', 'ErrorErr02HostCaptured', 'ErrorErr03RuntimeClassified', 'ErrorErr04RouterPolicyApplied', 'ErrorErr05ExecutionDecision', 'ErrorErr06ClientProjected'];
+if (ingress.status !== 'design_pending' || ingress.input_arc !== 'source-failure'
+    || ingress.schema_ref !== 'v3.operation_runner.arc.source_failure'
+    || JSON.stringify(ingress.error_sequence) !== JSON.stringify(fixedErrorSequence)) {
+  failures.push('client ingress must bind pending source-failure to all six fixed Error nodes');
+}
+for (const [source, observer, origin] of [
+  ['client_transport_failure', 'Server/SSE', 'client_transport'],
+  ['client_disconnect', 'Server/SSE', 'client_disconnect'],
+  ['cancellation', 'RuntimeCancellation', 'typed_cancellation'],
+  ['internal_response_failure', 'RuntimeResponseProcessing', 'internal_response'],
+]) {
+  const binding = ingress.source_bindings?.[source];
+  if (binding?.observer !== observer || binding?.origin !== origin || binding?.policy !== 'terminal_health_neutral') {
+    failures.push(`client ingress ${source} must preserve source and health-neutral policy`);
+  }
+}
+for (const action of ['switch_provider', 'candidate_exclusion', 'provider_cooldown', 'provider_health_mutation', 'attribute_internal_response_to_provider']) {
+  if (!ingress.forbidden_actions?.includes(action)) failures.push(`client ingress must forbid ${action}`);
+}
+const closeOrder = ['independent_Error_graph', 'RuntimeTransportOutcome', 'ServerAbortOrAlreadyDisconnectedReceipt', 'drain', 'RuntimeAttemptCleanup', 'RuntimeRequestFinalizer'];
+if (ingress.consumer !== 'RuntimeTransportOutcome'
+    || !/typed clientDisconnected; typed cancellation with original cause and design-pending Error conversion/.test(ingress.terminal_consumption ?? '')
+    || ingress.receipt_owner !== 'ServerAbortOrAlreadyDisconnectedReceipt'
+    || JSON.stringify(ingress.cleanup_order) !== JSON.stringify(closeOrder)) {
+  failures.push('client failure must enter independent Error before outcome/receipt/drain/cleanup');
+}
+for (const name of ['cancel', 'disconnect']) {
+  const terminal = lifecycleManifest.lifecycle_terminals?.find((entry) => entry.name === name);
+  if (!/source-failure -> independent_Error_graph -> RuntimeTransportOutcome -> ServerAbortOrAlreadyDisconnectedReceipt/.test(terminal?.ingress ?? '')
+      || !terminal?.consumes?.includes('internal-error-outcome')
+      || !lifecycleManifest.typed_cleanup_events?.attempt_cleanup?.consumes?.[name]?.includes('typed_close_receipt')) {
+    failures.push(`${name} must enter independent Error before finalizer cleanup`);
+  }
+}
+const sourceCatalog = resourceEntry('v3.error.chain')?.design_pending_source_bindings;
+const errorCaller = mainlineMap.chains?.find((chain) => chain.chain_id === 'v3.operation_runner.dagpipe.error')?.client_source_failure_bindings;
+if (sourceCatalog?.reader !== 'ErrorErr01SourceRaised' || sourceCatalog?.input_arc !== 'source-failure'
+    || sourceCatalog?.transport_observer !== 'Server/SSE' || sourceCatalog?.cancellation_observer !== 'RuntimeCancellation'
+    || errorCaller?.status !== 'binding_pending' || errorCaller?.input_arc !== 'source-failure'
+    || !fixedErrorSequence.every((node) => errorCaller?.path?.includes(node))) {
+  failures.push('client source catalog/caller must bind independent Error ingress');
+}
+if (!/health-neutral; no switch_provider, candidate exclusion or provider cooldown for client\/internal-response origin/.test(sourceCatalog?.policy ?? '')
+    || !/client\/internal-response origin is health-neutral, no switch_provider or candidate exclusion/.test(errorCaller?.policy ?? '')) {
+  failures.push('client source catalog/caller must preserve health-neutral origin policy');
+}
+for (const rel of ['docs/architecture/dagpipe/v3-proxy-pipeline-target.md', 'docs/design/v3-unified-operation-runner-design.md']) {
+  const source = fs.readFileSync(path.join(root, rel), 'utf8');
+  if (/业务交付中\s*-->\s*连接中止:.*客户端传输|已取消\s*-->\s*已释放|取消排空\s*-->\s*\[\*\]|断开记录\s*-->\s*\[\*\]/u.test(source)) {
+    failures.push(`${rel}: client source must not bypass independent Error in diagrams`);
+  }
+  if (!/业务交付中\s*-->\s*(?:错误处理中|错误链):.*客户端传输/u.test(source)) {
+    failures.push(`${rel}: delivery failure must enter independent Error`);
+  }
 }
 
 if (failures.length) {

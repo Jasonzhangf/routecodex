@@ -118,6 +118,8 @@ async fn front_socket_deferred_closeout_keeps_the_sse_head_writable() {
         let socket = V3StableFrontSocket::spawn(
             write_half,
             V3ClientTransportObservation::new(None, V3FrontConnectionIdentity(0), 0),
+            V3FrontConnectionIdentity(0),
+            None,
         );
         socket.mark_request_started();
         assert!(socket.suppress_restart_closeout_frame());
@@ -185,6 +187,8 @@ async fn front_socket_deferred_closeout_without_a_head_delivers_zero_bytes() {
         let socket = V3StableFrontSocket::spawn(
             write_half,
             V3ClientTransportObservation::new(None, V3FrontConnectionIdentity(0), 0),
+            V3FrontConnectionIdentity(0),
+            None,
         );
         socket.mark_request_started();
         assert!(socket.suppress_restart_closeout_frame());
@@ -223,6 +227,8 @@ async fn front_socket_committed_closeout_delivers_zero_bytes() {
         let socket = V3StableFrontSocket::spawn(
             write_half,
             V3ClientTransportObservation::new(None, V3FrontConnectionIdentity(0), 0),
+            V3FrontConnectionIdentity(0),
+            None,
         );
         socket.mark_request_started();
         socket.close_for_exec_replacement();
@@ -259,6 +265,8 @@ async fn front_socket_restart_after_request_acceptance_delivers_zero_bytes() {
         let socket = V3StableFrontSocket::spawn(
             write_half,
             V3ClientTransportObservation::new(None, V3FrontConnectionIdentity(0), 0),
+            V3FrontConnectionIdentity(0),
+            None,
         );
         socket.mark_request_started();
         socket.close_for_exec_replacement();
@@ -291,6 +299,8 @@ async fn front_socket_restart_after_response_headers_delivers_no_error_bytes() {
         let socket = V3StableFrontSocket::spawn(
             write_half,
             V3ClientTransportObservation::new(None, V3FrontConnectionIdentity(0), 0),
+            V3FrontConnectionIdentity(0),
+            None,
         );
         socket.mark_request_started();
         socket.closeout_state.mark_response_started();

@@ -1,7 +1,11 @@
 lifecycle_id: error.mainline
 summary: Provider/runtime/direct failures enter unified ErrorErr chain; provider
   availability/cooldown truth stays provider/server-scoped and must not be
-  rewritten into session-storm truth before client projection.
+  rewritten into session-storm truth before the independent typed internal
+  outcome. ErrorErr06 is the fixed graph sink and returns internal-error-outcome
+  only; legacy client_payload/projection names denote internal evidence and
+  never authorize a model-client error candidate (requirements version 6
+  supersedes the legacy client-visible projection semantics).
 owner_feature_id: error.pipeline_contract
 entrypoint:
   node_id: ErrorErr01SourceRaised
@@ -98,10 +102,11 @@ edges:
       consumes:
         - error.chain
       produces:
-        - response.client_payload
+        - v3.error.client_projection_candidate
       side_channel_reads:
         - error.chain
-      side_channel_writes: []
+      side_channel_writes:
+        - v3.error.client_projection_candidate
 verification:
   required_gates:
     - npm run verify:architecture-mainline-call-map

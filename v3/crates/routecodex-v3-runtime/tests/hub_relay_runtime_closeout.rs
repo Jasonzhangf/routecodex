@@ -980,7 +980,7 @@ async fn responses_relay_continuous_non_terminal_sse_returns_typed_failure() {
         .attempt_store
         .residence_timeout_ms = 250;
 
-    let output = tokio::time::timeout(
+    let result = tokio::time::timeout(
         Duration::from_secs(2),
         execute_v3_responses_relay_runtime(
             &manifest,
@@ -1004,17 +1004,12 @@ async fn responses_relay_continuous_non_terminal_sse_returns_typed_failure() {
     )
     .await
     .expect("continuous non-terminal provider stream must not hang the runtime")
-    .expect("runtime must project a typed provider terminal failure");
+    .expect_err("a local residence deadline must abort the incomplete provider stream");
 
-    assert_eq!(output.status, 502);
     assert_eq!(
-        output.error_chain.as_deref(),
-        Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
+        result.to_string(),
+        "V3 Responses Relay response execution control failed: provider SSE attempt exceeded the request residence deadline"
     );
-    assert!(matches!(
-        output.client_body,
-        V3ResponsesRelayClientBody::Json(_)
-    ));
 }
 
 #[tokio::test]

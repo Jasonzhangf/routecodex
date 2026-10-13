@@ -3602,6 +3602,57 @@ features:
   - npm run verify:v3-execution-control-payload-architecture
   - npm run test:v3-execution-control-payload-architecture-red-fixtures
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime execution_control_payload_architecture -- --nocapture
+  residence_deadline_wait_binding:
+    status: source_bound
+    shared_symbol: V3AttemptBudget::wait_with_residence_deadline
+    source_blob: d7e95c705a504a3ee10c691f554cb82d7e070668
+    proof_owner: Runtime author
+    runtime_unit_command: CARGO_NET_OFFLINE=true CARGO_TARGET_DIR=target-runtime-residence node scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-runtime execution_control -- --test-threads=1 --nocapture
+    runtime_consumer_command: CARGO_NET_OFFLINE=true CARGO_TARGET_DIR=target-runtime-residence node scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-runtime execution_control_payload_architecture -- --test-threads=1 --nocapture
+    public_command: CARGO_NET_OFFLINE=true CARGO_TARGET_DIR=target-runtime-provider-test node scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test multi_listener_server responses_chat_header_timeout -- --test-threads=1 --nocapture
+    cases:
+    - id: shared-wait-local-header-expiry
+      test: responses_chat_header_timeout_budget_stop_never_fabricates_retry
+      file: v3/crates/routecodex-v3-server/tests/multi_listener_server.rs:9900-9916
+      lane: public
+      scope: 20ms residence and 50ms header timeout
+      required_assertion: zero Provider attempts, switches, and second wires before local Runtime terminal
+    - id: shared-wait-provider-first
+      test: responses_chat_header_timeout_budget_stop_never_fabricates_retry
+      file: v3/crates/routecodex-v3-server/tests/multi_listener_server.rs:9900-9916
+      lane: public
+      scope: 150ms residence and 50ms header timeout
+      required_assertion: preserve first Provider failure source and legal exact-identity cooldown, then stop recovery wait locally
+    - id: shared-wait-success-reselection
+      test: responses_chat_header_timeout_reselects_same_target
+      file: v3/crates/routecodex-v3-server/tests/multi_listener_server.rs:9617-9887
+      lane: public
+      scope: sufficient residence budget
+      required_assertion: two real wires, same target reselection, one VR hit, health reflects only the real first failure
+    - id: shared-wait-ready-source-preservation
+      test: execution_control_residence_wait_preserves_ready_provider_results
+      file: v3/crates/routecodex-v3-runtime/src/execution_control/tests.rs:7-29
+      lane: runtime_unit
+      scope: ready Provider success and failure versus later timer
+      required_assertion: timer never overwrites a ready real result
+    - id: shared-wait-local-body-expiry
+      test: execution_control_payload_architecture_relay_body_deadline_stays_local
+      file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core_tests.rs:317-352
+      lane: runtime_consumer
+      scope: pending full-body collector
+      required_assertion: LocalResourceExhausted enters Runtime Error before Provider policy
+    - id: shared-wait-local-body-provider-first
+      test: execution_control_payload_architecture_direct_body_sources_preserved
+      file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream_timing_tests.rs:4-45
+      lane: runtime_consumer
+      scope: ready real Provider body failure across a crossed local deadline
+      required_assertion: a ready real ProviderFailure keeps its source over the crossed local deadline
+    - id: shared-wait-request-local-cancellation
+      test: execution_control_residence_wait_drops_only_request_owned_resources
+      file: v3/crates/routecodex-v3-runtime/src/execution_control/tests.rs:32-74
+      lane: runtime_unit
+      scope: dropped request-owned future
+      required_assertion: only this request future is dropped; another request and shared recovery/probe continue
   completion_boundary: {source_controlled: true, live_cutover: required}
 
 - feature_id: v3.execution_attempt_budget_store
@@ -3613,6 +3664,16 @@ features:
   - npm run verify:v3-direct-sse-full-attempt-commit
   - npm run verify:v3-execution-control-payload-architecture
   - npm run test:v3-execution-control-payload-architecture-red-fixtures
+  residence_deadline_wait_binding:
+    status: source_bound
+    legal_reader: V3AttemptBudget::wait_with_residence_deadline
+    reader_lines: 274-287
+    reader_blob: d7e95c705a504a3ee10c691f554cb82d7e070668
+    required_assertions:
+    - same request absolute Instant across Direct and Relay header waits
+    - shared wait drops only the pending request future
+    - local expiry is Runtime Error and never mutates ProviderHealth
+    - a ready real Provider result and existing legal cooldown retain their source and effect
   completion_boundary: {source_controlled: true, live_cutover: required}
 
 - feature_id: v3.execution_attempt_success_receipt
@@ -3813,12 +3874,20 @@ features:
   - RespInbound02 is the unique producer of v3.operation_runner.response_provenance; Resp03 and RespOutbound05 are its only readers
   - ReqOutbound07 is the unique producer of v3.operation_runner.attempt_declaration_map and records only tools actually emitted for this successful attempt
   - explicit_history_pairing is a registered typed resource written by ReqInbound02 and read by Req04, ReqOutbound07, and Resp03 for validation/pass-through only
-  - request_origin_kind is an immutable invocation-scoped typed control resource keyed by [requestId, invocationId, originKind]; RuntimeRequestGraphEntry is the sole producer before every request graph invocation, normalize_request_losslessly is its only graph reader, storage is none, scope ends when the graph invocation returns, and RuntimeRequestFinalizer does not consume or release it
+  - request_origin_kind is an immutable invocation-scoped typed control resource keyed by [requestId, invocationId, originKind]; RuntimeRequestGraphEntry is the sole producer before every request graph invocation; the complete graph design-pending readers are normalize_request_losslessly for inverse/history initialization and preservation under the normalization contract, and resolve_target for explicit typed origin branches preserving the selected opaque target; the current Node01 runtime slice does not establish complete graph runtime cutover; origin is never carried in business payload, storage is none, scope ends when the graph invocation returns, and RuntimeRequestFinalizer does not consume or release it
   - request_inverse_context and explicit_history_pairing are request-scoped; they initialize only for client_entry, are preserved on retry/internal_followup, and release only at RuntimeRequestFinalizer
   - response_tool_binding is written by Resp03 for the new provider call returned in this successful attempt and read only by RespOutbound05
   - the response graph sink is v3.operation_runner.client_frame_candidate; the candidate is staged and never enters a client body directly
   - the legacy-named error graph sink v3.error.client_projection_candidate carries internal evidence only; Error06 never authorizes a model-client error candidate; Runtime consumes retry or terminal no-commit decisions and Server/SSE commits only success or aborts the affected transport
-  - retry belongs to Error05 typed error execution decision, not to the response graph; cancel/disconnect belong to Runtime ownership and the unified finalizer
+  - Error05 ARC is error-execution-decision with registered error_execution_decision schema; Error06 ARC is internal-error-outcome with legacy operator/schema identity retained; no Error node writes client payload
+  - provider HTTP errors, header wait timeout and transport failures preserve original attempt identity and response-wait/transport provenance; recovery switch_provider/reselect starts a new attempt in Runtime, never synthesizes request 598
+  - terminal no-commit requires Server to abort/disconnect only the affected transport with no response, no graceful empty EOF, [DONE], successful end, payload/status or termination event; typed close receipt and attempt cleanup precede request finalizer; cleanup is not business success; valid empty business responses remain successes; red fixtures reject graceful empty completion, legacy Server/SSE error commit and skipped attempt cleanup
+  - resolve_target reads typed origin and prior opaque target; client_entry selects once, retry/internal_followup preserve requestId/targetId/capturedTierPlan until RuntimeRequestFinalizer; missing control enters Error, never payload reconstruction/default entry/node skip; registry binds request_origin_kind as resource
+  - execution_decision authorizes RuntimeTransportOutcome as a design_pending reader while preserving existing runtime/legacy permissions
+  - client transport/disconnect/cancellation sources enter all six fixed Error nodes before RuntimeTransportOutcome, Server abort/already-disconnected receipt, drain and cleanup; client/internal response origin never switches/excludes/cools providers; red fixtures reject every bypass and health misattribution
+  - the Client/Error/Runtime typed bridge binds one owner per source slice and declares allowed source files plus typed resource permissions in the lifecycle manifest client_error_ingress.typed_bridge: routecodex-v3-error owns the unique typed source API, routecodex-v3-server (v3.client_sse_head_commit) submits the real client transport cause and executes the typed transport intent with a close receipt, and routecodex-v3-runtime consumes the internal typed decision and drives attempt cleanup then request finalizer
+  - the client-source lane is source-bound: each fixed node runs inside its registered SDK operator (Source/HostCaptured in client_transport_source.rs; classify/policy/decision/outcome reuse the existing Error center helpers), the six Operators compile and run through pipeline_runtime with a six-OperatorCompleted/six-ArcWritten journal, the allocated request_id is bound into the Front typed context, close_request executes the typed transport intent and records the close receipt, and the JoinHandle drain precedes attempt cleanup and request finalizer; the other Request/Response/Error lanes and the console observer stay legacy pending, so no complete three-graph cutover is claimed
+  - retry belongs to Error05 typed error execution decision, not to the response graph; the client SSE body-Drop cancellation (V3ClientTransportOperation::Cancellation with no captured socket I/O) is its own Server/SSE source bound to build_v3_error_01_source_raised_for_client_transport and a two-test split; the --lib classification regression client_body_cancellation_without_io_enters_error_before_finalizer and the public-entry behavior test public_entry_client_body_cancellation_without_io_enters_error_before_finalizer. The public behavior test proves raw-TCP FIN/no-I/O source behavior, the six-node Error chain and physical closeout, no provider effect, no client error/end/success frame, and later-request survival; it cannot observe Error01 source_kind and does not replace the --lib classification regression. The client body-Drop cancellation is never labeled ClientDisconnect; socket I/O disconnect (write/flush/peer_eof/peer_reset/read_error), internal-response channel loss (InternalChannelLoss), and the RuntimeCancellation ingress (producer still unbound) stay distinct; cancel/disconnect are observed by Server/SSE or RuntimeCancellation and require independent typed Error decisions before the unified finalizer
   - no protocol-configurable optional flow or second runner bypasses the fixed request/response/error graphs
   - Config publishes declarations only and references the field/operator profile manifest; legacy conversion tables are migration baselines and cannot remain a competing field-mapping owner after cutover
   - one exhaustive field walker assigns each semantic matrix path one consumer per direction
@@ -3852,6 +3921,9 @@ features:
   - no graph node or staged candidate resource is defined as writing directly to a client body
   - no response graph node may write v3.response.client_payload or a Server/SSE frame as its own output
   - no Server/SSE frame node appears in allowed_readers of v3.operation_runner.client_frame_candidate or v3.error.client_projection_candidate
+  - ErrorErr06 never produces response.client_payload or a model-client error candidate; the legacy-named v3.error.client_projection resource is internal-outcome-only and its retained legacy V3Server16HttpFrame reader never authorizes a new client error payload
+  - a matching Error-center helper, a printed six-node trace or a green static graph gate is never recorded as the registered six-Operator SDK Error graph having executed; that binding requires the operators to compile and run through pipeline_runtime with verified public red/green, which the client-source lane now meets through the six-OperatorCompleted/six-ArcWritten journal plus the passing public client_reset_enters_fixed_error_before_cleanup
+  - the public HTTP-entry body-cancellation behavior test cannot observe Error01 source_kind and never replaces the --lib classification regression client_body_cancellation_without_io_enters_error_before_finalizer
   - no retry disposition is produced by Resp03; execution_disposition legal_values are exactly client_commit and servertool_followup
   - no old current_attempt_declaration_map or request_history_pairing identifiers appear in the operation-runner design/map/lifecycle references owned by this feature
   - no cross-graph backedge or second runner re-enters an earlier graph before the current graph returns to its single sink
@@ -3888,6 +3960,8 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_direct_last_default_projects_after_provider_failure
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server openai_chat_http_entry_completes_responses_tool_round_trip
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_inbound_websocket_projects_json_completed_event_and_enters_runtime
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib client_body_cancellation_without_io_enters_error_before_finalizer
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test client_transport_boundary_controlled public_entry_client_body_cancellation_without_io_enters_error_before_finalizer
   - npm run verify:v3-resource-map
   - npm run verify:v3-mainline-caller-flow
   - npm run verify:v3-architecture-docs

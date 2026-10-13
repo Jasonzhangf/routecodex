@@ -271,6 +271,7 @@ pub enum V3ErrorSourceKind {
     TargetPoolExhausted,
     RuntimeFailure,
     ClientDisconnect,
+    ClientCancellation,
     SuccessControl,
 }
 
@@ -750,7 +751,8 @@ fn validate_internal_error_source_kind(source_kind: &V3ErrorSourceKind) {
         | V3ErrorSourceKind::PendingEndpoint
         | V3ErrorSourceKind::ProviderCompatPayloadBoundaryViolation
         | V3ErrorSourceKind::TargetPoolExhausted
-        | V3ErrorSourceKind::ClientDisconnect => {
+        | V3ErrorSourceKind::ClientDisconnect
+        | V3ErrorSourceKind::ClientCancellation => {
             panic!("client/route terminal errors cannot carry a RouteCodex internal error code")
         }
     }
@@ -792,6 +794,7 @@ pub fn build_v3_error_02_classified_from_v3_error_01(
         V3ErrorSourceKind::TargetPoolExhausted => ("target_pool_exhausted", "already_terminal"),
         V3ErrorSourceKind::RuntimeFailure => ("runtime_failure", "already_terminal"),
         V3ErrorSourceKind::ClientDisconnect => ("client_disconnect", "already_terminal"),
+        V3ErrorSourceKind::ClientCancellation => ("client_cancellation", "already_terminal"),
         V3ErrorSourceKind::SuccessControl => ("success_control_violation", "already_terminal"),
     };
     V3Error02Classified {
@@ -873,6 +876,10 @@ pub fn build_v3_error_03_target_local_action_from_v3_error_02(
         classified.source.source_kind,
         V3ErrorSourceKind::ClientDisconnect
     );
+    let client_cancellation = matches!(
+        classified.source.source_kind,
+        V3ErrorSourceKind::ClientCancellation
+    );
     let retry_eligible = provider_failure && candidates_remaining > 0;
     // Provider failures, including SSE/transport failures, affect provider health.
     let health_affecting = provider_failure && !matches!(scope, V3ErrorActionScope::None);
@@ -880,6 +887,8 @@ pub fn build_v3_error_03_target_local_action_from_v3_error_02(
         "target_local_reselect"
     } else if client_disconnect {
         "health_neutral_client_disconnect"
+    } else if client_cancellation {
+        "health_neutral_client_cancellation"
     } else if candidates_remaining == 0 {
         "target_pool_exhausted"
     } else {
@@ -925,6 +934,7 @@ pub fn build_v3_error_04_target_exhaustion_decision_with_provider_availability(
                     | V3ErrorSourceKind::TargetPoolExhausted
                     | V3ErrorSourceKind::RuntimeFailure
                     | V3ErrorSourceKind::ClientDisconnect
+                    | V3ErrorSourceKind::ClientCancellation
                     | V3ErrorSourceKind::SuccessControl
             );
     V3Error04TargetExhaustionDecision {
@@ -995,6 +1005,7 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
             V3ErrorSourceKind::TargetPoolExhausted => 503,
             V3ErrorSourceKind::RuntimeFailure => internal_client_status(source),
             V3ErrorSourceKind::ClientDisconnect => 499,
+            V3ErrorSourceKind::ClientCancellation => 499,
             V3ErrorSourceKind::SuccessControl => 500,
         }
     };
@@ -1405,6 +1416,7 @@ pub fn project_v3_pending_endpoint_error(
     projected
 }
 
+mod client_transport_source;
 mod sse_disposition;
 /// Consecutive real failures required by the default recoverable health policy.
 /// Authentication and explicitly terminal policies retain their own threshold.
@@ -1414,6 +1426,11 @@ mod subscription;
 #[cfg(test)]
 mod tests;
 
+pub use client_transport_source::{
+    build_v3_error_01_source_raised_for_client_transport,
+    build_v3_error_02_host_captured_from_client_transport, V3ClientTransportFailure,
+    V3ClientTransportOperation, V3Error02HostCaptured, V3_CLIENT_SOURCE_ERROR_CHAIN_NODE_IDS,
+};
 pub use sse_disposition::{v3_sse_post_commit_disposition, V3SsePostCommitDisposition};
 pub use subscription::{
     build_v3_provider_failure_action_from_v3_error_02, build_v3_provider_global_error_fingerprint,

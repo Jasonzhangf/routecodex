@@ -43,7 +43,7 @@
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": ["v3.request.normal_payload", "v3.config.published_manifest"],
+        "reads": ["v3.request.normal_payload", "v3.config.published_manifest", "v3.operation_runner.request_origin_kind", "v3.route.opaque_target"],
         "writes": ["v3.route.opaque_target"]
       }
     },

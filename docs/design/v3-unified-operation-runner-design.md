@@ -2,6 +2,8 @@
 
 Model-client delivery follows AGENTS.md's mandatory all-entry no-client-error contract and [the client transport design](../goals/provider-terminal-no-502-dag-20260930.md). Legacy symbols containing `ClientProjected`, `client_projection_candidate`, or `terminal_client_error` name internal resources/decisions only; they never authorize an HTTP error, error payload/event, or fabricated success. This target design supersedes their former client-error semantics; current code has not completed that cutover.
 
+Requirements version 6 governs this graph correction. `error.mainline.yml` supplies the legacy ErrorErr01–06 symbols/order only; its former client payload exit is not adopted. Provider HTTP errors, header wait timeouts and transport failures preserve the original attempt/provider/model/key and response-wait/transport provenance into the separate typed Error graph. Runtime consumes `switch_provider`/reselect recovery, cleans the failed attempt and starts a new attempt; it never synthesizes request 598 or an absent upstream HTTP status. Early SSE acceptance and transport keepalives are not business commit. No deliverable response means close only that request transport with no provider/proxy error payload or fabricated success.
+
 > Contract for the complete target graphs. In the current production baseline, only the
 > `capture_client_json` SESE slice is compiled and run by the DAGpipe Runtime entry. The complete
 > request, response, and error graphs, their later Operators, and field-profile execution are not
@@ -121,7 +123,7 @@ The design validates three DAGpipe SESE graphs:
   explicit in the graph artifact. Only RuntimeClientCommit may submit a staged candidate when the
   disposition is `client_commit`.
 - [error graph](../architecture/dagpipe/v3.operation_runner.error.graph.json): one source ARC
-  `source-failure`, one exit ARC `error-client-projected-candidate`; every node always runs once
+  `source-failure`, one exit ARC `internal-error-outcome`; every node always runs once
   in fixed order. Error06 stages internal failure evidence only, never a client-error candidate.
   Runtime consumes the typed Error05 decision: retry starts a new attempt; terminal failure ends
   the affected transport without an error response. Retry releases attempt resources and re-enters
@@ -147,7 +149,7 @@ mapping truth.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | capture_client_json | `routecodex-v3-runtime` (`operation_runner/operators/capture_client_json.rs`; RuntimeRequestGraphEntry invokes it) | source-request | client-json | none; this pure pass-through has no MetadataCenter or request-origin access | client-json produced | typed source failure to ErrorErr01 | one invocation per request-graph entry; HTTP and Responses WebSocket enter the same Runtime operation; output is the same JSON value; Direct/Relay handoff reuses it |
 | normalize_request_losslessly | `routecodex-v3-runtime` (Inbound/Chat Process lossless boundary) | client-json | canonical-request | request_origin_kind read; request_inverse_context and explicit_history_pairing written only for client_entry, read/preserved for retry/internal_followup | canonical-request produced | typed source failure to ErrorErr01 | inverse context owned by this node; Config has no mapping defaults |
-| resolve_target | `routecodex-v3-runtime` (Virtual Router) | canonical-request | selected-target | hub.resolved_target written | selected-target produced | typed source failure to ErrorErr01 | target identity is typed resource, not payload |
+| resolve_target | `routecodex-v3-runtime` (Virtual Router) | canonical-request + typed origin + prior opaque target | selected-target | opaque_target written only for client_entry | retry/internal_followup preserve same request target/capturedTierPlan | missing or mismatched typed control to ErrorErr01 | target request scope ends only at Finalizer; plan_execution separately produces hub.resolved_target |
 | plan_execution | `routecodex-v3-runtime` (Target Interpreter) | canonical-request, selected-target | execution-plan | execution_mode written | execution-plan produced | typed source failure to ErrorErr01 | mode is typed control resource; Config cannot select mode |
 | govern_chat_request | `routecodex-v3-runtime` (Chat Process Req04) | execution-plan | governed-request | tool_thinking_turn_context written; explicit_history_pairing read | governed-request produced | typed source failure to ErrorErr01 | tool declaration domains separated; applies the declared historical-image placeholder policy exactly once while preserving current-turn images; no payload control truth |
 | project_standard_provider_request | `routecodex-v3-runtime` (Outbound) | governed-request | standard-provider-request | request_inverse_context and explicit_history_pairing read; attempt_projection_context and attempt_declaration_map written | standard-provider-request produced | typed source failure to ErrorErr01 | projection runs through registered field operators and typed config; tables are baseline only |
@@ -186,8 +188,8 @@ or payload-carried control replaces this chain.
 | error_err02_host_captured | `error.provider_failure_policy` (existing ErrorErr02) | error-source | error-host-captured | error.chain read/write | error-host-captured produced | no skip path; this node is mandatory | HostCaptured never skipped |
 | error_err03_runtime_classified | `error.pipeline_contract` (existing ErrorErr03) | error-host-captured | error-classified | error.chain, provider_runtime.observation read/write | error-classified produced | classification failure remains in error chain | classification is typed, not payload metadata |
 | error_err04_router_policy_applied | `error.execution_decision_consumer` (existing ErrorErr04) | error-classified | error-policy-applied | error.chain, route.retry_exclusion_set read/write | error-policy-applied produced | policy failure remains in error chain | cooldown/retry policy preserved |
-| error_err05_execution_decision | `error.execution_decision_owner` (existing ErrorErr05) | error-policy-applied | error-for-projection | error.chain, v3.error.execution_decision read/write | error-for-projection produced; typed decision stays in the side resource | decision failure remains in error chain | writes retry/terminal decision only to typed control resource |
-| error_err06_client_projected | Error (existing ErrorErr06, internal resource despite legacy name) | error-for-projection | error-client-projected-candidate (internal only) | error.chain and error_execution_decision read | typed internal failure evidence; no client error candidate | typed source failure to ErrorErr01 | Runtime alone consumes retry/terminal decisions; Server/SSE only commits success or aborts transport |
+| error_err05_execution_decision | `error.execution_decision_owner` (existing ErrorErr05) | error-policy-applied | error-execution-decision | error.chain, v3.error.execution_decision read/write | error-execution-decision produced; typed decision stays in the side resource | decision failure remains in error chain | writes retry/terminal no-commit decision only to typed control resource |
+| error_err06_client_projected | Error (existing ErrorErr06, legacy operator/schema identity retained) | error-execution-decision | internal-error-outcome | error.chain and error_execution_decision read | typed internal failure evidence; no client error candidate | typed source failure to ErrorErr01 | Runtime alone consumes retry/terminal decisions; Server/SSE only commits business response or aborts transport |
 
 ## Runtime runner
 
@@ -219,10 +221,10 @@ dispositions stay on the control side and do not alter graph topology:
 | `client_commit` | `Resp03` | inverse projection, frame staging, RuntimeClientCommit, RuntimeRequestFinalizer | response graph stages a candidate; RuntimeClientCommit alone submits it; finalizer then releases request scope |
 | `servertool_followup` | `Resp03` | inverse projection, frame staging, RuntimeInternalFollowup, RuntimeAttemptCleanup, request graph | response graph stages an empty candidate; Runtime discards it, releases attempt scope, and re-enters with internal origin; finalizer is not triggered |
 | `retry` | `Error05` | Error06, RuntimeRetryLaunch, RuntimeAttemptCleanup, request graph | Error06 stages no client error; Runtime discards it, releases failed attempt scope, and admits one new attempt without a graph backedge; finalizer is not triggered |
-| terminal no-commit (legacy `terminal_client_error`) | `Error05` | Runtime transport-outcome consumer, RuntimeAttemptCleanup, RuntimeRequestFinalizer | no error projection; end only the affected transport, release attempt scope and finalize request scope |
-| `cancel` | Runtime | `RuntimeCancellation`, RuntimeAttemptCleanup, finalizer | no client commit; drains and releases attempt scope, then request scope |
-| `disconnect` | ServerDisconnectReceipt | `RuntimeAttemptCleanup`, finalizer | no new client commit; covers pre-first-frame and post-frame disconnects; releases attempt scope, then request scope |
-| `client_transport_break` | `Error05` | Server/SSE, `RuntimeAttemptCleanup`, finalizer | the error chain keeps the typed provider truth and stages no client candidate; Server/SSE ends the client transport without a provider status, code, or message; the finalizer then releases request scope. This is the only client boundary for a provider-derived terminal, so a client entry is never coupled to a provider |
+| terminal no-commit (legacy `terminal_client_error`) | `Error05` | RuntimeTransportOutcome, Server, RuntimeAttemptCleanup, RuntimeRequestFinalizer | typed abort/disconnect intent; Server aborts only the affected transport with no response and records a typed close receipt; no graceful empty EOF, [DONE], successful end, payload/status or termination event; release attempt scope before request scope; cleanup is not business success |
+| `cancel` | RuntimeCancellation source, Error decision | fixed Error01–06, RuntimeTransportOutcome, Server receipt, RuntimeAttemptCleanup, finalizer | typed cancellation and original cause enter independent Error; abort/confirm already disconnected, drain then cleanup; health-neutral; new conversion pending |
+| `disconnect` | Server/SSE source, Error decision | fixed Error01–06, RuntimeTransportOutcome, Server receipt, RuntimeAttemptCleanup, finalizer | pre-first-frame/post-frame disconnect enters independent Error with original cause; confirm disconnected without response; health-neutral; receipt/drain/attempt before request cleanup |
+| `client_transport_break` | `Error05` | RuntimeTransportOutcome, Server, `RuntimeAttemptCleanup`, finalizer | internal typed outcome directs Server to abort/disconnect with no response and record a typed close receipt, never a completion/error/notification; attempt cleanup precedes request finalizer; resource release is not business success |
 
 The request, response, and error graphs stay separate. Retry and servertool re-entry happen only
 after their fixed graph has returned to its single sink; Runtime consumes the typed disposition,
@@ -231,7 +233,7 @@ lifecycle control, not a graph cycle or hidden operator route. Inverse projectio
 frame staging remain in the fixed response graph; actual client communication remains outside the
 graph under Server/SSE ownership. `RuntimeRequestFinalizer` is the sole request-scoped cleanup owner
 and is reached only at final client commit, terminal_client_error, cancel, or disconnect. Terminal
-client errors, cancellations, and disconnects first release attempt-scoped resources through
+no-commit outcomes, cancellations, and disconnects first release attempt-scoped resources through
 RuntimeAttemptCleanup; only after that request-scoped cleanup runs. Retry and
 servertool hops use the finite typed `RuntimeAttemptCleanup` step: it consumes attempt identity and
 disposition, releases attempt-scoped resources, and returns to the same runner for the next request
@@ -320,7 +322,8 @@ Each control/projection family has one writer and explicit readers:
 | Resource | Writer | Readers | Release |
 | --- | --- | --- | --- |
 | execution mode | `plan_execution` after `resolve_target` | `govern_chat_request`, `project_standard_provider_request`, `govern_chat_response` | request finalizer |
-| request origin kind | `RuntimeRequestGraphEntry` (Runtime runner entry) | `normalize_request_losslessly` | graph invocation return; storage none; created immutable per invocation; never enters request/response/provider/client body; RuntimeRequestFinalizer does not consume or release it |
+| request origin kind | `RuntimeRequestGraphEntry` (Runtime runner entry) | `normalize_request_losslessly`, `resolve_target` | graph invocation return; storage none; created immutable per invocation; never enters request/response/provider/client body; RuntimeRequestFinalizer does not consume or release it |
+| opaque target | `resolve_target` (Virtual Router), client_entry only | `resolve_target`, `plan_execution`; retry/internal_followup preserve requestId/targetId/capturedTierPlan, Target Interpreter reselects within original target | RuntimeRequestFinalizer; never attempt cleanup; missing control enters Error |
 | request inverse context | `normalize_request_losslessly` | `normalize_request_losslessly`, `project_standard_provider_request`, `inverse_project_client_response` | RuntimeRequestFinalizer; never rebuilt from an internal follow-up payload |
 | attempt projection context | `project_standard_provider_request` | `normalize_provider_response`, `inverse_project_client_response` | failed attempt before next candidate; success after final client projection or servertool attempt cleanup |
 | attempt declaration map | `project_standard_provider_request` | `normalize_provider_response`, `govern_chat_response`, `inverse_project_client_response` | failed attempt before next candidate; success after final client projection or servertool attempt cleanup |
@@ -345,8 +348,12 @@ Every request graph invocation receives an immutable typed control resource
 `internal_followup`, keyed by `requestId`, `invocationId`, and `originKind`. The Runtime runner
 entry (`RuntimeRequestGraphEntry` in the architecture maps) is the single producer and creates the
 origin before every request graph invocation, including each retry and servertool re-entry, without
-putting it in the request payload. `normalize_request_losslessly` is its only graph reader and
-reads this resource before it touches canonical request construction.
+putting it in the request payload. In the complete graph design, its design-pending readers are
+`normalize_request_losslessly`, which reads origin before canonical request construction for
+inverse/history initialization or preservation under the normalization contract, and `resolve_target`,
+which consumes explicit typed origin branches to select once for `client_entry` and preserve the
+selected opaque target for `retry` and `internal_followup`. These pending readers do not establish
+complete graph runtime cutover from the current Node01 runtime slice.
 `request_origin_kind` has no MetadataCenter slot and no cross-invocation storage; its scope ends
 when the graph invocation returns, and RuntimeRequestFinalizer does not consume or release it.
 
@@ -427,19 +434,25 @@ stateDiagram-v2
   治理响应 --> 内部servertool跳转: 需要内部后续调用
   内部servertool跳转 --> 正在处理请求: 同一runner以内部来源重入
   治理响应 --> 客户端逆投影: 最终响应
-  客户端逆投影 --> 客户端提交: 投影和帧编码完成
-  客户端提交 --> [*]: 成功终态
+  客户端逆投影 --> 业务交付中: 投影和帧编码完成，尚非业务成功
+  业务交付中 --> 业务交付完成: 实际交付及合法业务终结完成
+  业务交付完成 --> [*]: 清理资源
+  业务交付中 --> 错误链: 客户端传输实际失败，保留来源与原因
+  业务交付中 --> 断开记录: 客户端主动断开或取消
   错误链 --> 重试排队: Error05 仅决策重试
   重试排队 --> 正在处理请求: RuntimeRetryLaunch 同 runner 重入
-  错误链 --> 中止未完成传输: 内部确认无法继续或候选耗尽
-  中止未完成传输 --> [*]: 无错误响应并释放请求资源
+  state "中止客户端连接（不返回响应）" as 连接中止
+  错误链 --> 连接中止: 类型化终态经传输结果消费，中止或确认已经断开
+  连接中止 --> [*]: typed 关闭收据，先清理 attempt 再释放 request
   正在处理请求 --> 取消排空: 观察取消并在波次结束后排空
-  取消排空 --> [*]: 释放尝试预算与上下文
+  取消排空 --> 错误链: 保留类型化取消与原始原因
   等待请求 --> 断开记录: 已接受帧后客户端断开
-  断开记录 --> [*]: 记录已接受帧，不证明远端执行
+  断开记录 --> 错误链: 保留断开来源和已接受帧，不证明远端执行
 ```
 
 ## Field walker and operator library
+
+接入／keepalive、投影及开始交付不证明业务成功。合法空业务响应和 content_filter 终结仍按成功业务语义忠实交付，不增加非空校验。无响应终态由 RuntimeTransportOutcome 传递 typed 中止意图、Server 中止连接（不返回响应）；禁止正常空 EOF、[DONE]、成功结束、错误 payload/status、终止事件及客户端通知。客户端主动断开／取消独立记录，不归为 Provider 失败。清理及 finalizer 释放不证明业务成功，静态图也不证明 live 静默失败根因。
 
 The manifest
 [v3.operation_runner.field_profiles.v1.yml](../architecture/manifests/v3.operation_runner.field_profiles.v1.yml)
@@ -535,8 +548,7 @@ supported; no local continuation is introduced.
 | 16 | `error_err03_runtime_classified` | Error03 |
 | 17 | `error_err04_router_policy_applied` | Error04 |
 | 18 | `error_err05_execution_decision` | Error05 |
-| 19 | `error_err06_client_projected` | Error06/SSE |
-| 19a | Provider-derived client transport break (no client error projection) | Error05 / Server/SSE |
+| 19 | `error_err06_client_projected` | Error06 internal outcome; legacy identity unchanged |
 
 ### Existing production families (context only, not delivery units)
 
@@ -629,8 +641,12 @@ types without another capture or payload rewrite:
 Anthropic and Gemini Direct are not current supported branches; the first node preserves their
 existing pending/unsupported behavior and does not add protocol capability. The HTTP dispatcher
 and WebSocket handler are alternate Server transports into one Runtime operation, not separate
-field-mapping implementations. `request_origin_kind` is consumed only at request normalization and
-is never encoded into the captured JSON.
+field-mapping implementations. The current Node01 runtime slice does not establish runtime cutover
+for the complete graph's design-pending `request_origin_kind` readers: `normalize_request_losslessly`
+consumes origin for inverse/history initialization or preservation under the normalization contract;
+`resolve_target` consumes explicit typed origin branches to preserve the selected opaque target on
+`retry` and `internal_followup` after the initial `client_entry` selection. Origin is never encoded
+into the captured JSON or any business payload.
 
 The first delivery must:
 
@@ -688,3 +704,9 @@ independently.
   capture; the complete request, response, and error graph bindings remain pending.
 - Field coverage: semantic matrix statuses remain unchanged; partial/declared rows are not relabeled
   as covered.
+
+### 三条补链的权限边界
+
+新增绑定全部 design-pending；仅 Node01 runtime fact 保持。resolve_target 的注册参数 request_origin_kind/opaque_target 均为 resource，client_entry/retry/internal_followup 三分支由 typed origin 决定；缺失或非法 origin、重入 target 与 request 不匹配时进入 typed Error，不重建 payload 控制、不默认首次入口或跳节点。原 opaque target/capturedTierPlan 保留到 Finalizer，重试由 Target Interpreter 在原 target 内重选。
+
+客户端传输失败、断开、取消从 Server/SSE 或 RuntimeCancellation 的 typed source-failure 进入 ErrorErr01SourceRaised → ErrorErr02HostCaptured → ErrorErr03RuntimeClassified → ErrorErr04RouterPolicyApplied → ErrorErr05ExecutionDecision → ErrorErr06ClientProjected，再由 RuntimeTransportOutcome 消费、中止或确认已断开、记录 typed 收据、drain/attempt cleanup/finalizer。内部响应失败保持内部来源；客户端／内部来源不 switch/cool/exclude Provider。取消转换为 source-failure 的接线 pending，未新增 Rust 枚举。v3.error.execution_decision 的 RuntimeTransportOutcome reader 新权限 pending；既有 RuntimeClientCommit 等 runtime/legacy 权限保留。无任何客户端错误 payload/end/status/通知或伪成功；合法空业务和 content_filter 继续保真。

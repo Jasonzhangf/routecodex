@@ -5877,7 +5877,32 @@ features:
   - real local TCP SSE replacement stream reaches protocol terminal on the resident Runtime
   - no SSE wrapper creates a Runtime or re-enters a full executor
   - one request-level attempt/deadline budget survives Direct, Relay, and typed handoff
+  - shared residence wait returns a ready Provider result before timer, keeps real Provider first, and converts only local expiry to Runtime Error
   - git diff --check
+  residence_deadline_wait_binding:
+    status: source_bound
+    owner_file: v3/crates/routecodex-v3-runtime/src/execution_control.rs
+    symbol: V3AttemptBudget::wait_with_residence_deadline
+    symbol_lines: 274-287
+    source_blob: d7e95c705a504a3ee10c691f554cb82d7e070668
+    visibility: crate_private_reader
+    same_absolute_instant: required
+    callers:
+    - {caller_symbol: send_v3_responses_direct_attempt, caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs, boundary: headers, caller_lines: 39-44, caller_blob: f64ae2ea6394f9469ab3f1483379dfb7c15814b9, invoked_by: execute_v3_responses_direct_runtime_kernel_core_resident}
+    - {caller_symbol: execute_v3_direct_runtime_kernel_core_resident, caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs, boundary: headers, caller_lines: 552-555, caller_blob: 1efc7ca2ffcc64ea6bd4061fa6c5066a1f4e0cce}
+    - {caller_symbol: execute_v3_relay_runtime_core, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs, boundary: headers, caller_lines: 853-861, caller_blob: ed8ef3143707930d4837ffe626f9b2ce000a3e98}
+    - {caller_symbol: execute_v3_responses_relay_runtime_inner, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs, boundary: headers, caller_lines: 486-493, caller_blob: adf66d6ced445a7de7e32fe7402ee59ad8b1dc2b}
+    - {caller_symbol: execute_v3_anthropic_relay_runtime_inner, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs, boundary: headers, caller_lines: 796-804, caller_blob: 878a03cb2217c0519e45a5cb0f526cab3720d26b}
+    - {caller_symbol: execute_v3_direct_runtime_kernel_core_resident, caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs, boundary: recovery, caller_lines: 455-461, caller_blob: 1efc7ca2ffcc64ea6bd4061fa6c5066a1f4e0cce}
+    - {caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident, caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs, boundary: recovery, caller_lines: 429-443, caller_blob: 7fa60407a4b8ae23608190261c9f82177955c3f2}
+    - {caller_symbol: execute_v3_relay_runtime_core, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs, boundary: recovery, caller_lines: 776-786, caller_blob: ed8ef3143707930d4837ffe626f9b2ce000a3e98}
+    - {caller_symbol: execute_v3_responses_relay_runtime_inner, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs, boundary: recovery, caller_lines: 420-428, caller_blob: adf66d6ced445a7de7e32fe7402ee59ad8b1dc2b}
+    - {caller_symbol: execute_v3_anthropic_relay_runtime_inner, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs, boundary: recovery, caller_lines: 726-734, caller_blob: 878a03cb2217c0519e45a5cb0f526cab3720d26b}
+    - {caller_symbol: execute_v3_relay_runtime_core, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs, boundary: first_frame, caller_lines: 1103-1115, caller_blob: ed8ef3143707930d4837ffe626f9b2ce000a3e98}
+    - {caller_symbol: execute_v3_relay_runtime_core, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs, boundary: full_body, caller_lines: 1253-1260, caller_blob: ed8ef3143707930d4837ffe626f9b2ce000a3e98}
+    - {caller_symbol: execute_v3_responses_relay_runtime_inner, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs, boundary: full_body, caller_lines: 881-894, caller_blob: adf66d6ced445a7de7e32fe7402ee59ad8b1dc2b}
+    - {caller_symbol: execute_v3_anthropic_relay_runtime_inner, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs, boundary: full_body, caller_lines: 921-933, caller_blob: 878a03cb2217c0519e45a5cb0f526cab3720d26b}
+    - {caller_symbol: collect_direct_sse_attempt_after_terminal_with_memory, caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs, boundary: full_body, caller_lines: 346-349, caller_blob: f64ae2ea6394f9469ab3f1483379dfb7c15814b9}
 
 - feature_id: v3.execution_attempt_budget_store
   status: active
@@ -5901,6 +5926,7 @@ features:
   - v3.execution.attempt_payload_store
   entry_symbols:
   - V3AttemptBudget::admit_transport_attempt
+  - V3AttemptBudget::wait_with_residence_deadline
   - V3CommittedClientSseBuilder::push
   - collect_direct_sse_attempt_after_terminal
   - build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05_with_budget
@@ -5929,8 +5955,19 @@ features:
   - concurrent attempts share request and process-global reservations
   - seal/discard/cancel/error release reservations exactly once
   - local resource exhaustion never mutates provider health
+  - shared residence wait uses the existing V3AttemptBudget absolute Instant and drops only the pending request future on local expiry
   - npm run verify:v3-execution-control-payload-architecture
   - git diff --check
+  residence_deadline_wait_binding:
+    status: source_bound
+    reader_symbol: V3AttemptBudget::wait_with_residence_deadline
+    reader_file: v3/crates/routecodex-v3-runtime/src/execution_control.rs
+    reader_lines: 274-287
+    reader_blob: d7e95c705a504a3ee10c691f554cb82d7e070668
+    deadline_source: existing V3AttemptBudgetInner.deadline via residence_deadline()
+    local_expiry: RuntimeFailure
+    provider_result: preserve_original_source
+    provider_health_on_local_expiry: forbidden
 
 - feature_id: v3.execution_attempt_success_receipt
   status: active
@@ -6146,13 +6183,15 @@ features:
   status: node01_capture_runtime_candidate_full_runner_pending
   change_risk: high
   owner_kind: design_architecture
-  owner_scope: Unified operation runner DAGpipe design, lifecycle manifest, exact ErrorErr01-06 binding, typed owner/release table, RuntimeRequestGraphEntry owner for invocation origin, and first runtime slice. The current runtime candidate implements only Node 01 capture_client_json; later nodes remain pending. The first slice owns one Runtime capture operation; Server HTTP and Responses WebSocket are caller/forwarding boundaries only.
+  owner_scope: Unified operation runner DAGpipe design, lifecycle manifest, exact legacy ErrorErr01-06 binding, typed owner/release table, RuntimeRequestGraphEntry owner for invocation origin, and first runtime slice. Graph correction explicitly binds resolve_target origin/prior opaque target reads and request-scoped capturedTierPlan retention, preserves Runtime legacy reader permissions with pending RuntimeTransportOutcome access, and requires client transport/disconnect/cancellation to enter the six fixed Error nodes with health-neutral source provenance before typed abort/cleanup. The client SSE body-Drop cancellation (V3ClientTransportOperation::Cancellation with no captured socket I/O) is bound as its own Server/SSE source to build_v3_error_01_source_raised_for_client_transport and a two-test split; the --lib classification regression client_body_cancellation_without_io_enters_error_before_finalizer and the public-entry behavior test public_entry_client_body_cancellation_without_io_enters_error_before_finalizer. The public behavior test proves raw-TCP FIN/no-I/O source behavior, the six-node Error chain and physical closeout, no provider effect, no client error/end/success frame, and later-request survival; it cannot observe Error01 source_kind and does not replace the classification regression. The client body-Drop cancellation is never labeled ClientDisconnect; socket I/O disconnect, internal-response channel loss, and the RuntimeCancellation ingress (producer still unbound) stay distinct. New bindings remain design_pending. Graph correction preserves provider attempt failure provenance into independent Error recovery; Error05/06 yield error-execution-decision/internal-error-outcome, terminal no-commit directs Server through RuntimeTransportOutcome to abort/disconnect with no response and typed close receipt, never normal empty completion or a termination message; attempt cleanup precedes request finalizer and is not business success. The current runtime candidate implements only Node 01 capture_client_json; later nodes remain pending. The first slice owns one Runtime capture operation; Server HTTP and Responses WebSocket are caller/forwarding boundaries only.
   owner_crate: routecodex-v3-runtime
   owner_file: docs/design/v3-unified-operation-runner-design.md
   resource_bindings:
   - v3.operation_runner.dagpipe_manifest
   - v3.operation_runner.operator_registry
   - v3.operation_runner.execution_mode
+  - v3.route.opaque_target
+  - v3.error.chain
   - v3.operation_runner.request_origin_kind
   - v3.operation_runner.request_inverse_context
   - v3.operation_runner.attempt_projection_context
@@ -6237,6 +6276,8 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_direct_last_default_projects_after_provider_failure
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server openai_chat_http_entry_completes_responses_tool_round_trip
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_inbound_websocket_projects_json_completed_event_and_enters_runtime
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib client_body_cancellation_without_io_enters_error_before_finalizer
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test client_transport_boundary_controlled public_entry_client_body_cancellation_without_io_enters_error_before_finalizer
   - git diff --check
 - feature_id: v3.anthropic_control_text_resp03
   status: source_gate_verified

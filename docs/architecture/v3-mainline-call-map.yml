@@ -8784,6 +8784,34 @@ chains:
   owner_feature_id: v3.execution_request_lifecycle
   summary: Active adjacent edges for one resident request lifecycle, bounded attempt storage, sealed success, constant-cost terminal control, and lock-isolated persistence.
   manifest: docs/architecture/manifests/v3.execution_control_payload_architecture.mainline.yml
+  residence_deadline_wait_binding:
+    status: source_bound
+    owner_file: v3/crates/routecodex-v3-runtime/src/execution_control.rs
+    owner_feature_id: v3.execution_attempt_budget_store
+    symbol: V3AttemptBudget::wait_with_residence_deadline
+    symbol_lines: 274-287
+    source_blob: d7e95c705a504a3ee10c691f554cb82d7e070668
+    source_status: source_bound
+    deadline_owner: existing V3AttemptBudgetInner.deadline read through residence_deadline()
+    required_callers:
+    - {boundary: headers, caller_symbol: send_v3_responses_direct_attempt, caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs, caller_lines: 39-44, caller_blob: f64ae2ea6394f9469ab3f1483379dfb7c15814b9, invoked_by: execute_v3_responses_direct_runtime_kernel_core_resident}
+    - {boundary: headers, caller_symbol: execute_v3_direct_runtime_kernel_core_resident, caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs, caller_lines: 552-555, caller_blob: 1efc7ca2ffcc64ea6bd4061fa6c5066a1f4e0cce}
+    - {boundary: headers, caller_symbol: execute_v3_relay_runtime_core, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs, caller_lines: 853-861, caller_blob: ed8ef3143707930d4837ffe626f9b2ce000a3e98}
+    - {boundary: headers, caller_symbol: execute_v3_responses_relay_runtime_inner, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs, caller_lines: 486-493, caller_blob: adf66d6ced445a7de7e32fe7402ee59ad8b1dc2b}
+    - {boundary: headers, caller_symbol: execute_v3_anthropic_relay_runtime_inner, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs, caller_lines: 796-804, caller_blob: 878a03cb2217c0519e45a5cb0f526cab3720d26b}
+    - {boundary: recovery, caller_symbol: execute_v3_direct_runtime_kernel_core_resident, caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs, caller_lines: 455-461, caller_blob: 1efc7ca2ffcc64ea6bd4061fa6c5066a1f4e0cce}
+    - {boundary: recovery, caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident, caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs, caller_lines: 429-443, caller_blob: 7fa60407a4b8ae23608190261c9f82177955c3f2}
+    - {boundary: recovery, caller_symbol: execute_v3_relay_runtime_core, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs, caller_lines: 776-786, caller_blob: ed8ef3143707930d4837ffe626f9b2ce000a3e98}
+    - {boundary: recovery, caller_symbol: execute_v3_responses_relay_runtime_inner, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs, caller_lines: 420-428, caller_blob: adf66d6ced445a7de7e32fe7402ee59ad8b1dc2b}
+    - {boundary: recovery, caller_symbol: execute_v3_anthropic_relay_runtime_inner, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs, caller_lines: 726-734, caller_blob: 878a03cb2217c0519e45a5cb0f526cab3720d26b}
+    - {boundary: first_frame, caller_symbol: execute_v3_relay_runtime_core, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs, caller_lines: 1103-1115, caller_blob: ed8ef3143707930d4837ffe626f9b2ce000a3e98}
+    - {boundary: full_body, caller_symbol: execute_v3_relay_runtime_core, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs, caller_lines: 1253-1260, caller_blob: ed8ef3143707930d4837ffe626f9b2ce000a3e98}
+    - {boundary: full_body, caller_symbol: execute_v3_responses_relay_runtime_inner, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs, caller_lines: 881-894, caller_blob: adf66d6ced445a7de7e32fe7402ee59ad8b1dc2b}
+    - {boundary: full_body, caller_symbol: execute_v3_anthropic_relay_runtime_inner, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs, caller_lines: 921-933, caller_blob: 878a03cb2217c0519e45a5cb0f526cab3720d26b}
+    - {boundary: full_body, caller_symbol: collect_direct_sse_attempt_after_terminal_with_memory, caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs, caller_lines: 346-349, caller_blob: f64ae2ea6394f9469ab3f1483379dfb7c15814b9}
+    ready_result_rule: biased select returns a ready real Provider result before the local timer; source is preserved
+    local_expiry_rule: Runtime Error only; never ProviderHealth
+    completion_boundary: {source_controlled: true, blob_bound: true, live_cutover: required}
   implementation_symbols:
   - execute_v3_direct_runtime_kernel_core_resident
   - execute_v3_responses_direct_runtime_kernel_core_resident
@@ -8986,7 +9014,7 @@ chains:
 - chain_id: v3.operation_runner.dagpipe.request
   owner_feature_id: v3.unified_operation_runner_design
   manifest: docs/architecture/dagpipe/v3.operation_runner.request.graph.json
-  summary: Design-only DAGpipe request graph; one source client JSON, one exit transport request, with target and execution decision before Chat Process. RuntimeRequestGraphEntry creates immutable request_origin_kind for each request graph invocation before it starts; only normalize reads it. Retry and servertool re-entry preserve the original request_inverse_context and explicit_history_pairing until RuntimeRequestFinalizer; normalize initializes inverse context only for client_entry and never rebuilds it from an internal follow-up payload.
+  summary: Design-only DAGpipe request graph; one source client JSON, one exit transport request, with target and execution decision before Chat Process. RuntimeRequestGraphEntry creates immutable request_origin_kind for each request graph invocation before it starts; normalize and resolve_target read it. client_entry selects and conditionally writes one opaque target; retry and same-request internal_followup read the prior target and preserve requestId/targetId/capturedTierPlan, with Target Interpreter reselecting only within the original target. Missing typed origin or matching target enters Error, never payload reconstruction/default entry/node skip. Target and inverse/history live until RuntimeRequestFinalizer, never attempt cleanup. Retry and servertool re-entry preserve the original request_inverse_context and explicit_history_pairing until RuntimeRequestFinalizer; normalize initializes inverse context only for client_entry and never rebuilds it from an internal follow-up payload.
   entry_contract:
     node: V3OperationRunnerCaptureClientJson
     owner_doc: docs/design/v3-unified-operation-runner-design.md
@@ -9184,11 +9212,20 @@ chains:
       side_channel_reads: [v3.hub.resolved_target, v3.operation_runner.execution_mode]
       side_channel_writes: []
   request_typed_resource_edges:
+    opaque_target:
+      resource: v3.route.opaque_target
+      producer: V3OperationRunnerResolveTarget (Virtual Router)
+      readers: [V3OperationRunnerResolveTarget, V3OperationRunnerPlanExecution]
+      conditional_write: client_entry only; retry/internal_followup preserve same requestId/targetId/capturedTierPlan
+      missing_control: typed source failure to ErrorErr01SourceRaised; no default entry, payload reconstruction, classification fallback or node skip
+      release: RuntimeRequestFinalizer; never attempt_cleanup
+      status: binding_pending
     request_origin_kind:
       resource: v3.operation_runner.request_origin_kind
       producer: RuntimeRequestGraphEntry
       readers:
       - V3OperationRunnerNormalizeRequest
+      - V3OperationRunnerResolveTarget
       legal_values: [client_entry, retry, internal_followup]
       client_entry:
         effect: RuntimeRequestGraphEntry creates originKind=client_entry before the original graph invocation; V3OperationRunnerNormalizeRequest initializes request_inverse_context and explicit_history_pairing from the original client entry payload
@@ -9360,7 +9397,7 @@ chains:
 - chain_id: v3.operation_runner.dagpipe.error
   owner_feature_id: v3.unified_operation_runner_design
   manifest: docs/architecture/dagpipe/v3.operation_runner.error.graph.json
-  summary: Design-only DAGpipe error graph; exact ErrorErr01-06 chain with HostCaptured. Error06 stages an optional projection; Runtime consumes Error05 decision after the graph and alone submits terminal error output through Server/SSE. Retry launches a new attempt after typed attempt_cleanup; only terminal_client_error reaches RuntimeRequestFinalizer.
+  summary: Design-only DAGpipe error graph; exact legacy ErrorErr01-06 identities/order with HostCaptured. Error05 produces error-execution-decision and Error06 returns internal-error-outcome only. Provider response-wait/transport failure retains original attempt provenance. Server/SSE client transport/disconnect, the client body-Drop cancellation, and RuntimeCancellation sources enter all six fixed Error nodes before RuntimeTransportOutcome, Server abort/already-disconnected receipt, drain and cleanup; preserve client/internal-response source and cause, never switch/exclude/cool Provider. The client body-Drop cancellation (no captured socket I/O) is a distinct Cancellation origin bound to build_v3_error_01_source_raised_for_client_transport and a two-test split; the --lib classification regression client_body_cancellation_without_io_enters_error_before_finalizer and the public-entry behavior test public_entry_client_body_cancellation_without_io_enters_error_before_finalizer. The public behavior test proves the observable abort/closeout path but cannot observe Error01 source_kind and does not replace the classification regression. The client body-Drop cancellation is never labeled ClientDisconnect; the RuntimeCancellation conversion remains design-pending. Typed clientDisconnected is consumed as internal outcome. RuntimeTransportOutcome decision reader is design-pending while existing runtime/legacy reader permissions remain. Runtime consumes switch_provider/reselect recovery within the original opaque target and launches a new attempt after typed attempt_cleanup; terminal_client_error means terminal no-commit; RuntimeTransportOutcome directs Server to abort/disconnect only the affected transport with no response and typed close receipt, never graceful empty EOF, [DONE], successful end, payload/status or termination event; attempt cleanup precedes RuntimeRequestFinalizer and is not business success. Binding remains pending.
   entry_contract:
     node: ErrorErr01SourceRaised
     owner_doc: docs/design/v3-unified-operation-runner-design.md
@@ -9436,16 +9473,93 @@ chains:
       produces: [v3.error.client_projection_candidate]
       side_channel_reads: [v3.error.chain, v3.error.execution_decision]
       side_channel_writes: [v3.error.client_projection_candidate]
+  client_source_failure_bindings:
+    status: binding_pending
+    input_arc: source-failure
+    schema_ref: v3.operation_runner.arc.source_failure
+    observers: [Server/SSE, RuntimeCancellation]
+    origins: [client_transport, client_disconnect, typed_cancellation, internal_response]
+    path: ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified -> ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision -> ErrorErr06ClientProjected -> RuntimeTransportOutcome -> ServerAbortOrAlreadyDisconnectedReceipt -> drain -> RuntimeAttemptCleanup -> RuntimeRequestFinalizer
+    policy: preserve original cause; client/internal-response origin is health-neutral, no switch_provider or candidate exclusion; the client transport cancellation operation is source-bound, while RuntimeCancellation to typed cancellation input/conversion stays pending
+    response_rule: abort or confirm already disconnected with no response, payload, status, end or notification
+    client_body_cancellation_source:
+      origin: cancellation
+      caller_edge: V3ClientSseChannelStream::drop [state is not Finished] -> V3FrontClientSourceCloseout::drive_premature_disconnect -> V3ClientTransportOperation::Cancellation (io_kind none, os_cause "committed client body dropped before completion") -> V3FrontClientSourceCloseout::run/close_request -> execute_v3_client_source_error_chain(V3ClientTransportFailure)
+      distinction: a premature committed client SSE body Drop with no recorded socket I/O is client-body cancellation; it stays a distinct Cancellation origin and is never labeled ClientDisconnect
+      socket_io_disconnect: write/flush/peer_eof/peer_reset/read_error stay the Server/SSE socket I/O disconnect source; a real captured I/O cause is kept as the first cause and is not overwritten by a later body Drop
+      internal_response_channel_loss: V3ClientTransportOperation::InternalChannelLoss stays the internal-response source, not client-body cancellation
+      runtime_cancellation_ingress: RuntimeCancellation (origin typed_cancellation) has no bound production producer and stays separate and design_pending
+      source_converter: {symbol: build_v3_error_01_source_raised_for_client_transport, file: v3/crates/routecodex-v3-error/src/client_transport_source.rs, lines: 99-133, anchor_blob: 2db73925ed5622cc58f3b1b7aa2532afa770f79e}
+      post_commit_disposition: {symbol: v3_sse_post_commit_disposition, file: v3/crates/routecodex-v3-error/src/sse_disposition.rs, lines: 10-24, anchor_blob: cf88e9271fcb9f4e0f98c59bbf063607f3dd7920}
+      focused_consumer_test: {id: client_body_cancellation_without_io_enters_error_before_finalizer, package: routecodex-v3-server, target: lib, role: classification_regression, status: required}
+      public_entry_behavior_test: {id: public_entry_client_body_cancellation_without_io_enters_error_before_finalizer, file: v3/crates/routecodex-v3-server/tests/client_transport_boundary_controlled.rs, status: required}
+      test_split_rule: the focused consumer test is the Error01 source-kind classification regression in routecodex-v3-server --lib and is added by the implementation author; the public HTTP-entry test proves raw-TCP FIN/no-I/O source behavior, the six-node Error chain and physical closeout, no provider effect, no client error/end/success frame, and later-request survival; the public test cannot observe Error01 source_kind and does not replace the focused consumer test
+    allowed_source_bindings:
+      typed_source_api:
+        owner_crate: routecodex-v3-error
+        owner_feature_id: v3.debug_error_foundation
+        allowed_files: [v3/crates/routecodex-v3-error/src/lib.rs, v3/crates/routecodex-v3-error/src/client_transport_source.rs, v3/crates/routecodex-v3-error/src/sse_disposition.rs, v3/crates/routecodex-v3-error/tests/error_chain_contract.rs]
+        role: unique typed source constructor; Server submits the real client transport cause and identity here
+        symbol: V3ClientTransportFailure
+        symbol_file: v3/crates/routecodex-v3-error/src/client_transport_source.rs
+        symbol_lines: 64-74
+        anchor_blob: 2db73925ed5622cc58f3b1b7aa2532afa770f79e
+        anchor_status: settled
+        binding_state: typed_source_actual
+      server_capture_observer:
+        owner_crate: routecodex-v3-server
+        owner_feature_id: v3.client_sse_head_commit
+        allowed_files: [v3/crates/routecodex-v3-server/src/restart_handoff.rs, v3/crates/routecodex-v3-server/src/client_sse_transport.rs, v3/crates/routecodex-v3-server/src/lib.rs, v3/crates/routecodex-v3-server/src/frame_builders.rs, v3/crates/routecodex-v3-server/src/restart_closeout.rs, v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs]
+        role: capture the real client transport cause and identity, then execute the typed transport intent and record the close receipt
+        symbol: v3_front_io_cause
+        symbol_file: v3/crates/routecodex-v3-server/src/restart_closeout.rs
+        symbol_lines: 511-525
+        anchor_blob: 4b6533ae4ddde7ec6aeecf6183da151da4a62d0e
+        anchor_status: settled
+        binding_state: transport_intent_actual
+        transport_intent_consumer: close_request (restart_closeout.rs 411-508) applies Abort (abort_without_response plus signal_socket_close) or AlreadyDisconnected and records the typed ServerAbortOrAlreadyDisconnectedReceipt from is_peer_disconnected (481-484)
+        physical_receipt: mark_socket_closed after Front shutdown (restart_handoff.rs 1169); close_request awaits wait_socket_closed (204-211) and wait_http_closed (213-225) before the receipt
+      runtime_consumer:
+        owner_crate: routecodex-v3-runtime
+        owner_feature_id: v3.unified_operation_runner_design
+        allowed_files: [v3/crates/routecodex-v3-runtime/src/foundation.rs, v3/crates/routecodex-v3-runtime/src/execution_control.rs, v3/crates/routecodex-v3-runtime/src/operation_runner]
+        role: consume the internal typed decision/outcome; drive attempt cleanup then request finalizer
+        symbol: consume_v3_client_source_outcome
+        symbol_file: v3/crates/routecodex-v3-runtime/src/operation_runner/mod.rs
+        symbol_lines: 500-511
+        anchor_blob: 20118b9f830e3455e05111a93ccee38c93d161a9
+        anchor_status: settled
+        binding_state: cleanup_finalizer_actual
+        drain_symbol: drain_v3_client_source_request
+        drain_lines: 471-482
+        release_sequence: close_request (restart_closeout.rs 471-507) aborts the bound runtime task, awaits socket and http close, builds V3ServerTransportCloseReceipt, awaits the JoinHandle drain, then drops the Front request_id and sets request_finalized before recording RuntimeRequestFinalizer
+      console_observer:
+        owner_crate: routecodex-v3-server
+        owner_feature_id: v3.server_internal_observability_projection
+        allowed_files: [v3/crates/routecodex-v3-server/src/console/impl_bulk.rs]
+        role: observe the single already-generated result; ablation-only where it duplicates a control producer
+        symbol: pending
+        binding_state: legacy_unchanged
+        current_truth: the console observer is unchanged by this client-source binding and never produces a fixed client-disconnected cause as control truth
+    resource_permissions:
+      source_api_writer: routecodex-v3-error (unique typed source API)
+      error_execution_decision: {resource: v3.error.execution_decision, writer: ErrorErr05ExecutionDecision, readers: [ErrorErr06ClientProjected, RuntimeRetryLaunch, RuntimeAttemptCleanup, RuntimeRequestFinalizer, RuntimeTransportOutcome]}
+      internal_error_outcome: {resource: v3.error.client_projection_candidate, writer: ErrorErr06ClientProjected, readers: [RuntimeTransportOutcome]}
+      runtime_transport_outcome: {writer: RuntimeTransportOutcome, reader: Server, scope: affected_transport_only}
+      server_close_receipt: {owner: ServerAbortOrAlreadyDisconnectedReceipt, writer: Server, readers: [RuntimeAttemptCleanup, RuntimeRequestFinalizer]}
+    lifecycle_order: [independent_Error_graph, RuntimeTransportOutcome, ServerAbortOrAlreadyDisconnectedReceipt, drain, RuntimeAttemptCleanup, RuntimeRequestFinalizer]
+    control_tunnel_forbidden: [V3FoundationRuntimeOutput.status, V3FoundationRuntimeOutput.body, V3FoundationRuntimeOutput.error_chain, response.client_payload, MetadataCenter.payload, debug.log]
+    lifecycle_manifest: docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml#client_error_ingress.typed_bridge
   error_execution_decision:
     resource: v3.error.execution_decision
     producer: ErrorErr05ExecutionDecision
     legal_values: [retry, terminal_client_error]
     retry:
       consumers: [ErrorErr06ClientProjected, RuntimeRetryLaunch, RuntimeAttemptCleanup, V3OperationRunnerNormalizeRequest]
-      effect: Error06 stages no client error; Runtime discards that empty result, releases failed attempt context through typed attempt_cleanup, and re-enters the request graph; RuntimeRequestFinalizer is not triggered
+      effect: Error06 returns internal evidence; Runtime consumes switch_provider/reselect recovery, releases failed attempt context through typed attempt_cleanup, and starts a new eligible attempt through RuntimeRequestGraphEntry with typed retry origin; resolve_target preserves original opaque target and capturedTierPlan, Target Interpreter reselects only within that target, preserving request inverse/history; RuntimeRequestFinalizer is not triggered
     terminal_client_error:
-      consumers: [ErrorErr06ClientProjected, RuntimeClientCommit, RuntimeRequestFinalizer]
-      effect: Error06 stages the terminal projection; Runtime alone submits it through Server/SSE
+      consumers: [ErrorErr06ClientProjected, RuntimeTransportOutcome, RuntimeAttemptCleanup, RuntimeRequestFinalizer]
+      effect: legacy terminal_client_error means terminal no-commit; RuntimeTransportOutcome consumes internal-error-outcome and supplies typed abort/disconnect intent to Server; abort only the affected transport with no response, no normal empty EOF, [DONE], successful end, payload/status or termination event; typed close receipt and attempt cleanup precede request finalizer; cleanup is not business success
 
 - chain_id: v3.admin.control_plane_admission
   owner_feature_id: v3.config_management

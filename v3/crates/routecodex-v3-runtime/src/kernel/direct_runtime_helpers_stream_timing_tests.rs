@@ -1,5 +1,49 @@
 use super::*;
 
+#[tokio::test]
+async fn execution_control_payload_architecture_direct_body_sources_preserved() {
+    let new_budget = |timeout| {
+        crate::execution_control::V3AttemptBudget::new_isolated(
+            crate::execution_control::V3AttemptStoreLimits {
+                residence_timeout: timeout,
+                ..Default::default()
+            },
+            Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        )
+    };
+    let local = collect_direct_sse_attempt_after_terminal(
+        Box::pin(stream::pending()),
+        V3HubProviderWireProtocol::OpenAiChat,
+        new_budget(std::time::Duration::from_millis(20)),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(local.source_kind, V3ErrorSourceKind::RuntimeFailure);
+    assert!(local.message.contains("residence deadline"));
+
+    // The real Provider result becomes ready while its poll crosses the deadline.
+    let source = build_v3_error_01_source_raised(
+        V3ErrorSourceKind::ProviderFailure,
+        "test",
+        "actual_body_failure",
+        "original provider body failure",
+    );
+    let provider = Box::pin(stream::once(async move {
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        Err(source)
+    }));
+    let actual = collect_direct_sse_attempt_after_terminal(
+        provider,
+        V3HubProviderWireProtocol::OpenAiChat,
+        new_budget(std::time::Duration::from_millis(20)),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(actual.source_kind, V3ErrorSourceKind::ProviderFailure);
+    assert_eq!(actual.code, "actual_body_failure");
+    assert_eq!(actual.message, "original provider body failure");
+}
+
 #[test]
 fn direct_sse_missing_projection_observation_is_bound_before_stream_closeout() {
     let mut projection_observation = None;

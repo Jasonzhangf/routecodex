@@ -609,6 +609,12 @@ async fn collect_v3_anthropic_relay_provider_sse_chunks(
     let mut chunks = Vec::new();
     while let Some(chunk) = stream.next().await {
         chunks.push(chunk?);
+        // Yield after each consumed chunk so an always-ready provider stream
+        // cannot keep this collector in one poll: the caller's residence
+        // deadline is a sibling select branch and observes expiry only when
+        // this future returns Pending. This is collector scheduling, not a
+        // fixture delay.
+        tokio::task::yield_now().await;
     }
     Ok(chunks)
 }

@@ -1,7 +1,10 @@
 use crate::client_transport_observation::{
     V3ClientResponseObservation, V3ClientTransportObservation,
 };
-use crate::restart_closeout::V3FrontTransportCloseoutState;
+use crate::restart_closeout::{
+    v3_front_io_cause, V3FrontClientSourceCloseout, V3FrontClientTransportCause,
+    V3FrontTransportCloseoutState,
+};
 use crate::session_admission::V3ServerRequestActivityPermit;
 use crate::V3MetadataCenterExecutionPlan;
 use axum::body::Body;
@@ -9,6 +12,7 @@ use axum::extract::ConnectInfo;
 use axum::http::{Request, Response};
 use hyper::body::Incoming;
 use hyper_util::rt::TokioIo;
+use routecodex_v3_error::V3ClientTransportOperation;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::convert::Infallible;
@@ -984,6 +988,10 @@ async fn write_front_response_frame(
             None,
             Some(error.to_string()),
         );
+        closeout_state.record_client_transport_cause(v3_front_io_cause(
+            V3ClientTransportOperation::Write,
+            &error,
+        ));
         closeout_state.close();
         return false;
     }
@@ -994,6 +1002,10 @@ async fn write_front_response_frame(
             None,
             Some(error.to_string()),
         );
+        closeout_state.record_client_transport_cause(v3_front_io_cause(
+            V3ClientTransportOperation::Flush,
+            &error,
+        ));
         closeout_state.close();
         return false;
     }
@@ -1027,6 +1039,10 @@ async fn write_front_command(
                     None,
                     Some(error.to_string()),
                 );
+                closeout.record_client_transport_cause(v3_front_io_cause(
+                    V3ClientTransportOperation::Flush,
+                    error,
+                ));
                 closeout.close();
             }
             // The worker owns completion even if Hyper/restart stops polling.
@@ -1045,6 +1061,7 @@ pub struct V3StableFrontSocket {
     observation: Arc<V3ClientTransportObservation>,
     close_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
     closeout_state: Arc<V3FrontTransportCloseoutState>,
+    client_source_closeout: V3FrontClientSourceCloseout,
 }
 
 #[derive(Debug)]
@@ -1057,22 +1074,39 @@ enum V3FrontWriteCommand {
 }
 
 impl V3StableFrontSocket {
+    pub(crate) fn bind_client_request(&self, request_id: String) {
+        self.client_source_closeout.bind_request(request_id);
+    }
     pub(crate) fn observe_request_trace(
         &self,
         trace: routecodex_v3_debug::V3DebugTraceScope,
         session: String,
     ) {
+        self.client_source_closeout.set_trace(trace.clone());
         self.observation.bind_trace(trace, session);
+    }
+
+    pub(crate) fn client_source_closeout(&self) -> V3FrontClientSourceCloseout {
+        self.client_source_closeout.clone()
     }
     fn spawn(
         mut write_half: OwnedWriteHalf,
         observation: Arc<V3ClientTransportObservation>,
+        connection_id: V3FrontConnectionIdentity,
+        observation_sink: Option<routecodex_v3_debug::V3DebugRuntime>,
     ) -> Self {
         let (write_tx, mut write_rx) = mpsc::channel::<V3FrontWriteCommand>(32);
         let pending_activity = Arc::new(Mutex::new(Vec::new()));
         let worker_pending_activity = Arc::clone(&pending_activity);
         let (close_tx, mut close_rx) = oneshot::channel();
+        let close_tx = Arc::new(Mutex::new(Some(close_tx)));
         let closeout_state = V3FrontTransportCloseoutState::new();
+        let client_source_closeout = V3FrontClientSourceCloseout::new(
+            observation_sink,
+            connection_id,
+            Arc::clone(&closeout_state),
+            Arc::clone(&close_tx),
+        );
         let worker_closeout_state = Arc::clone(&closeout_state);
         let worker_observation = Arc::clone(&observation);
         tokio::spawn(async move {
@@ -1090,20 +1124,21 @@ impl V3StableFrontSocket {
                     },
                     frame = write_rx.recv() => {
                         let Some(command) = frame else { break };
-                        if !write_front_command(
-                            &mut write_half,
-                            &worker_observation,
-                            &worker_closeout_state,
-                            command,
-                        )
-                        .await
-                        {
+                        let written = tokio::select! {
+                            biased;
+                            _ = worker_closeout_state.wait_abort() => false,
+                            written = write_front_command(
+                                &mut write_half, &worker_observation,
+                                &worker_closeout_state, command,
+                            ) => written,
+                        };
+                        if !written {
                             break;
                         }
                     }
                 }
             }
-            if flush_queued_before_close {
+            if flush_queued_before_close && !worker_closeout_state.is_aborted() {
                 // The close branch is biased, so a close signal would otherwise drop
                 // the response tail that reached the write queue but not the socket.
                 // Flush those frames under a bound, then close.
@@ -1129,14 +1164,18 @@ impl V3StableFrontSocket {
                 .expect("front activity lock")
                 .clear();
             let _ = write_half.shutdown().await;
+            drop(write_half);
+            drop(write_rx);
+            worker_closeout_state.mark_socket_closed();
             worker_observation.emit("socket_closed", &worker_observation.current(), None, None);
         });
         Self {
             write_tx,
             pending_activity,
             observation,
-            close_tx: Arc::new(Mutex::new(Some(close_tx))),
+            close_tx,
             closeout_state,
+            client_source_closeout,
         }
     }
 
@@ -1226,6 +1265,36 @@ impl AsyncRead for V3FrontHttpIo {
         if matches!(&result, std::task::Poll::Ready(Ok(())) if buf.filled().is_empty())
             || matches!(&result, std::task::Poll::Ready(Err(_)))
         {
+            match &result {
+                std::task::Poll::Ready(Ok(())) => {
+                    // A clean EOF is a client-source failure only while no
+                    // response byte has reached the client yet (the client left
+                    // before its response). After the response was written it is
+                    // a normal connection close and must not fabricate a
+                    // client-source Error chain.
+                    if !self.front_socket.closeout_state.transport_wrote() {
+                        self.front_socket
+                            .closeout_state
+                            .record_client_transport_cause(V3FrontClientTransportCause {
+                                operation: V3ClientTransportOperation::PeerEof,
+                                io_kind: Some("UnexpectedEof".to_string()),
+                                os_cause: None,
+                            });
+                    }
+                }
+                std::task::Poll::Ready(Err(error)) => {
+                    let operation = match error.kind() {
+                        std::io::ErrorKind::ConnectionReset => {
+                            V3ClientTransportOperation::PeerReset
+                        }
+                        _ => V3ClientTransportOperation::ReadError,
+                    };
+                    self.front_socket
+                        .closeout_state
+                        .record_client_transport_cause(v3_front_io_cause(operation, error));
+                }
+                std::task::Poll::Pending => {}
+            }
             self.front_socket.closeout_state.mark_peer_disconnected();
         }
         result
@@ -1353,7 +1422,12 @@ where
         stream.local_addr()?.port(),
     );
     let (read_half, write_half) = stream.into_split();
-    let front_socket = V3StableFrontSocket::spawn(write_half, Arc::clone(&observation));
+    let front_socket = V3StableFrontSocket::spawn(
+        write_half,
+        Arc::clone(&observation),
+        connection_identity,
+        front_transport_broker.observation_sink.clone(),
+    );
     front_transport_broker
         .register_front_socket(connection_identity, front_socket.clone())
         .map_err(std::io::Error::other)?;
@@ -1402,6 +1476,9 @@ where
             result.map_err(std::io::Error::other)
         },
     };
+    // select has dropped the Hyper connection and its owned read half.
+    front_socket.closeout_state.mark_http_closed();
+    front_socket.client_source_closeout().drive();
     observation.emit(
         "http_connection_end",
         &observation.current(),

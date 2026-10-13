@@ -361,6 +361,17 @@ impl ResponsesTransport for PendingFirstFrameTransport {
 async fn shared_relay_first_frame_deadline_projects_typed_failure_after_reselection() {
     let server_id = "shared-relay-first-frame-deadline";
     let mut manifest = manifest_with_two_providers_for_scope(server_id, true);
+    for provider_id in [
+        format!("{server_id}_primary"),
+        format!("{server_id}_secondary"),
+    ] {
+        let provider = manifest
+            .providers
+            .get_mut(&provider_id)
+            .expect("both relay candidates must be declared");
+        provider.request_timeout_ms = 3_000;
+        provider.sse_first_frame_timeout_ms = Some(50);
+    }
     manifest
         .servers
         .get_mut(server_id)
@@ -369,7 +380,9 @@ async fn shared_relay_first_frame_deadline_projects_typed_failure_after_reselect
         .as_mut()
         .expect("execution policy")
         .attempt_store
-        .residence_timeout_ms = 250;
+        // Keep the request budget above both provider first-frame deadlines so
+        // this case exercises Provider failure/reselection, not local expiry.
+        .residence_timeout_ms = 1_500;
 
     let output = tokio::time::timeout(
         Duration::from_secs(2),

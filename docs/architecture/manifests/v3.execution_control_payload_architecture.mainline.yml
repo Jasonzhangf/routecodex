@@ -58,11 +58,54 @@ budget_contract:
   per_request: required
   process_global: required
   residence_or_deadline: required
+  shared_residence_deadline_wait: required
+  local_expiry_source: RuntimeFailure
+  provider_health_on_local_expiry: forbidden
+  ready_provider_result_over_timer: preserve_source
   reserve_before_append_or_copy: true
   provider_attempt_and_client_replay_share_request_budget: true
   server_budget_construction: forbidden
   initial_storage: bounded_memory_only
   disk_spill: forbidden
+residence_deadline_wait_binding:
+  status: source_bound
+  owner:
+    file: v3/crates/routecodex-v3-runtime/src/execution_control.rs
+    owner_feature_id: v3.execution_attempt_budget_store
+    symbol: V3AttemptBudget::wait_with_residence_deadline
+    symbol_lines: 274-287
+    source_blob: d7e95c705a504a3ee10c691f554cb82d7e070668
+    visibility: crate_private_reader
+    binding_state: source_bound
+    source_truth: The absolute Instant is owned by the existing V3AttemptBudgetInner.deadline and read through residence_deadline(); no caller reconstructs it from payload, Debug, configuration, or a second wall-clock value.
+    wait_contract: tokio::select! with biased consumes an already ready pending result first, then races the caller Provider attempt timeout against sleep_until(residence_deadline()).
+    ready_result_contract: A ready real Provider success or failure result returns as Ok(output) and is never overwritten because the current time is later.
+    expiry_contract: Only local timer expiry returns Err(V3AttemptStoreError::LocalResourceExhausted); each caller maps it to its existing Runtime Error variant before Provider failure policy.
+    provider_contract: A real Provider result keeps its original typed source, attempt identity, and already legal cooldown effect.
+    future_contract: Local expiry drops only the pending request-owned future; it does not cancel shared recovery or probe or another request.
+  callers:
+  - {boundary: headers, caller_symbol: send_v3_responses_direct_attempt, caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs, caller_lines: 39-44, caller_blob: f64ae2ea6394f9469ab3f1483379dfb7c15814b9, invoked_by: execute_v3_responses_direct_runtime_kernel_core_resident}
+  - {boundary: headers, caller_symbol: execute_v3_direct_runtime_kernel_core_resident, caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs, caller_lines: 552-555, caller_blob: 1efc7ca2ffcc64ea6bd4061fa6c5066a1f4e0cce}
+  - {boundary: headers, caller_symbol: execute_v3_relay_runtime_core, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs, caller_lines: 853-861, caller_blob: ed8ef3143707930d4837ffe626f9b2ce000a3e98}
+  - {boundary: headers, caller_symbol: execute_v3_responses_relay_runtime_inner, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs, caller_lines: 486-493, caller_blob: adf66d6ced445a7de7e32fe7402ee59ad8b1dc2b}
+  - {boundary: headers, caller_symbol: execute_v3_anthropic_relay_runtime_inner, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs, caller_lines: 796-804, caller_blob: 878a03cb2217c0519e45a5cb0f526cab3720d26b}
+  - {boundary: recovery, caller_symbol: execute_v3_direct_runtime_kernel_core_resident, caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs, caller_lines: 455-461, caller_blob: 1efc7ca2ffcc64ea6bd4061fa6c5066a1f4e0cce}
+  - {boundary: recovery, caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident, caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs, caller_lines: 429-443, caller_blob: 7fa60407a4b8ae23608190261c9f82177955c3f2}
+  - {boundary: recovery, caller_symbol: execute_v3_relay_runtime_core, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs, caller_lines: 776-786, caller_blob: ed8ef3143707930d4837ffe626f9b2ce000a3e98}
+  - {boundary: recovery, caller_symbol: execute_v3_responses_relay_runtime_inner, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs, caller_lines: 420-428, caller_blob: adf66d6ced445a7de7e32fe7402ee59ad8b1dc2b}
+  - {boundary: recovery, caller_symbol: execute_v3_anthropic_relay_runtime_inner, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs, caller_lines: 726-734, caller_blob: 878a03cb2217c0519e45a5cb0f526cab3720d26b}
+  - {boundary: first_frame, caller_symbol: execute_v3_relay_runtime_core, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs, caller_lines: 1103-1115, caller_blob: ed8ef3143707930d4837ffe626f9b2ce000a3e98}
+  - {boundary: full_body, caller_symbol: execute_v3_relay_runtime_core, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs, caller_lines: 1253-1260, caller_blob: ed8ef3143707930d4837ffe626f9b2ce000a3e98}
+  - {boundary: full_body, caller_symbol: execute_v3_responses_relay_runtime_inner, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs, caller_lines: 881-894, caller_blob: adf66d6ced445a7de7e32fe7402ee59ad8b1dc2b}
+  - {boundary: full_body, caller_symbol: execute_v3_anthropic_relay_runtime_inner, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs, caller_lines: 921-933, caller_blob: 878a03cb2217c0519e45a5cb0f526cab3720d26b}
+  - {boundary: full_body, caller_symbol: collect_direct_sse_attempt_after_terminal_with_memory, caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs, caller_lines: 346-349, caller_blob: f64ae2ea6394f9469ab3f1483379dfb7c15814b9}
+  transition_edges:
+  - {result: local_timer_expiry, source: "Err(V3AttemptStoreError::LocalResourceExhausted)", lane: existing_runtime_error_chain, provider_health_mutation: forbidden, evidence: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs:554}
+  - {result: ready_real_provider_result, source: "Ok(output)", lane: existing_provider_error_policy_or_business_projection, source_rewrite: forbidden, evidence: v3/crates/routecodex-v3-runtime/src/execution_control.rs:279-280}
+  completion_boundary:
+    source_controlled: true
+    blob_bound: true
+    live_cutover: required
 sealed_replay_body_contract:
   responses: typed_non_optional
   anthropic: typed_non_optional

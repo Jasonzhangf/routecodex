@@ -4,11 +4,15 @@ use routecodex_v3_error::{
     build_v3_error_03_target_local_action_from_v3_error_02,
     build_v3_error_04_target_exhaustion_decision_with_provider_availability,
     build_v3_error_05_execution_decision_from_v3_error_04,
-    build_v3_error_06_client_projected_from_v3_error_05, V3Error05ExecutionAction,
-    V3Error05RecoveryAdmissionWitness, V3ErrorActionScope, V3ErrorHandlingCenter,
-    V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
-    V3HttpBoundaryErrorKind, V3InternalErrorCode, V3ProviderFailureSessionScope,
+    build_v3_error_06_client_projected_from_v3_error_05, V3ClientTransportFailure,
+    V3ClientTransportOperation, V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness,
+    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
+    V3ExternalErrorKind, V3ExternalErrorLink, V3HttpBoundaryErrorKind, V3InternalErrorCode,
+    V3ProviderFailureSessionScope, V3SsePostCommitDisposition,
+    V3_CLIENT_SOURCE_ERROR_CHAIN_NODE_IDS, V3_ERROR_CHAIN_NODE_IDS,
 };
+
+use routecodex_v3_error::v3_sse_post_commit_disposition;
 
 fn recovery_witness() -> V3Error05RecoveryAdmissionWitness {
     V3Error05RecoveryAdmissionWitness::new(
@@ -490,5 +494,256 @@ fn already_terminal_target_exhaustion_and_success_control_never_become_success()
         assert_eq!(projected.body["error"]["code"], expected_public_code);
         assert!(projected.body.get("ok").is_none());
         assert!(projected.status >= 400);
+    }
+}
+
+fn client_transport_failure(operation: V3ClientTransportOperation) -> V3ClientTransportFailure {
+    let (io_kind, os_cause) = match operation {
+        V3ClientTransportOperation::Cancellation => (
+            None,
+            Some("committed client body dropped before completion".to_string()),
+        ),
+        _ => (
+            Some("ConnectionReset".to_string()),
+            Some("os_error=54: Connection reset by peer".to_string()),
+        ),
+    };
+    V3ClientTransportFailure {
+        operation,
+        io_kind,
+        os_cause,
+        connection_id: 7,
+        request_id: "openai-chat-router-chat-client-alias-1".to_string(),
+        attempt_id: Some("attempt-1".to_string()),
+    }
+}
+
+#[test]
+fn client_transport_source_enters_corrected_host_captured_chain_health_neutral() {
+    let outcome = compose_client_transport_contract(client_transport_failure(
+        V3ClientTransportOperation::PeerReset,
+    ));
+
+    // This helper proves typed semantics only. SDK execution order is asserted
+    // by the Runtime consumer test against its actual execution journal.
+    // The legacy projection identity stays intact for every other lane.
+    assert_ne!(
+        V3_CLIENT_SOURCE_ERROR_CHAIN_NODE_IDS,
+        V3_ERROR_CHAIN_NODE_IDS
+    );
+
+    // HostCaptured reads the typed request/connection context; a client source
+    // never carries provider identity or an upstream error link.
+    let host = &outcome.host_captured;
+    assert_eq!(host.source.source_kind, V3ErrorSourceKind::ClientDisconnect);
+    assert_eq!(host.source.source_stage, "V3ServerClientTransportBoundary");
+    assert!(host.source.external_error.is_none());
+    assert!(host.source.internal_error.is_none());
+    assert_eq!(host.operation, V3ClientTransportOperation::PeerReset);
+    assert_eq!(host.io_kind.as_deref(), Some("ConnectionReset"));
+    assert_eq!(
+        host.os_cause.as_deref(),
+        Some("os_error=54: Connection reset by peer")
+    );
+    assert_eq!(host.connection_id, 7);
+    assert_eq!(host.request_id, "openai-chat-router-chat-client-alias-1");
+    assert_eq!(host.attempt_id.as_deref(), Some("attempt-1"));
+
+    // Runtime classification and execution decision are client-source and
+    // health neutral: no switch, exclude or cooldown.
+    assert_eq!(outcome.classified.class, "client_disconnect");
+    assert_eq!(
+        outcome.decision.action,
+        V3Error05ExecutionAction::ClientDisconnected
+    );
+    assert!(outcome.outcome.health_action.is_none());
+    assert_eq!(outcome.outcome.status, 499);
+    assert!(outcome.outcome.status >= 400);
+}
+
+#[test]
+fn client_transport_failure_preserves_each_operation_without_provider_identity() {
+    for operation in [
+        V3ClientTransportOperation::Write,
+        V3ClientTransportOperation::Flush,
+        V3ClientTransportOperation::PeerEof,
+        V3ClientTransportOperation::PeerReset,
+        V3ClientTransportOperation::ReadError,
+        V3ClientTransportOperation::Cancellation,
+        V3ClientTransportOperation::InternalChannelLoss,
+    ] {
+        let outcome = compose_client_transport_contract(client_transport_failure(operation));
+        assert_eq!(outcome.host_captured.operation, operation);
+        let (source_kind, action) = match operation {
+            V3ClientTransportOperation::InternalChannelLoss => (
+                V3ErrorSourceKind::RuntimeFailure,
+                V3Error05ExecutionAction::RejectNonProviderError,
+            ),
+            V3ClientTransportOperation::Cancellation => (
+                V3ErrorSourceKind::ClientCancellation,
+                V3Error05ExecutionAction::RejectNonProviderError,
+            ),
+            _ => (
+                V3ErrorSourceKind::ClientDisconnect,
+                V3Error05ExecutionAction::ClientDisconnected,
+            ),
+        };
+        assert_eq!(outcome.source.source_kind, source_kind);
+        if operation == V3ClientTransportOperation::Cancellation {
+            assert_eq!(outcome.source.code, "client_body_cancellation");
+            assert_eq!(outcome.classified.class, "client_cancellation");
+            assert_eq!(outcome.outcome.error_class, "client_cancellation");
+            assert_eq!(outcome.outcome.status, 499);
+            assert_eq!(
+                v3_sse_post_commit_disposition(&outcome.source),
+                V3SsePostCommitDisposition::CloseEof
+            );
+        }
+        assert_eq!(outcome.decision.action, action);
+        assert!(outcome.outcome.health_action.is_none());
+    }
+}
+
+#[test]
+fn client_transport_cancellation_preserves_identity_and_internal_cause_without_provider_side_effect(
+) {
+    let failure = V3ClientTransportFailure {
+        operation: V3ClientTransportOperation::Cancellation,
+        io_kind: None,
+        os_cause: Some("committed client body dropped before completion".to_string()),
+        connection_id: 77,
+        request_id: "client-body-cancel-request".to_string(),
+        attempt_id: None,
+    };
+    let outcome = compose_client_transport_contract(failure);
+
+    assert_eq!(
+        outcome.source.source_kind,
+        V3ErrorSourceKind::ClientCancellation
+    );
+    assert_eq!(outcome.source.code, "client_body_cancellation");
+    assert_eq!(
+        outcome.source.source_stage,
+        "V3ServerClientTransportBoundary"
+    );
+    assert!(outcome.source.external_error.is_none());
+    assert!(outcome.source.internal_error.is_none());
+    assert_eq!(
+        outcome.host_captured.operation,
+        V3ClientTransportOperation::Cancellation
+    );
+    assert_eq!(outcome.host_captured.io_kind, None);
+    assert_eq!(
+        outcome.host_captured.os_cause.as_deref(),
+        Some("committed client body dropped before completion")
+    );
+    assert_eq!(outcome.host_captured.connection_id, 77);
+    assert_eq!(
+        outcome.host_captured.request_id,
+        "client-body-cancel-request"
+    );
+    assert_eq!(outcome.host_captured.attempt_id, None);
+    assert_eq!(
+        outcome.classified.source.source_kind,
+        V3ErrorSourceKind::ClientCancellation
+    );
+    assert_eq!(outcome.classified.source.code, "client_body_cancellation");
+    assert_eq!(outcome.classified.class, "client_cancellation");
+    assert_eq!(outcome.classified.terminal_state, "already_terminal");
+    assert_eq!(
+        outcome
+            .decision
+            .exhaustion
+            .local_action
+            .classified
+            .source
+            .source_kind,
+        V3ErrorSourceKind::ClientCancellation
+    );
+    assert_eq!(
+        outcome
+            .decision
+            .exhaustion
+            .local_action
+            .classified
+            .source
+            .code,
+        "client_body_cancellation"
+    );
+    assert_eq!(
+        outcome.decision.exhaustion.local_action.action.scope,
+        V3ErrorActionScope::None
+    );
+    assert!(
+        !outcome
+            .decision
+            .exhaustion
+            .local_action
+            .action
+            .retry_eligible
+            && !outcome
+                .decision
+                .exhaustion
+                .local_action
+                .action
+                .health_affecting
+    );
+    assert_eq!(
+        outcome
+            .decision
+            .exhaustion
+            .local_action
+            .action
+            .exhaustion_effect,
+        "health_neutral_client_cancellation"
+    );
+    assert_eq!(
+        outcome.decision.action,
+        V3Error05ExecutionAction::RejectNonProviderError
+    );
+    assert!(outcome.decision.action.recovery_witness().is_none());
+    assert!(outcome.outcome.health_action.is_none());
+    assert_eq!(outcome.outcome.error_class, "client_cancellation");
+    assert_eq!(
+        v3_sse_post_commit_disposition(&outcome.source),
+        V3SsePostCommitDisposition::CloseEof
+    );
+}
+
+// Unit semantics only; actual Operator execution is verified in Runtime tests.
+struct ClientTransportContract {
+    source: routecodex_v3_error::V3Error01SourceRaised,
+    host_captured: routecodex_v3_error::V3Error02HostCaptured,
+    classified: routecodex_v3_error::V3Error02Classified,
+    decision: routecodex_v3_error::V3Error05ExecutionDecision,
+    outcome: routecodex_v3_error::V3Error06ClientProjected,
+}
+
+fn compose_client_transport_contract(failure: V3ClientTransportFailure) -> ClientTransportContract {
+    let source =
+        routecodex_v3_error::build_v3_error_01_source_raised_for_client_transport(&failure);
+    let host_captured = routecodex_v3_error::build_v3_error_02_host_captured_from_client_transport(
+        source.clone(),
+        &failure,
+    );
+    let classified = build_v3_error_02_classified_from_v3_error_01(source.clone());
+    let action = build_v3_error_03_target_local_action_from_v3_error_02(
+        classified.clone(),
+        V3ErrorActionScope::None,
+        0,
+    );
+    let policy = build_v3_error_04_target_exhaustion_decision_with_provider_availability(
+        action, 0, false, false,
+    );
+    let decision = build_v3_error_05_execution_decision_from_v3_error_04(policy, None);
+    let outcome = V3ErrorHandlingCenter::project_terminal_decision(
+        decision.clone().try_into_terminal().unwrap(),
+    );
+    ClientTransportContract {
+        source,
+        host_captured,
+        classified,
+        decision,
+        outcome,
     }
 }

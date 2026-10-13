@@ -410,7 +410,14 @@ resources:
     owner_node: V3Router07OpaqueTargetHitOnce
     identity: [requestId, serverId, routeGroupId, poolId, targetId, capturedTierPlan]
     allowed_writers: [V3Router07OpaqueTargetHitOnce]
-    allowed_readers: [V3Target08KindClassified]
+    allowed_readers: [V3Target08KindClassified, resolve_target, plan_execution]
+    design_pending_contract:
+      readers: [resolve_target, plan_execution]
+      conditional_writer: resolve_target (Virtual Router), request_origin_kind=client_entry only
+      retry_internal_followup: preserve same requestId/targetId/capturedTierPlan; Target Interpreter reselects only within original opaque target
+      missing_control: typed_source_failure_to_ErrorErr01SourceRaised; no payload reconstruction, default origin or node skip
+      lifetime: request-scoped until RuntimeRequestFinalizer; never released by attempt_cleanup
+      runtime_permissions: existing V3Router07OpaqueTargetHitOnce/V3Target08KindClassified remain anchored; new readers and conditional writer are design_pending
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, V3Resp15ClientPayload]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -619,6 +626,55 @@ resources:
     owner_crate: routecodex-v3-error
     owner_node: V3Error01SourceRaised
     identity: [requestId, targetId, providerId, errorStage]
+    design_pending_source_bindings:
+      input_arc: source-failure
+      schema_ref: v3.operation_runner.arc.source_failure
+      transport_observer: Server/SSE
+      cancellation_observer: RuntimeCancellation
+      reader: ErrorErr01SourceRaised
+      source_rule: retain client transport/disconnect, typed cancellation or internal response origin and original cause; enter all six fixed Error nodes before RuntimeTransportOutcome and typed close receipt, then drain/attempt cleanup/finalizer
+      policy: health-neutral; no switch_provider, candidate exclusion or provider cooldown for client/internal-response origin; Server never writes Error decisions or Provider health
+      cancellation_binding: the client transport cancellation operation (V3ClientTransportOperation::Cancellation) is source-bound; the client body-Drop cancellation is bound to build_v3_error_01_source_raised_for_client_transport and a two-test split (the --lib classification regression client_body_cancellation_without_io_enters_error_before_finalizer and the public-entry behavior test public_entry_client_body_cancellation_without_io_enters_error_before_finalizer), and is never labeled ClientDisconnect; the public test cannot observe Error01 source_kind and does not replace the --lib classification regression; RuntimeCancellation to typed cancellation enum/conversion stays design_pending
+      client_body_cancellation_source:
+        origin: cancellation
+        caller_edge: V3ClientSseChannelStream::drop [state is not Finished] -> V3FrontClientSourceCloseout::drive_premature_disconnect -> V3ClientTransportOperation::Cancellation (io_kind none, os_cause "committed client body dropped before completion") -> V3FrontClientSourceCloseout::run/close_request -> execute_v3_client_source_error_chain(V3ClientTransportFailure)
+        distinction: a premature committed client SSE body Drop with no recorded socket I/O is client-body cancellation, not socket I/O disconnect and not internal_response_channel_loss
+        socket_io_disconnect: write/flush/peer_eof/peer_reset/read_error stay the Server/SSE socket I/O disconnect source; a real captured I/O cause is kept as the first cause and is not overwritten by a later body Drop
+        internal_response_channel_loss: V3ClientTransportOperation::InternalChannelLoss stays the internal-response source, not client-body cancellation
+        runtime_cancellation_ingress: RuntimeCancellation (origin typed_cancellation) has no bound production producer and stays separate and design_pending
+        source_converter: {symbol: build_v3_error_01_source_raised_for_client_transport, file: v3/crates/routecodex-v3-error/src/client_transport_source.rs, lines: 99-133, anchor_blob: 2db73925ed5622cc58f3b1b7aa2532afa770f79e}
+        post_commit_disposition: {symbol: v3_sse_post_commit_disposition, file: v3/crates/routecodex-v3-error/src/sse_disposition.rs, lines: 10-24, anchor_blob: cf88e9271fcb9f4e0f98c59bbf063607f3dd7920}
+        focused_consumer_test: {id: client_body_cancellation_without_io_enters_error_before_finalizer, package: routecodex-v3-server, target: lib, role: classification_regression, status: required}
+        public_entry_behavior_test: {id: public_entry_client_body_cancellation_without_io_enters_error_before_finalizer, file: v3/crates/routecodex-v3-server/tests/client_transport_boundary_controlled.rs, status: required}
+        test_split_rule: the focused consumer test is the Error01 source-kind classification regression in routecodex-v3-server --lib and is added by the implementation author; the public HTTP-entry test proves raw-TCP FIN/no-I/O source behavior, the six-node Error chain and physical closeout, no provider effect, no client error/end/success frame, and later-request survival; the public test cannot observe Error01 source_kind and does not replace the focused consumer test
+        policy: terminal_health_neutral; no switch_provider, candidate exclusion or provider cooldown
+      source_api_owner: routecodex-v3-error
+      capture_owner: routecodex-v3-server
+      allowed_source_files:
+        error: [v3/crates/routecodex-v3-error/src/lib.rs, v3/crates/routecodex-v3-error/src/client_transport_source.rs, v3/crates/routecodex-v3-error/src/sse_disposition.rs, v3/crates/routecodex-v3-error/tests/error_chain_contract.rs]
+        server: [v3/crates/routecodex-v3-server/src/restart_handoff.rs, v3/crates/routecodex-v3-server/src/client_sse_transport.rs, v3/crates/routecodex-v3-server/src/lib.rs, v3/crates/routecodex-v3-server/src/frame_builders.rs, v3/crates/routecodex-v3-server/src/restart_closeout.rs, v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs]
+        runtime: [v3/crates/routecodex-v3-runtime/src/foundation.rs, v3/crates/routecodex-v3-runtime/src/execution_control.rs, v3/crates/routecodex-v3-runtime/src/operation_runner]
+      consumer: RuntimeTransportOutcome
+      lifecycle_order: [independent_Error_graph, RuntimeTransportOutcome, ServerAbortOrAlreadyDisconnectedReceipt, drain, RuntimeAttemptCleanup, RuntimeRequestFinalizer]
+      forbidden_control_tunnel: [V3FoundationRuntimeOutput.status, V3FoundationRuntimeOutput.body, V3FoundationRuntimeOutput.error_chain, response.client_payload, MetadataCenter.payload, debug.log]
+      symbol: execute_v3_client_source_error_chain
+      actual_source_anchors:
+        source_api: {symbol: V3ClientTransportFailure, file: v3/crates/routecodex-v3-error/src/client_transport_source.rs, lines: 64-74, anchor_blob: 2db73925ed5622cc58f3b1b7aa2532afa770f79e}
+        source_raised: {symbol: build_v3_error_01_source_raised_for_client_transport, file: v3/crates/routecodex-v3-error/src/client_transport_source.rs, lines: 99-133, anchor_blob: 2db73925ed5622cc58f3b1b7aa2532afa770f79e}
+        host_captured: {symbol: build_v3_error_02_host_captured_from_client_transport, file: v3/crates/routecodex-v3-error/src/client_transport_source.rs, lines: 137-150, anchor_blob: 2db73925ed5622cc58f3b1b7aa2532afa770f79e}
+        sdk_entry: {symbol: execute_v3_client_source_error_chain, file: v3/crates/routecodex-v3-runtime/src/operation_runner/client_source_error.rs, lines: 24-90, anchor_blob: 3bba9a63964d0799925d2b6ccf3c7179b4d190fd}
+        sdk_operator: {symbol: ClientSourceErrorOperator, file: v3/crates/routecodex-v3-runtime/src/operation_runner/operators/client_source_error.rs, lines: 8-33, anchor_blob: bfd582413b8c2019fa9cfcd85e5dce627cc4ed9c}
+        server_capture: {symbol: v3_front_io_cause, file: v3/crates/routecodex-v3-server/src/restart_closeout.rs, lines: 511-525, anchor_blob: 4b6533ae4ddde7ec6aeecf6183da151da4a62d0e}
+        server_intent_consumer: {symbol: V3FrontClientSourceCloseout::close_request, file: v3/crates/routecodex-v3-server/src/restart_closeout.rs, lines: 411-508, anchor_blob: 4b6533ae4ddde7ec6aeecf6183da151da4a62d0e}
+        identity_ingress: {symbol: V3StableFrontSocket::bind_client_request, file: v3/crates/routecodex-v3-server/src/restart_handoff.rs, lines: 1077-1079, anchor_blob: a42b2bdeee2039aaa041d041499f2a5cff5f3acd}
+        runtime_consumer: {symbol: consume_v3_client_source_outcome, file: v3/crates/routecodex-v3-runtime/src/operation_runner/mod.rs, lines: 500-511, anchor_blob: 20118b9f830e3455e05111a93ccee38c93d161a9}
+        runtime_drain: {symbol: drain_v3_client_source_request, file: v3/crates/routecodex-v3-runtime/src/operation_runner/mod.rs, lines: 471-482, anchor_blob: 20118b9f830e3455e05111a93ccee38c93d161a9}
+      anchor_status: settled; anchors bound to the implementation author's settled source
+      binding_facts:
+        sdk_graph_executed: true; execute_v3_client_source_error_chain compiles the canonical error graph JSON through pipeline_runtime::parse_graph_json and compile, then runs six registered ClientSourceErrorOperator instances; the journal proves six OperatorCompleted and six ArcWritten with the execution_decision and client_projection_candidate effects
+        typed_identity: the allocated request_id is bound into the Front typed context by V3StableFrontSocket::bind_client_request before the trace starts, stored by V3FrontClientSourceCloseout::bind_request, and submitted by close_request into V3ClientTransportFailure; no V3DebugTraceScope control read
+        release: close_request applies the typed transport intent, awaits the socket and http close receipt, and awaits the JoinHandle drain before dropping the request identity and recording RuntimeRequestFinalizer
+      pending_scope: the whole three-graph cutover (other Request/Response/Error lanes), the RuntimeCancellation to typed cancellation conversion (producer still unbound), and the console observer stay legacy pending; the client body-Drop cancellation is bound as its own Server/SSE source
     allowed_writers: [V3Error01SourceRaised, V3Error02Classified, V3Error03TargetLocalAction, V3Error04TargetExhaustionDecision, V3Error05ExecutionDecision, V3Error06ClientProjected]
     allowed_readers: [V3Target09CandidateSetExpanded, V3Server16HttpFrame]
     forbidden_writers: [V3Provider12ResponsesWirePayload, V3Resp15ClientPayload]
@@ -1168,10 +1224,12 @@ resources:
       owner: ErrorErr05ExecutionDecision
       legal_values: [retry, terminal_client_error]
       retry_rule: retry remains a typed control decision; the fixed Error graph still reaches Error06, which emits no error projection, RuntimeRetryLaunch consumes the decision and runs typed attempt_cleanup, then re-enters the request graph without client SSE commit and without RuntimeRequestFinalizer
-      terminal_rule: the legacy terminal_client_error value means terminal no-commit; Error06 retains internal diagnostic evidence only, Server consumes the typed transport outcome and ends the affected transport without error bytes or success completion; RuntimeAttemptCleanup releases attempt scope before RuntimeRequestFinalizer releases request scope
+      terminal_rule: the legacy terminal_client_error value means terminal no-commit; Error06 retains internal diagnostic evidence only; RuntimeTransportOutcome supplies typed abort/disconnect intent to Server, which aborts the affected transport with no response and records a typed close receipt; no normal empty EOF, [DONE], successful end, payload/status or termination event; RuntimeAttemptCleanup precedes RuntimeRequestFinalizer; cleanup is not business success
       payload_rule: this decision is typed control resource; it is never reconstructed from response payload or debug state
     allowed_writers: [build_v3_error_05_execution_decision_from_v3_error_04]
-    allowed_readers: [V3Error06ClientProjected, RuntimeClientCommit, RuntimeRetryLaunch, RuntimeAttemptCleanup, RuntimeRequestFinalizer]
+    allowed_readers: [V3Error06ClientProjected, RuntimeClientCommit, RuntimeRetryLaunch, RuntimeAttemptCleanup, RuntimeRequestFinalizer, RuntimeTransportOutcome]
+    design_pending_readers: [RuntimeTransportOutcome]
+    runtime_legacy_permission_rule: existing anchored readers including RuntimeClientCommit retained; RuntimeTransportOutcome is design_pending, not runtime cutover
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -1182,6 +1240,7 @@ resources:
     owner_crate: routecodex-v3-error
     owner_node: V3Error06ClientProjected
     identity: [status, code, errorNode]
+    superseded_semantics: legacy resource; ErrorErr06 is the fixed graph sink and returns internal-error-outcome only. Requirements version 6 supersedes the legacy client-visible projection; the corrected V3 error graph uses v3.error.client_projection_candidate (internal evidence, reader RuntimeTransportOutcome). The legacy V3Server16HttpFrame reader is retained only as an existing runtime/legacy binding pending cutover and never authorizes a new client error payload.
     allowed_writers: [build_v3_error_06_client_projected_from_v3_error_05]
     allowed_readers: [V3Server16HttpFrame]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses]
@@ -3011,8 +3070,9 @@ resources:
       admission_order: Reserve byte/frame capacity before append or copy; release exactly once on seal, discard, cancellation, or terminal error.
       request_scope: Provider transport admission and every Runtime-sealed client replay projection consume the same request-local budget instance; Server may only move the sealed replay and may not construct or reconstruct a budget.
       exhaustion_lane: LocalResourceExhausted in the internal Error chain; never provider ResponseBody and never provider health mutation.
+      shared_wait: V3AttemptBudget::wait_with_residence_deadline (v3/crates/routecodex-v3-runtime/src/execution_control.rs:274-287, blob d7e95c705a504a3ee10c691f554cb82d7e070668) waits a request-owned future on the existing absolute residence Instant; local expiry stays a Runtime Error reader and is neither a health writer nor a new payload/metadata resource.
     allowed_writers: [resident_request_controller, AttemptPayloadStore]
-    allowed_readers: [resident_request_controller, AttemptPayloadStore, V3Error05ExecutionDecision]
+    allowed_readers: [resident_request_controller, AttemptPayloadStore, V3Error05ExecutionDecision, V3AttemptBudget::wait_with_residence_deadline]
     forbidden_writers: [SSE_stream_wrapper, ProviderTransport, observability, health, payload]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -3284,6 +3344,7 @@ resources:
     allowed_writers: [RuntimeRequestGraphEntry]
     allowed_readers:
     - normalize_v3_operation_runner_request_losslessly
+    - resolve_target
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, payload_writer, protocol_adapter]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -3489,7 +3550,7 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
-    release_point: runtime_client_commit; terminal_client_error_candidate_released_by_attempt_cleanup_before_request_finalizer; empty_servertool_candidate_released_by_attempt_cleanup_before_request_reentry
+    release_point: runtime_client_commit; no_terminal_error_candidate; empty_servertool_candidate_released_by_attempt_cleanup_before_request_reentry
     binding_status: design_pending
 
   - resource_id: v3.operation_runner.servertool_sidecar_plan
@@ -3514,7 +3575,7 @@ resources:
     binding_status: design_pending
 
   - resource_id: v3.error.client_projection_candidate
-    resource_kind: error_projection_staging
+    resource_kind: typed_internal_error_outcome
     lifecycle: v3.operation_runner.error
     owner_feature_id: v3.unified_operation_runner_design
     owner_crate: routecodex-v3-error
@@ -3522,16 +3583,16 @@ resources:
     identity: [requestId, decision, status, code, errorNode]
     semantic_contract:
       staging_only: this legacy-named resource carries internal error evidence only; it never contains a model-client error candidate
-      retry_rule: Error06 always runs but returns an empty candidate for retry; Runtime discards it and re-enters the request graph
-      terminal_rule: the legacy terminal_client_error decision means terminal no-commit; Runtime consumes the typed outcome, Server/SSE aborts the affected transport, and typed cleanup releases attempt and request scopes
+      retry_rule: Error06 always runs and returns internal-error-outcome; Runtime consumes typed recovery, cleans the failed attempt and reselects a new eligible attempt preserving request inverse/history
+      terminal_rule: the legacy terminal_client_error decision means terminal no-commit; RuntimeTransportOutcome consumes the typed outcome and directs Server to abort/disconnect the affected transport with no response and record a typed close receipt; no normal empty EOF, [DONE], successful end, payload/status or termination event; typed attempt cleanup precedes request finalizer and is not business success
       committer: Runtime consumes internal evidence only; Server/SSE receives successful business data or typed no-response intent, never an error payload
     allowed_writers: [ErrorErr06ClientProjected, build_v3_error_06_client_projected_from_v3_error_05]
-    allowed_readers: [runtime_client_commit]
+    allowed_readers: [RuntimeTransportOutcome]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, V3Server16HttpFrame, V3ServerRespOutbound06ClientFrame]
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
-    release_point: runtime_client_commit_for_terminal_projection; attempt_cleanup_for_terminal_projection_before_request_finalizer; empty_retry_candidate_released_by_attempt_cleanup_before_request_reentry
+    release_point: attempt_cleanup_for_terminal_no_commit_before_request_finalizer_or_retry_before_request_reentry
     binding_status: design_pending
 
   - resource_id: v3.operation_runner.metadata_center_control

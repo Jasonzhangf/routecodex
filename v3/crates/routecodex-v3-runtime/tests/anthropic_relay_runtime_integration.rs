@@ -14,7 +14,10 @@ use routecodex_v3_runtime::{
     V3AnthropicRelayRuntimeInput, V3HubProviderWireProtocol, V3ProviderFailureRuntimeHealth,
 };
 use serde_json::{json, Value};
-use std::sync::Mutex;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc, Mutex,
+};
 use std::time::Duration;
 
 async fn execute_v3_anthropic_relay_runtime<T: ResponsesTransport>(
@@ -965,7 +968,9 @@ data: {"type":"response.reasoning_summary_text.delta","output_index":0,"item_id"
     }
 }
 
-struct ContinuousNonTerminalAnthropicSseTransport;
+struct ContinuousNonTerminalAnthropicSseTransport {
+    sends: Arc<AtomicUsize>,
+}
 
 #[async_trait]
 impl ResponsesTransport for ContinuousNonTerminalAnthropicSseTransport {
@@ -973,6 +978,7 @@ impl ResponsesTransport for ContinuousNonTerminalAnthropicSseTransport {
         &self,
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.sends.fetch_add(1, Ordering::SeqCst);
         let stream = futures_util::stream::iter([Ok(
             br#"event: response.created
 data: {"type":"response.created","response":{"id":"resp_anthropic_hang","status":"in_progress","output":[]}}
@@ -1117,6 +1123,10 @@ async fn anthropic_relay_continuous_non_terminal_sse_returns_typed_failure() {
         .attempt_store
         .residence_timeout_ms = 250;
 
+    let sends = Arc::new(AtomicUsize::new(0));
+    let transport = ContinuousNonTerminalAnthropicSseTransport {
+        sends: Arc::clone(&sends),
+    };
     let outcome = tokio::time::timeout(
         Duration::from_secs(2),
         execute_v3_anthropic_relay_runtime(
@@ -1137,48 +1147,49 @@ async fn anthropic_relay_continuous_non_terminal_sse_returns_typed_failure() {
                     "stream":true
                 }),
             },
-            &ContinuousNonTerminalAnthropicSseTransport,
+            &transport,
         ),
     )
     .await
     .expect("continuous non-terminal Anthropic stream must not hang the runtime");
 
-    match outcome {
+    let message = match outcome {
         Ok(output) => {
-            assert_eq!(output.status, 502);
-            assert_eq!(output.client_response["error"]["code"], "network_error");
-            assert_eq!(
-                output.error_chain.as_deref(),
-                Some(
-                    &[
-                        "V3Error01SourceRaised",
-                        "V3Error02Classified",
-                        "V3Error03TargetLocalAction",
-                        "V3Error04TargetExhaustionDecision",
-                        "V3Error05ExecutionDecision",
-                        "V3Error06ClientProjected",
-                    ][..]
-                )
-            );
+            panic!("response-stage residence expiry must return the typed error, got {output:?}")
         }
-        Err(routecodex_v3_runtime::V3AnthropicRelayRuntimeError::ExecutionControlRequest(
+        Err(routecodex_v3_runtime::V3AnthropicRelayRuntimeError::ExecutionControlResponse(
             message,
-        )) => {
-            assert!(
-                message.contains("request residence deadline"),
-                "unexpected request-stage failure: {message}"
-            );
-            let projected = routecodex_v3_runtime::project_v3_anthropic_relay_runtime_failure(
-                routecodex_v3_runtime::V3AnthropicRelayRuntimeError::ExecutionControlRequest(
-                    message,
-                ),
-            );
-            assert_eq!(projected.status, 598);
-            assert_eq!(projected.error_chain.as_ref().map(Vec::len), Some(6));
-            assert!(projected.client_response.get("error").is_some());
-        }
+        )) => message,
         Err(error) => panic!("unexpected Anthropic relay failure: {error}"),
-    }
+    };
+    assert!(
+        message.contains("request residence deadline"),
+        "response-stage residence expiry must keep the typed deadline cause: {message}"
+    );
+    let projected = routecodex_v3_runtime::project_v3_anthropic_relay_runtime_failure(
+        routecodex_v3_runtime::V3AnthropicRelayRuntimeError::ExecutionControlResponse(message),
+    );
+    assert_eq!(projected.status, 599);
+    assert_eq!(
+        projected.error_chain.as_deref(),
+        Some(routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS.as_slice())
+    );
+    assert_eq!(
+        projected.client_response["error"]["code"],
+        "anthropic_relay_response_execution_control_error"
+    );
+    assert!(
+        projected.client_response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("request residence deadline")),
+        "internal diagnostic must retain the local deadline cause: {}",
+        projected.client_response
+    );
+    assert_eq!(
+        sends.load(Ordering::SeqCst),
+        1,
+        "a local residence deadline must not retry or reselect the provider"
+    );
 }
 
 fn manifest(scope: &str) -> routecodex_v3_config::V3Config05ManifestPublished {

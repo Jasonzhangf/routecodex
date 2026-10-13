@@ -417,10 +417,15 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
             drop(selected_admission.take());
         }
         if let Some(recovery) = pending_provider_action_recovery.take() {
-            match handle_error_before_resp03!(provider_health
-                .wait_for_error05_recovery(&recovery, &selected)
+            match handle_error_before_resp03!(handle_error_before_resp03!(attempt_budget
+                .wait_with_residence_deadline(
+                    provider_health.wait_for_error05_recovery(&recovery, &selected)
+                )
                 .await
-                .map_err(V3ResponsesRelayRuntimeError::ProviderHealth))
+                .map_err(|error| V3ResponsesRelayRuntimeError::ExecutionControl(
+                    error.to_string()
+                )))
+            .map_err(V3ResponsesRelayRuntimeError::ProviderHealth))
             {
                 V3ProviderActionRecoveryTransition::Admitted(mut admission) => {
                     _provider_action_permit = admission.take_permit();
@@ -478,11 +483,13 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
             }
             None => transport_request,
         };
-        let transport_result = match tokio::time::timeout(
-            v3_relay_transport_response_timeout(manifest, &selected_target_provider_id),
-            transport.send(transport_request),
-        )
-        .await
+        let transport_result = match handle_error_before_resp03!(attempt_budget
+            .wait_with_residence_deadline(tokio::time::timeout(
+                v3_relay_transport_response_timeout(manifest, &selected_target_provider_id),
+                transport.send(transport_request),
+            ))
+            .await
+            .map_err(|error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string())))
         {
             Err(_) => Err(V3ProviderError::Transport {
                 request_id: input.request_id.clone(),
@@ -870,16 +877,9 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         &selected_target_provider_id,
                     )
                     .map_err(V3ResponsesRelayRuntimeError::Target)?;
-                let stream =
-                    crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_attempt_deadline(
-                        &input.request_id,
-                        &selected_target_provider_id,
-                        stream,
-                        attempt_budget.residence_deadline(),
-                    );
                 let stream_observation = V3RuntimeStreamObservation::default();
                 let provider_value_result =
-                    build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
+                    handle_error_before_resp03!(attempt_budget.wait_with_residence_deadline(build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
                         provider_wire_protocol,
                         crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_idle(
                             &input.request_id,
@@ -889,8 +889,9 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         ),
                         &stream_observation,
                         &anthropic_response_projection_context,
-                    )
-                    .await;
+                    ))
+                    .await
+                    .map_err(|error| V3ResponsesRelayRuntimeError::ExecutionControlResponse(error.to_string())));
                 handle_error_before_resp03!(runtime_timing
                     .finish_external()
                     .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
@@ -904,9 +905,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                 &selected_target_provider_id,
                                 Some(selected_observability.clone()),
                             ));
-                        let residence_deadline_error = failure.policy_error_message.contains(
-                            "provider SSE attempt exceeded the request residence deadline",
-                        );
                         drop(_provider_action_permit.take());
                         let terminal_failure = handle_error_before_resp03!(
                             handle_v3_responses_relay_provider_failure(
@@ -928,24 +926,9 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             )
                             .await
                         );
-                        let deadline_expired =
-                            attempt_budget.residence_deadline() <= std::time::Instant::now();
                         if let Some(failure) = terminal_failure {
                             return Ok(provider_failure_output_with_observation(
                                 failure,
-                                trace,
-                                Some(stream_observation),
-                            ));
-                        }
-                        if residence_deadline_error || deadline_expired {
-                            return Ok(provider_failure_output_with_observation(
-                                attach_v3_provider_failure_events_to_failure(
-                                    terminalize_v3_responses_relay_provider_failure(
-                                        failure,
-                                        last_external_http.clone(),
-                                    ),
-                                    &provider_failure_events,
-                                ),
                                 trace,
                                 Some(stream_observation),
                             ));

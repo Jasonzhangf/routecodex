@@ -196,55 +196,6 @@ async fn guard_relay_sse_first_frame(
 }
 
 /// Relay SSE idle guard: a configured window applies between every two frames.
-pub(crate) fn guard_v3_provider_sse_attempt_deadline(
-    request_id: &str,
-    provider_id: &str,
-    stream: routecodex_v3_provider_responses::V3ProviderSseStream,
-    deadline: std::time::Instant,
-) -> routecodex_v3_provider_responses::V3ProviderSseStream {
-    let request_id = request_id.to_string();
-    let provider_id = provider_id.to_string();
-    Box::pin(futures_util::stream::unfold(
-        (stream, false),
-        move |(mut stream, timed_out)| {
-            let request_id = request_id.clone();
-            let provider_id = provider_id.clone();
-            async move {
-                if timed_out {
-                    return None;
-                }
-                if std::time::Instant::now() >= deadline {
-                    return Some((
-                        Err(V3ProviderError::Transport {
-                            request_id,
-                            provider_id,
-                            reason: "provider SSE attempt exceeded the request residence deadline before a semantic terminal".to_string(),
-                        }),
-                        (stream, true),
-                    ));
-                }
-                match tokio::time::timeout_at(
-                    tokio::time::Instant::from_std(deadline),
-                    stream.next(),
-                )
-                .await
-                {
-                    Ok(Some(chunk)) => Some((chunk, (stream, false))),
-                    Ok(None) => None,
-                    Err(_) => Some((
-                        Err(V3ProviderError::Transport {
-                            request_id,
-                            provider_id,
-                            reason: "provider SSE attempt exceeded the request residence deadline before a semantic terminal".to_string(),
-                        }),
-                        (stream, true),
-                    )),
-                }
-            }
-        },
-    ))
-}
-
 pub(crate) fn guard_v3_provider_sse_idle(
     request_id: &str,
     provider_id: &str,
@@ -822,9 +773,16 @@ where
             drop(selected_admission.take());
         }
         if let Some(recovery) = pending_provider_action_recovery.take() {
-            match provider_health
-                .wait_for_error05_recovery(&recovery, &selected)
+            match attempt_budget
+                .wait_with_residence_deadline(
+                    provider_health.wait_for_error05_recovery(&recovery, &selected),
+                )
                 .await
+                .map_err(|error| {
+                    V3RelayCoreError::Target(format!(
+                        "V3ExecutionAttemptBudget recovery wait: {error}"
+                    ))
+                })?
                 .map_err(|error| V3RelayCoreError::Target(error.to_string()))?
             {
                 V3ProviderActionRecoveryTransition::Admitted(mut admission) => {
@@ -892,97 +850,103 @@ where
         let attempt_timeout =
             v3_relay_transport_response_timeout(manifest, &selected_target_provider_id);
         let attempt_deadline = tokio::time::Instant::now() + attempt_timeout;
-        let provider_raw =
-            match tokio::time::timeout_at(attempt_deadline, transport.send(transport_request))
+        let provider_raw = match attempt_budget
+            .wait_with_residence_deadline(tokio::time::timeout_at(
+                attempt_deadline,
+                transport.send(transport_request),
+            ))
+            .await
+            .map_err(|error| {
+                V3RelayCoreError::Target(format!("V3ExecutionAttemptBudget header wait: {error}"))
+            })?
+            .unwrap_or_else(|_elapsed| {
+                // provider 挂起（响应头等待超时）：归一化为 Transport 错误进入错误链
+                // （记录 provider failure + reselect 切 provider + 连续失败拉黑），
+                // 避免客户端无限重试命中同一挂起 provider。
+                Err(V3ProviderError::Transport {
+                    request_id: request_id.to_string(),
+                    provider_id: selected_target_provider_id.clone(),
+                    reason: "provider response header timed out (suspected hang)".to_string(),
+                })
+            }) {
+            Ok(raw) => raw,
+            Err(V3ProviderError::ConcurrencyBusy { .. }) => {
+                runtime_timing
+                    .finish_external()
+                    .map_err(V3RelayCoreError::Target)?;
+                failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
+                drop(provider_action_permit.take());
+                provider_action_permit_target = None;
+                continue;
+            }
+            Err(V3ProviderError::HttpStatus { response }) => {
+                last_external_http = Some(
+                    crate::hub_v1::relay_runtime_shared::external_http_witness(&response),
+                );
+                let failure = if response.body_read_failure.is_some() {
+                    crate::hub_v1::relay_runtime_shared::provider_http_body_read_failure(
+                        &response,
+                        &selected_target_provider_id,
+                    )
+                } else {
+                    C::provider_http_failure(
+                        response.status,
+                        &response.body,
+                        &selected_target_provider_id,
+                    )
+                };
+                let _ = runtime_timing.finish_external();
+                drop(provider_action_permit.take());
+                if let Some(failure) = handle_provider_failure(
+                    &failure_context,
+                    selected,
+                    failure,
+                    &mut V3RelayProviderFailurePolicyState {
+                        failed_candidates: &mut failed_candidates,
+                        same_candidate_retries: &mut same_candidate_retries,
+                        trace: &mut trace,
+                        last_external_http: &mut last_external_http,
+                    },
+                    &mut retry_selected,
+                    &mut pending_provider_action_recovery,
+                )
                 .await
-                .unwrap_or_else(|_elapsed| {
-                    // provider 挂起（响应头等待超时）：归一化为 Transport 错误进入错误链
-                    // （记录 provider failure + reselect 切 provider + 连续失败拉黑），
-                    // 避免客户端无限重试命中同一挂起 provider。
-                    Err(V3ProviderError::Transport {
-                        request_id: request_id.to_string(),
-                        provider_id: selected_target_provider_id.clone(),
-                        reason: "provider response header timed out (suspected hang)".to_string(),
-                    })
-                }) {
-                Ok(raw) => raw,
-                Err(V3ProviderError::ConcurrencyBusy { .. }) => {
-                    runtime_timing
-                        .finish_external()
-                        .map_err(V3RelayCoreError::Target)?;
-                    failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
-                    drop(provider_action_permit.take());
-                    provider_action_permit_target = None;
-                    continue;
+                .map_err(V3RelayCoreError::Target)?
+                {
+                    return Ok(C::assemble_failure_output(failure, trace));
                 }
-                Err(V3ProviderError::HttpStatus { response }) => {
-                    last_external_http = Some(
-                        crate::hub_v1::relay_runtime_shared::external_http_witness(&response),
-                    );
-                    let failure = if response.body_read_failure.is_some() {
-                        crate::hub_v1::relay_runtime_shared::provider_http_body_read_failure(
-                            &response,
-                            &selected_target_provider_id,
-                        )
-                    } else {
-                        C::provider_http_failure(
-                            response.status,
-                            &response.body,
-                            &selected_target_provider_id,
-                        )
-                    };
-                    let _ = runtime_timing.finish_external();
-                    drop(provider_action_permit.take());
-                    if let Some(failure) = handle_provider_failure(
-                        &failure_context,
-                        selected,
-                        failure,
-                        &mut V3RelayProviderFailurePolicyState {
-                            failed_candidates: &mut failed_candidates,
-                            same_candidate_retries: &mut same_candidate_retries,
-                            trace: &mut trace,
-                            last_external_http: &mut last_external_http,
-                        },
-                        &mut retry_selected,
-                        &mut pending_provider_action_recovery,
-                    )
-                    .await
-                    .map_err(V3RelayCoreError::Target)?
-                    {
-                        return Ok(C::assemble_failure_output(failure, trace));
-                    }
-                    continue;
+                continue;
+            }
+            Err(error) => {
+                if let Some(witness) =
+                    crate::hub_v1::external_http_witness_from_provider_error(&error)
+                {
+                    last_external_http = Some(witness);
                 }
-                Err(error) => {
-                    if let Some(witness) =
-                        crate::hub_v1::external_http_witness_from_provider_error(&error)
-                    {
-                        last_external_http = Some(witness);
-                    }
-                    let failure = provider_runtime_failure(error, &selected_target_provider_id);
-                    let _ = runtime_timing.finish_external();
-                    drop(provider_action_permit.take());
-                    if let Some(failure) = handle_provider_failure(
-                        &failure_context,
-                        selected,
-                        failure,
-                        &mut V3RelayProviderFailurePolicyState {
-                            failed_candidates: &mut failed_candidates,
-                            same_candidate_retries: &mut same_candidate_retries,
-                            trace: &mut trace,
-                            last_external_http: &mut last_external_http,
-                        },
-                        &mut retry_selected,
-                        &mut pending_provider_action_recovery,
-                    )
-                    .await
-                    .map_err(V3RelayCoreError::Target)?
-                    {
-                        return Ok(C::assemble_failure_output(failure, trace));
-                    }
-                    continue;
+                let failure = provider_runtime_failure(error, &selected_target_provider_id);
+                let _ = runtime_timing.finish_external();
+                drop(provider_action_permit.take());
+                if let Some(failure) = handle_provider_failure(
+                    &failure_context,
+                    selected,
+                    failure,
+                    &mut V3RelayProviderFailurePolicyState {
+                        failed_candidates: &mut failed_candidates,
+                        same_candidate_retries: &mut same_candidate_retries,
+                        trace: &mut trace,
+                        last_external_http: &mut last_external_http,
+                    },
+                    &mut retry_selected,
+                    &mut pending_provider_action_recovery,
+                )
+                .await
+                .map_err(V3RelayCoreError::Target)?
+                {
+                    return Ok(C::assemble_failure_output(failure, trace));
                 }
-            };
+                continue;
+            }
+        };
         // The upstream answered: from this instant its head is real evidence,
         // whatever the body turns out to be. Recorded before the body is
         // interpreted so a stream whose payload never decodes is never reported
@@ -1024,12 +988,6 @@ where
                         .map_err(V3RelayCoreError::Target)?;
                         if let Some(failure) = terminal_failure {
                             return Ok(C::assemble_failure_output(failure, trace));
-                        }
-                        if attempt_budget.residence_deadline() <= std::time::Instant::now() {
-                            return Ok(C::assemble_failure_output(
-                                terminalize_provider_failure(failure, last_external_http.clone()),
-                                trace,
-                            ));
                         }
                         continue;
                     }
@@ -1142,13 +1100,7 @@ where
                     .providers
                     .get(&selected_target_provider_id)
                     .and_then(|provider| provider.sse_first_frame_timeout_ms);
-                let stream = guard_v3_provider_sse_attempt_deadline(
-                    request_id,
-                    &selected_target_provider_id,
-                    stream,
-                    attempt_budget.residence_deadline(),
-                );
-                let first_frame_result = match tokio::time::timeout_at(
+                let first_frame_result = match attempt_budget.wait_with_residence_deadline(tokio::time::timeout_at(
                     attempt_deadline,
                     guard_relay_sse_first_frame(
                         request_id,
@@ -1158,8 +1110,9 @@ where
                         sse_first_frame_timeout_ms,
                         C::ENTRY_PROTOCOL == V3HubEntryProtocol::OpenAiChat,
                     ),
-                )
+                ))
                 .await
+                .map_err(|error| V3RelayCoreError::Target(format!("V3ExecutionAttemptBudget first-frame wait: {error}")))?
                 {
                     Err(_) => Err(V3ProviderError::Transport {
                         request_id: request_id.to_string(),
@@ -1180,11 +1133,6 @@ where
                         return Ok(C::assemble_failure_output(failure, trace));
                     }
                     Err(error) => {
-                        let residence_deadline_error = matches!(
-                            &error,
-                            V3ProviderError::Transport { reason, .. }
-                                if reason.contains("provider SSE attempt exceeded the request residence deadline")
-                        );
                         let failure = provider_runtime_failure(error, &selected_target_provider_id);
                         drop(provider_action_permit.take());
                         let terminal_failure = handle_provider_failure(
@@ -1204,14 +1152,6 @@ where
                         .map_err(V3RelayCoreError::Target)?;
                         if let Some(failure) = terminal_failure {
                             return Ok(C::assemble_failure_output(failure, trace));
-                        }
-                        if residence_deadline_error
-                            || attempt_budget.residence_deadline() <= std::time::Instant::now()
-                        {
-                            return Ok(C::assemble_failure_output(
-                                terminalize_provider_failure(failure, last_external_http.clone()),
-                                trace,
-                            ));
                         }
                         continue;
                     }
@@ -1310,11 +1250,16 @@ where
                 })?;
                 let mut projected_sse = projected_sse;
                 let stream_failure = loop {
-                    let next = match tokio::time::timeout_at(attempt_deadline, projected_sse.next())
+                    let next = match attempt_budget
+                        .wait_with_residence_deadline(tokio::time::timeout_at(
+                            attempt_deadline,
+                            projected_sse.next(),
+                        ))
                         .await
                     {
-                        Ok(next) => next,
-                        Err(_) => {
+                        Err(error) => break Some(V3RelayAttemptCollectFailure::LocalStore(error)),
+                        Ok(Ok(next)) => next,
+                        Ok(Err(_)) => {
                             break Some(V3RelayAttemptCollectFailure::ProviderTransport(format!(
                                 "provider SSE stream exceeded the configured request timeout ({}ms) before terminal EOF",
                                 attempt_timeout.as_millis()
@@ -1401,14 +1346,6 @@ where
                     .map_err(V3RelayCoreError::Target)?;
                     if let Some(failure) = terminal_failure {
                         return Ok(C::assemble_failure_output(failure, trace));
-                    }
-                    let deadline_expired =
-                        attempt_budget.residence_deadline() <= std::time::Instant::now();
-                    if deadline_expired {
-                        return Ok(C::assemble_failure_output(
-                            terminalize_provider_failure(failure, last_external_http.clone()),
-                            trace,
-                        ));
                     }
                     continue;
                 }

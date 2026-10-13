@@ -452,10 +452,14 @@ where
             drop(selected_admission.take());
         }
         if let Some(recovery) = pending_provider_action_recovery.take() {
-            match provider_health
-                .wait_for_error05_recovery(&recovery, &selected)
+            let recovery_result = match attempt_budget
+                .wait_with_residence_deadline(provider_health.wait_for_error05_recovery(&recovery, &selected))
                 .await
             {
+                Ok(result) => result,
+                Err(error) => return error_output(runtime_source("V3ExecutionAttemptBudget", error), trace, &crate::hooks::register_responses_direct_hooks()),
+            };
+            match recovery_result {
                 Ok(V3ProviderActionRecoveryTransition::Admitted(mut admission)) => {
                     provider_action_permit = admission.take_permit();
                     provider_action_permit_target = Some(selected.candidate.clone());
@@ -545,7 +549,11 @@ where
             }
             None => transport_request,
         };
-        let provider_raw = match transport.send(transport_request).await {
+        let transport_result = match attempt_budget.wait_with_residence_deadline(transport.send(transport_request)).await {
+            Ok(result) => result,
+            Err(error) => return error_output(runtime_source("V3ExecutionAttemptBudget", error), trace, &crate::hooks::register_responses_direct_hooks()),
+        };
+        let provider_raw = match transport_result {
             Ok(raw) => raw,
             Err(V3ProviderError::ConcurrencyBusy { .. }) => {
                 if let Err(error) = runtime_timing.finish_external() {

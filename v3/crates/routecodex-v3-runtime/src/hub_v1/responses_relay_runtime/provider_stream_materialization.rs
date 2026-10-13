@@ -23,6 +23,9 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_responses_provider_stream_
             terminal_response = Some(response);
             break;
         }
+        // Let the request-owned residence timer run when a provider stream is
+        // immediately ready but never emits a terminal response event.
+        tokio::task::yield_now().await;
     }
     if terminal_response.is_none() {
         finish_v3_responses_provider_sse_decoder_typed(decoder, observation, &mut reducer)?;
@@ -257,6 +260,10 @@ pub(crate) async fn build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_
         if terminal_seen {
             break;
         }
+        // The outer Runtime owns residence expiry. Cooperate after each
+        // non-terminal chunk so an always-ready provider cannot monopolize one
+        // poll and starve that existing deadline.
+        tokio::task::yield_now().await;
     }
     if !terminal_seen {
         decoder.finish().map_err(|error| {
@@ -468,6 +475,9 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_strea
         if (terminal_seen && (terminal_usage_closeout_seen || done_seen)) || stop_after_terminal {
             break;
         }
+        // Keep the outer request residence wait schedulable for continuously
+        // ready, non-terminal provider streams.
+        tokio::task::yield_now().await;
     }
     if !terminal_seen && !stop_after_terminal {
         decoder.finish().map_err(|error| {
