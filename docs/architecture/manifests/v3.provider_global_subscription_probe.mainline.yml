@@ -9,6 +9,10 @@ verification_gates:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --lib
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_global_subscription_probe_contract -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test cooldown_manual_actions_managed -- --test-threads=1 --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_exec_probe_rollback -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test managed_lifecycle fa22072_probe_rollback -- --test-threads=1 --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_probe_fairness -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib provider_probe_fairness_tests -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --no-default-features
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib runtime_policy_maps_account_and_recoverable_http_classes_to_global_health -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib configured_semantic_global_failure_keeps_manifest_cooldown_policy -- --nocapture
@@ -19,6 +23,8 @@ nodes:
   - id: V3ProviderHealthProbePermit
     owner: routecodex-v3-provider-responses
   - id: V3ServerAggregateLifecycle
+    owner: routecodex-v3-server
+  - id: V3ServerProbeOwner
     owner: routecodex-v3-server
   - id: V3ProviderGlobalProbeExecution
     owner: routecodex-v3-runtime
@@ -38,6 +44,8 @@ edges:
   - from: V3ProviderHealthStore
     to: V3ProviderHealthProbePermit
   - from: V3ServerAggregateLifecycle
+    to: V3ServerProbeOwner
+  - from: V3ServerProbeOwner
     to: V3ProviderGlobalProbeExecution
   - from: V3ProviderGlobalProbeExecution
     to: V3ProviderProbeHttpStatus

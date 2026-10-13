@@ -293,6 +293,7 @@ features:
   - v3/crates/routecodex-v3-lifecycle
   - v3/crates/routecodex-v3-cli
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/aggregate_probe_lifecycle.rs
   - v3/scripts/prepare-v3-previous-release-fixture.mjs
   - .github/workflows/test.yml
   - .github/workflows/release.yml
@@ -4879,6 +4880,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/lib.rs
   - v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
   - v3/crates/routecodex-v3-runtime/src/provider_probe_lifecycle.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_probe_fairness_tests.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests/probe_recovery.rs
   - v3/crates/routecodex-v3-runtime/src/hooks.rs
@@ -4888,8 +4890,13 @@ features:
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests/cooldown_exhaustion.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/aggregate_probe_lifecycle.rs
   - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
   - v3/crates/routecodex-v3-server/tests/fa22072_recovery_isolation.rs
+  - v3/crates/routecodex-v3-server/tests/fa22072_exec_probe_rollback.rs
+  - v3/crates/routecodex-v3-server/tests/fa22072_probe_fairness.rs
+  - v3/crates/routecodex-v3-server/tests/support/fa22072_probe_fairness_fixture.rs
+  - v3/crates/routecodex-v3-cli/tests/managed_lifecycle/fa22072_probe_rollback.rs
   resource_bindings:
   - v3.provider.global_subscription_health
   - v3.provider.auth_key_cooldown_state
@@ -4906,6 +4913,11 @@ features:
   - v3-rd-target-select-anthropic-relay-admission-rescue
   - v3-provider-admission-lease-lifecycle
   - v3-provider-global-probe-http-status
+  - v3-provider-global-probe-02
+  - v3-provider-global-probe-02-owner
+  - v3-provider-global-probe-02-resume
+  - v3-provider-global-probe-02-quiesce
+  - v3-provider-global-probe-02-schedule
   entry_symbols:
   - build_v3_provider_global_error_fingerprint
   - build_v3_provider_global_error_fingerprint_from_classified
@@ -4926,6 +4938,11 @@ features:
   - V3ProviderHealthStore::cooldown_entries
   - V3ProviderFailureRuntimeHealth::run_due_provider_health_probes
   - V3ProviderFailureRuntimeHealth::aggregate_provider_probe_lifecycle
+  - V3ProviderFailureRuntimeHealth::aggregate_provider_probe_lifecycle_resume
+  - V3ProviderFailureRuntimeHealth::aggregate_provider_probe_scheduler
+  - AggregateProbeLifecycle::start
+  - AggregateProbeLifecycle::quiesce
+  - AggregateProbeLifecycle::join
   - V3ProviderFailureRuntimeHealth::initiate_cooldown_rescue_probe
   - V3ProviderFailureRuntimeHealth::managed_probe
   - complete_v3_provider_health_probe
@@ -4990,12 +5007,17 @@ features:
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests/cooldown_exhaustion.rs
   - v3/crates/routecodex-v3-runtime/src/provider_probe_lifecycle.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_probe_fairness_tests.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests/probe_recovery.rs
   - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
   - v3/crates/routecodex-v3-server/tests/fa22072_recovery_isolation.rs
+  - v3/crates/routecodex-v3-server/tests/fa22072_exec_probe_rollback.rs
+  - v3/crates/routecodex-v3-server/tests/fa22072_probe_fairness.rs
+  - v3/crates/routecodex-v3-server/tests/support/fa22072_probe_fairness_fixture.rs
   - v3/crates/routecodex-v3-runtime/tests/gemini_relay_runtime_integration.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/aggregate_probe_lifecycle.rs
   - v3/crates/routecodex-v3-error/src/subscription.rs
   - v3/scripts/architecture/verify-v3-provider-session-cooldown.mjs
   - v3/scripts/tests/v3-provider-session-cooldown-red-fixtures.mjs
@@ -5015,6 +5037,10 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime runtime_policy_maps_account_and_recoverable_http_classes_to_global_health -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime cooldown_exhaustion --lib -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_recovery_isolation -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_exec_probe_rollback -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test managed_lifecycle fa22072_probe_rollback -- --test-threads=1 --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_probe_fairness -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib provider_probe_fairness_tests -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime later_tier_selection_skips_in_flight_rescue_probes_without_waiting --lib -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime provider_concurrency --lib -- --nocapture
   - npm run test:v3-provider-adaptive-concurrency

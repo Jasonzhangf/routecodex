@@ -33,6 +33,9 @@ mod previous_release_restart;
 #[path = "managed_lifecycle/hooks_target_restart.rs"]
 mod hooks_target_restart;
 
+#[path = "managed_lifecycle/fa22072_probe_rollback.rs"]
+mod fa22072_probe_rollback;
+
 struct P0ManagedProcess {
     pid: u32,
 }

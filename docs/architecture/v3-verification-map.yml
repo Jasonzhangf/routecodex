@@ -248,6 +248,7 @@ features:
   - v3/crates/routecodex-v3-lifecycle
   - v3/crates/routecodex-v3-cli
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/aggregate_probe_lifecycle.rs
   - v3/crates/routecodex-v3-config/src/store.rs
   design:
   - docs/goals/v3-managed-live-server-lifecycle-plan.md
@@ -3285,6 +3286,8 @@ features:
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests/cooldown_exhaustion.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
   - v3/crates/routecodex-v3-server/tests/fa22072_recovery_isolation.rs
+  - v3/crates/routecodex-v3-server/tests/fa22072_exec_probe_rollback.rs
+  - v3/crates/routecodex-v3-server/tests/fa22072_probe_fairness.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
@@ -3297,6 +3300,8 @@ features:
   - late_probe_outcomes_cannot_release_replacement_or_sibling_owners and acquired_owner_release_preserves_due_time_and_rejects_late_a_after_actual_b prove same-generation replacement ownership, non-default interface and exact sibling isolation, and deterministic due-time admission
   - newer_business_generation_shutdown_releases_held_probe_owner, newer_business_generation_exec_releases_held_probe_owner, and newer_business_generation_drop_releases_held_probe_owner prove authenticated held probe release after genuine same-identity earlier business403, while healthy business completes before cancellation; an already accepted read-only public HTTP connection observes original in-memory state after listener exit
   - public Chat HTTP proves cooldown-only failed rescue closes the exhausted request without client status, error payload or fabricated success, preserves exact-identity cooldown and permits healthy sibling progress
+  - rejected, cancelled or dropped reversible exec preparation restores the sole aggregate probe owner before business admission resumes; restored scheduling preserves future due deadlines and an authenticated due probe restores only its exact cooled identity before subsequent successful business
+  - fair scheduling reaches an independently available fifth due identity while four earlier identities retain real business transport leases; capacity rejection remains health-neutral and the four manager slots stay bounded
   - each health-excluded provider+auth_alias+model identity stays visible in the cooldown pool; due waiting and in-flight probes are cooldown substates until exact HTTP 2xx probe recovery
   - 429 cooldown and HTTP 2xx recovery cases exercise the public managed listener, exact-key business failures, stalled probe visibility, spare-key routing, and automatically recovered same-key business dispatch
   - Responses, OpenAI Chat, Anthropic, and Gemini probes send a simple ping and accept every HTTP 2xx response without reading the success body or validating content type, JSON, embedded errors, terminal status, or pong text
@@ -3336,6 +3341,10 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime cooldown_exhaustion --lib -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime provider_failure_runtime_policy --lib -- --test-threads=1 --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_recovery_isolation -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_exec_probe_rollback -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test managed_lifecycle fa22072_probe_rollback -- --test-threads=1 --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_probe_fairness -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib provider_probe_fairness_tests -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server pool_empty_recovery -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_provider_concurrency_ -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_direct_provider_http_error_never_reaches_the_client -- --exact --nocapture

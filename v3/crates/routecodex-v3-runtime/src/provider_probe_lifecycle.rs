@@ -1,6 +1,10 @@
 type V3ManagedProbe =
     std::pin::Pin<Box<dyn Future<Output = Result<V3ProbeCompletion, String>> + Send>>;
 
+#[cfg(test)]
+#[path = "provider_probe_fairness_tests.rs"]
+mod provider_probe_fairness_tests;
+
 #[derive(Debug)]
 enum V3ProbeCompletion {
     Recovered,
@@ -63,7 +67,25 @@ impl V3ProviderFailureRuntimeHealth {
     pub fn aggregate_provider_probe_lifecycle(
         &self,
         manifest: std::sync::Arc<V3Config05ManifestPublished>,
+        shutdown: tokio::sync::oneshot::Receiver<()>,
+    ) -> Result<impl Future<Output = ()> + Send + 'static, String> {
+        self.aggregate_provider_probe_scheduler(manifest, shutdown, true)
+    }
+
+    // A retained aggregate resumes the stored schedule, not the startup sweep.
+    pub fn aggregate_provider_probe_lifecycle_resume(
+        &self,
+        manifest: std::sync::Arc<V3Config05ManifestPublished>,
+        shutdown: tokio::sync::oneshot::Receiver<()>,
+    ) -> Result<impl Future<Output = ()> + Send + 'static, String> {
+        self.aggregate_provider_probe_scheduler(manifest, shutdown, false)
+    }
+
+    fn aggregate_provider_probe_scheduler(
+        &self,
+        manifest: std::sync::Arc<V3Config05ManifestPublished>,
         mut shutdown: tokio::sync::oneshot::Receiver<()>,
+        mut startup: bool,
     ) -> Result<impl Future<Output = ()> + Send + 'static, String> {
         let (sender, mut receiver) =
             tokio::sync::mpsc::channel(V3_PROVIDER_HEALTH_PROBE_MAX_CONCURRENCY);
@@ -86,7 +108,7 @@ impl V3ProviderFailureRuntimeHealth {
         Ok(async move {
             let mut pending = FuturesUnordered::<V3ManagedProbe>::new();
             let mut interval = tokio::time::interval(Duration::from_secs(1));
-            let mut startup = true;
+            let mut last_considered = None;
             loop {
                 tokio::select! {
                     biased;
@@ -105,13 +127,21 @@ impl V3ProviderFailureRuntimeHealth {
                             Ok(now_ms) => now_ms,
                             Err(error) => { eprintln!("provider probe clock failed: {error}"); continue; }
                         };
-                        let keys = match health.store.provider_cooldown_probe_keys_with_interface(now_ms, startup) {
+                        let mut keys = match health.store.provider_cooldown_probe_keys_with_interface(now_ms, startup) {
                             Ok(keys) => keys,
                             Err(error) => { eprintln!("provider probe scheduling failed: {error}"); continue; }
                         };
                         startup = false;
-                        for (provider_id, interface_id, auth_alias, model_id) in keys {
+                        if let Some(last) = &last_considered {
+                            let next = keys.partition_point(|key| key <= last);
+                            keys.rotate_left(next);
+                        }
+                        for key in keys {
                             let Ok(slot) = capacity.clone().try_acquire_owned() else { break; };
+                            // Advance even if acquisition is denied or fails. Full
+                            // capacity leaves this cursor at the last considered key.
+                            last_considered = Some(key.clone());
+                            let (provider_id, interface_id, auth_alias, model_id) = key;
                             match health.store.acquire_provider_cooldown_probe_for_interface(
                                 &provider_id, &interface_id, auth_alias.as_deref(), model_id.as_deref(),
                             ) {

@@ -1,3 +1,4 @@
+mod aggregate_probe_lifecycle;
 mod client_sse_transport;
 mod client_transport_observation;
 mod compaction_request;
@@ -252,8 +253,7 @@ pub struct V3ListenerHandle {
 #[derive(Debug)]
 pub struct V3ServerAggregateHandle {
     pub listeners: Vec<V3ListenerHandle>,
-    probe_shutdown: Option<oneshot::Sender<()>>,
-    probe_task: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+    probe_lifecycle: aggregate_probe_lifecycle::AggregateProbeLifecycle,
     request_activity_gate: Arc<V3ServerRequestActivityGate>,
     front_transport_broker: V3FrontTransportBroker,
     provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
@@ -267,6 +267,7 @@ pub struct V3ServerExecPreparation {
     pub codex_sample_persist_failures: Vec<routecodex_v3_debug::V3CodexSamplePersistFailure>,
     _codex_sample_exec_guard: Option<routecodex_v3_debug::V3CodexSampleExecGuard>,
     _maintenance_guard: Option<V3ServerMaintenanceGuard>,
+    _probe_quiescence_guard: Option<aggregate_probe_lifecycle::ProbeQuiescenceGuard>,
 }
 
 pub fn build_v3_server_startup_01_listener_set_from_config_05(
@@ -284,25 +285,9 @@ pub fn build_v3_server_startup_01_listener_set_from_config_05(
 }
 
 impl V3ServerAggregateHandle {
-    async fn cancel_and_join_probes(&self) {
-        let task = self
-            .probe_task
-            .lock()
-            .expect("aggregate probe task lock")
-            .take();
-        if let Some(task) = task {
-            task.abort();
-            if let Err(error) = task.await {
-                if !error.is_cancelled() {
-                    eprintln!("aggregate probe task failed: {error}");
-                }
-            }
-        }
-    }
-
     pub async fn prepare_exec_attempt(&self) -> Result<V3ServerExecPreparation, String> {
         let maintenance_guard = self.request_activity_gate.begin_maintenance().await;
-        self.cancel_and_join_probes().await;
+        let probe_quiescence_guard = self.probe_lifecycle.quiesce(maintenance_guard).await?;
         self.flush_runtime_persistence();
         let codex_sample_exec_guard = match self.codex_sample_persist_worker.as_ref() {
             Some(worker) => match tokio::time::timeout(
@@ -333,7 +318,8 @@ impl V3ServerAggregateHandle {
             front_checkpoints: self.front_transport_broker.freeze(Instant::now()),
             codex_sample_persist_failures,
             _codex_sample_exec_guard: codex_sample_exec_guard,
-            _maintenance_guard: Some(maintenance_guard),
+            _maintenance_guard: None,
+            _probe_quiescence_guard: Some(probe_quiescence_guard),
         })
     }
 
@@ -351,15 +337,13 @@ impl V3ServerAggregateHandle {
     }
 
     pub async fn shutdown(mut self) -> Vec<routecodex_v3_debug::V3CodexSamplePersistFailure> {
+        self.probe_lifecycle.terminate();
+        self.probe_lifecycle.join().await;
         self.flush_runtime_persistence();
         let codex_sample_persist_failures = match self.codex_sample_persist_worker.take() {
             Some(mut worker) => worker.shutdown().await,
             None => Vec::new(),
         };
-        if let Some(shutdown) = self.probe_shutdown.take() {
-            let _ = shutdown.send(());
-        }
-        self.cancel_and_join_probes().await;
         for listener in &mut self.listeners {
             if let Some(shutdown) = listener.shutdown.take() {
                 let _ = shutdown.send(());
@@ -371,8 +355,9 @@ impl V3ServerAggregateHandle {
     /// Stop new business dispatch, wait for accepted requests to finish, then
     /// close the remaining idle transports before exec replacement.
     pub async fn prepare_for_exec(mut self) -> V3ServerExecPreparation {
+        self.probe_lifecycle.terminate();
         let maintenance_guard = self.request_activity_gate.begin_maintenance().await;
-        self.cancel_and_join_probes().await;
+        self.probe_lifecycle.join().await;
         for listener in &mut self.listeners {
             if let Some(shutdown) = listener.shutdown.take() {
                 let _ = shutdown.send(());
@@ -389,14 +374,12 @@ impl V3ServerAggregateHandle {
             Some(mut worker) => worker.shutdown().await,
             None => Vec::new(),
         };
-        if let Some(shutdown) = self.probe_shutdown.take() {
-            let _ = shutdown.send(());
-        }
         V3ServerExecPreparation {
             front_checkpoints: checkpoints,
             codex_sample_persist_failures,
             _codex_sample_exec_guard: None,
             _maintenance_guard: Some(maintenance_guard),
+            _probe_quiescence_guard: None,
         }
     }
 
@@ -464,14 +447,7 @@ impl V3ServerAggregateHandle {
 
 impl Drop for V3ServerAggregateHandle {
     fn drop(&mut self) {
-        if let Some(task) = self
-            .probe_task
-            .get_mut()
-            .expect("aggregate probe task lock")
-            .take()
-        {
-            task.abort();
-        }
+        self.probe_lifecycle.terminate();
     }
 }
 
@@ -741,17 +717,14 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
     if console_enabled {
         emit_v3_startup_console_line(&listeners);
     }
-    let (probe_shutdown, probe_shutdown_rx) = oneshot::channel();
-    let probe_health = Arc::clone(&provider_health).runtime_health();
-    let probe_task = tokio::spawn(
-        probe_health
-            .aggregate_provider_probe_lifecycle(Arc::clone(&manifest), probe_shutdown_rx)
-            .map_err(std::io::Error::other)?,
-    );
+    let probe_lifecycle = aggregate_probe_lifecycle::AggregateProbeLifecycle::start(
+        Arc::clone(&manifest),
+        Arc::clone(&provider_health),
+    )
+    .map_err(std::io::Error::other)?;
     Ok(V3ServerAggregateHandle {
         listeners,
-        probe_shutdown: Some(probe_shutdown),
-        probe_task: std::sync::Mutex::new(Some(probe_task)),
+        probe_lifecycle,
         request_activity_gate,
         front_transport_broker,
         provider_health,
