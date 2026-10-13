@@ -41,11 +41,7 @@ pub(crate) use crate::provider_failure_global_probe::probe_v3_provider_global_ta
 
 struct V3ProviderProbeCancellationGuard {
     store: V3ProviderHealthStore,
-    provider_id: String,
-    interface_id: String,
-    auth_alias: Option<String>,
-    model_id: Option<String>,
-    expected_generation: u64,
+    permit: routecodex_v3_provider_responses::V3ProviderHealthProbePermit,
 }
 
 const V3_PROVIDER_HEALTH_PROBE_MAX_CONCURRENCY: usize = 4;
@@ -57,19 +53,16 @@ pub enum V3ProviderHealthProbeFailure {
     ConcurrencyBusy,
 }
 
-async fn execute_provider_health_probe<F, Fut>(
+fn execute_provider_health_probe<F, Fut>(
     store: V3ProviderHealthStore,
     permit: routecodex_v3_provider_responses::V3ProviderHealthProbePermit,
     probe: F,
-) -> (
-    V3ProviderProbeCancellationGuard,
-    String,
-    String,
-    Option<String>,
-    Option<String>,
-    u64,
-    Result<(), V3ProviderHealthProbeFailure>,
-)
+) -> impl Future<
+    Output = (
+        V3ProviderProbeCancellationGuard,
+        Result<(), V3ProviderHealthProbeFailure>,
+    ),
+>
 where
     F: Fn(String, String, Option<String>, Option<String>) -> Fut,
     Fut: Future<Output = Result<(), V3ProviderHealthProbeFailure>>,
@@ -78,44 +71,22 @@ where
     let interface_id = permit.interface_id().to_string();
     let auth_alias = permit.auth_alias().map(str::to_string);
     let model_id = permit.model_id().map(str::to_string);
-    let expected_generation = permit.expected_generation();
-    let cancellation = V3ProviderProbeCancellationGuard {
-        store,
-        provider_id: provider_id.clone(),
-        interface_id: interface_id.clone(),
-        auth_alias: auth_alias.clone(),
-        model_id: model_id.clone(),
-        expected_generation,
-    };
-    let result = probe(
-        provider_id.clone(),
-        interface_id.clone(),
-        auth_alias.clone(),
-        model_id.clone(),
-    )
-    .await;
-    (
-        cancellation,
-        provider_id,
-        interface_id,
-        auth_alias,
-        model_id,
-        expected_generation,
-        result,
-    )
+    let cancellation = V3ProviderProbeCancellationGuard { store, permit };
+    async move {
+        let result = probe(
+            provider_id.clone(),
+            interface_id.clone(),
+            auth_alias.clone(),
+            model_id.clone(),
+        )
+        .await;
+        (cancellation, result)
+    }
 }
 
 impl Drop for V3ProviderProbeCancellationGuard {
     fn drop(&mut self) {
-        let _ = self
-            .store
-            .cancel_provider_cooldown_probe_at_generation_for_interface(
-                &self.provider_id,
-                &self.interface_id,
-                self.auth_alias.as_deref(),
-                self.model_id.as_deref(),
-                self.expected_generation,
-            );
+        let _ = self.store.cancel_provider_cooldown_probe(&self.permit);
     }
 }
 
@@ -421,6 +392,7 @@ pub struct V3ProviderFailureRuntimeHealth {
     store: V3ProviderHealthStore,
     action_gate: V3ProviderActionGate,
     default_same_provider_retries: usize,
+    probe_owner: std::sync::Arc<std::sync::Mutex<Option<V3ManagedProbeSender>>>,
 }
 
 impl V3ProviderSchedulingReader for V3ProviderFailureRuntimeHealth {
@@ -530,6 +502,7 @@ impl From<V3ProviderHealthStore> for V3ProviderFailureRuntimeHealth {
     fn from(store: V3ProviderHealthStore) -> Self {
         Self {
             store,
+            probe_owner: Default::default(),
             action_gate: V3ProviderActionGate::process_shared(),
             default_same_provider_retries: 0,
         }
@@ -1199,6 +1172,7 @@ pub(crate) fn resolve_v3_relay_target_outcome(
 }
 
 include!("provider_cooldown_rescue.rs");
+include!("provider_probe_lifecycle.rs");
 
 fn target_resolution_source(
     stage: &'static str,

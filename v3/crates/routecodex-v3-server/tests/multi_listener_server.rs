@@ -7630,7 +7630,7 @@ async fn p6_provider_503_never_reaches_a_streaming_client() {
 #[tokio::test]
 async fn responses_selection_exhaustion_never_reaches_the_client() {
     let _test_guard = TEST_LOCK.lock().await;
-    let (success_base_url, _captures, success_shutdown) = start_controlled_upstream().await;
+    let (success_base_url, mut captures, success_shutdown) = start_controlled_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-selection-exhaustion");
     let handle = spawn_v3_server_aggregate(p6_manifest_with_context_window(
         free_port(),
@@ -7643,21 +7643,38 @@ async fn responses_selection_exhaustion_never_reaches_the_client() {
     let client = reqwest::Client::new();
     let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
 
-    // Positive control: a request inside every candidate's window is served
-    // normally, so the transport break below can only come from real exhaustion.
+    // Positive control: the same upstream serves real business content while
+    // its provider is enabled.
     let served = client
         .post(&endpoint)
         .json(&json!({"model":"client-test","input":"hello"}))
         .send()
         .await
-        .expect("a request inside the window must be served");
+        .expect("an enabled provider must serve the control request");
     assert_eq!(served.status(), StatusCode::OK);
+    let served_body: Value = served.json().await.unwrap();
+    assert_eq!(served_body["output_text"], "ok");
+    assert_eq!(served_body["status"], "completed");
+    let control_capture = captures.recv().await.unwrap();
+    assert_eq!(
+        control_capture.body["input"],
+        json!([{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}])
+    );
+    assert!(captures.try_recv().is_err());
+    handle.shutdown().await;
 
-    // Selection-time pool exhaustion: every candidate is excluded by the
-    // context window before any provider attempt, so no upstream status exists
-    // and the client boundary is a transport break, never a synthesized 502.
+    // A separate declared manifest disables every candidate provider. This
+    // causes genuine selection exhaustion without rejecting context estimates.
+    let mut manifest =
+        p6_manifest_with_context_window(free_port(), free_port(), &success_base_url, 2_000);
+    for provider in manifest.providers.values_mut() {
+        provider.enabled = false;
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let addr = handle.listeners[0].addr;
+    let endpoint = format!("http://{addr}/v1/responses");
     let long_input = "context window exhaustion probe ".repeat(600);
-    let streaming = client
+    let mut streaming = client
         .post(&endpoint)
         .json(&json!({"model":"client-test","input":long_input,"stream":true}))
         .send()
@@ -7665,9 +7682,24 @@ async fn responses_selection_exhaustion_never_reaches_the_client() {
         .expect("a streaming client must receive the SSE response head");
     assert_eq!(streaming.status(), StatusCode::OK);
     assert_eq!(streaming.headers()["content-type"], "text/event-stream");
+    let mut stream_bytes = Vec::new();
+    loop {
+        match streaming.chunk().await {
+            Ok(Some(chunk)) => stream_bytes.extend_from_slice(&chunk),
+            Err(_) => break,
+            Ok(None) => panic!("an exhausted selection must abort the streaming body"),
+        }
+    }
+    let stream_text = String::from_utf8(stream_bytes).unwrap();
     assert!(
-        streaming.text().await.is_err(),
-        "an exhausted selection must abort the streaming body instead of projecting a 502"
+        stream_text.starts_with(":"),
+        "SSE must emit a transport comment: {stream_text}"
+    );
+    assert!(
+        stream_text
+            .lines()
+            .all(|line| line.is_empty() || line.starts_with(':')),
+        "SSE exhaustion must emit only comments, no business/error/DONE events: {stream_text}"
     );
 
     let nonstreaming = client
@@ -7678,6 +7710,23 @@ async fn responses_selection_exhaustion_never_reaches_the_client() {
     assert!(
         nonstreaming.is_err(),
         "an exhausted selection must close the nonstreaming client without a payload"
+    );
+    let body = serde_json::to_vec(&json!({"model":"client-test","input":long_input})).unwrap();
+    let mut socket = TcpStream::connect(addr).await.unwrap();
+    socket.write_all(format!("POST /v1/responses HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).as_bytes()).await.unwrap();
+    socket.write_all(&body).await.unwrap();
+    let mut wire = Vec::new();
+    timeout(Duration::from_secs(5), socket.read_to_end(&mut wire))
+        .await
+        .expect("JSON exhaustion must terminate promptly")
+        .unwrap();
+    assert!(
+        wire.is_empty(),
+        "JSON exhaustion must send zero response bytes: {wire:?}"
+    );
+    assert!(
+        captures.try_recv().is_err(),
+        "disabled providers must receive no requests after control"
     );
 
     std::env::remove_var("V3_P6_TEST_KEY");

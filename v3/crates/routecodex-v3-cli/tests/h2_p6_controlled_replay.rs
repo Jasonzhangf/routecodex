@@ -1102,6 +1102,7 @@ fn start_cli_server(config_path: &H2Config, _ports: Vec<u16>) -> CliProcess {
         .env("ROUTECODEX_V3_H2_SUCCESS_KEY", "h2-success-secret")
         .env("ROUTECODEX_V3_H2_FAILURE_A_KEY", "h2-failure-a-secret")
         .env("ROUTECODEX_V3_H2_FAILURE_B_KEY", "h2-failure-b-secret")
+        .env("HOME", &temp_dir)
         .env("TMPDIR", &temp_dir)
         .env("TMP", &temp_dir)
         .env("TEMP", &temp_dir)

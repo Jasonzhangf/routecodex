@@ -531,7 +531,7 @@ requireMatch(
 );
 requireMatch(
   source.cooldownRescue,
-  /acquire_provider_cooldown_rescue_probe[\s\S]*probe_v3_provider_global_target[\s\S]*complete_provider_cooldown_probe_success_at_generation/u,
+  /acquire_provider_cooldown_rescue_probe[\s\S]*probe_v3_provider_global_target[\s\S]*complete_provider_cooldown_probe_success_with_permit/u,
   "Runtime rescue owner must require a successful provider probe before revival",
 );
 requireMatch(

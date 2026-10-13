@@ -125,13 +125,7 @@ fn no_first_failure_default_counts_real_failure_and_success_resets_exact_identit
         .expect("matching due semantic probe");
     health
         .store()
-        .complete_provider_cooldown_probe_success_at_generation(
-            permit.provider_id(),
-            permit.auth_alias(),
-            permit.model_id(),
-            5_105,
-            Some(permit.expected_generation()),
-        )
+        .complete_provider_cooldown_probe_success_with_permit(&permit, 5_105)
         .unwrap();
     assert!(
         health

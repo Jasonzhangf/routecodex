@@ -2,6 +2,7 @@ use super::*;
 
 async fn assert_busy_candidate_preserves_peer_recovery(direct: bool) {
     let _guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("pool-empty-recovery");
     let (first_url, mut first_captures, first_release, first_shutdown) =
         start_controlled_held_upstream().await;
     let (second_url, mut second_captures, second_shutdown) =

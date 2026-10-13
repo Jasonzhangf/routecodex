@@ -1635,7 +1635,7 @@ targets = [
 }
 
 #[test]
-fn context_admission_filters_over_limit_candidates() {
+fn context_admission_estimate_is_advisory_ordering() {
     let source = r#"
 version = 3
 [servers.s]
@@ -1799,11 +1799,10 @@ targets = [
         )
         .unwrap();
     assert_eq!(selected_oversized.candidate.provider_id, "long");
-    assert!(selected_oversized
-        .unavailable_candidates
-        .iter()
-        .any(|entry| entry
-            == "short:key:m:context_window_exceeded(input_tokens=1001,max_context_tokens=1000)"));
+    assert!(
+        selected_oversized.unavailable_candidates.is_empty(),
+        "an eligible over-estimate candidate remains selectable and is not recorded unavailable"
+    );
 
     let classified = router
         .classify_request_with_facts(
@@ -1826,7 +1825,10 @@ targets = [
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    let exhausted_scaled = target
+    // The estimate over-runs both windows, but the estimate is advisory: the
+    // higher-priority candidate stays selectable so the request still reaches a
+    // provider that can accept it, and the reason is kept as ordering evidence.
+    let selected_scaled = target
         .select_available(
             expanded,
             &Availability {
@@ -1834,12 +1836,12 @@ targets = [
             },
             0,
         )
-        .expect_err("candidate-specific context estimate scale must filter before transport");
-    assert!(exhausted_scaled
-        .attempted_candidates
-        .iter()
-        .any(|reason| reason
-            == "long:key:m:context_window_exceeded(input_tokens=4080,max_context_tokens=4000)"));
+        .expect("an estimate over every declared window must not exhaust the pool");
+    assert_eq!(selected_scaled.candidate.provider_id, "long");
+    assert!(
+        selected_scaled.unavailable_candidates.is_empty(),
+        "eligible over-estimate ordering evidence is not recorded as unavailable"
+    );
 
     let classified = router
         .classify_request_with_facts(
@@ -1862,7 +1864,7 @@ targets = [
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    let exhausted = target
+    let selected_all_over = target
         .select_available(
             expanded,
             &Availability {
@@ -1870,12 +1872,12 @@ targets = [
             },
             0,
         )
-        .unwrap_err();
-    assert_eq!(exhausted.attempted_candidates.len(), 2);
-    assert!(exhausted
-        .attempted_candidates
-        .iter()
-        .all(|entry| entry.contains(":context_window_exceeded(")));
+        .expect("every candidate over the estimate still yields a selectable candidate");
+    assert_eq!(selected_all_over.candidate.provider_id, "long");
+    assert!(
+        selected_all_over.unavailable_candidates.is_empty(),
+        "the estimate cannot make every otherwise-eligible candidate unavailable"
+    );
 }
 
 #[test]
@@ -1949,11 +1951,10 @@ targets = [
         .unwrap();
 
     assert_eq!(selected.candidate.provider_id, "long");
-    assert!(selected
-        .unavailable_candidates
-        .iter()
-        .any(|entry| entry
-            == "implicit:key:m:context_window_exceeded(input_tokens=200001,max_context_tokens=200000)"));
+    assert!(
+        selected.unavailable_candidates.is_empty(),
+        "an eligible default-floor over-estimate is ordering evidence, not unavailability"
+    );
 }
 
 #[test]
@@ -2027,9 +2028,10 @@ targets = [{ kind = "provider_model", provider = "low", model = "m", key = "key"
         selected.candidate.provider_id, "high",
         "a near-limit candidate in a higher route tier must not be filtered out by a lower-tier normal candidate"
     );
-    assert!(selected.unavailable_candidates.iter().any(|entry| {
-        entry == "high:key:m:context_window_near_limit(input_tokens=950,max_context_tokens=1000)"
-    }));
+    assert!(
+        selected.unavailable_candidates.is_empty(),
+        "an eligible near-limit candidate is ordering evidence, not unavailable"
+    );
 }
 
 #[test]
@@ -2106,9 +2108,10 @@ targets = [{ kind = "provider_model", provider = "normal", model = "m", key = "k
         selected.candidate.provider_id, "high",
         "a near-limit candidate in a higher route-pool priority tier must not yield to a lower-tier normal candidate"
     );
-    assert!(selected.unavailable_candidates.iter().any(|entry| {
-        entry == "high:key:m:context_window_near_limit(input_tokens=930000,max_context_tokens=1000000)"
-    }));
+    assert!(
+        selected.unavailable_candidates.is_empty(),
+        "an eligible near-limit candidate is ordering evidence, not unavailable"
+    );
 }
 
 #[test]
@@ -2178,13 +2181,14 @@ targets = [
         .unwrap();
 
     assert_eq!(selected.candidate.provider_id, "normal");
-    assert!(selected.unavailable_candidates.iter().any(|entry| {
-        entry == "near:key:m:context_window_near_limit(input_tokens=950,max_context_tokens=1000)"
-    }));
+    assert!(
+        selected.unavailable_candidates.is_empty(),
+        "an eligible near-limit candidate is ordering evidence, not unavailable"
+    );
 }
 
 #[test]
-fn context_admission_rejects_oversized_exact_pin_before_transport() {
+fn context_admission_admits_oversized_exact_pin_for_upstream_authority() {
     let source = r#"
 version = 3
 [servers.s]
@@ -2229,7 +2233,7 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    let exhausted = target
+    let selected = target
         .select_available(
             expanded,
             &Availability {
@@ -2237,11 +2241,11 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
             },
             0,
         )
-        .expect_err("an exact pin cannot bypass the context transport boundary");
-    assert_eq!(exhausted.attempted_candidates.len(), 1);
-    assert_eq!(
-        exhausted.attempted_candidates[0],
-        "pinned:key:m:context_window_exceeded(input_tokens=2000,max_context_tokens=1000)"
+        .expect("an exact pin stays selectable so the upstream owns the context verdict");
+    assert_eq!(selected.candidate.provider_id, "pinned");
+    assert!(
+        selected.unavailable_candidates.is_empty(),
+        "an eligible exact pin stays selectable without being marked unavailable"
     );
 
     let classified = router
@@ -2265,7 +2269,7 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    let exhaustion_over_limit = target
+    let selected_over_limit = target
         .select_available(
             expanded,
             &Availability {
@@ -2273,15 +2277,16 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
             },
             0,
         )
-        .expect_err("context-ineligible candidates must not enter the pool");
-    assert!(exhaustion_over_limit
-        .attempted_candidates
-        .iter()
-        .any(|entry| entry.contains("context_window_exceeded(")));
+        .expect("an over-estimate candidate remains selectable");
+    assert_eq!(selected_over_limit.candidate.provider_id, "pinned");
+    assert!(
+        selected_over_limit.unavailable_candidates.is_empty(),
+        "eligible context overflow stays outside unavailable_candidates"
+    );
 }
 
 #[test]
-fn context_admission_rejects_oversized_exact_pin() {
+fn context_admission_admits_oversized_exact_pin() {
     let source = r#"
 version = 3
 [servers.s]
@@ -2326,7 +2331,7 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    let exhausted = target
+    let selected = target
         .select_available(
             expanded,
             &Availability {
@@ -2334,11 +2339,12 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
             },
             0,
         )
-        .expect_err("an oversized exact pin must fail before transport");
-    assert!(exhausted
-        .attempted_candidates
-        .iter()
-        .any(|entry| entry.contains("context_window_exceeded(")));
+        .expect("an oversized exact pin stays selectable for the upstream verdict");
+    assert_eq!(selected.candidate.provider_id, "pinned");
+    assert!(
+        selected.unavailable_candidates.is_empty(),
+        "eligible context overflow stays outside unavailable_candidates"
+    );
 }
 
 #[test]
@@ -2387,7 +2393,7 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    let exhaustion_floor = target
+    let selected_floor = target
         .select_available(
             expanded,
             &Availability {
@@ -2395,11 +2401,12 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
             },
             0,
         )
-        .expect_err("default floor must not admit an over-context candidate");
-    assert!(exhaustion_floor
-        .attempted_candidates
-        .iter()
-        .any(|entry| entry.contains("context_window_exceeded(")));
+        .expect("the default floor candidate stays selectable for the upstream verdict");
+    assert_eq!(selected_floor.candidate.provider_id, "pinned");
+    assert!(
+        selected_floor.unavailable_candidates.is_empty(),
+        "eligible context overflow stays outside unavailable_candidates"
+    );
 }
 
 #[test]

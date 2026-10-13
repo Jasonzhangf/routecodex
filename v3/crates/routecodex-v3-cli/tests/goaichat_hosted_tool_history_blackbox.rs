@@ -2,7 +2,7 @@ use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
-use std::{ffi::OsString, net::TcpListener, sync::Arc, time::Duration};
+use std::{ffi::OsString, net::TcpListener, path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 
 #[path = "../../../crates/routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
@@ -40,6 +40,41 @@ impl Drop for CounterEnvironment {
         } else {
             std::env::remove_var("ROUTECODEX_REQUEST_ID_COUNTER_FILE");
         }
+    }
+}
+
+struct TestHomeGuard {
+    previous: Option<OsString>,
+    path: PathBuf,
+}
+
+impl TestHomeGuard {
+    fn new() -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "routecodex-v3-cli-goaichat-home-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path).unwrap();
+        let previous = std::env::var_os("HOME");
+        std::env::set_var("HOME", &path);
+        Self { previous, path }
+    }
+}
+
+impl Drop for TestHomeGuard {
+    fn drop(&mut self) {
+        if let Some(previous) = &self.previous {
+            std::env::set_var("HOME", previous);
+        } else {
+            std::env::remove_var("HOME");
+        }
+        let _ = std::fs::remove_dir_all(&self.path);
+        assert!(!self.path.exists(), "owned fixture home must be absent");
+        eprintln!(
+            "fixture-home-cleanup absent=true path={}",
+            self.path.display()
+        );
     }
 }
 
@@ -243,6 +278,7 @@ fn request(endpoint: &str, stream: bool) -> Value {
 
 async fn run_round_trip(endpoint: &str, stream: bool, profile: &str, strict: bool) {
     let _test_guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new();
     let _counter_environment = CounterEnvironment::new();
     std::env::set_var("V3_GOAICHAT_BLACKBOX_KEY", "controlled-external-peer");
     let captures = Arc::new(Mutex::new(Vec::new()));

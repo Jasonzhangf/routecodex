@@ -392,18 +392,19 @@ impl V3TargetInterpreter {
                 ));
                 continue;
             }
-            let mut near_limit = false;
-            if let Some(reason) =
+            // The context estimate is advisory ordering evidence, never an
+            // admission boundary or provider refusal. Preserve health,
+            // capability and request-local exclusion; demote an eligible
+            // candidate only inside its route tier when its scaled estimate
+            // is near or above its declared window.
+            let near_limit =
                 context_window_exceeded_reason(expanded.route.request_input_tokens, candidate)
-            {
-                unavailable.push(reason);
-                continue;
-            } else if let Some(reason) =
-                context_window_near_limit_reason(expanded.route.request_input_tokens, candidate)
-            {
-                unavailable.push(reason);
-                near_limit = true;
-            }
+                    .is_some()
+                    || context_window_near_limit_reason(
+                        expanded.route.request_input_tokens,
+                        candidate,
+                    )
+                    .is_some();
             // Earlier route tiers have precedence over later/default tiers.
             // Keep that precedence while candidate priority itself is ordered
             // descending (larger configured values win).
@@ -431,11 +432,6 @@ impl V3TargetInterpreter {
             projection.effective_priority =
                 route_priority.saturating_add(projection.effective_priority);
             if projection.available {
-                if context_window_exceeded_reason(expanded.route.request_input_tokens, candidate)
-                    .is_some()
-                {
-                    continue;
-                }
                 eligible.push((
                     index,
                     candidate,

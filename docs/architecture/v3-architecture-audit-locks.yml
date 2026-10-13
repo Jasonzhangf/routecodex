@@ -61,8 +61,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:e09b3524db5510c71781bc145a257d1283eebeac736120b4f8f5a69f06c04adf
-    last_manual_authorization_id: auth-20261003-all-entry-http-framing-no-client-error
+    fingerprint: sha256:a6f5ea2c676bd74cadfca78beb97c82e18902ac62a430032a705f6d6c68de8e2
+    last_manual_authorization_id: auth-20261013-fa22072-managed-probe-startup
   - item_id: chain:v3.responses_direct.required_mainline
     chain_id: v3.responses_direct.required_mainline
     status: audited_locked
@@ -450,9 +450,30 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-29T20:40:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:e8451e88f85861c9f3b9f77781c263b43ddb90586660c1ec5eec03b0d7c28245
-    last_manual_authorization_id: auth-20261010-status-only-provider-probe-stopgap
+    fingerprint: sha256:cd35afc13953c1bcc4aeeb62f174f46635af5bb1c416e4b7321a708d33454d9f
+    last_manual_authorization_id: auth-20261013-fa22072-probe-findings-closeout
 manual_authorizations:
+  - authorization_id: auth-20261013-fa22072-probe-findings-closeout
+    item_id: chain:v3.provider_global_subscription_probe
+    approved_by: Jason
+    approved_at: '2026-10-13T15:38:57Z'
+    reason: "Applies Jason's existing 授权本轮两项锁刷新 grant in Codex conversation 01a133d7-8d27-7641-9fbe-eadf32f40ec4 to the same fa22072 probe chain after the two independent review findings. The final chain binds the Server-owned reversible quiescence transaction, due-only restoration after rejected/cancelled preparation, and fair four-slot Runtime scheduling; exact acquisition ownership, one request rescue and internal-only failures remain. This is the existing grant, not a new approval or a review PASS. The startup fingerprint is unchanged and no other locked item is refreshed. Tests, findings recheck and CI are still required."
+    fingerprint_before: sha256:7b90085ad8931eab5bf1bc59a2921f9c7bfcb4b320901dd85cd2bba4b543b92c
+    fingerprint_after: sha256:cd35afc13953c1bcc4aeeb62f174f46635af5bb1c416e4b7321a708d33454d9f
+  - authorization_id: auth-20261013-fa22072-managed-probe-startup
+    item_id: chain:v3.server.startup
+    approved_by: Jason
+    approved_at: '2026-10-13T15:38:57Z'
+    reason: "Jason explicitly answered 授权本轮两项锁刷新 in Codex conversation 01a133d7-8d27-7641-9fbe-eadf32f40ec4. This bounded fa22072 refresh covers aggregate ownership of pending probes and cancellation/join at shutdown or exec. Listener startup remains advisory and provider/client error decoupling is unchanged. Tests, independent review, and CI remain required before delivery."
+    fingerprint_before: sha256:e09b3524db5510c71781bc145a257d1283eebeac736120b4f8f5a69f06c04adf
+    fingerprint_after: sha256:a6f5ea2c676bd74cadfca78beb97c82e18902ac62a430032a705f6d6c68de8e2
+  - authorization_id: auth-20261013-fa22072-probe-acquisition-ownership
+    item_id: chain:v3.provider_global_subscription_probe
+    approved_by: Jason
+    approved_at: '2026-10-13T15:38:57Z'
+    reason: "Jason explicitly answered 授权本轮两项锁刷新 in Codex conversation 01a133d7-8d27-7641-9fbe-eadf32f40ec4. This bounded fa22072 refresh covers one request-owned rescue pass followed by request-local exhaustion, and acquisition-identity probe release so a stale result cannot release a replacement owner. Exact provider health, status-only 2xx recovery, and internal errors remain with their declared owners. Tests, independent review, and CI remain required before delivery."
+    fingerprint_before: sha256:e8451e88f85861c9f3b9f77781c263b43ddb90586660c1ec5eec03b0d7c28245
+    fingerprint_after: sha256:7b90085ad8931eab5bf1bc59a2921f9c7bfcb4b320901dd85cd2bba4b543b92c
   - authorization_id: auth-20260929-v3-hooks-sidecar-chain-lock
     item_id: chain:v3.rcc_internal_hooks_sidecar
     approved_by: Jason

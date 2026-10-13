@@ -5,6 +5,239 @@ fn session(session_id: &str) -> V3ProviderFailureSessionScope {
     V3ProviderFailureSessionScope::new("server-a", "group-a", session_id).unwrap()
 }
 
+fn probe_stored_snapshot(
+    store: &V3ProviderHealthStore,
+    permit: &V3ProviderHealthProbePermit,
+) -> (String, String) {
+    let state = store.state.read().unwrap();
+    let key = provider_cooldown_probe_key_for_interface(
+        permit.provider_id(),
+        permit.interface_id(),
+        permit.auth_alias(),
+        permit.model_id(),
+    );
+    let mut probe = state.provider_cooldown_probes[&key].clone();
+    probe.active_probe = None;
+    (
+        format!("{probe:?}"),
+        format!("{:?}", state.adaptive_history.get(&key)),
+    )
+}
+
+fn finish_owned_probe(
+    store: &V3ProviderHealthStore,
+    permit: &V3ProviderHealthProbePermit,
+    outcome: &str,
+) {
+    match outcome {
+        "cancel" => store.cancel_provider_cooldown_probe(permit).unwrap(),
+        "success" => store
+            .complete_provider_cooldown_probe_success_with_permit(permit, 300)
+            .unwrap(),
+        "failure" => store
+            .complete_provider_cooldown_probe_failure_with_permit(permit, 300)
+            .unwrap(),
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn old_probe_outcomes_release_only_their_owner_and_preserve_stored_health() {
+    for outcome in ["cancel", "success", "failure"] {
+        let store = V3ProviderHealthStore::default();
+        let mut action = V3ProviderFailureAction::recoverable("transport");
+        action.failure_threshold = 1;
+        store
+            .record_provider_failure_action_for_interface("p", "alternate", "k", "m", &action, 100)
+            .unwrap();
+        let a = store
+            .acquire_provider_cooldown_rescue_probe_for_interface(
+                "p",
+                "alternate",
+                Some("k"),
+                Some("m"),
+            )
+            .unwrap()
+            .unwrap();
+        let newer = store
+            .record_provider_failure_action_for_interface("p", "alternate", "k", "m", &action, 200)
+            .unwrap();
+        assert!(newer.score_generation > a.expected_generation());
+        assert!(store
+            .acquire_provider_cooldown_probe_for_interface("p", "alternate", Some("k"), Some("m"))
+            .unwrap()
+            .is_none());
+        let before = probe_stored_snapshot(&store, &a);
+        finish_owned_probe(&store, &a, outcome);
+        assert_eq!(
+            before,
+            probe_stored_snapshot(&store, &a),
+            "{outcome} changed stored health/schedule"
+        );
+        let state = store.state.read().unwrap();
+        let key = provider_cooldown_probe_key_for_interface("p", "alternate", Some("k"), Some("m"));
+        let probe = &state.provider_cooldown_probes[&key];
+        assert!(
+            probe.active_probe.is_none(),
+            "{outcome} left ownerless probing"
+        );
+        assert!(
+            probe.rescue_probe_attempted,
+            "cancellation must not rearm rescue"
+        );
+        let due = probe.next_probe_at_ms.unwrap();
+        drop(state);
+        assert!(store
+            .acquire_provider_cooldown_probe_if_due_for_interface(
+                "p",
+                "alternate",
+                Some("k"),
+                Some("m"),
+                due - 1
+            )
+            .unwrap()
+            .is_none());
+        let b = store
+            .acquire_provider_cooldown_probe_if_due_for_interface(
+                "p",
+                "alternate",
+                Some("k"),
+                Some("m"),
+                due,
+            )
+            .unwrap()
+            .unwrap();
+        assert_ne!(a.acquisition_id, b.acquisition_id);
+        store.cancel_provider_cooldown_probe(&b).unwrap();
+    }
+}
+
+#[test]
+fn late_probe_outcomes_cannot_release_replacement_or_sibling_owners() {
+    for outcome in ["cancel", "success", "failure"] {
+        let store = V3ProviderHealthStore::default();
+        let mut siblings = Vec::new();
+        for (p, i, k, m) in [
+            ("p", "alternate", "k", "m"),
+            ("p", "default", "k", "m"),
+            ("p", "alternate", "sibling", "m"),
+            ("p", "alternate", "k", "sibling"),
+            ("sibling", "alternate", "k", "m"),
+        ] {
+            store
+                .add_cooldown_entry_for_interface(p, i, Some(k), Some(m), "probe", 60_000, 100)
+                .unwrap();
+            siblings.push(
+                store
+                    .acquire_provider_cooldown_probe_for_interface(p, i, Some(k), Some(m))
+                    .unwrap()
+                    .unwrap(),
+            );
+        }
+        let a = siblings.remove(0);
+        store.cancel_provider_cooldown_probe(&a).unwrap();
+        let b = store
+            .acquire_provider_cooldown_probe_for_interface("p", "alternate", Some("k"), Some("m"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(a.expected_generation(), b.expected_generation());
+        assert_ne!(a.acquisition_id, b.acquisition_id);
+        siblings.push(b);
+        let snapshots: Vec<_> = siblings
+            .iter()
+            .map(|p| probe_stored_snapshot(&store, p))
+            .collect();
+        finish_owned_probe(&store, &a, outcome);
+        for (permit, snapshot) in siblings.iter().zip(snapshots) {
+            assert_eq!(probe_stored_snapshot(&store, permit), snapshot);
+            let state = store.state.read().unwrap();
+            let key = provider_cooldown_probe_key_for_interface(
+                permit.provider_id(),
+                permit.interface_id(),
+                permit.auth_alias(),
+                permit.model_id(),
+            );
+            assert_eq!(
+                state.provider_cooldown_probes[&key].active_probe,
+                Some(permit.acquisition_id)
+            );
+            drop(state);
+            store.cancel_provider_cooldown_probe(permit).unwrap();
+        }
+    }
+}
+
+#[test]
+fn probe_acquisition_exhaustion_is_explicit_without_owning_or_reusing() {
+    let store = V3ProviderHealthStore::default();
+    store
+        .add_cooldown_entry_for_interface(
+            "p",
+            "default",
+            Some("k"),
+            Some("m"),
+            "probe",
+            60_000,
+            100,
+        )
+        .unwrap();
+    store.state.write().unwrap().last_probe_acquisition_id = u64::MAX;
+    assert!(matches!(
+        store.acquire_provider_cooldown_probe("p", Some("k"), Some("m")),
+        Err(V3ProviderHealthError::ProbeAcquisitionExhausted)
+    ));
+    assert_ne!(store.cooldown_entries(100)[0].state, "probing");
+}
+
+#[test]
+fn probe_acquisition_is_not_reused_after_cooldown_removal() {
+    let store = V3ProviderHealthStore::default();
+    store
+        .add_cooldown_entry_for_interface(
+            "p",
+            "default",
+            Some("k"),
+            Some("m"),
+            "probe",
+            60_000,
+            100,
+        )
+        .unwrap();
+    let a = store
+        .acquire_provider_cooldown_probe("p", Some("k"), Some("m"))
+        .unwrap()
+        .unwrap();
+    // Explicit administrative removal has its declared scope; it is not an
+    // acquired-probe completion. Reinsert the same identity while A still exists.
+    store
+        .remove_cooldown_entry_for_interface("p", "default", Some("k"), Some("m"), "probe")
+        .unwrap();
+    store
+        .add_cooldown_entry_for_interface(
+            "p",
+            "default",
+            Some("k"),
+            Some("m"),
+            "probe",
+            60_000,
+            200,
+        )
+        .unwrap();
+    let b = store
+        .acquire_provider_cooldown_probe("p", Some("k"), Some("m"))
+        .unwrap()
+        .unwrap();
+    assert_ne!(a.acquisition_id, b.acquisition_id);
+    for outcome in ["cancel", "success", "failure"] {
+        finish_owned_probe(&store, &a, outcome);
+        assert!(store
+            .acquire_provider_cooldown_probe("p", Some("k"), Some("m"))
+            .unwrap()
+            .is_none());
+    }
+    store.cancel_provider_cooldown_probe(&b).unwrap();
+}
+
 #[test]
 fn manifest_disabled_provider_is_projected_as_unavailable_by_provider_owner() {
     let manifest = compile_v3_config_05_manifest(
@@ -292,13 +525,7 @@ fn provider_key_model_policy_isolates_models_across_sessions() {
         "an in-flight probe must not expose its expired due time as a retry deadline"
     );
     store
-        .complete_provider_cooldown_probe_failure_at_generation(
-            permit.provider_id(),
-            permit.auth_alias(),
-            permit.model_id(),
-            5_101,
-            Some(permit.expected_generation()),
-        )
+        .complete_provider_cooldown_probe_failure_with_permit(&permit, 5_101)
         .unwrap();
     assert!(
         !store
@@ -509,17 +736,12 @@ fn success_in_any_session_does_not_recover_provider_cooldown_without_probe() {
         "a real success must not recover provider cooldown without probe success"
     );
 
-    store
+    let permit = store
         .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("gpt-5.5"))
         .unwrap()
         .expect("pending provider cooldown must acquire a probe");
     store
-        .complete_provider_cooldown_probe_success_at(
-            "provider-a",
-            Some("key-a"),
-            Some("gpt-5.5"),
-            106,
-        )
+        .complete_provider_cooldown_probe_success_with_permit(&permit, 106)
         .unwrap();
     assert!(
         store
@@ -593,14 +815,7 @@ fn cancelled_probe_releases_single_flight_for_the_same_generation() {
         .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("gpt-5.5"))
         .unwrap()
         .expect("blocked provider must acquire one probe");
-    store
-        .cancel_provider_cooldown_probe_at_generation(
-            "provider-a",
-            Some("key-a"),
-            Some("gpt-5.5"),
-            permit.expected_generation(),
-        )
-        .unwrap();
+    store.cancel_provider_cooldown_probe(&permit).unwrap();
     assert!(
         store
             .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("gpt-5.5"))
@@ -637,14 +852,7 @@ async fn cancelled_probe_wakes_cooldown_exhaustion_waiter() {
             .is_err()
     );
 
-    store
-        .cancel_provider_cooldown_probe_at_generation(
-            "provider-a",
-            Some("key-a"),
-            Some("gpt-5.5"),
-            permit.expected_generation(),
-        )
-        .unwrap();
+    store.cancel_provider_cooldown_probe(&permit).unwrap();
 
     let next_generation = tokio::time::timeout(std::time::Duration::from_millis(100), &mut wait)
         .await
@@ -654,7 +862,7 @@ async fn cancelled_probe_wakes_cooldown_exhaustion_waiter() {
 }
 
 #[test]
-fn stale_probe_cancellation_cannot_release_a_newer_generation() {
+fn stale_probe_cancellation_cannot_release_a_replacement_owner() {
     let store = V3ProviderHealthStore::default();
     store
         .record_provider_cooldown_failure(
@@ -670,23 +878,22 @@ fn stale_probe_cancellation_cannot_release_a_newer_generation() {
         .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("gpt-5.5"))
         .unwrap()
         .expect("blocked provider must acquire one probe");
-    store
-        .record_provider_key_success("provider-a", "key-a", "gpt-5.5", 101)
+    store.cancel_provider_cooldown_probe(&permit).unwrap();
+    let replacement = store
+        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("gpt-5.5"))
+        .unwrap()
         .unwrap();
-    store
-        .cancel_provider_cooldown_probe_at_generation(
-            "provider-a",
-            Some("key-a"),
-            Some("gpt-5.5"),
-            permit.expected_generation(),
-        )
-        .unwrap();
+    assert_eq!(
+        permit.expected_generation(),
+        replacement.expected_generation()
+    );
+    store.cancel_provider_cooldown_probe(&permit).unwrap();
     assert!(
         store
             .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("gpt-5.5"))
             .unwrap()
             .is_none(),
-        "stale cancellation must not release a newer generation probe"
+        "stale cancellation must not release a replacement probe at the same health generation"
     );
 }
 

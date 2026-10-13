@@ -2736,12 +2736,12 @@ fn provider_key_failure_uses_aggressive_probe_ladder_and_recovers() {
         .provider_cooldown_probe_keys_due(6_000)
         .unwrap()
         .contains(&exact_key));
-    assert!(store
+    let permit = store
         .acquire_provider_cooldown_probe("limited", Some("key1"), Some("gpt-5.5"))
         .unwrap()
-        .is_some());
+        .unwrap();
     store
-        .complete_provider_cooldown_probe_failure("limited", Some("key1"), Some("gpt-5.5"), 6_000)
+        .complete_provider_cooldown_probe_failure_with_permit(&permit, 6_000)
         .unwrap();
     assert!(store
         .provider_cooldown_probe_keys_due(15_999)
@@ -2752,12 +2752,12 @@ fn provider_key_failure_uses_aggressive_probe_ladder_and_recovers() {
         .unwrap()
         .contains(&exact_key));
 
-    assert!(store
+    let permit = store
         .acquire_provider_cooldown_probe("limited", Some("key1"), Some("gpt-5.5"))
         .unwrap()
-        .is_some());
+        .unwrap();
     store
-        .complete_provider_cooldown_probe_failure("limited", Some("key1"), Some("gpt-5.5"), 16_000)
+        .complete_provider_cooldown_probe_failure_with_permit(&permit, 16_000)
         .unwrap();
     assert!(store
         .provider_cooldown_probe_keys_due(45_999)
@@ -2768,17 +2768,12 @@ fn provider_key_failure_uses_aggressive_probe_ladder_and_recovers() {
         .unwrap()
         .contains(&exact_key));
 
-    assert!(store
+    let permit = store
         .acquire_provider_cooldown_probe("limited", Some("key1"), Some("gpt-5.5"))
         .unwrap()
-        .is_some());
+        .unwrap();
     store
-        .complete_provider_cooldown_probe_success_at(
-            "limited",
-            Some("key1"),
-            Some("gpt-5.5"),
-            46_000,
-        )
+        .complete_provider_cooldown_probe_success_with_permit(&permit, 46_000)
         .unwrap();
     assert!(
         store

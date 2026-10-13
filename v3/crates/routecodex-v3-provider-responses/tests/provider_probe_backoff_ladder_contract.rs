@@ -73,17 +73,12 @@ fn first_probe_is_due_exactly_5s_after_block_and_probe_success_resurrects() {
             )
             .available
     );
-    store
+    let permit = store
         .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
         .unwrap()
         .expect("due exact identity probe must be acquirable");
     store
-        .complete_provider_cooldown_probe_success_at(
-            "provider-a",
-            Some("key-a"),
-            Some("model-a"),
-            first_due,
-        )
+        .complete_provider_cooldown_probe_success_with_permit(&permit, first_due)
         .unwrap();
     assert!(
         store
@@ -314,20 +309,12 @@ fn probe_failures_cap_all_provider_errors_at_thirty_minutes() {
             "step {index} must be due at {due_at} (delta {delta})"
         );
         now_ms = due_at;
-        assert!(
-            store
-                .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
-                .unwrap()
-                .is_some(),
-            "probe permit missing at step {index}"
-        );
+        let permit = store
+            .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
+            .unwrap()
+            .unwrap_or_else(|| panic!("probe permit missing at step {index}"));
         store
-            .complete_provider_cooldown_probe_failure(
-                "provider-a",
-                Some("key-a"),
-                Some("model-a"),
-                now_ms,
-            )
+            .complete_provider_cooldown_probe_failure_with_permit(&permit, now_ms)
             .unwrap();
         assert!(
             !store
@@ -375,13 +362,7 @@ fn long_policy_probe_is_capped_at_thirty_minutes() {
             .unwrap()
             .expect("long cadence probe permit");
         store
-            .complete_provider_cooldown_probe_failure_at_generation(
-                "provider-a",
-                Some("key-a"),
-                Some("model-a"),
-                due_at,
-                Some(permit.expected_generation()),
-            )
+            .complete_provider_cooldown_probe_failure_with_permit(&permit, due_at)
             .unwrap();
         now_ms = due_at;
     }
@@ -443,13 +424,7 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "a", pr
             .unwrap()
             .expect("fast-recovery probe permit");
         store
-            .complete_provider_cooldown_probe_failure_at_generation(
-                "p",
-                Some("a"),
-                Some("m"),
-                due_at,
-                Some(permit.expected_generation()),
-            )
+            .complete_provider_cooldown_probe_failure_with_permit(&permit, due_at)
             .unwrap();
         now_ms = due_at;
     }

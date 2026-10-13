@@ -39,7 +39,11 @@ pub struct V3ProviderHealthProbePermit {
     auth_alias: Option<String>,
     model_id: Option<String>,
     expected_generation: u64,
+    pub(crate) acquisition_id: V3ProbeAcquisitionId,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct V3ProbeAcquisitionId(pub(crate) u64);
 
 impl V3ProviderHealthProbePermit {
     pub(crate) fn new(
@@ -48,6 +52,7 @@ impl V3ProviderHealthProbePermit {
         auth_alias: Option<String>,
         model_id: Option<String>,
         expected_generation: u64,
+        acquisition_id: V3ProbeAcquisitionId,
     ) -> Self {
         Self {
             provider_id,
@@ -55,6 +60,7 @@ impl V3ProviderHealthProbePermit {
             auth_alias,
             model_id,
             expected_generation,
+            acquisition_id,
         }
     }
 

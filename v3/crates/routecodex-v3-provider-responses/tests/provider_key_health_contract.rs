@@ -934,13 +934,7 @@ fn recoverable_key_probe_is_single_flight_and_global_probe_is_not_duplicated() {
         .expect("single-flight check")
         .is_none());
     store
-        .complete_probe_success_at_generation(
-            permit.provider_id(),
-            permit.auth_alias().expect("permit auth alias"),
-            permit.model_id().expect("permit model id"),
-            104,
-            Some(permit.expected_generation()),
-        )
+        .complete_provider_cooldown_probe_success_with_permit(&permit, 104)
         .expect("probe success");
 }
 
@@ -961,13 +955,7 @@ fn stale_probe_generation_cannot_clear_newer_failure_state() {
         .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 103)
         .expect("newer failure");
     store
-        .complete_probe_success_at_generation(
-            "provider-a",
-            "key-a",
-            "model-a",
-            104,
-            Some(permit.expected_generation()),
-        )
+        .complete_provider_cooldown_probe_success_with_permit(&permit, 104)
         .expect("stale probe completion is ignored without clearing newer state");
     assert!(store
         .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
@@ -993,13 +981,7 @@ fn stale_failed_probe_cannot_mutate_newer_failure_state() {
         .expect("newer failure");
 
     store
-        .complete_provider_cooldown_probe_failure_at_generation(
-            "provider-a",
-            Some("key-a"),
-            Some("model-a"),
-            104,
-            Some(permit.expected_generation()),
-        )
+        .complete_provider_cooldown_probe_failure_with_permit(&permit, 104)
         .expect("stale failed-probe completion is ignored without mutating newer state");
     let after = store
         .scheduling_projection("provider-a", "key-a", "model-a", 1, 1, 104)

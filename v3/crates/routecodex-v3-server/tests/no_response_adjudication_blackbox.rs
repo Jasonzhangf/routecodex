@@ -11,14 +11,16 @@ use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_aut
 use routecodex_v3_server::{spawn_v3_server_aggregate, V3ServerAggregateHandle};
 use serde_json::{json, Value};
 use std::{sync::Arc, time::Duration};
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{mpsc, oneshot};
 
 #[path = "../../../crates/routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
 mod hub_v1_fixture;
 #[path = "../../../crates/routecodex-v3-runtime/tests/support/test_ports.rs"]
 mod test_ports;
 
-static TEST_LOCK: Mutex<()> = Mutex::const_new(());
+#[path = "support/fa22072_test_home.rs"]
+mod fa22072_test_home;
+static TEST_LOCK: fa22072_test_home::ServerTestLock = fa22072_test_home::ServerTestLock::new();
 const KEY_ENV: &str = "V3_NO_RESPONSE_TEST_KEY";
 
 struct ProviderState {

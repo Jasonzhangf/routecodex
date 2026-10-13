@@ -33,7 +33,7 @@ pub struct V3ProviderCooldownProbeState {
     pub observed_failures: u32,
     pub recovery_ewma_ms: Option<u64>,
     pub cooldown_started_at_ms: u64,
-    pub probe_in_flight: bool,
+    pub(crate) active_probe: Option<crate::key_health::V3ProbeAcquisitionId>,
     pub probe_model_id: Option<String>,
     pub rescue_probe_attempted: bool,
 }

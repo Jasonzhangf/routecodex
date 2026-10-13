@@ -138,15 +138,39 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
     first
         .record_provider_cooldown_failure("p", Some("k"), Some("m"), "quota", 1_000, 10)
         .unwrap();
+    let abandoned = first
+        .acquire_provider_cooldown_probe("p", Some("k"), Some("m"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        first
+            .cooldown_entries(1_000)
+            .iter()
+            .find(|entry| entry.kind == "probe")
+            .unwrap()
+            .state,
+        "probing"
+    );
     first
         .flush_persistence()
         .expect("cooldown persistence must be durable before restart");
     drop(first);
+    drop(abandoned);
     let restored =
         V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path.clone());
     let scope = V3ProviderFailureSessionScope::new("s", "g", "session").unwrap();
     let reader = V3ProviderSessionAvailabilityReader::new(restored.clone(), scope.clone());
     let projection = reader.availability("p", Some("k"), Some("m"), 2_000);
+    assert_ne!(
+        restored
+            .cooldown_entries(2_000)
+            .iter()
+            .find(|entry| entry.kind == "probe")
+            .unwrap()
+            .state,
+        "probing",
+        "durable cooldown must never reconstruct a process-local owner"
+    );
     assert!(!projection.available);
     assert!(projection
         .blocked_scopes
@@ -157,13 +181,7 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         .unwrap()
         .expect("restored cooldown must expose a startup probe");
     restored
-        .complete_provider_cooldown_probe_failure_at_generation(
-            "p",
-            Some("k"),
-            Some("m"),
-            2_001,
-            Some(startup_probe.expected_generation()),
-        )
+        .complete_provider_cooldown_probe_failure_with_permit(&startup_probe, 2_001)
         .unwrap();
     assert!(
         !reader
@@ -180,13 +198,7 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         .unwrap()
         .expect("failed startup probe must remain retryable");
     restored
-        .complete_provider_cooldown_probe_success_at_generation(
-            "p",
-            Some("k"),
-            Some("m"),
-            62_002,
-            Some(recovery_probe.expected_generation()),
-        )
+        .complete_provider_cooldown_probe_success_with_permit(&recovery_probe, 62_002)
         .unwrap();
     assert!(
         reader
@@ -236,12 +248,12 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
     store
         .record_provider_cooldown_failure("p", Some("k"), Some("m"), "timeout", 1_000, 1)
         .unwrap();
-    assert!(store
+    let permit = store
         .acquire_provider_cooldown_probe("p", Some("k"), Some("m"))
         .unwrap()
-        .is_some());
+        .unwrap();
     store
-        .complete_provider_cooldown_probe_failure("p", Some("k"), Some("m"), 2_000)
+        .complete_provider_cooldown_probe_failure_with_permit(&permit, 2_000)
         .unwrap();
     assert!(store
         .provider_cooldown_probe_keys_due(11_999)
@@ -293,17 +305,13 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         .unwrap();
 
     let restored = V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path);
-    assert_eq!(
-        restored
-            .acquire_provider_cooldown_probe("p", Some("k"), Some("m"))
-            .unwrap()
-            .map(|permit| permit.provider_id().to_string())
-            .as_deref(),
-        Some("p"),
-        "persisted long-policy cooldown must expose a startup probe"
-    );
+    let permit = restored
+        .acquire_provider_cooldown_probe("p", Some("k"), Some("m"))
+        .unwrap()
+        .expect("persisted long-policy cooldown must expose a startup probe");
+    assert_eq!(permit.provider_id(), "p");
     restored
-        .complete_provider_cooldown_probe_failure("p", Some("k"), Some("m"), 2_001)
+        .complete_provider_cooldown_probe_failure_with_permit(&permit, 2_001)
         .unwrap();
     assert!(restored
         .provider_cooldown_probe_keys_due(11_999)
@@ -361,13 +369,7 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         .unwrap()
         .expect("restored cooldown must expose a startup probe");
     restored
-        .complete_provider_cooldown_probe_failure_at_generation(
-            "p",
-            Some("k"),
-            Some("m"),
-            2_001,
-            Some(permit.expected_generation()),
-        )
+        .complete_provider_cooldown_probe_failure_with_permit(&permit, 2_001)
         .unwrap();
     assert!(restored
         .provider_cooldown_probe_keys_due(11_999)
@@ -382,26 +384,14 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         .unwrap()
         .expect("second probe permit");
     restored
-        .complete_provider_cooldown_probe_failure_at_generation(
-            "p",
-            Some("k"),
-            Some("m"),
-            32_001,
-            Some(second.expected_generation()),
-        )
+        .complete_provider_cooldown_probe_failure_with_permit(&second, 32_001)
         .unwrap();
     let third = restored
         .acquire_provider_cooldown_probe("p", Some("k"), Some("m"))
         .unwrap()
         .expect("third probe permit");
     restored
-        .complete_provider_cooldown_probe_failure_at_generation(
-            "p",
-            Some("k"),
-            Some("m"),
-            92_001,
-            Some(third.expected_generation()),
-        )
+        .complete_provider_cooldown_probe_failure_with_permit(&third, 92_001)
         .unwrap();
     assert!(restored
         .provider_cooldown_probe_keys_due(152_000)

@@ -27,7 +27,7 @@ use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_aut
 use routecodex_v3_server::{spawn_v3_server_aggregate, V3ServerAggregateHandle};
 use serde_json::{json, Value};
 use std::{sync::Arc, time::Duration};
-use tokio::sync::{mpsc, oneshot, watch, Mutex};
+use tokio::sync::{mpsc, oneshot, watch};
 
 #[path = "../../../crates/routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
 mod hub_v1_fixture;
@@ -37,7 +37,9 @@ use hub_v1_fixture::{hub_v1_server_execution, hub_v1_test_declaration};
 mod test_ports;
 use test_ports::free_port;
 
-static TEST_LOCK: Mutex<()> = Mutex::const_new(());
+#[path = "support/fa22072_test_home.rs"]
+mod fa22072_test_home;
+static TEST_LOCK: fa22072_test_home::ServerTestLock = fa22072_test_home::ServerTestLock::new();
 
 const KEEPALIVE_MS: u64 = 300;
 const KEEPALIVE_FRAME: &[u8] = b": keepalive\n\n";

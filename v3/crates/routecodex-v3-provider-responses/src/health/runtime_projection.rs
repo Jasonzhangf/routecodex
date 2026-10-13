@@ -81,7 +81,7 @@ fn key_health_projection(
     let cooldown = state
         .provider_cooldown_probes
         .get(key)
-        .is_some_and(|probe| probe.probe_in_flight || probe.blocked_until_ms.is_some());
+        .is_some_and(|probe| probe.active_probe.is_some() || probe.blocked_until_ms.is_some());
     V3ProviderKeyHealthProjection {
         provider_id: key.provider_id.clone(),
         interface_id: key.interface_id.clone(),
@@ -117,7 +117,7 @@ fn remove_expired_session_state(state: &mut V3ProviderHealthState, now_ms: u64) 
     // provider 级冷却探针状态独立于 session 冷却：冷却期、待探期、探针
     // 执行中都保留，只有 `complete_provider_cooldown_probe_success` 清除。
     state.provider_cooldown_probes.retain(|_, probe_state| {
-        probe_state.probe_in_flight
+        probe_state.active_probe.is_some()
             || probe_state.next_probe_at_ms.is_some()
             || probe_state
                 .blocked_until_ms
@@ -312,9 +312,6 @@ fn complete_provider_probe_success_at_generation(
         .map_or(0, |history| history.score_generation);
     if let Some(expected_generation) = expected_generation {
         if expected_generation != current_generation {
-            if let Some(probe_state) = state.provider_cooldown_probes.get_mut(key) {
-                probe_state.probe_in_flight = false;
-            }
             return Ok(());
         }
     }
@@ -358,7 +355,7 @@ fn upsert_provider_cooldown_probe_with_interval(
             auth_alias,
             model_id,
         ));
-    let probe_in_flight = existing.is_some_and(|probe_state| probe_state.probe_in_flight);
+    let active_probe = existing.and_then(|probe_state| probe_state.active_probe);
     let existing_probe_failure_count =
         existing.map_or(0, |probe_state| probe_state.probe_failure_count);
     let existing_probe_interval_ms = existing.map(|probe_state| probe_state.probe_interval_ms);
@@ -395,7 +392,7 @@ fn upsert_provider_cooldown_probe_with_interval(
             observed_failures: 0,
             recovery_ewma_ms: existing.and_then(|probe_state| probe_state.recovery_ewma_ms),
             cooldown_started_at_ms: now_ms,
-            probe_in_flight,
+            active_probe,
             probe_model_id: model_id.map(str::to_string),
             rescue_probe_attempted,
         },
