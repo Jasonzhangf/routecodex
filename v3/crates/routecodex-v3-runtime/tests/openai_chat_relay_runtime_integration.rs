@@ -865,8 +865,13 @@ async fn responses_provider_usage_respects_chat_client_opt_out() {
 }
 
 #[tokio::test]
-async fn responses_provider_empty_incomplete_reaches_chat_terminal() {
+async fn responses_provider_empty_incomplete_reselects_and_delivers_healthy_secondary() {
     use futures_util::StreamExt;
+    // The primary Responses attempt ends at `response.incomplete` carrying usage
+    // but no deliverable business content. The active v8 policy classifies that
+    // complete attempt as an internal 502 (`provider_response_empty`) and
+    // reselects, so the healthy Chat secondary must deliver the real business
+    // result. The primary usage frame must never leak into the client projection.
     let server_id = "openai_chat_responses_incomplete_reselect";
     let manifest = manifest_with_two_responses_providers_for_scope(server_id);
     let transport = ResponsesIncompleteThenChatSuccessTransport {
@@ -894,11 +899,20 @@ async fn responses_provider_empty_incomplete_reaches_chat_terminal() {
         &transport,
     )
     .await
-    .expect("empty incomplete terminal must reach Chat projection");
-    assert_eq!(output.status, 200);
+    .expect("empty incomplete attempt must reselect and deliver the healthy secondary");
+    assert_eq!(output.status, 200, "{output:?}");
     assert_eq!(
         transport.provider_ids.lock().unwrap().as_slice(),
-        [format!("{server_id}_primary")]
+        [
+            format!("{server_id}_primary"),
+            format!("{server_id}_secondary")
+        ],
+        "empty primary attempt must reselect exactly once into the healthy secondary"
+    );
+    assert!(
+        output.node_trace.contains(&"V3TargetLocalReselected"),
+        "empty primary attempt must be classified and reselected, not projected: {:?}",
+        output.node_trace
     );
     let V3OpenAiChatRelayClientBody::Sse(stream) = output.client_body else {
         panic!("expected Chat SSE client body");
@@ -910,9 +924,25 @@ async fn responses_provider_empty_incomplete_reaches_chat_terminal() {
         .map(String::from_utf8)
         .collect::<Result<String, _>>()
         .unwrap();
-    assert!(text.contains("\"finish_reason\":\"length\""), "{text}");
-    assert!(text.contains("\"choices\":[]"), "{text}");
+    let frames: Vec<Value> = text
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .filter(|data| *data != "[DONE]")
+        .map(serde_json::from_str)
+        .collect::<Result<_, _>>()
+        .expect("every secondary client data frame must be valid JSON");
+    let content: String = frames
+        .iter()
+        .filter_map(|frame| frame["choices"][0]["delta"]["content"].as_str())
+        .collect();
+    assert_eq!(content, "secondary-after-incomplete", "{text}");
+    assert!(text.contains("\"finish_reason\":\"stop\""), "{text}");
     assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
+    assert!(!text.contains("primary-partial-must-not-commit"), "{text}");
+    assert!(!text.contains("\"finish_reason\":\"length\""), "{text}");
+    assert!(!text.contains("\"choices\":[]"), "{text}");
+    assert!(!text.contains("\"prompt_tokens\":10"), "{text}");
+    assert!(!text.contains("\"usage\""), "{text}");
 }
 
 #[tokio::test]
@@ -1920,10 +1950,16 @@ async fn sse_done_before_terminal_fails_and_terminal_without_done_succeeds() {
         }
     }
 
-    // 合法 terminal finish_reason 后 EOF（无 [DONE]）：provider 合法关闭流，
-    // 网关必须补齐客户端协议终止帧。
+    // 合法 terminal finish_reason 后 EOF（无 [DONE]）：provider 在真实内容 delta
+    // 之后以空 stop terminal 关闭流。合法终止只证明流完整，不证明整次尝试有业务
+    // 内容；有内容的完整尝试必须成功交付，并由网关补齐恰好一次客户端终止帧。
+    let expected_content = "terminal-with-content";
     let transport = StaticSseTransport {
         chunks: Mutex::new(Some(vec![
+            format!(
+                "data: {{\"id\":\"ok\",\"object\":\"chat.completion.chunk\",\"choices\":[{{\"index\":0,\"delta\":{{\"role\":\"assistant\",\"content\":\"{expected_content}\"}},\"finish_reason\":null}}]}}\n\n"
+            )
+            .into_bytes(),
             br#"data: {"id":"ok","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
 
 "#
@@ -1953,21 +1989,115 @@ async fn sse_done_before_terminal_fails_and_terminal_without_done_succeeds() {
     )
     .await
     .unwrap();
+    assert_eq!(output.status, 200, "{output:?}");
     let stream = match output.client_body {
         V3OpenAiChatRelayClientBody::Sse(stream) => stream,
         V3OpenAiChatRelayClientBody::Json(_) => panic!("expected SSE client body"),
     };
     let items = stream.collect::<Vec<_>>().await;
-    assert!(
-        !items.is_empty(),
-        "terminal finish_reason must project success"
+    let projected_content: String = items
+        .iter()
+        .filter_map(|chunk| {
+            let line = std::str::from_utf8(chunk).ok()?;
+            let data = line.strip_prefix("data: ")?.trim();
+            if data == "[DONE]" {
+                return None;
+            }
+            let value: Value = serde_json::from_str(data).ok()?;
+            value["choices"][0]["delta"]["content"]
+                .as_str()
+                .map(str::to_string)
+        })
+        .collect();
+    assert_eq!(
+        projected_content, expected_content,
+        "client content must equal the provider content delta: {items:?}"
     );
     assert!(
-        items
-            .iter()
-            .any(|chunk| chunk.as_slice() == b"data: [DONE]\n\n"),
-        "gateway must terminate the client SSE stream with [DONE]: {items:?}"
+        items.iter().any(|chunk| {
+            std::str::from_utf8(chunk)
+                .map(|line| line.contains("\"finish_reason\":\"stop\""))
+                .unwrap_or(false)
+        }),
+        "gateway must project the provider stop terminal: {items:?}"
     );
+    let done_frames = items
+        .iter()
+        .filter(|chunk| chunk.as_slice() == b"data: [DONE]\n\n")
+        .count();
+    assert_eq!(
+        done_frames, 1,
+        "gateway must append exactly one client [DONE]: {items:?}"
+    );
+    assert_eq!(
+        items.last().map(Vec::as_slice),
+        Some(b"data: [DONE]\n\n".as_slice()),
+        "the single [DONE] must be the final client frame: {items:?}"
+    );
+}
+
+#[tokio::test]
+async fn sse_empty_terminal_without_done_is_rejected_as_provider_response_empty() {
+    // Negative control: a Chat attempt whose only terminal is an empty stop
+    // delta followed by EOF carries no deliverable business content. The legal
+    // terminal shape (and the missing provider [DONE]) must not admit the empty
+    // attempt as success; it stays a typed internal 502
+    // (`provider_response_empty`) on the Error chain and never projects SSE.
+    let server_id = "openai_chat_sse_empty_terminal_no_done";
+    let manifest = manifest_with_identity(server_id);
+    let transport = StaticSseTransport {
+        chunks: Mutex::new(Some(vec![
+            br#"data: {"id":"empty","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+"#
+            .to_vec(),
+        ])),
+    };
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                "openai-chat-sse-empty-terminal-no-done",
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-sse-empty-terminal-no-done".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"empty terminal stream"}],
+                "stream":true
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+    assert_eq!(output.status, 502, "{output:?}");
+    assert_eq!(
+        output.error_class,
+        Some("provider_failure"),
+        "empty attempt must be classified as a provider failure: {output:?}"
+    );
+    assert_eq!(
+        output.error_detail.as_deref(),
+        Some("provider_response_empty"),
+        "empty attempt must retain the typed provider_response_empty reason: {output:?}"
+    );
+    assert_eq!(
+        output.error_chain.as_ref().map(Vec::len),
+        Some(6),
+        "empty attempt must travel the typed Error01-06 chain: {output:?}"
+    );
+    let body = match output.client_body {
+        V3OpenAiChatRelayClientBody::Json(body) => body,
+        V3OpenAiChatRelayClientBody::Sse(_) => {
+            panic!("empty provider attempt must never become a success SSE client body")
+        }
+    };
+    assert_eq!(body["error"]["code"], "network_error", "{body:?}");
+    assert_eq!(body["error"]["message"], "network error", "{body:?}");
 }
 
 #[tokio::test]
