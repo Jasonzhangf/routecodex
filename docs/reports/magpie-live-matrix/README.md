@@ -52,7 +52,7 @@ the next operator/configuration phase without changing architecture ownership.
 ## Reproduce
 
 From the repository root, run `npm run test:protocol-live-mock-support` for all
-discovered helper test files. Run `npm run run:v3-protocol-live-mock-matrix -- --binary
+discovered helper test files through the [V3-local driver](entry-isolation-20261012/README.md). Run `npm run run:v3-protocol-live-mock-matrix -- --binary
 /absolute/path/to/rccv3 --evidence /absolute/owned/output --report-path
 /absolute/owned/output/baseline.md` for the explicit live matrix. `--case <id>`
 selects an affected replay. Live product mismatches return nonzero and remain

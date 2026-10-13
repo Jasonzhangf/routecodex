@@ -5,8 +5,7 @@ import { readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)), '..');
-const v3Root = join(repoRoot, 'v3');
+const v3Root = resolve(fileURLToPath(new URL('..', import.meta.url)), '..');
 const testDir = join(v3Root, 'scripts', 'tests', 'protocol-live-mock');
 
 function runCommand(command) {
@@ -29,7 +28,7 @@ function runCommand(command) {
 const testFiles = readdirSync(testDir)
   .filter((name) => name.endsWith('.test.mjs'))
   .sort();
-const testPaths = testFiles.map((name) => join('v3', 'scripts', 'tests', 'protocol-live-mock', name));
+const testPaths = testFiles.map((name) => join('scripts', 'tests', 'protocol-live-mock', name));
 
 runCommand({
   cwd: v3Root,
@@ -38,7 +37,7 @@ runCommand({
   label: 'static:v3:runner',
 });
 runCommand({
-  cwd: repoRoot,
+  cwd: v3Root,
   command: process.execPath,
   args: ['--test', '--test-concurrency=1', '--test-timeout=120000', ...testPaths],
   label: 'support:node-tests',

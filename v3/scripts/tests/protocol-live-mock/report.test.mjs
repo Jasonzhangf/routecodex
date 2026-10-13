@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { buildMatrixCoverage, finalizeReport, renderMarkdown } from './report.mjs';
 
@@ -58,7 +59,9 @@ test('real corpus chat ids are recognized as the openai_chat base matrix', () =>
 });
 
 test('actual corpus declarations cover every required base variant without claiming execution', () => {
-  const fixtureDirectory = join(process.cwd(), 'v3', 'fixtures', 'protocol-live-mock-matrix', 'cases');
+  const fixtureDirectory = fileURLToPath(
+    new URL('../../../fixtures/protocol-live-mock-matrix/cases/', import.meta.url),
+  );
   const cases = readdirSync(fixtureDirectory)
     .filter((name) => name.endsWith('.json'))
     .sort()
