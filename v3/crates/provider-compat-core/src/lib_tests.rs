@@ -1,6 +1,34 @@
 use super::*;
 
 #[test]
+fn responses_function_normalization_preserves_strict_presence() {
+    for nested in [false, true] {
+        for strict in [Some(json!(true)), Some(json!(false)), None] {
+            let mut function = json!({
+                "name": "acceptance_add",
+                "description": "Return the sum of the two integer arguments.",
+                "parameters": {"type": "object", "properties": {
+                    "a": {"type": "integer"}, "b": {"type": "integer"}
+                }, "required": ["a", "b"], "additionalProperties": false}
+            });
+            if let Some(value) = &strict {
+                function["strict"] = value.clone();
+            }
+            let mut expected = function.clone();
+            expected["type"] = json!("function");
+            let tool = if nested {
+                json!({"type": "function", "function": function})
+            } else {
+                expected.clone()
+            };
+            let mut payload = json!({"tools": [tool]});
+            normalize_responses_function_tools(payload.as_object_mut().unwrap());
+            assert_eq!(payload["tools"][0], expected, "nested={nested}, strict={strict:?}");
+        }
+    }
+}
+
+#[test]
 fn goaichat_profile_preserves_existing_hosted_extensions_and_other_protocols() {
     let payload = json!({"tools":[
         {"type":"web_search_20250305","name":"web_search","max_uses":7,

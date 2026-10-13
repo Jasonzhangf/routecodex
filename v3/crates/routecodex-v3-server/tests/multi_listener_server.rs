@@ -7468,6 +7468,335 @@ async fn anthropic_messages_provider_failure_never_reaches_the_client() {
 }
 
 #[tokio::test]
+async fn responses_direct_followup_preserves_function_strict_presence() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("strict-presence-followup");
+    // Stable public regression: JSON/SSE × strict true/false/absence, two business attempts.
+    let mut original: Value = serde_json::from_str(
+        r#"{
+  "model": "client-test",
+  "stream": false,
+  "reasoning": {"effort": "medium"},
+  "input": [
+    {"role": "user", "content": [{"type": "input_text", "text": "Acceptance marker: PR390_GPT_5_JSON. Think through this task, then call acceptance_add exactly once with a=17 and b=25. Do not calculate the final answer before receiving the tool result. After the tool result, answer with the marker followed by the sum."}]},
+    {"content": [{"text": "The user wants me to call acceptance_add with a=17 and b=25. Let me do that.", "type": "reasoning_text"}], "summary": [{"text": "The user wants me to call acceptance_add with a=17 and b=25. Let me do that.", "type": "summary_text"}], "type": "reasoning"},
+    {"arguments": "{\"a\": 17, \"b\": 25}", "call_id": "call_00_5b97PyhFvP41SWnsrTVR6642", "name": "acceptance_add", "type": "function_call"}
+  ],
+  "tools": [{"type": "function", "name": "acceptance_add", "description": "Return the sum of the two integer arguments.", "parameters": {"type": "object", "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}}, "required": ["a", "b"], "additionalProperties": false}, "strict": true}],
+  "tool_choice": "auto"
+}"#,
+    )
+    .unwrap();
+    // Only the user message is sent initially; these two items are provider output.
+    let provider_output = original["input"].as_array().unwrap()[1..3].to_vec();
+    original["input"].as_array_mut().unwrap().truncate(1);
+
+    struct StrictRoundtripState {
+        captures: mpsc::UnboundedSender<ProviderCapture>,
+        expected: Mutex<std::collections::VecDeque<Value>>,
+        output: Vec<Value>,
+    }
+
+    async fn strict_roundtrip_upstream(
+        State(state): State<Arc<StrictRoundtripState>>,
+        headers: HeaderMap,
+        axum::Json(body): axum::Json<Value>,
+    ) -> Response<Body> {
+        // The declared Responses health probe is separate from business attempts.
+        if body
+            == json!({
+                "model":"wire-protocol",
+                "input":[{"role":"user","content":[{"type":"input_text","text":"ping; reply pong"}]}],
+                "stream":false
+            })
+        {
+            return Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"id":"resp_probe","status":"completed","output_text":"pong"}"#,
+                ))
+                .unwrap();
+        }
+        state
+            .captures
+            .send(ProviderCapture::from_http(&headers, body.clone()))
+            .unwrap();
+        let mut expected = state.expected.lock().await;
+        let accepted = expected.front().is_some_and(|request| {
+            [
+                "model",
+                "tools",
+                "input",
+                "tool_choice",
+                "reasoning",
+                "stream",
+            ]
+            .iter()
+            .all(|field| body.get(*field) == request.get(*field))
+        });
+        if !accepted {
+            return Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(Body::from("strict declaration or paired history mismatch"))
+                .unwrap();
+        }
+        expected.pop_front();
+        let followup = body["tool_choice"] == "none";
+        let output = if followup {
+            vec![
+                json!({"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"42"}]}),
+            ]
+        } else {
+            state.output.clone()
+        };
+        let response = json!({
+            "id":if followup {"resp_strict_final"} else {"resp_strict_call"},
+            "object":"response", "status":"completed", "model":"wire-protocol", "output":output
+        });
+        if body["stream"] == true {
+            let mut wire = format!(
+                "event: response.created\ndata: {}\n\n",
+                json!({
+                    "type":"response.created", "response":{"id":response["id"],"status":"in_progress","output":[]}
+                })
+            );
+            for (index, item) in output.iter().enumerate() {
+                wire.push_str(&format!(
+                    "event: response.output_item.done\ndata: {}\n\n",
+                    json!({
+                        "type":"response.output_item.done", "output_index":index, "item":item
+                    })
+                ));
+            }
+            wire.push_str(&format!(
+                "event: response.completed\ndata: {}\n\ndata: [DONE]\n\n",
+                json!({
+                    "type":"response.completed", "response":response
+                })
+            ));
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "text/event-stream")
+                .body(Body::from(wire))
+                .unwrap()
+        } else {
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "application/json")
+                .body(Body::from(response.to_string()))
+                .unwrap()
+        }
+    }
+
+    let capture_dir = std::env::temp_dir().join(format!(
+        "routecodex-4ce7349-strict-captures-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&capture_dir).unwrap();
+    println!("strict presence upstream bodies: {}", capture_dir.display());
+
+    let mut cases = Vec::new();
+    let mut expected = std::collections::VecDeque::new();
+    for stream in [false, true] {
+        for (label, strict) in [
+            ("true", Some(json!(true))),
+            ("false", Some(json!(false))),
+            ("absent", None),
+        ] {
+            let mut request = original.clone();
+            request["stream"] = json!(stream);
+            let tool = request["tools"][0].as_object_mut().unwrap();
+            if let Some(value) = strict {
+                tool.insert("strict".to_owned(), value);
+            } else {
+                tool.remove("strict");
+            }
+            let mut first_wire = request.clone();
+            first_wire["model"] = json!("wire-protocol");
+            expected.push_back(first_wire.clone());
+            let mut followup_wire = first_wire;
+            followup_wire["input"]
+                .as_array_mut()
+                .unwrap()
+                .extend(provider_output.clone());
+            followup_wire["input"].as_array_mut().unwrap().push(json!({
+                "type":"function_call_output", "call_id":provider_output[1]["call_id"], "output":"{\"sum\":42}"
+            }));
+            followup_wire["tool_choice"] = json!("none");
+            expected.push_back(followup_wire);
+            cases.push((
+                format!("{}-{label}", if stream { "sse" } else { "json" }),
+                request,
+            ));
+        }
+    }
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let (captures_tx, mut captures) = mpsc::unbounded_channel();
+    let (shutdown, shutdown_rx) = oneshot::channel();
+    let state = Arc::new(StrictRoundtripState {
+        captures: captures_tx,
+        expected: Mutex::new(expected),
+        output: provider_output.clone(),
+    });
+    let app = Router::new()
+        .route("/v1/responses", post(strict_roundtrip_upstream))
+        .with_state(Arc::clone(&state));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    std::env::set_var("V3_PROTOCOL_DECISION_KEY", "controlled-strict-presence");
+    let manifest = responses_direct_binding_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        "responses",
+        &base_url,
+        "\"direct\"",
+    );
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .unwrap();
+
+    for (label, mut request) in cases {
+        for turn in 0..2 {
+            let response = client
+                .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+                .header(
+                    "accept",
+                    if request["stream"] == true {
+                        "text/event-stream"
+                    } else {
+                        "application/json"
+                    },
+                )
+                .json(&request)
+                .send()
+                .await;
+            let received = timeout(Duration::from_secs(5), captures.recv())
+                .await
+                .expect("first provider attempt must reach controlled upstream")
+                .expect("controlled upstream must capture request");
+            let capture_path = capture_dir.join(format!("{label}-turn{turn}-upstream-body.json"));
+            fs::write(
+                &capture_path,
+                serde_json::to_vec_pretty(&received.body).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                received.body["tools"][0].get("strict"),
+                request["tools"][0].get("strict"),
+                "strict presence changed for {label}; body saved at {}",
+                capture_path.display()
+            );
+            assert_eq!(received.body["tools"], request["tools"], "{label}: tools");
+            assert_eq!(received.body["input"], request["input"], "{label}: history");
+            assert_eq!(received.body["tool_choice"], request["tool_choice"]);
+            assert_eq!(received.body["reasoning"], request["reasoning"]);
+            assert_eq!(received.body["stream"], request["stream"]);
+            let response = response.expect("public Responses request must complete");
+            assert_eq!(response.status(), StatusCode::OK);
+            let content_type = response.headers()["content-type"]
+                .to_str()
+                .unwrap()
+                .to_owned();
+            let wire = response
+                .text()
+                .await
+                .expect("accepted provider response must complete");
+            fs::write(
+                capture_dir.join(format!("{label}-turn{turn}-client.txt")),
+                &wire,
+            )
+            .unwrap();
+            let body: Value = if request["stream"] == true {
+                assert!(content_type.starts_with("text/event-stream"));
+                let events: Vec<Value> = wire
+                    .lines()
+                    .filter_map(|line| line.strip_prefix("data: "))
+                    .filter(|data| *data != "[DONE]")
+                    .map(|data| serde_json::from_str(data).unwrap())
+                    .collect();
+                assert!(!events.iter().any(|event| matches!(
+                    event["type"].as_str(),
+                    Some("error" | "response.failed")
+                )));
+                let completed = events
+                    .iter()
+                    .find(|event| event["type"] == "response.completed")
+                    .expect("SSE completion");
+                for item in completed["response"]["output"].as_array().unwrap() {
+                    assert!(events
+                        .iter()
+                        .any(|event| event["type"] == "response.output_item.done"
+                            && event["item"] == *item));
+                }
+                completed["response"].clone()
+            } else {
+                assert!(content_type.starts_with("application/json"));
+                serde_json::from_str(&wire).unwrap()
+            };
+            assert_eq!(body["status"], "completed");
+            if turn == 0 {
+                assert_eq!(
+                    body["output"],
+                    json!(provider_output),
+                    "complete provider output"
+                );
+                let call = body["output"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|item| item["type"] == "function_call")
+                    .unwrap();
+                assert_eq!(call["name"], "acceptance_add");
+                let arguments: Value =
+                    serde_json::from_str(call["arguments"].as_str().unwrap()).unwrap();
+                assert_eq!(arguments, json!({"a":17,"b":25}));
+                let sum = arguments["a"].as_i64().unwrap() + arguments["b"].as_i64().unwrap();
+                assert_eq!(sum, 42);
+                let output = json!({"sum":sum}).to_string();
+                let receipt = json!({"name":call["name"], "call_id":call["call_id"], "arguments":arguments, "output":output});
+                fs::write(
+                    capture_dir.join(format!("{label}-execution-receipt.json")),
+                    serde_json::to_vec_pretty(&receipt).unwrap(),
+                )
+                .unwrap();
+                request["input"]
+                    .as_array_mut()
+                    .unwrap()
+                    .extend(body["output"].as_array().unwrap().clone());
+                request["input"].as_array_mut().unwrap().push(json!({"type":"function_call_output", "call_id":call["call_id"], "output":output}));
+                request["tool_choice"] = json!("none");
+            } else {
+                assert_eq!(body["output"][0]["content"][0]["text"], "42");
+            }
+            assert!(
+                timeout(Duration::from_millis(100), captures.recv())
+                    .await
+                    .is_err(),
+                "unexpected extra business attempt"
+            );
+        }
+    }
+    assert!(
+        state.expected.lock().await.is_empty(),
+        "all twelve business attempts accepted"
+    );
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+}
+
+#[tokio::test]
 async fn responses_without_snap_authorization_writes_no_codex_sample() {
     let _test_guard = TEST_LOCK.lock().await;
     let home_guard = TestHomeGuard::new("no-snap-authorization");
