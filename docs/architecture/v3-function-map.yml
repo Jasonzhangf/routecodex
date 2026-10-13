@@ -145,6 +145,77 @@ features:
   forbidden_paths:
   - request.normal_payload
   - response.client_payload
+- feature_id: v3.provider_oauth_credentials
+  status: source_and_controlled_transport_verified
+  change_risk: medium
+  owner_kind: rust_v3_oauth_credentials
+  owner_scope: Typed OAuth credential declarations compiled by Config, Codex auth.json source reads, refresh scheduling, memory/file credential stores with a cross-process store lock, and the single Provider secret resolution path that turns a declaration into a bearer token. Transport HTTP stays under the Provider transport owner.
+  owner_crates:
+  - routecodex-v3-oauth
+  - routecodex-v3-config
+  - routecodex-v3-provider-responses
+  owner_files:
+  - v3/crates/routecodex-v3-oauth/src/declaration.rs
+  - v3/crates/routecodex-v3-oauth/src/credential.rs
+  - v3/crates/routecodex-v3-oauth/src/error.rs
+  - v3/crates/routecodex-v3-oauth/src/resolver.rs
+  - v3/crates/routecodex-v3-config/src/auth_types.rs
+  - v3/crates/routecodex-v3-config/src/validate/auth.rs
+  - v3/crates/routecodex-v3-provider-responses/src/provider_auth.rs
+  - v3/crates/routecodex-v3-provider-responses/src/shared.rs
+  - v3/crates/routecodex-v3-provider-responses/src/wire.rs
+  - v3/crates/routecodex-v3-provider-responses/src/error.rs
+  resource_bindings:
+  - v3.secret.provider_oauth_declaration
+  - v3.secret.provider_oauth_credential_state
+  - v3.secret.provider_oauth_file_store
+  - v3.secret.provider_oauth_error
+  - v3.secret.provider_oauth_credential
+  entry_symbols:
+  - V3OAuthDeclaration
+  - V3OAuthSource
+  - V3OAuthStore
+  - V3OAuthCredential
+  - compile_oauth_auth_entry
+  - v3_provider_auth_secret_handle_from_declaration_fields
+  - resolve_secret
+  - resolve_oauth_access_token_with_client
+  - resolve_oauth_access_token_with_reqwest
+  - V3OAuthRefreshClient
+  allowed_paths:
+  - v3/crates/routecodex-v3-oauth
+  - v3/crates/routecodex-v3-config/src/auth_types.rs
+  - v3/crates/routecodex-v3-config/src/lib.rs
+  - v3/crates/routecodex-v3-config/src/types.rs
+  - v3/crates/routecodex-v3-config/src/provider_config.rs
+  - v3/crates/routecodex-v3-config/src/validate/auth.rs
+  - v3/crates/routecodex-v3-config/src/validate.rs
+  - v3/crates/routecodex-v3-provider-responses/src/error.rs
+  - v3/crates/routecodex-v3-provider-responses/src/provider_auth.rs
+  - v3/crates/routecodex-v3-provider-responses/src/shared.rs
+  - v3/crates/routecodex-v3-provider-responses/src/wire.rs
+  - v3/crates/routecodex-v3-provider-responses/tests/oauth_credentials.rs
+  - v3/crates/routecodex-v3-target/src/lib.rs
+  - v3/crates/routecodex-v3-runtime/src/hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
+  - v3/crates/routecodex-v3-runtime/src/selected_provider_model_binding.rs
+  - docs/architecture
+  forbidden_paths:
+  - request.normal_payload
+  - response.client_payload
+  - v3/crates/routecodex-v3-virtual-router
+  required_gates:
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-oauth
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses --test oauth_credentials
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-mainline-caller-flow
+  - npm run verify:v3-architecture-ci
+  - git diff --check
 - feature_id: v3.managed_server_lifecycle
   owner_crate: routecodex-v3-lifecycle
   owner_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs

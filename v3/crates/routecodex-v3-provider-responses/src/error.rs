@@ -74,6 +74,13 @@ pub enum V3ProviderError {
         auth_alias: String,
         reason: String,
     },
+    #[error("provider {provider_id} OAuth credential failed for auth handle {auth_alias} on request {request_id}: {reason}")]
+    OAuthCredential {
+        request_id: String,
+        provider_id: String,
+        auth_alias: String,
+        reason: routecodex_v3_oauth::V3OAuthError,
+    },
     #[error("provider {provider_id} transport failed for request {request_id}: {reason}")]
     Transport {
         request_id: String,

@@ -4,6 +4,7 @@ use crate::{
     V3ConfigError,
 };
 use crate::{memory_raw_capture::compile_memory_raw_capture, runtime_config::compile_runtime};
+mod auth;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) fn validate_schema(
@@ -871,129 +872,7 @@ pub(crate) fn compile_auth(
     provider_id: &str,
     authoring: V3ProviderAuthAuthoringConfig,
 ) -> Result<V3ProviderAuthManifest, V3ConfigError> {
-    if matches!(
-        authoring.selection.strategy,
-        V3SelectionStrategy::RoundRobin
-    ) {
-        return Err(validation(format!(
-            "provider {provider_id} auth only supports priority or weighted selection"
-        )));
-    }
-    if authoring.entries.is_empty() {
-        return Err(validation(format!(
-            "provider {provider_id} auth entries are empty"
-        )));
-    }
-    let mut aliases = BTreeSet::new();
-    let mut entries = Vec::new();
-    for entry in authoring.entries {
-        if entry.priority.is_some_and(|priority| priority < 0) {
-            return Err(validation(format!(
-                "provider {provider_id} auth {} priority cannot be negative",
-                entry.alias
-            )));
-        }
-        if entry.weight.is_some_and(|weight| weight == 0) {
-            return Err(validation(format!(
-                "provider {provider_id} auth {} weight must be positive",
-                entry.alias
-            )));
-        }
-        require_id("auth alias", &entry.alias)?;
-        if !aliases.insert(entry.alias.clone()) {
-            return Err(validation(format!(
-                "provider {provider_id} has duplicate auth alias {}",
-                entry.alias
-            )));
-        }
-        let handle_count = usize::from(entry.env.is_some())
-            + usize::from(entry.token_file.is_some())
-            + usize::from(entry.secret_file.is_some())
-            + usize::from(entry.api_key.is_some());
-        if handle_count != 1 {
-            return Err(validation(format!(
-                "provider {provider_id} auth {} must define exactly one of env, token_file, secret_file, or api_key", entry.alias
-            )));
-        }
-        if entry.secret_file.is_some() != entry.secret_key.is_some() {
-            return Err(validation(format!(
-                "provider {provider_id} auth {} secret_file and secret_key must be declared together", entry.alias
-            )));
-        }
-        if entry
-            .secret_file
-            .as_deref()
-            .is_some_and(|path| path.trim().is_empty())
-        {
-            return Err(validation(format!(
-                "provider {provider_id} auth {} secret_file cannot be empty",
-                entry.alias
-            )));
-        }
-        if entry
-            .secret_key
-            .as_deref()
-            .is_some_and(|key| key.trim().is_empty())
-        {
-            return Err(validation(format!(
-                "provider {provider_id} auth {} secret_key cannot be empty",
-                entry.alias
-            )));
-        }
-        if let (Some(secret_file), Some(secret_key)) = (&entry.secret_file, &entry.secret_key) {
-            // 集中 secret 文件在编译期解析校验：文件可读、key 存在、值非空——fail-fast
-            // 在 config check / 启动阶段暴露；值不写入 manifest（避免明文进快照）。
-            crate::read_v3_secret_file_key(secret_file, secret_key).map_err(|error| {
-                validation(format!(
-                    "provider {provider_id} auth {} secret_file validation failed: {error}",
-                    entry.alias
-                ))
-            })?;
-        }
-        if let Some(env) = &entry.env {
-            if env.trim().is_empty() || looks_like_secret_literal(env) {
-                return Err(validation(format!(
-                    "provider {provider_id} auth {} env must be a secret handle name",
-                    entry.alias
-                )));
-            }
-        }
-        if entry
-            .token_file
-            .as_deref()
-            .is_some_and(|path| path.trim().is_empty())
-        {
-            return Err(validation(format!(
-                "provider {provider_id} auth {} token_file cannot be empty",
-                entry.alias
-            )));
-        }
-        if entry
-            .api_key
-            .as_deref()
-            .is_some_and(|secret| secret.trim().is_empty())
-        {
-            return Err(validation(format!(
-                "provider {provider_id} auth {} api_key cannot be empty",
-                entry.alias
-            )));
-        }
-        entries.push(V3ProviderAuthEntryManifest {
-            alias: entry.alias,
-            priority: entry.priority,
-            weight: entry.weight,
-            env: entry.env,
-            token_file: entry.token_file,
-            secret_file: entry.secret_file,
-            secret_key: entry.secret_key,
-            api_key: entry.api_key,
-        });
-    }
-    Ok(V3ProviderAuthManifest {
-        auth_type: authoring.auth_type,
-        selection: authoring.selection.clone(),
-        entries,
-    })
+    auth::compile_auth(provider_id, authoring)
 }
 
 fn compile_models(

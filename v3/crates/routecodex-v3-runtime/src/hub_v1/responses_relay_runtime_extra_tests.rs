@@ -356,7 +356,7 @@ fn test_provider_request(
             "https://provider.example/v1/responses",
             V3ProviderAuthHandle {
                 alias: "provider_snap:key1:test".to_string(),
-                secret: V3ProviderAuthSecretHandle::Environment(
+                secret: routecodex_v3_provider_responses::V3ProviderAuthSecretHandle::Environment(
                     "ROUTECODEX_TEST_KEY".to_string(),
                 ),
             },

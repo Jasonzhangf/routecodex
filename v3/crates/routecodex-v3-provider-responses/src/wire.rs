@@ -5,7 +5,9 @@ use provider_compat_core::namespace_tools::{
     push_unique_provider_function_tool,
 };
 use routecodex_v3_config::internal::is_v3_gpt_family_model;
-use routecodex_v3_config::{V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind};
+use routecodex_v3_config::{
+    V3ProviderAuthEntryManifest, V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind,
+};
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -23,12 +25,80 @@ pub enum V3ProviderAuthSecretHandle {
         key: String,
     },
     ApiKey(String),
+    OAuth(routecodex_v3_oauth::V3OAuthDeclaration),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3ProviderAuthHandle {
     pub alias: String,
     pub secret: V3ProviderAuthSecretHandle,
+}
+
+/// Convert one compiled provider auth declaration into the transport auth
+/// handle. This function only carries declarations; it never reads a token or
+/// calls OAuth refresh.
+pub fn v3_provider_auth_handle_from_manifest_entry(
+    alias: impl Into<String>,
+    entry: &V3ProviderAuthEntryManifest,
+) -> Result<V3ProviderAuthHandle, String> {
+    let secret = v3_provider_auth_secret_handle_from_declaration_fields(
+        entry.oauth_declaration.as_ref(),
+        entry.env.as_deref(),
+        entry.token_file.as_deref(),
+        entry.secret_file.as_deref(),
+        entry.secret_key.as_deref(),
+        entry.api_key.as_deref(),
+        &entry.alias,
+    )?;
+    Ok(V3ProviderAuthHandle {
+        alias: alias.into(),
+        secret,
+    })
+}
+
+pub fn v3_provider_auth_secret_handle_from_declaration_fields(
+    oauth_declaration: Option<&routecodex_v3_oauth::V3OAuthDeclaration>,
+    env: Option<&str>,
+    token_file: Option<&str>,
+    secret_file: Option<&str>,
+    secret_key: Option<&str>,
+    api_key: Option<&str>,
+    alias: &str,
+) -> Result<V3ProviderAuthSecretHandle, String> {
+    if let Some(declaration) = oauth_declaration {
+        if env.is_some()
+            || token_file.is_some()
+            || secret_file.is_some()
+            || secret_key.is_some()
+            || api_key.is_some()
+        {
+            return Err(format!(
+                "provider auth {} mixes OAuth with legacy secret handles",
+                alias
+            ));
+        }
+        return Ok(V3ProviderAuthSecretHandle::OAuth(declaration.clone()));
+    }
+
+    match (env, token_file, secret_file, secret_key, api_key) {
+        (Some(name), None, None, None, None) => {
+            Ok(V3ProviderAuthSecretHandle::Environment(name.to_string()))
+        }
+        (None, Some(path), None, None, None) => {
+            Ok(V3ProviderAuthSecretHandle::TokenFile(path.to_string()))
+        }
+        (None, None, Some(path), Some(key), None) => Ok(V3ProviderAuthSecretHandle::SecretFile {
+            path: path.to_string(),
+            key: key.to_string(),
+        }),
+        (None, None, None, None, Some(value)) => {
+            Ok(V3ProviderAuthSecretHandle::ApiKey(value.to_string()))
+        }
+        _ => Err(format!(
+            "provider auth {} must define exactly one compiled secret handle",
+            alias
+        )),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

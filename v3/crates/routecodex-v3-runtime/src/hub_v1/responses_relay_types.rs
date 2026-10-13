@@ -841,6 +841,11 @@ impl V3LiveSnapProviderSnapshotRecorder {
                 request_id,
                 provider_id,
                 ..
+            }
+            | V3ProviderError::OAuthCredential {
+                request_id,
+                provider_id,
+                ..
             } => self.record_transport_provider_error(attempt, request_id, provider_id, error),
         }
     }

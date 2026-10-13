@@ -7,7 +7,8 @@ use crate::provider_auth::{
 };
 use crate::raw_response::{V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderSseStream};
 use crate::shared::{
-    collect_response_headers, content_type, send_http_await, validated_sse_stream,
+    collect_response_headers, content_type, remaining_timeout, send_http_await,
+    validated_sse_stream,
 };
 pub use crate::transport_admission::build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency;
 use crate::transport_admission::{
@@ -28,8 +29,7 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
-use std::time::Duration;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::net::TcpStream;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 use tokio_tungstenite::{
@@ -67,10 +67,6 @@ const ANTHROPIC_PROVIDER_HEADER_NAMES: &[&str] = &[
     "x-stainless-retry-count",
     "x-stainless-timeout",
 ];
-// Keep the client-level idle read guard at the maximum supported local cold-start
-// budget. Per-request `RequestBuilder::timeout` and the protocol-specific SSE
-// semantic guards remain the authoritative shorter deadlines for providers that
-// configure them; this guard must not truncate a 15-minute local provider start.
 const V3_PROVIDER_HTTP_READ_TIMEOUT_SECS: u64 = 900;
 const V3_PROVIDER_HTTP_POOL_IDLE_TIMEOUT_SECS: u64 = 30;
 const V3_PROVIDER_HTTP_TCP_KEEPALIVE_SECS: u64 = 30;
@@ -1031,7 +1027,15 @@ impl ProviderResponsesTransport {
         cancellation: Option<V3ProviderCancellation>,
     ) -> Result<reqwest::Response, V3ProviderError> {
         ensure_not_cancelled(&request_id, &provider_id, cancellation.as_ref())?;
-        let secret = resolve_secret(&request_id, &provider_id, &auth).await?;
+        let deadline = timeout.map(|timeout| Instant::now() + timeout);
+        let secret = resolve_secret(
+            &request_id,
+            &provider_id,
+            &auth,
+            timeout,
+            cancellation.clone(),
+        )
+        .await?;
         let accept = match stream_intent {
             V3ResponsesStreamIntent::Json => "application/json",
             V3ResponsesStreamIntent::Sse => "text/event-stream",
@@ -1042,8 +1046,8 @@ impl ProviderResponsesTransport {
             .post(url)
             .header(reqwest::header::ACCEPT, accept)
             .bearer_auth(&secret);
-        if let Some(timeout) = timeout {
-            request = request.timeout(timeout);
+        if let Some(deadline) = deadline {
+            request = request.timeout(remaining_timeout(deadline, &request_id, &provider_id)?);
         }
         if anthropic_messages {
             request = apply_anthropic_messages_compat_headers(request, &secret, &provider_headers);
@@ -1185,7 +1189,8 @@ impl ProviderResponsesTransport {
         compatibility_profile: Option<String>,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
         ensure_not_cancelled(&request_id, &provider_id, cancellation.as_ref())?;
-        let secret = resolve_secret(&request_id, &provider_id, &auth).await?;
+        let secret =
+            resolve_secret(&request_id, &provider_id, &auth, None, cancellation.clone()).await?;
         if connection.is_none() {
             let mut handshake = url
                 .clone()
@@ -1374,7 +1379,6 @@ fn content_type_header(value: &str) -> V3ProviderResponseHeader {
         value: value.as_bytes().to_vec(),
     }
 }
-
 fn ensure_not_cancelled(
     request_id: &str,
     provider_id: &str,
@@ -1388,7 +1392,6 @@ fn ensure_not_cancelled(
     }
     Ok(())
 }
-
 async fn read_response_body_bytes(
     response: reqwest::Response,
     request_id: &str,
@@ -1414,11 +1417,6 @@ async fn read_response_body_bytes(
         }
         None => read.await,
     }
-    // A failed body read is never a response-stage decode failure, so it must
-    // not project as 599. When the upstream already returned an error status,
-    // that real status survives; for any other status the upstream still
-    // answered, so its head survives as well and this remains a transport
-    // failure that simply carries the head it really received.
     .map_err(|error| {
         let reason = crate::shared::format_v3_provider_transport_error(&error);
         if status >= 400 {
@@ -1444,17 +1442,10 @@ async fn read_response_body_bytes(
     })?;
     Ok(bytes.to_vec())
 }
-
 /// 上游模型发现（WebUI onboarding）使用的合成 request id；只出现在错误变体里。
 pub(crate) const DISCOVERY_REQUEST_ID: &str = "admin-discover";
 const DISCOVERY_TIMEOUT_SECS: u64 = 15;
 
-/// 上游模型发现：按 provider 协议发一次带真实凭据的 GET，返回结构化条目。
-///
-/// 凭据在本模块内解析（`resolve_secret`），明文 secret 既不出现在返回值，也不进入错误
-/// 变体或日志；URL 不使用 query 参数承载 secret。HTTP 只在 transport surface 实现，
-/// generic provider 的其他模块不得直接使用 reqwest。
-/// 失败一律返回 typed `V3ProviderError`，绝不返回猜测或空列表。
 pub async fn discover_v3_provider_model_entries(
     provider_id: &str,
     provider_type: &str,
@@ -1462,9 +1453,19 @@ pub async fn discover_v3_provider_model_entries(
     auth: &V3ProviderAuthHandle,
 ) -> Result<Vec<V3DiscoveredModel>, V3ProviderError> {
     let url = discovery_models_url(provider_id, provider_type, base_url)?;
-    let secret = resolve_secret(DISCOVERY_REQUEST_ID, provider_id, auth).await?;
+    let discovery_deadline = Instant::now() + Duration::from_secs(DISCOVERY_TIMEOUT_SECS);
+    let discovery_budget = Some(Duration::from_secs(DISCOVERY_TIMEOUT_SECS));
+    let secret = resolve_secret(
+        DISCOVERY_REQUEST_ID,
+        provider_id,
+        auth,
+        discovery_budget,
+        None,
+    )
+    .await?;
+    let remaining = remaining_timeout(discovery_deadline, DISCOVERY_REQUEST_ID, provider_id)?;
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(DISCOVERY_TIMEOUT_SECS))
+        .timeout(remaining)
         .build()
         .map_err(|error| V3ProviderError::InternalTransport {
             request_id: DISCOVERY_REQUEST_ID.to_string(),
