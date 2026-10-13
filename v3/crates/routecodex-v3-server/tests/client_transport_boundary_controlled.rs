@@ -752,7 +752,6 @@ targets = [{{ kind = "provider_model", provider = "controlled", model = "chat-wi
 
 const CLIENT_RED_CHILD_ENV: &str = "V3_CLIENT_RED_ISOLATED_CHILD";
 const CLIENT_RED_TEST_NAME: &str = "client_reset_enters_fixed_error_before_cleanup";
-const CLIENT_RED_HOME: &str = "/Volumes/Intel/playground/routecodex/client-error-runtime-20261011/v3/build-control/temp/runtime-error-fixture-home/client-red";
 
 /// Corrected graph identities (reviewed lifecycle manifest `error_sequence`).
 const CORRECTED_ERROR_CHAIN: [&str; 6] = [
@@ -802,6 +801,29 @@ fn read_client_red_jsonl(path: &Path) -> Vec<Value> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// Build a unique owned fixture HOME under this worktree's build-control temp
+/// root. Deriving it from `CARGO_MANIFEST_DIR` keeps the fixture inside the
+/// checked-out tree, so the isolated child never depends on a machine-specific
+/// absolute path that a CI runner cannot create.
+fn owned_runtime_error_fixture_home(leaf: &str) -> PathBuf {
+    let run_id = format!(
+        "{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default()
+    );
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("build-control")
+        .join("temp")
+        .join("runtime-error-fixture-home")
+        .join("client")
+        .join(format!("{leaf}-{run_id}"))
 }
 
 /// Controlled entry whose aggregate server binds an owned canonical config path
@@ -854,7 +876,7 @@ async fn client_reset_enters_fixed_error_before_cleanup() {
     if std::env::var_os(CLIENT_RED_CHILD_ENV).is_none() {
         // Parent: keep the real HOME. Re-exec this exact test as a child whose
         // Command environment binds the owned fixture HOME and counter file.
-        let home = PathBuf::from(CLIENT_RED_HOME);
+        let home = owned_runtime_error_fixture_home("client-red");
         std::fs::create_dir_all(&home).expect("create the owned fixture home");
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
@@ -1204,22 +1226,7 @@ async fn public_entry_client_body_cancellation_without_io_enters_error_before_fi
         // Parent: keep the real HOME. Re-exec this exact test as a child whose
         // Command environment binds an owned fixture HOME under this worktree's
         // build-control temp root.
-        let run_id = format!(
-            "{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|duration| duration.as_nanos())
-                .unwrap_or_default()
-        );
-        let home = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("..")
-            .join("build-control")
-            .join("temp")
-            .join("runtime-error-fixture-home")
-            .join("client")
-            .join(format!("client-body-cancel-{run_id}"));
+        let home = owned_runtime_error_fixture_home("client-body-cancel");
         std::fs::create_dir_all(&home).expect("create the owned fixture home");
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
