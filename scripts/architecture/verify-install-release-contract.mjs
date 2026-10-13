@@ -14,6 +14,8 @@ requireText('configured V3 server discovery', 'resolve_v3_verify_ports');
 requireText('server table parsing', 'servers\\.');
 requireText('fail-fast when no configured V3 listener exists', '无法从配置文件解析 V3 server listener');
 requireText('all configured listener verification', 'for verify_port in "${VERIFY_PORTS[@]}"');
+requireText('release restart timeout source', 'local restart_wait_ms="${ROUTECODEX_RESTART_WAIT_MS:-${RCC_RESTART_WAIT_MS:-120000}}"');
+requireText('release restart timeout flag', '--timeout-ms "$restart_wait_ms"');
 
 if (script.includes('ROUTECODEX_INSTALL_VERIFY_PORT:-5520')) {
   failures.push('V3 release verification must not default to V4 port 5520');
