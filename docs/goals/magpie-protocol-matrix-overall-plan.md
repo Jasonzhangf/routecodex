@@ -54,10 +54,14 @@ P1 的“基线轮完成”表示通过、失败、未覆盖和执行器故障�
 
 Magpie 只作为 corpus 和实现参考。expected 按 RCC 需求独立定义，runner 不调用 RCC codec 或 Magpie converter 生成断言。不同契约要显式记录：不迁移合成工具结果、角色提醒修补、参数默认包装、删字段重试、签名猜测或隐式权限扩展。
 
+用户后续明确要求本仓库自包含，并在 mock 完成后移除其 CI 接入。P1 保留本仓库的 mock、corpus、独立断言和手动矩阵命令。常规 CI 不执行本次新增的 mock support/matrix 链，不拉取 Magpie。参考 clone、固定版本和许可证用于开发参考及来源追踪，不是本地执行前置条件。显式指定参考源码的审计能力独立保留；默认本地检查只证明仓库 corpus 的有效性。
+
 ## 执行与收口
 
 本轮执行目标见 `magpie-live-matrix-execution-goal.md`。项目代码在最新 `origin/main` 的外置独占 worktree 开发。worker 按文件 ownership 并行；独立 Reviewer 在完整 milestone 的作者自检和黑盒验收后执行一次整体审查。
 
 仅运行受影响测试与项目适用 gates，不把静态门禁当 live 证据。候选、已安装 runtime、基线、review、集成和远端回执分别报告。测试设施的集成不宣称 runtime 业务缺口修复。
+
+已有 E1–E4 基线证据和未改内容的整体审查继续有效。移除 CI 接线与外部源码前置的修订须完成作者验证及受影响独立复核。E6 集成和 E7 资源收口以实际回执为准；P2/P3 仍未在本轮实现。
 
 保留有效基线证据，清理自有测试实例和临时配置；不动生产服务、真实 provider 配置、他人进程或 worktree。参考 clone 保留供 P2/P3 使用。长期目标按各阶段交付推进，不以 P1 完成声称总体 operator 完备。

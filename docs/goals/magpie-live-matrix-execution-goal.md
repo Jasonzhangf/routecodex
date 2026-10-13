@@ -8,6 +8,8 @@
 
 总体计划：`magpie-protocol-matrix-overall-plan.md`。本轮不修改 runtime operator，不推进 P2/P3 实现，不安装或重启生产 daemon，不修改真实 provider/凭据/生产配置。
 
+后续用户修订：mock 完成后移除本次新增的常规 CI 接入，作为本仓库自包含的参考工具。保留手动 support/matrix 入口及作者验证；本地运行不需要 Magpie checkout 或源码环境变量。CI 不拉取 Magpie，也不执行本次新增的 mock support/matrix 链。固定来源、许可和显式参考源码审计独立保留。
+
 ## 工作位置与来源
 
 - 独占 worktree：`/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012`。
@@ -30,6 +32,8 @@
 | E7 | 证据移交与自有资源收口 | 编排者与创建者；相应资源不再需要 | 测试实例、临时配置和自有干净 worktree 清理；长期 corpus/报告可访问 |
 
 初始状态：计划与来源已落盘；E1/E3 开始执行，其余按依赖推进。不预记验收通过。
+
+当前修订状态：E1–E4 有已接受的历史基线证据，E5 未改内容有独立审查。自包含与 CI 移除修订待作者验证及受影响复核；E6/E7 待集成、远端和清理回执。原始 48 例中 12 例通过、36 例不匹配的记录保持不变，不据此声称 operator 缺陷已确认或修复。
 
 ## 测试设施契约
 

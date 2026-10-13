@@ -20,6 +20,7 @@ const modeBWebSearchFixtures = [
   readFileSync('v3/crates/routecodex-v3-runtime/tests/responses_relay_mode_b_web_search_integration.rs', 'utf8'),
   readFileSync('v3/crates/routecodex-v3-runtime/tests/v3_web_search_anthropic_wire.rs', 'utf8'),
 ];
+const magpieMockCiReferences = ['magpie', 'MAGPIE_SOURCE_ROOT', 'protocol-live-mock'];
 
 const namedGates = {
   'file-size': {
@@ -67,6 +68,16 @@ function transitiveGateCount(script) {
   return total;
 }
 
+function assertNoMagpieMockCiConnection(owner, text) {
+  for (const reference of magpieMockCiReferences) {
+    assert.doesNotMatch(
+      text,
+      new RegExp(reference, 'i'),
+      `${owner} must not connect the manual reference tool to CI via ${reference}`,
+    );
+  }
+}
+
 test('V3 CI keeps named gate wiring within canonical V3 verification', () => {
   const counts = {};
   for (const [name, gate] of Object.entries(namedGates)) {
@@ -101,6 +112,17 @@ test('V3 CI keeps named gate wiring within canonical V3 verification', () => {
   assert.match(workflow, /node v3\/scripts\/run-v3-cargo-test\.mjs --workspace -- --nocapture/);
   assert.doesNotMatch(workflow, /RUSTUP_TOOLCHAIN=stable|run-v3-cargo-test\.mjs \+stable/);
   assert.ok(workflow.indexOf('npm --prefix v3 run verify:ci') < workflow.indexOf('run: npm run build:min'));
+});
+
+test('V3 CI keeps the manual Magpie reference tool out of routine CI', () => {
+  const canonicalStackStart = workflow.indexOf('      - name: V3 canonical verification stack\n');
+  const canonicalStackEnd = workflow.indexOf('\n      - name: ', canonicalStackStart + 1);
+  const canonicalStack = workflow.slice(canonicalStackStart, canonicalStackEnd);
+
+  assertNoMagpieMockCiConnection('workflow', workflow);
+  assertNoMagpieMockCiConnection('canonical V3 verification stack', canonicalStack);
+  assertNoMagpieMockCiConnection('v3/scripts/verify-ci.mjs', verifyCi);
+  assert.match(canonicalStack, /run: npm --prefix v3 run verify:ci/);
 });
 
 test('V3 Clippy keeps ordinary lints non-blocking while compile failures remain errors', () => {

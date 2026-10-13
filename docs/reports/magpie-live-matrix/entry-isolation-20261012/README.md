@@ -2,8 +2,11 @@
 
 The support suite driver now lives only at
 v3/scripts/tests/protocol-live-mock-support-selftests.mjs. Root npm test/verify
-commands delegate to the existing V3 names. V3 npm and verify-ci call the local
-driver. The former root implementation is removed.
+commands delegate to the existing V3 names. Manual V3 npm entries call the local
+driver. The former root implementation is removed. The P1-added verify-ci
+connection is removed under the user's later reference-tool scope decision.
+Routine CI does not invoke the support/matrix suite or provision Magpie; local
+manual use needs only repository-owned fixtures and helpers.
 
 The original isolation gate rejected two V3 package scripts that referenced
 ../scripts/. That true positive is fixed in source; the gate and forbidden-root

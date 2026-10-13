@@ -54,11 +54,23 @@ the next operator/configuration phase without changing architecture ownership.
 ## Reproduce
 
 From the repository root, run `npm run test:protocol-live-mock-support` for all
-discovered helper test files through the [V3-local driver](entry-isolation-20261012/README.md). Run `npm run run:v3-protocol-live-mock-matrix -- --binary
+discovered helper test files through the
+[V3-local driver](entry-isolation-20261012/README.md). The mock, corpus and manual
+commands are repository-contained reference tools. They do not require a
+Magpie checkout or source-root environment variable. Routine CI does not run
+this task's mock support/matrix suite or fetch Magpie. Author validation remains
+required before delivery.
+
+The pinned Magpie revision and MIT license are provenance records. An explicit
+reference audit remains available through `inspectCorpus(root, { magpieRoot })`;
+it reports checked/stale source references separately. Default local validation
+reports `source_refs.checked=false` and still validates all corpus definitions,
+identities and coverage. It does not claim a completed reference-source audit.
+Run `npm run run:v3-protocol-live-mock-matrix -- --binary
 /absolute/path/to/rccv3 --evidence /absolute/owned/output --report-path
 /absolute/owned/output/baseline.md` for the explicit live matrix. `--case <id>`
 selects an affected replay. Live product mismatches return nonzero and remain
-visible; they do not weaken the author tests or CI gate.
+visible; they do not weaken the author tests.
 
 The native control script accepts `--repo` and `--binary` arguments. It uses
 owned loopback endpoints and fake credentials. It never uses an existing Admin

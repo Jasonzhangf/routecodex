@@ -35,9 +35,14 @@ SSE error payload, or fabricated success.
 ## Source provenance
 
 - Repository: `https://github.com/yetone/magpie`
-- Local read-only clone: `/Volumes/extension/code/magpie`
+- Development reference clone used for extraction: `/Volumes/extension/code/magpie`
 - SHA: `bfaedf18301d02a423bd5422d22e41432d231ab8`
 - License: MIT (`LICENSE.magpie`)
+
+The clone path records the original development reference. Local mock, corpus
+and manual matrix use read this repository's fixtures and do not require that
+clone or fetch Magpie. Optional source auditing requires an explicitly supplied
+reference root. Routine CI does not execute this reference-tool suite.
 
 Magpie is an input and shape reference. Its own golden expectations are not
 ported wholesale. In particular, current RCC requirements reject synthesized

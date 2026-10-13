@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { createServer as createTcpServer } from 'node:net';
+import { constants as osConstants } from 'node:os';
 import test from 'node:test';
 
 import {
@@ -118,7 +119,7 @@ test('diagnoseListenerSet checks every declared address in order and preserves e
     assert.equal(result.addresses[1].role, 'admin_webui');
     assert.equal(result.addresses[1].bound, false);
     assert.equal(result.addresses[1].error?.code, 'EADDRINUSE');
-    assert.equal(result.addresses[1].error?.errno, -48);
+    assert.equal(result.addresses[1].error?.errno, -osConstants.errno.EADDRINUSE);
     assert.equal(result.all_bound, false);
     assert.equal(result.first_failure.role, 'admin_webui');
   } finally {

@@ -20,7 +20,6 @@ import {
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..', '..', '..', '..');
 const realFixtureRoot = join(repoRoot, 'v3', 'fixtures', 'protocol-live-mock-matrix');
-const magpieRoot = '/Volumes/extension/code/magpie';
 
 function validManifest(cases) {
   return { harness_id: HARNESS_ID, schema_version: 1, source: { repo: SOURCE_REPO, sha: SOURCE_SHA, license: SOURCE_LICENSE }, cases };
@@ -73,7 +72,7 @@ test('real corpus loads 48 fixtures sorted with exact identities', () => {
   assert.equal(ids[0], 'anthropic-to-anthropic-json');
   assert.equal(ids.at(-1), 'usage-missing-or-null-preserved');
   assert.deepEqual(loaded.map((entry) => entry.relative), [...loaded.map((entry) => entry.relative)].sort());
-  const report = inspectCorpus(realFixtureRoot, { magpieRoot });
+  const report = inspectCorpus(realFixtureRoot);
   assert.equal(report.ok, true, report.findings.join('\n'));
   assert.equal(report.case_count, 48);
   assert.deepEqual(report.findings, []);
@@ -81,6 +80,7 @@ test('real corpus loads 48 fixtures sorted with exact identities', () => {
   assert.equal(report.coverage.base_cells_covered, 16);
   assert.equal(report.coverage.base_variants_covered, 32);
   assert.equal(report.extensions.length, 16);
+  assert.equal(report.source_refs.checked, false);
   assert.deepEqual(report.source_refs.stale_files, []);
   assert.deepEqual(report.source_refs.stale_tests, []);
 });
@@ -376,10 +376,34 @@ test('non-base extension ids are reported, not rejected', () => {
 
 test('stale source references are reported rather than fabricated', () => {
   const value = baseCase();
-  value.source = { sha: SOURCE_SHA, files: ['internal/gateway/does_not_exist_test.go'], tests: ['internal/gateway/does_not_exist_test.go::TestNope'] };
-  withFixture({ 'valid-case': value }, validManifest(['valid-case']), (root) => {
-    const report = inspectCorpus(root, { magpieRoot });
-    assert.equal(report.source_refs.stale_files.length, 1);
-    assert.equal(report.source_refs.stale_tests.length, 1);
-  });
+  value.source = {
+    sha: SOURCE_SHA,
+    files: ['wire_test.go', 'internal/gateway/does_not_exist_test.go'],
+    tests: [
+      'wire_test.go::TestPresentSourceFunctionPinned',
+      'internal/gateway/does_not_exist_test.go::TestNope',
+      'internal/gateway/wire_test.go::TestAbsentSourceFunctionPinned',
+    ],
+  };
+  const sourceRoot = mkdtempSync(join(tmpdir(), 'corpus-source-refs-'));
+  try {
+    mkdirSync(join(sourceRoot, 'internal', 'gateway'), { recursive: true });
+    writeFileSync(join(sourceRoot, 'wire_test.go'), 'package gateway\n\nfunc TestPresentSourceFunctionPinned() {}\n');
+    writeFileSync(join(sourceRoot, 'internal', 'gateway', 'wire_test.go'), 'package gateway\n\nfunc TestExistingWireCase() {}\n');
+    withFixture({ 'valid-case': value }, validManifest(['valid-case']), (root) => {
+      const report = inspectCorpus(root, { magpieRoot: sourceRoot });
+      assert.equal(report.ok, true, report.findings.join('\n'));
+      assert.equal(report.source_refs.checked, true);
+      assert.deepEqual(report.source_refs.stale_files, [
+        'source file missing: cases/valid-case.json -> internal/gateway/does_not_exist_test.go',
+      ]);
+      assert.deepEqual(report.source_refs.stale_tests, [
+        'source test file missing: cases/valid-case.json -> internal/gateway/does_not_exist_test.go',
+        'source test name missing: cases/valid-case.json -> internal/gateway/wire_test.go::TestAbsentSourceFunctionPinned',
+      ]);
+      assert.ok(!report.source_refs.stale_tests.some((ref) => /TestPresentSourceFunctionPinned/.test(ref)));
+    });
+  } finally {
+    rmSync(sourceRoot, { recursive: true, force: true });
+  }
 });
