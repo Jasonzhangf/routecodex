@@ -310,6 +310,7 @@ mod tests {
             secret_file: None,
             secret_key: None,
             api_key: None,
+            oauth_declaration: None,
             required_capabilities: Vec::new(),
             pool_ids: vec!["default".to_string()],
             default_pool_member: true,

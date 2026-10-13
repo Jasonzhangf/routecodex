@@ -1,4 +1,5 @@
 mod attempt_store;
+mod auth_types;
 mod defaults;
 mod entry_protocol_validation;
 mod memory_raw_capture;
@@ -28,6 +29,7 @@ mod validate_debug_tests;
 mod validate_relations;
 
 pub use attempt_store::{V3AttemptStorePolicyAuthoringConfig, V3AttemptStorePolicyManifest};
+pub use routecodex_v3_oauth::{V3OAuthDeclaration, V3OAuthSource, V3OAuthStore};
 pub use store::{
     default_v3_config_path, load_v3_config_snapshot_from_path, v3_webui_observability_store_path,
     V3ConfigLoadedSnapshot, V3ConfigStore, V3ConfigWritePlan,

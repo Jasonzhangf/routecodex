@@ -282,8 +282,8 @@
       <div class="hero-meta">
         <span>Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-caller-flow.md</code></span>
         <span>Edge source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
-        <span>90 functional paths</span>
-        <span>535 caller edges</span>
+        <span>91 functional paths</span>
+        <span>544 caller edges</span>
       </div>
     </header>
 
@@ -472,7 +472,7 @@ flowchart TD
 <tr><td>Missing caller/callee fields</td><td><strong>none</strong></td></tr>
 <tr><td>Binding-pending edges</td><td><strong>22</strong></td></tr>
 <tr><td>typed-test-only edges</td><td><strong>15</strong></td></tr>
-<tr><td>live-bound source edges</td><td><strong>422</strong></td></tr>
+<tr><td>live-bound source edges</td><td><strong>431</strong></td></tr>
 <tr><td>aggregate-only wrapper edges</td><td><strong>2</strong></td></tr>
 </tbody>
 </table>
@@ -593,6 +593,7 @@ flowchart TD
 <tr><td><a href="#chain-v3_rcc_internal_hooks_sidecar"><code>v3.rcc_internal_hooks_sidecar</code></a><br/>v 3.rcc_internal_hooks_sidecar</td><td><span class="status audited_locked">locked by Jason</span></td><td>8</td><td>11</td><td><code>v3.rcc_internal_hooks_sidecar</code></td><td><code>sha256:a36cd78a9447…</code></td></tr>
 <tr><td><a href="#chain-v3_provider_global_cooldown_persistence"><code>v3.provider_global_cooldown_persistence</code></a><br/>v 3.provider_global_cooldown_persistence</td><td><span class="status pending_review">pending review</span></td><td>3</td><td>4</td><td><code>v3.provider_global_cooldown_persistence</code></td><td><code>sha256:9f569275ae56…</code></td></tr>
 <tr><td><a href="#chain-v3_provider_key_health_model_granularity"><code>v3.provider_key_health_model_granularity</code></a><br/>v 3.provider_key_health_model_granularity</td><td><span class="status pending_review">pending review</span></td><td>3</td><td>5</td><td><code>v3.provider_key_health_model_granularity</code></td><td><code>sha256:fd2c62f27661…</code></td></tr>
+<tr><td><a href="#chain-v3_provider_oauth_credentials_mainline"><code>v3.provider_oauth_credentials.mainline</code></a><br/>v 3.provider_oauth_credentials.mainline</td><td><span class="status pending_review">pending review</span></td><td>9</td><td>9</td><td><code>v3.provider_oauth_credentials</code></td><td><code>sha256:872c81360fa5…</code></td></tr>
 <tr><td><a href="#chain-v3_global_binary_install"><code>v3.global_binary_install</code></a><br/>v 3.global_binary_install</td><td><span class="status audited_locked">locked by Jason</span></td><td>1</td><td>1</td><td><code>v3.global_binary_install</code></td><td><code>sha256:34c3f3e588a9…</code></td></tr>
 <tr><td><a href="#chain-v3_direct_request_key_hooks"><code>v3.direct.request_key_hooks</code></a><br/>v 3.direct.request_key_hooks</td><td><span class="status pending_review">pending review</span></td><td>6</td><td>3</td><td><code>v3.direct.request_key_hooks</code></td><td><code>sha256:d680f1142ebb…</code></td></tr>
 <tr><td><a href="#chain-v3_provider_compat_profile_request"><code>v3.provider_compat_profile.request</code></a><br/>v 3.provider_compat_profile.request</td><td><span class="status pending_review">pending review</span></td><td>1</td><td>5</td><td><code>v3.provider_compat_profile_loading</code></td><td><code>sha256:8115448683b5…</code></td></tr>
@@ -708,6 +709,13 @@ flowchart TD
             <span>V3Error02Classified → V3Target10ConcreteProviderSelected</span>
             <span><code>v3.provider_key_health_model_granularity</code></span>
             <span>3 edges · 5 resources · v3-error, v3-provider-responses, v3-runtime, v3-target</span>
+            <span class="status pending_review">pending review</span>
+          </a>
+<a class="branch-card" href="#chain-v3_provider_oauth_credentials_mainline">
+            <span class="chain-id">v 3.provider_oauth_credentials.mainline</span>
+            <span>V3ProviderOAuthAuthoring → V3Error01SourceRaised</span>
+            <span><code>v3.provider_oauth_credentials.mainline</code></span>
+            <span>9 edges · 9 resources · routecodex-v3-oauth, v3-config, v3-provider-responses, v3-runtime, v3-target</span>
             <span class="status pending_review">pending review</span>
           </a>
 <a class="branch-card" href="#chain-v3_global_binary_install">
@@ -1496,6 +1504,67 @@ flowchart TD
 <tr><td><code>v3-provider-key-health-model-01</code></td><td><code>V3Error02Classified</code><br/>→ <code>V3ProviderFailureAction</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.error.classified</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.provider.failure_action</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.error.classified</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.provider.failure_action</code></div></td><td><code>V3ProviderFailureRuntimeHealth::record_provider_failure_record_from_source</code><br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small></td><td><code>build_v3_provider_failure_action_from_v3_error_02</code><br/><small>routecodex-v3-error/src/subscription.rs</small></td></tr>
 <tr><td><code>v3-provider-key-health-model-02</code></td><td><code>V3ProviderFailureAction</code><br/>→ <code>V3ProviderHealthStore</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.provider.failure_action</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.provider.key_health_state</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.provider.failure_action</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.provider.key_health_state</code></div></td><td><code>V3ProviderFailureRuntimeHealth::record_provider_key_failure_action</code><br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small></td><td><code>V3ProviderHealthStore::record_provider_failure_action</code><br/><small>routecodex-v3-provider-responses/src/health.rs</small></td></tr>
 <tr><td><code>v3-provider-key-health-model-03</code></td><td><code>V3Target09CandidateSetExpanded</code><br/>→ <code>V3Target10ConcreteProviderSelected</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.provider.scheduling_projection</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.target.concrete_provider</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.provider.scheduling_projection</code></div></td><td><code>V3TargetInterpreter::select_available_with_health</code><br/><small>routecodex-v3-target/src/lib.rs</small></td><td><code>V3ProviderSchedulingReader::scheduling_projection</code><br/><small>routecodex-v3-provider-responses/src/health.rs</small></td></tr>
+</tbody>
+</table>
+      </div>
+    </details>
+
+
+    <details class="branch-detail" id="chain-v3_provider_oauth_credentials_mainline" >
+      <summary>
+        <span class="summary-main">v 3.provider_oauth_credentials.mainline</span>
+        <span class="summary-sub">V3ProviderOAuthAuthoring → V3Error01SourceRaised</span>
+        <span class="summary-sub">9 edges · <code>v3.provider_oauth_credentials.mainline</code> · V3ProviderOAuthAuthoring → V3Error01SourceRaised</span>
+      </summary>
+      <div class="branch-body">
+        <p class="chain-summary">Config compiles typed OAuth declarations without reading credentials; Provider resolves the declared source and store, refreshes only when the access token is due, and keeps HTTP refresh in the Provider transport owner.</p>
+        <div class="branch-meta">
+          <span>owner: <code>v3.provider_oauth_credentials</code></span>
+          <span>audit: <span class="status pending_review">pending review</span></span>
+          <span>modules: <code>routecodex-v3-oauth · v3-config · v3-provider-responses · v3-runtime · v3-target</code></span>
+          <span>resources: <code>9</code></span>
+
+
+        </div>
+        <div class="diagram-shell">
+          <pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 82, &quot;nodeSpacing&quot;: 46}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;18px&quot;}} }%%
+flowchart TD
+  n_v3_provider_oauth_credentials_mainline_0[&quot;&lt;b&gt;Provider OAuth Authoring&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3ProviderOAuthAuthoring&lt;/small&gt;&quot;]
+  n_v3_provider_oauth_credentials_mainline_1[&quot;&lt;b&gt;Provider OAuth Declaration&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3ProviderOAuthDeclaration&lt;/small&gt;&quot;]
+  n_v3_provider_oauth_credentials_mainline_2[&quot;&lt;b&gt;Provider OAuth Secret Handle&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3ProviderOAuthSecretHandle&lt;/small&gt;&quot;]
+  n_v3_provider_oauth_credentials_mainline_3[&quot;&lt;b&gt;Provider OAuth Access Token&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3ProviderOAuthAccessToken&lt;/small&gt;&quot;]
+  n_v3_provider_oauth_credentials_mainline_4[&quot;&lt;b&gt;HTTP transport 请求&lt;/b&gt;&lt;br/&gt;认证/header/body 已组成，准备发送上游&lt;br/&gt;&lt;small&gt;V3Transport13ResponsesHttpRequest&lt;/small&gt;&quot;]
+  n_v3_provider_oauth_credentials_mainline_5[&quot;&lt;b&gt;Target Candidate&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3TargetCandidate&lt;/small&gt;&quot;]
+  n_v3_provider_oauth_credentials_mainline_6[&quot;&lt;b&gt;OAuth Source Credential&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3OAuthSourceCredential&lt;/small&gt;&quot;]
+  n_v3_provider_oauth_credentials_mainline_7[&quot;&lt;b&gt;OAuth Credential Store&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3OAuthCredentialStore&lt;/small&gt;&quot;]
+  n_v3_provider_oauth_credentials_mainline_8[&quot;&lt;b&gt;OAuth Refresh Request&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3OAuthRefreshRequest&lt;/small&gt;&quot;]
+  n_v3_provider_oauth_credentials_mainline_9[&quot;&lt;b&gt;OAuth Error&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3OAuthError&lt;/small&gt;&quot;]
+  n_v3_provider_oauth_credentials_mainline_10[&quot;&lt;b&gt;Error source&lt;/b&gt;&lt;br/&gt;错误唯一入口；记录 source/stage/code，不在 Server/provider 本地分叉&lt;br/&gt;&lt;small&gt;V3Error01SourceRaised&lt;/small&gt;&quot;]
+  n_v3_provider_oauth_credentials_mainline_0 --&gt;|v3-oauth-01&lt;br/&gt;v3-config → v3-config| n_v3_provider_oauth_credentials_mainline_1
+  n_v3_provider_oauth_credentials_mainline_1 --&gt;|v3-oauth-02&lt;br/&gt;v3-provider-responses → v3-provider-responses| n_v3_provider_oauth_credentials_mainline_2
+  n_v3_provider_oauth_credentials_mainline_2 --&gt;|v3-oauth-03&lt;br/&gt;v3-provider-responses → v3-provider-responses| n_v3_provider_oauth_credentials_mainline_3
+  n_v3_provider_oauth_credentials_mainline_3 --&gt;|v3-oauth-04&lt;br/&gt;v3-provider-responses → routecodex-v3-oauth| n_v3_provider_oauth_credentials_mainline_4
+  n_v3_provider_oauth_credentials_mainline_1 --&gt;|v3-oauth-05&lt;br/&gt;v3-target → v3-target| n_v3_provider_oauth_credentials_mainline_5
+  n_v3_provider_oauth_credentials_mainline_2 --&gt;|v3-oauth-06&lt;br/&gt;routecodex-v3-oauth → routecodex-v3-oauth| n_v3_provider_oauth_credentials_mainline_6
+  n_v3_provider_oauth_credentials_mainline_6 --&gt;|v3-oauth-07&lt;br/&gt;routecodex-v3-oauth → routecodex-v3-oauth| n_v3_provider_oauth_credentials_mainline_7
+  n_v3_provider_oauth_credentials_mainline_7 --&gt;|v3-oauth-08&lt;br/&gt;routecodex-v3-oauth → routecodex-v3-oauth| n_v3_provider_oauth_credentials_mainline_8
+  n_v3_provider_oauth_credentials_mainline_9 --&gt;|v3-oauth-09&lt;br/&gt;v3-provider-responses → v3-runtime| n_v3_provider_oauth_credentials_mainline_10
+  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+  classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
+  class n_v3_provider_oauth_credentials_mainline_0,n_v3_provider_oauth_credentials_mainline_1,n_v3_provider_oauth_credentials_mainline_2,n_v3_provider_oauth_credentials_mainline_3,n_v3_provider_oauth_credentials_mainline_4,n_v3_provider_oauth_credentials_mainline_5,n_v3_provider_oauth_credentials_mainline_6,n_v3_provider_oauth_credentials_mainline_7,n_v3_provider_oauth_credentials_mainline_8,n_v3_provider_oauth_credentials_mainline_9,n_v3_provider_oauth_credentials_mainline_10 node;</pre>
+        </div>
+        <table>
+<thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
+<tbody>
+<tr><td><code>v3-oauth-01</code></td><td><code>V3ProviderOAuthAuthoring</code><br/>→ <code>V3ProviderOAuthDeclaration</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.config.authoring_parsed</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.config.resource_registry</code></div></td><td><code>compile_auth</code><br/><small>routecodex-v3-config/src/validate/auth.rs</small></td><td><code>compile_oauth_auth_entry</code><br/><small>routecodex-v3-config/src/validate/auth.rs</small></td></tr>
+<tr><td><code>v3-oauth-02</code></td><td><code>V3ProviderOAuthDeclaration</code><br/>→ <code>V3ProviderOAuthSecretHandle</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.config.published_manifest</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.secret.provider_auth_handle</code></div></td><td><code>v3_provider_auth_secret_handle_from_declaration_fields</code><br/><small>routecodex-v3-provider-responses/src/wire.rs</small></td><td><code>V3ProviderAuthSecretHandle::OAuth</code><br/><small>routecodex-v3-provider-responses/src/wire.rs</small></td></tr>
+<tr><td><code>v3-oauth-03</code></td><td><code>V3ProviderOAuthSecretHandle</code><br/>→ <code>V3ProviderOAuthAccessToken</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.secret.provider_auth_handle</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.secret.provider_oauth_credential</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.secret.provider_oauth_credential</code></div></td><td><code>resolve_secret</code><br/><small>routecodex-v3-provider-responses/src/provider_auth.rs</small></td><td><code>resolve_oauth_access_token_with_reqwest</code><br/><small>routecodex-v3-provider-responses/src/shared.rs</small></td></tr>
+<tr><td><code>v3-oauth-04</code></td><td><code>V3ProviderOAuthAccessToken</code><br/>→ <code>V3Transport13ResponsesHttpRequest</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.secret.provider_oauth_credential</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.secret.provider_oauth_credential</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.secret.provider_oauth_credential</code> <code>v3.secret.provider_oauth_credential_state</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.secret.provider_oauth_credential</code> <code>v3.secret.provider_oauth_credential_state</code></div></td><td><code>resolve_oauth_access_token_with_reqwest</code><br/><small>routecodex-v3-provider-responses/src/shared.rs</small></td><td><code>resolve_oauth_access_token_with_client</code><br/><small>routecodex-v3-oauth/src/resolver.rs</small></td></tr>
+<tr><td><code>v3-oauth-05</code></td><td><code>V3ProviderOAuthDeclaration</code><br/>→ <code>V3TargetCandidate</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.config.published_manifest</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.secret.provider_oauth_declaration</code></div></td><td><code>expand_provider</code><br/><small>routecodex-v3-target/src/lib.rs</small></td><td><code>V3TargetCandidate</code><br/><small>routecodex-v3-target/src/lib.rs</small></td></tr>
+<tr><td><code>v3-oauth-06</code></td><td><code>V3ProviderOAuthSecretHandle</code><br/>→ <code>V3OAuthSourceCredential</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.secret.provider_oauth_declaration</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.secret.provider_oauth_credential</code></div></td><td><code>resolve_oauth_access_token_with_client</code><br/><small>routecodex-v3-oauth/src/resolver.rs</small></td><td><code>read_source</code><br/><small>routecodex-v3-oauth/src/resolver.rs</small></td></tr>
+<tr><td><code>v3-oauth-07</code></td><td><code>V3OAuthSourceCredential</code><br/>→ <code>V3OAuthCredentialStore</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.secret.provider_oauth_credential</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.secret.provider_oauth_file_store</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.secret.provider_oauth_file_store</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.secret.provider_oauth_file_store</code></div></td><td><code>resolve_oauth_access_token_with_client</code><br/><small>routecodex-v3-oauth/src/resolver.rs</small></td><td><code>read_store_or_initialize</code><br/><small>routecodex-v3-oauth/src/resolver.rs</small></td></tr>
+<tr><td><code>v3-oauth-08</code></td><td><code>V3OAuthCredentialStore</code><br/>→ <code>V3OAuthRefreshRequest</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.secret.provider_oauth_credential</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.secret.provider_oauth_credential</code></div></td><td><code>refresh_credential</code><br/><small>routecodex-v3-oauth/src/resolver.rs</small></td><td><code>V3OAuthRefreshClient::refresh</code><br/><small>routecodex-v3-oauth/src/resolver.rs</small></td></tr>
+<tr><td><code>v3-oauth-09</code></td><td><code>V3OAuthError</code><br/>→ <code>V3Error01SourceRaised</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.secret.provider_oauth_error</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.secret.provider_oauth_error</code></div></td><td><code>V3ProviderError::OAuthCredential</code><br/><small>routecodex-v3-provider-responses/src/provider_auth.rs</small></td><td><code>build_v3_error_01_source_raised_internal</code><br/><small>routecodex-v3-runtime/src/hooks.rs</small></td></tr>
 </tbody>
 </table>
       </div>

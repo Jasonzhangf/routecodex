@@ -318,6 +318,11 @@ fn compile_v2_auth(
                 api_key: None,
                 secret_file: None,
                 secret_key: None,
+                oauth_source: None,
+                refresh_endpoint: None,
+                client_id: None,
+                refresh_before_seconds: None,
+                oauth_store: None,
             });
             continue;
         }
@@ -348,6 +353,11 @@ fn compile_v2_auth(
                 api_key: None,
                 secret_file: Some(secret_file.to_string()),
                 secret_key: Some(secret_key.to_string()),
+                oauth_source: None,
+                refresh_endpoint: None,
+                client_id: None,
+                refresh_before_seconds: None,
+                oauth_store: None,
             });
             continue;
         }
@@ -367,6 +377,11 @@ fn compile_v2_auth(
                 api_key: None,
                 secret_file: None,
                 secret_key: None,
+                oauth_source: None,
+                refresh_endpoint: None,
+                client_id: None,
+                refresh_before_seconds: None,
+                oauth_store: None,
             });
             continue;
         }
@@ -389,6 +404,11 @@ fn compile_v2_auth(
             api_key: Some(api_key),
             secret_file: None,
             secret_key: None,
+            oauth_source: None,
+            refresh_endpoint: None,
+            client_id: None,
+            refresh_before_seconds: None,
+            oauth_store: None,
         });
     }
     Ok(V3ProviderAuthAuthoringConfig {

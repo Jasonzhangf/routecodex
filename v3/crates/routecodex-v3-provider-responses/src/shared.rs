@@ -5,6 +5,9 @@ use bytes::Bytes;
 use futures_util::{stream, Stream, StreamExt};
 use reqwest::header::HeaderMap;
 use routecodex_v3_error::V3_PROVIDER_RESPONSE_HEADER_TIMEOUT_REASON_PREFIX;
+use routecodex_v3_oauth::{
+    resolve_oauth_access_token_with_client, V3OAuthDeclaration, V3OAuthError, V3OAuthRefreshClient,
+};
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk,
     build_v3_sse_transport_out_04_from_v3_sse_transport_in_03, SseIncrementalDecoder,
@@ -12,6 +15,70 @@ use routecodex_v3_sse::{
 };
 use std::collections::VecDeque;
 use std::pin::Pin;
+use std::time::{Duration, Instant};
+
+const OAUTH_REFRESH_TIMEOUT_SECS: u64 = 30;
+const OAUTH_REFRESH_MAX_TIMEOUT_SECS: u64 = 30;
+
+struct ReqwestOAuthRefreshClient {
+    /// `Some` when the caller knows the remaining request budget. The budget
+    /// caps the refresh; `OAUTH_REFRESH_MAX_TIMEOUT_SECS` caps both branches.
+    request_budget: Option<Duration>,
+}
+
+impl V3OAuthRefreshClient for ReqwestOAuthRefreshClient {
+    async fn refresh(
+        &self,
+        endpoint: &str,
+        body: &serde_json::Value,
+    ) -> Result<(u16, Vec<u8>), V3OAuthError> {
+        let timeout = self
+            .request_budget
+            .unwrap_or_else(|| Duration::from_secs(OAUTH_REFRESH_TIMEOUT_SECS))
+            .min(Duration::from_secs(OAUTH_REFRESH_MAX_TIMEOUT_SECS));
+        let response = reqwest::Client::builder()
+            .timeout(timeout)
+            .build()
+            .map_err(|_| V3OAuthError::RefreshTransport)?
+            .post(endpoint)
+            .json(body)
+            .send()
+            .await
+            .map_err(|_| V3OAuthError::RefreshTransport)?;
+        let status = response.status().as_u16();
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|_| V3OAuthError::RefreshTransport)?;
+        Ok((status, bytes.to_vec()))
+    }
+}
+
+pub(crate) async fn resolve_oauth_access_token_with_reqwest(
+    declaration: &V3OAuthDeclaration,
+    request_budget: Option<Duration>,
+) -> Result<String, V3OAuthError> {
+    let budget = request_budget
+        .unwrap_or_else(|| Duration::from_secs(OAUTH_REFRESH_MAX_TIMEOUT_SECS))
+        .min(Duration::from_secs(OAUTH_REFRESH_MAX_TIMEOUT_SECS));
+    // The budget bounds the whole resolution, not only the refresh round trip:
+    // identity-lock wait, store lock, source read, refresh, and store write all
+    // share the same deadline as the provider request they serve.
+    match tokio::time::timeout(
+        budget,
+        resolve_oauth_access_token_with_client(
+            declaration,
+            &ReqwestOAuthRefreshClient {
+                request_budget: Some(budget),
+            },
+        ),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => Err(V3OAuthError::RefreshTransport),
+    }
+}
 
 pub(crate) fn collect_response_headers(headers: &HeaderMap) -> Vec<V3ProviderResponseHeader> {
     headers
@@ -77,6 +144,22 @@ pub(crate) async fn send_http_await(
         })?,
         _ => send_http_await_inner(request_id, provider_id, send, cancellation).await,
     }
+}
+
+pub(crate) fn remaining_timeout(
+    deadline: Instant,
+    request_id: &str,
+    provider_id: &str,
+) -> Result<Duration, V3ProviderError> {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        return Err(V3ProviderError::Transport {
+            request_id: request_id.to_string(),
+            provider_id: provider_id.to_string(),
+            reason: "provider request budget exhausted".to_string(),
+        });
+    }
+    Ok(remaining)
 }
 
 async fn send_http_await_inner(

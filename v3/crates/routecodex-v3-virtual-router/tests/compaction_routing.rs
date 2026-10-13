@@ -58,6 +58,7 @@ fn manifest() -> V3Config05ManifestPublished {
                         secret_file: None,
                         secret_key: None,
                         api_key: None,
+                        oauth_declaration: None,
                     }],
                 },
                 models: BTreeMap::from([(

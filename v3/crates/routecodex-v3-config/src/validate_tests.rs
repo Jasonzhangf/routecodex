@@ -62,6 +62,11 @@ mod secret_file_compile_tests {
                 secret_key: Some("opencode-go.key1".to_string()),
                 priority: None,
                 weight: None,
+                oauth_source: None,
+                refresh_endpoint: None,
+                client_id: None,
+                refresh_before_seconds: None,
+                oauth_store: None,
             }),
         )
         .unwrap();
@@ -85,6 +90,11 @@ mod secret_file_compile_tests {
                 secret_key: Some("missing.key".to_string()),
                 priority: None,
                 weight: None,
+                oauth_source: None,
+                refresh_endpoint: None,
+                client_id: None,
+                refresh_before_seconds: None,
+                oauth_store: None,
             }),
         )
         .unwrap_err();
@@ -104,6 +114,11 @@ mod secret_file_compile_tests {
                 secret_key: None,
                 priority: None,
                 weight: None,
+                oauth_source: None,
+                refresh_endpoint: None,
+                client_id: None,
+                refresh_before_seconds: None,
+                oauth_store: None,
             }),
         )
         .unwrap_err();
