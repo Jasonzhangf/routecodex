@@ -412,7 +412,18 @@ fn source_identity(path: &str) -> Result<serde_json::Value, V3OAuthError> {
     {
         use std::os::unix::fs::MetadataExt;
         if let Ok(metadata) = std::fs::metadata(&path) {
-            return Ok(serde_json::json!({"dev": metadata.dev(), "ino": metadata.ino()}));
+            // Device and inode identify hard links. File generation metadata
+            // prevents a deleted-and-recreated path from reusing stale in-memory
+            // credential state when the filesystem reuses the inode number.
+            return Ok(serde_json::json!({
+                "dev": metadata.dev(),
+                "ino": metadata.ino(),
+                "size": metadata.len(),
+                "mtime": metadata.mtime(),
+                "mtime_nsec": metadata.mtime_nsec(),
+                "ctime": metadata.ctime(),
+                "ctime_nsec": metadata.ctime_nsec(),
+            }));
         }
     }
     Ok(serde_json::json!({"path": path.to_string_lossy()}))
@@ -1017,6 +1028,29 @@ mod tests {
             1,
             "equivalent source paths must share one credential identity"
         );
+    }
+
+    #[tokio::test]
+    async fn oauth_memory_identity_observes_source_replacement() {
+        let dir = temp_dir("rcc-oauth-memory-source-replacement");
+        let source = write_codex_auth(&dir, "first-access", None, None, None);
+        let declaration = declaration(&source, V3OAuthStore::Memory, 300);
+        let client = MockRefreshClient::default();
+
+        assert_eq!(
+            resolve_oauth_access_token_with_client(&declaration, &client)
+                .await
+                .unwrap(),
+            "first-access"
+        );
+        write_codex_auth(&dir, "second-access-longer", None, None, None);
+        assert_eq!(
+            resolve_oauth_access_token_with_client(&declaration, &client)
+                .await
+                .unwrap(),
+            "second-access-longer"
+        );
+        assert_eq!(client.call_count(), 0);
     }
 
     #[cfg(unix)]
