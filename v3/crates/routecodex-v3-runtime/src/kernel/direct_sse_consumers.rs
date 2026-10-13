@@ -57,6 +57,8 @@ pub(crate) struct V3DirectSseContentConsumer {
     /// response compat owner at the same point Relay applies it: after the
     /// typed semantic projection and before Resp03 terminal admission.
     pub(crate) provider_response_compat_profile: Option<String>,
+    pub(crate) custom_tool_function_binding:
+        Option<provider_compat_core::CustomToolFunctionBinding>,
     pub(crate) typed_hooks: V3DirectSseTypedHookCatalog,
     pub(crate) tool_thinking_enabled: bool,
     pub(crate) toolreason_client_projection: bool,
@@ -278,6 +280,14 @@ impl V3DirectSseContentConsumer {
 
     pub(crate) fn with_provider_response_compat_profile(mut self, profile: Option<String>) -> Self {
         self.provider_response_compat_profile = profile;
+        self
+    }
+
+    pub(crate) fn with_custom_tool_function_binding(
+        mut self,
+        binding: Option<provider_compat_core::CustomToolFunctionBinding>,
+    ) -> Self {
+        self.custom_tool_function_binding = binding;
         self
     }
 
@@ -529,6 +539,7 @@ impl SseObjectConsumer for V3DirectSseContentConsumer {
                 profile,
                 provider_protocol,
                 self.request_id.as_deref().unwrap_or_default(),
+                self.custom_tool_function_binding.as_ref(),
             )
             .map_err(|error| SseObjectError::Consumer {
                 message: error.code,

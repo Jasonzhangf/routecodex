@@ -6,6 +6,9 @@ use crate::hub_v1::{
     V3ProviderResponsesJsonFrameOutcome, V3RuntimeStreamObservation,
 };
 use crate::nodes::V3ProviderAttemptSseStream;
+use crate::shared_custom_tool_function_sse::{
+    apply_custom_tool_function_sse_chunk_buffered, flush_custom_tool_function_sse_buffer,
+};
 use futures_util::{stream, StreamExt};
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
@@ -172,6 +175,7 @@ pub(crate) fn apply_direct_provider_response_compat(
     profile: &str,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
     request_id: &str,
+    custom_tool_function_binding: Option<&provider_compat_core::CustomToolFunctionBinding>,
 ) -> Result<serde_json::Value, V3Error01SourceRaised> {
     use crate::hub_v1::{
         build_provider_resp_compat_02_from_v3_provider_resp_inbound_01,
@@ -188,7 +192,8 @@ pub(crate) fn apply_direct_provider_response_compat(
             V3HubInvocationSource::Client,
             V3HubTransportIntent::Json,
         )
-        .with_compatibility_profile(Some(profile)),
+        .with_compatibility_profile(Some(profile))
+        .with_custom_tool_function_binding(custom_tool_function_binding.cloned()),
     );
     let resp02 = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01).map_err(
         |error| {
@@ -301,6 +306,8 @@ async fn project_provider_raw_to_client_payload_inner(
                     sse_first_frame_timeout_ms,
                     thinking_tags,
                     deepseek_console_go,
+                    provider_response_compat,
+                    compat_plan.custom_tool_function_binding.clone(),
                     compat_plan.provider_protocol,
                     tool_thinking_enabled,
                     toolreason_client_projection,
@@ -360,6 +367,7 @@ async fn project_provider_raw_to_client_payload_inner(
                 profile,
                 compat_plan.provider_protocol,
                 &request_id,
+                compat_plan.custom_tool_function_binding.as_ref(),
             )?;
         }
         (V3ProviderAttemptBody::Json(parsed), None)
@@ -403,6 +411,8 @@ async fn process_direct_sse_stream(
     sse_first_frame_timeout_ms: Option<u64>,
     thinking_tags: bool,
     deepseek_console_go: bool,
+    provider_response_compat: Option<&str>,
+    custom_tool_function_binding: Option<provider_compat_core::CustomToolFunctionBinding>,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
     tool_thinking_enabled: bool,
     toolreason_client_projection: bool,
@@ -415,7 +425,11 @@ async fn process_direct_sse_stream(
 > {
     let compatibility_profile = thinking_tags
         .then_some("responses:thinking-tags")
-        .or_else(|| deepseek_console_go.then_some("responses:deepseek-console-go"));
+        .or_else(|| deepseek_console_go.then_some("responses:deepseek-console-go"))
+        .or_else(|| {
+            provider_response_compat
+                .filter(|profile| *profile == provider_compat_core::CUSTOM_TOOL_FUNCTION_PROFILE)
+        });
     let stream = guard_initial_direct_sse_provider_failure(
         provider_id,
         stream,
@@ -433,6 +447,7 @@ async fn process_direct_sse_stream(
         usage_observation.clone(),
         v3_direct_sse_frame_interval_timeout(sse_first_frame_timeout_ms),
         compatibility_profile,
+        custom_tool_function_binding,
         provider_protocol,
         // Resp03 toolreason parsing/projection has one owner: the registered
         // direct SSE typed hook applied by kernel/direct_sse_consumers.rs.
@@ -666,6 +681,7 @@ fn observed_sse_client_stream(
         usage_observation,
         v3_direct_sse_default_timeout(),
         compatibility_profile,
+        None,
         provider_protocol,
         false,
         false,
@@ -712,6 +728,7 @@ fn observed_sse_client_stream_with_timeout_and_projection(
         usage_observation,
         frame_interval_timeout,
         compatibility_profile,
+        None,
         provider_protocol,
         tool_thinking_enabled,
         toolreason_client_projection,
@@ -726,6 +743,7 @@ fn observed_sse_client_stream_with_timeout_and_projection_and_request_id(
     usage_observation: V3RuntimeStreamObservation,
     frame_interval_timeout: std::time::Duration,
     compatibility_profile: Option<&str>,
+    custom_tool_function_binding: Option<provider_compat_core::CustomToolFunctionBinding>,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
     tool_thinking_enabled: bool,
     toolreason_client_projection: bool,
@@ -736,6 +754,7 @@ fn observed_sse_client_stream_with_timeout_and_projection_and_request_id(
         usage_observation,
         frame_interval_timeout,
         compatibility_profile,
+        custom_tool_function_binding,
         provider_protocol,
         tool_thinking_enabled,
         toolreason_client_projection,
@@ -750,6 +769,7 @@ fn observed_sse_client_stream_with_protocol(
     usage_observation: V3RuntimeStreamObservation,
     frame_interval_timeout: std::time::Duration,
     compatibility_profile: Option<&str>,
+    custom_tool_function_binding: Option<provider_compat_core::CustomToolFunctionBinding>,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
     tool_thinking_enabled: bool,
     toolreason_client_projection: bool,
@@ -768,6 +788,7 @@ fn observed_sse_client_stream_with_protocol(
         tool_thinking_enabled: bool,
         toolreason_client_projection: bool,
         compatibility_buffer: Vec<u8>,
+        custom_tool_function_sse_state: provider_compat_core::CustomToolFunctionSseState,
         tool_thinking_buffer: Vec<u8>,
         tool_thinking_tool_names: Vec<String>,
         tool_thinking_pending_reasons: Vec<Option<String>>,
@@ -789,6 +810,9 @@ fn observed_sse_client_stream_with_protocol(
             tool_thinking_enabled,
             toolreason_client_projection,
             compatibility_buffer: Vec::new(),
+            custom_tool_function_sse_state: provider_compat_core::CustomToolFunctionSseState::new(
+                custom_tool_function_binding.unwrap_or_default(),
+            ),
             tool_thinking_buffer: Vec::new(),
             tool_thinking_tool_names: Vec::new(),
             tool_thinking_pending_reasons: Vec::new(),
@@ -842,22 +866,40 @@ fn observed_sse_client_stream_with_protocol(
             };
             match next {
                 Some(Ok(chunk)) => {
+                    let custom_tool_function_profile = state.compatibility_profile.as_deref()
+                        == Some(provider_compat_core::CUSTOM_TOOL_FUNCTION_PROFILE);
                     let client_chunk = if state.tool_thinking_enabled {
-                        apply_toolreason_to_sse_chunk_buffered_with_state_and_request_id(
-                            &mut state.tool_thinking_buffer,
-                            &mut state.tool_thinking_tool_names,
-                            &mut state.tool_thinking_pending_reasons,
-                            &mut state.tool_thinking_reason_emitted,
-                            state.toolreason_client_projection,
-                            &chunk,
-                            state.session_id.as_deref(),
-                            state.request_id.as_deref(),
-                        )
+                        let projected =
+                            apply_toolreason_to_sse_chunk_buffered_with_state_and_request_id(
+                                &mut state.tool_thinking_buffer,
+                                &mut state.tool_thinking_tool_names,
+                                &mut state.tool_thinking_pending_reasons,
+                                &mut state.tool_thinking_reason_emitted,
+                                state.toolreason_client_projection,
+                                &chunk,
+                                state.session_id.as_deref(),
+                                state.request_id.as_deref(),
+                            );
+                        if custom_tool_function_profile {
+                            apply_custom_tool_function_sse_chunk_buffered(
+                                &mut state.compatibility_buffer,
+                                &mut state.custom_tool_function_sse_state,
+                                &projected,
+                            )
+                        } else {
+                            projected
+                        }
                     } else if state.compatibility_profile.as_deref()
                         == Some("responses:deepseek-console-go")
                     {
                         apply_deepseek_console_go_sse_chunk_buffered(
                             &mut state.compatibility_buffer,
+                            &chunk,
+                        )
+                    } else if custom_tool_function_profile {
+                        apply_custom_tool_function_sse_chunk_buffered(
+                            &mut state.compatibility_buffer,
+                            &mut state.custom_tool_function_sse_state,
                             &chunk,
                         )
                     } else if state
@@ -904,12 +946,22 @@ fn observed_sse_client_stream_with_protocol(
                     Some((Err(provider_body_source(error)), state))
                 }
                 None => {
+                    let custom_tool_function_profile = state.compatibility_profile.as_deref()
+                        == Some(provider_compat_core::CUSTOM_TOOL_FUNCTION_PROFILE);
                     let buffered_client_chunk = if state.tool_thinking_enabled {
                         let buffered = std::mem::take(&mut state.tool_thinking_buffer);
                         if buffered.is_empty() {
-                            None
+                            if custom_tool_function_profile {
+                                flush_custom_tool_function_sse_buffer(
+                                    &mut state.compatibility_buffer,
+                                    &mut state.custom_tool_function_sse_state,
+                                    !state.decoder.remaining_bytes().is_empty(),
+                                )
+                            } else {
+                                None
+                            }
                         } else {
-                            Some(
+                            let projected =
                                 crate::hub_v1::project_v3_toolreason_sse_final_buffer_at_resp03_with_projection_and_context(
                                     &buffered,
                                     &mut state.tool_thinking_tool_names,
@@ -918,8 +970,24 @@ fn observed_sse_client_stream_with_protocol(
                                     state.toolreason_client_projection,
                                     state.session_id.as_deref(),
                                     state.request_id.as_deref(),
-                                ),
-                            )
+                                );
+                            if custom_tool_function_profile {
+                                let mut out = apply_custom_tool_function_sse_chunk_buffered(
+                                    &mut state.compatibility_buffer,
+                                    &mut state.custom_tool_function_sse_state,
+                                    &projected,
+                                );
+                                if let Some(flushed) = flush_custom_tool_function_sse_buffer(
+                                    &mut state.compatibility_buffer,
+                                    &mut state.custom_tool_function_sse_state,
+                                    !state.decoder.remaining_bytes().is_empty(),
+                                ) {
+                                    out.extend(flushed);
+                                }
+                                Some(out)
+                            } else {
+                                Some(projected)
+                            }
                         }
                     } else if state
                         .compatibility_profile
@@ -932,6 +1000,12 @@ fn observed_sse_client_stream_with_protocol(
                         } else {
                             Some(apply_cc_sol_thinking_tags_to_sse_chunk(&buffered))
                         }
+                    } else if custom_tool_function_profile {
+                        flush_custom_tool_function_sse_buffer(
+                            &mut state.compatibility_buffer,
+                            &mut state.custom_tool_function_sse_state,
+                            !state.decoder.remaining_bytes().is_empty(),
+                        )
                     } else {
                         None
                     };
@@ -1434,6 +1508,7 @@ mod tests {
             "chat:minimax",
             crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
             "req-minimax-compat",
+            None,
         )
         .expect("chat:minimax compat must apply on the Direct path");
         assert_eq!(
@@ -1464,6 +1539,7 @@ mod tests {
             "chat:glm",
             crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
             "req-glm-harvest",
+            None,
         )
         .expect("chat:glm compat must apply on the Direct path");
         let calls = compat["choices"][0]["message"]["tool_calls"]
@@ -1495,6 +1571,7 @@ mod tests {
             "chat:glm",
             crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
             "req-glm-sse",
+            None,
         )
         .expect("chat:glm compat must apply to a Direct SSE chunk");
         assert_eq!(
@@ -1513,6 +1590,7 @@ mod tests {
             "chat:openai",
             crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
             "req-openai-compat",
+            None,
         )
         .expect("chat:openai compat must apply on the Direct path");
         assert_eq!(compat, payload);

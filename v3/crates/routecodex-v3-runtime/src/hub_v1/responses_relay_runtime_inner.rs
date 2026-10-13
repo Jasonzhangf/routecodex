@@ -382,6 +382,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
             }
         };
         let opencode_zen_tcm_bridge = req_compat.opencode_zen_tcm_bridge.clone();
+        let custom_tool_function_binding = req_compat.custom_tool_function_binding().cloned();
         trace.push("V3HubReqTarget06Resolved");
         trace.push("V3HubReqOutbound07ProviderSemantic");
         trace.push("ProviderReqCompat06ProviderCompat");
@@ -393,7 +394,9 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
             target,
             provider_semantic,
         ) {
-            Ok(wire) => wire,
+            Ok(wire) => {
+                wire.with_custom_tool_function_binding(custom_tool_function_binding.clone())
+            }
             Err(error) => {
                 handle_provider_request_failure!(V3ResponsesRelayRuntimeError::Provider(error));
             }
@@ -704,6 +707,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             source_provider_protocol: provider_wire_protocol,
                             projection_context: &anthropic_response_projection_context,
                             opencode_zen_tcm_bridge: opencode_zen_tcm_bridge.as_ref(),
+                            custom_tool_function_binding: custom_tool_function_binding.as_ref(),
                             provider_response_transport_intent: V3HubTransportIntent::Json,
                             tool_thinking_enabled: request_tool_thinking_enabled,
                             tool_thinking_turn_context: &request_tool_thinking_turn_context,
@@ -975,6 +979,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             source_provider_protocol: provider_wire_protocol,
                             projection_context: &anthropic_response_projection_context,
                             opencode_zen_tcm_bridge: opencode_zen_tcm_bridge.as_ref(),
+                            custom_tool_function_binding: custom_tool_function_binding.as_ref(),
                             provider_response_transport_intent: V3HubTransportIntent::Sse,
                             tool_thinking_enabled: request_tool_thinking_enabled,
                             tool_thinking_turn_context: &request_tool_thinking_turn_context,

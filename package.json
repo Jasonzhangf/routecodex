@@ -164,6 +164,7 @@
     "test:v3-provider-reasoning-effort-policy-blackbox": "npm --prefix v3 run test:v3-provider-reasoning-effort-policy-blackbox",
     "test:v3-provider-reasoning-effort-policy-config-failures": "npm --prefix v3 run test:v3-provider-reasoning-effort-policy-config-failures",
     "test:v3-goaichat-hosted-tool-history-blackbox": "npm --prefix v3 run test:v3-goaichat-hosted-tool-history-blackbox",
+    "test:v3-custom-tool-function-compat-blackbox": "npm --prefix v3 run test:v3-custom-tool-function-compat-blackbox",
     "test:v3-responses-websocket-v2-transport-hardening": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test responses_websocket_v2 -- --nocapture",
     "verify:v3-responses-websocket-v2-transport-hardening": "node scripts/architecture/verify-v3-responses-websocket-v2-transport-hardening.mjs",
     "test:v3-responses-websocket-v2-transport-hardening-red-fixtures": "node scripts/tests/v3-responses-websocket-v2-transport-hardening-red-fixtures.mjs",

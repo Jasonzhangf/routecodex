@@ -3,6 +3,7 @@ use super::{
     V3HubResponsePayload, V3HubTransportIntent, V3ProviderCompatProfileId,
 };
 use provider_compat_core::opencode_zen_tcm::OpencodeZenTcmBridgeBinding;
+use provider_compat_core::CustomToolFunctionBinding;
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -25,6 +26,7 @@ pub struct V3ProviderRespInbound01Raw {
     pub(crate) transport_intent: V3HubTransportIntent,
     pub(crate) compatibility_profile: V3ProviderCompatProfileId,
     pub(crate) opencode_zen_tcm_bridge: Option<OpencodeZenTcmBridgeBinding>,
+    pub(crate) custom_tool_function_binding: Option<CustomToolFunctionBinding>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +39,7 @@ pub struct V3ProviderRespInbound01RawContext {
     pub(crate) transport_intent: V3HubTransportIntent,
     pub(crate) compatibility_profile: V3ProviderCompatProfileId,
     pub(crate) opencode_zen_tcm_bridge: Option<OpencodeZenTcmBridgeBinding>,
+    pub(crate) custom_tool_function_binding: Option<CustomToolFunctionBinding>,
 }
 
 impl V3ProviderRespInbound01RawContext {
@@ -56,6 +59,7 @@ impl V3ProviderRespInbound01RawContext {
             transport_intent,
             compatibility_profile: V3ProviderCompatProfileId::Passthrough,
             opencode_zen_tcm_bridge: None,
+            custom_tool_function_binding: None,
         }
     }
 
@@ -77,6 +81,14 @@ impl V3ProviderRespInbound01RawContext {
         binding: Option<OpencodeZenTcmBridgeBinding>,
     ) -> Self {
         self.opencode_zen_tcm_bridge = binding;
+        self
+    }
+
+    pub(crate) fn with_custom_tool_function_binding(
+        mut self,
+        binding: Option<CustomToolFunctionBinding>,
+    ) -> Self {
+        self.custom_tool_function_binding = binding;
         self
     }
 }
@@ -116,6 +128,7 @@ pub fn build_v3_provider_resp_inbound_01_raw_with_compat_profile(
         transport_intent: context.transport_intent,
         compatibility_profile: context.compatibility_profile,
         opencode_zen_tcm_bridge: context.opencode_zen_tcm_bridge,
+        custom_tool_function_binding: context.custom_tool_function_binding,
     }
 }
 
@@ -134,6 +147,7 @@ pub fn build_v3_provider_resp_inbound_01_raw_from_sse_chunks(
         transport_intent: context.transport_intent,
         compatibility_profile: context.compatibility_profile,
         opencode_zen_tcm_bridge: context.opencode_zen_tcm_bridge,
+        custom_tool_function_binding: context.custom_tool_function_binding,
     }
 }
 

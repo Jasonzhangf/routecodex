@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 90 functional paths, 534 caller edges.
+Generated view: 90 functional paths, 535 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -63,6 +63,7 @@ flowchart TD
   module_v3_runtime__hub_v1 -->|8 edges / 6 paths| module_v3_provider_responses
   module_v3_runtime__hub_v1 -->|31 edges / 5 paths| module_v3_runtime
   module_v3_runtime__hub_v1 -->|130 edges / 26 paths| module_v3_runtime__hub_v1
+  module_v3_runtime -->|1 edges / 1 paths| module_provider_compat_core
   module_v3_runtime -->|2 edges / 1 paths| module_routecodex_v3_agent_memory
   module_v3_runtime -->|3 edges / 3 paths| module_routecodex_v3_route_classifier
   module_v3_runtime -->|1 edges / 1 paths| module_routecodex_v3_sse
@@ -117,6 +118,7 @@ flowchart TD
 | v3-runtime::hub_v1 | v3-provider-responses | 8 | `v3-provider-admission-lease-lifecycle`<br/>`v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry` |
 | v3-runtime::hub_v1 | v3-runtime | 31 | `v3.provider_action_gate.mainline`<br/>`v3.provider_admission_rescue_entrypoints`<br/>`v3.provider_global_subscription_probe`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding` |
 | v3-runtime::hub_v1 | v3-runtime::hub_v1 | 130 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.config.provider_sse_timeout_projection.mainline`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_pipeline.v1.relay_request_source_slice`<br/>`v3.hub_pipeline.v1.relay_response_source_slice`<br/>`v3.hub_pipeline.v1.request`<br/>`v3.hub_pipeline.v1.response`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.openai_chat_sse_typed_tree`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_conversion_field_parity.outbound_helper_bindings`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_compat.request_invalid_error_source`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.responses_chat_sse_typed_tree`<br/>`v3.responses_provider_event.terminal_merge`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.servertool_center.skeleton`<br/>`v3.sse.protocol_codec_projection_boundary`<br/>`v3.tool_thinking_hook_skeleton.mainline`<br/>`v3.web_search_servertool_state_machine` |
+| v3-runtime | provider-compat-core | 1 | `v3.sse_error_and_direct_consumer_pre_wiring` |
 | v3-runtime | routecodex-v3-agent-memory | 2 | `v3.memory_raw_capture` |
 | v3-runtime | routecodex-v3-route-classifier | 3 | `v3.route_classifier.facts_classification`<br/>`v3.route_policy.condition_evaluation`<br/>`vr.current_turn_typed_route_facts` |
 | v3-runtime | routecodex-v3-sse | 1 | `v3.sse_error_and_direct_consumer_pre_wiring` |
@@ -3158,6 +3160,9 @@ Owner feature: `v3.responses_chat_sse_typed_tree_refactor`
 
 ```mermaid
 flowchart TD
+  subgraph c_75_v3_sse_error_and_direct_consumer_pre_wiring_m_provider_compat_core["provider-compat-core"]
+    c_75_v3_sse_error_and_direct_consumer_pre_wiring_9["provider-compat-core<br/>apply_custom_tool_function_sse_event_compat<br/><small>provider-compat-core/src/lib.rs</small>"]
+  end
   subgraph c_75_v3_sse_error_and_direct_consumer_pre_wiring_m_routecodex_v3_sse["routecodex-v3-sse"]
     c_75_v3_sse_error_and_direct_consumer_pre_wiring_1["routecodex-v3-sse<br/>SseTransportErrorExport::from<br/><small>routecodex-v3-sse/src/lib.rs</small>"]
   end
@@ -3169,6 +3174,7 @@ flowchart TD
     c_75_v3_sse_error_and_direct_consumer_pre_wiring_5["v3-runtime<br/>apply_direct_provider_response_compat<br/><small>routecodex-v3-runtime/src/shared.rs</small>"]
     c_75_v3_sse_error_and_direct_consumer_pre_wiring_6["v3-runtime<br/>project_provider_raw_to_client_payload_inner<br/><small>routecodex-v3-runtime/src/shared.rs</small>"]
     c_75_v3_sse_error_and_direct_consumer_pre_wiring_7["v3-runtime<br/>V3DirectSseTypedHookCatalog::with_responses<br/><small>routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs</small>"]
+    c_75_v3_sse_error_and_direct_consumer_pre_wiring_8["v3-runtime<br/>apply_custom_tool_function_sse_chunk_buffered<br/><small>routecodex-v3-runtime/src/shared_custom_tool_function_sse.rs</small>"]
   end
   c_75_v3_sse_error_and_direct_consumer_pre_wiring_0 -->|v3-sse-error-export-01<br/>V3ProviderResp14Raw → ErrorErr01SourceRaised| c_75_v3_sse_error_and_direct_consumer_pre_wiring_1
   c_75_v3_sse_error_and_direct_consumer_pre_wiring_2 -->|v3-direct-content-consumer-01<br/>V3ProviderResp14Raw → V3DirectResp14ProviderProjectionPrepared| c_75_v3_sse_error_and_direct_consumer_pre_wiring_3
@@ -3176,6 +3182,7 @@ flowchart TD
   c_75_v3_sse_error_and_direct_consumer_pre_wiring_2 -->|v3-direct-sse-provider-response-compat-01<br/>V3DirectResp14TypedProtocolData → V3DirectResp15ClientPayloadReady| c_75_v3_sse_error_and_direct_consumer_pre_wiring_5
   c_75_v3_sse_error_and_direct_consumer_pre_wiring_6 -->|v3-direct-provider-response-compat-01<br/>V3ProviderResp14Raw → V3DirectResp14ProviderProjectionPrepared| c_75_v3_sse_error_and_direct_consumer_pre_wiring_5
   c_75_v3_sse_error_and_direct_consumer_pre_wiring_2 -->|v3-direct-typed-hook-catalog-01<br/>V3ProviderResp14Raw → V3DirectResp14ProviderProjectionPrepared| c_75_v3_sse_error_and_direct_consumer_pre_wiring_7
+  c_75_v3_sse_error_and_direct_consumer_pre_wiring_8 -->|v3-provider-compat-custom-tool-function-sse-01<br/>V3ProviderResp14Raw → V3DirectResp15ClientPayloadReady| c_75_v3_sse_error_and_direct_consumer_pre_wiring_9
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -3186,6 +3193,7 @@ flowchart TD
 | `v3-direct-sse-provider-response-compat-01` | `V3DirectResp14TypedProtocolData` → `V3DirectResp15ClientPayloadReady` | anchored | V3DirectSseContentConsumer::consume<br/><small>routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs</small> | apply_direct_provider_response_compat<br/><small>routecodex-v3-runtime/src/shared.rs</small> | `v3.responses_chat_sse_typed_tree_refactor` |
 | `v3-direct-provider-response-compat-01` | `V3ProviderResp14Raw` → `V3DirectResp14ProviderProjectionPrepared` | anchored | project_provider_raw_to_client_payload_inner<br/><small>routecodex-v3-runtime/src/shared.rs</small> | apply_direct_provider_response_compat<br/><small>routecodex-v3-runtime/src/shared.rs</small> | `v3.responses_chat_sse_typed_tree_refactor` |
 | `v3-direct-typed-hook-catalog-01` | `V3ProviderResp14Raw` → `V3DirectResp14ProviderProjectionPrepared` | anchored | V3DirectSseContentConsumer::consume<br/><small>routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs</small> | V3DirectSseTypedHookCatalog::with_responses<br/><small>routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs</small> | `v3.responses_chat_sse_typed_tree_refactor` |
+| `v3-provider-compat-custom-tool-function-sse-01` | `V3ProviderResp14Raw` → `V3DirectResp15ClientPayloadReady` | anchored | apply_custom_tool_function_sse_chunk_buffered<br/><small>routecodex-v3-runtime/src/shared_custom_tool_function_sse.rs</small> | apply_custom_tool_function_sse_event_compat<br/><small>provider-compat-core/src/lib.rs</small> | `v3.provider_compat_profile_loading` |
 
 ## v3.runtime_restart_handoff_skeleton
 

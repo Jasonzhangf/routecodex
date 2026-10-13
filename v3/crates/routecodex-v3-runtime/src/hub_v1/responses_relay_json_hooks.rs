@@ -18,6 +18,8 @@ pub(crate) struct V3ResponsesRelayJsonResponseHookInput<'a> {
     pub(crate) compatibility_profile: Option<&'a str>,
     pub(crate) opencode_zen_tcm_bridge:
         Option<&'a provider_compat_core::opencode_zen_tcm::OpencodeZenTcmBridgeBinding>,
+    pub(crate) custom_tool_function_binding:
+        Option<&'a provider_compat_core::CustomToolFunctionBinding>,
     pub(crate) web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
     pub(crate) web_search_center_state: Option<V3WebSearchCenterState>,
     /// 请求侧 VR 路由决策算好的"保留响应密文"标记（仅 gpt 模型 + 单一 provider
@@ -66,7 +68,8 @@ pub(crate) fn run_json_response_hooks(
         )
         .with_source_provider_protocol(source_provider_protocol)
         .with_compatibility_profile(input.compatibility_profile)
-        .with_opencode_zen_tcm_bridge(input.opencode_zen_tcm_bridge.cloned()),
+        .with_opencode_zen_tcm_bridge(input.opencode_zen_tcm_bridge.cloned())
+        .with_custom_tool_function_binding(input.custom_tool_function_binding.cloned()),
     );
     trace.push("V3ProviderRespInbound01Raw");
     let hooks = compile_v3_hub_relay_response_hooks();

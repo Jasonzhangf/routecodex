@@ -589,6 +589,7 @@ async fn malformed_json_response_is_explicit_error() {
                 toolreason_client_projection: true,
                 toolreason_observation_session_id: Some("session-test".to_string()),
                 tool_thinking_turn_context: crate::hub_v1::V3ToolThinkingTurnContext::disabled(),
+                custom_tool_function_binding: None,
                 runtime_timing: crate::runtime_timing::V3RuntimeTimingState::start(),
             },
         )

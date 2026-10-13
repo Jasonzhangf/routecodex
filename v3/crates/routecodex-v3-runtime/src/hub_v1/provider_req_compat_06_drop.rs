@@ -43,6 +43,13 @@ impl ProviderReqCompat06ProviderCompat {
     pub fn profile(&self) -> &V3ProviderCompatProfileId {
         &self.profile
     }
+
+    pub(crate) fn custom_tool_function_binding(
+        &self,
+    ) -> Option<&provider_compat_core::CustomToolFunctionBinding> {
+        self.custom_tool_function_binding.as_ref()
+    }
+
     pub(crate) fn provider_semantic_payload(&self) -> &Value {
         &self.payload.0
     }

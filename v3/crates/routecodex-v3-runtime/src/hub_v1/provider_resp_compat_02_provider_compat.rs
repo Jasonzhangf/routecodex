@@ -85,6 +85,7 @@ fn apply_v3_provider_resp_compat(
         adapter_context: AdapterContext {
             compatibility_profile: profile.as_optional_string(),
             provider_protocol: Some(provider_protocol_compat_id(input.provider_protocol)),
+            custom_tool_function_binding: input.custom_tool_function_binding.clone(),
             ..Default::default()
         },
         explicit_profile: profile.as_optional_string(),

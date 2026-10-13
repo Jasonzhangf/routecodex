@@ -712,6 +712,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             }
         };
         trace.push("V3Provider12ResponsesWirePayload");
+        let custom_tool_function_binding = wire.custom_tool_function_binding().cloned();
 
         let transport_request = match hook_registry.run_provider_transport(wire) {
             Ok(value) => value,
@@ -1000,6 +1001,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 ),
                 direct_failure_session_scope.session_id(),
                 standardized.tool_thinking_turn_context.clone(),
+                custom_tool_function_binding.clone(),
             ) {
                 Ok(context) => context,
                 Err(error) => {

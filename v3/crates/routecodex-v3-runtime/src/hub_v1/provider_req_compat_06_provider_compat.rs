@@ -4,7 +4,7 @@ use super::request_outbound_format::{
 use super::{
     build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops,
     build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording,
-    build_v3_openai_responses_standard_request_for_selected_target_with_drops,
+    build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options,
     classify_v3_provider_compat_error, encode_v3_responses_semantic_as_anthropic_request,
     provider_protocol_compat_id, ProviderReqCompat06Projected, V3HubOpaquePayload,
     V3HubProviderWireProtocol, V3HubReqOutbound07ProviderSemantic, V3ProviderCompatError,
@@ -16,6 +16,9 @@ use provider_compat_core::opencode_zen_tcm::{
 };
 use provider_compat_core::req_outbound_stage3_compat::{
     run_req_outbound_stage3_compat, AdapterContext, ReqOutboundCompatInput,
+};
+use provider_compat_core::{
+    compile_custom_tool_function_binding, CustomToolFunctionBinding, CUSTOM_TOOL_FUNCTION_PROFILE,
 };
 use serde_json::Value;
 
@@ -30,6 +33,7 @@ pub struct ProviderReqCompat06ProviderCompat {
     pub(crate) profile: V3ProviderCompatProfileId,
     pub(crate) payload: V3HubOpaquePayload,
     pub(crate) opencode_zen_tcm_bridge: Option<OpencodeZenTcmBridgeBinding>,
+    pub(crate) custom_tool_function_binding: Option<CustomToolFunctionBinding>,
 }
 
 pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
@@ -39,7 +43,8 @@ pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
         Some(profile) => V3ProviderCompatProfileId::from_config(Some(profile)),
         None => V3ProviderCompatProfileId::Passthrough,
     };
-    let (mut payload, drops) = apply_v3_provider_req_compat(&input, &profile)?;
+    let (mut payload, drops, custom_tool_function_binding) =
+        apply_v3_provider_req_compat(&input, &profile)?;
     let opencode_zen_tcm_bridge = if profile
         .as_str()
         .eq_ignore_ascii_case(OPENCODE_ZEN_TCM_PROFILE)
@@ -60,6 +65,7 @@ pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
             profile,
             payload: V3HubOpaquePayload(std::sync::Arc::new(payload)),
             opencode_zen_tcm_bridge,
+            custom_tool_function_binding,
         },
         drops,
     })
@@ -68,16 +74,23 @@ pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
 pub(super) fn apply_v3_provider_req_compat(
     input: &V3HubReqOutbound07ProviderSemantic,
     profile: &V3ProviderCompatProfileId,
-) -> Result<(Value, Vec<V3ProjectionDropRecord>), V3ProviderCompatError> {
+) -> Result<
+    (
+        Value,
+        Vec<V3ProjectionDropRecord>,
+        Option<CustomToolFunctionBinding>,
+    ),
+    V3ProviderCompatError,
+> {
     let (payload, drops) = build_v3_provider_standard_protocol_payload_from_req07(input)
         .map_err(|reason| classify_v3_provider_compat_error("request_protocol", profile, reason))?;
-    let payload = apply_v3_provider_req_compat_to_provider_payload(
+    let (payload, custom_tool_function_binding) = apply_v3_provider_req_compat_to_provider_payload(
         payload,
         input.selected_target(),
         input.provider_protocol,
         profile,
     )?;
-    Ok((payload, drops))
+    Ok((payload, drops, custom_tool_function_binding))
 }
 
 pub(crate) fn provider_req_compat_reasoning_effort_explicit(payload: &Value) -> bool {
@@ -97,8 +110,13 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
     selected: &routecodex_v3_target::V3TargetCandidate,
     provider_protocol: V3HubProviderWireProtocol,
     profile: &V3ProviderCompatProfileId,
-) -> Result<Value, V3ProviderCompatError> {
+) -> Result<(Value, Option<CustomToolFunctionBinding>), V3ProviderCompatError> {
     project_reasoning_effort_for_selected_target(&mut payload, selected, provider_protocol)?;
+    let custom_tool_function_binding = (profile
+        .as_str()
+        .eq_ignore_ascii_case(CUSTOM_TOOL_FUNCTION_PROFILE)
+        && provider_protocol == V3HubProviderWireProtocol::Responses)
+        .then(|| compile_custom_tool_function_binding(&payload));
     let provider_key = format!(
         "{}:{}:{}:{}",
         selected.provider_id, selected.interface_id, selected.auth_alias, selected.model_id
@@ -116,6 +134,7 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
             web_search_execution_mode: Some(
                 selected.web_search_execution_mode.as_str().to_string(),
             ),
+            custom_tool_function_binding: custom_tool_function_binding.clone(),
             ..Default::default()
         },
         explicit_profile: profile.as_optional_string(),
@@ -148,7 +167,7 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
             V3HubProviderWireProtocol::Anthropic | V3HubProviderWireProtocol::Gemini => {}
         }
     }
-    Ok(result)
+    Ok((result, custom_tool_function_binding))
 }
 
 #[path = "provider_req_compat_06_output_cap.rs"]
@@ -180,13 +199,21 @@ fn build_v3_provider_standard_protocol_payload_from_req07(
             payload
         }
         V3HubProviderWireProtocol::Responses => {
+            // The `responses:custom-tool-function` compat profile owns the
+            // custom→function projection, so the standard Responses projection
+            // must keep client `custom` tool declarations on the wire for it.
+            let preserve_responses_custom_tools = selected
+                .compatibility_profile
+                .as_deref()
+                .is_some_and(|profile| profile.eq_ignore_ascii_case(CUSTOM_TOOL_FUNCTION_PROFILE));
             let (payload, responses_drops) =
-                build_v3_openai_responses_standard_request_for_selected_target_with_drops(
+                build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options(
                     input.provider_semantic_payload(),
                     selected
                         .model_capabilities
                         .iter()
                         .any(|capability| capability == "web_search"),
+                    preserve_responses_custom_tools,
                 )?;
             drops.extend(responses_drops);
             payload
@@ -1337,7 +1364,7 @@ mod tests {
         });
         let mut selected = selected_candidate(V3HubProviderWireProtocol::OpenAiChat);
         selected.model_capabilities = vec!["text".into(), "multimodal".into(), "vision".into()];
-        let payload = apply_v3_provider_req_compat_to_provider_payload(
+        let (payload, _) = apply_v3_provider_req_compat_to_provider_payload(
             payload,
             &selected,
             V3HubProviderWireProtocol::OpenAiChat,
@@ -1360,7 +1387,7 @@ mod tests {
         });
         let mut selected = selected_candidate(V3HubProviderWireProtocol::OpenAiChat);
         selected.model_capabilities = vec!["text".into(), "tools".into()];
-        let payload = apply_v3_provider_req_compat_to_provider_payload(
+        let (payload, _) = apply_v3_provider_req_compat_to_provider_payload(
             payload,
             &selected,
             V3HubProviderWireProtocol::OpenAiChat,

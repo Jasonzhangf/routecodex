@@ -46,6 +46,7 @@ pub(crate) fn build_direct_response_compat_context(
     toolreason_client_projection: bool,
     toolreason_observation_session_id: &str,
     tool_thinking_turn_context: crate::hub_v1::V3ToolThinkingTurnContext,
+    custom_tool_function_binding: Option<provider_compat_core::CustomToolFunctionBinding>,
 ) -> Result<V3DirectResponseCompatContext, String> {
     Ok(V3DirectResponseCompatContext {
         provider_protocol: crate::hub_v1::provider_wire_protocol_for_selected_candidate(
@@ -58,6 +59,7 @@ pub(crate) fn build_direct_response_compat_context(
         toolreason_client_projection,
         toolreason_observation_session_id: Some(toolreason_observation_session_id.to_owned()),
         tool_thinking_turn_context,
+        custom_tool_function_binding,
         runtime_timing: crate::runtime_timing::V3RuntimeTimingState::start(),
     })
 }

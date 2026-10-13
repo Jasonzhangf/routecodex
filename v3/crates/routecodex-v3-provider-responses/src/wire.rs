@@ -75,6 +75,7 @@ pub struct V3Provider12ResponsesWirePayload {
     stream_intent: V3ResponsesStreamIntent,
     endpoint: V3ResponsesRequestEndpoint,
     body: Value,
+    custom_tool_function_binding: Option<provider_compat_core::CustomToolFunctionBinding>,
 }
 
 impl V3Provider12ResponsesWirePayload {
@@ -96,6 +97,20 @@ impl V3Provider12ResponsesWirePayload {
 
     pub fn body(&self) -> &Value {
         &self.body
+    }
+
+    pub fn custom_tool_function_binding(
+        &self,
+    ) -> Option<&provider_compat_core::CustomToolFunctionBinding> {
+        self.custom_tool_function_binding.as_ref()
+    }
+
+    pub fn with_custom_tool_function_binding(
+        mut self,
+        binding: Option<provider_compat_core::CustomToolFunctionBinding>,
+    ) -> Self {
+        self.custom_tool_function_binding = binding;
+        self
     }
 
     pub(crate) fn into_parts(
@@ -238,6 +253,7 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
         stream_intent,
         endpoint,
         body,
+        custom_tool_function_binding: None,
     })
 }
 

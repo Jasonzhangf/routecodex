@@ -602,3 +602,55 @@ fn minimax_response_profile_does_not_harvest_ordinary_anthropic_wrapper_text() {
             )
         }));
 }
+
+#[test]
+fn custom_tool_function_profile_dispatches_request_and_response_mapping() {
+    let request_payload = json!({
+        "model": "kimi-k3",
+        "tools": [{"type": "custom", "name": "apply_patch"}],
+        "input": [
+            {"type": "custom_tool_call", "call_id": "call_1", "name": "apply_patch", "input": "patch"},
+            {"type": "custom_tool_call_output", "call_id": "call_1", "output": "done"}
+        ]
+    });
+    let binding = crate::compile_custom_tool_function_binding(&request_payload);
+    let request = run_req_outbound_stage3_compat(ReqOutboundCompatInput {
+        payload: request_payload,
+        adapter_context: AdapterContext {
+            compatibility_profile: Some(crate::CUSTOM_TOOL_FUNCTION_PROFILE.to_string()),
+            provider_protocol: Some("openai-responses".to_string()),
+            ..Default::default()
+        },
+        explicit_profile: None,
+    })
+    .unwrap();
+    assert_eq!(
+        request.applied_profile.as_deref(),
+        Some(crate::CUSTOM_TOOL_FUNCTION_PROFILE)
+    );
+    assert_eq!(request.payload["tools"][0]["type"], "function");
+    assert_eq!(request.payload["input"][0]["type"], "function_call");
+    assert_eq!(request.payload["input"][1]["type"], "function_call_output");
+
+    let response = run_resp_inbound_stage3_compat(ReqOutboundCompatInput {
+        payload: json!({
+            "output": [{
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "routecodex_custom__6170706c795f7061746368",
+                "arguments": "{\"input\":\"patch\"}"
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some(crate::CUSTOM_TOOL_FUNCTION_PROFILE.to_string()),
+            provider_protocol: Some("openai-responses".to_string()),
+            custom_tool_function_binding: Some(binding),
+            ..Default::default()
+        },
+        explicit_profile: None,
+    })
+    .unwrap();
+    assert_eq!(response.payload["output"][0]["type"], "custom_tool_call");
+    assert_eq!(response.payload["output"][0]["name"], "apply_patch");
+    assert_eq!(response.payload["output"][0]["input"], "patch");
+}

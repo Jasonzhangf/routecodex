@@ -489,6 +489,7 @@ features:
   - When no provider reasoning-effort policy is declared, the client/protocol/compat effort result is preserved unchanged.
   - Explicit chat:opencode-zen-tcm binds the actual compatible executor and performs a reversible native bash/read to client executor to native-history conversion with unchanged call IDs and actual paired output/error content.
   - Original custom executor scripts and passable direct exec_command calls preserve complete UTF8 file contents, actual execution receipts and paired history through public Responses SSE entry.
+  - Responses gateways that reject custom tool history accept the equivalent function-call wire shape, while public Responses JSON and SSE clients receive custom_tool_call items with unwrapped input.
   required_negative:
   - Top-level semantics, processed, and processingMetadata fail at both request and response compat entrypoints.
   - Compat does not strip, reconstruct, or route control state and does not own Chat Process or SSE semantics.
@@ -498,6 +499,7 @@ features:
   - Goaichat compatibility never adds function envelopes to native hosted declarations, adds type/function envelopes to ordinary Anthropic declarations, or restores retired historical tools to the callable inventory.
   - Zen TCM aliases are never added without the real compatible executor or when its new calls are disabled; native declarations/calls, ordinary executor scripts and incompatible entry/protocol paths are preserved.
   - Missing or malformed alias arguments reach the real client executor for error/correction; Compat never fabricates execution receipts or reconstructs capability controls from the executable codec.
+  - Custom-tool compatibility never leaks routecodex_custom__ wire names or function_call_arguments events after an item becomes custom_tool_call; ordinary function calls remain unchanged.
   black_box_regression:
     command: npm run test:v3-goaichat-hosted-tool-history-blackbox
     test_ids:
@@ -515,9 +517,32 @@ features:
     - zen_tcm_incompatible_executor_preserved
     - zen_tcm_original_executor_file_write_history_roundtrip
     - zen_tcm_direct_shell_file_write_history_roundtrip
+  custom_tool_function_black_box_regression:
+    command: npm run test:v3-custom-tool-function-compat-blackbox
+    test_ids:
+    - responses_custom_tool_function_compat_maps_request_and_response_publicly
+    - responses_custom_tool_function_compat_maps_request_and_response_through_relay_publicly
+    - responses_custom_tool_function_compat_rewrites_provider_sse_publicly
+    - responses_custom_tool_function_compat_rewrites_provider_sse_through_relay_publicly
+    - responses_custom_tool_function_compat_rejects_malformed_provider_sse_publicly
+    - responses_custom_tool_function_compat_avoids_ordinary_wire_name_collision_publicly
+    - responses_custom_tool_function_compat_keeps_long_wire_name_within_provider_limit_publicly
+    - responses_custom_tool_function_compat_maps_allowed_tools_choice_publicly
+  custom_tool_function_failure_modes:
+  - A mapped custom tool's delta event is never returned to the client while its arguments remain on the function-call wire, including an empty delta that projects to no new input.
+  - Named custom tool_choice stays on a declared provider tool instead of pointing at a custom name the provider never received.
+  - In the standard Responses `tool_choice` shape (`type=allowed_tools` with `mode`/`tools` directly on the object), a custom reference follows the bound wire name while an ordinary function reference keeps its own name and `mode` is preserved.
+  - The Relay (`responses.process = "chat"`) path keeps the custom tool declaration on the wire so the same compat profile produces the bound wire name and maps the response back, instead of leaking the standard `apply_patch` function projection; the buffered Relay replay hands the client a `custom_tool_call` item with the unwrapped input and never a `function_call` or delta frame.
+  - A custom tool whose reversible wire name collides with a declared ordinary function, or whose reversible name exceeds the provider 64-char limit, still projects a unique wire name and maps back.
+  - Provider arguments that cannot be unwrapped into a custom input keep their real content on the JSON item and the SSE done event; empty input is not fabricated.
+  - The custom-tool SSE projection rewrites frames delimited by LF, CRLF and CR, and flushes a complete trailing frame the transport decoder already accepted.
+  - Responses terminal events other than completed (incomplete/failed) still restore custom_tool_call output items.
+  - Malformed provider SSE never becomes a successful client stream and never fabricates a client error response.
+  - The workspace cargo-test target list actually executes the custom-tool black-box target instead of treating it as a filter argument.
   required_gates:
   - npm run test:v3-provider-compat-profile-loading
   - npm run test:v3-goaichat-hosted-tool-history-blackbox
+  - npm run test:v3-custom-tool-function-compat-blackbox
   - npm run test:v3-provider-reasoning-effort-policy-blackbox
   - npm run test:v3-provider-reasoning-effort-policy-config-failures
   - npm run test:v3-opencode-zen-tcm-bridge-blackbox
