@@ -1069,7 +1069,7 @@ fn provider_req_compat_leaves_existing_gemini_generation_config_untouched() {
     let selected =
         v3_output_cap_test_candidate("gemini", V3HubEntryProtocol::OpenAiChat, Some(20_000));
 
-    let wire = apply_v3_provider_req_compat_to_provider_payload(
+    let (wire, _) = apply_v3_provider_req_compat_to_provider_payload(
         payload,
         &selected,
         V3HubProviderWireProtocol::Gemini,

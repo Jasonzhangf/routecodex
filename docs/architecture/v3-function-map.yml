@@ -1245,6 +1245,7 @@ features:
   - v3-zen-tcm-request-01
   - v3-zen-tcm-request-02
   - v3-zen-tcm-response-01
+  - v3-provider-compat-custom-tool-function-sse-01
   entry_symbols:
   - run_req_outbound_stage3_compat
   - run_resp_inbound_stage3_compat
@@ -1265,8 +1266,11 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_error.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+  - v3/crates/routecodex-v3-runtime/src/shared.rs
+  - v3/crates/routecodex-v3-runtime/src/shared_custom_tool_function_sse.rs
   - v3/crates/routecodex-v3-runtime/tests
   - v3/crates/routecodex-v3-cli/tests/goaichat_hosted_tool_history_blackbox.rs
+  - v3/crates/routecodex-v3-cli/tests/responses_custom_tool_function_compat_blackbox.rs
   - v3/crates/routecodex-v3-cli/tests/provider_reasoning_effort_policy_blackbox.rs
   - v3/crates/routecodex-v3-cli/tests/opencode_zen_tcm_bridge_blackbox.rs
   - v3/scripts/test.mjs
@@ -1283,6 +1287,7 @@ features:
   required_gates:
   - npm run test:v3-provider-compat-profile-loading
   - npm run test:v3-goaichat-hosted-tool-history-blackbox
+  - npm run test:v3-custom-tool-function-compat-blackbox
   - npm run test:v3-provider-reasoning-effort-policy-blackbox
   - npm run test:v3-provider-reasoning-effort-policy-config-failures
   - npm run test:v3-opencode-zen-tcm-bridge-blackbox

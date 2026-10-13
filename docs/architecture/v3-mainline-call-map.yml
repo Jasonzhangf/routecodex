@@ -8603,6 +8603,21 @@ chains:
       produces: [v3.sse.responses.hook_effect]
       side_channel_reads: [v3.sse.direct.typed_hook_catalog]
       side_channel_writes: []
+  - step_id: v3-provider-compat-custom-tool-function-sse-01
+    from_node: V3ProviderResp14Raw
+    to_node: V3DirectResp15ClientPayloadReady
+    caller_symbol: apply_custom_tool_function_sse_chunk_buffered
+    caller_file: v3/crates/routecodex-v3-runtime/src/shared_custom_tool_function_sse.rs
+    callee_symbol: apply_custom_tool_function_sse_event_compat
+    callee_file: v3/crates/provider-compat-core/src/lib.rs
+    status: anchored
+    edge_kind: provider_private_response_compat_single_owner
+    owner_feature_id: v3.provider_compat_profile_loading
+    resource_flow:
+      consumes: [v3.response.provider_raw]
+      produces: [v3.response.client_payload]
+      side_channel_reads: []
+      side_channel_writes: []
 
 - chain_id: v3.runtime_restart_handoff_skeleton
   owner_feature_id: v3.runtime_restart_handoff_skeleton

@@ -27,6 +27,7 @@ fn wrap_direct_sse_provider_event_json_observation_stream(
         false,
         false,
         None,
+        None,
         V3DirectSseTypedHookCatalog::default(),
         false,
         false,
@@ -47,6 +48,7 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
     deepseek_console_go: bool,
     thinking_tags: bool,
     provider_response_compat_profile: Option<String>,
+    custom_tool_function_binding: Option<provider_compat_core::CustomToolFunctionBinding>,
     typed_hooks: V3DirectSseTypedHookCatalog,
     tool_thinking_enabled: bool,
     toolreason_client_projection: bool,
@@ -90,6 +92,7 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
                 ..Default::default()
             }
             .with_typed_hooks(typed_hooks)
+            .with_custom_tool_function_binding(custom_tool_function_binding)
             .with_tool_thinking(tool_thinking_enabled, toolreason_client_projection)
             .with_client_responses_projection(client_responses_projection),
             semantic_state: V3DirectSseSemanticState::new(),
@@ -633,6 +636,7 @@ pub(crate) async fn project_and_collect_direct_sse_attempt(
             .then(|| compat_plan.provider_response_compat_profile())
             .flatten()
             .map(ToOwned::to_owned),
+        compat_plan.custom_tool_function_binding.clone(),
         hook_registry.direct_sse_typed_hooks(),
         crate::hub_v1::v3_tool_thinking_enabled_for_server(manifest, server_id),
         crate::hub_v1::v3_toolreason_client_projection_enabled_for_server(manifest, server_id),

@@ -69,6 +69,8 @@ await run(
     '--test',
     'provider_reasoning_effort_policy_blackbox',
     '--test',
+    'responses_custom_tool_function_compat_blackbox',
+    '--test',
     'vr_full_function_controlled_replay',
     '--',
     '--nocapture',

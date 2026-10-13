@@ -538,21 +538,23 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
     let profile = crate::hub_v1::V3ProviderCompatProfileId::from_config(
         candidate.compatibility_profile.as_deref(),
     );
-    request_body = crate::hub_v1::apply_v3_provider_req_compat_to_provider_payload(
-        request_body,
-        candidate,
-        provider_protocol,
-        &profile,
-    )
-    .map_err(|error| {
-        build_v3_error_01_source_raised_internal(
-            V3ErrorSourceKind::RuntimeFailure,
-            "V3ResponsesDirect11Policy",
-            "responses_direct_provider_compat_failed",
-            format!("{}", error),
-            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+    let (compat_body, custom_tool_function_binding) =
+        crate::hub_v1::apply_v3_provider_req_compat_to_provider_payload(
+            request_body,
+            candidate,
+            provider_protocol,
+            &profile,
         )
-    })?;
+        .map_err(|error| {
+            build_v3_error_01_source_raised_internal(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3ResponsesDirect11Policy",
+                "responses_direct_provider_compat_failed",
+                format!("{}", error),
+                V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+            )
+        })?;
+    request_body = compat_body;
     let secret = match (
         &candidate.env_name,
         &candidate.token_file,
@@ -607,6 +609,7 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
         },
         request_body,
     )
+    .map(|wire| wire.with_custom_tool_function_binding(custom_tool_function_binding))
     .map_err(provider_error_source("V3Provider12ResponsesWirePayload"))
 }
 
@@ -832,7 +835,7 @@ pub(crate) fn chat_direct_request_projection_hook_with_key_catalog_and_drop_cont
     let profile = crate::hub_v1::V3ProviderCompatProfileId::from_config(
         candidate.compatibility_profile.as_deref(),
     );
-    wire_body = crate::hub_v1::apply_v3_provider_req_compat_to_provider_payload(
+    let (compat_body, _) = crate::hub_v1::apply_v3_provider_req_compat_to_provider_payload(
         wire_body,
         candidate,
         crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
@@ -847,6 +850,7 @@ pub(crate) fn chat_direct_request_projection_hook_with_key_catalog_and_drop_cont
             V3InternalErrorCode::V3Provider12ResponsesWirePayload,
         )
     })?;
+    wire_body = compat_body;
     let secret = match (
         &candidate.env_name,
         &candidate.token_file,

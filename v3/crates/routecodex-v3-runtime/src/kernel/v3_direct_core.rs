@@ -416,6 +416,7 @@ where
             }
         };
         trace.push("V3Provider12ResponsesWirePayload");
+        let custom_tool_function_binding = wire.custom_tool_function_binding().cloned();
         let transport_request = match C::run_provider_transport(wire) {
             Ok(value) => value,
             Err(source) => {
@@ -885,6 +886,7 @@ where
                 ),
                 direct_failure_session_scope.session_id(),
                 C::tool_thinking_turn_context(&standardized).clone(),
+                custom_tool_function_binding.clone(),
             ) {
                 Ok(context) => context,
                 Err(error) => {
@@ -1044,6 +1046,10 @@ where
                         })
                         .flatten()
                         .map(ToOwned::to_owned),
+                    response_projection
+                        .compat_plan
+                        .custom_tool_function_binding
+                        .clone(),
                     crate::hooks::register_responses_direct_hooks().direct_sse_typed_hooks(),
                     tool_thinking_enabled,
                     crate::hub_v1::v3_toolreason_client_projection_enabled_for_server(

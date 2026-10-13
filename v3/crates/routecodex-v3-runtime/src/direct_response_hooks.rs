@@ -88,6 +88,7 @@ pub struct V3DirectResponseCompatPlan {
     /// Configured provider-private compat profile carried for the
     /// `ProviderResponseCompat` block. `None` when the plan does not select it.
     pub provider_compat_profile: Option<String>,
+    pub custom_tool_function_binding: Option<provider_compat_core::CustomToolFunctionBinding>,
 }
 
 impl V3DirectResponseCompatPlan {
@@ -113,6 +114,7 @@ pub struct V3DirectResponseCompatContext {
     pub toolreason_client_projection: bool,
     pub toolreason_observation_session_id: Option<String>,
     pub tool_thinking_turn_context: V3ToolThinkingTurnContext,
+    pub custom_tool_function_binding: Option<provider_compat_core::CustomToolFunctionBinding>,
     pub(crate) runtime_timing: V3RuntimeTimingState,
 }
 
@@ -128,12 +130,14 @@ impl V3DirectResponseCompatContext {
             .iter()
             .map(String::as_str)
             .collect::<Vec<_>>();
-        compile_direct_response_compat_plan(V3DirectResponseCompatFacts {
+        let mut plan = compile_direct_response_compat_plan(V3DirectResponseCompatFacts {
             provider_protocol: self.provider_protocol,
             canonical_model_id: &self.canonical_model_id,
             model_capabilities: &capabilities,
             compatibility_profile: self.compatibility_profile.as_deref(),
-        })
+        })?;
+        plan.custom_tool_function_binding = self.custom_tool_function_binding.clone();
+        Ok(plan)
     }
 }
 
@@ -205,6 +209,7 @@ pub fn compile_direct_response_compat_plan(
         blocks: vec![block],
         provider_compat_profile: (block == V3DirectResponseCompatBlock::ProviderResponseCompat)
             .then(|| profile.unwrap_or_default().to_string()),
+        custom_tool_function_binding: None,
     })
 }
 

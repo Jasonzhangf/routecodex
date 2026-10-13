@@ -109,6 +109,21 @@ pub(crate) fn build_v3_openai_responses_standard_request_for_selected_target_wit
     payload: &Value,
     has_web_search_capability: bool,
 ) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
+    build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options(
+        payload,
+        has_web_search_capability,
+        false,
+    )
+}
+
+/// 与 `build_v3_openai_responses_standard_request_for_selected_target_with_drops`
+/// 相同，但当 `preserve_responses_custom_tools` 为真时保留客户端 `custom`
+/// 工具声明，交由 provider compat profile 作为唯一 owner 投影。
+pub(crate) fn build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options(
+    payload: &Value,
+    has_web_search_capability: bool,
+    preserve_responses_custom_tools: bool,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
     if payload.get("previous_response_id").is_some() {
         return Err(
             "UnmappedOutboundFields target_protocol=responses paths=$.previous_response_id"
@@ -116,7 +131,10 @@ pub(crate) fn build_v3_openai_responses_standard_request_for_selected_target_wit
         );
     }
     let (mut projected, drops) =
-        build_v3_openai_responses_request_from_chat_canonical_with_drops(payload)?;
+        build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options(
+            payload,
+            preserve_responses_custom_tools,
+        )?;
     project_openai_responses_hosted_web_search_for_selected_target(
         &mut projected,
         has_web_search_capability,
@@ -136,16 +154,41 @@ fn build_v3_openai_responses_request_from_chat_canonical(payload: &Value) -> Res
 fn build_v3_openai_responses_request_from_chat_canonical_with_drops(
     payload: &Value,
 ) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
+    build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options(payload, false)
+}
+
+fn build_v3_openai_responses_request_from_chat_canonical_with_drops_and_options(
+    payload: &Value,
+    preserve_responses_custom_tools: bool,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
     if payload.get("reasoning").is_some() {
         return Err(
             "RawPayloadShortcut target_protocol=responses path=$.reasoning; use registered Chat reasoning fields"
                 .to_string(),
         );
     }
+    if preserve_responses_custom_tools {
+        let (projected_source, drops) =
+            project_outbound_payload_for_target_protocol_preserving_custom_tools_with_drops(
+                payload,
+                V3OutboundTargetProtocol::OpenAiResponses,
+            )?;
+        return build_v3_openai_responses_request_from_projected_chat_canonical(
+            projected_source,
+            drops,
+        );
+    }
     let (projected_source, drops) = project_outbound_payload_for_target_protocol_with_drops(
         payload,
         V3OutboundTargetProtocol::OpenAiResponses,
     )?;
+    build_v3_openai_responses_request_from_projected_chat_canonical(projected_source, drops)
+}
+
+fn build_v3_openai_responses_request_from_projected_chat_canonical(
+    projected_source: Value,
+    drops: Vec<V3ProjectionDropRecord>,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
     let messages = projected_source
         .get("messages")
         .and_then(Value::as_array)
@@ -457,7 +500,28 @@ pub(crate) fn project_outbound_payload_for_target_protocol_with_drops(
     source: &Value,
     target_protocol: V3OutboundTargetProtocol,
 ) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
-    project_outbound_payload_for_target_protocol_inner_with_drops(source, target_protocol, None)
+    project_outbound_payload_for_target_protocol_inner_with_drops(
+        source,
+        target_protocol,
+        None,
+        false,
+    )
+}
+
+/// Responses 出站投影变体：保留客户端 `custom` 工具声明，交给显式配置的
+/// provider compat profile（`responses:custom-tool-function`）作为唯一 owner
+/// 完成 custom→function 投影。默认的 `apply_patch` 归一化若先行会消费掉
+/// custom 声明，使该 profile 在 Relay 路径失去可投影输入。
+pub(crate) fn project_outbound_payload_for_target_protocol_preserving_custom_tools_with_drops(
+    source: &Value,
+    target_protocol: V3OutboundTargetProtocol,
+) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
+    project_outbound_payload_for_target_protocol_inner_with_drops(
+        source,
+        target_protocol,
+        None,
+        true,
+    )
 }
 
 pub(crate) fn project_outbound_payload_for_selected_target_protocol(
@@ -486,6 +550,7 @@ pub(crate) fn project_outbound_payload_for_selected_target_protocol_with_drops(
         source,
         target_protocol,
         Some(model_capabilities),
+        false,
     )
 }
 
@@ -493,6 +558,7 @@ fn project_outbound_payload_for_target_protocol_inner_with_drops(
     source: &Value,
     target_protocol: V3OutboundTargetProtocol,
     gemini_model_capabilities: Option<&[String]>,
+    preserve_responses_custom_tools: bool,
 ) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
     let mut source = source.clone();
     if matches!(target_protocol, V3OutboundTargetProtocol::Gemini) {
@@ -532,7 +598,11 @@ fn project_outbound_payload_for_target_protocol_inner_with_drops(
     for json_path in &unmapped {
         remove_unmapped_outbound_field(&mut projected, json_path);
     }
-    apply_outbound_projection_transforms(&mut projected, target_protocol)?;
+    apply_outbound_projection_transforms(
+        &mut projected,
+        target_protocol,
+        preserve_responses_custom_tools,
+    )?;
     Ok((projected, drops))
 }
 
@@ -581,11 +651,14 @@ include!("request_outbound_gemini.rs");
 fn apply_outbound_projection_transforms(
     projected: &mut Value,
     target_protocol: V3OutboundTargetProtocol,
+    preserve_responses_custom_tools: bool,
 ) -> Result<(), String> {
     match target_protocol {
         V3OutboundTargetProtocol::OpenAiResponses => {
             project_responses_request_chat_extension_to_openai_responses(projected)?;
-            project_openai_responses_custom_tools_to_function_schema(projected)?;
+            if !preserve_responses_custom_tools {
+                project_openai_responses_custom_tools_to_function_schema(projected)?;
+            }
             validate_openai_metadata(projected, "responses")?;
             project_openai_responses_reasoning_extensions_to_reasoning(projected)?;
         }

@@ -18,6 +18,7 @@ pub mod route_policy;
 mod runtime_timing;
 mod selected_provider_model_binding;
 mod shared;
+mod shared_custom_tool_function_sse;
 mod shared_direct_thinking_compat;
 pub(crate) mod sse_object_pipeline;
 mod token_estimation;
