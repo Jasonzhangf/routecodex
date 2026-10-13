@@ -4,6 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
+Generated view: 91 functional paths, 544 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -3224,6 +3225,29 @@ Owner feature: `v3.responses_chat_sse_typed_tree_refactor`
 
 ```mermaid
 flowchart TD
+  subgraph c_76_v3_sse_error_and_direct_consumer_pre_wiring_m_provider_compat_core["provider-compat-core"]
+    c_76_v3_sse_error_and_direct_consumer_pre_wiring_9["provider-compat-core<br/>apply_custom_tool_function_sse_event_compat<br/><small>provider-compat-core/src/lib.rs</small>"]
+  end
+  subgraph c_76_v3_sse_error_and_direct_consumer_pre_wiring_m_routecodex_v3_sse["routecodex-v3-sse"]
+    c_76_v3_sse_error_and_direct_consumer_pre_wiring_1["routecodex-v3-sse<br/>SseTransportErrorExport::from<br/><small>routecodex-v3-sse/src/lib.rs</small>"]
+  end
+  subgraph c_76_v3_sse_error_and_direct_consumer_pre_wiring_m_v3_runtime["v3-runtime"]
+    c_76_v3_sse_error_and_direct_consumer_pre_wiring_0["v3-runtime<br/>build_v3_sse_transport_error_source<br/><small>routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs</small>"]
+    c_76_v3_sse_error_and_direct_consumer_pre_wiring_2["v3-runtime<br/>V3DirectSseContentConsumer::consume<br/><small>routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs</small>"]
+    c_76_v3_sse_error_and_direct_consumer_pre_wiring_3["v3-runtime<br/>process_sse_object_frame<br/><small>routecodex-v3-runtime/src/sse_object_pipeline.rs</small>"]
+    c_76_v3_sse_error_and_direct_consumer_pre_wiring_4["v3-runtime<br/>project_direct_typed_protocol_data<br/><small>routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs</small>"]
+    c_76_v3_sse_error_and_direct_consumer_pre_wiring_5["v3-runtime<br/>apply_direct_provider_response_compat<br/><small>routecodex-v3-runtime/src/shared.rs</small>"]
+    c_76_v3_sse_error_and_direct_consumer_pre_wiring_6["v3-runtime<br/>project_provider_raw_to_client_payload_inner<br/><small>routecodex-v3-runtime/src/shared.rs</small>"]
+    c_76_v3_sse_error_and_direct_consumer_pre_wiring_7["v3-runtime<br/>V3DirectSseTypedHookCatalog::with_responses<br/><small>routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs</small>"]
+    c_76_v3_sse_error_and_direct_consumer_pre_wiring_8["v3-runtime<br/>apply_custom_tool_function_sse_chunk_buffered<br/><small>routecodex-v3-runtime/src/shared_custom_tool_function_sse.rs</small>"]
+  end
+  c_76_v3_sse_error_and_direct_consumer_pre_wiring_0 -->|v3-sse-error-export-01<br/>V3ProviderResp14Raw → ErrorErr01SourceRaised| c_76_v3_sse_error_and_direct_consumer_pre_wiring_1
+  c_76_v3_sse_error_and_direct_consumer_pre_wiring_2 -->|v3-direct-content-consumer-01<br/>V3ProviderResp14Raw → V3DirectResp14ProviderProjectionPrepared| c_76_v3_sse_error_and_direct_consumer_pre_wiring_3
+  c_76_v3_sse_error_and_direct_consumer_pre_wiring_2 -->|v3-direct-typed-projection-01<br/>V3DirectResp14ProviderProjectionPrepared → V3DirectResp14TypedProtocolData| c_76_v3_sse_error_and_direct_consumer_pre_wiring_4
+  c_76_v3_sse_error_and_direct_consumer_pre_wiring_2 -->|v3-direct-sse-provider-response-compat-01<br/>V3DirectResp14TypedProtocolData → V3DirectResp15ClientPayloadReady| c_76_v3_sse_error_and_direct_consumer_pre_wiring_5
+  c_76_v3_sse_error_and_direct_consumer_pre_wiring_6 -->|v3-direct-provider-response-compat-01<br/>V3ProviderResp14Raw → V3DirectResp14ProviderProjectionPrepared| c_76_v3_sse_error_and_direct_consumer_pre_wiring_5
+  c_76_v3_sse_error_and_direct_consumer_pre_wiring_2 -->|v3-direct-typed-hook-catalog-01<br/>V3ProviderResp14Raw → V3DirectResp14ProviderProjectionPrepared| c_76_v3_sse_error_and_direct_consumer_pre_wiring_7
+  c_76_v3_sse_error_and_direct_consumer_pre_wiring_8 -->|v3-provider-compat-custom-tool-function-sse-01<br/>V3ProviderResp14Raw → V3DirectResp15ClientPayloadReady| c_76_v3_sse_error_and_direct_consumer_pre_wiring_9
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
