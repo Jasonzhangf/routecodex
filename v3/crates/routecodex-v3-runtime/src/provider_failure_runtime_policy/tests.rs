@@ -673,7 +673,7 @@ fn post_commit_response_stream_failure_updates_global_key_health() {
             1,
             v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
         );
-    assert_eq!(projection.score_milli, 0);
+    assert_eq!(projection.score_milli, 85);
     assert!(!projection.available);
 }
 
@@ -724,7 +724,7 @@ fn post_commit_transient_stream_failures_count_toward_global_cooldown() {
             1,
             v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
         );
-    assert_eq!(projection.score_milli, 0);
+    assert_eq!(projection.score_milli, 85);
     assert!(
         !projection.available,
         "three transient post-commit failures must cool the key down globally"

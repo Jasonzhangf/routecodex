@@ -81,6 +81,7 @@ features:
   - routecodex-v3-provider-responses
   owner_files:
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health/runtime_projection.rs
   - v3/crates/routecodex-v3-provider-responses/tests/provider_key_health_contract.rs
   resource_bindings:
   - v3.provider.key_health_state
@@ -94,6 +95,7 @@ features:
   - V3ProviderHealthStore::acquire_provider_cooldown_probe
   allowed_paths:
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health/runtime_projection.rs
   - v3/crates/routecodex-v3-provider-responses/src/key_health.rs
   - v3/crates/routecodex-v3-provider-responses/tests/provider_key_health_contract.rs
   - docs/architecture
@@ -4849,6 +4851,7 @@ features:
   - v3/crates/routecodex-v3-error/src/lib.rs
   - v3/crates/routecodex-v3-error/src/subscription.rs
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health/runtime_projection.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/probe_schedule.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/manual.rs
   - v3/crates/routecodex-v3-provider-responses/src/probe_backoff.rs
@@ -4945,6 +4948,7 @@ features:
   - v3/crates/routecodex-v3-cli/tests/provider_account_pool_blackbox.rs
   - v3/crates/routecodex-v3-error/src/lib.rs
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health/runtime_projection.rs
   - v3/crates/routecodex-v3-provider-responses/src/health_tests.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/persistence.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/probe_schedule.rs
@@ -5416,7 +5420,7 @@ features:
   status: source_controlled_runtime_pending_live_replay
   change_risk: critical
   owner_kind: rust_v3_provider_key_health_scoring
-  owner_scope: Provider-owned key score, failure/success streak, typed recovery action application, process-local cooldown/probe recovery, and Target scheduling projection. Effective priority always equals configured priority; health only controls availability and diagnostics.
+  owner_scope: Provider-owned bounded key score with neutral 100 baseline and 0..150 clamp, failure/success streak, typed recovery action application, score-zero exact cooldown admission, process-local cooldown/probe recovery, and Target scheduling projection. Effective priority always equals configured priority; health only controls availability and diagnostics.
   owner_crates:
   - routecodex-v3-error
   - routecodex-v3-provider-responses
@@ -5426,6 +5430,7 @@ features:
   - v3/crates/routecodex-v3-error/src/lib.rs
   - v3/crates/routecodex-v3-error/src/subscription.rs
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health/runtime_projection.rs
   - v3/crates/routecodex-v3-provider-responses/src/lib.rs
   - v3/crates/routecodex-v3-target/src/lib.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -5456,6 +5461,7 @@ features:
   - v3/crates/routecodex-v3-server/tests/no_first_failure_cooldown_blackbox.rs
   - v3/crates/routecodex-v3-provider-responses/src/key_health.rs
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health/runtime_projection.rs
   - v3/crates/routecodex-v3-provider-responses/src/lib.rs
   - v3/crates/routecodex-v3-provider-responses/tests/**
   - v3/crates/routecodex-v3-target/src/lib.rs

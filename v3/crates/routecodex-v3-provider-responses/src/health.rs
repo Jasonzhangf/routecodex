@@ -30,7 +30,7 @@ use routecodex_v3_error::{
     V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD,
 };
 use serde::Serialize;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
@@ -307,7 +307,6 @@ struct V3ProviderAdaptiveHistory {
     recovery_ewma_ms: Option<u64>,
     probe_failure_count: u8,
     score_milli: u32,
-    configured_priority: i32,
     failure_streak: u32,
     /// Typed identity of the current `failure_streak`. Only consecutive
     /// failures with the same fingerprint extend the streak; a different
@@ -316,7 +315,6 @@ struct V3ProviderAdaptiveHistory {
     success_streak: u32,
     last_success_at_ms: Option<u64>,
     score_generation: u64,
-    recent_deltas_milli: VecDeque<i32>,
 }
 
 impl Default for V3ProviderAdaptiveHistory {
@@ -327,13 +325,11 @@ impl Default for V3ProviderAdaptiveHistory {
             recovery_ewma_ms: None,
             probe_failure_count: 0,
             score_milli: 100,
-            configured_priority: 100,
             failure_streak: 0,
             failure_fingerprint: None,
             success_streak: 0,
             last_success_at_ms: None,
             score_generation: 0,
-            recent_deltas_milli: VecDeque::new(),
         }
     }
 }
@@ -494,28 +490,6 @@ impl V3ProviderHealthStore {
             failure_policies,
             ..V3ProviderHealthState::default()
         };
-        for baseline in manifest.provider_priority_baselines() {
-            let provider_id = baseline.provider_id;
-            let interface_id = baseline.interface_id;
-            let auth_alias = baseline.auth_alias;
-            let model_id = baseline.model_id;
-            let priority = baseline.priority;
-            if priority <= 0 {
-                continue;
-            }
-            let key = provider_cooldown_probe_key_for_interface(
-                &provider_id,
-                &interface_id,
-                Some(&auth_alias),
-                Some(&model_id),
-            );
-            let history = V3ProviderAdaptiveHistory {
-                configured_priority: priority,
-                score_milli: priority.clamp(0, 150) as u32,
-                ..V3ProviderAdaptiveHistory::default()
-            };
-            state.adaptive_history.entry(key).or_insert(history);
-        }
         if let Some((writer, persisted_entries)) =
             start_provider_health_persistence(manifest, persistence_path, legacy_persistence_path)
         {
@@ -1478,12 +1452,13 @@ impl V3ProviderHealthStore {
                 .unwrap_or(V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS);
             // The exact key/model failure streak admits cooldown. The default
             // threshold is one; explicit policies may still declare a higher
-            // threshold.
+            // threshold. A globally scored identity that reaches zero is an
+            // additional, independent cooldown trigger.
             let should_block = action.scope == V3ProviderHealthScope::GlobalProviderKey
                 && match action.recovery {
                     V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
                     | V3ProviderRecoveryKind::RecoverableCounted => {
-                        history.failure_streak >= failure_threshold
+                        history.score_milli == 0 || history.failure_streak >= failure_threshold
                     }
                     _ => false,
                 };
@@ -1722,17 +1697,11 @@ impl V3ProviderHealthStore {
             .state
             .read()
             .map_err(|error| format!("provider health state poisoned: {error}"))?;
-        let (net_delta, score_generation) = state
+        let (score_milli, score_generation) = state
             .adaptive_history
             .get(&key)
-            .map(|history| {
-                (
-                    history.recent_deltas_milli.iter().copied().sum::<i32>(),
-                    history.score_generation,
-                )
-            })
-            .unwrap_or((0, 0));
-        let score_milli = priority.saturating_add(net_delta).clamp(0, 150) as u32;
+            .map(|history| (history.score_milli.min(150), history.score_generation))
+            .unwrap_or((100, 0));
         let auth_key = provider_cooldown_probe_key_for_interface(
             provider_id,
             interface_id,

@@ -71,11 +71,150 @@ fn health_projection_without_history_uses_contract_default_score() {
 }
 
 #[test]
-fn low_priority_baseline_does_not_collapse_threshold_to_one_failure() {
-    // Regression: score baseline is the configured priority, so a priority-1 key
-    // reaches score 0 after a single -5 delta. A thresholded recoverable failure
-    // must still wait for `failure_threshold` consecutive failures instead of
-    // cooling down after one transient error.
+fn hs01_configured_and_unseen_identities_start_at_score_100() {
+    let unseen = V3ProviderKeyHealthStore::default();
+    let unseen_projection = unseen
+        .scheduling_projection("provider-a", "key-a", "model-a", 3, 2, 100)
+        .expect("unseen identity projection");
+    assert_eq!(unseen_projection.priority, 3);
+    assert_eq!(unseen_projection.effective_priority, 3);
+    assert_eq!(unseen_projection.score_milli, 100);
+    assert_eq!(unseen_projection.effective_weight_milli, 200);
+
+    let manifest = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.p]
+type = "responses"
+base_url = "http://provider.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "a", env = "KEY" }] }
+[providers.p.models.m]
+[route_groups.g.pools.default]
+targets = [{ kind = "provider_model", provider = "p", model = "m", key = "a", priority = 1 }]
+"#,
+        )
+        .expect("parse manifest authoring"),
+    )
+    .expect("compile manifest");
+    let configured = V3ProviderHealthStore::from_manifest_without_persistence(&manifest);
+    let configured_projection = configured
+        .scheduling_projection("p", "a", "m", 1, 3, 100)
+        .expect("configured identity projection");
+    assert_eq!(configured_projection.priority, 1);
+    assert_eq!(configured_projection.effective_priority, 1);
+    assert_eq!(configured_projection.score_milli, 100);
+    assert_eq!(configured_projection.effective_weight_milli, 300);
+}
+
+#[test]
+fn hs02_score_is_clamped_per_event_without_hidden_credit() {
+    let store = V3ProviderKeyHealthStore::default();
+    for now_ms in 0..100 {
+        store
+            .record_provider_key_success("p", "k", "m", now_ms)
+            .expect("success");
+    }
+    assert_eq!(
+        store
+            .scheduling_projection("p", "k", "m", 100, 1, 100)
+            .expect("capped projection")
+            .score_milli,
+        150
+    );
+
+    store
+        .record_provider_failure_action(
+            "p",
+            "k",
+            "m",
+            &V3ProviderFailureAction::recoverable("transport"),
+            100,
+        )
+        .expect("deduction after saturation");
+    assert_eq!(
+        store
+            .scheduling_projection("p", "k", "m", 100, 1, 100)
+            .expect("post-deduction projection")
+            .score_milli,
+        145
+    );
+
+    let exhausted = V3ProviderKeyHealthStore::default();
+    let failure = V3ProviderFailureAction::recoverable("transport");
+    for now_ms in 0..21 {
+        exhausted
+            .record_provider_failure_action("p", "k", "m", &failure, now_ms)
+            .expect("failure");
+    }
+    assert_eq!(
+        exhausted
+            .scheduling_projection("p", "k", "m", 100, 1, 21)
+            .expect("exhausted projection")
+            .score_milli,
+        0
+    );
+}
+
+#[test]
+fn hs03_zero_score_cools_exact_key_and_valid_probe_restores_100() {
+    let store = V3ProviderKeyHealthStore::default();
+    let action = V3ProviderFailureAction {
+        recovery: V3ProviderRecoveryKind::RecoverableCounted,
+        scope: routecodex_v3_provider_responses::V3ProviderHealthScope::GlobalProviderKey,
+        score_delta_milli: -100,
+        failure_threshold: 100,
+        cooldown_ms: 5_000,
+        long_probe_backoff: false,
+        class_code: "transport".to_string(),
+        failure_fingerprint: None,
+    };
+
+    let zero = store
+        .record_provider_failure_action("p", "k", "m", &action, 100)
+        .expect("zero-score failure");
+    assert_eq!(zero.score_milli, 0);
+    assert!(zero.cooldown);
+    assert!(!zero.available);
+    assert!(
+        !store
+            .scheduling_projection("p", "k", "m", 100, 1, 100)
+            .expect("cooled projection")
+            .available
+    );
+    for (provider, key, model) in [("p", "sibling-key", "m"), ("p", "k", "sibling-model")] {
+        let sibling = store
+            .scheduling_projection(provider, key, model, 100, 1, 100)
+            .expect("sibling projection");
+        assert_eq!(sibling.score_milli, 100);
+        assert!(sibling.available);
+    }
+
+    let failed_probe = store
+        .complete_probe_failure("p", "k", "m", 101, 5_000)
+        .expect("failed probe");
+    assert_eq!(failed_probe.score_milli, 0);
+    assert!(failed_probe.cooldown);
+    assert!(!failed_probe.available);
+
+    let recovered = store
+        .complete_probe_success("p", "k", "m", 102)
+        .expect("successful probe");
+    assert_eq!(recovered.score_milli, 100);
+    assert!(!recovered.cooldown);
+    assert!(recovered.available);
+}
+
+#[test]
+fn thresholded_failures_require_consecutive_streak_with_neutral_baseline() {
+    // The neutral baseline is 100 for every configured priority. A thresholded
+    // recoverable failure must still wait for `failure_threshold` consecutive
+    // failures instead of cooling down after one transient error.
     let manifest = compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(
             r#"
@@ -104,7 +243,7 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "a", pr
     let first = store
         .record_provider_failure_action("p", "a", "m", &action, 100)
         .expect("first recoverable failure");
-    assert_eq!(first.score_milli, 0);
+    assert_eq!(first.score_milli, 95);
     assert!(
         !first.cooldown,
         "one thresholded failure must not cool down a low-priority key"
@@ -119,10 +258,10 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "a", pr
         .expect("first scheduling projection");
     assert!(
         first_scheduling.available,
-        "score zero without a cooldown must remain schedulable"
+        "a reduced score without a cooldown must remain schedulable"
     );
-    assert_eq!(first_scheduling.score_milli, 0);
-    assert_eq!(first_scheduling.effective_weight_milli, 1);
+    assert_eq!(first_scheduling.score_milli, 95);
+    assert_eq!(first_scheduling.effective_weight_milli, 95);
     assert!(first_scheduling.blocked_scopes.is_empty());
 
     store
@@ -370,7 +509,7 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
                 now_ms,
             )
             .expect("disabled health failure action");
-        assert_eq!(projection.score_milli, 1);
+        assert_eq!(projection.score_milli, 100);
         assert_eq!(projection.failure_streak, 0);
         assert!(!projection.cooldown);
         assert!(projection.available);
@@ -379,7 +518,7 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
     let projection = store
         .scheduling_projection("p", "k", "m", 1, 1, 102)
         .expect("disabled health projection");
-    assert_eq!(projection.score_milli, 1);
+    assert_eq!(projection.score_milli, 100);
     assert!(projection.available);
     assert!(store
         .provider_cooldown_probe_keys(102, false)
@@ -422,44 +561,44 @@ fn business_success_resets_streak_and_only_matching_probe_releases_cooldown() {
 }
 
 #[test]
-fn health_score_uses_only_the_latest_100_calls() {
+fn health_score_accumulates_each_event_without_a_rolling_window() {
     let store = V3ProviderHealthStore::default();
     let failure = V3ProviderFailureAction::recoverable("transport");
-    for now_ms in 0..100 {
+    for now_ms in 0..20 {
         store
             .record_provider_failure_action("p", "k", "m", &failure, now_ms)
             .expect("failure");
     }
     let before = store
-        .scheduling_projection("p", "k", "m", 100, 1, 100)
+        .scheduling_projection("p", "k", "m", 100, 1, 20)
         .expect("projection");
     assert_eq!(before.score_milli, 0);
     let success = store
-        .record_provider_key_success("p", "k", "m", 101)
+        .record_provider_key_success("p", "k", "m", 21)
         .expect("success");
-    // The first success remains inside the latest 100-call score window; it
-    // resets the failure streak without deleting prior observations.
-    assert_eq!(success.score_milli, 0);
+    // No rolling window exists: the success applies its +1 delta directly to
+    // the clamped score while leaving the non-429 cooldown probe untouched.
+    assert_eq!(success.score_milli, 1);
     assert_eq!(success.failure_streak, 0);
-    for now_ms in 102..202 {
+    for now_ms in 22..171 {
         store
             .record_provider_key_success("p", "k", "m", now_ms)
             .expect("success");
     }
     let after = store
-        .scheduling_projection("p", "k", "m", 100, 1, 202)
+        .scheduling_projection("p", "k", "m", 100, 1, 171)
         .expect("projection");
     assert_eq!(after.score_milli, 150);
 }
 
 #[test]
-fn health_score_uses_configured_priority_as_its_baseline() {
+fn health_score_ignores_configured_priority_as_its_baseline() {
     let store = V3ProviderHealthStore::default();
     let failure = V3ProviderFailureAction::recoverable("provider_502");
     let initial = store
         .scheduling_projection("p", "k", "m", 80, 1, 100)
         .expect("initial projection");
-    assert_eq!(initial.score_milli, 80);
+    assert_eq!(initial.score_milli, 100);
 
     store
         .record_provider_failure_action("p", "k", "m", &failure, 101)
@@ -467,7 +606,7 @@ fn health_score_uses_configured_priority_as_its_baseline() {
     let after_failure = store
         .scheduling_projection("p", "k", "m", 80, 1, 102)
         .expect("projection after failure");
-    assert_eq!(after_failure.score_milli, 75);
+    assert_eq!(after_failure.score_milli, 95);
 }
 
 #[test]
@@ -903,7 +1042,7 @@ fn score_and_cooldown_are_isolated_per_provider_key_and_model() {
 
     assert!(unaffected_auth_key.available);
     assert!(same_key_different_model.available);
-    assert_eq!(same_key_different_model.score_milli, 1);
+    assert_eq!(same_key_different_model.score_milli, 100);
     assert!(!cooled_key.available);
 }
 
@@ -1059,5 +1198,5 @@ fn provider_health_cooldown_is_isolated_between_interfaces() {
 
     assert!(!cooled_interface.available);
     assert!(sibling_interface.available);
-    assert_eq!(sibling_interface.score_milli, 1);
+    assert_eq!(sibling_interface.score_milli, 100);
 }
