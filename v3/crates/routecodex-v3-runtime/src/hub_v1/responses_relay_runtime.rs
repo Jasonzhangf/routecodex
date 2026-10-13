@@ -28,9 +28,9 @@ use routecodex_v3_error::{
     V3ProviderFailureSessionScope, V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_provider_responses::{
-    build_v3_provider_12_responses_wire_payload, ReqwestResponsesTransport, ResponsesTransport,
-    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError, V3ProviderHealthStore,
-    V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderResponseHeader,
+    build_v3_provider_12_responses_wire_payload, v3_provider_auth_handle_from_manifest_entry,
+    ReqwestResponsesTransport, ResponsesTransport, V3ProviderAuthHandle, V3ProviderError,
+    V3ProviderHealthStore, V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderResponseHeader,
     V3ResponsesProviderTarget, V3ResponsesStreamIntent, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_sse::{
@@ -1131,26 +1131,9 @@ pub(crate) fn provider_target(
         .ok_or_else(|| {
             V3ResponsesRelayRuntimeError::Target("selected auth handle missing".to_string())
         })?;
-    let secret = match (
-        &auth.env,
-        &auth.token_file,
-        &auth.secret_file,
-        &auth.secret_key,
-        &auth.api_key,
-    ) {
-        (Some(env), None, None, None, None) => V3ProviderAuthSecretHandle::Environment(env.clone()),
-        (None, Some(path), None, None, None) => V3ProviderAuthSecretHandle::TokenFile(path.clone()),
-        (None, None, Some(path), Some(key), None) => V3ProviderAuthSecretHandle::SecretFile {
-            path: path.clone(),
-            key: key.clone(),
-        },
-        (None, None, None, None, Some(value)) => V3ProviderAuthSecretHandle::ApiKey(value.clone()),
-        _ => {
-            return Err(V3ResponsesRelayRuntimeError::Target(
-                "selected auth handle is invalid".to_string(),
-            ));
-        }
-    };
+    let secret = v3_provider_auth_handle_from_manifest_entry(selected.auth_alias.clone(), auth)
+        .map_err(V3ResponsesRelayRuntimeError::Target)?
+        .secret;
     Ok(V3ResponsesProviderTarget {
         provider_id: selected.provider_id.clone(),
         interface_id: selected.interface_id.clone(),

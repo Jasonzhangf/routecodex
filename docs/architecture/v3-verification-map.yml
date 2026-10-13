@@ -1229,6 +1229,48 @@ features:
       ports.'
     forbidden_claim: Local controlled-upstream P6 evidence does not prove relay, servertool, other protocols, V2 compatibility, global install, real ~/.rcc mutation, production replacement,
       or real-provider compatibility.
+- feature_id: v3.provider_oauth_credentials
+  status: source_and_controlled_transport_verified
+  owner_kind: rust_v3_oauth_credentials
+  owner_modules:
+  - v3/crates/routecodex-v3-oauth
+  - v3/crates/routecodex-v3-config
+  - v3/crates/routecodex-v3-provider-responses
+  contract:
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/v3-verification-map.yml
+  required_positive:
+  - Codex auth.json tokens are read without mutating the source file.
+  - Refresh scheduling uses the declared refresh_before_seconds boundary and only refreshes when the access token is due.
+  - OAuth refresh is bounded by the provider request budget and never outlives it.
+  - Concurrent callers share one identity lock and issue one refresh.
+  - Two declarations that share one file store, with distinct identities, serialize on the cross-process store lock and consume one rotating refresh token once.
+  - A real Provider transport request built from an OAuth handle reaches a loopback model endpoint with the refreshed bearer token.
+  - The real RCC HTTP entry returns the provider business body for a successful OAuth refresh, and that body contains no access, refresh, id, or client secret.
+  - Refreshed tokens are stored only in the declared memory/file store and never enter Debug, Provider, Client, or Error payloads.
+  - OAuth config authoring rejects mixed legacy handles, incomplete declarations, and source/store path collisions.
+  required_negative:
+  - Config compile never reads a credential file or performs refresh.
+  - Unregistered OAuth fields fail config validation instead of warning or being silently dropped.
+  - A rejected refresh is a typed OAuth credential error and the model endpoint is never called.
+  - A rejected refresh through the real RCC HTTP entry exhausts the request at the transport boundary without projecting a provider/proxy error payload or fabricating success.
+  - Provider auth never falls back to another secret handle when OAuth resolution fails.
+  required_gates:
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-oauth
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses --test oauth_credentials
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server oauth_
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-architecture-ci
+  - git diff --check
+  completion_boundary:
+    source_controlled: required
+    mapped_gates: required
+    live_replay: required
+    production_restart: not_applicable
+    merge: supervisor_owned
 - feature_id: v3.responses_provider_runtime
   status: source_verified_controlled_upstream
   change_risk: high

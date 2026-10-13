@@ -22,9 +22,10 @@ use routecodex_v3_error::{
     V3InternalErrorCode,
 };
 use routecodex_v3_provider_responses::{
-    build_v3_provider_12_responses_wire_payload, V3Provider12ResponsesWirePayload,
-    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError, V3ProviderResp14Raw,
-    V3ResponsesProviderTarget, V3Transport13ResponsesHttpRequest,
+    build_v3_provider_12_responses_wire_payload,
+    v3_provider_auth_secret_handle_from_declaration_fields, V3Provider12ResponsesWirePayload,
+    V3ProviderAuthHandle, V3ProviderError, V3ProviderResp14Raw, V3ResponsesProviderTarget,
+    V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_target::V3Target10ConcreteProviderSelected;
 use serde_json::Value;
@@ -555,35 +556,24 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
             )
         })?;
     request_body = compat_body;
-    let secret = match (
-        &candidate.env_name,
-        &candidate.token_file,
-        &candidate.secret_file,
-        &candidate.secret_key,
-        &candidate.api_key,
-    ) {
-        (Some(name), None, None, None, None) => {
-            V3ProviderAuthSecretHandle::Environment(name.clone())
-        }
-        (None, Some(path), None, None, None) => V3ProviderAuthSecretHandle::TokenFile(path.clone()),
-        (None, None, Some(path), Some(key), None) => V3ProviderAuthSecretHandle::SecretFile {
-            path: path.clone(),
-            key: key.clone(),
-        },
-        (None, None, None, None, Some(value)) => V3ProviderAuthSecretHandle::ApiKey(value.clone()),
-        _ => {
-            return Err(build_v3_error_01_source_raised_internal(
-                V3ErrorSourceKind::RuntimeFailure,
-                "V3Provider12ResponsesWirePayload",
-                "provider_auth_handle_missing",
-                format!(
-                    "provider {} selected without auth handle",
-                    candidate.provider_id
-                ),
-                V3InternalErrorCode::V3Provider12ResponsesWirePayload,
-            ))
-        }
-    };
+    let secret = v3_provider_auth_secret_handle_from_declaration_fields(
+        candidate.oauth_declaration.as_ref(),
+        candidate.env_name.as_deref(),
+        candidate.token_file.as_deref(),
+        candidate.secret_file.as_deref(),
+        candidate.secret_key.as_deref(),
+        candidate.api_key.as_deref(),
+        &candidate.auth_alias,
+    )
+    .map_err(|reason| {
+        build_v3_error_01_source_raised_internal(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3Provider12ResponsesWirePayload",
+            "provider_auth_handle_missing",
+            reason,
+            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+        )
+    })?;
     build_v3_provider_12_responses_wire_payload(
         policy.request_id.clone(),
         V3ResponsesProviderTarget {
@@ -851,35 +841,24 @@ pub(crate) fn chat_direct_request_projection_hook_with_key_catalog_and_drop_cont
         )
     })?;
     wire_body = compat_body;
-    let secret = match (
-        &candidate.env_name,
-        &candidate.token_file,
-        &candidate.secret_file,
-        &candidate.secret_key,
-        &candidate.api_key,
-    ) {
-        (Some(name), None, None, None, None) => {
-            V3ProviderAuthSecretHandle::Environment(name.clone())
-        }
-        (None, Some(path), None, None, None) => V3ProviderAuthSecretHandle::TokenFile(path.clone()),
-        (None, None, Some(path), Some(key), None) => V3ProviderAuthSecretHandle::SecretFile {
-            path: path.clone(),
-            key: key.clone(),
-        },
-        (None, None, None, None, Some(value)) => V3ProviderAuthSecretHandle::ApiKey(value.clone()),
-        _ => {
-            return Err(build_v3_error_01_source_raised_internal(
-                V3ErrorSourceKind::RuntimeFailure,
-                "V3Provider12ResponsesWirePayload",
-                "provider_auth_handle_missing",
-                format!(
-                    "provider {} selected without auth handle",
-                    candidate.provider_id
-                ),
-                V3InternalErrorCode::V3Provider12ResponsesWirePayload,
-            ))
-        }
-    };
+    let secret = v3_provider_auth_secret_handle_from_declaration_fields(
+        candidate.oauth_declaration.as_ref(),
+        candidate.env_name.as_deref(),
+        candidate.token_file.as_deref(),
+        candidate.secret_file.as_deref(),
+        candidate.secret_key.as_deref(),
+        candidate.api_key.as_deref(),
+        &candidate.auth_alias,
+    )
+    .map_err(|reason| {
+        build_v3_error_01_source_raised_internal(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3Provider12ResponsesWirePayload",
+            "provider_auth_handle_missing",
+            reason,
+            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+        )
+    })?;
     build_v3_provider_12_responses_wire_payload(
         policy.request_id.clone(),
         V3ResponsesProviderTarget {
@@ -960,7 +939,8 @@ pub(crate) fn build_v3_provider_error_source(
         ),
         V3ProviderError::InvalidBaseUrl { .. }
         | V3ProviderError::MissingAuthSecret { .. }
-        | V3ProviderError::AuthSecretRead { .. } => build_v3_error_01_source_raised_internal(
+        | V3ProviderError::AuthSecretRead { .. }
+        | V3ProviderError::OAuthCredential { .. } => build_v3_error_01_source_raised_internal(
             V3ErrorSourceKind::RuntimeFailure,
             stage,
             "provider_local_runtime_error",
@@ -1037,6 +1017,7 @@ pub(crate) fn source_code_for_external_provider_error(error: &V3ProviderError) -
         | V3ProviderError::InvalidBaseUrl { .. }
         | V3ProviderError::MissingAuthSecret { .. }
         | V3ProviderError::AuthSecretRead { .. }
+        | V3ProviderError::OAuthCredential { .. }
         | V3ProviderError::NamespaceToolFlattenFailed { .. }
         | V3ProviderError::FunctionToolShapeFailed { .. }
         | V3ProviderError::ConcurrencyBusy { .. }
@@ -1154,6 +1135,18 @@ fn external_link_for_provider_error(error: &V3ProviderError) -> V3ExternalErrorL
             provider_id: Some(provider_id.clone()),
             upstream_request_id: None,
             message: Some(reason.clone()),
+        },
+        V3ProviderError::OAuthCredential {
+            provider_id,
+            reason,
+            ..
+        } => V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: None,
+            code: Some("PROVIDER_OAUTH_CREDENTIAL".to_string()),
+            provider_id: Some(provider_id.clone()),
+            upstream_request_id: None,
+            message: Some(reason.to_string()),
         },
         V3ProviderError::InvalidWireBody { .. }
         | V3ProviderError::ProviderModelBindingMismatch { .. }

@@ -2044,7 +2044,7 @@ async fn openai_chat_provider_pool_exhaustion_is_request_local_after_failed_resc
     provider.auth.entries[0].env = Some("ROUTECODEX_V3_POOL_PROBE_TEST_KEY".into());
     provider.health = Some(routecodex_v3_config::V3ProviderHealthAuthoringConfig {
         enabled: true,
-        failure_threshold: 1,
+        failure_threshold: 3,
         cooldown_ms: 900_000,
         probe_interval_ms: Some(5_000),
     });

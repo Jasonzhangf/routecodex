@@ -325,10 +325,79 @@ resources:
     lifecycle: v3.config.compile
     owner_crate: routecodex-v3-config
     owner_node: V3Config05ManifestPublished
-    identity: [providerId, authAlias, envOrTokenFileOrSecretFileHandle]
+    identity: [providerId, authAlias, envOrTokenFileOrSecretFileOrOAuthDeclarationHandle]
     allowed_writers: [V3Config05ManifestPublished]
     allowed_readers: [V3Transport13ResponsesHttpRequest]
     forbidden_writers: [V3DebugArtifact, V3Error06ClientProjected]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.secret.provider_oauth_declaration
+    resource_kind: oauth_declaration
+    lifecycle: v3.provider_oauth_credentials
+    owner_feature_id: v3.provider_oauth_credentials
+    owner_crate: routecodex-v3-config
+    owner_node: V3Config05ManifestPublished
+    identity: [providerId, authAlias]
+    allowed_writers: [V3Config05ManifestPublished]
+    allowed_readers:
+      - v3_provider_auth_secret_handle_from_declaration_fields
+      - resolve_oauth_access_token_with_client
+    forbidden_writers: [V3DebugArtifact, V3Error06ClientProjected, routecodex-v3-oauth]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.secret.provider_oauth_credential_state
+    resource_kind: oauth_credential_material
+    lifecycle: v3.provider_oauth_credentials
+    owner_feature_id: v3.provider_oauth_credentials
+    owner_crate: routecodex-v3-oauth
+    owner_node: IdentityState
+    identity: [serializedDeclaration]
+    allowed_writers: [resolve_oauth_access_token_with_client]
+    allowed_readers: [resolve_oauth_access_token_with_client]
+    forbidden_writers: [V3Config05ManifestPublished, V3DebugArtifact, V3Error06ClientProjected, routecodex-v3-runtime, routecodex-v3-server]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.secret.provider_oauth_file_store
+    resource_kind: oauth_credential_store
+    lifecycle: v3.provider_oauth_credentials
+    owner_feature_id: v3.provider_oauth_credentials
+    owner_crate: routecodex-v3-oauth
+    owner_node: StoredCredential
+    identity: [storePath]
+    allowed_writers: [write_store]
+    allowed_readers: [read_store_or_initialize, StoreFileLock::acquire]
+    forbidden_writers: [V3Config05ManifestPublished, V3DebugArtifact, V3Error06ClientProjected, routecodex-v3-runtime, routecodex-v3-server]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.secret.provider_oauth_error
+    resource_kind: typed_error
+    lifecycle: v3.provider_oauth_credentials
+    owner_feature_id: v3.provider_oauth_credentials
+    owner_crate: routecodex-v3-oauth
+    owner_node: V3OAuthError
+    identity: [stage, reason]
+    allowed_writers: [resolve_oauth_access_token_with_client]
+    allowed_readers:
+      - V3ProviderError::OAuthCredential
+      - build_v3_error_01_source_raised_internal
+    forbidden_writers: [V3Config05ManifestPublished, V3DebugArtifact, V3Error06ClientProjected]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.secret.provider_oauth_credential
+    resource_kind: oauth_credential_material
+    lifecycle: v3.provider_oauth_credentials
+    owner_feature_id: v3.provider_oauth_credentials
+    owner_crate: routecodex-v3-oauth
+    owner_node: V3OAuthCredential
+    identity: [serializedDeclaration, storeKind]
+    allowed_writers: [resolve_oauth_access_token_with_client]
+    allowed_readers: [resolve_oauth_access_token_with_client]
+    forbidden_writers: [V3Config05ManifestPublished, V3DebugArtifact, V3Error06ClientProjected, routecodex-v3-runtime, routecodex-v3-server]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored

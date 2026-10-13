@@ -24,8 +24,9 @@ use routecodex_v3_error::{
     V3_TRANSIENT_TRANSPORT_HANG_CODE,
 };
 use routecodex_v3_provider_responses::{
-    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError, V3ProviderHttpFailure,
-    V3ProviderResp14Raw, V3ProviderResponseHeader, V3ResponsesProviderTarget,
+    v3_provider_auth_handle_from_manifest_entry, V3ProviderAuthHandle, V3ProviderError,
+    V3ProviderHttpFailure, V3ProviderResp14Raw, V3ProviderResponseHeader,
+    V3ResponsesProviderTarget,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, SseIncrementalDecoder, SseTransportLimits,
@@ -178,22 +179,8 @@ pub fn provider_target(
         .iter()
         .find(|entry| entry.alias == selected.auth_alias)
         .ok_or_else(|| "selected auth handle missing".to_string())?;
-    let secret = match (
-        &auth.env,
-        &auth.token_file,
-        &auth.secret_file,
-        &auth.secret_key,
-        &auth.api_key,
-    ) {
-        (Some(env), None, None, None, None) => V3ProviderAuthSecretHandle::Environment(env.clone()),
-        (None, Some(path), None, None, None) => V3ProviderAuthSecretHandle::TokenFile(path.clone()),
-        (None, None, Some(path), Some(key), None) => V3ProviderAuthSecretHandle::SecretFile {
-            path: path.clone(),
-            key: key.clone(),
-        },
-        (None, None, None, None, Some(value)) => V3ProviderAuthSecretHandle::ApiKey(value.clone()),
-        _ => return Err("selected auth handle is invalid".to_string()),
-    };
+    let secret =
+        v3_provider_auth_handle_from_manifest_entry(selected.auth_alias.clone(), auth)?.secret;
     Ok(V3ResponsesProviderTarget {
         provider_id: selected.provider_id.clone(),
         interface_id: selected.interface_id.clone(),

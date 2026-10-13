@@ -1661,6 +1661,294 @@ async fn start_controlled_upstream() -> (
     (format!("http://{address}/v1"), captures_rx, shutdown_tx)
 }
 
+#[derive(Clone)]
+struct OAuthTokenState {
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+    access_token: String,
+}
+
+async fn oauth_token_endpoint(
+    State(state): State<OAuthTokenState>,
+    axum::Json(_body): axum::Json<Value>,
+) -> Response<Body> {
+    state
+        .calls
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::to_vec(&json!({
+                "access_token": state.access_token,
+                "refresh_token": "rotated-refresh",
+            }))
+            .unwrap(),
+        ))
+        .unwrap()
+}
+
+async fn start_oauth_token_endpoint(
+    access_token: String,
+) -> (
+    String,
+    Arc<std::sync::atomic::AtomicUsize>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route("/refresh", post(oauth_token_endpoint))
+        .with_state(OAuthTokenState {
+            calls: Arc::clone(&calls),
+            access_token,
+        });
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}"), calls, shutdown_tx)
+}
+
+#[derive(Clone)]
+struct OAuthRejectionState {
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+async fn oauth_rejection_endpoint(
+    State(state): State<OAuthRejectionState>,
+    axum::Json(body): axum::Json<Value>,
+) -> Response<Body> {
+    state
+        .calls
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let echoed = format!(
+        "{{\"error\":\"oauth-reject-sentinel\",\"refresh_token\":{}}}",
+        serde_json::to_string(
+            body.get("refresh_token")
+                .and_then(Value::as_str)
+                .unwrap_or("missing-refresh-token")
+        )
+        .unwrap()
+    );
+    Response::builder()
+        .status(StatusCode::UNAUTHORIZED)
+        .header("content-type", "application/json")
+        .body(Body::from(echoed))
+        .unwrap()
+}
+
+async fn start_oauth_rejection_endpoint() -> (
+    String,
+    Arc<std::sync::atomic::AtomicUsize>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route("/refresh", post(oauth_rejection_endpoint))
+        .with_state(OAuthRejectionState {
+            calls: Arc::clone(&calls),
+        });
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}"), calls, shutdown_tx)
+}
+
+fn oauth_manifest(
+    port_a: u16,
+    port_b: u16,
+    provider_base_url: &str,
+    source_path: &str,
+    refresh_endpoint: &str,
+    store_path: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
+    let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let source = format!(
+        r#"
+version = 3
+{hub_v1_declaration}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["responses"]
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["responses"]
+{hub_v1_server_execution}
+[providers.test]
+type = "responses"
+base_url = "{provider_base_url}"
+default_model = "test"
+auth = {{ type = "oauth", entries = [{{ alias = "oauth", oauth_source = {{ kind = "codex_auth_json", path = "{source_path}" }}, refresh_endpoint = "{refresh_endpoint}", client_id = "test-client", oauth_store = {{ kind = "file", path = "{store_path}" }} }}] }}
+[providers.test.models.test]
+[debug]
+log_console = false
+snapshots = false
+dry_run = false
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "oauth", priority = 1 }}]
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
+// Stable public gate: OAuth refresh runs through the RCC HTTP entry and the
+// refreshed bearer reaches the provider; the Codex source stays read-only.
+#[tokio::test]
+async fn oauth_refresh_bearer_reaches_provider_through_rcc_http_blackbox() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, upstream_shutdown) = start_controlled_upstream().await;
+    let refreshed = "refreshed-access-token".to_string();
+    let (token_base, token_calls, token_shutdown) =
+        start_oauth_token_endpoint(refreshed.clone()).await;
+    let dir = std::env::temp_dir().join(format!("rcc-oauth-http-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let source_path = dir.join("auth.json");
+    fs::write(
+        &source_path,
+        serde_json::to_vec(&json!({
+            "auth_mode": "chatgpt",
+            "tokens": {
+                "access_token": "stale-access",
+                "refresh_token": "refresh-one",
+                "expires_at": 0
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let source_before = fs::read(&source_path).unwrap();
+    let store_path = dir.join("oauth-store.json");
+
+    let handle = spawn_v3_server_aggregate(oauth_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+        &source_path.display().to_string(),
+        &format!("{token_base}/refresh"),
+        &store_path.display().to_string(),
+    ))
+    .await
+    .unwrap();
+
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .json(&json!({"model": "test", "input": "hello"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body_text = response.text().await.unwrap();
+    let body: Value = serde_json::from_str(&body_text).unwrap();
+    assert_eq!(body["id"], "resp_json");
+    assert_eq!(body["output_text"], "ok");
+    assert!(!body_text.contains(&refreshed));
+    assert!(!body_text.contains("refresh-one"));
+    assert!(!body_text.contains("test-client"));
+
+    let capture = captures
+        .recv()
+        .await
+        .expect("the provider must receive the request");
+    assert_eq!(
+        capture.authorization.as_deref(),
+        Some(format!("Bearer {refreshed}").as_str())
+    );
+    assert_eq!(token_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(
+        fs::read(&source_path).unwrap(),
+        source_before,
+        "the Codex auth.json source must never be written"
+    );
+
+    handle.shutdown().await;
+    upstream_shutdown.send(()).unwrap();
+    token_shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn oauth_refresh_rejection_never_reaches_client_or_model_endpoint() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, upstream_shutdown) = start_controlled_upstream().await;
+    let (token_base, token_calls, token_shutdown) = start_oauth_rejection_endpoint().await;
+    let dir = std::env::temp_dir().join(format!("rcc-oauth-reject-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let source_path = dir.join("auth.json");
+    fs::write(
+        &source_path,
+        serde_json::to_vec(&json!({
+            "auth_mode": "chatgpt",
+            "tokens": {
+                "access_token": "stale-access",
+                "refresh_token": "refresh-one",
+                "expires_at": 0
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let source_before = fs::read(&source_path).unwrap();
+    let store_path = dir.join("oauth-store.json");
+
+    let handle = spawn_v3_server_aggregate(oauth_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+        &source_path.display().to_string(),
+        &format!("{token_base}/refresh"),
+        &store_path.display().to_string(),
+    ))
+    .await
+    .unwrap();
+
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .json(&json!({"model": "test", "input": "hello"}))
+        .send()
+        .await;
+    let error = response.expect_err(
+        "a refresh rejection must terminate the request at the transport boundary, not \
+         project a provider/proxy error payload",
+    );
+    assert!(
+        !error.is_status(),
+        "the client must not receive a projected provider/proxy HTTP status: {error}"
+    );
+    assert_eq!(token_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert!(
+        captures.try_recv().is_err(),
+        "the OAuth model endpoint must not be called after refresh rejection"
+    );
+    assert_eq!(
+        fs::read(&source_path).unwrap(),
+        source_before,
+        "the Codex auth.json source must never be written"
+    );
+
+    handle.shutdown().await;
+    upstream_shutdown.send(()).unwrap();
+    token_shutdown.send(()).unwrap();
+}
+
 async fn start_controlled_held_upstream() -> (
     String,
     mpsc::UnboundedReceiver<ProviderCapture>,
