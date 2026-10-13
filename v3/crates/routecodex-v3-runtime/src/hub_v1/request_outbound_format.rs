@@ -1173,9 +1173,9 @@ fn collect_unmapped_outbound_field_paths(
         .filter(|key| !allowed.contains(key.as_str()))
         .map(|key| json_path_child("$", key))
         .collect();
-    paths.extend(signature_target_projection::unrepresentable_call_extension_paths(
-        source, target_protocol,
-    ));
+    paths.extend(
+        signature_target_projection::unrepresentable_call_extension_paths(source, target_protocol),
+    );
     if !matches!(target_protocol, V3OutboundTargetProtocol::OpenAiResponses) {
         if let Some(messages) = source.get("messages").and_then(Value::as_array) {
             for (index, message) in messages.iter().enumerate() {

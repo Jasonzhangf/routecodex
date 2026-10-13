@@ -287,7 +287,8 @@ fn verify_namespace_profile_request(body: &Value) -> Result<(String, String), St
         .find(|tool| tool["type"] == "function" && tool_requires(tool, "cmd"))
         .and_then(|tool| tool["name"].as_str())
         .ok_or_else(|| {
-            "the colliding ordinary function must remain a provider function declaration".to_string()
+            "the colliding ordinary function must remain a provider function declaration"
+                .to_string()
         })?
         .to_string();
     if custom_wire == ordinary_wire {
@@ -327,10 +328,12 @@ fn verify_namespace_profile_request(body: &Value) -> Result<(String, String), St
         let custom_paired = custom_call.is_some_and(|entry| {
             entry["name"] == json!(custom_wire)
                 && entry["arguments"] == json!(expected_custom_arguments)
-        }) && custom_output.is_some_and(|entry| entry["output"] == NAMESPACE_RAW_OUTPUT);
+        }) && custom_output
+            .is_some_and(|entry| entry["output"] == NAMESPACE_RAW_OUTPUT);
         let ordinary_paired = ordinary_call.is_some_and(|entry| {
             entry["name"] == json!(ordinary_wire) && entry["arguments"] == "{\"cmd\":\"pwd\"}"
-        }) && ordinary_output.is_some_and(|entry| entry["output"] == NAMESPACE_ORDINARY_RAW_OUTPUT);
+        }) && ordinary_output
+            .is_some_and(|entry| entry["output"] == NAMESPACE_ORDINARY_RAW_OUTPUT);
         if !(custom_paired && ordinary_paired) {
             return Err(format!(
                 "history call/output pairing must preserve both the namespace custom wire name and the ordinary identity; input={input:?}"
@@ -1285,7 +1288,10 @@ async fn run_namespace_profile_json_round_trip(process: &str) {
         );
     });
     let first_status = first.status();
-    let first_body = first.text().await.expect("namespace profile first response body");
+    let first_body = first
+        .text()
+        .await
+        .expect("namespace profile first response body");
     assert!(
         first_status.is_success(),
         "strict gateway must accept the namespace profile first request: {first_status} {first_body}; gateway_rejections={}",
@@ -1299,11 +1305,25 @@ async fn run_namespace_profile_json_round_trip(process: &str) {
     let custom_item = output
         .iter()
         .find(|item| item["type"] == "custom_tool_call")
-        .unwrap_or_else(|| panic!("client must receive the restored namespace custom_tool_call: {first_body}"));
-    assert_eq!(custom_item["namespace"], NAMESPACE_TOOLS, "body={first_body}");
-    assert_eq!(custom_item["name"], NAMESPACE_CUSTOM_LEAF, "body={first_body}");
-    assert_eq!(custom_item["call_id"], NAMESPACE_CUSTOM_CALL_ID, "body={first_body}");
-    assert_eq!(custom_item["input"], NAMESPACE_CUSTOM_RAW_INPUT, "body={first_body}");
+        .unwrap_or_else(|| {
+            panic!("client must receive the restored namespace custom_tool_call: {first_body}")
+        });
+    assert_eq!(
+        custom_item["namespace"], NAMESPACE_TOOLS,
+        "body={first_body}"
+    );
+    assert_eq!(
+        custom_item["name"], NAMESPACE_CUSTOM_LEAF,
+        "body={first_body}"
+    );
+    assert_eq!(
+        custom_item["call_id"], NAMESPACE_CUSTOM_CALL_ID,
+        "body={first_body}"
+    );
+    assert_eq!(
+        custom_item["input"], NAMESPACE_CUSTOM_RAW_INPUT,
+        "body={first_body}"
+    );
     assert!(custom_item.get("arguments").is_none(), "body={first_body}");
     let ordinary_item = output
         .iter()
@@ -1314,8 +1334,14 @@ async fn run_namespace_profile_json_round_trip(process: &str) {
         json!(custom_tool_wire_name(NAMESPACE_CUSTOM_STANDARD_WIRE)),
         "the colliding ordinary function must keep its declared identity: body={first_body}"
     );
-    assert_eq!(ordinary_item["call_id"], NAMESPACE_ORDINARY_CALL_ID, "body={first_body}");
-    assert_eq!(ordinary_item["arguments"], "{\"cmd\":\"pwd\"}", "body={first_body}");
+    assert_eq!(
+        ordinary_item["call_id"], NAMESPACE_ORDINARY_CALL_ID,
+        "body={first_body}"
+    );
+    assert_eq!(
+        ordinary_item["arguments"], "{\"cmd\":\"pwd\"}",
+        "body={first_body}"
+    );
 
     let captured = responses.lock().await.clone();
     assert_eq!(captured.len(), 1, "one provider request expected");
@@ -1342,7 +1368,10 @@ async fn run_namespace_profile_json_round_trip(process: &str) {
         );
     });
     let second_status = second.status();
-    let second_body = second.text().await.expect("namespace profile second response body");
+    let second_body = second
+        .text()
+        .await
+        .expect("namespace profile second response body");
     assert!(
         second_status.is_success(),
         "strict gateway must accept the namespace profile follow-up: {second_status} {second_body}; gateway_rejections={}",
@@ -1355,7 +1384,11 @@ async fn run_namespace_profile_json_round_trip(process: &str) {
         second["output"][0]["content"][0]["text"], "receipt accepted",
         "body={second_body}"
     );
-    assert_eq!(responses.lock().await.len(), 2, "two provider requests expected");
+    assert_eq!(
+        responses.lock().await.len(),
+        2,
+        "two provider requests expected"
+    );
     assert!(
         rejections.lock().await.is_empty(),
         "no gateway rejections expected: {:?}",
@@ -1412,7 +1445,10 @@ async fn run_namespace_profile_sse_round_trip(process: &str, streaming_deltas: b
         "strict gateway must accept the namespace profile SSE request: {status} {body}; gateway_rejections={}",
         rejections.try_lock().map(|r| r.clone()).unwrap_or_default().join("; ")
     );
-    assert!(!body.contains("routecodex_custom__"), "provider-private wire name must not leak: {body}");
+    assert!(
+        !body.contains("routecodex_custom__"),
+        "provider-private wire name must not leak: {body}"
+    );
     assert!(
         !body.contains(NAMESPACE_CUSTOM_STANDARD_WIRE),
         "the pre-profile standard wire name must not leak: {body}"
@@ -1429,10 +1465,22 @@ async fn run_namespace_profile_sse_round_trip(process: &str, streaming_deltas: b
         .iter()
         .find(|event| event.data["type"] == "response.output_item.added")
         .expect("added event");
-    assert_eq!(added.data["item"]["type"], "custom_tool_call", "body={body}");
-    assert_eq!(added.data["item"]["namespace"], NAMESPACE_TOOLS, "body={body}");
-    assert_eq!(added.data["item"]["name"], NAMESPACE_CUSTOM_LEAF, "body={body}");
-    assert_eq!(added.data["item"]["call_id"], NAMESPACE_CUSTOM_CALL_ID, "body={body}");
+    assert_eq!(
+        added.data["item"]["type"], "custom_tool_call",
+        "body={body}"
+    );
+    assert_eq!(
+        added.data["item"]["namespace"], NAMESPACE_TOOLS,
+        "body={body}"
+    );
+    assert_eq!(
+        added.data["item"]["name"], NAMESPACE_CUSTOM_LEAF,
+        "body={body}"
+    );
+    assert_eq!(
+        added.data["item"]["call_id"], NAMESPACE_CUSTOM_CALL_ID,
+        "body={body}"
+    );
     assert!(added.data["item"].get("arguments").is_none(), "body={body}");
     if streaming_deltas {
         assert_eq!(added.data["item"]["input"], "", "body={body}");
@@ -1454,7 +1502,10 @@ async fn run_namespace_profile_sse_round_trip(process: &str, streaming_deltas: b
             .find(|event| event.data["type"] == "response.custom_tool_call_input.done")
             .expect("custom input done event");
         assert_eq!(input_done.data["item_id"], "fc_ns_custom", "body={body}");
-        assert_eq!(input_done.data["input"], NAMESPACE_CUSTOM_RAW_INPUT, "body={body}");
+        assert_eq!(
+            input_done.data["input"], NAMESPACE_CUSTOM_RAW_INPUT,
+            "body={body}"
+        );
         assert!(input_done.data.get("arguments").is_none(), "body={body}");
     } else {
         assert_eq!(
@@ -1462,9 +1513,11 @@ async fn run_namespace_profile_sse_round_trip(process: &str, streaming_deltas: b
             "buffered Relay replay carries the complete item: {body}"
         );
         assert!(
-            events.iter().all(|event| !event.data["type"]
-                .as_str()
-                .is_some_and(|event_type| event_type.starts_with("response.custom_tool_call_input."))),
+            events.iter().all(
+                |event| !event.data["type"].as_str().is_some_and(
+                    |event_type| event_type.starts_with("response.custom_tool_call_input.")
+                )
+            ),
             "buffered Relay replay must not fabricate delta frames: {body}"
         );
     }
@@ -1473,11 +1526,26 @@ async fn run_namespace_profile_sse_round_trip(process: &str, streaming_deltas: b
         .iter()
         .find(|event| event.data["type"] == "response.output_item.done")
         .expect("item done event");
-    assert_eq!(item_done.data["item"]["type"], "custom_tool_call", "body={body}");
-    assert_eq!(item_done.data["item"]["namespace"], NAMESPACE_TOOLS, "body={body}");
-    assert_eq!(item_done.data["item"]["name"], NAMESPACE_CUSTOM_LEAF, "body={body}");
-    assert_eq!(item_done.data["item"]["input"], NAMESPACE_CUSTOM_RAW_INPUT, "body={body}");
-    assert!(item_done.data["item"].get("arguments").is_none(), "body={body}");
+    assert_eq!(
+        item_done.data["item"]["type"], "custom_tool_call",
+        "body={body}"
+    );
+    assert_eq!(
+        item_done.data["item"]["namespace"], NAMESPACE_TOOLS,
+        "body={body}"
+    );
+    assert_eq!(
+        item_done.data["item"]["name"], NAMESPACE_CUSTOM_LEAF,
+        "body={body}"
+    );
+    assert_eq!(
+        item_done.data["item"]["input"], NAMESPACE_CUSTOM_RAW_INPUT,
+        "body={body}"
+    );
+    assert!(
+        item_done.data["item"].get("arguments").is_none(),
+        "body={body}"
+    );
 
     let completed = events
         .iter()
@@ -1487,7 +1555,10 @@ async fn run_namespace_profile_sse_round_trip(process: &str, streaming_deltas: b
     assert_eq!(completed_item["type"], "custom_tool_call", "body={body}");
     assert_eq!(completed_item["namespace"], NAMESPACE_TOOLS, "body={body}");
     assert_eq!(completed_item["name"], NAMESPACE_CUSTOM_LEAF, "body={body}");
-    assert_eq!(completed_item["input"], NAMESPACE_CUSTOM_RAW_INPUT, "body={body}");
+    assert_eq!(
+        completed_item["input"], NAMESPACE_CUSTOM_RAW_INPUT,
+        "body={body}"
+    );
     assert_eq!(responses.lock().await.len(), 1);
     assert!(
         rejections.lock().await.is_empty(),
@@ -1504,7 +1575,8 @@ async fn responses_custom_tool_function_compat_maps_nested_namespace_custom_publ
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn responses_custom_tool_function_compat_maps_nested_namespace_custom_through_relay_publicly() {
+async fn responses_custom_tool_function_compat_maps_nested_namespace_custom_through_relay_publicly()
+{
     run_namespace_profile_json_round_trip("chat").await;
 }
 

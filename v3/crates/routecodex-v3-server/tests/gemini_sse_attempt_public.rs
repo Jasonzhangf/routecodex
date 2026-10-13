@@ -182,7 +182,9 @@ fn late_error_frames() -> Vec<Value> {
 /// filter. It stays a business response and must never enter provider-failure
 /// recovery.
 fn filter_frame() -> Vec<Value> {
-    vec![json!({"candidates":[{"index":0,"finishReason":"SAFETY"}],"usageMetadata":{"totalTokenCount":USAGE_TOTAL}})]
+    vec![
+        json!({"candidates":[{"index":0,"finishReason":"SAFETY"}],"usageMetadata":{"totalTokenCount":USAGE_TOTAL}}),
+    ]
 }
 
 fn text_frame(text: &str) -> Vec<Value> {
@@ -323,12 +325,11 @@ fn gemini_violations(body: &Value) -> Vec<String> {
     if body.get("messages").is_some() || !body.get("contents").is_some_and(Value::is_array) {
         violations.push("Gemini standard request requires contents and no Chat messages".into());
     }
-    if body["tools"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .any(|tool| !tool.get("functionDeclarations").is_some_and(Value::is_array))
-    {
+    if body["tools"].as_array().into_iter().flatten().any(|tool| {
+        !tool
+            .get("functionDeclarations")
+            .is_some_and(Value::is_array)
+    }) {
         violations.push("Gemini tools require functionDeclarations, no flat tools".into());
     }
     let declared = declared_wire_names(body);
@@ -585,11 +586,9 @@ async fn gemini_sse_complete_attempt_buffering_and_late_error_public() {
             eprintln!("EVIDENCE_gemini_SSE_MULTI_TERMINAL={response}");
             let items = response["output"].as_array().cloned().unwrap_or_default();
             let text_preserved = items.iter().any(|item| {
-                item["content"].as_array().is_some_and(|parts| {
-                    parts
-                        .iter()
-                        .any(|part| part["text"] == "candidate zero")
-                })
+                item["content"]
+                    .as_array()
+                    .is_some_and(|parts| parts.iter().any(|part| part["text"] == "candidate zero"))
             });
             if !text_preserved {
                 violations.push(format!(
@@ -681,13 +680,7 @@ async fn gemini_sse_complete_attempt_buffering_and_late_error_public() {
 
     // 2. A typed late provider error after candidate 0 already terminated must
     // reach the typed Error chain before any client success commitment.
-    match send_sse(
-        &client,
-        &endpoint,
-        &streaming_request("late error control"),
-    )
-    .await
-    {
+    match send_sse(&client, &endpoint, &streaming_request("late error control")).await {
         Ok((status, text)) => {
             eprintln!("EVIDENCE_gemini_SSE_LATE_ERROR_CLIENT={text}");
             if status != StatusCode::OK {
@@ -714,13 +707,9 @@ async fn gemini_sse_complete_attempt_buffering_and_late_error_public() {
     }
 
     // 3. A provider content-filter terminal stays a legal business response.
-    let (status, text) = send_sse(
-        &client,
-        &endpoint,
-        &streaming_request("filter control"),
-    )
-    .await
-    .unwrap_or_else(|error| panic!("filter-control SSE must commit a client head: {error}"));
+    let (status, text) = send_sse(&client, &endpoint, &streaming_request("filter control"))
+        .await
+        .unwrap_or_else(|error| panic!("filter-control SSE must commit a client head: {error}"));
     for capture in capture_all(&mut captures).await {
         violations.extend(captured_violations(&capture));
     }
