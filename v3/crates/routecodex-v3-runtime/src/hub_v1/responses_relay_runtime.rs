@@ -1079,6 +1079,9 @@ fn build_v3_responses_client_progress_response(response: &Value, response_id: &s
             Value::String("in_progress".to_string()),
         );
         object.insert("output".to_string(), Value::Array(Vec::new()));
+        // Candidate outcomes describe the terminal output positions. Defer
+        // this business extension until a snapshot contains that output.
+        object.remove("gemini_candidate_outcomes");
         object.insert("usage".to_string(), Value::Null);
         object.insert("incomplete_details".to_string(), Value::Null);
         object.remove("completed_at");

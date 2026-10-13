@@ -72,7 +72,7 @@ const directSource = directStart >= 0
   ? text.direct.slice(directStart, directEnd >= 0 ? directEnd : undefined)
   : '';
 const directBind = directSource.indexOf('bind_v3_selected_provider_model(');
-const directWire = directSource.indexOf('build_v3_provider_12_responses_wire_payload(', directBind);
+const directWire = directSource.search(/\bbuild_v3_provider_12_responses_wire_payload(?:_with_registry)?\(/u);
 if (directBind < 0 || directWire < 0 || directBind > directWire) {
   failures.push(`${files.direct}: Direct must bind selected model before Provider12 wire build`);
 }

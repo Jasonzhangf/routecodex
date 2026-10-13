@@ -25,6 +25,19 @@ const CUSTOM_TOOL_HASH_WIRE_NAME: &str = "routecodex_custom__d634d6d4ac7f4701";
 /// the 64-char provider function-name limit.
 const LONG_CUSTOM_TOOL_NAME: &str = "custom_tool_name_with_thirty_three_ch";
 
+/// Two ordinary namespace components must survive the provider profile.
+const NAMESPACE_TOOLS: &str = "work.ops";
+const NAMESPACE_CUSTOM_LEAF: &str = "apply_patch";
+const NAMESPACE_CUSTOM_PATH: &str = "work.ops.apply_patch";
+/// Standard namespace wire name for `work.ops.apply_patch` on the Responses
+/// wire, before the explicit `responses:custom-tool-function` profile runs.
+const NAMESPACE_CUSTOM_STANDARD_WIRE: &str = "work__ops__apply_patch";
+const NAMESPACE_CUSTOM_CALL_ID: &str = "call_ns_custom";
+const NAMESPACE_ORDINARY_CALL_ID: &str = "call_ord";
+const NAMESPACE_CUSTOM_RAW_INPUT: &str = "*** Begin Patch\n*** End Patch";
+const NAMESPACE_RAW_OUTPUT: &str = "EXECUTED:patch";
+const NAMESPACE_ORDINARY_RAW_OUTPUT: &str = "ORDINARY:ok";
+
 struct CounterEnvironment {
     previous: Option<OsString>,
     _runtime: tempfile::TempDir,
@@ -61,6 +74,8 @@ enum GatewayMode {
     SseMultiline,
     SseMalformed,
     AllowedToolsRoundTrip,
+    NamespaceRoundTrip,
+    NamespaceSse,
 }
 
 #[derive(Clone)]
@@ -229,6 +244,109 @@ fn verify_allowed_tools_request(
     }
 }
 
+fn tool_requires(tool: &Value, field: &str) -> bool {
+    tool["parameters"]["required"]
+        .as_array()
+        .is_some_and(|required| required.iter().any(|value| value == field))
+}
+
+/// Verify a nested namespace custom that also passed through the explicit
+/// `responses:custom-tool-function` profile.
+///
+/// The provider wire must carry only provider-native function declarations:
+/// no leftover `namespace` container and no native `custom` declaration. The
+/// forced `tool_choice` must name the exact custom declaration the gateway
+/// actually received. This helper returns the received custom and ordinary wire
+/// names so the response is built from the real declaration rather than a
+/// hardcoded private alias.
+fn verify_namespace_profile_request(body: &Value) -> Result<(String, String), String> {
+    let tools = body["tools"]
+        .as_array()
+        .ok_or_else(|| "provider wire must carry a tools array".to_string())?;
+    if let Some(tool) = tools.iter().find(|tool| tool["type"] == "namespace") {
+        return Err(format!(
+            "provider wire must not carry a namespace container, got {tool}"
+        ));
+    }
+    if let Some(tool) = tools.iter().find(|tool| tool["type"] == "custom") {
+        return Err(format!(
+            "provider wire must not carry a native custom declaration, got {tool}"
+        ));
+    }
+    let custom_wire = tools
+        .iter()
+        .find(|tool| tool["type"] == "function" && tool_requires(tool, "input"))
+        .and_then(|tool| tool["name"].as_str())
+        .ok_or_else(|| {
+            "the nested namespace custom must project to a provider function carrying an input schema"
+                .to_string()
+        })?
+        .to_string();
+    let ordinary_wire = tools
+        .iter()
+        .find(|tool| tool["type"] == "function" && tool_requires(tool, "cmd"))
+        .and_then(|tool| tool["name"].as_str())
+        .ok_or_else(|| {
+            "the colliding ordinary function must remain a provider function declaration".to_string()
+        })?
+        .to_string();
+    if custom_wire == ordinary_wire {
+        return Err(format!(
+            "the namespace custom and the colliding ordinary function must not share one provider wire name ({custom_wire})"
+        ));
+    }
+    let choice = &body["tool_choice"];
+    if choice["type"] != "function" || choice["name"] != json!(custom_wire) {
+        return Err(format!(
+            "the forced tool_choice must follow the received custom declaration onto its function wire name, got {choice}"
+        ));
+    }
+    let input = body["input"]
+        .as_array()
+        .ok_or_else(|| "provider wire must carry an input array".to_string())?;
+    let has_history = input
+        .iter()
+        .any(|entry| entry["type"] == "function_call_output");
+    if has_history {
+        let expected_custom_arguments =
+            serde_json::to_string(&json!({"input": NAMESPACE_CUSTOM_RAW_INPUT}))
+                .unwrap_or_default();
+        let custom_call = input.iter().find(|entry| {
+            entry["type"] == "function_call" && entry["call_id"] == NAMESPACE_CUSTOM_CALL_ID
+        });
+        let custom_output = input.iter().find(|entry| {
+            entry["type"] == "function_call_output" && entry["call_id"] == NAMESPACE_CUSTOM_CALL_ID
+        });
+        let ordinary_call = input.iter().find(|entry| {
+            entry["type"] == "function_call" && entry["call_id"] == NAMESPACE_ORDINARY_CALL_ID
+        });
+        let ordinary_output = input.iter().find(|entry| {
+            entry["type"] == "function_call_output"
+                && entry["call_id"] == NAMESPACE_ORDINARY_CALL_ID
+        });
+        let custom_paired = custom_call.is_some_and(|entry| {
+            entry["name"] == json!(custom_wire)
+                && entry["arguments"] == json!(expected_custom_arguments)
+        }) && custom_output.is_some_and(|entry| entry["output"] == NAMESPACE_RAW_OUTPUT);
+        let ordinary_paired = ordinary_call.is_some_and(|entry| {
+            entry["name"] == json!(ordinary_wire) && entry["arguments"] == "{\"cmd\":\"pwd\"}"
+        }) && ordinary_output.is_some_and(|entry| entry["output"] == NAMESPACE_ORDINARY_RAW_OUTPUT);
+        if !(custom_paired && ordinary_paired) {
+            return Err(format!(
+                "history call/output pairing must preserve both the namespace custom wire name and the ordinary identity; input={input:?}"
+            ));
+        }
+    } else if !input
+        .first()
+        .is_some_and(|entry| entry["type"] == "message")
+    {
+        return Err(format!(
+            "the first namespace request must carry the original user message, got {input:?}"
+        ));
+    }
+    Ok((custom_wire, ordinary_wire))
+}
+
 fn sse_frame(event: &Value, terminator: &str, multiline: bool) -> String {
     let event_type = event["type"].as_str().unwrap();
     let json = serde_json::to_string(event).unwrap();
@@ -267,6 +385,7 @@ async fn responses_gateway(
         state.rejections.lock().await.push(reason.clone());
         return bad_request(reason);
     }
+    let mut namespace_names: Option<(String, String)> = None;
     let rejection = match state.mode {
         GatewayMode::AllowedToolsRoundTrip => verify_allowed_tools_request(
             &body,
@@ -276,6 +395,15 @@ async fn responses_gateway(
                 .as_deref()
                 .unwrap_or(ORDINARY_PREFIX_FUNCTION),
         ),
+        GatewayMode::NamespaceRoundTrip | GatewayMode::NamespaceSse => {
+            match verify_namespace_profile_request(&body) {
+                Ok(names) => {
+                    namespace_names = Some(names);
+                    None
+                }
+                Err(reason) => Some(reason),
+            }
+        }
         _ => verify_request(
             &body,
             &state.custom_wire_name,
@@ -286,11 +414,16 @@ async fn responses_gateway(
         state.rejections.lock().await.push(reason.clone());
         return bad_request(reason);
     }
-    let custom_wire_name = state.custom_wire_name.clone();
-    let ordinary_wire_name = state
-        .ordinary_wire_name
-        .clone()
-        .unwrap_or_else(|| ORDINARY_PREFIX_FUNCTION.to_string());
+    let (custom_wire_name, ordinary_wire_name) = match &namespace_names {
+        Some((custom, ordinary)) => (custom.clone(), ordinary.clone()),
+        None => (
+            state.custom_wire_name.clone(),
+            state
+                .ordinary_wire_name
+                .clone()
+                .unwrap_or_else(|| ORDINARY_PREFIX_FUNCTION.to_string()),
+        ),
+    };
 
     match state.mode {
         GatewayMode::JsonRoundTrip => {
@@ -396,6 +529,85 @@ async fn responses_gateway(
                 })),
             )
                 .into_response();
+        }
+        GatewayMode::NamespaceRoundTrip => {
+            let has_history = body["input"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| entry["type"] == "function_call_output");
+            if has_history {
+                return (
+                    StatusCode::OK,
+                    Json(json!({
+                        "id": "resp_ns_2",
+                        "object": "response",
+                        "created_at": 2,
+                        "status": "completed",
+                        "model": "kimi-k3",
+                        "output": [{
+                            "id": "msg_ns_final",
+                            "type": "message",
+                            "role": "assistant",
+                            "status": "completed",
+                            "content": [{"type": "output_text", "text": "receipt accepted"}]
+                        }],
+                        "usage": {"input_tokens": 2, "output_tokens": 2, "total_tokens": 4}
+                    })),
+                )
+                    .into_response();
+            }
+            let custom_arguments =
+                serde_json::to_string(&json!({"input": NAMESPACE_CUSTOM_RAW_INPUT})).unwrap();
+            return (
+                StatusCode::OK,
+                Json(json!({
+                    "id": "resp_ns_1",
+                    "object": "response",
+                    "created_at": 1,
+                    "status": "completed",
+                    "model": "kimi-k3",
+                    "output": [
+                        {
+                            "id": "fc_ns_custom",
+                            "type": "function_call",
+                            "call_id": NAMESPACE_CUSTOM_CALL_ID,
+                            "name": custom_wire_name,
+                            "arguments": custom_arguments,
+                            "status": "completed"
+                        },
+                        {
+                            "id": "fc_ns_ordinary",
+                            "type": "function_call",
+                            "call_id": NAMESPACE_ORDINARY_CALL_ID,
+                            "name": ordinary_wire_name,
+                            "arguments": "{\"cmd\":\"pwd\"}",
+                            "status": "completed"
+                        }
+                    ],
+                    "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+                })),
+            )
+                .into_response();
+        }
+        GatewayMode::NamespaceSse => {
+            let custom_arguments =
+                serde_json::to_string(&json!({"input": NAMESPACE_CUSTOM_RAW_INPUT})).unwrap();
+            let events = [
+                json!({"type":"response.created","response":{"id":"resp_ns_sse","model":"kimi-k3","status":"in_progress","output":[]}}),
+                json!({"type":"response.output_item.added","output_index":0,"item":{"id":"fc_ns_custom","type":"function_call","call_id":NAMESPACE_CUSTOM_CALL_ID,"name":custom_wire_name,"arguments":"","status":"in_progress"}}),
+                json!({"type":"response.function_call_arguments.delta","item_id":"fc_ns_custom","output_index":0,"delta":"{\"input\":\"*** Begin "}),
+                json!({"type":"response.function_call_arguments.delta","item_id":"fc_ns_custom","output_index":0,"delta":"Patch\\n*** End Patch\"}"}),
+                json!({"type":"response.function_call_arguments.done","item_id":"fc_ns_custom","output_index":0,"arguments":custom_arguments}),
+                json!({"type":"response.output_item.done","output_index":0,"item":{"id":"fc_ns_custom","type":"function_call","call_id":NAMESPACE_CUSTOM_CALL_ID,"name":custom_wire_name,"arguments":custom_arguments,"status":"completed"}}),
+                json!({"type":"response.completed","response":{"id":"resp_ns_sse","model":"kimi-k3","status":"completed","output":[{"id":"fc_ns_custom","type":"function_call","call_id":NAMESPACE_CUSTOM_CALL_ID,"name":custom_wire_name,"arguments":custom_arguments,"status":"completed"}]}}),
+            ];
+            let terminator = "\r\n";
+            let body = events
+                .iter()
+                .map(|event| sse_frame(event, terminator, true))
+                .collect::<String>();
+            return ([("content-type", "text/event-stream")], body).into_response();
         }
     }
 }
@@ -560,6 +772,83 @@ fn allowed_tools_request(stream: bool) -> Value {
         },
         "input": [
             {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "apply patch"}]}
+        ]
+    })
+}
+
+/// A nested namespace custom plus one ordinary function whose declared name is
+/// exactly the reversible profile wire encoding of the namespace custom's
+/// standard Responses wire name. A correct combined projection must keep the
+/// custom and the ordinary function on distinct provider wire names and must
+/// force `tool_choice` onto the custom's actual received name.
+fn namespace_profile_request(stream: bool) -> (Value, String) {
+    let ordinary_collision = custom_tool_wire_name(NAMESPACE_CUSTOM_STANDARD_WIRE);
+    let request = json!({
+        "model": "gateway.kimi-k3",
+        "stream": stream,
+        "tools": [
+            {"type": "namespace", "name": "work", "tools": [
+                {"type": "namespace", "name": "ops", "tools": [
+                    {"type": "custom", "name": NAMESPACE_CUSTOM_LEAF, "description": "Apply patch", "format": {"type": "text"}}
+                ]}
+            ]},
+            {"type": "function", "name": ordinary_collision, "parameters": {
+                "type": "object",
+                "properties": {"cmd": {"type": "string"}},
+                "required": ["cmd"]
+            }}
+        ],
+        "tool_choice": {"type": "custom", "name": NAMESPACE_CUSTOM_PATH},
+        "input": [
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "apply patch"}]}
+        ]
+    });
+    (request, ordinary_collision)
+}
+
+/// Paired follow-up built from the exact client-visible calls. The custom call
+/// keeps its restored namespace identity (`namespace` + leaf `name`); the
+/// ordinary call keeps its own name. Both call ids and the raw custom input are
+/// carried back so the provider wire must round-trip them without loss.
+fn namespace_profile_followup_request(
+    stream: bool,
+    custom_call: &Value,
+    ordinary_call: &Value,
+) -> Value {
+    let ordinary_collision = custom_tool_wire_name(NAMESPACE_CUSTOM_STANDARD_WIRE);
+    json!({
+        "model": "gateway.kimi-k3",
+        "stream": stream,
+        "tools": [
+            {"type": "namespace", "name": "work", "tools": [
+                {"type": "namespace", "name": "ops", "tools": [
+                    {"type": "custom", "name": NAMESPACE_CUSTOM_LEAF, "description": "Apply patch", "format": {"type": "text"}}
+                ]}
+            ]},
+            {"type": "function", "name": ordinary_collision, "parameters": {
+                "type": "object",
+                "properties": {"cmd": {"type": "string"}},
+                "required": ["cmd"]
+            }}
+        ],
+        "tool_choice": {"type": "custom", "name": NAMESPACE_CUSTOM_PATH},
+        "input": [
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "apply patch"}]},
+            {
+                "type": "custom_tool_call",
+                "namespace": custom_call["namespace"],
+                "name": custom_call["name"],
+                "call_id": custom_call["call_id"],
+                "input": custom_call["input"]
+            },
+            {"type": "custom_tool_call_output", "call_id": custom_call["call_id"], "output": NAMESPACE_RAW_OUTPUT},
+            {
+                "type": "function_call",
+                "name": ordinary_call["name"],
+                "call_id": ordinary_call["call_id"],
+                "arguments": ordinary_call["arguments"]
+            },
+            {"type": "function_call_output", "call_id": ordinary_call["call_id"], "output": NAMESPACE_ORDINARY_RAW_OUTPUT}
         ]
     })
 }
@@ -960,6 +1249,274 @@ async fn run_custom_tool_sse_blackbox(process: &str, streaming_deltas: bool) {
     assert!(rejections.lock().await.is_empty());
     server.shutdown().await;
     upstream_task.abort();
+}
+
+/// JSON round trip for the nested namespace custom combined with the explicit
+/// `responses:custom-tool-function` profile. Both the Direct and Relay
+/// executions reuse this single core fixture. The first provider attempt must
+/// carry only native function declarations (no namespace container, no native
+/// custom) with the forced choice on the received custom wire name; the client
+/// must get its original namespace custom back, the ordinary function must keep
+/// its own identity, and the paired follow-up must preserve call ids, names and
+/// the raw custom input on the provider wire.
+async fn run_namespace_profile_json_round_trip(process: &str) {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _counter = CounterEnvironment::new();
+    std::env::set_var("V3_CUSTOM_TOOL_COMPAT_KEY", "compat-key");
+    let (upstream, responses, rejections, upstream_task) =
+        start_gateway(GatewayMode::NamespaceRoundTrip, "", None).await;
+    let server =
+        spawn_v3_server_aggregate(manifest(free_port(), &upstream, "never", false, process))
+            .await
+            .unwrap();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .unwrap();
+    let url = format!("http://{}/v1/responses", server.listeners[0].addr);
+
+    let (first_request, _ordinary_collision) = namespace_profile_request(false);
+    let first = client.post(&url).json(&first_request).send().await.unwrap_or_else(|error| {
+        let captured = responses.try_lock().map(|c| c.clone()).unwrap_or_default();
+        panic!(
+            "namespace profile public /v1/responses request must reach the listener: {error}; captured={}; gateway_rejections={}",
+            serde_json::to_string(&captured).unwrap_or_default(),
+            rejections.try_lock().map(|r| r.clone()).unwrap_or_default().join("; ")
+        );
+    });
+    let first_status = first.status();
+    let first_body = first.text().await.expect("namespace profile first response body");
+    assert!(
+        first_status.is_success(),
+        "strict gateway must accept the namespace profile first request: {first_status} {first_body}; gateway_rejections={}",
+        rejections.try_lock().map(|r| r.clone()).unwrap_or_default().join("; ")
+    );
+    let first: Value =
+        serde_json::from_str(&first_body).expect("namespace profile first response must be JSON");
+    let output = first["output"]
+        .as_array()
+        .expect("namespace profile response output array");
+    let custom_item = output
+        .iter()
+        .find(|item| item["type"] == "custom_tool_call")
+        .unwrap_or_else(|| panic!("client must receive the restored namespace custom_tool_call: {first_body}"));
+    assert_eq!(custom_item["namespace"], NAMESPACE_TOOLS, "body={first_body}");
+    assert_eq!(custom_item["name"], NAMESPACE_CUSTOM_LEAF, "body={first_body}");
+    assert_eq!(custom_item["call_id"], NAMESPACE_CUSTOM_CALL_ID, "body={first_body}");
+    assert_eq!(custom_item["input"], NAMESPACE_CUSTOM_RAW_INPUT, "body={first_body}");
+    assert!(custom_item.get("arguments").is_none(), "body={first_body}");
+    let ordinary_item = output
+        .iter()
+        .find(|item| item["type"] == "function_call")
+        .unwrap_or_else(|| panic!("client must receive the ordinary function_call: {first_body}"));
+    assert_eq!(
+        ordinary_item["name"],
+        json!(custom_tool_wire_name(NAMESPACE_CUSTOM_STANDARD_WIRE)),
+        "the colliding ordinary function must keep its declared identity: body={first_body}"
+    );
+    assert_eq!(ordinary_item["call_id"], NAMESPACE_ORDINARY_CALL_ID, "body={first_body}");
+    assert_eq!(ordinary_item["arguments"], "{\"cmd\":\"pwd\"}", "body={first_body}");
+
+    let captured = responses.lock().await.clone();
+    assert_eq!(captured.len(), 1, "one provider request expected");
+    let received_custom = captured[0]["tools"]
+        .as_array()
+        .expect("provider tools array")
+        .iter()
+        .find(|tool| tool["type"] == "function" && tool_requires(tool, "input"))
+        .and_then(|tool| tool["name"].as_str())
+        .expect("the nested namespace custom must reach the provider as a function declaration");
+    assert_ne!(
+        received_custom,
+        ordinary_item["name"].as_str().unwrap(),
+        "the namespace custom must be moved off the ordinary function's colliding wire name: {captured:?}"
+    );
+
+    let followup = namespace_profile_followup_request(false, custom_item, ordinary_item);
+    let second = client.post(&url).json(&followup).send().await.unwrap_or_else(|error| {
+        let captured = responses.try_lock().map(|c| c.clone()).unwrap_or_default();
+        panic!(
+            "namespace profile paired follow-up must reach the listener: {error}; captured={}; gateway_rejections={}",
+            serde_json::to_string(&captured).unwrap_or_default(),
+            rejections.try_lock().map(|r| r.clone()).unwrap_or_default().join("; ")
+        );
+    });
+    let second_status = second.status();
+    let second_body = second.text().await.expect("namespace profile second response body");
+    assert!(
+        second_status.is_success(),
+        "strict gateway must accept the namespace profile follow-up: {second_status} {second_body}; gateway_rejections={}",
+        rejections.try_lock().map(|r| r.clone()).unwrap_or_default().join("; ")
+    );
+    let second: Value =
+        serde_json::from_str(&second_body).expect("namespace profile second response JSON");
+    assert_eq!(second["output"][0]["type"], "message", "body={second_body}");
+    assert_eq!(
+        second["output"][0]["content"][0]["text"], "receipt accepted",
+        "body={second_body}"
+    );
+    assert_eq!(responses.lock().await.len(), 2, "two provider requests expected");
+    assert!(
+        rejections.lock().await.is_empty(),
+        "no gateway rejections expected: {:?}",
+        rejections.lock().await
+    );
+    server.shutdown().await;
+    upstream_task.abort();
+}
+
+/// SSE projection for the nested namespace custom through the explicit
+/// `responses:custom-tool-function` profile. The buffered Relay replay carries
+/// the complete item; the Direct stream emits unwrapped input deltas. Both must
+/// restore the original namespace custom identity across added, done and
+/// terminal frames and must not leak the provider-private wire name.
+async fn run_namespace_profile_sse_round_trip(process: &str, streaming_deltas: bool) {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _counter = CounterEnvironment::new();
+    std::env::set_var("V3_CUSTOM_TOOL_COMPAT_KEY", "compat-key");
+    let (upstream, responses, rejections, upstream_task) =
+        start_gateway(GatewayMode::NamespaceSse, "", None).await;
+    let server =
+        spawn_v3_server_aggregate(manifest(free_port(), &upstream, "always", true, process))
+            .await
+            .unwrap();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .unwrap();
+    let (first_request, _ordinary_collision) = namespace_profile_request(true);
+    let reply = client
+        .post(format!("http://{}/v1/responses", server.listeners[0].addr))
+        .json(&first_request)
+        .send()
+        .await
+        .unwrap_or_else(|error| {
+            let captured = responses.try_lock().map(|c| c.clone()).unwrap_or_default();
+            panic!(
+                "namespace profile SSE request must reach the listener: {error}; captured={}; gateway_rejections={}",
+                serde_json::to_string(&captured).unwrap_or_default(),
+                rejections.try_lock().map(|r| r.clone()).unwrap_or_default().join("; ")
+            );
+        });
+    let status = reply.status();
+    let body = reply.text().await.unwrap_or_else(|error| {
+        let captured = responses.try_lock().map(|c| c.clone()).unwrap_or_default();
+        panic!(
+            "namespace profile SSE response body must stream without breaking: {error}; captured={}; gateway_rejections={}",
+            serde_json::to_string(&captured).unwrap_or_default(),
+            rejections.try_lock().map(|r| r.clone()).unwrap_or_default().join("; ")
+        );
+    });
+    assert!(
+        status.is_success(),
+        "strict gateway must accept the namespace profile SSE request: {status} {body}; gateway_rejections={}",
+        rejections.try_lock().map(|r| r.clone()).unwrap_or_default().join("; ")
+    );
+    assert!(!body.contains("routecodex_custom__"), "provider-private wire name must not leak: {body}");
+    assert!(
+        !body.contains(NAMESPACE_CUSTOM_STANDARD_WIRE),
+        "the pre-profile standard wire name must not leak: {body}"
+    );
+    assert!(!body.contains("response.function_call_arguments"), "{body}");
+    let events = parse_sse_events(&body);
+    assert!(events.iter().all(|event| {
+        !event.data["type"]
+            .as_str()
+            .is_some_and(|event_type| event_type.starts_with("response.function_call_arguments."))
+    }));
+
+    let added = events
+        .iter()
+        .find(|event| event.data["type"] == "response.output_item.added")
+        .expect("added event");
+    assert_eq!(added.data["item"]["type"], "custom_tool_call", "body={body}");
+    assert_eq!(added.data["item"]["namespace"], NAMESPACE_TOOLS, "body={body}");
+    assert_eq!(added.data["item"]["name"], NAMESPACE_CUSTOM_LEAF, "body={body}");
+    assert_eq!(added.data["item"]["call_id"], NAMESPACE_CUSTOM_CALL_ID, "body={body}");
+    assert!(added.data["item"].get("arguments").is_none(), "body={body}");
+    if streaming_deltas {
+        assert_eq!(added.data["item"]["input"], "", "body={body}");
+        let deltas = events
+            .iter()
+            .filter(|event| event.data["type"] == "response.custom_tool_call_input.delta")
+            .collect::<Vec<_>>();
+        assert!(
+            !deltas.is_empty(),
+            "custom SSE projection must emit at least one input delta: {body}"
+        );
+        let projected_input = deltas
+            .iter()
+            .map(|event| event.data["delta"].as_str().unwrap_or_default())
+            .collect::<String>();
+        assert_eq!(projected_input, NAMESPACE_CUSTOM_RAW_INPUT, "body={body}");
+        let input_done = events
+            .iter()
+            .find(|event| event.data["type"] == "response.custom_tool_call_input.done")
+            .expect("custom input done event");
+        assert_eq!(input_done.data["item_id"], "fc_ns_custom", "body={body}");
+        assert_eq!(input_done.data["input"], NAMESPACE_CUSTOM_RAW_INPUT, "body={body}");
+        assert!(input_done.data.get("arguments").is_none(), "body={body}");
+    } else {
+        assert_eq!(
+            added.data["item"]["input"], NAMESPACE_CUSTOM_RAW_INPUT,
+            "buffered Relay replay carries the complete item: {body}"
+        );
+        assert!(
+            events.iter().all(|event| !event.data["type"]
+                .as_str()
+                .is_some_and(|event_type| event_type.starts_with("response.custom_tool_call_input."))),
+            "buffered Relay replay must not fabricate delta frames: {body}"
+        );
+    }
+
+    let item_done = events
+        .iter()
+        .find(|event| event.data["type"] == "response.output_item.done")
+        .expect("item done event");
+    assert_eq!(item_done.data["item"]["type"], "custom_tool_call", "body={body}");
+    assert_eq!(item_done.data["item"]["namespace"], NAMESPACE_TOOLS, "body={body}");
+    assert_eq!(item_done.data["item"]["name"], NAMESPACE_CUSTOM_LEAF, "body={body}");
+    assert_eq!(item_done.data["item"]["input"], NAMESPACE_CUSTOM_RAW_INPUT, "body={body}");
+    assert!(item_done.data["item"].get("arguments").is_none(), "body={body}");
+
+    let completed = events
+        .iter()
+        .find(|event| event.data["type"] == "response.completed")
+        .expect("completed event");
+    let completed_item = &completed.data["response"]["output"][0];
+    assert_eq!(completed_item["type"], "custom_tool_call", "body={body}");
+    assert_eq!(completed_item["namespace"], NAMESPACE_TOOLS, "body={body}");
+    assert_eq!(completed_item["name"], NAMESPACE_CUSTOM_LEAF, "body={body}");
+    assert_eq!(completed_item["input"], NAMESPACE_CUSTOM_RAW_INPUT, "body={body}");
+    assert_eq!(responses.lock().await.len(), 1);
+    assert!(
+        rejections.lock().await.is_empty(),
+        "no gateway rejections expected: {:?}",
+        rejections.lock().await
+    );
+    server.shutdown().await;
+    upstream_task.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn responses_custom_tool_function_compat_maps_nested_namespace_custom_publicly() {
+    run_namespace_profile_json_round_trip("direct").await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn responses_custom_tool_function_compat_maps_nested_namespace_custom_through_relay_publicly() {
+    run_namespace_profile_json_round_trip("chat").await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn responses_custom_tool_function_compat_streams_nested_namespace_custom_publicly() {
+    run_namespace_profile_sse_round_trip("direct", true).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn responses_custom_tool_function_compat_streams_nested_namespace_custom_through_relay_publicly(
+) {
+    run_namespace_profile_sse_round_trip("chat", false).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

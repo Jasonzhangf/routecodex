@@ -2140,6 +2140,9 @@ chains:
     callee_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
     status: anchored
     owner_feature_id: v3.responses_direct_mvp_architecture
+    semantic_contract:
+      - Runtime builds the request-local Direct context from the exact provider wire inverse before response projection; it does not infer an alias from provider or namespace strings
+      - JSON and SSE item and terminal projection consume the same inverse and preserve kind, call ID, input and arguments; retry uses the current attempt binding
     resource_flow:
       consumes:
       - v3.response.provider_raw
@@ -4853,6 +4856,24 @@ chains:
       side_channel_writes:
       - v3.error.source
       - v3.error.external_link
+- chain_id: v3.responses_provider_event.gemini_materialization
+  owner_feature_id: v3.hub_relay_runtime_closeout
+  summary: Fully buffer Gemini provider SSE before adjacent Resp02 normalization and the existing Responses client projection.
+  edges:
+  - step_id: v3-gemini-provider-event-materialization-01
+    from_node: V3ProviderRespInbound01Raw
+    to_node: V3HubRespInbound02Normalized
+    caller_symbol: build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs
+    callee_symbol: materialize_gemini_provider_events
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs
+    status: anchored
+    owner_feature_id: v3.hub_relay_runtime_closeout
+    resource_flow:
+      consumes: [v3.response.provider_raw]
+      produces: [v3.hub.response_semantic]
+      side_channel_reads: []
+      side_channel_writes: []
 - chain_id: v3.responses_provider_event.terminal_merge
   owner_feature_id: v3.hub_relay_runtime_closeout
   summary: Responses provider-event terminal merge matches call-bearing output by call_id, preserves terminal truth, and backfills only stream fields absent from response.completed.
@@ -4948,6 +4969,55 @@ chains:
       produces: []
       side_channel_reads:
       - v3.error.chain
+      side_channel_writes: []
+- chain_id: v3.protocol_conversion.gemini_standard_bridge
+  owner_feature_id: v3.protocol_conversion_field_parity
+  binding_kind: adjacent_protocol_codec_helper
+  summary: Gemini helper bindings on existing Req07, Resp02 and Resp03 stages; no new execution path, runtime node or client SSE implementation.
+  edges:
+  - step_id: v3-protocol-field-parity-gemini-request-01
+    from_node: V3HubReqOutbound07ProviderSemantic
+    to_node: ProviderReqCompat06ProviderCompat
+    caller_symbol: project_gemini_compatible_fields_inner
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs
+    callee_symbol: project_gemini_chat_request
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs
+    status: anchored
+    owner_feature_id: v3.protocol_conversion_field_parity
+    resource_flow:
+      consumes: [v3.request.provider_semantic]
+      produces: [v3.hub.provider_wire_payload]
+      side_channel_reads: [v3.protocol_conversion.attempt_tool_binding]
+      side_channel_writes: []
+  - step_id: v3-protocol-field-parity-gemini-response-01
+    from_node: ProviderRespCompat02ProviderCompat
+    to_node: V3HubRespInbound02Normalized
+    caller_symbol: normalize_gemini_business_response
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs
+    callee_symbol: project_gemini_response
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_responses_codec.rs
+    status: anchored
+    owner_feature_id: v3.protocol_conversion_field_parity
+    resource_flow:
+      consumes: [v3.response.provider_raw]
+      produces: [v3.hub.response_semantic]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-protocol-field-parity-attempt-inverse-01
+    from_node: V3HubRespInbound02Normalized
+    to_node: V3HubRespChatProcess03Governed
+    caller_symbol: run_json_response_hooks
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
+    callee_symbol: restore_gemini_tool_kinds
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_responses_codec.rs
+    status: anchored
+    owner_feature_id: v3.protocol_conversion_field_parity
+    semantic_contract:
+      - Provider-private inverse precedes standard namespace inverse; JSON and materialized SSE use the same attempt holder before existing Resp05 projection.
+    resource_flow:
+      consumes: [v3.hub.response_semantic]
+      produces: [v3.hub.response_semantic]
+      side_channel_reads: [v3.protocol_conversion.attempt_tool_binding]
       side_channel_writes: []
 - chain_id: v3.protocol_conversion_field_parity
   owner_feature_id: v3.protocol_conversion_field_parity

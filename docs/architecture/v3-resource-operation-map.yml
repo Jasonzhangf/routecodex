@@ -555,10 +555,32 @@ resources:
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3Provider12ResponsesWirePayload
     identity: [requestId, providerId, providerType, modelId]
+    semantic_contract:
+      namespace_binding: shared request-local declaration binding assigns actual provider wire names and produces the inverse carried in a separate typed field; the inverse never enters body or transport bytes
+      namespace_lifetime: each provider attempt clones its actual wire inverse into the Direct response context before consuming the wire resource; retry rebuilds from current request declarations and request completion releases the context
+      compat_order: standard declaration expansion and reference binding precede provider-private compat; packaging receives the original standard registry and does not rebuild identity from private declarations
     allowed_writers: [V3Provider12ResponsesWirePayload]
-    allowed_readers: [V3Transport13ResponsesHttpRequest]
+    allowed_readers: [V3Transport13ResponsesHttpRequest, V3DirectResponseCompatContext]
     forbidden_writers: [V3Resp15ClientPayload, V3Server16HttpFrame, V3DebugArtifact]
     may_enter_provider_body: true
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.protocol_conversion.attempt_tool_binding
+    resource_kind: projection_resource
+    lifecycle: v3.responses_relay.mainline
+    owner_feature_id: v3.protocol_conversion_field_parity
+    owner_crate: routecodex-v3-runtime
+    owner_node: ProviderReqCompat06ProviderCompat
+    identity: [requestId, providerId, modelId, attempt]
+    semantic_contract:
+      standard: NamespaceToolIdentityRegistry binds original components, leaf, kind and actual standard names before provider-private compat; declarations, choice and paired history share that binding
+      private: CustomToolFunctionBinding remains a separate typed resource; its inverse restores standard name and custom kind before the shared namespace inverse
+      lifetime: attempt-local stack holder is cloned before wire consumption; retries rebuild from current declarations; completion, cancellation and exhaustion drop the holder
+      response: Gemini provider SSE fully buffers into native business content; Resp02 atomically normalizes payload and semantic protocol; Resp03 consumes the standard holder; Resp05 uses existing Responses JSON and SSE projection
+    allowed_writers: [NamespaceToolIdentityRegistry::from_request, build_provider_req_compat_06_from_v3_hub_req_outbound_07]
+    allowed_readers: [build_v3_provider_12_responses_wire_payload_with_registry, run_json_response_hooks, restore_gemini_tool_kinds]
+    forbidden_writers: [routecodex-v3-server, provider transport, MetadataCenter, debug snapshot]
+    may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
   - resource_id: v3.provider.transport_request
@@ -664,8 +686,11 @@ resources:
     owner_crate: routecodex-v3-runtime
     owner_node: V3DirectResp14ProviderCompat
     identity: [providerProtocol, modelId, compatibilityProfile]
+    semantic_contract:
+      namespace_inverse: the exact attempt wire binding restores only declared namespace identities or renamed plain names; original kind and business arguments remain provider content
+      namespace_scope: context is request-local, is rebuilt for each retry attempt, and is released on completion, cancellation or exhaustion; it never grants undeclared calls or overwrites a non-null namespace
     allowed_writers: [V3DirectResponseCompatContext]
-    allowed_readers: [V3DirectResponseCompatContext::compile_plan]
+    allowed_readers: [V3DirectResponseCompatContext::compile_plan, responses_direct_response_projection_hook_with_context, restore_v3_responses_namespace_in_value]
     forbidden_writers: [V3ProviderResp14Raw, V3Resp15ClientPayload]
     may_enter_provider_body: false
     may_enter_client_body: false

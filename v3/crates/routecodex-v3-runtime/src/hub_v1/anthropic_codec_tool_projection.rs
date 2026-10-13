@@ -66,9 +66,15 @@ pub(super) fn anthropic_tool_use_as_responses_call(
             field: "tool_use.input",
         })?;
     if let Some(client_name) = context.governed_custom_tool_client_name(name) {
-        let wrapper = input
-            .as_object()
-            .filter(|value| value.contains_key("input"));
+        let wrapper = input.as_object().filter(|value| {
+            value.get("input").and_then(Value::as_str).is_some()
+                && value.keys().all(|key| {
+                    matches!(
+                        key.as_str(),
+                        "input" | "reason" | "goal_alignment_confidence" | "model_id"
+                    )
+                })
+        });
         let mut output = Map::from_iter([
             (
                 "type".to_string(),
@@ -82,17 +88,6 @@ pub(super) fn anthropic_tool_use_as_responses_call(
             output.insert("name".to_string(), Value::String(tool_name.to_owned()));
         }
         let raw = if let Some(wrapper) = wrapper {
-            if !wrapper.keys().all(|key| {
-                matches!(
-                    key.as_str(),
-                    "input" | "reason" | "goal_alignment_confidence" | "model_id"
-                )
-            }) || wrapper.get("input").and_then(Value::as_str).is_none()
-            {
-                return Err(V3AnthropicCodecError::MalformedField {
-                    field: "custom tool_use.input",
-                });
-            }
             for key in ["reason", "goal_alignment_confidence", "model_id"] {
                 if let Some(value) = wrapper.get(key) {
                     output.insert(key.to_string(), value.clone());
@@ -136,12 +131,35 @@ pub(super) fn anthropic_tool_use_as_responses_call(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn namespace_custom_malformed_wrapper_preserves_complete_provider_input() {
+        let request = serde_json::json!({"tools":[{"type":"namespace","name":"alpha","tools":[{"type":"custom","name":"run","format":{"type":"text"}}]}]});
+        let context =
+            super::V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&request)
+                .unwrap();
+        for input in [
+            serde_json::json!({"input":17}),
+            serde_json::json!({"input":"raw","unexpected":{"x":1}}),
+        ] {
+            let call = super::anthropic_tool_use_as_responses_call(&serde_json::json!({"type":"tool_use","id":"invalid_wrapper","name":"alpha__run","input":input}), &context).unwrap();
+            assert_eq!(call["type"], "custom_tool_call");
+            assert_eq!(call["namespace"], "alpha");
+            assert_eq!(call["name"], "run");
+            assert_eq!(call["call_id"], "invalid_wrapper");
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(call["input"].as_str().unwrap()).unwrap(),
+                input
+            );
+        }
+    }
     use super::*;
 
     #[test]
-    fn flattened_mcp_tool_use_restores_namespace_for_responses_client() {
+    fn declared_namespace_tool_use_restores_namespace_for_responses_client() {
         let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
-            "tools": [{"type": "function", "name": "mcp__mcpx__workspace"}]
+            "tools": [{"type": "namespace", "name": "mcp__mcpx", "tools": [
+                {"type": "function", "name": "workspace"}
+            ]}]
         }))
         .expect("projection context");
         let call = anthropic_tool_use_as_responses_call(
@@ -192,7 +210,7 @@ mod tests {
         }))
         .expect("projection context");
         let call = anthropic_tool_use_as_responses_call(
-            &json!({"type":"tool_use","id":"call_nested","name":"mcp__mcpx__exec","input":{"input":"pwd"}}),
+            &json!({"type":"tool_use","id":"call_nested","name":"functions__mcp__mcpx__exec","input":{"input":"pwd"}}),
             &context,
         ).expect("nested custom tool must restore client name");
         assert_eq!(call["type"], "custom_tool_call");

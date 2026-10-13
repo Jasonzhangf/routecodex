@@ -38,6 +38,7 @@ const files = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_tests.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_reasoning_effort.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
@@ -76,6 +77,21 @@ const files = [
 ];
 
 const cases = [
+  {
+    name: 'Anthropic declared custom inverse loses kind filter',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs',
+    from: 'identity.kind == provider_compat_core::namespace_tools::ToolKind::Custom',
+    to: 'identity.kind == provider_compat_core::namespace_tools::ToolKind::Function',
+    all: true,
+    diagnostic: /anthropic_custom_reverse_guard/u,
+  },
+  {
+    name: 'Unified namespace binding regressions removed from aggregate gate',
+    file: 'v3/package.json',
+    from: ' && npm run test:v3-namespace-identity-bindings',
+    to: '',
+    diagnostic: /test:v3-namespace-identity-bindings/u,
+  },
   {
     name: 'Anthropic content union loses its scalar semantic mapping',
     file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',

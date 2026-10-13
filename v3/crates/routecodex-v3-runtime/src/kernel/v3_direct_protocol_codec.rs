@@ -42,6 +42,7 @@ pub(crate) type V3DirectResponseProjectionFuture = Pin<
 
 pub(crate) fn build_direct_response_compat_context(
     target: &V3Target10ConcreteProviderSelected,
+    namespace_tool_identities: std::collections::HashMap<String, (String, String)>,
     tool_thinking_enabled: bool,
     toolreason_client_projection: bool,
     toolreason_observation_session_id: &str,
@@ -60,6 +61,7 @@ pub(crate) fn build_direct_response_compat_context(
         toolreason_observation_session_id: Some(toolreason_observation_session_id.to_owned()),
         tool_thinking_turn_context,
         custom_tool_function_binding,
+        namespace_tool_identities,
         runtime_timing: crate::runtime_timing::V3RuntimeTimingState::start(),
     })
 }

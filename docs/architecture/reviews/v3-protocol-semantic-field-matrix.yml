@@ -5335,6 +5335,21 @@ protocol_specific_chat_extensions:
         - request.contents[].parts[].thoughtSignature
       extension_owner: chat.extensions.gemini.thought_signature
       current_impl: extension_declared
+    candidate_outcomes:
+      field_paths:
+        - response.candidates
+      extension_owner: chat.extensions.gemini.candidate_outcomes
+      canonical_response_field: response.gemini_candidate_outcomes
+      association_fields: [candidate_index, output_indices]
+      projection: Preserve each original candidate terminal and metadata; project content.parts once into output. Existing Resp03 transformation owners remap output_indices from exact item derivation and removal to final client positions, including think harvest, toolreason aggregation and local websearch interception. Responses created/in_progress snapshots with empty output defer this terminal extension; the terminal snapshot retains complete outcomes and final positions. Missing candidate index uses its source array position. This is business data only, with no routing, health, retry or decoder state.
+      terminal_owner: interpret_gemini_terminal
+      source_owners:
+        - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_terminal_semantics.rs
+        - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_responses_codec.rs
+        - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+        - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+        - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+      current_impl: response_normalized
 extended_openai_chat_semantic_superset:
   contract: Chat Process protocol is OpenAI Chat plus extension fields. The
     canonical semantic id is the same string as
@@ -8538,7 +8553,10 @@ extended_openai_chat_semantic_superset:
         gemini:
           - response.candidates
       source_classification: canonical_chat_fields
-      chat_extension_association: []
+      chat_extension_association:
+        - protocol: gemini
+          extension_id: candidate_outcomes
+          extension_owner: chat.extensions.gemini.candidate_outcomes
     - extended_openai_chat_field: response.candidates_items.avg_logprobs
       semantic_id: response.candidates_items.avg_logprobs
       direction: response

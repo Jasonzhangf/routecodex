@@ -5303,7 +5303,7 @@
     <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
     <td><span class="muted">— no Anthropic equivalent</span></td>
     <td><ul class="field-list"><li><code>response.candidates</code></li></ul></td>
-    <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">runtime mapping partial or extension-only gap</span></td>
+    <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">runtime mapping partial or extension-only gap</span><details><summary>extension <code>candidate_outcomes</code></summary><div>owner: <code>chat.extensions.gemini.candidate_outcomes</code></div><div><span class="badge missing">missing</span></div></details></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>response.candidates_items.avg_logprobs</code><br><span class="muted">added Chat extension field</span></td>
@@ -9167,6 +9167,13 @@
         <td><code>chat.extensions.gemini.thought_signature</code></td>
         <td><span class="badge extension_declared">extension_declared</span></td>
         <td><ul class="field-list"><li><code>request.contents[].parts[].thought</code></li><li><code>request.contents[].parts[].thoughtSignature</code></li></ul></td>
+      </tr>
+<tr>
+        <td>Gemini</td>
+        <td><code>candidate_outcomes</code></td>
+        <td><code>chat.extensions.gemini.candidate_outcomes</code></td>
+        <td><span class="badge response_normalized">response_normalized</span></td>
+        <td><ul class="field-list"><li><code>response.candidates</code></li></ul></td>
       </tr></tbody>
   </table></div>
     </section>

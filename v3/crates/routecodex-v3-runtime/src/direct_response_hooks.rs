@@ -25,6 +25,23 @@ pub(crate) fn apply_v3_direct_response_projection_hooks(
     }
 }
 
+/// Direct response payload projection with the request-local declared tool
+/// identity inverse. The cleanup projection above and the namespace restore
+/// share this single owner so buffered JSON and SSE consumers cannot drift.
+pub(crate) fn apply_v3_direct_response_projection_hooks_with_identities(
+    payload: &mut serde_json::Value,
+    strip_client_response_id: bool,
+    retain_response_cipher: bool,
+    namespace_tool_identities: &std::collections::HashMap<String, (String, String)>,
+) {
+    apply_v3_direct_response_projection_hooks(
+        payload,
+        strip_client_response_id,
+        retain_response_cipher,
+    );
+    crate::hub_v1::restore_v3_responses_namespace_identities(payload, namespace_tool_identities);
+}
+
 pub(crate) fn apply_v3_memory_raw_capture_json_payload(
     payload: &mut serde_json::Value,
     manifest: &V3Config05ManifestPublished,
@@ -115,6 +132,11 @@ pub struct V3DirectResponseCompatContext {
     pub toolreason_observation_session_id: Option<String>,
     pub tool_thinking_turn_context: V3ToolThinkingTurnContext,
     pub custom_tool_function_binding: Option<provider_compat_core::CustomToolFunctionBinding>,
+    /// Request-local declared tool identity inverse (provider wire name ->
+    /// client namespace + leaf). Built once from the originating request so
+    /// the Direct Responses response owner restores the same identity the
+    /// forward projection emitted. Never crosses a request boundary.
+    pub namespace_tool_identities: std::collections::HashMap<String, (String, String)>,
     pub(crate) runtime_timing: V3RuntimeTimingState,
 }
 

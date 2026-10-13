@@ -522,7 +522,9 @@ fn project_registered_servertool_calls_to_client_exec(
 
 fn strip_local_websearch_tool_call(payload: &Value, call_id: &str) -> Value {
     let mut projected = payload.clone();
+    let mut output_sources = Vec::new();
     if let Some(output) = projected.get_mut("output").and_then(Value::as_array_mut) {
+        let mut source = 0;
         output.retain(|item| {
             let item_call_id = item
                 .get("call_id")
@@ -536,9 +538,18 @@ fn strip_local_websearch_tool_call(payload: &Value, call_id: &str) -> Value {
             let is_result = item.get("type").and_then(Value::as_str)
                 == Some("web_search_tool_result")
                 && item.get("tool_use_id").and_then(Value::as_str) == Some(call_id);
-            !(is_call || is_result)
+            let retained = !(is_call || is_result);
+            if retained {
+                output_sources.push(vec![source]);
+            }
+            source += 1;
+            retained
         });
     }
+    super::resp_chat_process_03_governed::remap_v3_response_candidate_output_indices(
+        &mut projected,
+        &output_sources,
+    );
     projected
 }
 
@@ -613,6 +624,32 @@ fn intercept_local_web_search_call(
 #[cfg(test)]
 mod web_search_hook_contract_tests {
     use super::*;
+
+    #[test]
+    fn resp03_candidate_association_local_websearch_removal() {
+        let payload = json!({
+            "output":[
+                {"type":"function_call","call_id":"search","name":"web_search"},
+                {"type":"web_search_tool_result","tool_use_id":"search"},
+                {"type":"function_call","call_id":"other","name":"evaluate"}
+            ],
+            "gemini_candidate_outcomes":[
+                {"candidate_index":7,"output_indices":[0,1]},
+                {"candidate_index":3,"output_indices":[2]}
+            ]
+        });
+        let projected = strip_local_websearch_tool_call(&payload, "search");
+        assert_eq!(
+            projected["gemini_candidate_outcomes"][0]["output_indices"],
+            json!([])
+        );
+        assert_eq!(
+            projected["gemini_candidate_outcomes"][1]["output_indices"],
+            json!([0])
+        );
+        assert_eq!(projected["output"][0], payload["output"][2]);
+        assert_eq!(payload["output"].as_array().unwrap().len(), 3);
+    }
 
     #[test]
     fn web_search_hook_result_accepts_typed_sources_without_control_state() {

@@ -401,22 +401,21 @@ where
             manifest.debug.projection_drop_log_file.clone(),
             client_original_body.clone(),
         );
-        let wire = match C::run_request_projection(
-            &policy,
-            request_key_catalog,
-            &projection_drop_context,
-        ) {
-            Ok(value) => value,
-            Err(source) => {
-                return error_output(
-                    source,
-                    trace,
-                    &crate::hooks::register_responses_direct_hooks(),
-                )
-            }
-        };
+        let wire =
+            match C::run_request_projection(&policy, request_key_catalog, &projection_drop_context)
+            {
+                Ok(value) => value,
+                Err(source) => {
+                    return error_output(
+                        source,
+                        trace,
+                        &crate::hooks::register_responses_direct_hooks(),
+                    )
+                }
+            };
         trace.push("V3Provider12ResponsesWirePayload");
         let custom_tool_function_binding = wire.custom_tool_function_binding().cloned();
+        let namespace_identities = wire.namespace_identities().clone();
         let transport_request = match C::run_provider_transport(wire) {
             Ok(value) => value,
             Err(source) => {
@@ -463,7 +462,8 @@ where
                     selected_admission = match admit_v3_selected_target_after_recovery(&selected) {
                         V3AdmitAfterRecovery::Admitted(admission) => Some(admission),
                         V3AdmitAfterRecovery::Busy => {
-                            failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
+                            failed_candidates
+                                .insert(v3_relay_provider_candidate_key(&selected.candidate));
                             drop(provider_action_permit.take());
                             provider_action_permit_target = None;
                             continue;
@@ -550,7 +550,11 @@ where
             Ok(raw) => raw,
             Err(V3ProviderError::ConcurrencyBusy { .. }) => {
                 if let Err(error) = runtime_timing.finish_external() {
-                    return error_output(runtime_source("V3RuntimeTimingExternal", error), trace, &crate::hooks::register_responses_direct_hooks());
+                    return error_output(
+                        runtime_source("V3RuntimeTimingExternal", error),
+                        trace,
+                        &crate::hooks::register_responses_direct_hooks(),
+                    );
                 }
                 failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
                 drop(provider_action_permit.take());
@@ -558,7 +562,9 @@ where
                 continue;
             }
             Err(error) => {
-                if let Some(witness) = crate::hub_v1::external_http_witness_from_provider_error(&error) {
+                if let Some(witness) =
+                    crate::hub_v1::external_http_witness_from_provider_error(&error)
+                {
                     last_external_http = Some(witness);
                 }
                 if let Err(timing_error) = runtime_timing.finish_external() {
@@ -879,6 +885,7 @@ where
         let response_projection_context =
             match crate::kernel::v3_direct_protocol_codec::build_direct_response_compat_context(
                 C::policy_target(&policy),
+                namespace_identities,
                 tool_thinking_enabled,
                 crate::hub_v1::v3_toolreason_client_projection_enabled_for_server(
                     manifest,
@@ -899,6 +906,9 @@ where
             };
         let response_projection_context =
             response_projection_context.with_runtime_timing(runtime_timing.clone());
+        let direct_namespace_tool_identities = response_projection_context
+            .namespace_tool_identities
+            .clone();
         let mut response_projection =
             match C::run_response_projection(provider_raw, response_projection_context).await {
                 Ok(projection) => projection,
@@ -1060,6 +1070,7 @@ where
                     Some(C::request_id(&standardized).to_owned()),
                     Some(C::policy_target(&policy).candidate.model_id.clone()),
                     true,
+                    direct_namespace_tool_identities,
                 );
                 let committed = match crate::kernel::direct_runtime_helpers_stream::collect_direct_sse_attempt_after_terminal_with_memory(
                     projected,

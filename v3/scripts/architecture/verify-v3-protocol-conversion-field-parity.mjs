@@ -28,6 +28,7 @@ const paths = {
   requestOutboundToolProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs',
   requestOutboundMetadata: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs',
   requestOutboundFormatExtraTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs',
+  requestOutboundMcpTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_tests.rs',
   providerReqCompat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
   providerReqReasoningEffort: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_reasoning_effort.rs',
   directPassthroughTests: 'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
@@ -522,7 +523,7 @@ for (const phrase of [
   '"type":"object"',
 ]) requireText(openaiChatCustomToolProjection, `${paths.requestOutboundToolProjection}::native_openai_chat_custom_tool`, phrase);
 forbid(openaiChatCustomToolProjection, `${paths.requestOutboundToolProjection}::native_openai_chat_custom_tool`, [/Value::String\("custom"\.to_string\(\)/]);
-requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormatExtraTests}::responses_web_search_projection`, 'openai_chat_wire_projects_responses_web_search_tool_to_options');
+requireText(text.requestOutboundMcpTests, `${paths.requestOutboundMcpTests}::responses_web_search_projection`, 'openai_chat_wire_projects_responses_web_search_tool_to_options');
 for (const testName of [
   'openai_chat_wire_projects_complete_codex_tool_declaration_matrix',
 ]) requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormatExtraTests}::native_openai_chat_custom_tool_tests`, testName);
@@ -545,7 +546,7 @@ forbid(text.responsesRuntime, `${paths.responsesRuntime}::no_function_relabel_fo
 requireText(text.responsesRuntimeTests, `${paths.responsesRuntimeTests}::target_protocol_unmapped_field_no_switch`, 'target_protocol_unmapped_field_projects_internal_598_without_switching_provider');
 requireText(text.responsesRuntimeTests, `${paths.responsesRuntimeTests}::target_protocol_unmapped_field_no_switch`, 'a request-shape error must not send or switch provider');
 requireText(text.anthropicProjectionContext, `${paths.anthropicProjectionContext}::responses_metadata_projection_context`, 'pub struct V3AnthropicResponsesProjectionContext');
-for (const phrase of ['custom_tool_names: BTreeMap<String, String>', 'governed_custom_tool_names', 'governed_custom_tool_client_name']) requireText(text.anthropicProjectionContext, `${paths.anthropicProjectionContext}::anthropic_custom_reverse_guard`, phrase);
+for (const phrase of ['custom_tool_names: BTreeMap<String, String>', 'NamespaceToolIdentityRegistry::from_request', 'identity.kind == provider_compat_core::namespace_tools::ToolKind::Custom', 'governed_custom_tool_client_name']) requireText(text.anthropicProjectionContext, `${paths.anthropicProjectionContext}::anthropic_custom_reverse_guard`, phrase);
 requireText(text.anthropicCodecToolProjection, `${paths.anthropicCodecToolProjection}::anthropic_custom_reverse_guard`, 'anthropic_tool_use_as_responses_call');
 requireText(text.responsesAnthropicProviderTests, `${paths.responsesAnthropicProviderTests}::responses_metadata_projection_context`, 'responses_relay_anthropic_provider_restores_response_metadata_without_wire_leak');
 forbid(text.responsesToAnthropicCodec, `${paths.responsesToAnthropicCodec}::malformed_chat_tool_arguments`, [/field: "tool_call[.]arguments"/, /field: "function_call[.]arguments"/]);
@@ -1222,6 +1223,7 @@ for (const scriptName of [
   'render:v3-protocol-semantic-field-matrix',
   'test:v3-protocol-conversion-field-parity',
   'test:v3-responses-continuation-namespace-contract',
+  'test:v3-namespace-identity-bindings',
   'verify:v3-protocol-conversion-field-parity',
   'test:v3-protocol-conversion-field-parity-red-fixtures',
 ]) {
@@ -1233,6 +1235,7 @@ for (const command of [
   'npm run test:v3-protocol-conversion-field-parity-red-fixtures',
   'npm run test:v3-protocol-conversion-field-parity',
   'npm run test:v3-responses-continuation-namespace-contract',
+  'npm run test:v3-namespace-identity-bindings',
 ]) {
   if (!parityCiScript.includes(command)) {
     failures.push(`${paths.v3PackageJson}: verify:v3-protocol-conversion-field-parity-ci must include ${command}`);

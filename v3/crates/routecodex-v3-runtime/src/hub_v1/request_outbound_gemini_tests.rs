@@ -1,5 +1,53 @@
 use super::*;
 
+#[test]
+fn gemini_history_projects_only_each_calls_original_signature() {
+    let mut request = json!({"messages":[{"role":"assistant","content":"","tool_calls":[
+        {"id":"signed","type":"function","thought_signature":"opaque/function/+==","function":{"name":"function","arguments":"{\"left\":19,\"right\":23}"}},
+        {"id":"unsigned","type":"function","function":{"name":"unsigned","arguments":"{malformed"}}
+    ]},{"role":"tool","tool_call_id":"signed","content":"42"}]});
+    project_gemini_chat_request(&mut request).unwrap();
+    let parts = &request["contents"][0]["parts"];
+    assert_eq!(parts[0]["thoughtSignature"], "opaque/function/+==");
+    assert!(parts[1].get("thoughtSignature").is_none());
+    assert_eq!(parts[1]["functionCall"]["args"], "{malformed");
+    assert_eq!(
+        request["contents"][1]["parts"][0]["functionResponse"]["id"],
+        "signed"
+    );
+    assert_eq!(
+        request["contents"][1]["parts"][0]["functionResponse"]["response"]["output"],
+        "42"
+    );
+    let mut native = json!({"contents":[{"role":"model","parts":[{"functionCall":{"name":"native","args":{}},"thoughtSignature":"native/+=="}]}]});
+    let original = native.clone();
+    project_gemini_chat_request(&mut native).unwrap();
+    assert_eq!(native, original);
+}
+
+#[test]
+fn gemini_standard_projection_preserves_opaque_tools_beside_shared_declarations() {
+    let opaque = json!({"googleSearch":{"excludeDomains":["example.invalid"]}});
+    let source = json!({"messages":[{"role":"user","content":"plain request"}],"tools":[
+        opaque,
+        {"type":"namespace","name":"declared","tools":[{"type":"function","name":"leaf","parameters":{"type":"object"}}]}
+    ],"tool_choice":{"type":"function","name":"declared.leaf"}});
+    let projected =
+        project_outbound_payload_for_target_protocol(&source, V3OutboundTargetProtocol::Gemini)
+            .unwrap();
+    assert_eq!(projected["tools"][0], opaque);
+    let name = &projected["tools"][1]["functionDeclarations"][0]["name"];
+    assert_eq!(
+        &projected["toolConfig"]["functionCallingConfig"]["allowedFunctionNames"][0],
+        name
+    );
+    assert_eq!(
+        projected["contents"][0]["parts"][0]["text"],
+        "plain request"
+    );
+    assert!(projected.get("messages").is_none());
+}
+
 // Chat semantics reaching a Gemini target must either project into the Gemini
 // wire shape or fail explicitly at the protocol boundary; they must never be
 // silently stripped before the provider wire.

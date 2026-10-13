@@ -10,6 +10,7 @@ use super::anthropic_request_field_projection::project_chat_store_to_anthropic_w
 use super::request_outbound_builtin_tool_projection::project_openai_chat_provider_tools_for_web_search_mode_recording;
 use super::request_outbound_builtin_tool_projection::project_openai_responses_custom_tools_to_function_schema;
 use super::request_outbound_builtin_tool_projection::project_openai_responses_hosted_web_search_for_selected_target;
+use super::request_outbound_builtin_tool_projection::promote_additional_tools_to_provider_tools;
 use super::request_outbound_builtin_tool_projection::promote_tool_search_output_tools_to_provider_tools;
 use super::request_outbound_metadata::{
     project_openai_chat_reasoning_context_policy,
@@ -20,6 +21,8 @@ use super::request_outbound_metadata::{
 use std::collections::BTreeSet;
 #[path = "request_outbound_responses_items.rs"]
 mod request_outbound_responses_items;
+#[path = "signature_target_projection.rs"]
+mod signature_target_projection;
 use self::request_outbound_responses_items::{
     chat_content_to_responses_content, chat_tool_call_to_responses_input_item,
     chat_tool_result_to_responses_input_item,
@@ -305,6 +308,7 @@ pub(crate) fn normalize_v3_openai_responses_provider_request_payload(
     payload: &mut Value,
 ) -> Result<(), String> {
     promote_tool_search_output_tools_to_provider_tools(payload)?;
+    promote_additional_tools_to_provider_tools(payload)?;
     normalize_responses_input_content_parts(payload);
     Ok(())
 }
@@ -1169,6 +1173,9 @@ fn collect_unmapped_outbound_field_paths(
         .filter(|key| !allowed.contains(key.as_str()))
         .map(|key| json_path_child("$", key))
         .collect();
+    paths.extend(signature_target_projection::unrepresentable_call_extension_paths(
+        source, target_protocol,
+    ));
     if !matches!(target_protocol, V3OutboundTargetProtocol::OpenAiResponses) {
         if let Some(messages) = source.get("messages").and_then(Value::as_array) {
             for (index, message) in messages.iter().enumerate() {
@@ -1350,9 +1357,6 @@ fn normalize_openai_chat_messages_payload(
         let Some(message_row) = message.as_object_mut() else {
             continue;
         };
-        super::request_outbound_mcp_names::normalize_openai_chat_message_tool_call_names(
-            message_row,
-        );
         consume_routecodex_chat_extension_for_openai_chat_provider(message_row);
         // Map `developer` role to `system` for OpenAI Chat provider wire
         // compatibility. Many third-party Chat Completions providers (e.g.

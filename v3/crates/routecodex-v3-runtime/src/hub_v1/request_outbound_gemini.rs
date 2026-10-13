@@ -17,6 +17,7 @@ fn project_gemini_compatible_fields_for_selected_target(
 }
 
 fn project_gemini_compatible_fields_inner(source: &mut Value) -> Result<(), String> {
+    project_gemini_chat_request(source)?;
     let Some(row) = source.as_object_mut() else {
         return Ok(());
     };
@@ -26,6 +27,143 @@ fn project_gemini_compatible_fields_inner(source: &mut Value) -> Result<(), Stri
     }
     if let Some(tool_choice) = row.remove("tool_choice") {
         project_gemini_tool_choice(row, tool_choice)?;
+    }
+    Ok(())
+}
+
+fn project_gemini_chat_request(source: &mut Value) -> Result<(), String> {
+    use provider_compat_core::namespace_tools::{NamespaceToolIdentityRegistry, ToolKind};
+    // Native Gemini input is already in its standard shape.
+    if source.get("messages").is_none() {
+        return Ok(());
+    }
+    let registry = NamespaceToolIdentityRegistry::from_request(source, "gemini")?;
+    registry.project_references(source);
+    let mut tools: Vec<Value> = source
+        .get("tools")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|tool| {
+            !matches!(
+                tool.get("type").and_then(Value::as_str),
+                Some("namespace" | "function" | "custom")
+            )
+        })
+        .cloned()
+        .collect();
+    let mut declarations = Vec::new();
+    for identity in registry.identities() {
+        let definition = identity.source.get("function").unwrap_or(&identity.source);
+        let mut declaration = serde_json::Map::new();
+        declaration.insert("name".into(), json!(identity.actual_wire_name));
+        if let Some(description) = definition.get("description") {
+            declaration.insert("description".into(), description.clone());
+        }
+        let parameters = match identity.kind {
+            ToolKind::Function => definition.get("parameters").cloned(),
+            ToolKind::Custom => Some(
+                json!({"type":"object","properties":{"input":{"type":"string"}},"required":["input"]}),
+            ),
+        };
+        if let Some(parameters) = parameters {
+            declaration.insert("parameters".into(), parameters);
+        }
+        declarations.push(Value::Object(declaration));
+    }
+    let row = source
+        .as_object_mut()
+        .ok_or("Gemini request must be an object")?;
+    let messages = row.remove("messages").unwrap();
+    let messages = messages
+        .as_array()
+        .ok_or("Chat messages must be an array")?;
+    let mut contents = Vec::new();
+    let mut system_parts = Vec::new();
+    let mut call_names = std::collections::HashMap::<String, String>::new();
+    for message in messages {
+        let role = message
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or("user");
+        let mut parts = Vec::new();
+        match message.get("content") {
+            Some(Value::String(text)) if !text.is_empty() => parts.push(json!({"text":text})),
+            Some(Value::Array(content)) => {
+                for part in content {
+                    match part.get("type").and_then(Value::as_str) {
+                        Some("text" | "input_text" | "output_text") => {
+                            let mut part = part.clone();
+                            part.as_object_mut().unwrap().remove("type");
+                            parts.push(part);
+                        }
+                        _ => parts.push(part.clone()),
+                    }
+                }
+            }
+            _ => {}
+        }
+        for call in message
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let function = call.get("function").unwrap_or(call);
+            let name = function
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or("Chat function call requires a name")?;
+            let id = call.get("id").and_then(Value::as_str);
+            if let Some(id) = id {
+                call_names.insert(id.into(), name.into());
+            }
+            let args = match function.get("arguments") {
+                Some(Value::String(text)) => {
+                    serde_json::from_str(text).unwrap_or_else(|_| Value::String(text.clone()))
+                }
+                Some(value) => value.clone(),
+                None => json!({}),
+            };
+            let mut native = json!({"name":name,"args":args});
+            if let Some(id) = id {
+                native["id"] = json!(id);
+            }
+            let mut part = json!({"functionCall":native});
+            if let Some(signature) = call.get("thought_signature") {
+                part["thoughtSignature"] = signature.clone();
+            }
+            parts.push(part);
+        }
+        if role == "tool" {
+            let id = message.get("tool_call_id").and_then(Value::as_str);
+            let name = id
+                .and_then(|id| call_names.get(id).map(String::as_str))
+                .or_else(|| message.get("name").and_then(Value::as_str))
+                .ok_or("Gemini tool response requires its paired function call name")?;
+            let content = message.get("content").cloned().unwrap_or(Value::Null);
+            let mut native = json!({"name":name,"response":{"output":content}});
+            if let Some(id) = id {
+                native["id"] = json!(id);
+            }
+            parts = vec![json!({"functionResponse":native})];
+        }
+        if matches!(role, "system" | "developer") {
+            system_parts.extend(parts);
+        } else if !parts.is_empty() {
+            contents
+                .push(json!({"role":if role == "assistant" {"model"} else {"user"},"parts":parts}));
+        }
+    }
+    row.insert("contents".into(), Value::Array(contents));
+    if !system_parts.is_empty() {
+        row.insert("systemInstruction".into(), json!({"parts":system_parts}));
+    }
+    if !declarations.is_empty() {
+        tools.push(json!({"functionDeclarations":declarations}));
+    }
+    if !tools.is_empty() {
+        row.insert("tools".into(), Value::Array(tools));
     }
     Ok(())
 }
@@ -64,9 +202,10 @@ fn validate_gemini_thinking_config_for_selected_target(
 }
 
 fn validate_gemini_thinking_level_value(value: &Value, path: &str) -> Result<(), String> {
-    let value = value.as_str().map(str::trim).ok_or_else(|| {
-        format!("MalformedOutboundField target_protocol=gemini path={path}")
-    })?;
+    let value = value
+        .as_str()
+        .map(str::trim)
+        .ok_or_else(|| format!("MalformedOutboundField target_protocol=gemini path={path}"))?;
     match value.to_ascii_lowercase().as_str() {
         "minimal" | "low" | "medium" | "high" => Ok(()),
         _ => Err(format!(
@@ -87,8 +226,7 @@ fn consume_gemini_routecodex_chat_extension(row: &mut Map<String, Value>) -> Res
         return Ok(());
     };
     let mut extension = extension.as_object().cloned().ok_or_else(|| {
-        "MalformedOutboundField target_protocol=gemini path=$.routecodex_chat_extension"
-            .to_string()
+        "MalformedOutboundField target_protocol=gemini path=$.routecodex_chat_extension".to_string()
     })?;
     let Some(responses_request) = extension.remove("responses_request") else {
         if extension.is_empty() {
@@ -205,10 +343,7 @@ fn project_gemini_tool_choice(
                 });
             let mut names = allowed_names
                 .map(|(key, value)| {
-                    collect_gemini_allowed_function_names(
-                        value,
-                        &format!("$.tool_choice.{key}"),
-                    )
+                    collect_gemini_allowed_function_names(value, &format!("$.tool_choice.{key}"))
                 })
                 .transpose()?
                 .unwrap_or_default();
@@ -223,10 +358,7 @@ fn project_gemini_tool_choice(
                     "MalformedOutboundField target_protocol=gemini path=$.tool_choice.function.name"
                         .to_string()
                 })?;
-                names.push(gemini_nonempty_string(
-                    name,
-                    "$.tool_choice.function.name",
-                )?);
+                names.push(gemini_nonempty_string(name, "$.tool_choice.function.name")?);
             }
             (mode, names)
         }
@@ -237,7 +369,9 @@ fn project_gemini_tool_choice(
         }
     };
     let Some(mode) = mode else {
-        return Err("UnmappedOutboundFields target_protocol=gemini paths=$.tool_choice".to_string());
+        return Err(
+            "UnmappedOutboundFields target_protocol=gemini paths=$.tool_choice".to_string(),
+        );
     };
     let Some(tool_config) = row
         .entry("toolConfig".to_string())
@@ -270,7 +404,11 @@ fn validate_gemini_tool_choice_object_shape(object: &Map<String, Value>) -> Resu
     for key in object.keys() {
         if !matches!(
             key.as_str(),
-            "type" | "mode" | "allowed_function_names" | "allowedFunctionNames" | "name"
+            "type"
+                | "mode"
+                | "allowed_function_names"
+                | "allowedFunctionNames"
+                | "name"
                 | "function"
         ) {
             return Err(format!(
@@ -290,13 +428,10 @@ fn validate_gemini_tool_choice_object_shape(object: &Map<String, Value>) -> Resu
     Ok(())
 }
 
-fn collect_gemini_allowed_function_names(
-    value: &Value,
-    path: &str,
-) -> Result<Vec<String>, String> {
-    let values = value.as_array().ok_or_else(|| {
-        format!("MalformedOutboundField target_protocol=gemini path={path}")
-    })?;
+fn collect_gemini_allowed_function_names(value: &Value, path: &str) -> Result<Vec<String>, String> {
+    let values = value
+        .as_array()
+        .ok_or_else(|| format!("MalformedOutboundField target_protocol=gemini path={path}"))?;
     values
         .iter()
         .enumerate()

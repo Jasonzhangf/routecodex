@@ -14,6 +14,7 @@ mod cc_sol;
 mod custom_tool_function;
 mod deepseek_console_go;
 mod minimax_anthropic;
+pub mod namespace_identity;
 pub mod namespace_tools;
 pub mod opencode_zen_tcm;
 
