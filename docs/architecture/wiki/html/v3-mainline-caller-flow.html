@@ -1466,7 +1466,7 @@ flowchart TD
         <span class="summary-sub">3 edges · <code>v3.provider_key_health_model_granularity</code> · V3Error02Classified → V3Target10ConcreteProviderSelected</span>
       </summary>
       <div class="branch-body">
-        <p class="chain-summary">Runtime passes the exact provider, auth alias, and model identity to the Provider-owned key health store; Target reads only the resulting per-model scheduling projection.</p>
+        <p class="chain-summary">Runtime passes the exact provider, auth alias, and model identity to the Provider-owned key health store; each identity starts at neutral score 100, every scored event clamps to 0..150, score zero admits an exact-identity cooldown, and Target reads only the resulting per-model scheduling projection.</p>
         <div class="branch-meta">
           <span>owner: <code>v3.provider_key_health_model_granularity</code></span>
           <span>audit: <span class="status pending_review">pending review</span></span>

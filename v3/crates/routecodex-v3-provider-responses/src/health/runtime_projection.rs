@@ -97,16 +97,9 @@ fn key_health_projection(
     }
 }
 
-const HEALTH_WINDOW_SIZE: usize = 100;
-
 fn record_health_delta(history: &mut V3ProviderAdaptiveHistory, delta: i32) {
-    history.recent_deltas_milli.push_back(delta);
-    if history.recent_deltas_milli.len() > HEALTH_WINDOW_SIZE {
-        history.recent_deltas_milli.pop_front();
-    }
-    let net_delta: i32 = history.recent_deltas_milli.iter().copied().sum();
     history.score_milli =
-        (history.configured_priority.saturating_add(net_delta)).clamp(0, 150) as u32;
+        (i64::from(history.score_milli) + i64::from(delta)).clamp(0, 150) as u32;
 }
 
 fn provider_failure_session_scope_label(key: &V3ProviderFailureSessionKey) -> String {
@@ -332,9 +325,8 @@ fn complete_provider_probe_success_at_generation(
         history.success_streak = 1;
         history.attempts = 0;
         history.failures = 0;
-        history.score_milli = history.configured_priority.clamp(0, 150) as u32;
+        history.score_milli = 100;
         history.last_success_at_ms = Some(now_ms);
-        history.recent_deltas_milli.clear();
         history.probe_failure_count = 0;
         history.score_generation = history.score_generation.saturating_add(1);
     }

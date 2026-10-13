@@ -18,11 +18,11 @@
 /goal
 按 docs/design/v3-provider-health-scoring-cooldown-design.md 实现 V3 Provider-owned key 级健康治理，并按本计划完成验证与交付。
 
-硬约束：Error 唯一生成 typed failure action；Provider health 唯一修改 score、streak、cooldown、probe；Target 只读 scheduling projection；Virtual Router 不读写 health。健康分基于 configured priority，范围 0..150；正常 HTTP 响应 +1；可恢复错误（含 502）-5；401/403 -20；typed recoverable failure 连续三次同一 fingerprint 才 cooldown，typed irrecoverable 账户/计费类（401/402/403 与已注册不可恢复代码）首次即 cooldown；连续失败和有意义的失败率选择 5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s 阶梯。cooldown 必须持久化，重启只允许 probe；probe failure 保持 blocked，probe success 恢复到 configured priority。priority 数字越大越优先，只有最高可用 priority 的完全相同桶参与调度；health 只在同桶内作为权重信号，score 不决定 availability。控制状态不得进入 provider/client normal payload；禁止 fallback、silent strip、请求侧 cleanup、VR re-entry 和第二套 scheduler。
+硬约束：Error 唯一生成 typed failure action；Provider health 唯一修改 score、streak、cooldown、probe；Target 只读 scheduling projection；Virtual Router 不读写 health。健康分初始 100（含新身份），范围 0..150；正常 HTTP 响应 +1；可恢复错误（含 502）-5；401/403 -20；typed recoverable failure 连续三次同一 fingerprint 才 cooldown，typed irrecoverable 账户/计费类（401/402/403 与已注册不可恢复代码）首次即 cooldown；连续失败和有意义的失败率选择 5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s 阶梯。cooldown 必须持久化，重启只允许 probe；probe failure 保持 blocked，probe success 恢复到 100。priority 数字越大越优先，只有最高可用 priority 的完全相同桶参与调度；health 只在同桶内作为权重信号，score 不决定 availability。控制状态不得进入 provider/client normal payload；禁止 fallback、silent strip、请求侧 cleanup、VR re-entry 和第二套 scheduler。
 
 执行顺序：先更新并验证 resource/function/mainline/verification map、wiki/manifest；再实现 classification/action、key health、persistence/probe、scheduling projection、runtime 接线；随后跑 red/green 正反测试、fmt/clippy/build 和全部架构 gate；最后 global install、一次聚合 restart、全部成员 health、真实旧样本 replay、AGY Review、evidence/handoff、精准 commit/push、MEMORY 收口。任何 gate、在线验证或 Review 未通过，不得宣称完成。
 
-完成信号：所有 owner/edge/gate 绑定真实 symbol；502/401/403 计分、三次同源 cooldown 与不可恢复首错 cooldown、5s 首探、阶梯推进、成功 probe 恢复、100-call window、scope isolation、persistence failure、priority-first/same-priority scheduling、payload isolation 和 no-VR-reentry 均有证据；global install、restart、health、online replay、AGY Review PASS 全部记录在 evidence 中。
+完成信号：所有 owner/edge/gate 绑定真实 symbol；502/401/403 计分、三次同源 cooldown 与不可恢复首错 cooldown、5s 首探、阶梯推进、成功 probe 恢复、bounded score、scope isolation、persistence failure、priority-first/same-priority scheduling、payload isolation 和 no-VR-reentry 均有证据；global install、restart、health、online replay、AGY Review PASS 全部记录在 evidence 中。
 ```
 
 ## 1. 目标与验收标准
@@ -35,7 +35,7 @@
 - 不同 key/session/model 不错误合并；
 - irrecoverable action 直接进入正确 global scope；
 - cooldown 在 restart 后仍阻断，probe failure 不恢复，probe success 才恢复；
-- success 提升 score，probe success 使用 recovery floor，不瞬间满分；
+- success 提升 score，probe success 恢复到 100；
 - score 不改变 configured priority；只在同 priority 桶内参与权重；cooldown key 永不被选中；
 - Target 消费 typed scheduling projection，Router 不拥有 health mutation；
 - score/cooldown/probe 不进入 provider/client payload；
@@ -131,8 +131,8 @@
 2. 增加 `score_milli`、failure/success streak、last timestamps、generation、scope/class。
 3. 实现 success/failure/probe score mutation。
 4. 固化默认 delta：success +1、recoverable -5、account 401/403 -20、probe failure -5；实际值经 typed action 注入。
-5. 固化 score clamp 0..150；configured priority 是基线；success +1、recoverable -5、401/403 -20。
-6. probe success 使用 recovery floor，不直接恢复满分。
+5. 固化 score clamp 0..150；每个 identity 初始 100（含新 key 与未配置 key）；success +1、recoverable -5、401/403 -20。
+6. 全局评分 identity 到 0 时进入 exact identity cooldown；probe success 恢复 score=100。
 7. 普通 recoverable cooldown 绑定 provider+auth key+model，跨 session 持久化并由对应 model probe 恢复；只有显式 request-local action 才保持 session isolation。
 
 门槛：unit tests、generation stale-success negative tests、session/key/model isolation tests，以及同一 key 不同 model 不共享 score/cooldown 的正反测试。
@@ -147,7 +147,7 @@
 2. 版本化 schema；v1/v2 旧条目按 provider+auth key+model 保留并升级为 v4，v3 条目必须从 `probe_model_id` 恢复 model，缺失即 fail-fast；未知 schema 不能静默解释成新 score truth。
 3. 原子写入、load/decode/lock failure 显式错误。
 4. restart 触发 startup probe；deadline 只产生 probe eligibility。
-5. probe failure 保留 cooldown 并 reschedule；probe success 清 cooldown、清 failure generation、设置 recovery floor。
+5. probe failure 保留 cooldown 并 reschedule；probe success 清 cooldown、清 failure generation、恢复 score=100。
 6. 保证 single-flight probe 和 stale generation 不能清除更新状态。
 
 门槛：persistence positive/negative、restart fixture、probe concurrency、corrupt state fail-fast tests。
@@ -207,7 +207,7 @@
 | Recoverable | each failure -5; three consecutive same-fingerprint failures cool; adaptive 5s -> 30m ladder | one 502 remains isolated, a different fingerprint restarts the streak, and neither can be selected again |
 | Irrecoverable | immediate scoped global cooldown | not same-provider retry |
 | Success | score rises, streak resets | success cannot bypass active global cooldown |
-| Probe | success re-admits at recovery floor | failure keeps blocked/reschedules |
+| Probe | success re-admits at score 100 | failure keeps blocked/reschedules |
 | Scope | key/session/model isolation | A1+B2 never combine accidentally |
 | Scheduling | higher numeric configured priority wins; score weights only equal-priority candidates | health cannot cross priority buckets |
 | Availability | cooldown key excluded | low score alone does not mean blocked |
@@ -217,7 +217,7 @@
 ## 7. Risks
 
 1. 双重 global cooldown：普通 health store 与 global subscription store 同时阻断同一 key。规避：action 明确唯一 scope/owner；重复 mutation 红测。
-2. score 穿透 route tier：score 被误用于跨 tier fallback。规避：Target 只在最高可用 route tier 内消费 Provider scheduling projection，positive uplift 按 configured priority 的 50% 向下取整封顶。
+2. score 穿透 route tier：score 被误用于跨 tier fallback。规避：Target 只在最高可用 route tier 内消费 Provider scheduling projection，positive uplift 只改变同桶权重，不改变 route tier 身份。
 3. score 绕过 cooldown：低层 scheduler 只看分数。规避：availability gate 先于 score。
 4. 成功错误清 global cooldown：普通 success 不得清 global subscription block。规避：只有 probe success 拥有 global clear。
 5. health-neutral 污染 score：SSE/client disconnect 进入 failure mutation。规避：negative event tests + action kind gate。

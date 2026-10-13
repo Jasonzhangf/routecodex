@@ -265,7 +265,7 @@ flowchart TD
 
 ## v3.provider_key_health_model_granularity
 
-Runtime passes the exact provider, auth alias, and model identity to the Provider-owned key health store; Target reads only the resulting per-model scheduling projection.
+Runtime passes the exact provider, auth alias, and model identity to the Provider-owned key health store; each identity starts at neutral score 100, every scored event clamps to 0..150, score zero admits an exact-identity cooldown, and Target reads only the resulting per-model scheduling projection.
 
 Owner feature: `v3.provider_key_health_model_granularity`
 

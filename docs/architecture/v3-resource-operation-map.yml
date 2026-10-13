@@ -1220,9 +1220,12 @@ resources:
     owner_node: V3ProviderHealthStore
     identity: [providerId, interfaceId, authAlias, modelId]
     semantic_contract:
+      score_baseline: every configured or unseen identity starts at score 100
+      score_contract: clamp(score + delta, 0, 150) with no hidden credit above the cap
+      zero_cooldown_trigger: a globally scored identity reaching score 0 enters cooldown for the exact providerId+interfaceId+authAlias+modelId
       cross_session_same_model: shared
       cross_model_same_key: isolated
-      revival_rule: matching-model HTTP 2xx probe success removes cooldown; business success also clears matching-model 429-owned cooldown
+      revival_rule: matching-model HTTP 2xx probe success restores score 100 and removes cooldown; business success also clears matching-model 429-owned cooldown
     allowed_writers: [V3ProviderHealthStore::record_provider_failure_action, V3ProviderHealthStore::record_provider_key_success, V3ProviderHealthStore::complete_probe_success, V3ProviderHealthStore::complete_probe_failure]
     allowed_readers: [V3ProviderHealthStore::scheduling_projection, V3ProviderHealthStore::provider_cooldown_probe_keys, V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::acquire_provider_cooldown_probe_if_due, V3ProviderHealthStore::provider_cooldown_probe_next_deadline_ms]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, request.normal_payload, response.client_payload]
@@ -1238,8 +1241,9 @@ resources:
     owner_node: V3ProviderCooldownProbeState
     identity: [providerId, interfaceId, authAlias, modelId]
     semantic_contract:
-      health_window: latest 100 calls for this provider+authAlias+model
-      score_contract: clamp(configured_priority + sum(deltas), 0, 150)
+      score_baseline: every configured or unseen identity starts at score 100
+      score_contract: clamp(score + delta, 0, 150) with no hidden credit above the cap
+      zero_cooldown_trigger: a globally scored identity reaching score 0 enters cooldown for the exact providerId+interfaceId+authAlias+modelId
       deltas: { normal_http: 1, recoverable_including_502: -5, account_401_403: -20 }
       cooldown_condition: every HTTP 429 requires three consecutive HTTP 429 failures of the exact providerId+interfaceId+authAlias+modelId regardless of body code or fingerprint; other typed failures retain declared thresholds; real success clears that identity's streak
       revival_rule: only a successful provider transport probe may remove cooldown state
