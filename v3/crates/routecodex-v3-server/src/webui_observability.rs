@@ -52,14 +52,19 @@ pub(crate) fn record_v3_webui_error_projection(
     entry_protocol: &str,
     project_path: Option<&str>,
     session: Option<&str>,
-    status: u16,
+    projected_client_status: u16,
     body: Option<&Value>,
     typed: V3ObsErrorProjection<'_>,
 ) -> Result<u64, String> {
     let (error_category, error_detail) = body
         .map(crate::v3_error_body_code_message)
         .map(|(code, message)| (code, message))
-        .unwrap_or_else(|| (format!("http_{status}"), format!("HTTP status {status}")));
+        .unwrap_or_else(|| {
+            (
+                format!("http_{projected_client_status}"),
+                format!("HTTP status {projected_client_status}"),
+            )
+        });
     let request_key = build_v3_obs_request_key(port, request_id);
     let scope = V3ObsScope {
         port,
@@ -74,7 +79,12 @@ pub(crate) fn record_v3_webui_error_projection(
         }
         .to_string(),
         error_class: typed.error_class.map(str::to_string),
-        chain: build_v3_obs_error_chain(typed.error_chain, typed.error_class, status),
+        chain: build_v3_obs_error_chain(
+            typed.error_chain,
+            typed.error_class,
+            projected_client_status,
+        ),
+        projected_client_status: Some(projected_client_status),
         upstream_request_id: typed.upstream_request_id.map(str::to_string),
         health_action: match typed.health_action {
             Some(plan) => Some(v3_obs_health_action_from_plan(plan)?),
@@ -86,7 +96,14 @@ pub(crate) fn record_v3_webui_error_projection(
         request_id: request_id.to_string(),
         endpoint: endpoint.to_string(),
         entry_protocol: Some(entry_protocol.to_string()),
-        provider_status: Some(status),
+        // `provider_status` carries only the real upstream HTTP status. The
+        // terminal Error06 projection is the client-projected status, so it is
+        // recorded in its own typed field and never assigned to `provider_status`.
+        // A real upstream status reaches this row through the same request's
+        // provider-attempt observation merge, or stays absent when no HTTP
+        // response was received.
+        provider_status: None,
+        projected_client_status: Some(projected_client_status),
         response_status: Some("error".to_string()),
         finish_reason: Some("error".to_string()),
         route: Some("-".to_string()),
@@ -173,6 +190,9 @@ fn merge_v3_obs_request_meta(
         execution_mode: incoming.execution_mode.or(previous.execution_mode),
         transport: incoming.transport.or(previous.transport),
         provider_status: incoming.provider_status.or(previous.provider_status),
+        projected_client_status: incoming
+            .projected_client_status
+            .or(previous.projected_client_status),
         response_status: incoming.response_status.or(previous.response_status),
         finish_reason: incoming.finish_reason.or(previous.finish_reason),
         error_category: incoming.error_category.or(previous.error_category),
@@ -246,6 +266,10 @@ pub(crate) struct V3ObsRequestMeta {
     pub execution_mode: Option<String>,
     pub transport: Option<String>,
     pub provider_status: Option<u16>,
+    /// The client status Error06 projected for this request. It is the local
+    /// diagnostic value, distinct from `provider_status` (the real upstream HTTP
+    /// status) and never assigned to it.
+    pub projected_client_status: Option<u16>,
     pub response_status: Option<String>,
     pub finish_reason: Option<String>,
     pub error_category: Option<String>,
@@ -277,6 +301,9 @@ pub(crate) struct V3ObsErrorTruth {
     pub external_error_kind: Option<String>,
     pub external_error_code: Option<String>,
     pub external_error_status: Option<u16>,
+    /// Client status Error06 projected for this request, carried beside the real
+    /// upstream `external_error_status` instead of replacing `provider_status`.
+    pub projected_client_status: Option<u16>,
     /// Upstream provider request id captured from the provider response headers.
     pub upstream_request_id: Option<String>,
     /// `V3Error06ClientProjected.health_action` (typed `V3ErrorActionPlan`).
@@ -482,6 +509,9 @@ fn merge_v3_obs_error_truth(
             external_error_status: incoming
                 .external_error_status
                 .or(previous.external_error_status),
+            projected_client_status: incoming
+                .projected_client_status
+                .or(previous.projected_client_status),
             upstream_request_id: incoming
                 .upstream_request_id
                 .or(previous.upstream_request_id),

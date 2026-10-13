@@ -260,3 +260,28 @@ fn transport_failure_without_upstream_status_renders_as_network_not_599() {
     assert_eq!(row_status_code(&row), "502");
     assert_eq!(attempt_status_code(&row), Some("502".to_string()));
 }
+
+/// A terminal row can carry both the real upstream status and the locally
+/// projected client status. The rendered status must prefer the client
+/// projection, so a local failure is not silently relabelled as an upstream
+/// rejection (and vice versa).
+#[test]
+fn row_status_code_prefers_the_projected_client_status() {
+    let row = build_attempt_row(json!({
+        "provider_status": 403,
+        "projected_client_status": 502,
+        "error_category": "network_error",
+    }));
+    assert_eq!(
+        row_status_code(&row),
+        "502",
+        "the rendered status is the client projection, not the upstream status"
+    );
+
+    // Without a client projection the real upstream status is used as-is.
+    let row = build_attempt_row(json!({
+        "provider_status": 429,
+        "error_category": "provider_http_429",
+    }));
+    assert_eq!(row_status_code(&row), "429");
+}

@@ -306,10 +306,11 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
     };
     assert_eq!(list_row["result"], "error");
     assert_eq!(list_row["failed_attempts"], 1);
-    // The merged row carries the projected internal status (a provider network
-    // failure projects 502); the real external 503 stays on the attempt row and
-    // in `observed_error.external_error_status`, both asserted below.
-    assert_eq!(list_row["meta"]["provider_status"], 502);
+    // `provider_status` carries only the real upstream HTTP status (503 from the
+    // provider), while the client-projected 502 is recorded in its own typed
+    // `projected_client_status` field and never overwrites the upstream status.
+    assert_eq!(list_row["meta"]["provider_status"], 503);
+    assert_eq!(list_row["meta"]["projected_client_status"], 502);
 
     let (detail_status, detail) = get_json(
         &client,
@@ -380,6 +381,14 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
     assert_eq!(observed["source"], "error06_projection_not_exposed");
     assert_eq!(observed["external_error_code"], "server_error");
     assert_eq!(observed["external_error_status"], 503);
+    assert_eq!(
+        observed["projected_client_status"], 502,
+        "the typed Error06 client projection must be recorded separately from the upstream status"
+    );
+    assert_eq!(
+        detail["row"]["meta"]["provider_status"], 503,
+        "the terminal row must preserve the real upstream status"
+    );
     assert_eq!(observed["failure_count"], 1);
     // HTTP 503 retains its declared first-failure threshold; only ordinary 429
     // uses the three-consecutive-failure rule.
@@ -603,4 +612,188 @@ fn request_id_of(request_key: &str) -> String {
         .expect("request_key is <port>:<request_id>")
         .1
         .to_string()
+}
+
+/// A provider that rejects the request with a real upstream HTTP 403 carrying a
+/// typed provider error code. This mirrors the fb8159a live row: the upstream
+/// status must stay on the terminal row, and the local client projection must not
+/// overwrite it.
+async fn forbidden_upstream(State(calls): State<Arc<AtomicU64>>) -> Response<Body> {
+    calls.fetch_add(1, Ordering::SeqCst);
+    Response::builder()
+        .status(StatusCode::FORBIDDEN)
+        .header("content-type", "application/json")
+        .body(Body::from(
+            r#"{"error":{"message":"free tier is not available here","type":"FreeTierError","code":"FreeTierError"}}"#,
+        ))
+        .unwrap()
+}
+
+async fn start_forbidden_upstream() -> (String, Arc<AtomicU64>, tokio::sync::oneshot::Sender<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let calls = Arc::new(AtomicU64::new(0));
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+    let app = Router::new()
+        .route("/v1/responses", post(forbidden_upstream))
+        .with_state(Arc::clone(&calls));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}/v1"), calls, shutdown_tx)
+}
+
+/// fb8159a provenance: a genuine upstream HTTP 403 must survive on the terminal
+/// row's `provider_status` while the client-projected status stays in its own
+/// typed `projected_client_status` field. The provider status is read from the
+/// real store row produced by this request, not from preserved historical logs.
+#[tokio::test]
+async fn terminal_row_preserves_upstream_status_and_keeps_local_projection_separate() {
+    let _guard = TEST_LOCK.lock().await;
+    env::set_var(PROVIDER_KEY_ENV, "controlled-obs-replay-secret");
+    let home = temp_home("upstream-403");
+    let previous_home = env::var_os("HOME");
+    env::set_var("HOME", &home);
+
+    let (upstream_base_url, upstream_calls, upstream_shutdown) = start_forbidden_upstream().await;
+    let server_port = free_port();
+    let admin_port = free_port();
+    let config_path = home.join("config.v3.toml");
+    fs::write(
+        &config_path,
+        config_source(server_port, admin_port, &upstream_base_url),
+    )
+    .unwrap();
+
+    let snapshot = V3ConfigStore::new(&config_path)
+        .load_snapshot_with_source_identity()
+        .unwrap();
+    let handle = spawn_v3_server_aggregate_with_admin(
+        snapshot.manifest,
+        snapshot.admin_webui,
+        Some(config_path),
+    )
+    .await
+    .unwrap();
+    let server_addr = handle
+        .listeners
+        .iter()
+        .find(|listener| listener.server_id == "main")
+        .expect("aggregate exposes the configured server listener")
+        .addr;
+    let admin_addr = handle
+        .listeners
+        .iter()
+        .find(|listener| listener.server_id == "admin_webui")
+        .expect("aggregate exposes the admin webui listener")
+        .addr;
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!("http://{server_addr}/v1/responses"))
+        .json(&json!({
+            "model": "client-test",
+            "input": "observability upstream 403 probe",
+            "stream": false
+        }))
+        .send()
+        .await;
+
+    // The provider HTTP error is internal: it must never become a client HTTP
+    // response.
+    assert_eq!(upstream_calls.load(Ordering::SeqCst), 1);
+    assert!(
+        response.is_err(),
+        "a provider HTTP 403 must not fabricate a client HTTP response"
+    );
+
+    let list_url = format!("http://{admin_addr}/api/observability/records?range=all&page_size=50");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let (request_key, list_row) = loop {
+        let (status, body) = get_json(&client, &list_url).await;
+        assert_eq!(status, reqwest::StatusCode::OK, "records list: {body}");
+        if let Some(row) = body["records"].as_array().and_then(|rows| rows.first()) {
+            break (
+                row["request_key"]
+                    .as_str()
+                    .expect("request_key")
+                    .to_string(),
+                row.clone(),
+            );
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no observability row appeared within 20s"
+        );
+        sleep(Duration::from_millis(50)).await;
+    };
+    assert_eq!(list_row["result"], "error");
+    assert_eq!(list_row["failed_attempts"], 1);
+    assert_eq!(
+        list_row["meta"]["provider_status"], 403,
+        "the terminal row must preserve the real upstream HTTP status"
+    );
+    assert_eq!(
+        list_row["meta"]["projected_client_status"], 502,
+        "the local client projection must be recorded in its own typed field"
+    );
+
+    let (detail_status, detail) = get_json(
+        &client,
+        &format!("http://{admin_addr}/api/observability/records/{request_key}"),
+    )
+    .await;
+    assert_eq!(detail_status, reqwest::StatusCode::OK);
+
+    let chain = detail["error_chain"].clone();
+    assert_eq!(
+        chain_node(&chain, "V3Error06ClientProjected")["code"],
+        "502",
+        "the client-projected status stays on the Error06 chain node"
+    );
+
+    // The attempt row keeps the real upstream status and typed error code; the
+    // terminal row keeps them too, with the local projection separated out.
+    let attempts = detail["attempts"].as_array().expect("attempts is an array");
+    assert_eq!(attempts.len(), 1, "one failed provider attempt");
+    assert_eq!(attempts[0]["meta"]["provider_status"], 403);
+    assert_eq!(
+        attempts[0]["meta"]["observed_error"]["external_error_status"],
+        403
+    );
+
+    let observed = &detail["row"]["meta"]["observed_error"];
+    assert_eq!(observed["external_error_status"], 403);
+    assert_eq!(observed["projected_client_status"], 502);
+    assert_eq!(detail["row"]["meta"]["provider_status"], 403);
+
+    // The Admin list renders the client-projected status, so the provenance fix
+    // does not change the displayed failure status.
+    let (list_status, list_body) = get_json(&client, &list_url).await;
+    assert_eq!(list_status, reqwest::StatusCode::OK);
+    assert!(
+        list_body["facets"]["error_status_codes"]["502"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 1,
+        "the client-projected 502 stays the rendered failure status: {}",
+        list_body["facets"]
+    );
+
+    eprintln!("[upstream-403] request_key={request_key}");
+    eprintln!("[upstream-403] provider_status=403 projected_client_status=502");
+
+    handle.shutdown().await;
+    upstream_shutdown.send(()).unwrap();
+    env::remove_var(PROVIDER_KEY_ENV);
+    match previous_home {
+        Some(previous) => env::set_var("HOME", previous),
+        None => env::remove_var("HOME"),
+    }
+    let _ = fs::remove_dir_all(&home);
 }

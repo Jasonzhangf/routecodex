@@ -937,6 +937,62 @@ fn relay_lane_absence_marker_survives_when_no_typed_projection_exists() {
     assert!(observed_after_second_marker.chain.is_empty());
 }
 
+/// The terminal Error06 projection records the client-projected status in its own
+/// typed field and never assigns it to `provider_status`, which carries only a
+/// real upstream HTTP status.
+#[test]
+fn terminal_error_projection_keeps_provider_status_free_of_the_local_projection() {
+    let observability = V3WebuiObservability::new();
+    let key = "6000:req-local-only";
+    // A real upstream attempt fills `provider_status` with the real status and
+    // records the upstream status in the typed observation.
+    let mut attempt_meta = meta_with_full("req-local-only");
+    attempt_meta.provider_status = Some(403);
+    attempt_meta.error_category = Some("provider_http_403".to_string());
+    attempt_meta.observed_error = Some(V3ObsErrorTruth {
+        source: "provider_attempt_failure".to_string(),
+        external_error_status: Some(403),
+        ..Default::default()
+    });
+    record_observed(
+        &observability,
+        V3ObsEventType::ProviderAttemptFailed,
+        key,
+        scope(6000),
+        attempt_meta,
+        &crate::V3RuntimeObservability::default(),
+    )
+    .unwrap();
+
+    // The terminal Error06 projection records the local client status in its own
+    // field and must not overwrite the real upstream status.
+    record_v3_webui_error_projection(
+        &observability,
+        6000,
+        "req-local-only",
+        "/v1/responses",
+        "responses",
+        None,
+        Some("s1"),
+        502,
+        Some(&serde_json::json!({"error":{"code":"network_error","message":"exhausted"}})),
+        V3ObsErrorProjection::default(),
+    )
+    .unwrap();
+
+    let rows = observability.rows().unwrap();
+    let row = rows.get(key).expect("the merged row");
+    assert_eq!(
+        row.meta.provider_status,
+        Some(403),
+        "the real upstream status must survive and never be overwritten by the local projection"
+    );
+    assert_eq!(row.meta.projected_client_status, Some(502));
+    let observed = row.meta.observed_error.as_ref().expect("typed truth");
+    assert_eq!(observed.external_error_status, Some(403));
+    assert_eq!(observed.projected_client_status, Some(502));
+}
+
 #[test]
 fn startup_writer_spawn_failure_raises_alarm_instead_of_panicking() {
     // Force the real spawn inside V3WebuiObservabilityPersistenceWriter::start to
