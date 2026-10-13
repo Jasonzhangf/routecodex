@@ -17,6 +17,7 @@ const copied = [
   'v3/crates/routecodex-v3-error/tests/typed_error05_terminal_contract.rs',
   'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
   'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
+  'v3/crates/routecodex-v3-runtime/src/provider_probe_lifecycle.rs',
   'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs',
   'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_events.rs',
   'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_configured.rs',
