@@ -286,6 +286,7 @@ impl V3ProviderAvailabilityReader for V3ProviderAvailabilityRegistry {
 
 #[derive(Debug, Default)]
 pub(super) struct V3ProviderHealthState {
+    last_probe_acquisition_id: u64,
     persistence: Option<V3ProviderHealthPersistenceWriter>,
     configured_disabled: BTreeSet<String>,
     health_disabled: BTreeSet<String>,
@@ -368,6 +369,8 @@ struct V3ProviderConsecutiveFailure {
 
 #[derive(Debug, thiserror::Error)]
 pub enum V3ProviderHealthError {
+    #[error("provider probe acquisition identity exhausted")]
+    ProbeAcquisitionExhausted,
     #[error("provider health state lock poisoned: {0}")]
     Poisoned(String),
     #[error("invalid manual cooldown request: {0}")]
@@ -569,7 +572,7 @@ impl V3ProviderHealthStore {
                         observed_failures: 0,
                         recovery_ewma_ms: None,
                         cooldown_started_at_ms: blocked_until_ms,
-                        probe_in_flight: false,
+                        active_probe: None,
                         probe_model_id: probe_key.model_id.clone(),
                         rescue_probe_attempted: false,
                     },
@@ -1165,7 +1168,7 @@ impl V3ProviderHealthStore {
         model_id: Option<&str>,
         now_ms: u64,
     ) -> Result<(), V3ProviderHealthError> {
-        self.complete_provider_cooldown_probe_success_at_generation_for_interface(
+        self.complete_provider_cooldown_probe_success_impl(
             provider_id,
             interface_id,
             auth_alias,
@@ -1175,37 +1178,39 @@ impl V3ProviderHealthStore {
         )
     }
 
-    pub fn complete_provider_cooldown_probe_success_at_generation(
+    pub fn complete_provider_cooldown_probe_success_with_permit(
         &self,
-        provider_id: &str,
-        auth_alias: Option<&str>,
-        model_id: Option<&str>,
+        permit: &V3ProviderHealthProbePermit,
         now_ms: u64,
-        expected_generation: Option<u64>,
     ) -> Result<(), V3ProviderHealthError> {
-        self.complete_provider_cooldown_probe_success_at_generation_for_interface(
-            provider_id,
-            "default",
-            auth_alias,
-            model_id,
+        self.complete_provider_cooldown_probe_success_impl(
+            permit.provider_id(),
+            permit.interface_id(),
+            permit.auth_alias(),
+            permit.model_id(),
             now_ms,
-            expected_generation,
+            Some(permit),
         )
     }
 
-    pub fn complete_provider_cooldown_probe_success_at_generation_for_interface(
+    fn complete_provider_cooldown_probe_success_impl(
         &self,
         provider_id: &str,
         interface_id: &str,
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         now_ms: u64,
-        expected_generation: Option<u64>,
+        permit: Option<&V3ProviderHealthProbePermit>,
     ) -> Result<(), V3ProviderHealthError> {
         let mut state = self
             .state
             .write()
             .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
+        if let Some(permit) = permit {
+            if !probe_schedule::release_probe_acquisition(&mut state, permit) {
+                return Ok(());
+            }
+        }
         let key = resolve_provider_cooldown_probe_key_for_interface(
             &state.provider_cooldown_probes,
             provider_id,
@@ -1217,7 +1222,7 @@ impl V3ProviderHealthStore {
             &mut state,
             &key,
             now_ms,
-            expected_generation,
+            permit.map(V3ProviderHealthProbePermit::expected_generation),
         )
         .map_err(V3ProviderHealthError::Poisoned)?;
         persist_cooldown_state(state);
@@ -1250,7 +1255,7 @@ impl V3ProviderHealthStore {
         model_id: Option<&str>,
         now_ms: u64,
     ) -> Result<(), V3ProviderHealthError> {
-        self.complete_provider_cooldown_probe_failure_at_generation_for_interface(
+        self.complete_provider_cooldown_probe_failure_impl(
             provider_id,
             interface_id,
             auth_alias,
@@ -1260,37 +1265,39 @@ impl V3ProviderHealthStore {
         )
     }
 
-    pub fn complete_provider_cooldown_probe_failure_at_generation(
+    pub fn complete_provider_cooldown_probe_failure_with_permit(
         &self,
-        provider_id: &str,
-        auth_alias: Option<&str>,
-        model_id: Option<&str>,
+        permit: &V3ProviderHealthProbePermit,
         now_ms: u64,
-        expected_generation: Option<u64>,
     ) -> Result<(), V3ProviderHealthError> {
-        self.complete_provider_cooldown_probe_failure_at_generation_for_interface(
-            provider_id,
-            "default",
-            auth_alias,
-            model_id,
+        self.complete_provider_cooldown_probe_failure_impl(
+            permit.provider_id(),
+            permit.interface_id(),
+            permit.auth_alias(),
+            permit.model_id(),
             now_ms,
-            expected_generation,
+            Some(permit),
         )
     }
 
-    pub fn complete_provider_cooldown_probe_failure_at_generation_for_interface(
+    fn complete_provider_cooldown_probe_failure_impl(
         &self,
         provider_id: &str,
         interface_id: &str,
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         now_ms: u64,
-        expected_generation: Option<u64>,
+        permit: Option<&V3ProviderHealthProbePermit>,
     ) -> Result<(), V3ProviderHealthError> {
         let mut state = self
             .state
             .write()
             .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
+        if let Some(permit) = permit {
+            if !probe_schedule::release_probe_acquisition(&mut state, permit) {
+                return Ok(());
+            }
+        }
         let key = resolve_provider_cooldown_probe_key_for_interface(
             &state.provider_cooldown_probes,
             provider_id,
@@ -1307,11 +1314,10 @@ impl V3ProviderHealthStore {
             .adaptive_history
             .get(&key)
             .map_or(0, |history| history.score_generation);
-        if let Some(expected_generation) = expected_generation {
+        if let Some(expected_generation) =
+            permit.map(V3ProviderHealthProbePermit::expected_generation)
+        {
             if expected_generation != current_generation {
-                if let Some(probe_state) = state.provider_cooldown_probes.get_mut(&key) {
-                    probe_state.probe_in_flight = false;
-                }
                 persist_cooldown_state(state);
                 self.publish_availability_change();
                 return Ok(());
@@ -1339,7 +1345,7 @@ impl V3ProviderHealthStore {
         let Some(probe_state) = state.provider_cooldown_probes.get_mut(&key) else {
             return Ok(());
         };
-        probe_state.probe_in_flight = false;
+        probe_state.active_probe = None;
         probe_state.probe_failure_count = next_probe_failure_count;
         probe_state.observed_attempts = observed_attempts;
         probe_state.observed_failures = observed_failures;
@@ -1590,35 +1596,22 @@ impl V3ProviderHealthStore {
         model_id: &str,
         now_ms: u64,
     ) -> Result<V3ProviderKeyHealthProjection, String> {
-        self.complete_probe_success_at_generation(provider_id, auth_alias, model_id, now_ms, None)
-    }
-
-    pub fn complete_probe_success_at_generation(
-        &self,
-        provider_id: &str,
-        auth_alias: &str,
-        model_id: &str,
-        now_ms: u64,
-        expected_generation: Option<u64>,
-    ) -> Result<V3ProviderKeyHealthProjection, String> {
-        self.complete_probe_success_at_generation_for_interface(
+        self.complete_probe_success_for_interface(
             provider_id,
             "default",
             auth_alias,
             model_id,
             now_ms,
-            expected_generation,
         )
     }
 
-    pub fn complete_probe_success_at_generation_for_interface(
+    pub fn complete_probe_success_for_interface(
         &self,
         provider_id: &str,
         interface_id: &str,
         auth_alias: &str,
         model_id: &str,
         now_ms: u64,
-        expected_generation: Option<u64>,
     ) -> Result<V3ProviderKeyHealthProjection, String> {
         let key = provider_cooldown_probe_key_for_interface(
             provider_id,
@@ -1626,13 +1619,12 @@ impl V3ProviderHealthStore {
             Some(auth_alias),
             Some(model_id),
         );
-        self.complete_provider_cooldown_probe_success_at_generation_for_interface(
+        self.complete_provider_cooldown_probe_success_at_for_interface(
             provider_id,
             interface_id,
             Some(auth_alias),
             Some(model_id),
             now_ms,
-            expected_generation,
         )
         .map_err(|error| error.to_string())?;
         let state = self
@@ -1755,7 +1747,7 @@ impl V3ProviderHealthStore {
             .provider_cooldown_probes
             .get(&auth_key)
             .is_some_and(|probe| {
-                probe.probe_in_flight
+                probe.active_probe.is_some()
                     || probe.next_probe_at_ms.is_some()
                     || probe.blocked_until_ms.is_some_and(|until| until > _now_ms)
             });
@@ -1765,7 +1757,7 @@ impl V3ProviderHealthStore {
         let available = state
             .provider_cooldown_probes
             .get(&key)
-            .is_none_or(|probe| !probe.probe_in_flight && probe.blocked_until_ms.is_none())
+            .is_none_or(|probe| probe.active_probe.is_none() && probe.blocked_until_ms.is_none())
             && !auth_key_cooldown
             && !auth_key_probe;
         Ok(V3ProviderSchedulingProjection {
@@ -1943,7 +1935,7 @@ impl V3ProviderHealthStore {
                         && probe_key.interface_id == interface_id
                         && probe_key.auth_alias.as_deref() == auth_alias
                         && probe_key.model_id.as_deref() == model_id
-                        && (probe_state.probe_in_flight
+                        && (probe_state.active_probe.is_some()
                             || probe_state.next_probe_at_ms.is_some()
                             || probe_state
                                 .blocked_until_ms
@@ -2098,7 +2090,7 @@ impl V3ProviderHealthStore {
             let blocked = probe.blocked_until_ms.is_some_and(|u| u > now_ms);
             // A deadline only makes recovery due. Retained exclusions remain
             // in the pool while waiting or probing, until semantic recovery.
-            let state_str = if probe.probe_in_flight {
+            let state_str = if probe.active_probe.is_some() {
                 "probing".to_string()
             } else if blocked {
                 "blocked".to_string()
@@ -2307,13 +2299,13 @@ fn global_availability_projection(
                 None,
             ));
     if cooldown_probe.is_some_and(|probe_state| {
-        probe_state.probe_in_flight
+        probe_state.active_probe.is_some()
             || probe_state.next_probe_at_ms.is_some()
             || probe_state
                 .blocked_until_ms
                 .is_some_and(|blocked_until_ms| blocked_until_ms > now_ms)
     }) || auth_key_cooldown_probe.is_some_and(|probe_state| {
-        probe_state.probe_in_flight
+        probe_state.active_probe.is_some()
             || probe_state.next_probe_at_ms.is_some()
             || probe_state
                 .blocked_until_ms

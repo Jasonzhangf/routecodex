@@ -84,8 +84,7 @@ use routecodex_v3_error::{
     V3Error01SourceRaised, V3HttpBoundaryErrorKind, V3ProviderFailureSessionScope,
 };
 use routecodex_v3_runtime::{
-    build_v3_provider_global_probe_target, build_v3_server_03_http_request_raw,
-    build_v3_server_03_http_request_raw_with_purpose,
+    build_v3_server_03_http_request_raw, build_v3_server_03_http_request_raw_with_purpose,
     build_v3_server_03_http_request_raw_with_purpose_and_port,
     build_v3_server_03_http_request_raw_with_purpose_and_scope,
     execute_v3_anthropic_relay_dry_run_runtime_with_client_headers,
@@ -106,7 +105,7 @@ use routecodex_v3_runtime::{
     execute_v3_responses_relay_dry_run_orchestration_outcome_with_server_tool_state,
     execute_v3_responses_relay_runtime_with_default_transport,
     execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state,
-    plan_v3_responses_protocol_execution_with_provider_health, probe_v3_provider_global_target,
+    plan_v3_responses_protocol_execution_with_provider_health,
     project_v3_anthropic_relay_runtime_failure, project_v3_debug_failure,
     project_v3_gemini_relay_runtime_failure, project_v3_openai_chat_relay_runtime_failure,
     project_v3_protocol_execution_plan_failure, project_v3_responses_relay_runtime_failure,
@@ -117,15 +116,15 @@ use routecodex_v3_runtime::{
     V3FoundationRuntimeInput, V3FoundationRuntimeOutput, V3GeminiRelayClientBody,
     V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput, V3HubExecutionMode,
     V3OpenAiChatClientStream, V3OpenAiChatCommittedStream, V3OpenAiChatRelayClientBody,
-    V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3ProviderHealthProbeFailure,
-    V3RelayProviderSnapshots, V3RequestExecutionControl, V3Resp15ClientPayload,
-    V3ResponsesDirectRuntimeSharedState, V3ResponsesDirectServerToolScope,
-    V3ResponsesDirectServerToolState, V3ResponsesProtocolExecutionPlan, V3ResponsesRelayClientBody,
-    V3ResponsesRelayClientStream, V3ResponsesRelayDryRunOutcome,
-    V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayProviderSnapshotCapture,
-    V3ResponsesRelayRuntimeError, V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput,
-    V3ResponsesRelayRuntimeSeeds, V3ResponsesRelayServerToolScope, V3ResponsesRelayServerToolState,
-    V3RuntimeObservability, V3RuntimeObservabilityAccumulator, V3RuntimeProviderFailureEventSink,
+    V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3RelayProviderSnapshots,
+    V3RequestExecutionControl, V3Resp15ClientPayload, V3ResponsesDirectRuntimeSharedState,
+    V3ResponsesDirectServerToolScope, V3ResponsesDirectServerToolState,
+    V3ResponsesProtocolExecutionPlan, V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
+    V3ResponsesRelayDryRunOutcome, V3ResponsesRelayProviderHealthHandle,
+    V3ResponsesRelayProviderSnapshotCapture, V3ResponsesRelayRuntimeError,
+    V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeSeeds,
+    V3ResponsesRelayServerToolScope, V3ResponsesRelayServerToolState, V3RuntimeObservability,
+    V3RuntimeObservabilityAccumulator, V3RuntimeProviderFailureEventSink,
     V3RuntimeProviderFailureObservation, V3RuntimeRouteSelectionEventSink,
     V3RuntimeStreamObservation, V3RuntimeTimingSummary, V3RuntimeUsageSummary,
 };
@@ -254,6 +253,7 @@ pub struct V3ListenerHandle {
 pub struct V3ServerAggregateHandle {
     pub listeners: Vec<V3ListenerHandle>,
     probe_shutdown: Option<oneshot::Sender<()>>,
+    probe_task: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
     request_activity_gate: Arc<V3ServerRequestActivityGate>,
     front_transport_broker: V3FrontTransportBroker,
     provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
@@ -284,8 +284,25 @@ pub fn build_v3_server_startup_01_listener_set_from_config_05(
 }
 
 impl V3ServerAggregateHandle {
+    async fn cancel_and_join_probes(&self) {
+        let task = self
+            .probe_task
+            .lock()
+            .expect("aggregate probe task lock")
+            .take();
+        if let Some(task) = task {
+            task.abort();
+            if let Err(error) = task.await {
+                if !error.is_cancelled() {
+                    eprintln!("aggregate probe task failed: {error}");
+                }
+            }
+        }
+    }
+
     pub async fn prepare_exec_attempt(&self) -> Result<V3ServerExecPreparation, String> {
         let maintenance_guard = self.request_activity_gate.begin_maintenance().await;
+        self.cancel_and_join_probes().await;
         self.flush_runtime_persistence();
         let codex_sample_exec_guard = match self.codex_sample_persist_worker.as_ref() {
             Some(worker) => match tokio::time::timeout(
@@ -342,6 +359,7 @@ impl V3ServerAggregateHandle {
         if let Some(shutdown) = self.probe_shutdown.take() {
             let _ = shutdown.send(());
         }
+        self.cancel_and_join_probes().await;
         for listener in &mut self.listeners {
             if let Some(shutdown) = listener.shutdown.take() {
                 let _ = shutdown.send(());
@@ -354,6 +372,7 @@ impl V3ServerAggregateHandle {
     /// close the remaining idle transports before exec replacement.
     pub async fn prepare_for_exec(mut self) -> V3ServerExecPreparation {
         let maintenance_guard = self.request_activity_gate.begin_maintenance().await;
+        self.cancel_and_join_probes().await;
         for listener in &mut self.listeners {
             if let Some(shutdown) = listener.shutdown.take() {
                 let _ = shutdown.send(());
@@ -440,6 +459,19 @@ impl V3ServerAggregateHandle {
             .iter()
             .filter_map(|listener| listener.accept_state.last_accept_error())
             .next_back()
+    }
+}
+
+impl Drop for V3ServerAggregateHandle {
+    fn drop(&mut self) {
+        if let Some(task) = self
+            .probe_task
+            .get_mut()
+            .expect("aggregate probe task lock")
+            .take()
+        {
+            task.abort();
+        }
     }
 }
 
@@ -709,78 +741,17 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
     if console_enabled {
         emit_v3_startup_console_line(&listeners);
     }
-    let (probe_shutdown, mut probe_shutdown_rx) = oneshot::channel();
-    let probe_manifest = Arc::clone(&manifest);
+    let (probe_shutdown, probe_shutdown_rx) = oneshot::channel();
     let probe_health = Arc::clone(&provider_health).runtime_health();
-    tokio::spawn(async move {
-        let startup_manifest = Arc::clone(&probe_manifest);
-        let startup_now_ms = match SystemTime::now().duration_since(UNIX_EPOCH) {
-            Ok(duration) => duration.as_millis() as u64,
-            Err(error) => {
-                eprintln!("provider persistent startup probe clock failure: {error}");
-                return;
-            }
-        };
-        let startup_result = probe_health
-            .run_due_provider_health_probes(
-                startup_now_ms,
-                true,
-                move |provider_id, interface_id, auth_alias, model_id| {
-                    let startup_manifest = Arc::clone(&startup_manifest);
-                    async move {
-                        let target = build_v3_provider_global_probe_target(
-                            &startup_manifest,
-                            &provider_id,
-                            &interface_id,
-                            auth_alias.as_deref(),
-                            model_id.as_deref(),
-                        )
-                        .map_err(V3ProviderHealthProbeFailure::Internal)?;
-                        probe_v3_provider_global_target(target).await
-                    }
-                },
-            )
-            .await;
-        if let Err(error) = startup_result {
-            eprintln!("provider startup probe batch failed: {error}");
-        }
-        let mut interval = tokio::time::interval(Duration::from_secs(1));
-        loop {
-            tokio::select! {
-                _ = &mut probe_shutdown_rx => break,
-                _ = interval.tick() => {
-                    let now_ms = match SystemTime::now().duration_since(UNIX_EPOCH) {
-                        Ok(duration) => duration.as_millis() as u64,
-                        Err(error) => {
-                            eprintln!("provider global probe clock failure: {error}");
-                            continue;
-                        }
-                    };
-                    let manifest_for_probe = Arc::clone(&probe_manifest);
-                    let result = probe_health.run_due_provider_health_probes(now_ms, false, move |provider_id, interface_id, auth_alias, model_id| {
-                        let manifest_for_probe = Arc::clone(&manifest_for_probe);
-                        async move {
-                            let target = build_v3_provider_global_probe_target(
-                                &manifest_for_probe,
-                                &provider_id,
-                                &interface_id,
-                                auth_alias.as_deref(),
-                                model_id.as_deref(),
-                            )
-                            .map_err(V3ProviderHealthProbeFailure::Internal)?;
-                            probe_v3_provider_global_target(target).await
-                        }
-                    }).await;
-                    if let Err(error) = result {
-                        eprintln!("provider periodic probe batch failed: {error}");
-                    }
-                }
-            }
-        }
-    });
+    let probe_task = tokio::spawn(
+        probe_health
+            .aggregate_provider_probe_lifecycle(Arc::clone(&manifest), probe_shutdown_rx)
+            .map_err(std::io::Error::other)?,
+    );
     Ok(V3ServerAggregateHandle {
         listeners,
         probe_shutdown: Some(probe_shutdown),
+        probe_task: std::sync::Mutex::new(Some(probe_task)),
         request_activity_gate,
         front_transport_broker,
         provider_health,

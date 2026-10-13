@@ -32,6 +32,8 @@ nodes:
     owner: routecodex-v3-error
   - id: V3ProviderFailureRuntimeHealth
     owner: routecodex-v3-runtime
+  - id: V3ProviderProbeCancellationGuard
+    owner: routecodex-v3-runtime
 edges:
   - from: V3ProviderHealthStore
     to: V3ProviderHealthProbePermit
@@ -40,6 +42,8 @@ edges:
   - from: V3ProviderGlobalProbeExecution
     to: V3ProviderProbeHttpStatus
   - from: V3ProviderGlobalProbeExecution
+    to: V3ProviderHealthStore
+  - from: V3ProviderProbeCancellationGuard
     to: V3ProviderHealthStore
   - from: V3ProviderGlobalSubscriptionFailureObservation
     to: V3ProviderHealthStore

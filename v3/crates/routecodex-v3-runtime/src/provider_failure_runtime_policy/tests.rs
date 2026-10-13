@@ -340,13 +340,7 @@ fn recovered_primary_failback_is_not_starved_by_backup_successes() {
         .expect("blocked primary probe permit");
     health
         .store
-        .complete_provider_cooldown_probe_success_at_generation(
-            permit.provider_id(),
-            permit.auth_alias(),
-            permit.model_id(),
-            155,
-            Some(permit.expected_generation()),
-        )
+        .complete_provider_cooldown_probe_success_with_permit(&permit, 155)
         .expect("semantic probe recovery");
 
     let selected = resolve_target(&manifest, "failback_liveness", &BTreeSet::new(), &health);

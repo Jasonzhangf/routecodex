@@ -84,7 +84,7 @@ fn upsert_manual_probe_cooldown(
             cooldown_started_at_ms: existing
                 .as_ref()
                 .map_or(now_ms, |probe| probe.cooldown_started_at_ms),
-            probe_in_flight: existing.as_ref().is_some_and(|probe| probe.probe_in_flight),
+            active_probe: existing.as_ref().and_then(|probe| probe.active_probe),
             probe_model_id: model_id.map(str::to_string),
             rescue_probe_attempted: existing
                 .as_ref()
@@ -355,7 +355,7 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         assert_eq!(permit.auth_alias(), Some("k"));
         assert_eq!(permit.model_id(), None);
         store
-            .complete_provider_cooldown_probe_success_at("p", Some("k"), None, 62_000)
+            .complete_provider_cooldown_probe_success_with_permit(&permit, 62_000)
             .expect("probe success");
         let released = store.availability("p", Some("k"), Some("m"), 62_000);
         assert!(
@@ -493,7 +493,7 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
             probe.probe_interval_ms,
             V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS
         );
-        assert!(!probe.probe_in_flight);
+        assert!(probe.active_probe.is_none());
         assert_eq!(probe.probe_model_id, None);
         drop(state);
         assert!(

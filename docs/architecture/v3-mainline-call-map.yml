@@ -159,8 +159,8 @@ chains:
     to_node: V3ProviderHealthStore
     caller_symbol: spawn_v3_server_aggregate
     caller_file: v3/crates/routecodex-v3-server/src/lib.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::run_due_provider_health_probes
-    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: V3ProviderFailureRuntimeHealth::aggregate_provider_probe_lifecycle
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_probe_lifecycle.rs
     status: anchored
     owner_feature_id: v3.provider_global_cooldown_persistence
     resource_flow:
@@ -473,7 +473,7 @@ chains:
     semantic_contract:
       - Initial Direct planning selects from the captured Target09 set using session availability before global availability.
       - Request-local exclusions are empty before the first provider attempt.
-      - Target10 applies the candidate model context_token_estimate_scale_bps to route request_input_tokens, then compares max_context_tokens before provider availability selection.
+      - Target10 applies the candidate model context_token_estimate_scale_bps to route request_input_tokens, then compares max_context_tokens only as advisory ordering evidence inside the route tier; the scaled estimate never removes a healthy, capability-eligible, request-eligible candidate from the pool.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection]
       produces: [v3.target.concrete_provider]
@@ -1882,8 +1882,8 @@ chains:
       side_channel_writes:
       - v3.target.concrete_provider
     semantic_contract:
-      - Target10 performs context admission from the typed requestInputTokens carried by Target09 and each candidate max_context_tokens before availability or provider transport; an omitted max_context_tokens compiles to the documented 200000-token default.
-      - context_window_exceeded is emitted in Target10 selection evidence; no request or response payload is rewritten.
+      - Target10 reads the typed requestInputTokens carried by Target09 and compares the scaled estimate with each candidate max_context_tokens only as advisory ordering evidence; an omitted max_context_tokens compiles to the documented 200000-token default. The estimate never removes an eligible candidate from the pool.
+      - context_window_exceeded and context_window_near_limit remain ordering evidence inside Target10; an eligible over-estimate candidate stays selectable and outside unavailable_candidates, and no request or response payload is rewritten.
       - Target10 applies the captured server-scoped provider priority schedule only after health availability projection and only within the selected route pool.
       - Target10 consumes availability by providerId+interfaceId+authAlias+modelId, so one interface cooling or failing request-locally does not remove a sibling interface of the same provider.
   - step_id: v3-rd-09
@@ -3105,7 +3105,7 @@ chains:
     to_node: V3FrontTransportCloseoutState
     caller_symbol: commit_model_transport_outcome
     caller_file: v3/crates/routecodex-v3-server/src/frame_builders.rs
-    callee_symbol: provider_terminal_response
+    callee_symbol: model_transport_break_response
     callee_file: v3/crates/routecodex-v3-server/src/frame_builders.rs
     owner_feature_id: v3.foundation_p0_p2
     resource_flow:
@@ -7623,6 +7623,7 @@ chains:
 - chain_id: v3.provider_admission_rescue_entrypoints
   owner_feature_id: v3.provider_global_subscription_probe
   summary: Direct and Relay use one pre-transport selection boundary with atomic provider+authAlias capacity admission; full candidates are skipped request-locally without waiting, health mutation or Router reentry.
+  exhaustion_contract: a cooldown-only request receives one rescue pass and captured-target reselection, then internal exhaustion when no candidate is available; independent scheduled health recovery does not retain the exhausted request
   edges:
   - step_id: v3-rd-target-select-direct-admission-rescue
     from_node: V3Target09CandidateSetExpanded
@@ -7895,8 +7896,8 @@ chains:
     to_node: V3ProviderGlobalProbeExecution
     caller_symbol: spawn_v3_server_aggregate
     caller_file: v3/crates/routecodex-v3-server/src/lib.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::run_due_provider_health_probes
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3ProviderFailureRuntimeHealth::aggregate_provider_probe_lifecycle
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_probe_lifecycle.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     resource_flow:
@@ -7944,9 +7945,9 @@ chains:
   - step_id: v3-provider-global-probe-02-success
     from_node: V3ProviderGlobalProbeExecution
     to_node: V3ProviderHealthStore
-    caller_symbol: V3ProviderFailureRuntimeHealth::run_due_provider_health_probes
-    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-    callee_symbol: V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation
+    caller_symbol: complete_v3_provider_health_probe
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_probe_lifecycle.rs
+    callee_symbol: V3ProviderHealthStore::complete_provider_cooldown_probe_success_with_permit
     callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
@@ -7959,9 +7960,56 @@ chains:
   - step_id: v3-provider-global-probe-02-failure
     from_node: V3ProviderGlobalProbeExecution
     to_node: V3ProviderHealthStore
-    caller_symbol: V3ProviderFailureRuntimeHealth::run_due_provider_health_probes
+    caller_symbol: complete_v3_provider_health_probe
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_probe_lifecycle.rs
+    callee_symbol: V3ProviderHealthStore::complete_provider_cooldown_probe_failure_with_permit
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.provider.global_subscription_health]
+      produces: [v3.provider.global_subscription_health]
+      side_channel_reads: [v3.provider.global_subscription_health]
+      side_channel_writes: [v3.provider.global_subscription_health]
+
+  - step_id: v3-provider-global-probe-owner-cancel
+    from_node: V3ProviderProbeCancellationGuard
+    to_node: V3ProviderHealthStore
+    caller_symbol: V3ProviderProbeCancellationGuard::drop
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-    callee_symbol: V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation
+    callee_symbol: V3ProviderHealthStore::cancel_provider_cooldown_probe
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/health/probe_schedule.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.provider.global_subscription_health]
+      produces: [v3.provider.global_subscription_health]
+      side_channel_reads: [v3.provider.global_subscription_health]
+      side_channel_writes: [v3.provider.global_subscription_health]
+    semantic_contract:
+      - Release only the permit's active acquisition; health generation does not gate cancellation and cancellation preserves health and stored schedule.
+
+  - step_id: v3-provider-global-probe-inline-rescue-success
+    from_node: V3ProviderGlobalProbeExecution
+    to_node: V3ProviderHealthStore
+    caller_symbol: V3ProviderFailureRuntimeHealth::run_cooldown_rescue_probes_for_candidates
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
+    callee_symbol: V3ProviderHealthStore::complete_provider_cooldown_probe_success_with_permit
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    resource_flow:
+      consumes: [v3.provider.global_subscription_health]
+      produces: [v3.provider.global_subscription_health]
+      side_channel_reads: [v3.provider.global_subscription_health]
+      side_channel_writes: [v3.provider.global_subscription_health]
+
+  - step_id: v3-provider-global-probe-inline-rescue-failure
+    from_node: V3ProviderGlobalProbeExecution
+    to_node: V3ProviderHealthStore
+    caller_symbol: V3ProviderFailureRuntimeHealth::run_cooldown_rescue_probes_for_candidates
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
+    callee_symbol: V3ProviderHealthStore::complete_provider_cooldown_probe_failure_with_permit
     callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe

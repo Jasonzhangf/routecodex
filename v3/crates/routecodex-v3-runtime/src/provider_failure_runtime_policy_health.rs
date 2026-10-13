@@ -4,6 +4,7 @@ impl V3ProviderFailureRuntimeHealth {
         Self {
             store,
             action_gate: V3ProviderActionGate::process_shared(),
+            probe_owner: Default::default(),
             default_same_provider_retries: V3RelayProviderFailureRetryPolicy::from_manifest(
                 manifest,
             )
@@ -16,6 +17,7 @@ impl V3ProviderFailureRuntimeHealth {
         Self {
             store,
             action_gate: V3ProviderActionGate::default(),
+            probe_owner: Default::default(),
             default_same_provider_retries: V3RelayProviderFailureRetryPolicy::from_manifest(
                 manifest,
             )
@@ -34,6 +36,7 @@ impl V3ProviderFailureRuntimeHealth {
         Self {
             store,
             action_gate: V3ProviderActionGate::process_shared(),
+            probe_owner: Default::default(),
             default_same_provider_retries: V3RelayProviderFailureRetryPolicy::from_manifest(
                 manifest,
             )
@@ -134,16 +137,7 @@ impl V3ProviderFailureRuntimeHealth {
                 probe.clone(),
             ));
         }
-        while let Some((
-            cancellation,
-            provider_id,
-            interface_id,
-            auth_alias,
-            model_id,
-            expected_generation,
-            result,
-        )) = in_flight.next().await
-        {
+        while let Some((cancellation, result)) = in_flight.next().await {
             let completion_now_ms = match SystemTime::now().duration_since(UNIX_EPOCH) {
                 Ok(duration) => duration.as_millis() as u64,
                 Err(error) => {
@@ -151,57 +145,10 @@ impl V3ProviderFailureRuntimeHealth {
                     now_ms
                 }
             };
-            match result {
-                Ok(()) => {
-                    if let Err(error) = self
-                        .store
-                        .complete_provider_cooldown_probe_success_at_generation_for_interface(
-                            &provider_id,
-                            &interface_id,
-                            auth_alias.as_deref(),
-                            model_id.as_deref(),
-                            completion_now_ms,
-                            Some(expected_generation),
-                        )
-                    {
-                        probe_errors.push(error.to_string());
-                    }
-                }
-                Err(V3ProviderHealthProbeFailure::Provider(error)) => {
-                    if let Err(completion_error) = self
-                        .store
-                        .complete_provider_cooldown_probe_failure_at_generation_for_interface(
-                            &provider_id,
-                            &interface_id,
-                            auth_alias.as_deref(),
-                            model_id.as_deref(),
-                            completion_now_ms,
-                            Some(expected_generation),
-                        )
-                    {
-                        probe_errors.push(completion_error.to_string());
-                    }
-                    eprintln!(
-                        "provider health probe failed: provider={provider_id} auth_alias={auth_alias:?} model={model_id:?} error={error}"
-                    );
-                }
-                Err(V3ProviderHealthProbeFailure::Internal(error)) => {
-                    if let Err(completion_error) = self
-                        .store
-                        .complete_provider_cooldown_probe_failure_at_generation_for_interface(
-                            &provider_id,
-                            &interface_id,
-                            auth_alias.as_deref(),
-                            model_id.as_deref(),
-                            completion_now_ms,
-                            Some(expected_generation),
-                        )
-                    {
-                        probe_errors.push(completion_error.to_string());
-                    }
-                    probe_errors.push(error);
-                }
-                Err(V3ProviderHealthProbeFailure::ConcurrencyBusy) => {}
+            if let Err(error) =
+                complete_v3_provider_health_probe(&cancellation, result, completion_now_ms)
+            {
+                probe_errors.push(error);
             }
             drop(cancellation);
             while in_flight.len() < V3_PROVIDER_HEALTH_PROBE_MAX_CONCURRENCY {

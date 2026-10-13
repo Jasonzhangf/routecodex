@@ -104,17 +104,12 @@ fn cooldown_expiry_only_makes_probe_due_and_success_probe_restores() {
             )
             .available
     );
-    assert!(store
+    let permit = store
         .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
         .unwrap()
-        .is_some());
+        .unwrap();
     store
-        .complete_provider_cooldown_probe_success_at(
-            "provider-a",
-            Some("key-a"),
-            Some("model-a"),
-            first_due + 1,
-        )
+        .complete_provider_cooldown_probe_success_with_permit(&permit, first_due + 1)
         .unwrap();
     assert!(
         store
@@ -141,12 +136,15 @@ fn due_and_inflight_probes_stay_in_pool_until_exact_success() {
         .unwrap()
         .until_ms
         .unwrap();
+    let mut permit = None;
     for in_flight in [false, true] {
         if in_flight {
-            assert!(store
-                .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
-                .unwrap()
-                .is_some());
+            permit = Some(
+                store
+                    .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
+                    .unwrap()
+                    .unwrap(),
+            );
         }
         for now in [due, due + 60_000] {
             let entries = store.cooldown_entries(now);
@@ -179,12 +177,7 @@ fn due_and_inflight_probes_stay_in_pool_until_exact_success() {
         }
     }
     store
-        .complete_provider_cooldown_probe_success_at(
-            "provider-a",
-            Some("key-a"),
-            Some("model-a"),
-            due + 60_001,
-        )
+        .complete_provider_cooldown_probe_success_with_permit(&permit.unwrap(), due + 60_001)
         .unwrap();
     assert!(store
         .cooldown_entries(due + 60_002)
@@ -204,17 +197,12 @@ fn failed_probe_keeps_blocked_and_stretches_next_deadline() {
     fail(&store, "session-a", "model-a", 1);
     fail(&store, "session-a", "model-a", 2);
     let first_due = 5_002;
-    assert!(store
+    let permit = store
         .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
         .unwrap()
-        .is_some());
+        .unwrap();
     store
-        .complete_provider_cooldown_probe_failure(
-            "provider-a",
-            Some("key-a"),
-            Some("model-a"),
-            first_due,
-        )
+        .complete_provider_cooldown_probe_failure_with_permit(&permit, first_due)
         .unwrap();
     assert!(
         !store

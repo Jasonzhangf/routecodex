@@ -460,6 +460,8 @@ features:
   - routecodex-v3-cli
   owner_files:
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/tests/fa22072_error_decoupling.rs
+  - v3/crates/routecodex-v3-server/tests/support/fa22072_test_home.rs
   - v3/crates/routecodex-v3-debug/src/lib.rs
   - v3/crates/routecodex-v3-error/src/lib.rs
   - v3/crates/routecodex-v3-config/src/lib.rs
@@ -637,9 +639,9 @@ features:
   - V3ProviderHealthStore::availability_for_session
   - V3ProviderHealthStore::record_provider_failure_in_session_with_policy
   - V3ProviderHealthStore::acquire_provider_cooldown_probe
-  - V3ProviderHealthStore::cancel_provider_cooldown_probe_at_generation
-  - V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation
-  - V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation
+  - V3ProviderHealthStore::cancel_provider_cooldown_probe
+  - V3ProviderHealthStore::complete_provider_cooldown_probe_success_with_permit
+  - V3ProviderHealthStore::complete_provider_cooldown_probe_failure_with_permit
   - V3ProviderHealthStore::record_provider_key_success
   - V3ProviderFailureRuntimeHealth::run_due_provider_health_probes
   - provider_error_policy_matches_failure
@@ -4767,6 +4769,9 @@ features:
   - routecodex-v3-runtime
   - routecodex-v3-server
   owner_files:
+  - v3/crates/routecodex-v3-provider-responses/src/key_health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health/runtime_projection.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health_tests.rs
   - v3/crates/routecodex-v3-provider-responses/src/probe.rs
   - v3/crates/provider-compat-core/src/opencode_zen_tcm.rs
   - v3/crates/routecodex-v3-cli/tests/provider_account_pool_blackbox.rs
@@ -4799,6 +4804,9 @@ features:
   - v3/crates/routecodex-v3-runtime/tests/anthropic_relay_mixed_pool_failover_integration.rs
   - v3/crates/routecodex-v3-runtime/src/lib.rs
   - v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_probe_lifecycle.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests/probe_recovery.rs
   - v3/crates/routecodex-v3-runtime/src/hooks.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
@@ -4807,6 +4815,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests/cooldown_exhaustion.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
+  - v3/crates/routecodex-v3-server/tests/fa22072_recovery_isolation.rs
   resource_bindings:
   - v3.provider.global_subscription_health
   - v3.provider.auth_key_cooldown_state
@@ -4837,10 +4846,15 @@ features:
   - V3ProviderHealthStore::acquire_provider_cooldown_probe
   - V3ProviderHealthStore::acquire_provider_cooldown_probe_if_due
   - V3ProviderHealthStore::provider_cooldown_probe_next_deadline_ms
-  - V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation
-  - V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation
+  - V3ProviderHealthStore::cancel_provider_cooldown_probe
+  - V3ProviderHealthStore::complete_provider_cooldown_probe_success_with_permit
+  - V3ProviderHealthStore::complete_provider_cooldown_probe_failure_with_permit
   - V3ProviderHealthStore::cooldown_entries
   - V3ProviderFailureRuntimeHealth::run_due_provider_health_probes
+  - V3ProviderFailureRuntimeHealth::aggregate_provider_probe_lifecycle
+  - V3ProviderFailureRuntimeHealth::initiate_cooldown_rescue_probe
+  - V3ProviderFailureRuntimeHealth::managed_probe
+  - complete_v3_provider_health_probe
   - V3ProviderFailureRuntimeHealth::run_exhaustion_rescue_probes
   - build_v3_provider_global_probe_target
   - select_v3_expanded_target_with_exhaustion_rescue
@@ -4900,7 +4914,11 @@ features:
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests/cooldown_exhaustion.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_probe_lifecycle.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests/probe_recovery.rs
   - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
+  - v3/crates/routecodex-v3-server/tests/fa22072_recovery_isolation.rs
   - v3/crates/routecodex-v3-runtime/tests/gemini_relay_runtime_integration.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-error/src/subscription.rs
@@ -4921,6 +4939,7 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test cooldown_manual_actions_managed -- --test-threads=1 --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime runtime_policy_maps_account_and_recoverable_http_classes_to_global_health -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime cooldown_exhaustion --lib -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_recovery_isolation -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime later_tier_selection_skips_in_flight_rescue_probes_without_waiting --lib -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime provider_concurrency --lib -- --nocapture
   - npm run test:v3-provider-adaptive-concurrency
@@ -5350,7 +5369,7 @@ features:
   - V3ProviderHealthStore::record_provider_key_success
   - V3ProviderHealthStore::complete_probe_success
   - V3ProviderHealthStore::complete_probe_failure
-  - V3ProviderHealthStore::complete_probe_success_at_generation
+  - V3ProviderHealthStore::complete_provider_cooldown_probe_success_with_permit
   - V3ProviderHealthStore::provider_cooldown_probe_keys
   - V3ProviderHealthStore::acquire_provider_cooldown_probe
   - V3ProviderHealthStore::scheduling_projection
