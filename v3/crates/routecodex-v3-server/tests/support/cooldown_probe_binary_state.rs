@@ -6,9 +6,14 @@ use axum::{
     routing::post,
     Json, Router,
 };
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 use tokio::sync::{mpsc, Mutex, Semaphore};
 use tokio::time::timeout;
+
+static NEXT_FIXTURE_ID: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone)]
 struct Peer {
@@ -104,6 +109,13 @@ async fn in_flight_business_success_recovers_429_before_probe_headers() {
 }
 
 #[tokio::test]
+async fn fixture_identities_are_isolated_across_ci_order() {
+    automatic_recovery(false, true).await;
+    automatic_recovery(false, false).await;
+    automatic_recovery(true, false).await;
+}
+
+#[tokio::test]
 async fn zen_non_2xx_unfinished_probe_body_preserves_cooldown_and_allows_fallback() {
     automatic_recovery(false, true).await;
 }
@@ -116,6 +128,12 @@ async fn automatic_recovery(in_flight_success: bool, fail_streaming_probe: bool)
     let success_release = Arc::new(Semaphore::new(0));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let upstream_port = listener.local_addr().unwrap().port();
+    // Adaptive concurrency is shared by provider/auth across the process.
+    // Each fixture invocation must own a fresh identity, including repeat calls.
+    let provider_id = format!(
+        "cooldown_binary_state_{}",
+        NEXT_FIXTURE_ID.fetch_add(1, Ordering::Relaxed)
+    );
     let peer = Peer {
         receipts: tx,
         release: release.clone(),
@@ -154,16 +172,16 @@ port = {port}
 routing_group = "default"
 endpoints = ["responses"]
 {execution}
-[providers.test]
+[providers.{provider_id}]
 type = "{provider_type}"
 {probe_timeout}
 base_url = "http://127.0.0.1:{upstream_port}/v1"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_COOLDOWN_MANUAL_TEST_KEY" }}, {{ alias = "spare", env = "V3_COOLDOWN_BINARY_SPARE_KEY" }}] }}
-[providers.test.models.test]
+[providers.{provider_id}.models.test]
 [route_groups.default.pools.default]
 selection = {{ strategy = "priority" }}
-targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 100 }}, {{ kind = "provider_model", provider = "test", model = "test", key = "spare", priority = 1 }}]
+targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test", key = "key", priority = 100 }}, {{ kind = "provider_model", provider = "{provider_id}", model = "test", key = "spare", priority = 1 }}]
 "#)).await;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
