@@ -61,6 +61,8 @@ pub struct V3AnthropicRelayClientHeader {
 
 #[derive(Debug, thiserror::Error)]
 pub enum V3AnthropicRelayRuntimeError {
+    #[error("provider_response_empty: provider returned no deliverable business content")]
+    ProviderResponseEmpty,
     #[error(transparent)]
     Protocol(#[from] V3AnthropicRelayProtocolHookError),
     #[error(transparent)]
@@ -1011,7 +1013,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                             if is_v3_anthropic_request_local_projection_failure(&error) {
                                 return Err(error);
                             }
-                            let failure = if let Some(failure) =
+                            let mut failure = if let Some(failure) =
                                 anthropic_provider_stream_failure_from_closeout_error(
                                     &error,
                                     chunks.clone(),
@@ -1034,6 +1036,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                                     &selected_target_provider_id,
                                 )
                             };
+                            failure.provider_status = Some(provider_status);
                             drop(_provider_action_permit.take());
                             if let Some(failure) = handle_provider_failure(
                                 &failure_context,
@@ -1240,14 +1243,28 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                             if is_v3_anthropic_request_local_projection_failure(&error) {
                                 return Err(error);
                             }
-                            let failure = provider_runtime_failure(
-                                V3ProviderError::ResponseBody {
-                                    request_id: input.request_id.clone(),
-                                    provider_id: selected_target_provider_id.clone(),
-                                    reason: format!("provider response governance failed: {error}"),
-                                },
-                                &selected_target_provider_id,
-                            );
+                            let mut failure = if matches!(
+                                error,
+                                V3AnthropicRelayRuntimeError::ProviderResponseEmpty
+                            ) {
+                                provider_request_failure(
+                                    "V3ProviderRespInbound01Raw",
+                                    "provider_response_empty",
+                                    error,
+                                )
+                            } else {
+                                provider_runtime_failure(
+                                    V3ProviderError::ResponseBody {
+                                        request_id: input.request_id.clone(),
+                                        provider_id: selected_target_provider_id.clone(),
+                                        reason: format!(
+                                            "provider response governance failed: {error}"
+                                        ),
+                                    },
+                                    &selected_target_provider_id,
+                                )
+                            };
+                            failure.provider_status = Some(provider_status);
                             drop(_provider_action_permit.take());
                             if let Some(failure) = handle_provider_failure(
                                 &failure_context,
@@ -1369,6 +1386,13 @@ async fn anthropic_provider_stream_failure_from_closeout_error(
     provider_id: &str,
     provider_wire_protocol: V3HubProviderWireProtocol,
 ) -> Option<V3RelayProviderFailure> {
+    if matches!(error, V3AnthropicRelayRuntimeError::ProviderResponseEmpty) {
+        return Some(provider_request_failure(
+            "V3ProviderRespInbound01Raw",
+            "provider_response_empty",
+            error,
+        ));
+    }
     if !matches!(error, V3AnthropicRelayRuntimeError::ProviderCompat(_)) {
         return None;
     }

@@ -9,8 +9,8 @@ deduplicate every execution-bound defect and carry its authoritative bug ID
 through its own worktree, evidence, review, merge, cleanup, and solution receipt.
 The RouteCodex standard defect flow requires commit and merge to `main`; the
 normal repair authorization in the global `AGENTS.md` covers commit, merge, and
-push after the gates pass. The ordinary independent review route requires both
-Codex Review and AGY Review. A conflict, required-check failure, or rejected
+push after the gates pass. The global host orchestrator owns the independent
+review route and delivery order. A conflict, required-check failure, or rejected
 merge/push remains an open disposition with its owner and recovery condition.
 
 Do not begin issue execution until the canonical AppSDK intake/dedup returns an
@@ -18,11 +18,10 @@ authoritative bug ID. If intake is unavailable, report the exact blocker and
 recovery condition before creating a worktree or doing issue work; do not invent
 a shadow tracker or ID. The issue owner remains accountable for intake,
 worktree, reproduction, fix, candidate validation, runtime evidence, cleanup,
-and bug disposition. Codex Review and AGY Review own separate independent
-verdicts on the same candidate SHA. The authorized delivery owner performs
-merge/push after author verification and applicable CI PASS, then main rebuild,
-restart and live acceptance precede completion of both reviews. Review pending
-keeps the bug open; integration failures go to the delivery owner (the live
+and bug disposition. The independent overall review follows author verification
+and applicable candidate runtime acceptance. The authorized delivery owner
+performs commit/integration after review and applicable CI pass. Review pending
+keeps the integration and bug close open; integration failures go to the delivery owner (the live
 master only when Collab is active). The master
 owns the separate residual-resource inventory, while each issue owner cleans
 only that issue's resources.
@@ -34,28 +33,27 @@ bug intake / dedup
 -> clean issue worktree at playground/<issue-id> from latest origin/main
 -> reproduce + feature DAG/map + first divergence + unique owner + red regression test
 -> minimal owner-scoped fix
--> fetch/combine latest origin/main in the issue worktree -> candidate commit + exact SHA
+-> fetch/combine latest origin/main in the issue worktree -> freeze candidate tree identity
 -> mapped tests/build + author E2E + candidate install/restart/replay when runtime-impacting
 -> health + real-entry replay + post-restart sample audit
+-> effective independent overall architecture review on the validated candidate -> candidate commit + exact SHA
 -> applicable PR CI PASS -> recheck origin/main -> merge validated candidate to clean main -> push + candidate/main equivalence + remote receipt
 -> post-merge verification: runtime path rebuild/install/restart -> health -> real-entry replay -> sample audit; otherwise scoped consumer check
--> independent Codex review and independent AGY review on the exact validated candidate, bound to delivered main content
 -> issue-owned resource cleanup + absence checks
 -> one issue disposition receipt
 ```
 
-The candidate commit binds the exact tree and all downstream evidence; it is not
-the delivery merge and does not authorize integration. Freeze that SHA before
-mapped tests, required gates, author E2E, runtime replay, and architecture
-reviews. Any source change or newer `origin/main` invalidates evidence whose
+The frozen candidate tree binds validation, runtime replay and review; its
+subsequent commit must have the same tree. A commit is not the delivery merge
+and does not authorize integration. Any source change or newer `origin/main` invalidates evidence whose
 bound inputs changed. Record the new candidate under the same authoritative
-bug ID and rerun affected gates and E2E before integration; bind post-delivery
-reviews to the final candidate/main content. Do not silently reuse stale PASS
+bug ID and rerun affected gates and E2E before integration; bind the independent
+review to the final candidate/main content. Do not silently reuse stale PASS
 evidence. Review pending never means solved. Blocking findings require repair
 and affected revalidation; a confirmed delivered regression follows the global
 traceable revert/rebuild/restart/replay recovery contract.
 
-The disposition node records `solved` only if every applicable gate, both reviews,
+The disposition node records `solved` only if every applicable gate, an effective independent review,
 merge receipt, post-merge replay/sample audit, and owned-resource check passed.
 Any failed gate, review finding, mainline drift requiring new validation, or
 explicit cancellation reaches that same node as `open`, with cause, owner,

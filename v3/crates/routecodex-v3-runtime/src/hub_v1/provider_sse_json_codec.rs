@@ -728,12 +728,16 @@ pub(crate) fn classify_v3_provider_gemini_json_event(
     if event.get("error").is_some() {
         return classify_provider_error_object(event, "gemini_provider_error");
     }
+    let prompt_blocked = super::v3_gemini_prompt_feedback_is_terminal(event);
+    if event.get("candidates").is_none() && prompt_blocked {
+        return Ok(V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput);
+    }
     let candidates = event
         .get("candidates")
         .and_then(Value::as_array)
         .ok_or_else(|| "provider Gemini SSE event requires candidates array".to_string())?;
     let mut has_output = false;
-    let mut terminal = false;
+    let mut terminal = prompt_blocked;
     for candidate in candidates {
         let candidate = candidate
             .as_object()

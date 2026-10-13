@@ -122,7 +122,7 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for
         return Err(V3ResponsesRelayRuntimeError::ProviderResponseEmpty { provider_id });
     };
     let replayed = merge_first_chunk_back_into_provider_stream(first_chunk, provider);
-    match provider_protocol {
+    let response = match provider_protocol {
         V3HubProviderWireProtocol::Responses => {
             let mut response = build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
                 replayed,
@@ -133,14 +133,14 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for
                 &mut response,
                 anthropic_context.mcp_tool_identities(),
             );
-            Ok(response)
+            response
         }
         V3HubProviderWireProtocol::OpenAiChat => {
             build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
                 replayed,
                 observation,
             )
-            .await
+            .await?
         }
         V3HubProviderWireProtocol::Anthropic => {
             build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_events_with_context(
@@ -148,12 +148,27 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for
                 observation,
                 anthropic_context,
             )
-            .await
+            .await?
         }
-        other => Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-            format!("Responses relay cannot decode provider stream protocol {other:?}"),
-        )),
+        other => {
+            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                format!("Responses relay cannot decode provider stream protocol {other:?}"),
+            ))
+        }
+    };
+    // Complete-attempt success acceptance: a fully materialized attempt that
+    // carries no deliverable business content is an internal 502 for the Error
+    // chain, never a normal empty completion. The judgment is shared across
+    // protocols and reads the whole accumulated response, not the last frame.
+    if !crate::hub_v1::v3_provider_attempt_has_deliverable_business_content(
+        provider_protocol,
+        &response,
+    ) {
+        return Err(crate::hub_v1::empty_provider_attempt_failure(
+            provider_protocol,
+        ));
     }
+    Ok(response)
 }
 
 fn merge_first_chunk_back_into_provider_stream(
@@ -905,7 +920,7 @@ mod tests {
     async fn anthropic_terminal_is_not_reopened_by_late_provider_read_error() {
         let observation = V3RuntimeStreamObservation::default();
         let provider = Box::pin(stream::iter(vec![
-            Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_late_error\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude\",\"content\":[]}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec()),
+            Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_late_error\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude\",\"content\":[]}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"done\"}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec()),
             Err(routecodex_v3_provider_responses::V3ProviderError::ResponseBody {
                 request_id: "req-anthropic-late-error".to_owned(),
                 provider_id: "provider-anthropic-late-error".to_owned(),
@@ -913,8 +928,11 @@ mod tests {
             }),
         ]));
 
+        // Non-empty content must still pass the complete-attempt acceptance
+        // judgment, and a late read error must not reopen the terminal.
         let response =
-            build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_events_with_context(
+            build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
+                V3HubProviderWireProtocol::Anthropic,
                 provider,
                 &observation,
                 &V3AnthropicResponsesProjectionContext::default(),
@@ -923,6 +941,36 @@ mod tests {
             .expect("a late provider read error cannot reopen a confirmed Anthropic terminal");
 
         assert_eq!(response["status"], "completed");
+        assert_eq!(response["output"][0]["content"][0]["text"], "done");
+    }
+
+    #[tokio::test]
+    async fn anthropic_empty_complete_terminal_is_internal_502() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![Ok(
+            b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_empty_terminal\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude\",\"content\":[]}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec(),
+        )]));
+
+        // The empty-attempt judgment is owned by the complete-attempt success
+        // acceptance dispatcher, so drive it through that entry point.
+        let error =
+            build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
+                V3HubProviderWireProtocol::Anthropic,
+                provider,
+                &observation,
+                &V3AnthropicResponsesProjectionContext::default(),
+            )
+            .await
+            .expect_err("an empty complete Anthropic attempt must become an internal 502");
+
+        assert!(matches!(
+            error,
+            V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure {
+                status: 502,
+                ref code,
+                ..
+            } if code == "provider_response_empty"
+        ));
     }
 
     #[tokio::test]

@@ -1413,6 +1413,7 @@ dependencies = [
 name = "routecodex-v3-server"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "axum",
  "futures-util",
  "hyper",
@@ -1423,6 +1424,7 @@ dependencies = [
  "routecodex-v3-config",
  "routecodex-v3-debug",
  "routecodex-v3-error",
+ "routecodex-v3-provider-responses",
  "routecodex-v3-runtime",
  "routecodex-v3-sse",
  "serde",

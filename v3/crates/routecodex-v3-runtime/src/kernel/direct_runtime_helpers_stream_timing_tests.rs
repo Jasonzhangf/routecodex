@@ -738,3 +738,71 @@ async fn direct_chat_sse_synthesizes_client_done_when_provider_omits_it() {
     );
     assert_eq!(text.matches("data: [DONE]").count(), 1, "{text}");
 }
+
+#[tokio::test]
+async fn direct_sse_empty_complete_anthropic_terminal_is_provider_failure() {
+    // A complete Anthropic success with no business content
+    // (`message_start content:[] -> end_turn -> message_stop`) must not seal a
+    // normal empty completion on the Direct path. It is a typed provider
+    // failure for the resident owner to reselect/abort, never a client error.
+    let provider: V3ClientSseStream = Box::pin(stream::iter([Ok(
+        concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_empty\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude\",\"content\":[]}}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        )
+        .as_bytes()
+        .to_vec(),
+    )]));
+    let error = collect_direct_sse_attempt_after_terminal(
+        test_direct_sse_attempt_stream(
+            provider,
+            crate::hub_v1::V3HubProviderWireProtocol::Anthropic,
+        ),
+        crate::hub_v1::V3HubProviderWireProtocol::Anthropic,
+        crate::nodes::V3AttemptBudget::process_default(),
+    )
+    .await
+    .expect_err("an empty complete Direct SSE attempt must become a provider failure");
+    assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
+    assert_eq!(error.code, "provider_response_empty");
+}
+
+#[tokio::test]
+async fn direct_sse_text_anthropic_terminal_still_seals() {
+    // Non-empty business content must still pass the Direct complete-attempt
+    // judgment and seal a normal client stream.
+    let provider: V3ClientSseStream = Box::pin(stream::iter([Ok(
+        concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_text\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude\",\"content\":[]}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"done\"}}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        )
+        .as_bytes()
+        .to_vec(),
+    )]));
+    let frames = collect_direct_sse_attempt_after_terminal(
+        test_direct_sse_attempt_stream(
+            provider,
+            crate::hub_v1::V3HubProviderWireProtocol::Anthropic,
+        ),
+        crate::hub_v1::V3HubProviderWireProtocol::Anthropic,
+        crate::nodes::V3AttemptBudget::process_default(),
+    )
+    .await
+    .expect("a text-bearing Direct SSE attempt must seal")
+    .collect::<Vec<_>>()
+    .await;
+    let text = String::from_utf8(frames.concat()).unwrap();
+    assert!(text.contains("done"), "{text}");
+}

@@ -775,6 +775,12 @@ fn observe_relay_client_sse_usage_chunk(
                 // migration scope. They still use the independent transport object;
                 // their protocol semantic migration is a later owner transition.
                 observation.record_provider_event_json(event)?;
+                if matches!(protocol, V3HubEntryProtocol::Gemini)
+                    && super::v3_gemini_prompt_feedback_is_terminal(event)
+                {
+                    observation
+                        .record_semantic_terminal(super::V3RuntimeSemanticTerminal::Success)?;
+                }
             }
         }
     }

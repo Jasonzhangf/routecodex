@@ -9454,6 +9454,104 @@ async fn invalid_http_boundaries_fail_before_runtime_with_typed_error_chain() {
     handle.shutdown().await;
 }
 
+/// Request-lane evidence for issue b878f6c: a real POST that fails at the
+/// request boundary enters the typed Error chain (`node=V3Error06ClientProjected`)
+/// and breaks the client transport, without any provider attempt and without any
+/// provider-health mutation.
+///
+/// `invalid_http_boundaries_fail_before_runtime_with_typed_error_chain` already
+/// proves the transport break and that no Runtime node is entered. This case adds
+/// the two missing side-effect checks against a live controlled upstream: the
+/// provider is never contacted, and no untried `provider.model.key` is cooled.
+#[tokio::test]
+async fn request_boundary_error_makes_no_provider_attempt_and_no_health_mutation() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("request-boundary-error-lane");
+    let (provider_base_url, mut captures, upstream_shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-request-boundary-error-lane");
+    let mut manifest = p6_manifest(free_port(), free_port(), &provider_base_url);
+    // `p6_manifest` disables provider health; enable it so a spurious cooldown
+    // caused by a request-boundary error would be observable.
+    let provider = manifest.providers.get_mut("test").unwrap();
+    let health = provider
+        .health
+        .as_mut()
+        .expect("p6 manifest declares provider health");
+    health.enabled = true;
+    health.failure_threshold = 1;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let client = reqwest::Client::new();
+
+    // Each request fails at the request boundary: an unknown path, a protocol
+    // that is not enabled on this listener, and a malformed JSON body.
+    for (path, content_type, body) in [
+        (
+            "/v1/unknown",
+            Some("application/json"),
+            r#"{"model":"client-test","input":"x"}"#,
+        ),
+        (
+            "/v1/messages",
+            Some("application/json"),
+            r#"{"model":"client-test","messages":[]}"#,
+        ),
+        ("/v1/responses", Some("application/json"), "{"),
+    ] {
+        let mut request = client.post(format!("{base}{path}"));
+        if let Some(content_type) = content_type {
+            request = request.header("content-type", content_type);
+        }
+        let response = timeout(Duration::from_secs(5), request.body(body).send())
+            .await
+            .expect("a request-boundary error must terminate the transport");
+        assert!(
+            response.is_err(),
+            "{path} must break the client transport, not deliver an error or empty completion"
+        );
+    }
+
+    // No provider attempt was made for any boundary error.
+    assert!(
+        captures.try_recv().is_err(),
+        "a request-boundary error must not reach the provider"
+    );
+    // No untried provider identity was cooled.
+    let pool: Value = client
+        .get(format!("{base}/_routecodex/health/cooldown-pool"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        pool["entries"].as_array().map(Vec::len),
+        Some(0),
+        "a request-boundary error must not mutate provider health: {pool}"
+    );
+
+    // Positive control: the provider channel is live, so the empty capture above
+    // is meaningful. A valid request is forwarded and captured.
+    let ok = client
+        .post(format!("{base}/v1/responses"))
+        .header("content-type", "application/json")
+        .json(&json!({"model":"client-test","input":"hello"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok.status(), StatusCode::OK);
+    let capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .expect("the controlled provider must receive the valid request")
+        .expect("the capture channel stays open");
+    assert_eq!(capture.body["model"], "wire-test");
+
+    handle.shutdown().await;
+    upstream_shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
 #[tokio::test]
 async fn observability_projection_is_isolated_per_listener() {
     let _test_guard = TEST_LOCK.lock().await;

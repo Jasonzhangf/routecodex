@@ -2962,6 +2962,26 @@ resources:
     may_enter_metadata_center: false
     binding_status: active
 
+  - resource_id: v3.runtime.provider_attempt_business_control
+    resource_kind: provider_attempt_control
+    lifecycle: v3.provider.attempt_until_terminal
+    owner_feature_id: v3.provider_response_error_policy_closeout
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3RuntimeStreamObservation
+    owner_module: provider_attempt_business_content
+    identity: [requestId, attemptId, providerKey, protocol]
+    allowed_writers: [V3RuntimeStreamObservation::record_provider_business_content]
+    allowed_readers: [V3RuntimeStreamObservation::has_provider_business_content, execute_v3_relay_runtime_core]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-sse, MetadataCenter, debug.snapshot]
+    semantic_contract:
+      aggregation: The typed control field starts false for each provider attempt and accumulates real business facts by logical OR.
+      source: Validated provider events supply business facts; diagnostic snapshots and usage never supply admission decisions.
+      terminal: A later empty terminal does not clear prior business content; a new candidate gets a new attempt control.
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: active
+
   - resource_id: v3.execution.request_lifecycle_control
     resource_kind: request_local_control
     lifecycle: v3.execution_control_payload_architecture
