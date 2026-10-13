@@ -51,6 +51,8 @@ features:
   change_risk: high
   owner_kind: provider_health_model_identity
   owner_modules:
+  - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health/runtime_projection.rs
   - v3/crates/routecodex-v3-provider-responses/src/key_health.rs
   - v3/crates/routecodex-v3-provider-responses/tests/provider_key_health_contract.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests.rs
@@ -64,6 +66,9 @@ features:
   - same provider and auth key remain available for a different model
   - legacy model-specific entries remain isolated during migration
   - health score changes never modify configured priority or move a candidate across priority buckets
+  - every configured or unseen provider+interface+auth+model identity starts at score 100
+  - repeated success caps score at 150 and the next -5 deduction yields 145 without hidden credit
+  - a globally scored identity reaching score 0 enters the exact-identity cooldown and a valid HTTP 2xx probe restores score 100
   - after prolonged backup success traffic, a semantic probe recovery returns the primary to Target selection immediately
   - One recoverable provider failure immediately cools the exact providerId+interfaceId+authAlias+model identity; a successful semantic probe or real success clears the cooldown.
   required_negative:
@@ -73,7 +78,8 @@ features:
   - mainline caller/callee symbols, edge owners, and resource writer/reader bindings must resolve to the registered modules
   - key health state never enters provider or client payload
   required_gates:
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test first_failure_cooldown_blackbox -- --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_first_failure_cooldown_blackbox -- --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test cooldown_manual_actions_managed -- --nocapture
   - npm run test:v3-provider-health-contract
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime recovered_primary_failback_is_not_starved_by_backup_successes -- --nocapture
   - npm run verify:v3-resource-map
