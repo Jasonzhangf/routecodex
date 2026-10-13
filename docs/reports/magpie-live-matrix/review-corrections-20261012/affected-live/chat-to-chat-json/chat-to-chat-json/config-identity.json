@@ -1,0 +1,58 @@
+{
+  "path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/review-live-verify/chat-to-chat-json/chat-to-chat-json/v3-protocol-live-mock-lifecycle-fmMNnR/config.toml",
+  "state": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/review-live-verify/chat-to-chat-json/chat-to-chat-json/v3-protocol-live-mock-lifecycle-fmMNnR/state",
+  "listeners": [
+    {
+      "role": "primary",
+      "server_id": "loopback",
+      "host": "127.0.0.1",
+      "port": 49972
+    },
+    {
+      "role": "admin_webui",
+      "server_id": "admin_webui",
+      "host": "127.0.0.1",
+      "port": 49973
+    }
+  ],
+  "admin_bind": "127.0.0.1:49973",
+  "env": {
+    "ROUTECODEX_V3_ADMIN_BIND": "127.0.0.1:49973"
+  },
+  "mode": "direct",
+  "model": "mock.chat-model",
+  "wire_model": "chat-model",
+  "runtime_setup": null,
+  "provider_files": [
+    {
+      "provider_id": "mock-openai_chat",
+      "path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/review-live-verify/chat-to-chat-json/chat-to-chat-json/v3-protocol-live-mock-lifecycle-fmMNnR/provider/mock-openai_chat/config.v2.toml",
+      "written_path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/review-live-verify/chat-to-chat-json/chat-to-chat-json/provider.toml",
+      "model": "mock.chat-model",
+      "wire_model": "chat-model",
+      "sha256": "e949bc0e5a94a1ccd09f78aa883945bc39dd700a6d61e9df35127e6291614eab"
+    }
+  ],
+  "candidate_identity_receipts": {
+    "validated": true,
+    "protocol": "openai_chat",
+    "wire_model": "chat-model",
+    "tier_count": 1,
+    "candidates": [
+      {
+        "candidate_id": "mock-openai_chat/mock.chat-model",
+        "provider_id": "mock-openai_chat",
+        "model": "mock.chat-model",
+        "wire_model": "chat-model",
+        "provider_path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/review-live-verify/chat-to-chat-json/chat-to-chat-json/v3-protocol-live-mock-lifecycle-fmMNnR/provider/mock-openai_chat/config.v2.toml",
+        "provider_sha256": "e949bc0e5a94a1ccd09f78aa883945bc39dd700a6d61e9df35127e6291614eab",
+        "auth_token": "fake-loopback-token",
+        "authorization": "Bearer fake-loopback-token",
+        "declared": true
+      }
+    ]
+  },
+  "candidate_ids": [
+    "mock-openai_chat/mock.chat-model"
+  ]
+}

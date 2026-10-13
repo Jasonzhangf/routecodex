@@ -1,0 +1,339 @@
+{
+  "case_id": "responses-to-gemini-json",
+  "turn": 1,
+  "turn_id": null,
+  "request_source": "fixture",
+  "request": {
+    "method": "POST",
+    "path": "/v1/responses",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body_text": "{\"model\":\"mock.gemini-model\",\"input\":\"hello\",\"stream\":false}"
+  },
+  "client_response": {
+    "url": "http://127.0.0.1:57204/v1/responses",
+    "method": "POST",
+    "request_headers": {
+      "content-type": "application/json"
+    },
+    "status": 200,
+    "status_text": "OK",
+    "headers": {
+      "content-type": "application/json",
+      "connection": "close",
+      "transfer-encoding": "chunked",
+      "date": "Mon, 12 Oct 2026 16:37:27 GMT"
+    },
+    "raw_headers": [
+      "content-type",
+      "application/json",
+      "connection",
+      "close",
+      "transfer-encoding",
+      "chunked",
+      "date",
+      "Mon, 12 Oct 2026 16:37:27 GMT"
+    ],
+    "body": {
+      "candidates": [
+        {
+          "content": {
+            "parts": [
+              {
+                "text": "ok"
+              }
+            ],
+            "role": "model"
+          },
+          "finishReason": "STOP"
+        }
+      ],
+      "usage": {
+        "input_tokens": 2
+      },
+      "usageMetadata": {
+        "candidatesTokenCount": 2,
+        "promptTokenCount": 7,
+        "totalTokenCount": 9
+      }
+    },
+    "bodyText": "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}],\"role\":\"model\"},\"finishReason\":\"STOP\"}],\"usage\":{\"input_tokens\":2},\"usageMetadata\":{\"candidatesTokenCount\":2,\"promptTokenCount\":7,\"totalTokenCount\":9}}",
+    "bodyBytes": {
+      "type": "Buffer",
+      "data": [
+        123,
+        34,
+        99,
+        97,
+        110,
+        100,
+        105,
+        100,
+        97,
+        116,
+        101,
+        115,
+        34,
+        58,
+        91,
+        123,
+        34,
+        99,
+        111,
+        110,
+        116,
+        101,
+        110,
+        116,
+        34,
+        58,
+        123,
+        34,
+        112,
+        97,
+        114,
+        116,
+        115,
+        34,
+        58,
+        91,
+        123,
+        34,
+        116,
+        101,
+        120,
+        116,
+        34,
+        58,
+        34,
+        111,
+        107,
+        34,
+        125,
+        93,
+        44,
+        34,
+        114,
+        111,
+        108,
+        101,
+        34,
+        58,
+        34,
+        109,
+        111,
+        100,
+        101,
+        108,
+        34,
+        125,
+        44,
+        34,
+        102,
+        105,
+        110,
+        105,
+        115,
+        104,
+        82,
+        101,
+        97,
+        115,
+        111,
+        110,
+        34,
+        58,
+        34,
+        83,
+        84,
+        79,
+        80,
+        34,
+        125,
+        93,
+        44,
+        34,
+        117,
+        115,
+        97,
+        103,
+        101,
+        34,
+        58,
+        123,
+        34,
+        105,
+        110,
+        112,
+        117,
+        116,
+        95,
+        116,
+        111,
+        107,
+        101,
+        110,
+        115,
+        34,
+        58,
+        50,
+        125,
+        44,
+        34,
+        117,
+        115,
+        97,
+        103,
+        101,
+        77,
+        101,
+        116,
+        97,
+        100,
+        97,
+        116,
+        97,
+        34,
+        58,
+        123,
+        34,
+        99,
+        97,
+        110,
+        100,
+        105,
+        100,
+        97,
+        116,
+        101,
+        115,
+        84,
+        111,
+        107,
+        101,
+        110,
+        67,
+        111,
+        117,
+        110,
+        116,
+        34,
+        58,
+        50,
+        44,
+        34,
+        112,
+        114,
+        111,
+        109,
+        112,
+        116,
+        84,
+        111,
+        107,
+        101,
+        110,
+        67,
+        111,
+        117,
+        110,
+        116,
+        34,
+        58,
+        55,
+        44,
+        34,
+        116,
+        111,
+        116,
+        97,
+        108,
+        84,
+        111,
+        107,
+        101,
+        110,
+        67,
+        111,
+        117,
+        110,
+        116,
+        34,
+        58,
+        57,
+        125,
+        125
+      ]
+    },
+    "bodyBytesBase64": "eyJjYW5kaWRhdGVzIjpbeyJjb250ZW50Ijp7InBhcnRzIjpbeyJ0ZXh0Ijoib2sifV0sInJvbGUiOiJtb2RlbCJ9LCJmaW5pc2hSZWFzb24iOiJTVE9QIn1dLCJ1c2FnZSI6eyJpbnB1dF90b2tlbnMiOjJ9LCJ1c2FnZU1ldGFkYXRhIjp7ImNhbmRpZGF0ZXNUb2tlbkNvdW50IjoyLCJwcm9tcHRUb2tlbkNvdW50Ijo3LCJ0b3RhbFRva2VuQ291bnQiOjl9fQ==",
+    "response_ended": true,
+    "complete": true,
+    "closed": false,
+    "aborted": false,
+    "truncated": false,
+    "elapsed_ms": 41,
+    "error": null,
+    "error_detail": null
+  },
+  "observation": {
+    "protocol": "responses",
+    "kind": "json",
+    "content_type": "application/json",
+    "ok": true,
+    "body": {
+      "candidates": [
+        {
+          "content": {
+            "parts": [
+              {
+                "text": "ok"
+              }
+            ],
+            "role": "model"
+          },
+          "finishReason": "STOP"
+        }
+      ],
+      "usage": {
+        "input_tokens": 2
+      },
+      "usageMetadata": {
+        "candidatesTokenCount": 2,
+        "promptTokenCount": 7,
+        "totalTokenCount": 9
+      }
+    },
+    "semantic": {
+      "candidates": [
+        {
+          "content": {
+            "parts": [
+              {
+                "text": "ok"
+              }
+            ],
+            "role": "model"
+          },
+          "finishReason": "STOP"
+        }
+      ],
+      "usage": {
+        "input_tokens": 2
+      },
+      "usageMetadata": {
+        "candidatesTokenCount": 2,
+        "promptTokenCount": 7,
+        "totalTokenCount": 9
+      }
+    }
+  },
+  "diagnostics": [
+    "provider body_must contents.0.role mismatch",
+    "provider body_must contents.0.parts.0.text mismatch",
+    "provider auth missing or empty for gemini carrier",
+    "client body_must output.0.content.0.text missing",
+    "client body_must status missing",
+    "semantic terminal missing from client output"
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "path": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/installed-baseline-20261012/gemini-to-anthropic-sse/v3-protocol-live-mock-lifecycle-FCgomv/config.toml",
+  "state": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/installed-baseline-20261012/gemini-to-anthropic-sse/v3-protocol-live-mock-lifecycle-FCgomv/state",
+  "listeners": [
+    {
+      "role": "primary",
+      "server_id": "loopback",
+      "host": "127.0.0.1",
+      "port": 56961
+    },
+    {
+      "role": "admin_webui",
+      "server_id": "admin_webui",
+      "host": "127.0.0.1",
+      "port": 56962
+    }
+  ],
+  "admin_bind": "127.0.0.1:56962",
+  "env": {
+    "ROUTECODEX_V3_ADMIN_BIND": "127.0.0.1:56962"
+  },
+  "mode": "relay",
+  "model": "mock.anthropic-model",
+  "wire_model": "anthropic-model",
+  "runtime_setup": null
+}

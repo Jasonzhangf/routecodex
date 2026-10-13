@@ -1,0 +1,26 @@
+{
+  "path": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/installed-baseline-20261012/gemini-to-gemini-sse/v3-protocol-live-mock-lifecycle-lcUvBt/config.toml",
+  "state": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/installed-baseline-20261012/gemini-to-gemini-sse/v3-protocol-live-mock-lifecycle-lcUvBt/state",
+  "listeners": [
+    {
+      "role": "primary",
+      "server_id": "loopback",
+      "host": "127.0.0.1",
+      "port": 57015
+    },
+    {
+      "role": "admin_webui",
+      "server_id": "admin_webui",
+      "host": "127.0.0.1",
+      "port": 57016
+    }
+  ],
+  "admin_bind": "127.0.0.1:57016",
+  "env": {
+    "ROUTECODEX_V3_ADMIN_BIND": "127.0.0.1:57016"
+  },
+  "mode": "direct",
+  "model": "mock.gemini-model",
+  "wire_model": "gemini-model",
+  "runtime_setup": null
+}

@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "case_id": "provider-error-exhaustion",
+  "cell": {"entry_protocol": "openai_chat", "provider_protocol": "openai_chat", "transport": "json", "mode": "direct"},
+  "client_request": {
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "headers": {"content-type": "application/json"},
+    "body": {"model": "mock.unavailable-model", "messages": [{"role": "user", "content": "trigger controlled error"}], "stream": false}
+  },
+  "expected_provider": {
+    "paths": ["/v1/chat/completions"],
+    "method": "POST",
+    "auth_required": true,
+    "body_must": {"model": "unavailable-model", "messages.0.content": "trigger controlled error", "stream": false},
+    "body_must_not": ["routecodex_internal", "metadata_center", "debug_snapshot"],
+    "exact": null
+  },
+  "upstream_response": {
+    "protocol": "openai_chat",
+    "mode": "json",
+    "status": 429,
+    "content_type": "application/json",
+    "body": {"error": {"type": "rate_limit_error", "message": "controlled rate limit"}}
+  },
+  "expected_client": {
+    "transport": "closed",
+    "status": null,
+    "body_must": {},
+    "body_must_not": ["rate_limit_error", "controlled rate limit", "provider_error", "internal_error", "routecodex_internal", "metadata_center"],
+    "semantic_terminal_required": false
+  },
+  "assertions": {"provider_attempt_count": 1, "probe_attempts_may_occur": true, "no_control_leakage": true},
+  "runtime_setup": {
+    "provider_id": "mock-chat",
+    "model": "mock.unavailable-model",
+    "wire_model": "unavailable-model",
+    "candidate_ids": ["mock-chat/mock.unavailable-model"],
+    "all_candidates_fail": true
+  },
+  "source": {
+    "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
+    "files": ["internal/gateway/stream_error_open_test.go"],
+    "tests": ["internal/gateway/stream_error_open_test.go::TestStreamErrorKeptOpenFailsOverAtOnce"],
+    "adaptation": "The provider error body is used only as an error stimulus. Current RCC requirement closes the exhausted client connection and never returns the provider error."
+  },
+  "contract_differences": [
+    {"source_behavior": "Magpie reports the provider error to the client when no account remains.", "rcc_requirement": "Provider errors stay internal; on exhaustion close the client connection with no substitute error or success."}
+  ]
+}

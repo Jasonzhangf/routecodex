@@ -1,0 +1,2 @@
+reverted(no-coalesce) output_items= 3 call_ids= ["call_echo_1","call_echo_1","call_echo_1"]
+current(fixed) output_items= 1 call_ids= ["call_echo_1"]

@@ -1,0 +1,15 @@
+{
+  "pid": 90124,
+  "ready": true,
+  "running": false,
+  "exit_receipt": {
+    "pid": 90124,
+    "kind": "exit",
+    "exit_code": 0,
+    "signal": null,
+    "at_epoch_ms": 1791823047126,
+    "error": null
+  },
+  "stdout": "[RouteCodexV3] rccv3 server start --foreground version=0.90.4886 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 config=/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/installed-baseline-20261012/responses-to-gemini-json/v3-protocol-live-mock-lifecycle-7K2rpJ/config.toml snap=false snapall=false snap_stages= debug=false\n\u001b[36m[server:startup          ][-                   ][-                                   ] ✅ [RouteCodexV3]        09:37:26 Server started\u001b[0m\u001b[2;90m  [sessionID:-]                                                                                    event=started version=0.90.4886 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 addresses=127.0.0.1:57204, 127.0.0.1:57205\u001b[0m\n[RouteCodexV3] Server started version=0.90.4886 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 on 127.0.0.1:57204, 127.0.0.1:57205\n\u001b[38;2;229;205;44m[57204:responses         ][-                   ][thinking:mock-gemini[key1].gemini-model] ▶ [/v1/responses]        09:37:27 [#1/1]             route=thinking target=mock-gemini[key1].gemini-model reason=pool:thinking\u001b[0m\u001b[2;90m  [sessionID:rcc-session:request:openai-responses-router-mock.gemini-model-20261012T093727071-1-1] [virtual-router-hit]     09:37:27 req=openai-responses-router-mock.gemini-model-20261012T093727071-1-1 event=route_selected route=thinking target=mock-gemini[key1].gemini-model reason=pool:thinking\u001b[0m\n",
+  "stderr": "\u001b[31m[57204:responses         ][-                   ][thinking:mock-gemini[key1].gemini-model] ❌ [/v1/responses]       09:37:27 req=openai-responses-router-mock.gemini-model-20261012T093727071-1-1 event=failed status=500 error=V3E3 subcode=runtime_observability_contract node=V3Error06ClientProjected message=successful V3 Runtime observability is missing response_status\u001b[0m\u001b[2;90m  [sessionID:rcc-session:request:openai-responses-router-mock.gemini-model-20261012T093727071-1-1] ❌ [/v1/responses]       09:37:27 req=openai-responses-router-mock.gemini-model-20261012T093727071-1-1 event=failed status=500 error=V3E3 subcode=runtime_observability_contract node=V3Error06ClientProjected message=successful V3 Runtime observability is missing response_status\u001b[0m\n"
+}

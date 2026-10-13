@@ -1,0 +1,61 @@
+{
+  "case_id": "namespace-custom-complete-args",
+  "turn": 2,
+  "turn_id": "namespace-followup",
+  "request_source": "fixture-declared",
+  "request": {
+    "method": "POST",
+    "path": "/v1/responses",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body_text": "{\"model\":\"mock.chat-model\",\"input\":[{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"go\"}]},{\"type\":\"function_call\",\"call_id\":\"call_ns_1\",\"name\":\"spawn_agent\",\"namespace\":\"collaboration\",\"arguments\":\"{\\\"message\\\":\\\"do work\\\"}\"},{\"type\":\"function_call_output\",\"call_id\":\"call_ns_1\",\"output\":\"agent started\"}],\"stream\":false}"
+  },
+  "client_response": {
+    "url": "http://127.0.0.1:57090/v1/responses",
+    "method": "POST",
+    "request_headers": {
+      "content-type": "application/json"
+    },
+    "status": null,
+    "status_text": null,
+    "headers": {},
+    "raw_headers": [],
+    "body": null,
+    "bodyText": "",
+    "bodyBytes": {
+      "type": "Buffer",
+      "data": []
+    },
+    "bodyBytesBase64": "",
+    "response_ended": false,
+    "complete": null,
+    "closed": true,
+    "aborted": false,
+    "truncated": false,
+    "elapsed_ms": 2,
+    "error": "socket hang up",
+    "error_detail": {
+      "name": "Error",
+      "message": "socket hang up",
+      "code": "ECONNRESET",
+      "errno": null,
+      "syscall": null,
+      "stack": "Error: socket hang up\n    at Socket.socketOnEnd (node:_http_client:599:25)\n    at Socket.emit (node:events:531:35)\n    at endReadableNT (node:internal/streams/readable:1698:12)\n    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)"
+    }
+  },
+  "observation": {
+    "protocol": "responses",
+    "kind": "unknown",
+    "content_type": "",
+    "ok": false,
+    "error": "empty_body"
+  },
+  "diagnostics": [
+    "provider attempt count 0 != scripted 1 for turn 2",
+    "provider business attempt missing for turn 1",
+    "client status missing for completed response",
+    "client body_must output.0.content.0.text missing",
+    "client body_must status missing"
+  ]
+}

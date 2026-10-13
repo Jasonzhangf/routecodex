@@ -1,0 +1,15 @@
+{
+  "pid": 83441,
+  "ready": true,
+  "running": false,
+  "exit_receipt": {
+    "pid": 83441,
+    "kind": "exit",
+    "exit_code": 0,
+    "signal": null,
+    "at_epoch_ms": 1791823032723,
+    "error": null
+  },
+  "stdout": "[RouteCodexV3] rccv3 server start --foreground version=0.90.4886 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 config=/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/installed-baseline-20261012/anthropic-to-anthropic-json/v3-protocol-live-mock-lifecycle-iU93VG/config.toml snap=false snapall=false snap_stages= debug=false\n\u001b[36m[server:startup          ][-                   ][-                                   ] ✅ [RouteCodexV3]        09:37:12 Server started\u001b[0m\u001b[2;90m  [sessionID:-]                                                                                    event=started version=0.90.4886 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 addresses=127.0.0.1:56730, 127.0.0.1:56731\u001b[0m\n[RouteCodexV3] Server started version=0.90.4886 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 on 127.0.0.1:56730, 127.0.0.1:56731\n\u001b[38;2;236;157;91m[56730:anthropic         ][-                   ][default:mock-anthropic[key1].anthropic-model] ▶ [/v1/messages]         09:37:12 [#1/1]             route=default target=mock-anthropic[key1].anthropic-model reason=pool:default\u001b[0m\u001b[2;90m  [sessionID:rcc-session:request:anthropic-messages-router-mock.anthropic-model-20261012T093712656-1-1] [virtual-router-hit]     09:37:12 req=anthropic-messages-router-mock.anthropic-model-20261012T093712656-1-1 event=route_selected route=default target=mock-anthropic[key1].anthropic-model reason=pool:default\u001b[0m\n\u001b[38;2;236;157;91m[56730:anthropic         ][-                   ][default:mock-anthropic[key1].anthropic-model] ✅ [/v1/messages]        09:37:12 [#1/1]             status=200 responseStatus=completed finish_reason=end_turn elapsedMs=44.9 reason=pool:default usage_in=7 usage_out=2 usage_total=9 time_i=32.7ms time_e=4.3ms time_t=44.9ms transport=json\u001b[0m\u001b[2;90m  [sessionID:rcc-session:request:anthropic-messages-router-mock.anthropic-model-20261012T093712656-1-1] ✅ [/v1/messages]        09:37:12 req=anthropic-messages-router-mock.anthropic-model-20261012T093712656-1-1 event=completed detail=[usage] status=200 responseStatus=completed finish_reason=end_turn elapsedMs=44.9 reason=pool:default usage_in=7 usage_out=2 usage_cache=0 usage_total=9 time_i=32.7ms time_e=4.3ms time_t=44.9ms nodes=15 transport=json\u001b[0m\n",
+  "stderr": ""
+}

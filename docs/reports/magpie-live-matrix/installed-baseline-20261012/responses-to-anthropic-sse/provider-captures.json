@@ -1,0 +1,104 @@
+[
+  {
+    "phase": "case",
+    "case_id": "responses-to-anthropic-sse",
+    "turn": 0,
+    "attempt": 0,
+    "attempt_kind": "business",
+    "protocol": "anthropic",
+    "method": "POST",
+    "path": "/v1/messages",
+    "query": "?beta=true",
+    "headers": {
+      "accept": "text/event-stream",
+      "authorization": "Bearer fake-loopback-token",
+      "x-api-key": "fake-loopback-token",
+      "anthropic-version": "2023-06-01",
+      "anthropic-beta": "claude-code-20250219,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,effort-2025-11-24,fallback-credit-2026-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+      "x-app": "cli",
+      "user-agent": "claude-cli/2.1.220 (external, sdk-cli)",
+      "x-stainless-lang": "js",
+      "x-stainless-package-version": "0.94.0",
+      "x-stainless-runtime": "node",
+      "x-stainless-retry-count": "0",
+      "x-stainless-timeout": "300",
+      "content-type": "application/json",
+      "host": "127.0.0.1:57161",
+      "content-length": "113"
+    },
+    "content_type": "application/json",
+    "raw_body": "{\"messages\":[{\"content\":[{\"text\":\"hello\",\"type\":\"text\"}],\"role\":\"user\"}],\"model\":\"anthropic-model\",\"stream\":true}",
+    "body": {
+      "messages": [
+        {
+          "content": [
+            {
+              "text": "hello",
+              "type": "text"
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "model": "anthropic-model",
+      "stream": true
+    },
+    "body_parsed": true,
+    "captured_at_epoch_ms": 1791823046094,
+    "response_script": {
+      "protocol": "anthropic",
+      "mode": "sse",
+      "status": 200,
+      "content_type": "text/event-stream",
+      "sse_events": [
+        {
+          "event": "message_start",
+          "data": {
+            "type": "message_start",
+            "message": {
+              "id": "msg_responses_to_anthropic_sse",
+              "type": "message",
+              "role": "assistant",
+              "content": [],
+              "usage": {
+                "input_tokens": 7,
+                "output_tokens": 0
+              }
+            }
+          }
+        },
+        {
+          "event": "content_block_delta",
+          "data": {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {
+              "type": "text_delta",
+              "text": "ok"
+            }
+          }
+        },
+        {
+          "event": "message_delta",
+          "data": {
+            "type": "message_delta",
+            "delta": {
+              "stop_reason": "end_turn"
+            },
+            "usage": {
+              "output_tokens": 2
+            }
+          }
+        },
+        {
+          "event": "message_stop",
+          "data": {
+            "type": "message_stop"
+          }
+        }
+      ]
+    },
+    "attempt_repeated": false
+  }
+]
