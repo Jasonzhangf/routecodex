@@ -214,6 +214,142 @@ chains:
       produces: [v3.target.concrete_provider]
       side_channel_reads: [v3.provider.scheduling_projection]
       side_channel_writes: []
+- chain_id: v3.provider_oauth_credentials.mainline
+  owner_feature_id: v3.provider_oauth_credentials
+  summary: Config compiles typed OAuth declarations without reading credentials; Provider resolves the declared source and store, refreshes only when the access token is due, and keeps HTTP refresh in the Provider transport owner.
+  edges:
+  - step_id: v3-oauth-01
+    from_node: V3ProviderOAuthAuthoring
+    to_node: V3ProviderOAuthDeclaration
+    caller_symbol: compile_auth
+    caller_file: v3/crates/routecodex-v3-config/src/validate/auth.rs
+    callee_symbol: compile_oauth_auth_entry
+    callee_file: v3/crates/routecodex-v3-config/src/validate/auth.rs
+    status: anchored
+    owner_feature_id: v3.provider_oauth_credentials
+    resource_flow:
+      consumes: [v3.config.authoring_parsed]
+      produces: [v3.config.resource_registry]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-oauth-02
+    from_node: V3ProviderOAuthDeclaration
+    to_node: V3ProviderOAuthSecretHandle
+    caller_symbol: v3_provider_auth_secret_handle_from_declaration_fields
+    caller_file: v3/crates/routecodex-v3-provider-responses/src/wire.rs
+    callee_symbol: V3ProviderAuthSecretHandle::OAuth
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/wire.rs
+    status: anchored
+    owner_feature_id: v3.provider_oauth_credentials
+    resource_flow:
+      consumes: [v3.config.published_manifest]
+      produces: [v3.secret.provider_auth_handle]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-oauth-03
+    from_node: V3ProviderOAuthSecretHandle
+    to_node: V3ProviderOAuthAccessToken
+    caller_symbol: resolve_secret
+    caller_file: v3/crates/routecodex-v3-provider-responses/src/provider_auth.rs
+    callee_symbol: resolve_oauth_access_token_with_reqwest
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/shared.rs
+    status: anchored
+    owner_feature_id: v3.provider_oauth_credentials
+    resource_flow:
+      consumes: [v3.secret.provider_auth_handle]
+      produces: [v3.secret.provider_oauth_credential]
+      side_channel_reads: []
+      side_channel_writes:
+      - v3.secret.provider_oauth_credential
+  - step_id: v3-oauth-04
+    from_node: V3ProviderOAuthAccessToken
+    to_node: V3Transport13ResponsesHttpRequest
+    caller_symbol: resolve_oauth_access_token_with_reqwest
+    caller_file: v3/crates/routecodex-v3-provider-responses/src/shared.rs
+    callee_symbol: resolve_oauth_access_token_with_client
+    callee_file: v3/crates/routecodex-v3-oauth/src/resolver.rs
+    status: anchored
+    owner_feature_id: v3.provider_oauth_credentials
+    resource_flow:
+      consumes: [v3.secret.provider_oauth_credential]
+      produces: [v3.secret.provider_oauth_credential]
+      side_channel_reads:
+      - v3.secret.provider_oauth_credential
+      - v3.secret.provider_oauth_credential_state
+      side_channel_writes:
+      - v3.secret.provider_oauth_credential
+      - v3.secret.provider_oauth_credential_state
+  - step_id: v3-oauth-05
+    from_node: V3ProviderOAuthDeclaration
+    to_node: V3TargetCandidate
+    caller_symbol: expand_provider
+    caller_file: v3/crates/routecodex-v3-target/src/lib.rs
+    callee_symbol: V3TargetCandidate
+    callee_file: v3/crates/routecodex-v3-target/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.provider_oauth_credentials
+    resource_flow:
+      consumes: [v3.config.published_manifest]
+      produces: [v3.secret.provider_oauth_declaration]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-oauth-06
+    from_node: V3ProviderOAuthSecretHandle
+    to_node: V3OAuthSourceCredential
+    caller_symbol: resolve_oauth_access_token_with_client
+    caller_file: v3/crates/routecodex-v3-oauth/src/resolver.rs
+    callee_symbol: read_source
+    callee_file: v3/crates/routecodex-v3-oauth/src/resolver.rs
+    status: anchored
+    owner_feature_id: v3.provider_oauth_credentials
+    resource_flow:
+      consumes: [v3.secret.provider_oauth_declaration]
+      produces: [v3.secret.provider_oauth_credential]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-oauth-07
+    from_node: V3OAuthSourceCredential
+    to_node: V3OAuthCredentialStore
+    caller_symbol: resolve_oauth_access_token_with_client
+    caller_file: v3/crates/routecodex-v3-oauth/src/resolver.rs
+    callee_symbol: read_store_or_initialize
+    callee_file: v3/crates/routecodex-v3-oauth/src/resolver.rs
+    status: anchored
+    owner_feature_id: v3.provider_oauth_credentials
+    resource_flow:
+      consumes: [v3.secret.provider_oauth_credential]
+      produces: [v3.secret.provider_oauth_file_store]
+      side_channel_reads: [v3.secret.provider_oauth_file_store]
+      side_channel_writes:
+      - v3.secret.provider_oauth_file_store
+  - step_id: v3-oauth-08
+    from_node: V3OAuthCredentialStore
+    to_node: V3OAuthRefreshRequest
+    caller_symbol: refresh_credential
+    caller_file: v3/crates/routecodex-v3-oauth/src/resolver.rs
+    callee_symbol: V3OAuthRefreshClient::refresh
+    callee_file: v3/crates/routecodex-v3-oauth/src/resolver.rs
+    status: anchored
+    owner_feature_id: v3.provider_oauth_credentials
+    resource_flow:
+      consumes: [v3.secret.provider_oauth_credential]
+      produces: [v3.secret.provider_oauth_credential]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-oauth-09
+    from_node: V3OAuthError
+    to_node: V3Error01SourceRaised
+    caller_symbol: V3ProviderError::OAuthCredential
+    caller_file: v3/crates/routecodex-v3-provider-responses/src/provider_auth.rs
+    callee_symbol: build_v3_error_01_source_raised_internal
+    callee_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
+    status: anchored
+    owner_feature_id: v3.provider_oauth_credentials
+    resource_flow:
+      consumes: [v3.secret.provider_oauth_error]
+      produces: [v3.secret.provider_oauth_error]
+      side_channel_reads: []
+      side_channel_writes: []
 - chain_id: v3.global_binary_install
   owner_feature_id: v3.global_binary_install
   summary: The isolated Cargo build embeds the RouteCodex version, atomically publishes one Rust binary to the user bin directory, then creates same-directory command aliases without release snapshots.

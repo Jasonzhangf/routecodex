@@ -8,12 +8,15 @@
 //! symbols (`is_v3_anthropic_provider_request_header_name`,
 //! `V3Transport13ResponsesRequest`) the relay-parity closeout gate checks.
 use crate::wire::{V3ProviderAuthHandle, V3ProviderAuthSecretHandle};
-use crate::V3ProviderError;
+use crate::{V3ProviderCancellation, V3ProviderError};
+use std::time::Duration;
 
 pub(crate) async fn resolve_secret(
     request_id: &str,
     provider_id: &str,
     auth: &V3ProviderAuthHandle,
+    request_budget: Option<Duration>,
+    cancellation: Option<V3ProviderCancellation>,
 ) -> Result<String, V3ProviderError> {
     let secret = match &auth.secret {
         V3ProviderAuthSecretHandle::Environment(name) => {
@@ -51,6 +54,28 @@ pub(crate) async fn resolve_secret(
             })?
         }
         V3ProviderAuthSecretHandle::ApiKey(value) => expand_env_vars(value),
+        V3ProviderAuthSecretHandle::OAuth(declaration) => {
+            let resolution =
+                crate::shared::resolve_oauth_access_token_with_reqwest(declaration, request_budget);
+            let result = match cancellation {
+                Some(cancellation) => tokio::select! {
+                    _ = cancellation.cancelled() => {
+                        return Err(V3ProviderError::ClientDisconnect {
+                            request_id: request_id.to_string(),
+                            provider_id: provider_id.to_string(),
+                        });
+                    }
+                    result = resolution => result,
+                },
+                None => resolution.await,
+            };
+            result.map_err(|error| V3ProviderError::OAuthCredential {
+                request_id: request_id.to_string(),
+                provider_id: provider_id.to_string(),
+                auth_alias: auth.alias.clone(),
+                reason: error,
+            })?
+        }
     };
     let secret = secret.trim().to_string();
     if secret.is_empty() {

@@ -190,6 +190,7 @@ fn manifest_with_direct_provider() -> V3Config05ManifestPublished {
                     secret_file: None,
                     secret_key: None,
                     api_key: None,
+                    oauth_declaration: None,
                 }],
             },
             models: BTreeMap::from([(
@@ -1139,6 +1140,7 @@ fn implicit_capability_pool_round_robin_when_no_explicit_pool() {
                     secret_file: None,
                     secret_key: None,
                     api_key: None,
+                    oauth_declaration: None,
                 }],
             },
             models: BTreeMap::from([(

@@ -1282,6 +1282,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "chrono-tz",
+ "routecodex-v3-oauth",
  "serde",
  "serde_json",
  "sha2",
@@ -1351,6 +1352,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "routecodex-v3-oauth"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
 name = "routecodex-v3-provider-responses"
 version = "0.1.0"
 dependencies = [
@@ -1363,6 +1378,7 @@ dependencies = [
  "reqwest",
  "routecodex-v3-config",
  "routecodex-v3-error",
+ "routecodex-v3-oauth",
  "routecodex-v3-sse",
  "serde",
  "serde_json",

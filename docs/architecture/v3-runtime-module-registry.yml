@@ -70,6 +70,10 @@ modules:
     owner_feature_id: v3.memory_raw_capture
     owned_paths:
       - v3/crates/routecodex-v3-agent-memory/**
+  - module_id: v3.oauth_credentials
+    owner_feature_id: v3.provider_oauth_credentials
+    owned_paths:
+      - v3/crates/routecodex-v3-oauth/**
 
 responsibility_contracts:
   - contract_id: v3.execution_control_payload.runtime
