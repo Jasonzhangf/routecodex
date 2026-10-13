@@ -688,9 +688,9 @@ fn to_attempt_query_row(row: &SourceRow) -> QueryRow {
 }
 
 /// Classifies a failure row from the typed `error_category`, never from the
-/// status: `provider_status` is the *projected client* status, so a network
-/// failure also shows up as `502` there, while `error_category` is the only field
-/// that separates "the provider rejected us" from "we failed to get an answer".
+/// status: a provider transport failure also carries a projected client status,
+/// so the status code cannot separate "the provider rejected us" from "we failed
+/// to get an answer"; `error_category` is the typed field that does.
 ///
 /// The rule is deliberately **positive for `upstream` and open for `local`**: the
 /// category set is open-ended, so a closed allowlist of local categories would
@@ -721,6 +721,14 @@ fn row_error_origin_opt(row: &QueryRow) -> Option<&'static str> {
 }
 
 fn row_status_code(row: &QueryRow) -> String {
+    // Prefer the client-projected status: `provider_status` now carries only the
+    // real upstream HTTP status, while `projected_client_status` is the internal
+    // Error06 diagnostic. It does not imply an HTTP status was sent to the client.
+    // Fall back to the real provider status, then to the error category identity.
+    let projected_client_status = status_code_label(row.meta.get("projected_client_status"));
+    if projected_client_status != "unknown" {
+        return projected_client_status;
+    }
     let provider_status = status_code_label(row.meta.get("provider_status"));
     if provider_status != "unknown" {
         return provider_status;

@@ -4008,7 +4008,11 @@ fn error_projection_appends_human_console_failure_line() {
         .get(&format!("{}:req-error-console", state.server.port))
         .expect("Error06 projection must create a WebUI request row");
     assert_eq!(row.result.as_deref(), Some("error"));
-    assert_eq!(row.meta.provider_status, Some(500));
+    // The terminal Error06 projection records the client-projected status in its
+    // own typed field; it never assigns it to `provider_status`, which carries
+    // only a real upstream HTTP status (absent here: no provider response).
+    assert_eq!(row.meta.provider_status, None);
+    assert_eq!(row.meta.projected_client_status, Some(500));
     assert_eq!(row.meta.error_category.as_deref(), Some("runtime_error"));
     let observed = row
         .meta
@@ -4017,6 +4021,7 @@ fn error_projection_appends_human_console_failure_line() {
         .expect("typed Error06 truth must be projected into the row");
     assert_eq!(observed.source, "error06_projection");
     assert_eq!(observed.error_class.as_deref(), Some("runtime_failure"));
+    assert_eq!(observed.projected_client_status, Some(500));
     assert_eq!(
         observed.chain.len(),
         6,

@@ -1107,8 +1107,9 @@ async fn observability_keeps_provider_attempt_failures_visible_after_success() {
 }
 
 /// Same request row shape, with the typed error category chosen by the caller.
-/// `provider_status` stays the projected client status, which is why a local
-/// transport failure and a genuine upstream 502 both project `502`.
+/// The rendered status code is a refinement over the error identity: a local
+/// transport failure and a genuine upstream 502 can both project `502` while
+/// their `error_category` separates the origin.
 fn observability_attempt_row_with_category(
     request_key: &str,
     provider_status: u16,
