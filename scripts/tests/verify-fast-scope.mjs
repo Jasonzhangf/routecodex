@@ -30,7 +30,7 @@ const cases = [
   { relative: 'scripts/architecture/verify-agent-collab-protocol.mjs', contents: 'export const scopeFixture = true;\n', v3: false, v4: false },
   { relative: 'scripts/architecture/verify-agent-p0-payload-control-guard.mjs', contents: 'export const scopeFixture = true;\n', v3: false, v4: false },
   { relative: 'scripts/install-global.sh', contents: '#!/bin/sh\ntrue\n', v3: true, v4: false },
-  { relative: 'scripts/install-release.sh', contents: '#!/bin/sh\ntrue\n', v3: true, v4: false },
+  { relative: 'scripts/install-release.sh', contents: '#!/bin/bash\nset -euo pipefail\nvalues=("scope")\nprintf \'%s\\n\' "${values[0]}"\n', v3: true, v4: false },
   { relative: 'scripts/run-v3-cargo-test.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
   { relative: 'scripts/tests/v3-scope-fixture.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
   { relative: '.agents/skills/rcc-dev-skills/references/96-v3-selected-provider-model-binding-sop.md', v3: true, v4: false },
