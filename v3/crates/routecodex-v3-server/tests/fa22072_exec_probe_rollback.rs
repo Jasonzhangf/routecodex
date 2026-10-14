@@ -16,6 +16,10 @@ use tokio::{
 #[path = "../../../crates/routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
 mod hub_v1_fixture;
 
+#[path = "support/fa22072_test_home.rs"]
+mod fa22072_test_home;
+static TEST_LOCK: fa22072_test_home::ServerTestLock = fa22072_test_home::ServerTestLock::new();
+
 fn business_payload() -> Value {
     json!({"id":"rollback-complete","object":"chat.completion","model":"test","choices":[{"index":0,"message":{"role":"assistant","content":"complete retained business payload","tool_calls":[{"id":"paired-call","type":"function","function":{"name":"fixture","arguments":"{invalid arguments preserved"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":3,"completion_tokens":5,"total_tokens":8},"tail":{"complete":[1,2,3]}})
 }
@@ -222,6 +226,7 @@ async fn sample_drain_timeout_restores_due_only_owner() {
 }
 
 async fn witness(exit: Exit) {
+    let _guard = TEST_LOCK.lock().await;
     static NEXT: AtomicUsize = AtomicUsize::new(0);
     let provider = format!("rollback_{}", NEXT.fetch_add(1, Ordering::SeqCst));
     std::env::set_var("FA22072_ROLLBACK_KEY", "rollback-fixture-secret");
