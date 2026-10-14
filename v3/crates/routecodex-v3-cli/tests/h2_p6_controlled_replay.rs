@@ -171,6 +171,82 @@ async fn bug_705d624_all_provider_no_response_breaks_streaming_client_transport(
     wait_ports_closed(&client, &ports.all()).await;
 }
 
+/// A real HTTP client (not a raw socket) must observe provider exhaustion as a
+/// transport failure, not as a clean end of an empty SSE body. The raw-bytes
+/// check above proves the wire keeps the incomplete chunked framing; this case
+/// proves an actual consumer surfaces that incomplete body as an error and never
+/// as `Ok(None)` with a `response.completed` terminal. That distinction is the
+/// reported "error returned as a successful empty response" failure.
+#[tokio::test]
+async fn bug_705d624_no_response_reaches_a_real_consumer_as_a_transport_error() {
+    let success = start_controlled_upstream(ProviderMode::Success).await;
+    let mut no_response_a = start_no_response_upstream().await;
+    let mut no_response_b = start_no_response_upstream().await;
+    let ports = H2Ports::allocate();
+    let config = write_h2_config(&ports, &success, &no_response_a, &no_response_b, "");
+    let client = reqwest::Client::new();
+    let mut cli = start_cli_server(&config, ports.all());
+    wait_for_health(&client, &mut cli, ports.exhausted, "h2_exhausted").await;
+
+    let (received, error, version) = read_front_response_consumer(ports.exhausted).await;
+    let body = String::from_utf8_lossy(&received);
+    assert!(
+        error.is_some(),
+        "a real consumer must observe a transport error, not a clean EOF, for provider exhaustion: {body:?}"
+    );
+    assert_eq!(
+        version,
+        reqwest::Version::HTTP_11,
+        "a real plaintext-loopback client negotiates HTTP/1.1: {version:?}"
+    );
+    assert!(
+        !body.contains("response.completed"),
+        "provider exhaustion must not reach the consumer as a completed response: {body:?}"
+    );
+    assert!(
+        !body.contains("\"error\"") && !body.contains("network_error"),
+        "no provider or proxy error payload may be projected to the client: {body:?}"
+    );
+    next_capture(&mut no_response_a.captures, "consumer first no-response").await;
+    next_capture(&mut no_response_b.captures, "consumer second no-response").await;
+    drop(cli);
+    wait_ports_closed(&client, &ports.all()).await;
+}
+
+/// Positive control for the same real consumer: a healthy provider's complete
+/// SSE response must still be read as a clean stream with its `response.completed`
+/// terminal. Without this, a client that broke on every stream would look like a
+/// fix for the no-response case.
+#[tokio::test]
+async fn bug_705d624_real_consumer_reads_a_healthy_sse_response_to_completion() {
+    let success = start_controlled_upstream(ProviderMode::Success).await;
+    let no_response_a = start_no_response_upstream().await;
+    let no_response_b = start_no_response_upstream().await;
+    let ports = H2Ports::allocate();
+    let config = write_h2_config(&ports, &success, &no_response_a, &no_response_b, "");
+    let client = reqwest::Client::new();
+    let mut cli = start_cli_server(&config, ports.all());
+    wait_for_health(&client, &mut cli, ports.success, "h2_success").await;
+
+    let (received, error, version) = read_front_response_consumer(ports.success).await;
+    let body = String::from_utf8_lossy(&received);
+    assert!(
+        error.is_none(),
+        "a healthy provider response must reach the consumer as a clean stream: {body:?}"
+    );
+    assert_eq!(
+        version,
+        reqwest::Version::HTTP_11,
+        "a real plaintext-loopback client negotiates HTTP/1.1: {version:?}"
+    );
+    assert!(
+        body.contains("response.completed"),
+        "a healthy provider response must carry its completed terminal: {body:?}"
+    );
+    drop(cli);
+    wait_ports_closed(&client, &ports.all()).await;
+}
+
 #[tokio::test]
 async fn bug_705d624_real_upstream_http_502_is_not_forwarded_to_client() {
     let success = start_controlled_upstream(ProviderMode::Success).await;
@@ -289,6 +365,45 @@ async fn read_front_response(port: u16, stream: bool) -> Vec<u8> {
         }
     }
     received
+}
+
+/// Drive the public `/v1/responses` streaming entry through the real `reqwest`
+/// consumer instead of a raw socket, and report the decoded body bytes and the
+/// terminal outcome. A clean end of body is `Ok(None)`; a truncated/incomplete
+/// transfer surfaces as `Err`. Returning the terminal outcome lets a test assert
+/// the consumer-visible classification rather than only the wire bytes.
+async fn read_front_response_consumer(
+    port: u16,
+) -> (Vec<u8>, Option<reqwest::Error>, reqwest::Version) {
+    // A fresh client per request forces a real per-request protocol negotiation
+    // instead of reusing the health-check client's pooled connection.
+    let client = reqwest::Client::new();
+    let response = timeout(
+        Duration::from_secs(10),
+        client
+            .post(format!("http://127.0.0.1:{port}/v1/responses"))
+            .json(&json!({"model":"client-test","input":"upstream no response","stream":true}))
+            .send(),
+    )
+    .await
+    .expect("front response head must arrive before timeout")
+    .expect("front response head must be a valid HTTP response");
+    let version = response.version();
+    let mut response = response;
+    let mut received = Vec::new();
+    let mut error = None;
+    loop {
+        match timeout(Duration::from_secs(10), response.chunk()).await {
+            Ok(Ok(Some(chunk))) => received.extend_from_slice(&chunk),
+            Ok(Ok(None)) => break,
+            Ok(Err(error_chunk)) => {
+                error = Some(error_chunk);
+                break;
+            }
+            Err(_) => panic!("front consumer stream must terminate before timeout"),
+        }
+    }
+    (received, error, version)
 }
 
 #[tokio::test]
@@ -446,6 +561,7 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
             },
             "response_payload": {
                 "id": "h2_dry_run",
+                "output_text": "dry control",
                 "api_key": "dry-run-response-secret"
             }
         }))
@@ -1102,7 +1218,10 @@ fn start_cli_server(config_path: &H2Config, _ports: Vec<u16>) -> CliProcess {
         .env("ROUTECODEX_V3_H2_SUCCESS_KEY", "h2-success-secret")
         .env("ROUTECODEX_V3_H2_FAILURE_A_KEY", "h2-failure-a-secret")
         .env("ROUTECODEX_V3_H2_FAILURE_B_KEY", "h2-failure-b-secret")
-        .env("HOME", &temp_dir)
+        // Keep the debug sample writer inside the test-owned temp dir. The
+        // sandbox denies the real `$HOME/.rcc/codex-samples` retention lock, and
+        // a scoped child must not touch shared user state.
+        .env("HOME", temp_dir)
         .env("TMPDIR", &temp_dir)
         .env("TMP", &temp_dir)
         .env("TEMP", &temp_dir)

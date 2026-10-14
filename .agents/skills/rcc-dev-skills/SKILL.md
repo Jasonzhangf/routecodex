@@ -57,17 +57,12 @@ that confirmation exists and all other applicable delivery conditions pass.
 
 ## Review Gate
 
-Follow the project delivery order in `AGENTS.md`: author verification and
-applicable PR CI PASS -> merge/push to main -> rebuild/install, managed restart,
-health, real-entry replay and sample audit from main -> complete independent
-Codex Review and AGY Review. Review pending does not block main/runtime delivery;
-both reviews remain required for defect closure. Repository checks and Git
-protection remain enforced. Bind both reviews to the same validated candidate
-SHA, prove content equivalence to delivered main, and apply shared review
-standards, Semantic Invariants and mapped owner/edge/gate bindings. Candidate
-acceptance does not prove the merged runtime. Repair blocking findings and
-revalidate affected behavior; a confirmed delivered regression follows the
-traceable revert/rebuild/restart/replay recovery contract.
+The global host orchestrator owns review roles, timing and delivery order.
+After author verification and applicable runtime acceptance, obtain one
+effective independent overall review before commit/integration. Fix blocking
+findings and revalidate their affected behavior. Bind candidate, installed
+artifact and delivered main separately; preserve repository checks, Git
+protection and the defect close conditions in `references/60-defect-lifecycle.md`.
 
 ## Routes
 

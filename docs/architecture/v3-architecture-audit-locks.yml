@@ -386,8 +386,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:d3cf88658ce49c20b1c8be822e3b1ac8e7191d8ed4229c4a7b4c13872b114fe5
-    last_manual_authorization_id: auth-20260915-v3-remove-continuation-runtime-timing
+    fingerprint: sha256:06ae8a050a320bbf0f3a16ec0ca8e7a5270fc44944b8cc6858d2aafbdd09c1d9
+    last_manual_authorization_id: auth-20261013-b878f6c-full-attempt-timing
   - item_id: chain:v3.responses_session_admission
     chain_id: v3.responses_session_admission
     status: audited_locked
@@ -1300,6 +1300,19 @@ manual_authorizations:
     reason: "Jason explicitly required that provider concurrency must not block business requests, provider errors must not cause meaningless waits, provider switching must retain storm control, and only cooldown may wait. Terminal provider-error projection commits the action-gate generation without waiting for provider-action admission, and now records and commits under one lock so a concurrent success cannot invalidate that disposition. Retry/reselect action admission and its rate limit remain in place. Provider cooldown semantics, chain owner, nodes, and resources remain unchanged."
     fingerprint_before: sha256:78d79632e9ad17d590ec3c2f631ba01361706cea83a84914532e3e367c72531b
     fingerprint_after: sha256:10acfd36a3dd8f2c41e5fc1cca7ca16c7b6714631f741a07335b321f3e2bb81c
+
+  - authorization_id: auth-20261013-b878f6c-full-attempt-timing
+    item_id: chain:v3.runtime_timing_observability.mainline
+    approved_by: Jason
+    approved_at: '2026-10-13'
+    authorization_source: 'Current user conversation 01a1345f-00c7-7f72-89b3-538b61fb4e66; client error-chain requirement active/v3 in ledger v8.'
+    original_text: |
+      上游的空响应 我们直接判为502 错误重试走错误链
+      。现在你会遇到几个不同路径的错误：1. 请求路径错误：错误就算很严重，要进入错误路径，也是走错误链响应。如果本身是错误，直接走错误链。2. 处理过程错误：如果本身响应的是 200，但在我们的处理过程中产生了错误（即 599 错误），它也是进错误链。3. 空响应：也进错误链。
+      验证了应该拉取最新的代码,重建重启,架构审查后提交merge
+    reason: "Records Jason's existing scoped instruction to repair client empty success and preserve each real failure through Error recovery. Premature Direct SSE frame timing finalization masked a complete empty attempt's provider_response_empty source as an unrelated timing598 and blocked retry. Edges11/12 now bind Runtime finalization/publication to the existing finish_v3_direct_runtime_timing owner after complete-attempt admission, memory processing and sealing. Chain nodes, owners, resources and data/control boundaries remain unchanged. This records the already authorized error-chain correction, not a new authorization or a claimed manual implementation review."
+    fingerprint_before: sha256:d3cf88658ce49c20b1c8be822e3b1ac8e7191d8ed4229c4a7b4c13872b114fe5
+    fingerprint_after: sha256:06ae8a050a320bbf0f3a16ec0ca8e7a5270fc44944b8cc6858d2aafbdd09c1d9
 
   - authorization_id: auth-20261010-status-only-provider-probe-stopgap
     item_id: chain:v3.provider_global_subscription_probe

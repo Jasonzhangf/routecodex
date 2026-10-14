@@ -155,37 +155,15 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
                                 if closeout_complete {
                                     state.done = true;
                                 }
-                                if terminal_observed
-                                    && !state.runtime_timing.is_finished().unwrap_or(false)
-                                {
+                                // The protocol frame closes external time only.
+                                // Collector admission, memory rewriting and sealing
+                                // must succeed before the runtime timing owner finishes.
+                                if terminal_observed {
                                     if let Err(error) =
                                         state.runtime_timing.finish_external_if_active()
                                     {
                                         return Some((
                                             Err(runtime_source("V3RuntimeTimingExternal", error)),
-                                            state,
-                                        ));
-                                    }
-                                    let timing = match state.runtime_timing.finish_runtime() {
-                                        Ok(timing) => timing,
-                                        Err(error) => {
-                                            return Some((
-                                                Err(runtime_source(
-                                                    "V3RuntimeTimingTerminal",
-                                                    error,
-                                                )),
-                                                state,
-                                            ));
-                                        }
-                                    };
-                                    if let Err(error) =
-                                        state.stream_observation.record_timing(timing)
-                                    {
-                                        return Some((
-                                            Err(runtime_source(
-                                                "V3RuntimeTimingObservation",
-                                                error,
-                                            )),
                                             state,
                                         ));
                                     }
@@ -220,29 +198,11 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
                             ));
                         }
                         match decoder_result {
-                            Ok(()) if state.runtime_timing.is_finished().unwrap_or(false) => {
-                                return None
-                            }
                             Ok(()) => {
                                 if let Err(error) = state.runtime_timing.finish_external_if_active()
                                 {
                                     return Some((
                                         Err(runtime_source("V3RuntimeTimingExternal", error)),
-                                        state,
-                                    ));
-                                }
-                                let timing = match state.runtime_timing.finish_runtime() {
-                                    Ok(timing) => timing,
-                                    Err(error) => {
-                                        return Some((
-                                            Err(runtime_source("V3RuntimeTimingTerminal", error)),
-                                            state,
-                                        ));
-                                    }
-                                };
-                                if let Err(error) = state.stream_observation.record_timing(timing) {
-                                    return Some((
-                                        Err(runtime_source("V3RuntimeTimingObservation", error)),
                                         state,
                                     ));
                                 }
@@ -305,6 +265,8 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
             )
         })?;
     let mut terminal_seen = false;
+    let mut business_decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+    let mut has_business_content = false;
     while let Some(frame) = stream.next().await {
         // The attempt is complete at the protocol terminal.  A provider
         // transport error or an unterminated tail after the terminal is
@@ -326,6 +288,11 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
             ));
         }
         let frame = frame.bytes;
+        has_business_content |= direct_sse_chunk_has_business_content(
+            provider_protocol,
+            &frame,
+            &mut business_decoder,
+        )?;
         committed.push(frame).map_err(|message| {
             build_v3_error_01_source_raised(
                 V3ErrorSourceKind::RuntimeFailure,
@@ -356,6 +323,9 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
                 )
             })?;
             if disposition == V3SseFrameDisposition::LegalCloseout {
+                if !has_business_content {
+                    return Err(direct_sse_empty_attempt_failure());
+                }
                 rewrite_direct_sse_memory(&mut committed, manifest, request_id).map_err(
                     |message| {
                         build_v3_error_01_source_raised(
@@ -380,6 +350,9 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
         }
     }
     if terminal_seen {
+        if !has_business_content {
+            return Err(direct_sse_empty_attempt_failure());
+        }
         // OpenAI Chat's client protocol terminal is the `data: [DONE]`
         // sentinel. A chat-wire provider may close after the semantic
         // terminal without ever emitting it; synthesize the protocol closeout
@@ -423,6 +396,51 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
         "provider_response_sse_stream",
         "provider SSE ended without a protocol terminal",
     ))
+}
+
+/// Typed provider-failure source for a complete Direct SSE attempt that carries
+/// no deliverable business content. It enters the existing provider failure
+/// policy (reselect/cooldown), never a client error or an empty completion.
+fn direct_sse_empty_attempt_failure() -> V3Error01SourceRaised {
+    build_v3_error_01_source_raised(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderResp14Raw",
+        "provider_response_empty",
+        "provider returned a complete response with no deliverable business content",
+    )
+}
+
+/// Read business facts from validated, projected frames without buffering a
+/// second copy or running another response materializer. Decoder failures
+/// remain errors and cannot make an empty attempt appear successful.
+fn direct_sse_chunk_has_business_content(
+    provider_protocol: V3HubProviderWireProtocol,
+    chunk: &[u8],
+    decoder: &mut SseIncrementalDecoder,
+) -> Result<bool, V3Error01SourceRaised> {
+    let mut has_output = false;
+    let frames = decoder
+        .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
+        .map_err(build_v3_sse_transport_error_source)?;
+    for frame in frames {
+        if is_v3_provider_sse_transport_keepalive_frame(frame.frame().fields()) {
+            continue;
+        }
+        let data = crate::hub_v1::normalize_v3_provider_sse_json_data_for_event_name(
+            provider_protocol,
+            frame.frame().fields(),
+        )
+        .map_err(provider_sse_failure_source)?;
+        if let Some(payload) = crate::hub_v1::parse_v3_provider_sse_json_data(&data)
+            .map_err(provider_sse_failure_source)?
+        {
+            has_output |= crate::hub_v1::v3_provider_event_has_deliverable_business_content(
+                provider_protocol,
+                &payload,
+            );
+        }
+    }
+    Ok(has_output)
 }
 
 fn rewrite_direct_sse_memory(

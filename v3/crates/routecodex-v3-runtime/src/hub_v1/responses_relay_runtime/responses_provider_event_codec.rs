@@ -299,6 +299,12 @@ fn build_typed_responses_terminal_response(
             output.push(item);
         }
     }
+    // A provider may send text deltas without output_item events, then close
+    // with an empty output array. Retain that accumulated business text in the
+    // canonical output consumed by response projection.
+    if output.is_empty() && !reducer.output_text.is_empty() {
+        output.push(json!({"type":"output_text", "text":reducer.output_text}));
+    }
     object.insert("output".to_owned(), Value::Array(output));
     let usage = object
         .entry("usage".to_owned())

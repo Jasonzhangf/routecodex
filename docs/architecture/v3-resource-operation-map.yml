@@ -574,11 +574,12 @@ resources:
     identity: [requestId, providerId, modelId, attempt]
     semantic_contract:
       standard: NamespaceToolIdentityRegistry binds original components, leaf, kind and actual standard names before provider-private compat; declarations, choice and paired history share that binding
+      native_discovery: The same request-local registry owns native tool_search client eligibility from explicit execution=client; Chat and Anthropic inverse consume it, retain ordinary/custom wire-name precedence, preserve complete arguments and call IDs, and never promote server, omitted-execution or undeclared calls to client execution
       private: CustomToolFunctionBinding remains a separate typed resource; its inverse restores standard name and custom kind before the shared namespace inverse
       lifetime: attempt-local stack holder is cloned before wire consumption; retries rebuild from current declarations; completion, cancellation and exhaustion drop the holder
       response: Gemini provider SSE fully buffers into native business content; Resp02 atomically normalizes payload and semantic protocol; Resp03 consumes the standard holder; Resp05 uses existing Responses JSON and SSE projection
     allowed_writers: [NamespaceToolIdentityRegistry::from_request, build_provider_req_compat_06_from_v3_hub_req_outbound_07]
-    allowed_readers: [build_v3_provider_12_responses_wire_payload_with_registry, run_json_response_hooks, restore_gemini_tool_kinds]
+    allowed_readers: [build_v3_provider_12_responses_wire_payload_with_registry, run_json_response_hooks, restore_gemini_tool_kinds, build_v3_responses_provider_response_from_openai_chat_payload, V3AnthropicResponsesProjectionContext::from_chat_canonical_request, anthropic_tool_use_as_responses_call]
     forbidden_writers: [routecodex-v3-server, provider transport, MetadataCenter, debug snapshot]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -2079,7 +2080,7 @@ resources:
     owner_crate: routecodex-v3-runtime
     owner_node: V3RuntimeTimingSummary
     allowed_readers: [record_timing, emit_v3_request_complete_console_line, V3ResponsesProtocolRelayHandoff, V3ResponsesProtocolDirectHandoff]
-    allowed_writers: [V3RuntimeObservabilityAccumulator, V3RuntimeTimingState::start, start_external, finish_external, finish_runtime, execute_v3_responses_direct_runtime_kernel_core, execute_v3_responses_relay_runtime_inner]
+    allowed_writers: [V3RuntimeObservabilityAccumulator, V3RuntimeTimingState::start, start_external, finish_external, finish_runtime, finish_v3_direct_runtime_timing, execute_v3_responses_direct_runtime_kernel_core, execute_v3_responses_relay_runtime_inner]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-sse, ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic, response.client_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -3063,6 +3064,26 @@ resources:
     allowed_readers: [collect_direct_sse_attempt_after_terminal, V3CommittedClientSseStream]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-sse, MetadataCenter, request.normal_payload, response.client_payload, provider.wire_payload, session.cache]
     must_pass_through: [V3ProviderResp14Raw, V3DirectResp14ProviderProjectionPrepared, Error01, Error03, Error04, Error05]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: active
+
+  - resource_id: v3.runtime.provider_attempt_business_control
+    resource_kind: provider_attempt_control
+    lifecycle: v3.provider.attempt_until_terminal
+    owner_feature_id: v3.provider_response_error_policy_closeout
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3RuntimeStreamObservation
+    owner_module: provider_attempt_business_content
+    identity: [requestId, attemptId, providerKey, protocol]
+    allowed_writers: [V3RuntimeStreamObservation::record_provider_business_content]
+    allowed_readers: [V3RuntimeStreamObservation::has_provider_business_content, execute_v3_relay_runtime_core]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-sse, MetadataCenter, debug.snapshot]
+    semantic_contract:
+      aggregation: The typed control field starts false for each provider attempt and accumulates real business facts by logical OR.
+      source: Validated provider events supply business facts; diagnostic snapshots and usage never supply admission decisions.
+      terminal: A later empty terminal does not clear prior business content; a new candidate gets a new attempt control.
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false

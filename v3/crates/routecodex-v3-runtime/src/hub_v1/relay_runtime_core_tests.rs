@@ -351,18 +351,25 @@ async fn relay_attempt_deadline_stops_continuous_non_terminal_stream() {
 #[tokio::test]
 async fn provider_raw_sse_observation_is_preserved_on_side_channel() {
     let observation = V3RuntimeStreamObservation::default();
-    let stream: routecodex_v3_provider_responses::V3ProviderSseStream = Box::pin(
-        futures_util::stream::iter(vec![Ok(b"data: semantic\n\n".to_vec())]),
+    let stream: routecodex_v3_provider_responses::V3ProviderSseStream =
+        Box::pin(futures_util::stream::iter(vec![Ok(
+            b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"semantic\"}\n\n".to_vec(),
+        )]));
+    let mut observed = observe_v3_provider_sse(
+        stream,
+        observation.clone(),
+        V3HubProviderWireProtocol::Responses,
+        "req-observation".into(),
+        "provider-observation".into(),
     );
-    let mut observed = observe_v3_provider_sse(stream, observation.clone());
 
     assert_eq!(
         observed.next().await.unwrap().unwrap(),
-        b"data: semantic\n\n"
+        b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"semantic\"}\n\n"
     );
     assert_eq!(
         observation.snapshot().unwrap().provider_raw_sse,
-        "data: semantic\n\n"
+        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"semantic\"}\n\n"
     );
     assert_eq!(observation.snapshot().unwrap().observation_error, None);
 }
