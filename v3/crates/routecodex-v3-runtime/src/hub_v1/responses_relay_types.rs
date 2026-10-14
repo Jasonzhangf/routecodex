@@ -226,6 +226,7 @@ pub enum V3RuntimeSemanticTerminal {
 #[derive(Debug, Clone, Default)]
 struct V3RuntimeStreamControlState {
     semantic_terminal: Option<V3RuntimeSemanticTerminal>,
+    provider_business_content: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -338,6 +339,30 @@ impl V3RuntimeStreamObservation {
 
     pub(crate) fn has_semantic_terminal(&self) -> Result<bool, String> {
         Ok(self.semantic_terminal()?.is_some())
+    }
+
+    pub(crate) fn record_semantic_terminal(
+        &self,
+        terminal: V3RuntimeSemanticTerminal,
+    ) -> Result<(), String> {
+        self.control
+            .lock()
+            .map(|mut control| control.semantic_terminal = Some(terminal))
+            .map_err(|_| "V3 runtime stream control state lock is poisoned".to_string())
+    }
+
+    pub(crate) fn record_provider_business_content(&self, has_content: bool) -> Result<(), String> {
+        self.control
+            .lock()
+            .map(|mut control| control.provider_business_content |= has_content)
+            .map_err(|_| "V3 runtime stream control state lock is poisoned".to_string())
+    }
+
+    pub(crate) fn has_provider_business_content(&self) -> Result<bool, String> {
+        self.control
+            .lock()
+            .map(|control| control.provider_business_content)
+            .map_err(|_| "V3 runtime stream control state lock is poisoned".to_string())
     }
 
     pub fn semantic_terminal(&self) -> Result<Option<V3RuntimeSemanticTerminal>, String> {

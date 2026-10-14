@@ -1,5 +1,60 @@
 use super::*;
 
+#[tokio::test]
+async fn compact_direct_projected_stream_reaches_collector_without_loopback() {
+    let expected = serde_json::json!({"id":"compact-response","object":"response",
+        "status":"completed","output":[{"id":"compact-message","type":"message",
+        "role":"assistant","text":"compact answer"}]});
+    let bytes = format!(
+        "event: response.completed\ndata: {}\n\n",
+        serde_json::json!({"type":"response.completed","response":expected})
+    )
+    .into_bytes();
+    let timing = V3RuntimeTimingState::start();
+    timing.start_external().unwrap();
+    let projected = wrap_direct_sse_provider_event_json_observation_stream_with_compat(
+        V3ProviderAttemptSseStream::new(Box::pin(stream::iter([Ok(bytes)]))),
+        V3RuntimeStreamObservation::default(),
+        timing.clone(),
+        false,
+        false,
+        V3HubProviderWireProtocol::Responses,
+        false,
+        false,
+        None,
+        None,
+        V3DirectSseTypedHookCatalog::default(),
+        false,
+        false,
+        None,
+        None,
+        None,
+        true,
+    );
+    let result = collect_direct_sse_attempt_after_terminal(
+        projected,
+        V3HubProviderWireProtocol::Responses,
+        crate::nodes::V3AttemptBudget::process_default(),
+    )
+    .await;
+    let committed = result.unwrap_or_else(|source| {
+        panic!(
+            "original compact collector source: {source:?}; timing_finished={:?}",
+            timing.is_finished()
+        )
+    });
+    let frames = committed.collect::<Vec<_>>().await;
+    let body = String::from_utf8(frames.concat()).unwrap();
+    let event: serde_json::Value = serde_json::from_str(
+        body.lines()
+            .find_map(|line| line.strip_prefix("data:"))
+            .unwrap()
+            .trim(),
+    )
+    .unwrap();
+    assert_eq!(event["response"]["output"], expected["output"]);
+}
+
 #[test]
 fn direct_sse_missing_projection_observation_is_bound_before_stream_closeout() {
     let mut projection_observation = None;
@@ -20,6 +75,38 @@ fn direct_sse_missing_projection_observation_is_bound_before_stream_closeout() {
             .timing,
         target.snapshot().unwrap().timing,
     );
+}
+
+#[tokio::test]
+async fn empty_direct_attempt_keeps_original_error_and_timing_open_for_recovery() {
+    let timing = V3RuntimeTimingState::start();
+    timing.start_external().unwrap();
+    let observation = V3RuntimeStreamObservation::default();
+    let projected = wrap_direct_sse_provider_event_json_observation_stream(
+        V3ProviderAttemptSseStream::new(Box::pin(stream::iter([Ok(
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[]}}\n\n".to_vec(),
+        )]))), observation.clone(), timing.clone(), false, false,
+        V3HubProviderWireProtocol::Responses,
+    );
+    let source = collect_direct_sse_attempt_after_terminal(
+        projected,
+        V3HubProviderWireProtocol::Responses,
+        crate::nodes::V3AttemptBudget::process_default(),
+    )
+    .await
+    .expect_err("empty attempt must enter Error recovery");
+    assert_eq!(source.source_kind, V3ErrorSourceKind::ProviderFailure);
+    assert_eq!(source.code, "provider_response_empty");
+    timing
+        .finish_external_if_active()
+        .expect("failure cleanup must not mask original source");
+    assert!(!timing.is_finished().unwrap());
+    assert!(observation.snapshot().unwrap().timing.is_none());
+    timing
+        .start_external()
+        .expect("next candidate must share the open runtime interval");
+    timing.finish_external_if_active().unwrap();
+    timing.finish_runtime().unwrap();
 }
 
 #[tokio::test]
@@ -544,32 +631,44 @@ async fn direct_sse_terminal_does_not_validate_same_chunk_tail() {
 }
 
 #[tokio::test]
-async fn clean_eof_finishes_runtime_and_publishes_typed_timing() {
+async fn successful_collection_finishes_runtime_and_publishes_typed_timing() {
     let observation = V3RuntimeStreamObservation::default();
     let runtime_timing = V3RuntimeTimingState::start();
     runtime_timing.start_external().unwrap();
     let source = Box::pin(stream::iter(vec![Ok(
-            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"success\"}]}}\n\n"
                 .to_vec(),
         )]));
-    let mut observed = wrap_direct_sse_provider_event_json_observation_stream(
+    let observed = wrap_direct_sse_provider_event_json_observation_stream(
         V3ProviderAttemptSseStream::new(source),
         observation.clone(),
-        runtime_timing,
+        runtime_timing.clone(),
         false,
         false,
         crate::hub_v1::V3HubProviderWireProtocol::Responses,
     );
 
-    while let Some(chunk) = observed.next().await {
-        chunk.expect("clean Direct SSE must not fail");
-    }
+    let _committed = collect_direct_sse_attempt_after_terminal(
+        observed,
+        V3HubProviderWireProtocol::Responses,
+        crate::nodes::V3AttemptBudget::process_default(),
+    )
+    .await
+    .expect("business attempt must seal");
+    assert!(observation.snapshot().unwrap().timing.is_none());
+    crate::kernel::finish_v3_direct_runtime_timing(
+        true,
+        false,
+        Some(&observation),
+        &runtime_timing,
+    )
+    .expect("successful full-attempt closeout owns timing publication");
 
     let timing = observation
         .snapshot()
         .expect("stream observation snapshot")
         .timing
-        .expect("clean EOF must publish runtime timing");
+        .expect("successful collection must publish runtime timing");
     assert_eq!(
         timing.internal.checked_add(timing.external),
         Some(timing.runtime_total)
@@ -737,4 +836,72 @@ async fn direct_chat_sse_synthesizes_client_done_when_provider_omits_it() {
         "chat client stream must end with the protocol [DONE] sentinel: {text}"
     );
     assert_eq!(text.matches("data: [DONE]").count(), 1, "{text}");
+}
+
+#[tokio::test]
+async fn direct_sse_empty_complete_anthropic_terminal_is_provider_failure() {
+    // A complete Anthropic success with no business content
+    // (`message_start content:[] -> end_turn -> message_stop`) must not seal a
+    // normal empty completion on the Direct path. It is a typed provider
+    // failure for the resident owner to reselect/abort, never a client error.
+    let provider: V3ClientSseStream = Box::pin(stream::iter([Ok(
+        concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_empty\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude\",\"content\":[]}}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        )
+        .as_bytes()
+        .to_vec(),
+    )]));
+    let error = collect_direct_sse_attempt_after_terminal(
+        test_direct_sse_attempt_stream(
+            provider,
+            crate::hub_v1::V3HubProviderWireProtocol::Anthropic,
+        ),
+        crate::hub_v1::V3HubProviderWireProtocol::Anthropic,
+        crate::nodes::V3AttemptBudget::process_default(),
+    )
+    .await
+    .expect_err("an empty complete Direct SSE attempt must become a provider failure");
+    assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
+    assert_eq!(error.code, "provider_response_empty");
+}
+
+#[tokio::test]
+async fn direct_sse_text_anthropic_terminal_still_seals() {
+    // Non-empty business content must still pass the Direct complete-attempt
+    // judgment and seal a normal client stream.
+    let provider: V3ClientSseStream = Box::pin(stream::iter([Ok(
+        concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_text\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude\",\"content\":[]}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"done\"}}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        )
+        .as_bytes()
+        .to_vec(),
+    )]));
+    let frames = collect_direct_sse_attempt_after_terminal(
+        test_direct_sse_attempt_stream(
+            provider,
+            crate::hub_v1::V3HubProviderWireProtocol::Anthropic,
+        ),
+        crate::hub_v1::V3HubProviderWireProtocol::Anthropic,
+        crate::nodes::V3AttemptBudget::process_default(),
+    )
+    .await
+    .expect("a text-bearing Direct SSE attempt must seal")
+    .collect::<Vec<_>>()
+    .await;
+    let text = String::from_utf8(frames.concat()).unwrap();
+    assert!(text.contains("done"), "{text}");
 }

@@ -1498,6 +1498,15 @@ fn build_v3_gemini_resp03_protocol_governance(
     payload: &Value,
     transport_intent: V3HubTransportIntent,
 ) -> Result<V3Resp03ProtocolGovernance, V3HubRelayResponseError> {
+    // Gemini may report a prompt-level block without creating any candidates.
+    // Read that real business terminal without inventing an output container.
+    if payload.get("candidates").is_none() && super::v3_gemini_prompt_feedback_is_terminal(payload)
+    {
+        return Ok(V3Resp03ProtocolGovernance {
+            status_terminality: V3HubResponseTerminality::Terminal,
+            tool_calls: Vec::new(),
+        });
+    }
     let candidates = payload.get("candidates").and_then(Value::as_array).ok_or(
         V3HubRelayResponseError::ProviderProtocolResponseMalformed {
             protocol: "gemini",
@@ -1527,11 +1536,12 @@ fn build_v3_gemini_resp03_protocol_governance(
             output.push(json!({"type":"function_call","call_id":name,"name":name}));
         }
     }
-    let terminal = candidates.iter().any(|candidate| {
-        candidate
-            .get("finishReason")
-            .is_some_and(|value| !value.is_null())
-    });
+    let terminal = super::v3_gemini_prompt_feedback_is_terminal(payload)
+        || candidates.iter().any(|candidate| {
+            candidate
+                .get("finishReason")
+                .is_some_and(|value| !value.is_null())
+        });
     let status_terminality = if transport_intent == V3HubTransportIntent::Sse && !terminal {
         V3HubResponseTerminality::NonTerminal
     } else {

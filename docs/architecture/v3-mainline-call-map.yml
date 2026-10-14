@@ -6251,7 +6251,7 @@ chains:
       - v3.console.terminal_output
 - chain_id: v3.runtime_timing_observability.mainline
   owner_feature_id: v3.runtime_timing_observability
-  summary: Responses Direct/Relay Runtime starts one monotonic state, accumulates every provider attempt, publishes only at governed terminal or Direct SSE clean EOF, and exposes a read-only Server projection.
+  summary: Responses Direct/Relay Runtime starts one monotonic state, accumulates every provider attempt, publishes only at successful whole-attempt closeout, and exposes a read-only Server projection. Direct SSE frame terminals close external time without finalizing the runtime before collector admission and sealing.
   manifest: docs/architecture/manifests/v3.runtime_timing_observability.mainline.yml
   edges:
   - step_id: v3-runtime-timing-01
@@ -6432,8 +6432,8 @@ chains:
   - step_id: v3-runtime-timing-11
     from_node: V3RuntimeTimingExternalComplete
     to_node: V3RuntimeTimingTerminal
-    caller_symbol: wrap_direct_sse_provider_event_json_observation_stream
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+    caller_symbol: finish_v3_direct_runtime_timing
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_timing.rs
     callee_symbol: finish_runtime
     callee_file: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
     status: anchored
@@ -6450,8 +6450,8 @@ chains:
   - step_id: v3-runtime-timing-12
     from_node: V3RuntimeTimingTerminal
     to_node: V3RuntimeTimingStreamObservation
-    caller_symbol: wrap_direct_sse_provider_event_json_observation_stream_with_compat
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+    caller_symbol: finish_v3_direct_runtime_timing
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_timing.rs
     callee_symbol: record_timing
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
     status: anchored
@@ -9979,3 +9979,140 @@ chains:
       produces: []
       side_channel_reads: [v3.admin.provider_probe_result]
       side_channel_writes: []
+- chain_id: v3.provider_response_error_policy_closeout
+  owner_feature_id: v3.provider_response_error_policy_closeout
+  summary: A complete provider attempt with no deliverable business content becomes an internal typed 502 in the existing Error chain before client commit. Relay SSE, Relay JSON, Direct JSON, and Direct SSE call the shared complete-attempt business-content judgment; no client error or empty completion is produced.
+  edges:
+  - step_id: v3-relay-json-business-admission-01
+    from_node: V3ProviderRespInbound01Raw
+    to_node: V3Error01SourceRaised
+    caller_symbol: execute_v3_relay_runtime_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+    callee_symbol: v3_provider_json_attempt_has_deliverable_business_content
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_attempt_business_content.rs
+    status: anchored
+    owner_feature_id: v3.provider_response_error_policy_closeout
+    resource_flow:
+      consumes: [v3.response.provider_raw]
+      produces: [v3.error.source]
+      side_channel_reads: []
+      side_channel_writes: [v3.error.source]
+  - step_id: v3-relay-sse-business-control-01
+    from_node: V3ProviderRespInbound01Raw
+    to_node: V3RuntimeStreamObservation
+    caller_symbol: observe_v3_provider_sse
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_attempt_business_content.rs
+    callee_symbol: V3RuntimeStreamObservation::record_provider_business_content
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+    status: anchored
+    owner_feature_id: v3.provider_response_error_policy_closeout
+    resource_flow:
+      consumes: [v3.response.provider_raw]
+      produces: [v3.runtime.provider_attempt_business_control]
+      side_channel_reads: []
+      side_channel_writes: [v3.runtime.provider_attempt_business_control]
+  - step_id: v3-relay-sse-business-admission-01
+    from_node: V3RuntimeStreamObservation
+    to_node: V3Error01SourceRaised
+    caller_symbol: execute_v3_relay_runtime_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+    callee_symbol: V3RuntimeStreamObservation::has_provider_business_content
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+    status: anchored
+    owner_feature_id: v3.provider_response_error_policy_closeout
+    resource_flow:
+      consumes: [v3.runtime.provider_attempt_business_control]
+      produces: [v3.error.source]
+      side_channel_reads: [v3.runtime.provider_attempt_business_control]
+      side_channel_writes: [v3.error.source]
+  - step_id: v3-anthropic-json-business-admission-01
+    from_node: V3HubRespInbound02Normalized
+    to_node: V3Error01SourceRaised
+    caller_symbol: closeout_anthropic_relay_normalized_response
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime/response_closeout.rs
+    callee_symbol: v3_provider_json_attempt_has_deliverable_business_content
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_attempt_business_content.rs
+    status: anchored
+    owner_feature_id: v3.provider_response_error_policy_closeout
+    resource_flow:
+      consumes: [v3.hub.response_semantic]
+      produces: [v3.error.source]
+      side_channel_reads: []
+      side_channel_writes: [v3.error.source]
+  - step_id: v3-gemini-prompt-filter-terminal-control-01
+    from_node: V3HubRespOutbound05ClientSemantic
+    to_node: V3RuntimeStreamObservation
+    caller_symbol: observe_relay_client_sse_usage_chunk
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
+    callee_symbol: V3RuntimeStreamObservation::record_semantic_terminal
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+    status: anchored
+    owner_feature_id: v3.provider_response_error_policy_closeout
+    resource_flow:
+      consumes: [v3.hub.response_semantic]
+      produces: [v3.execution.attempt_control_state]
+      side_channel_reads: []
+      side_channel_writes: [v3.execution.attempt_control_state]
+  - step_id: v3-hub-relay-sse-empty-attempt-01
+    from_node: V3ProviderRespInbound01Raw
+    to_node: V3Error01SourceRaised
+    caller_symbol: build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs
+    callee_symbol: empty_provider_attempt_failure
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_attempt_business_content.rs
+    status: anchored
+    owner_feature_id: v3.provider_response_error_policy_closeout
+    resource_flow:
+      consumes:
+      - v3.response.provider_raw
+      - v3.hub.response_semantic
+      produces:
+      - v3.error.source
+      side_channel_reads: []
+      side_channel_writes:
+      - v3.error.source
+  - step_id: v3-hub-relay-json-empty-attempt-01
+    from_node: V3ProviderRespInbound01Raw
+    to_node: V3Error01SourceRaised
+    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+    callee_symbol: empty_provider_attempt_failure
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_attempt_business_content.rs
+    status: anchored
+    owner_feature_id: v3.provider_response_error_policy_closeout
+    resource_flow:
+      consumes:
+      - v3.response.provider_raw
+      produces:
+      - v3.error.source
+      side_channel_reads: []
+      side_channel_writes:
+      - v3.error.source
+  - step_id: v3-direct-json-empty-attempt-01
+    from_node: V3ProviderResp14Raw
+    to_node: V3Error01SourceRaised
+    caller_symbol: project_provider_raw_to_client_payload_inner
+    caller_file: v3/crates/routecodex-v3-runtime/src/shared.rs
+    callee_symbol: v3_provider_json_attempt_has_deliverable_business_content
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_attempt_business_content.rs
+    status: anchored
+    owner_feature_id: v3.provider_response_error_policy_closeout
+    resource_flow:
+      consumes: [v3.response.provider_raw]
+      produces: [v3.error.source]
+      side_channel_reads: []
+      side_channel_writes: [v3.error.source]
+  - step_id: v3-direct-sse-empty-attempt-01
+    from_node: V3ProviderResp14Raw
+    to_node: V3Error01SourceRaised
+    caller_symbol: collect_direct_sse_attempt_after_terminal_with_memory
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+    callee_symbol: direct_sse_chunk_has_business_content
+    callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+    status: anchored
+    owner_feature_id: v3.provider_response_error_policy_closeout
+    resource_flow:
+      consumes: [v3.response.provider_raw, v3.sse.direct.full_attempt_buffer]
+      produces: [v3.error.source]
+      side_channel_reads: [v3.sse.direct.full_attempt_buffer]
+      side_channel_writes: [v3.error.source]

@@ -4286,9 +4286,12 @@ features:
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_timing.rs
   owner_scope: Runtime owns one timing state per Direct/Relay request; Direct SSE
-    starts external timing in the kernel, closes it only after provider decoder clean
-    EOF, and publishes Runtime timing from the outcome closeout.
+    starts external timing in the kernel and closes external time at the provider
+    terminal or clean EOF. Runtime timing is finalized and published only after
+    full-attempt admission, memory processing and sealing succeed; a failed
+    attempt keeps timing open for Error recovery and preserves its original source.
   resource_bindings:
   - v3.runtime.responses_observability
   - v3.runtime.responses_timing_observability
@@ -5058,7 +5061,7 @@ features:
   status: implementation_in_progress
   change_risk: critical
   owner_kind: rust_v3_provider_terminal_response_error_policy
-  owner_scope: Genuine provider errors enter the typed Error chain before provider success or client commit; representable successful response content and terminals pass without semantic adjudication.
+  owner_scope: Genuine provider errors enter the typed Error chain before provider success or client commit; representable successful response content and terminals pass without semantic adjudication. A complete provider attempt with no deliverable business content is the single adjudicated case and becomes an internal typed 502 for the Error chain, never a client error or empty completion.
   owner_crates:
   - routecodex-v3-config
   - routecodex-v3-runtime
@@ -5070,6 +5073,14 @@ features:
   - v3/crates/routecodex-v3-config/src/validate/provider_error_policy.rs
   - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_attempt_business_content.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
@@ -5096,6 +5107,12 @@ features:
   - V3ProviderFailureDirective
   - run_v3_relay_provider_failure_policy
   - V3ProviderActionGate::record_failure_with_minimum_delay
+  - v3_provider_attempt_has_deliverable_business_content
+  - v3_provider_json_attempt_has_deliverable_business_content
+  - empty_provider_attempt_failure
+  - v3_provider_event_has_deliverable_business_content
+  - V3RuntimeStreamObservation::record_provider_business_content
+  - V3RuntimeStreamObservation::has_provider_business_content
   allowed_paths:
   - package.json
   - v3/scripts/run-v3-cargo-test.mjs
@@ -5111,6 +5128,9 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_responses_event_classification.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_attempt_business_content.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream_timing_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs

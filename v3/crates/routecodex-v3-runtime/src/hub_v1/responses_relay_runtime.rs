@@ -95,6 +95,7 @@ impl V3ResponsesRelayProviderHealthHandle {
         self.runtime_health.store().persistence_alarm()
     }
 }
+pub(crate) use responses_openai_chat_conversion::build_v3_responses_reasoning_item_from_openai_chat_message;
 use responses_openai_chat_conversion::*;
 use responses_relay_dry_run::*;
 pub use responses_relay_dry_run::{

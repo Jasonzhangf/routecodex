@@ -1203,13 +1203,13 @@ chains:
   - step_id: v3-runtime-timing-11
     from_node: V3RuntimeTimingExternalComplete
     to_node: V3RuntimeTimingTerminal
-    caller_symbol: wrap_direct_sse_provider_event_json_observation_stream_with_compat
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+    caller_symbol: finish_v3_direct_runtime_timing
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_timing.rs
     callee_symbol: finish_runtime
     callee_file: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
     owner_feature_id: v3.runtime_timing_observability
-    semantic_input: Direct SSE provider stream completed cleanly and the external
-      attempt was closed
+    semantic_input: Direct SSE complete attempt was admitted and sealed, and the
+      external attempt was closed
     semantic_output: typed Runtime timing summary for the Direct SSE response
     resource_flow:
       consumes:
@@ -1224,13 +1224,13 @@ chains:
   - step_id: v3-runtime-timing-12
     from_node: V3RuntimeTimingTerminal
     to_node: V3RuntimeTimingStreamObservation
-    caller_symbol: wrap_direct_sse_provider_event_json_observation_stream_with_compat
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+    caller_symbol: finish_v3_direct_runtime_timing
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_timing.rs
     callee_symbol: record_timing
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
     owner_feature_id: v3.runtime_timing_observability
-    semantic_input: typed Direct SSE Runtime timing summary after clean EOF and terminal
-      validation
+    semantic_input: typed Direct SSE Runtime timing summary after successful complete
+      attempt collection and sealing
     semantic_output: typed timing published into the Direct SSE stream observation
     resource_flow:
       consumes:

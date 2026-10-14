@@ -525,6 +525,28 @@ fn read_single_responses_sample_response(samples_root: &std::path::Path) -> Valu
     serde_json::from_str(&response).unwrap()
 }
 
+fn assert_responses_sse_delivered_business_text(body: &str, expected: &str) {
+    assert!(
+        body.contains("event: response.completed"),
+        "client SSE must reach the protocol terminal: {body}"
+    );
+    assert!(
+        body.contains(expected),
+        "client SSE must carry the provider business text {expected:?}: {body}"
+    );
+}
+
+fn assert_responses_sample_sse_delivered_business_text(sample: &Value, expected: &str) {
+    let raw = sample
+        .get("rawSse")
+        .and_then(Value::as_str)
+        .expect("persisted SSE sample must expose rawSse");
+    assert!(
+        raw.contains(expected),
+        "persisted SSE sample must carry provider business text {expected:?}"
+    );
+}
+
 /// Wait for the provider-terminal evidence of the failed request to reach disk.
 ///
 /// The boundary records the evidence before it breaks the client transport, but
@@ -1497,7 +1519,7 @@ async fn controlled_held_responses_upstream(
     .chain(futures_util::stream::once(async move {
         let _permit = release.acquire_owned().await.unwrap();
         Ok::<_, std::io::Error>(
-            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_held\",\"status\":\"completed\"}}\n\ndata: [DONE]\n\n"
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_held\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"held response released\"}]}]}}\n\ndata: [DONE]\n\n"
                 .to_vec(),
         )
     }));
@@ -1523,7 +1545,7 @@ async fn controlled_responses_upstream(
             .status(StatusCode::OK)
             .header("content-type", "text/event-stream")
             .body(Body::from(
-                "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_sse\",\"status\":\"in_progress\"}}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_sse\",\"status\":\"completed\"}}\n\ndata: [DONE]\n\n",
+                "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_sse\",\"status\":\"in_progress\"}}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_sse\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"controlled SSE response\"}]}]}}\n\ndata: [DONE]\n\n",
             ))
             .unwrap()
     } else {
@@ -5411,6 +5433,7 @@ async fn responses_provider_concurrency_full_switches_without_queueing() {
             .unwrap();
         assert_eq!(status, StatusCode::OK);
         assert!(body.contains("response.completed"), "{body}");
+        assert_responses_sse_delivered_business_text(&body, "held response released");
     }
     let third = spawn_concurrency_client(&endpoint, "concurrency-after-release");
     timeout(Duration::from_millis(500), first_captures.recv())
@@ -5425,6 +5448,7 @@ async fn responses_provider_concurrency_full_switches_without_queueing() {
         .unwrap();
     assert_eq!(status, StatusCode::OK);
     assert!(body.contains("response.completed"));
+    assert_responses_sse_delivered_business_text(&body, "held response released");
     handle.shutdown().await;
     first_shutdown.send(()).unwrap();
     second_shutdown.send(()).unwrap();
@@ -5549,7 +5573,8 @@ async fn responses_same_listener_same_session_waits_for_release_then_returns_ok(
         .expect("first response headers must arrive after provider release")
         .expect("first request task must not panic");
     assert_eq!(first.status(), StatusCode::OK);
-    first.text().await.unwrap();
+    let first_body = first.text().await.unwrap();
+    assert_responses_sse_delivered_business_text(&first_body, "held response released");
     timeout(Duration::from_secs(2), captures.recv())
         .await
         .expect("second provider request must start after the first body releases")
@@ -5561,6 +5586,7 @@ async fn responses_same_listener_same_session_waits_for_release_then_returns_ok(
         .expect("second request task must not panic");
     assert_eq!(status, StatusCode::OK);
     assert!(!body.contains("request_in_flight"));
+    assert_responses_sse_delivered_business_text(&body, "held response released");
     handle.shutdown().await;
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
@@ -5620,6 +5646,7 @@ async fn responses_same_session_waiter_obeys_maintenance_after_active_body_finis
         .unwrap()
         .unwrap();
     assert_eq!(first_body.matches("event: response.completed").count(), 1);
+    assert_responses_sse_delivered_business_text(&first_body, "held response released");
     let preparation = timeout(Duration::from_secs(5), preparation)
         .await
         .unwrap()
@@ -5643,6 +5670,7 @@ async fn responses_same_session_waiter_obeys_maintenance_after_active_body_finis
     let (status, body) = timeout(Duration::from_secs(5), queued).await.unwrap();
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body.matches("event: response.completed").count(), 1);
+    assert_responses_sse_delivered_business_text(&body, "held response released");
     handle.shutdown().await;
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
@@ -5801,8 +5829,10 @@ async fn responses_same_listener_different_session_remains_concurrent() {
         .expect("different-session task must not panic");
     assert_eq!(first.status(), StatusCode::OK);
     assert_eq!(second.status(), StatusCode::OK);
-    first.text().await.unwrap();
-    second.text().await.unwrap();
+    let first_body = first.text().await.unwrap();
+    let second_body = second.text().await.unwrap();
+    assert_responses_sse_delivered_business_text(&first_body, "held response released");
+    assert_responses_sse_delivered_business_text(&second_body, "held response released");
     handle.shutdown().await;
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
@@ -5930,6 +5960,7 @@ async fn p6_responses_endpoint_projects_sse_without_materialize_repair() {
             && body.contains("event: response.completed"),
         "relay SSE stream must project created/in_progress/completed frames: {body}"
     );
+    assert_responses_sse_delivered_business_text(&body, "controlled SSE response");
     // Responses 客户端帧只由协议终态收口：不得追加 response.done 或 [DONE]。
     assert!(!body.contains("event: response.done"), "{body}");
     assert!(!body.contains("data: [DONE]"), "{body}");
@@ -8279,6 +8310,7 @@ async fn responses_direct_full_snap_scope_persists_live_json_and_sse_responses()
     assert_eq!(sse_response.status(), 200);
     let sse_body = sse_response.text().await.unwrap();
     assert!(sse_body.contains("response.completed"), "{sse_body}");
+    assert_responses_sse_delivered_business_text(&sse_body, "controlled SSE response");
     handle
         .wait_for_codex_sample_persistence()
         .await
@@ -8299,6 +8331,7 @@ async fn responses_direct_full_snap_scope_persists_live_json_and_sse_responses()
     assert!(sse_sample["rawSse"]
         .as_str()
         .is_some_and(|value| value.contains("response.completed")));
+    assert_responses_sample_sse_delivered_business_text(&sse_sample, "controlled SSE response");
     assert!(!serde_json::to_string(&json_sample)
         .unwrap()
         .contains("secret-key"));
@@ -8342,6 +8375,7 @@ async fn responses_direct_sample_persist_failure_is_reported_after_live_sse_succ
     assert_eq!(response.status(), 200);
     let body = response.text().await.unwrap();
     assert!(body.contains("response.completed"), "{body}");
+    assert_responses_sse_delivered_business_text(&body, "controlled SSE response");
     assert!(captures.recv().await.is_some());
 
     let persist_failures = handle.shutdown().await;
@@ -8629,6 +8663,7 @@ async fn responses_full_sampling_burst_does_not_drop_sample_writes() {
         assert_eq!(response.status(), 200);
         let body = response.text().await.expect("complete SSE body");
         assert!(body.contains("response.completed"), "{body}");
+        assert_responses_sse_delivered_business_text(&body, "controlled SSE response");
     }
 
     let failures = handle.shutdown().await;
@@ -8678,6 +8713,7 @@ async fn responses_direct_sample_persist_failure_is_reported_during_exec_prepara
     assert_eq!(response.status(), 200);
     let body = response.text().await.unwrap();
     assert!(body.contains("response.completed"), "{body}");
+    assert_responses_sse_delivered_business_text(&body, "controlled SSE response");
     assert!(captures.recv().await.is_some());
 
     let preparation = handle.prepare_for_exec().await;
@@ -9293,7 +9329,12 @@ async fn debug_endpoints_project_shared_runtime_state_and_dry_run_no_send() {
             "method": "POST",
             "path": "/v1/responses",
             "request_payload": {"input": "fixed", "authorization": "Bearer dry-run-request-secret"},
-            "response_payload": {"id": "fixed-response", "api_key": "dry-run-response-secret"}
+            "response_payload": {
+                "id": "fixed-response",
+                "api_key": "dry-run-response-secret",
+                "status": "completed",
+                "output": [{"type":"message","role":"assistant","content":[{"type":"output_text","text":"dry-run business response"}]}]
+            }
         }))
         .send()
         .await
@@ -9789,6 +9830,104 @@ async fn invalid_http_boundaries_fail_before_runtime_with_typed_error_chain() {
         );
     }
     handle.shutdown().await;
+}
+
+/// Request-lane evidence for issue b878f6c: a real POST that fails at the
+/// request boundary enters the typed Error chain (`node=V3Error06ClientProjected`)
+/// and breaks the client transport, without any provider attempt and without any
+/// provider-health mutation.
+///
+/// `invalid_http_boundaries_fail_before_runtime_with_typed_error_chain` already
+/// proves the transport break and that no Runtime node is entered. This case adds
+/// the two missing side-effect checks against a live controlled upstream: the
+/// provider is never contacted, and no untried `provider.model.key` is cooled.
+#[tokio::test]
+async fn request_boundary_error_makes_no_provider_attempt_and_no_health_mutation() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("request-boundary-error-lane");
+    let (provider_base_url, mut captures, upstream_shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-request-boundary-error-lane");
+    let mut manifest = p6_manifest(free_port(), free_port(), &provider_base_url);
+    // `p6_manifest` disables provider health; enable it so a spurious cooldown
+    // caused by a request-boundary error would be observable.
+    let provider = manifest.providers.get_mut("test").unwrap();
+    let health = provider
+        .health
+        .as_mut()
+        .expect("p6 manifest declares provider health");
+    health.enabled = true;
+    health.failure_threshold = 1;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let client = reqwest::Client::new();
+
+    // Each request fails at the request boundary: an unknown path, a protocol
+    // that is not enabled on this listener, and a malformed JSON body.
+    for (path, content_type, body) in [
+        (
+            "/v1/unknown",
+            Some("application/json"),
+            r#"{"model":"client-test","input":"x"}"#,
+        ),
+        (
+            "/v1/messages",
+            Some("application/json"),
+            r#"{"model":"client-test","messages":[]}"#,
+        ),
+        ("/v1/responses", Some("application/json"), "{"),
+    ] {
+        let mut request = client.post(format!("{base}{path}"));
+        if let Some(content_type) = content_type {
+            request = request.header("content-type", content_type);
+        }
+        let response = timeout(Duration::from_secs(5), request.body(body).send())
+            .await
+            .expect("a request-boundary error must terminate the transport");
+        assert!(
+            response.is_err(),
+            "{path} must break the client transport, not deliver an error or empty completion"
+        );
+    }
+
+    // No provider attempt was made for any boundary error.
+    assert!(
+        captures.try_recv().is_err(),
+        "a request-boundary error must not reach the provider"
+    );
+    // No untried provider identity was cooled.
+    let pool: Value = client
+        .get(format!("{base}/_routecodex/health/cooldown-pool"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        pool["entries"].as_array().map(Vec::len),
+        Some(0),
+        "a request-boundary error must not mutate provider health: {pool}"
+    );
+
+    // Positive control: the provider channel is live, so the empty capture above
+    // is meaningful. A valid request is forwarded and captured.
+    let ok = client
+        .post(format!("{base}/v1/responses"))
+        .header("content-type", "application/json")
+        .json(&json!({"model":"client-test","input":"hello"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok.status(), StatusCode::OK);
+    let capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .expect("the controlled provider must receive the valid request")
+        .expect("the capture channel stays open");
+    assert_eq!(capture.body["model"], "wire-test");
+
+    handle.shutdown().await;
+    upstream_shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
 }
 
 #[tokio::test]
