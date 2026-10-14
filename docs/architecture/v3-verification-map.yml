@@ -3117,7 +3117,7 @@ features:
   status: source_active_live_verification_required
   change_risk: medium
   owner_kind: rust_v3_failure_scoped_diagnostic_artifact
-  owner_scope: Server persists verbatim request, Error chain, and provider wire snapshots only after terminal failure; artifacts remain outside MetadataCenter and normal payload.
+  owner_scope: Server persists terminal Responses evidence and ordered Chat failed-attempt sources, including recovered requests; artifacts remain outside MetadataCenter and normal payload.
   owner_modules:
   - v3/crates/routecodex-v3-server/src/lib.rs
   contract:
@@ -3126,15 +3126,20 @@ features:
   - docs/architecture/v3-mainline-call-map.yml
   required_positive:
   - Terminal Relay failure enqueues verbatim request and Error chain evidence through the declared side-channel edge, and the shared sample worker persists it.
+  - One Chat client request retains its connection across failed Provider A and genuine Provider B completion in JSON and SSE, while the private artifact retains the exact original typed cause and actual upstream status.
+  - Diagnostic filesystem failure remains request/file-qualified in the failure ledger while the same client request completes from B without extra attempts.
+  - A generic Relay runtime error after an earlier Provider failure preserves that original ordered attempt source and the distinct later terminal source; a controlled SSE frame-limit failure has healthy before/after controls and never fabricates client completion.
   - Worker filesystem failures for error evidence are logged immediately and retained as request/file-qualified barrier errors.
   required_negative:
-  - Success responses do not force failure evidence persistence.
+  - Clean successes without a failed attempt or terminal source do not force failure evidence persistence.
+  - Private source fields never enter client payload, SSE frames, or ordinary diagnostic projections; no generic reason code substitutes for the original source.
   - Failure evidence never enters MetadataCenter, provider payload, or client payload.
   required_gates:
   - npm run verify:v3-resource-relation-edge-lock
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib -- --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test fa22072_provider_continuation -- --nocapture --test-threads=1
   completion_rule:
     source: Resource, function, mainline, module, and Server unit gates pass.
     runtime: Live failed request evidence capture remains required before production closeout.

@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 94 functional paths, 565 caller edges.
+Generated view: 94 functional paths, 569 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -66,13 +66,13 @@ flowchart TD
   module_v3_runtime__hub_v1 -->|2 edges / 2 paths| module_v3_error
   module_v3_runtime__hub_v1 -->|8 edges / 6 paths| module_v3_provider_responses
   module_v3_runtime__hub_v1 -->|31 edges / 5 paths| module_v3_runtime
-  module_v3_runtime__hub_v1 -->|141 edges / 29 paths| module_v3_runtime__hub_v1
+  module_v3_runtime__hub_v1 -->|142 edges / 29 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|1 edges / 1 paths| module_provider_compat_core
   module_v3_runtime -->|2 edges / 1 paths| module_routecodex_v3_agent_memory
   module_v3_runtime -->|3 edges / 3 paths| module_routecodex_v3_route_classifier
   module_v3_runtime -->|1 edges / 1 paths| module_routecodex_v3_sse
   module_v3_runtime -->|5 edges / 1 paths| module_v3_debug
-  module_v3_runtime -->|8 edges / 5 paths| module_v3_error
+  module_v3_runtime -->|9 edges / 5 paths| module_v3_error
   module_v3_runtime -->|24 edges / 8 paths| module_v3_provider_responses
   module_v3_runtime -->|57 edges / 18 paths| module_v3_runtime
   module_v3_runtime -->|48 edges / 13 paths| module_v3_runtime__hub_v1
@@ -84,7 +84,7 @@ flowchart TD
   module_v3_server -->|3 edges / 2 paths| module_v3_error
   module_v3_server -->|6 edges / 4 paths| module_v3_runtime
   module_v3_server -->|6 edges / 5 paths| module_v3_runtime__hub_v1
-  module_v3_server -->|41 edges / 20 paths| module_v3_server
+  module_v3_server -->|43 edges / 20 paths| module_v3_server
   module_v3_server -->|1 edges / 1 paths| module_v3_vendor
   module_v3_target -->|1 edges / 1 paths| module_v3_provider_responses
   module_v3_target -->|1 edges / 1 paths| module_v3_target
@@ -125,13 +125,13 @@ flowchart TD
 | v3-runtime::hub_v1 | v3-error | 2 | `v3.provider_global_subscription_probe`<br/>`v3.route_policy.condition_evaluation` |
 | v3-runtime::hub_v1 | v3-provider-responses | 8 | `v3-provider-admission-lease-lifecycle`<br/>`v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry` |
 | v3-runtime::hub_v1 | v3-runtime | 31 | `v3.provider_action_gate.mainline`<br/>`v3.provider_admission_rescue_entrypoints`<br/>`v3.provider_global_subscription_probe`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding` |
-| v3-runtime::hub_v1 | v3-runtime::hub_v1 | 141 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.config.provider_sse_timeout_projection.mainline`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_pipeline.v1.relay_request_source_slice`<br/>`v3.hub_pipeline.v1.relay_response_source_slice`<br/>`v3.hub_pipeline.v1.request`<br/>`v3.hub_pipeline.v1.response`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.openai_chat_sse_typed_tree`<br/>`v3.protocol_conversion.gemini_standard_bridge`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_conversion_field_parity.outbound_helper_bindings`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_compat.request_invalid_error_source`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.responses_chat_sse_typed_tree`<br/>`v3.responses_provider_event.gemini_materialization`<br/>`v3.responses_provider_event.terminal_merge`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.servertool_center.skeleton`<br/>`v3.sse.protocol_codec_projection_boundary`<br/>`v3.tool_thinking_hook_skeleton.mainline`<br/>`v3.web_search_servertool_state_machine` |
+| v3-runtime::hub_v1 | v3-runtime::hub_v1 | 142 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.config.provider_sse_timeout_projection.mainline`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_pipeline.v1.relay_request_source_slice`<br/>`v3.hub_pipeline.v1.relay_response_source_slice`<br/>`v3.hub_pipeline.v1.request`<br/>`v3.hub_pipeline.v1.response`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.openai_chat_sse_typed_tree`<br/>`v3.protocol_conversion.gemini_standard_bridge`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_conversion_field_parity.outbound_helper_bindings`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_compat.request_invalid_error_source`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.responses_chat_sse_typed_tree`<br/>`v3.responses_provider_event.gemini_materialization`<br/>`v3.responses_provider_event.terminal_merge`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.servertool_center.skeleton`<br/>`v3.sse.protocol_codec_projection_boundary`<br/>`v3.tool_thinking_hook_skeleton.mainline`<br/>`v3.web_search_servertool_state_machine` |
 | v3-runtime | provider-compat-core | 1 | `v3.sse_error_and_direct_consumer_pre_wiring` |
 | v3-runtime | routecodex-v3-agent-memory | 2 | `v3.memory_raw_capture` |
 | v3-runtime | routecodex-v3-route-classifier | 3 | `v3.route_classifier.facts_classification`<br/>`v3.route_policy.condition_evaluation`<br/>`vr.current_turn_typed_route_facts` |
 | v3-runtime | routecodex-v3-sse | 1 | `v3.sse_error_and_direct_consumer_pre_wiring` |
 | v3-runtime | v3-debug | 5 | `v3.debug_error_foundation.mainline` |
-| v3-runtime | v3-error | 8 | `v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.hub_relay.response_failure_entry`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.route_policy.condition_evaluation` |
+| v3-runtime | v3-error | 9 | `v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.hub_relay.response_failure_entry`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.route_policy.condition_evaluation` |
 | v3-runtime | v3-provider-responses | 24 | `v3-provider-admission-lease-lifecycle`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.selected_provider_model_binding` |
 | v3-runtime | v3-runtime | 57 | `v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.direct.request_key_hooks`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.execution_control_payload_architecture`<br/>`v3.memory_raw_capture`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_admission_rescue_entrypoints`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_direct_full_attempt_commit`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.sse_error_and_direct_consumer_pre_wiring`<br/>`v3.target.session_global_selection`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
 | v3-runtime | v3-runtime::hub_v1 | 48 | `v3.hub_pipeline.v1.hook_registry_compile`<br/>`v3.hub_pipeline.v1.relay_payload_copy_runtime_probes`<br/>`v3.hub_relay.tool_servertool_multiturn_parity`<br/>`v3.protocol.anthropic.characterization`<br/>`v3.protocol.gemini.characterization`<br/>`v3.protocol.openai_chat.characterization`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
@@ -143,7 +143,7 @@ flowchart TD
 | v3-server | v3-error | 3 | `v3.debug_error_foundation.mainline`<br/>`v3.server.startup` |
 | v3-server | v3-runtime | 6 | `v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline` |
 | v3-server | v3-runtime::hub_v1 | 6 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.runtime_timing_observability.mainline` |
-| v3-server | v3-server | 41 | `v3.client_sse_head_commit`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.managed_restart_attempt`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_restart_handoff_skeleton`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
+| v3-server | v3-server | 43 | `v3.client_sse_head_commit`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.managed_restart_attempt`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_restart_handoff_skeleton`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
 | v3-server | v3/vendor | 1 | `v3.server.startup` |
 | v3-target | v3-provider-responses | 1 | `v3.provider_key_health_model_granularity` |
 | v3-target | v3-target | 1 | `v3.provider_oauth_credentials.mainline` |
@@ -1518,12 +1518,15 @@ flowchart TD
     c_36_v3_debug_error_foundation_mainline_22["v3-runtime<br/>build_v3_provider_error_source<br/><small>routecodex-v3-runtime/src/hooks.rs</small>"]
     c_36_v3_debug_error_foundation_mainline_27["v3-runtime<br/>V3DryRunNoNetworkTransport::send<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small>"]
     c_36_v3_debug_error_foundation_mainline_29["v3-runtime<br/>collect_v3_response_dry_run_client_payload<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small>"]
+    c_36_v3_debug_error_foundation_mainline_34["v3-runtime<br/>build_v3_relay_provider_attempt_source<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
   end
   subgraph c_36_v3_debug_error_foundation_mainline_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
     c_36_v3_debug_error_foundation_mainline_30["v3-runtime::hub_v1<br/>V3ProviderRequestDryRunNoNetworkTransport::send<br/><small>routecodex-v3-runtime/src/hub_v1/provider_request_dry_run.rs</small>"]
     c_36_v3_debug_error_foundation_mainline_31["v3-runtime::hub_v1<br/>captured_provider_response_for_dry_run<br/><small>routecodex-v3-runtime/src/hub_v1/provider_request_dry_run.rs</small>"]
     c_36_v3_debug_error_foundation_mainline_32["v3-runtime::hub_v1<br/>execute_v3_anthropic_relay_response_dry_run_runtime<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small>"]
     c_36_v3_debug_error_foundation_mainline_33["v3-runtime::hub_v1<br/>V3AnthropicRelayRuntimeOutput::client_response<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs</small>"]
+    c_36_v3_debug_error_foundation_mainline_35["v3-runtime::hub_v1<br/>handle_provider_failure<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs</small>"]
+    c_36_v3_debug_error_foundation_mainline_36["v3-runtime::hub_v1<br/>build_v3_runtime_provider_failure_observation_from_policy_event<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs</small>"]
   end
   subgraph c_36_v3_debug_error_foundation_mainline_m_v3_server["v3-server"]
     c_36_v3_debug_error_foundation_mainline_25["v3-server<br/>build_v3_provider_failure_session_scope_for_request<br/><small>routecodex-v3-server/src/lib.rs</small>"]
@@ -1550,6 +1553,8 @@ flowchart TD
   c_36_v3_debug_error_foundation_mainline_13 -->|v3-de-20<br/>V3Resp15ClientPayload → V3DryRunResponseReplayCaptured| c_36_v3_debug_error_foundation_mainline_29
   c_36_v3_debug_error_foundation_mainline_30 -->|v3-de-21<br/>V3DryRunFixture → V3ProviderResp14Raw| c_36_v3_debug_error_foundation_mainline_31
   c_36_v3_debug_error_foundation_mainline_32 -->|v3-de-22<br/>V3AnthropicRelayRuntimeOutput → V3DryRunResponseReplayCaptured| c_36_v3_debug_error_foundation_mainline_33
+  c_36_v3_debug_error_foundation_mainline_34 -->|v3-de-23<br/>V3ProviderAttemptFailed → V3Error01SourceRaised| c_36_v3_debug_error_foundation_mainline_23
+  c_36_v3_debug_error_foundation_mainline_35 -->|v3-de-24<br/>V3Error01SourceRaised → V3RuntimeProviderFailureObservation| c_36_v3_debug_error_foundation_mainline_36
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -1576,6 +1581,8 @@ flowchart TD
 | `v3-de-20` | `V3Resp15ClientPayload` → `V3DryRunResponseReplayCaptured` | anchored | execute_v3_responses_direct_dry_run_runtime<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small> | collect_v3_response_dry_run_client_payload<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-21` | `V3DryRunFixture` → `V3ProviderResp14Raw` | anchored | V3ProviderRequestDryRunNoNetworkTransport::send<br/><small>routecodex-v3-runtime/src/hub_v1/provider_request_dry_run.rs</small> | captured_provider_response_for_dry_run<br/><small>routecodex-v3-runtime/src/hub_v1/provider_request_dry_run.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-22` | `V3AnthropicRelayRuntimeOutput` → `V3DryRunResponseReplayCaptured` | anchored | execute_v3_anthropic_relay_response_dry_run_runtime<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small> | V3AnthropicRelayRuntimeOutput::client_response<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs</small> | `v3.debug_error_foundation` |
+| `v3-de-23` | `V3ProviderAttemptFailed` → `V3Error01SourceRaised` | anchored | build_v3_relay_provider_attempt_source<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | build_v3_error_01_source_raised_external<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.debug_error_foundation` |
+| `v3-de-24` | `V3Error01SourceRaised` → `V3RuntimeProviderFailureObservation` | anchored | handle_provider_failure<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs</small> | build_v3_runtime_provider_failure_observation_from_policy_event<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs</small> | `v3.debug_error_foundation` |
 
 ## v3.anthropic_relay.controlled_runtime
 
@@ -1906,14 +1913,14 @@ flowchart TD
     c_43_v3_hub_relay_response_failure_entry_1["v3-error<br/>build_v3_error_01_source_raised_external<br/><small>routecodex-v3-error/src/lib.rs</small>"]
   end
   subgraph c_43_v3_hub_relay_response_failure_entry_m_v3_runtime["v3-runtime"]
-    c_43_v3_hub_relay_response_failure_entry_0["v3-runtime<br/>build_v3_relay_provider_error_05_decision<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
+    c_43_v3_hub_relay_response_failure_entry_0["v3-runtime<br/>build_v3_relay_provider_attempt_source<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
   end
   c_43_v3_hub_relay_response_failure_entry_0 -->|v3-hub-relay-response-failure-01<br/>V3HubRespChatProcess03Governed → V3Error01SourceRaised| c_43_v3_hub_relay_response_failure_entry_1
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-hub-relay-response-failure-01` | `V3HubRespChatProcess03Governed` → `V3Error01SourceRaised` | anchored | build_v3_relay_provider_error_05_decision<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | build_v3_error_01_source_raised_external<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.hub_relay_runtime_closeout` |
+| `v3-hub-relay-response-failure-01` | `V3HubRespChatProcess03Governed` → `V3Error01SourceRaised` | anchored | build_v3_relay_provider_attempt_source<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | build_v3_error_01_source_raised_external<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.hub_relay_runtime_closeout` |
 
 ## v3.responses_provider_event.gemini_materialization
 
@@ -2101,7 +2108,7 @@ flowchart TD
 
 ## v3.error.raw_wire_evidence
 
-Terminal Responses Relay failure enqueues verbatim request, Error chain, and provider wire evidence through the Server-owned failure diagnostic side channel; the shared Debug sample worker writes it to the declared filesystem resource.
+Responses terminal failures and Chat failed attempts enqueue private diagnostic evidence through the Server-owned side channel. Chat retains original typed sources even when a later Provider succeeds; diagnostic writes do not alter provider selection or client framing.
 
 Owner feature: `v3.error.raw_wire_evidence`
 
@@ -2115,10 +2122,14 @@ flowchart TD
   subgraph c_50_v3_error_raw_wire_evidence_m_v3_server["v3-server"]
     c_50_v3_error_raw_wire_evidence_0["v3-server<br/>finalize_v3_responses_relay_server_output<br/><small>routecodex-v3-server/src/live_snapshot.rs</small>"]
     c_50_v3_error_raw_wire_evidence_1["v3-server<br/>persist_v3_error_evidence_payload<br/><small>routecodex-v3-server/src/live_snapshot.rs</small>"]
+    c_50_v3_error_raw_wire_evidence_5["v3-server<br/>pending_endpoint_after_responses_admission_inner<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small>"]
+    c_50_v3_error_raw_wire_evidence_6["v3-server<br/>persist_v3_chat_failure_evidence<br/><small>routecodex-v3-server/src/lib.rs</small>"]
   end
   c_50_v3_error_raw_wire_evidence_0 -->|v3-responses-relay-error-evidence-01<br/>V3Error06ClientProjected → V3ErrorEvidencePersistQueued| c_50_v3_error_raw_wire_evidence_1
   c_50_v3_error_raw_wire_evidence_2 -->|v3-responses-relay-error-evidence-02<br/>V3ErrorEvidencePersistQueued → V3ErrorEvidenceFlushOnTerminalFailure| c_50_v3_error_raw_wire_evidence_3
   c_50_v3_error_raw_wire_evidence_3 -->|v3-responses-relay-error-evidence-03<br/>V3ErrorEvidencePersistFailed → V3ErrorEvidencePersistFailureReported| c_50_v3_error_raw_wire_evidence_4
+  c_50_v3_error_raw_wire_evidence_5 -->|v3-chat-relay-error-evidence-01<br/>V3OpenAiChatRelayRuntimeOutput → V3ChatFailedAttemptEvidence| c_50_v3_error_raw_wire_evidence_6
+  c_50_v3_error_raw_wire_evidence_6 -->|v3-chat-relay-error-evidence-02<br/>V3ChatFailedAttemptEvidence → V3ErrorEvidencePersistQueued| c_50_v3_error_raw_wire_evidence_1
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -2126,6 +2137,8 @@ flowchart TD
 | `v3-responses-relay-error-evidence-01` | `V3Error06ClientProjected` → `V3ErrorEvidencePersistQueued` | anchored | finalize_v3_responses_relay_server_output<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | persist_v3_error_evidence_payload<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | `v3.error.raw_wire_evidence` |
 | `v3-responses-relay-error-evidence-02` | `V3ErrorEvidencePersistQueued` → `V3ErrorEvidenceFlushOnTerminalFailure` | anchored | run_v3_codex_sample_persist_worker<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | persist_v3_codex_sample_persist_job<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.error.raw_wire_evidence` |
 | `v3-responses-relay-error-evidence-03` | `V3ErrorEvidencePersistFailed` → `V3ErrorEvidencePersistFailureReported` | anchored | persist_v3_codex_sample_persist_job<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | record_v3_codex_sample_persist_failure<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.error.raw_wire_evidence` |
+| `v3-chat-relay-error-evidence-01` | `V3OpenAiChatRelayRuntimeOutput` → `V3ChatFailedAttemptEvidence` | anchored | pending_endpoint_after_responses_admission_inner<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | persist_v3_chat_failure_evidence<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.error.raw_wire_evidence` |
+| `v3-chat-relay-error-evidence-02` | `V3ChatFailedAttemptEvidence` → `V3ErrorEvidencePersistQueued` | anchored | persist_v3_chat_failure_evidence<br/><small>routecodex-v3-server/src/lib.rs</small> | persist_v3_error_evidence_payload<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | `v3.error.raw_wire_evidence` |
 
 ## v3.servertool_center.skeleton
 

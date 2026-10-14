@@ -212,6 +212,7 @@ async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(
         true,
         None,
         None,
+        &mut Vec::new(),
     )
     .await
     .map_err(|error| match error {
@@ -409,6 +410,7 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
     fn assemble_failure_output(
         failure: V3RelayProviderFailure,
         trace: Vec<&'static str>,
+        _provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
     ) -> V3GeminiRelayRuntimeOutput {
         provider_failure_output(failure, trace)
     }

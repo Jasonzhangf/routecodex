@@ -518,6 +518,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> = None;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut last_external_http = None;
+    let mut provider_failure_events: Vec<V3RuntimeProviderFailureObservation> = Vec::new();
     let deterministic_sample = v3_relay_provider_target_selection_sample(&input.request_id);
     let failure_context = V3RelayProviderFailurePolicyContext {
         manifest,
@@ -626,6 +627,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     },
                     &mut retry_selected,
                     &mut pending_provider_action_recovery,
+                    &mut provider_failure_events,
                 )
                 .await?;
                 if let Some(failure) = terminal_failure {
@@ -858,6 +860,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     },
                     &mut retry_selected,
                     &mut pending_provider_action_recovery,
+                    &mut provider_failure_events,
                 )
                 .await?
                 {
@@ -886,6 +889,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     },
                     &mut retry_selected,
                     &mut pending_provider_action_recovery,
+                    &mut provider_failure_events,
                 )
                 .await?
                 {
@@ -945,6 +949,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                             },
                             &mut retry_selected,
                             &mut pending_provider_action_recovery,
+                            &mut provider_failure_events,
                         )
                         .await?;
                         if let Some(failure) = terminal_failure {
@@ -1050,6 +1055,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                                 },
                                 &mut retry_selected,
                                 &mut pending_provider_action_recovery,
+                                &mut provider_failure_events,
                             )
                             .await?
                             {
@@ -1138,6 +1144,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                             },
                             &mut retry_selected,
                             &mut pending_provider_action_recovery,
+                            &mut provider_failure_events,
                         )
                         .await?
                         {
@@ -1175,6 +1182,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                                     },
                                     &mut retry_selected,
                                     &mut pending_provider_action_recovery,
+                                    &mut provider_failure_events,
                                 )
                                 .await?
                                 {
@@ -1278,6 +1286,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                                 },
                                 &mut retry_selected,
                                 &mut pending_provider_action_recovery,
+                                &mut provider_failure_events,
                             )
                             .await?
                             {

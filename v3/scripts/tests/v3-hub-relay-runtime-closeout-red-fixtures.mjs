@@ -209,15 +209,15 @@ const cases = [
   {
     name: 'Resp03 Error01 call-map callee drifts to local envelope helper',
     file: 'docs/architecture/v3-mainline-call-map.yml',
-    marker: '    caller_symbol: build_v3_relay_provider_error_05_decision\n    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs\n    callee_symbol: build_v3_error_01_source_raised_external\n    callee_file: v3/crates/routecodex-v3-error/src/lib.rs',
-    mutation: '    caller_symbol: build_v3_relay_provider_error_05_decision\n    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs\n    callee_symbol: provider_response_hook_failure\n    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+    marker: '  - step_id: v3-hub-relay-response-failure-01\n    from_node: V3HubRespChatProcess03Governed\n    to_node: V3Error01SourceRaised\n    caller_symbol: build_v3_relay_provider_attempt_source\n    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs\n    callee_symbol: build_v3_error_01_source_raised_external',
+    mutation: '  - step_id: v3-hub-relay-response-failure-01\n    from_node: V3HubRespChatProcess03Governed\n    to_node: V3Error01SourceRaised\n    caller_symbol: build_v3_relay_provider_attempt_source\n    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs\n    callee_symbol: provider_response_hook_failure',
     diagnostic: /callee_symbol must equal build_v3_error_01_source_raised_external/,
   },
   {
     name: 'shared relay Error01 builder call removed',
     file: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
-    marker: '    let source = build_v3_error_01_source_raised_external(\n        V3ErrorSourceKind::ProviderFailure,\n        source_stage,\n        code.clone(),',
-    mutation: '    let source = removed_v3_error_01_source_raised_external(\n        V3ErrorSourceKind::ProviderFailure,\n        source_stage,\n        code.clone(),',
+    marker: '    build_v3_error_01_source_raised_external(\n        V3ErrorSourceKind::ProviderFailure,\n        source_stage,\n        code.clone(),',
+    mutation: '    removed_v3_error_01_source_raised_external(\n        V3ErrorSourceKind::ProviderFailure,\n        source_stage,\n        code.clone(),',
     diagnostic: /missing build_v3_error_01_source_raised_external\(/,
   },
 ];

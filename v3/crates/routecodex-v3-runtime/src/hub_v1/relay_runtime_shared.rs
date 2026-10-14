@@ -9,10 +9,14 @@
 //! 错误统一以 `String` 表达，调用方（协议 runtime）负责 map_err 到自身错误类型；
 //! 统一失败结构 [`V3RelayProviderFailure`] 替代各协议 `V3*RelayProviderFailure` 副本。
 
-use crate::hub_v1::{V3HubEntryProtocol, V3RuntimeObservability, V3RuntimeStreamObservation};
+use crate::hub_v1::{
+    V3HubEntryProtocol, V3RuntimeObservability, V3RuntimeProviderFailureObservation,
+    V3RuntimeStreamObservation,
+};
 use crate::provider_failure_runtime_policy::{
     project_v3_client_disconnect, provider_runtime_failure_stage,
-    run_v3_relay_provider_failure_policy, V3RelayProviderFailurePolicyContext,
+    run_v3_relay_provider_failure_policy, v3_relay_provider_candidate_key_parts,
+    V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyEvent,
     V3RelayProviderFailurePolicyState,
 };
 use futures_util::StreamExt;
@@ -33,13 +37,81 @@ use routecodex_v3_sse::{
 };
 use routecodex_v3_target::V3Target10ConcreteProviderSelected;
 use serde_json::{json, Value};
+use std::fmt;
 use std::pin::Pin;
+
+/// 骨架内部错误（协议入口负责映射到自身错误类型）。
+#[derive(Debug, Clone, PartialEq)]
+pub enum V3RelayCoreError {
+    StaticRegistry(String),
+    EndpointPath(String),
+    Target(String),
+    ProviderPoolExhausted {
+        attempted_candidates: Vec<String>,
+    },
+    /// 治理层拦截但入口无投影路径（如 openai_chat 入口遇 Mode B web-search 剥离）：
+    /// 非 provider 失败，禁止进入失败重试链，骨架 fail-fast 返回。
+    WebSearchIntercepted(String),
+}
+
+impl fmt::Display for V3RelayCoreError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            V3RelayCoreError::StaticRegistry(message) => write!(f, "static registry: {message}"),
+            V3RelayCoreError::EndpointPath(message) => write!(f, "endpoint path: {message}"),
+            V3RelayCoreError::Target(message) => write!(f, "target: {message}"),
+            V3RelayCoreError::ProviderPoolExhausted {
+                attempted_candidates,
+            } => write!(f, "provider pool exhausted after {attempted_candidates:?}"),
+            V3RelayCoreError::WebSearchIntercepted(message) => {
+                write!(f, "web search intercepted unprojected: {message}")
+            }
+        }
+    }
+}
 
 /// Provider attempt timeout, with the published default of five minutes.
 pub(crate) fn v3_relay_transport_response_timeout_from_ms(
     request_timeout_ms: Option<u64>,
 ) -> std::time::Duration {
     std::time::Duration::from_millis(request_timeout_ms.filter(|&ms| ms > 0).unwrap_or(300_000))
+}
+
+#[cfg(test)]
+mod response_header_timeout_contract_tests {
+    use super::*;
+
+    #[test]
+    fn relay_transport_header_timeout_reads_provider_request_timeout() {
+        assert_eq!(
+            v3_relay_transport_response_timeout_from_ms(Some(900_000)),
+            std::time::Duration::from_millis(900_000)
+        );
+    }
+
+    #[test]
+    fn relay_transport_header_timeout_defaults_and_zero_use_default_timeout() {
+        assert_eq!(
+            v3_relay_transport_response_timeout_from_ms(None),
+            std::time::Duration::from_millis(300_000)
+        );
+        assert_eq!(
+            v3_relay_transport_response_timeout_from_ms(Some(0)),
+            std::time::Duration::from_millis(300_000)
+        );
+    }
+}
+
+pub(crate) fn v3_relay_transport_response_timeout(
+    manifest: &V3Config05ManifestPublished,
+    provider_id: &str,
+) -> std::time::Duration {
+    v3_relay_transport_response_timeout_from_ms(
+        manifest
+            .providers
+            .get(provider_id)
+            .map(|p| p.request_timeout_ms),
+    )
 }
 
 /// The published SSE timeout covers both first frame and inter-frame idle time.
@@ -215,6 +287,7 @@ pub async fn handle_provider_failure(
     state: &mut V3RelayProviderFailurePolicyState<'_>,
     retry_selected: &mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
     pending_recovery: &mut Option<V3Error05RecoveryAdmissionWitness>,
+    provider_failure_events: &mut Vec<V3RuntimeProviderFailureObservation>,
 ) -> Result<Option<V3RelayProviderFailure>, String> {
     if failure.terminal_projection.is_some() {
         return Ok(Some(failure));
@@ -231,6 +304,9 @@ pub async fn handle_provider_failure(
     )
     .await
     .map_err(|error| error.to_string())?;
+    result.event.provider_status = failure.provider_status;
+    provider_failure_events
+        .push(build_v3_runtime_provider_failure_observation_from_policy_event(&result.event));
     match result.decision.action {
         V3Error05ExecutionAction::WaitThenReselect { recovery } => {
             *retry_selected = result.retry_selected.map(|selected| *selected);
@@ -261,6 +337,40 @@ pub async fn handle_provider_failure(
         | V3Error05ExecutionAction::RejectNonProviderError => {
             Err("provider failure entered a non-provider Error05 lane".to_string())
         }
+    }
+}
+
+pub(crate) fn build_v3_runtime_provider_failure_observation_from_policy_event(
+    event: &V3RelayProviderFailurePolicyEvent,
+) -> V3RuntimeProviderFailureObservation {
+    V3RuntimeProviderFailureObservation {
+        provider_key: v3_relay_provider_candidate_key_parts(
+            &event.candidate.provider_id,
+            Some(&event.candidate.interface_id),
+            Some(&event.candidate.auth_alias),
+            Some(&event.candidate.model_id),
+        ),
+        provider_id: event.candidate.provider_id.clone(),
+        auth_alias: Some(event.candidate.auth_alias.clone()),
+        model_id: event.candidate.model_id.clone(),
+        status: event.status,
+        error_type: event.error_type.clone(),
+        external_error_kind: None,
+        external_error_code: event.error_type.clone(),
+        // The real upstream HTTP status; `None` for a response-less failure.
+        external_error_status: event.provider_status,
+        internal_code: None,
+        // V3RelayProviderFailurePolicyEvent does not carry the upstream request
+        // id: record an honest unknown rather than a synthesised value.
+        upstream_request_id: None,
+        message: event.message.clone(),
+        failure_count: event.health_record.failure_count,
+        health_state: event.health_record.state.clone(),
+        cooldown_until_ms: event.health_record.cooldown_until_ms,
+        action: event.action.clone(),
+        next_provider_key: event.next_provider_key.clone(),
+        wait_ms: event.wait_ms,
+        diagnostic_source: Some(event.diagnostic_source.clone()),
     }
 }
 

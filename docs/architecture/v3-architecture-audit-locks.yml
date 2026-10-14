@@ -97,8 +97,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:c520e6d65c78c6dea0d8f5f8f3a3e1182626814c45341144251f9d5e5de7e98a
-    last_manual_authorization_id: auth-20260905-v3-debug-error-split-anchor
+    fingerprint: sha256:3080a7a115a970731ea8c4bd503d6d6899e48104f577105dfbbedcdc401dedef
+    last_manual_authorization_id: auth-20261014-fa22072-diagnostic-source
   - item_id: chain:v3.sse.transport_boundary
     chain_id: v3.sse.transport_boundary
     status: audited_locked
@@ -274,8 +274,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:a19e427d0ac7643bb355d4949f77d61b689def1db0aa77c37f39c748b25027cf
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:bbaa71c6d43f564dcc8fa94e77542e9eac85e9226fbff3c26497a1415b1fa767
+    last_manual_authorization_id: auth-20261014-fa22072-diagnostic-source-entry
   - item_id: chain:v3.responses_provider_event.terminal_merge
     chain_id: v3.responses_provider_event.terminal_merge
     status: audited_locked
@@ -306,8 +306,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:383b2116a35b192951d60f8c5df63cdd759e4fce448702d7389b8e8a9bb4b612
-    last_manual_authorization_id: auth-20260928-e12092b-error-evidence-lock
+    fingerprint: sha256:ddcd35e83878ee54238869d004bc60e7de8ae1cd72d3c83f451af2ee2876334f
+    last_manual_authorization_id: auth-20261014-fa22072-failed-attempt-evidence
   - item_id: chain:v3.servertool_center.skeleton
     chain_id: v3.servertool_center.skeleton
     status: audited_locked
@@ -1321,3 +1321,24 @@ manual_authorizations:
     reason: "Jason explicitly requested: probe 只要简单的 ping pong，只要求 2xx 响应就算成功; 429 需要连续三次才冷却，有成功立马恢复; 先止血. This bounded refresh binds only the shared Provider status-only probe transport call; the scheduled generation and recovery lifecycle remains fixed. Configuration abstraction is deferred."
     fingerprint_before: sha256:487da1203d72afc7ff984d1e24ab4ee9703a739e8170ee883c23526d1abaf70e
     fingerprint_after: sha256:e8451e88f85861c9f3b9f77781c263b43ddb90586660c1ec5eec03b0d7c28245
+  - authorization_id: auth-20261014-fa22072-diagnostic-source
+    item_id: chain:v3.debug_error_foundation.mainline
+    approved_by: Jason
+    approved_at: '2026-10-14T10:15:04Z'
+    reason: "Jason explicitly approved: 授权这两项诊断链锁刷新. This record retains the original typed Error01 source through Error06 and the existing failed-attempt observation. The subsequent instruction 内部记录错误,客户端继续切换provider继续执行 makes same-request eligible-provider continuation the acceptance. Only recording/source flow is changed; routing, recovery, cooling, framing, lifecycle and production configuration remain outside this grant. Authorization recorded at the stated time; tests, independent review and CI remain required."
+    fingerprint_before: sha256:c520e6d65c78c6dea0d8f5f8f3a3e1182626814c45341144251f9d5e5de7e98a
+    fingerprint_after: sha256:3080a7a115a970731ea8c4bd503d6d6899e48104f577105dfbbedcdc401dedef
+  - authorization_id: auth-20261014-fa22072-failed-attempt-evidence
+    item_id: chain:v3.error.raw_wire_evidence
+    approved_by: Jason
+    approved_at: '2026-10-14T10:15:04Z'
+    reason: "Jason explicitly approved: 授权这两项诊断链锁刷新. This record binds Chat private failed-attempt/terminal-source evidence to the existing asynchronous Debug queue, including a request recovered on another eligible Provider. Diagnostic persistence failures stay in the existing failure ledger and do not change client execution. Candidate source, maps and these two locks only; no install, restart, shutdown or production writes. Authorization recorded at the stated time; affected tests, independent review and CI remain required."
+    fingerprint_before: sha256:383b2116a35b192951d60f8c5df63cdd759e4fce448702d7389b8e8a9bb4b612
+    fingerprint_after: sha256:ddcd35e83878ee54238869d004bc60e7de8ae1cd72d3c83f451af2ee2876334f
+  - authorization_id: auth-20261014-fa22072-diagnostic-source-entry
+    item_id: chain:v3.hub_relay.response_failure_entry
+    approved_by: Jason
+    approved_at: '2026-10-14T14:09:30Z'
+    reason: "Jason explicitly approved: 授权这第三条诊断入口锁. This scoped refresh binds the existing original Error01 source edge v3-hub-relay-response-failure-01 to build_v3_relay_provider_attempt_source, extracted from build_v3_relay_provider_error_05_decision so the original cause is retained before target resolution. Callee, owner, resource flow, status and runtime policy remain unchanged. Only this caller binding, fingerprint and authorization record are covered; no install, restart, shutdown or production configuration writes. Authorization recorded at the stated time; independent review and CI remain required."
+    fingerprint_before: sha256:a19e427d0ac7643bb355d4949f77d61b689def1db0aa77c37f39c748b25027cf
+    fingerprint_after: sha256:bbaa71c6d43f564dcc8fa94e77542e9eac85e9226fbff3c26497a1415b1fa767

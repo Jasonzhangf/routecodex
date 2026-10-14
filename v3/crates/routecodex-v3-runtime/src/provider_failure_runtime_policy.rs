@@ -230,6 +230,10 @@ pub(crate) struct V3RelayProviderFailurePolicyEvent {
     pub(crate) action: String,
     pub(crate) next_provider_key: Option<String>,
     pub(crate) wait_ms: Option<u64>,
+    /// The original typed Error01 source of the provider attempt that started
+    /// this policy run. It is carried so a later target-resolution failure can
+    /// never erase the provider cause that actually began the attempt.
+    pub(crate) diagnostic_source: V3Error01SourceRaised,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -603,6 +607,15 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     state: &mut V3RelayProviderFailurePolicyState<'_>,
 ) -> Result<V3RelayProviderFailurePolicyResult, String> {
     let candidate_key = v3_relay_provider_candidate_key(&selected.candidate);
+    // Preserve the original typed Error01 source of this provider attempt before
+    // the Error05 decision consumes it, so a later target-resolution failure
+    // cannot erase the provider cause that actually began this attempt.
+    let attempt_source = build_v3_relay_provider_attempt_source(
+        &selected,
+        source_stage,
+        error_type.as_deref(),
+        &message,
+    );
     // Request-local provider failure exclusion is monotonic. Record it before
     // health/policy or target-resolution work so every exit path forbids the
     // failed provider:key:model from being sent again.
@@ -722,10 +735,8 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                 };
                 let decision = build_v3_relay_provider_error_05_decision(
                     &selected,
-                    source_stage,
+                    attempt_source.clone(),
                     status,
-                    error_type.as_deref(),
-                    &message,
                     usize::from(!alternative.candidate.default_pool_member),
                     alternative.candidate.default_pool_member,
                     false,
@@ -752,6 +763,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                             action: "switch_provider",
                             next_provider_key: Some(alternative_key),
                             wait_ms: recovery.as_ref().map(|record| record.minimum_delay_ms),
+                            diagnostic_source: attempt_source.clone(),
                         },
                     ),
                 });
@@ -789,6 +801,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                         action: "project_target_resolution_failure",
                         next_provider_key: None,
                         wait_ms: None,
+                        diagnostic_source: attempt_source.clone(),
                     },
                 ),
             });
@@ -798,10 +811,8 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         state.failed_candidates.insert(candidate_key);
         let decision = build_v3_relay_provider_error_05_decision(
             &selected,
-            source_stage,
+            attempt_source.clone(),
             status,
-            error_type.as_deref(),
-            &message,
             0,
             false,
             false,
@@ -822,6 +833,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                     action: "terminal_request_local_provider_compat_exhausted",
                     next_provider_key: None,
                     wait_ms: None,
+                    diagnostic_source: attempt_source.clone(),
                 },
             ),
         });
@@ -835,10 +847,8 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     state.failed_candidates.insert(candidate_key);
     let decision = build_v3_relay_provider_error_05_decision(
         &selected,
-        source_stage,
+        attempt_source.clone(),
         status,
-        error_type.as_deref(),
-        &message,
         0,
         false,
         false,
@@ -869,6 +879,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                 action: "terminal_route_and_default_exhausted",
                 next_provider_key: None,
                 wait_ms: Some(admission.minimum_delay_ms),
+                diagnostic_source: attempt_source.clone(),
             },
         ),
     })
@@ -1000,22 +1011,17 @@ fn provider_failure_policy_from_error_policy_directive(
     }))
 }
 
-fn build_v3_relay_provider_error_05_decision(
+fn build_v3_relay_provider_attempt_source(
     selected: &V3Target10ConcreteProviderSelected,
     source_stage: &'static str,
-    status: u16,
     error_type: Option<&str>,
     message: &str,
-    route_pool_remaining_after_exclusion: usize,
-    default_pool_available: bool,
-    same_provider_retry_available: bool,
-    recovery: Option<V3Error05RecoveryAdmissionWitness>,
-) -> V3Error05ExecutionDecision {
+) -> V3Error01SourceRaised {
     let code = error_type.unwrap_or("provider_failure").to_string();
     // The numeric policy status also represents synthesized request/transport
     // failures. Only the separately captured HTTP witness proves an upstream
     // status, so Error01 must not claim this policy number as external HTTP.
-    let source = build_v3_error_01_source_raised_external(
+    build_v3_error_01_source_raised_external(
         V3ErrorSourceKind::ProviderFailure,
         source_stage,
         code.clone(),
@@ -1028,7 +1034,18 @@ fn build_v3_relay_provider_error_05_decision(
             upstream_request_id: None,
             message: Some(message.to_string()),
         },
-    );
+    )
+}
+
+fn build_v3_relay_provider_error_05_decision(
+    selected: &V3Target10ConcreteProviderSelected,
+    source: V3Error01SourceRaised,
+    status: u16,
+    route_pool_remaining_after_exclusion: usize,
+    default_pool_available: bool,
+    same_provider_retry_available: bool,
+    recovery: Option<V3Error05RecoveryAdmissionWitness>,
+) -> V3Error05ExecutionDecision {
     V3ErrorHandlingCenter::decide_provider(
         V3ErrorHandlingCenterInput {
             source,

@@ -358,16 +358,23 @@ for (const phrase of [
   'build_v3_relay_provider_error_05_decision',
   'terminal_projection_for',
 ]) requireText(providerFailurePolicy, providerFailurePolicyPath, phrase);
+const relayAttemptSourceBody = functionBody(
+  providerFailurePolicy,
+  providerFailurePolicyPath,
+  'fn build_v3_relay_provider_attempt_source(',
+);
+requireText(
+  relayAttemptSourceBody,
+  `${providerFailurePolicyPath}: build_v3_relay_provider_attempt_source`,
+  'build_v3_error_01_source_raised_external(',
+);
 const relayError05BuilderBody = functionBody(
   providerFailurePolicy,
   providerFailurePolicyPath,
   'fn build_v3_relay_provider_error_05_decision(',
 );
-requireText(
-  relayError05BuilderBody,
-  `${providerFailurePolicyPath}: build_v3_relay_provider_error_05_decision`,
-  'build_v3_error_01_source_raised_external(',
-);
+requireText(relayError05BuilderBody, providerFailurePolicyPath, 'source,');
+requireText(relayError05BuilderBody, providerFailurePolicyPath, 'V3ErrorHandlingCenter::decide_provider(');
 
 for (const phrase of [
   'execute_v3_responses_relay_request',
@@ -431,7 +438,7 @@ for (const phrase of [
   'v3-hub-relay-response-failure-01',
   'V3HubRespChatProcess03Governed',
   'V3Error01SourceRaised',
-  'build_v3_relay_provider_error_05_decision',
+  'build_v3_relay_provider_attempt_source',
   'build_v3_error_01_source_raised_external',
 ]) {
   requireText(mainline, mainlinePath, phrase);
@@ -445,7 +452,7 @@ const responseFailureEdge = responseFailureChain?.edges?.find(
 for (const [field, expected] of Object.entries({
   from_node: 'V3HubRespChatProcess03Governed',
   to_node: 'V3Error01SourceRaised',
-  caller_symbol: 'build_v3_relay_provider_error_05_decision',
+  caller_symbol: 'build_v3_relay_provider_attempt_source',
   caller_file: providerFailurePolicyPath,
   callee_symbol: 'build_v3_error_01_source_raised_external',
   callee_file: 'v3/crates/routecodex-v3-error/src/lib.rs',

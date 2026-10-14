@@ -3442,10 +3442,12 @@ chains:
     resource_flow:
       consumes:
       - v3.error.execution_decision
+      - v3.error.source
       produces:
       - v3.error.client_projection
       side_channel_reads:
       - v3.error.execution_decision
+      - v3.error.source
       side_channel_writes:
       - v3.error.client_projection
     status: anchored
@@ -3682,6 +3684,34 @@ chains:
       side_channel_reads: []
       side_channel_writes:
       - v3.debug.response_dry_run_execution
+    status: anchored
+  - step_id: v3-de-23
+    from_node: V3ProviderAttemptFailed
+    to_node: V3Error01SourceRaised
+    caller_symbol: build_v3_relay_provider_attempt_source
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: build_v3_error_01_source_raised_external
+    callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+    owner_feature_id: v3.debug_error_foundation
+    resource_flow:
+      consumes: []
+      produces: [v3.error.source]
+      side_channel_reads: []
+      side_channel_writes: [v3.error.source]
+    status: anchored
+  - step_id: v3-de-24
+    from_node: V3Error01SourceRaised
+    to_node: V3RuntimeProviderFailureObservation
+    caller_symbol: handle_provider_failure
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
+    callee_symbol: build_v3_runtime_provider_failure_observation_from_policy_event
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
+    owner_feature_id: v3.debug_error_foundation
+    resource_flow:
+      consumes: [v3.error.source]
+      produces: [v3.runtime.responses_observability]
+      side_channel_reads: [v3.error.source]
+      side_channel_writes: [v3.runtime.responses_observability]
     status: anchored
 - chain_id: v3.anthropic_relay.controlled_runtime
   owner_feature_id: v3.anthropic_relay_runtime_integration
@@ -4840,7 +4870,7 @@ chains:
   - step_id: v3-hub-relay-response-failure-01
     from_node: V3HubRespChatProcess03Governed
     to_node: V3Error01SourceRaised
-    caller_symbol: build_v3_relay_provider_error_05_decision
+    caller_symbol: build_v3_relay_provider_attempt_source
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
     callee_symbol: build_v3_error_01_source_raised_external
     callee_file: v3/crates/routecodex-v3-error/src/lib.rs
@@ -5270,7 +5300,7 @@ chains:
       - v3.debug.dry_run_execution
 - chain_id: v3.error.raw_wire_evidence
   owner_feature_id: v3.error.raw_wire_evidence
-  summary: Terminal Responses Relay failure enqueues verbatim request, Error chain, and provider wire evidence through the Server-owned failure diagnostic side channel; the shared Debug sample worker writes it to the declared filesystem resource.
+  summary: Responses terminal failures and Chat failed attempts enqueue private diagnostic evidence through the Server-owned side channel. Chat retains original typed sources even when a later Provider succeeds; diagnostic writes do not alter provider selection or client framing.
   edges:
   - step_id: v3-responses-relay-error-evidence-01
     from_node: V3Error06ClientProjected
@@ -5320,6 +5350,36 @@ chains:
       produces: [v3.debug.codex_sample_persist_failure]
       side_channel_reads: [v3.debug.codex_sample_persist_queue]
       side_channel_writes: [v3.debug.codex_sample_persist_failure]
+  - step_id: v3-chat-relay-error-evidence-01
+    from_node: V3OpenAiChatRelayRuntimeOutput
+    to_node: V3ChatFailedAttemptEvidence
+    caller_symbol: pending_endpoint_after_responses_admission_inner
+    caller_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+    callee_symbol: persist_v3_chat_failure_evidence
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    status: anchored
+    edge_kind: failure_side_channel_edge
+    owner_feature_id: v3.error.raw_wire_evidence
+    resource_flow:
+      consumes: [v3.error.source, v3.runtime.responses_observability]
+      produces: [v3.debug.codex_sample_persist_queue]
+      side_channel_reads: [v3.error.source, v3.runtime.responses_observability]
+      side_channel_writes: [v3.debug.codex_sample_persist_queue]
+  - step_id: v3-chat-relay-error-evidence-02
+    from_node: V3ChatFailedAttemptEvidence
+    to_node: V3ErrorEvidencePersistQueued
+    caller_symbol: persist_v3_chat_failure_evidence
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: persist_v3_error_evidence_payload
+    callee_file: v3/crates/routecodex-v3-server/src/live_snapshot.rs
+    status: anchored
+    edge_kind: failure_side_channel_edge
+    owner_feature_id: v3.error.raw_wire_evidence
+    resource_flow:
+      consumes: [v3.error.source, v3.runtime.responses_observability]
+      produces: [v3.debug.codex_sample_persist_queue]
+      side_channel_reads: [v3.error.source, v3.runtime.responses_observability]
+      side_channel_writes: [v3.debug.codex_sample_persist_queue]
 - chain_id: v3.servertool_center.skeleton
   owner_feature_id: v3.servertool_center_skeleton
   summary: Unified ServertoolCenter (MetadataCenter) skeleton. Tools (web_search and servertool CLI) are identified, state-loaded, and projected only through fixed Req04/Resp03 governance hooks; data plane stays logic-free.
