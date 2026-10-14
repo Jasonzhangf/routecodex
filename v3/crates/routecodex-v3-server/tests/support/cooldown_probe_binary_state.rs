@@ -357,7 +357,9 @@ targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test
     };
     wait_receipt(&mut rx, ("Bearer controlled-secret", false)).await;
     assert!(
-        business(&client, &managed).await.contains("controlled-secret"),
+        business(&client, &managed)
+            .await
+            .contains("controlled-secret"),
         "a business 2xx must restore the adaptive concurrency budget"
     );
     success_release.add_permits(1);
