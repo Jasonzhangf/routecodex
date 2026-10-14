@@ -1909,6 +1909,19 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_codex_integer_values.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_codex_integer_values_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_responses_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_terminal_semantics.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_inline_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/signature_target_projection.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/signature_target_projection_tests.rs
+  - v3/crates/routecodex-v3-server/tests/namespace_cross_protocol_public.rs
+  - v3/crates/routecodex-v3-server/tests/namespace_cross_protocol_public/anthropic_invalid.rs
+  - v3/crates/routecodex-v3-server/tests/support/gemini_signature_filter_public.rs
+  - v3/crates/routecodex-v3-server/tests/gemini_sse_attempt_public.rs
+  - v3/crates/routecodex-v3-server/tests/gemini_terminal_public.rs
+  - v3/crates/routecodex-v3-server/tests/namespace_signature_targets_public.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_responses_items.rs
@@ -1937,7 +1950,8 @@ features:
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   required_unit:
-  - Same fully-qualified namespace path and tool kind across Responses `tools` and `additional_tools` uses the later `additional_tools` schema in provider projection; distinct client paths and function/custom kinds with the same provider name remain rejected.
+  - Same original namespace components, leaf and tool kind across Responses `tools`, `additional_tools` and discovered tools use the later source schema; distinct identities and kinds receive unique target wire names from one request-local binding and restore without overwrite.
+  - One complete registered custom-wrapper boundary is shared by Anthropic mechanical inverse and Resp03 serialized/provenance restoration. An unrecognized object with valid reason and extra fields remains complete through JSON/SSE and paired consumer-error follow-up; valid wrappers retain exact input and existing reasoning authorization.
   - Responses request to OpenAI Chat provider wire maps max_output_tokens to max_completion_tokens and preserves OpenAI Chat data-plane metadata/stop, tool schema, tool_choice, user, sampling, response_format,
     token fields, and projects Responses reasoning config to `reasoning_effort` while rejecting non-standard client_metadata and the raw Responses `reasoning` object from provider wire.
   - OpenAI Chat provider response to Responses projection preserves model, created timestamp, reasoning, text, tool calls, finish_reason, and usage fields.
@@ -1963,7 +1977,7 @@ features:
   - "Responses text.format.json_schema.name is a source-only schema identity: inbound preserves it, while Anthropic outbound consumes it and emits only the target-valid `{type:json_schema,schema}` format. Unknown nested format fields and malformed strict values remain explicit outbound failures."
   - ? Responses custom tool declarations map exactly to native OpenAI Chat custom tools. Anthropic uses the registered `v3.custom_tool.anthropic_string_input_wrapper.v1` compatibility projection
     : exact raw input becomes `tool_use.input={"input":raw}`, declaration description/schema carries free-form or exact grammar information without claiming native enforcement, and reverse projection requires
-      governed custom declaration identity plus the exact wrapper shape. Responses web_search/web_search_preview maps to OpenAI Chat web_search_options only for the text-only target subset, while image
+      governed custom declaration identity plus the exact wrapper shape for raw-string unwrapping; other model-generated JSON values remain complete custom input text with a paired consumer error and exact client-string follow-up. Responses web_search/web_search_preview maps to OpenAI Chat web_search_options only for the text-only target subset, while image
       content requests fail. Client-executed tool_search uses its separately audited function compatibility transform and projects back to Responses tool_search_call.
   - Malformed function-call arguments use the separate registered `v3.function_call.anthropic_raw_argument_wrapper.v1` compatibility projection. It preserves exact raw argument text in `tool_use.input={"input":raw}`
     without relabeling the call as custom; valid JSON arguments remain on the native object path, and missing/non-string arguments fail without `{}` repair, result deletion, provider failure classification,
@@ -1993,12 +2007,24 @@ features:
   - Legacy OpenAI Chat outbound currently maps exact client_metadata.user_id to public metadata.user_id and consumes registered Codex client-local keys before provider send; unknown client_metadata and reasoning-summary rejection are known transparency defects, not acceptance requirements. Their owner cutover must prove opaque preservation, provider attempt forwarding, and paired client inverse projection.
   - Responses Direct kernel preserves same-protocol Responses input/include/tool history through production Direct provider wire while applying selected provider model binding and never synthesizing Chat
     messages.
-  - Responses function-call history with an MCP namespace projects to the qualified provider tool name, while namespace-less Responses-origin history is qualified only when the provider tool set
-    makes that mapping unambiguous. Custom tool calls and ordinary native functions never borrow a colliding MCP leaf name.
+  - Responses function/custom history and forced choice project only through exact declared identities; namespace-less leaf names do not borrow namespace authority from prefixes, separators or source item IDs. Undeclared and ambiguous references remain unchanged.
   - Direct parity test is a verification binding over existing Direct mainline edges `v3-rd-09-direct-policy` and `v3-rd-10`; it must not create a second protocol-parity owner edge for those production
     nodes.
   required_blackbox:
   - responses_additional_tools_refreshes_same_namespace_tool_before_chat_projection
+  - responses_direct_declared_namespace_restores_mcp_identity_for_public_consumer
+  - responses_direct_namespace_identity_covers_declaration_sources_and_collisions_for_public_consumer
+  - namespace_wire_bindings_preserve_plain_calls_colliding_paths_and_native_custom
+  - namespace_target_bindings_keep_kind_choice_history_and_inverse
+  - namespace_custom_malformed_wrapper_preserves_complete_provider_input
+  - anthropic_custom_wrapper_preserves_extra_or_non_string_input_without_repair
+  - anthropic_custom_invalid_input_preserves_declared_identity_and_paired_correction
+  - anthropic_custom_unrecognized_reason_wrapper_preserves_complete_roundtrip
+  - responses_client_reaches_gemini_and_anthropic_namespace_targets
+  - gemini_association_empty_text_json_public
+  - gemini_association_empty_text_sse_public
+  - gemini_association_think_split_json_public
+  - gemini_association_think_split_sse_public
   - responses_chat_long_namespace_names_round_trip_on_first_attempt_json_and_sse
   - responses_discovered_custom_tools_restore_kind_and_identity_json_and_sse
   - invalid_custom_arguments_reach_client_and_recover_json_and_sse
@@ -2047,6 +2073,11 @@ features:
   required_gates:
   - npm run render:v3-protocol-semantic-field-matrix
   - npm run test:v3-protocol-conversion-field-parity
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test namespace_cross_protocol_public -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test gemini_sse_attempt_public -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test gemini_terminal_public -- --nocapture --test-threads=1
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test namespace_signature_targets_public -- --nocapture --test-threads=1
+  - npm run test:v3-gemini-responses-bridge-public
   - npm run verify:v3-protocol-conversion-field-parity
   - npm run test:v3-protocol-conversion-field-parity-red-fixtures
   - npm run verify:v3-protocol-conversion-field-parity-ci

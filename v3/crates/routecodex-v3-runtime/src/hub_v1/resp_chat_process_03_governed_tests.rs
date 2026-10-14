@@ -1077,6 +1077,26 @@ fn resp03_custom_tool_nested_json_wrapper_projects_reason_and_restores_native_in
 }
 
 #[test]
+fn resp03_custom_tool_unrecognized_reason_wrapper_preserves_complete_value_without_reasoning() {
+    let input = json!({"input":"raw","extra":true,"reason":"why"}).to_string();
+    let mut payload = json!({"output":[{
+        "type":"custom_tool_call","call_id":"call_opaque","name":"evaluate","input":input
+    }]});
+    let original = payload.clone();
+    map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_and_context(
+        &mut payload,
+        true,
+        true,
+        Some("selected-model"),
+        V3ToolreasonObservationContext {
+            session_id: Some("session-opaque"),
+            request_id: Some("request-opaque"),
+        },
+    );
+    assert_eq!(payload, original);
+}
+
+#[test]
 fn resp03_custom_tool_malformed_nested_wrapper_is_left_byte_semantically_unchanged() {
     let wrapped_input = r#"{"input":"*** Begin Patch\n*** End Patch","reason":42}"#;
     let mut payload = json!({

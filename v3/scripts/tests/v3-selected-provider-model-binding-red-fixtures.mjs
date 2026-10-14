@@ -33,6 +33,12 @@ const cases = [
     diagnostic: /Direct must bind selected model before Provider12 wire build/u,
   },
   {
+    name: 'Direct builds registry wire before shared binding',
+    path: 'v3/crates/routecodex-v3-runtime/src/hooks.rs',
+    mutate: (source) => source.replace('crate::selected_provider_model_binding::bind_v3_selected_provider_model(', 'routecodex_v3_provider_responses::wire::build_v3_provider_12_responses_wire_payload_with_registry();\ncrate::selected_provider_model_binding::bind_v3_selected_provider_model('),
+    diagnostic: /Direct must bind selected model before Provider12 wire build/u,
+  },
+  {
     name: 'Relay skips shared binding',
     path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
     mutate: (source) => source.replace('bind_v3_selected_provider_model(provider_protocol_payload, selected)', 'Ok(V3SelectedProviderModelBinding::from_unbound(provider_protocol_payload))'),

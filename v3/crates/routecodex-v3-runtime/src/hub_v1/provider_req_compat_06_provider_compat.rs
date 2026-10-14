@@ -34,6 +34,8 @@ pub struct ProviderReqCompat06ProviderCompat {
     pub(crate) payload: V3HubOpaquePayload,
     pub(crate) opencode_zen_tcm_bridge: Option<OpencodeZenTcmBridgeBinding>,
     pub(crate) custom_tool_function_binding: Option<CustomToolFunctionBinding>,
+    pub(crate) namespace_registry:
+        provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry,
 }
 
 pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
@@ -43,7 +45,7 @@ pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
         Some(profile) => V3ProviderCompatProfileId::from_config(Some(profile)),
         None => V3ProviderCompatProfileId::Passthrough,
     };
-    let (mut payload, drops, custom_tool_function_binding) =
+    let (mut payload, drops, custom_tool_function_binding, namespace_registry) =
         apply_v3_provider_req_compat(&input, &profile)?;
     let opencode_zen_tcm_bridge = if profile
         .as_str()
@@ -66,6 +68,7 @@ pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
             payload: V3HubOpaquePayload(std::sync::Arc::new(payload)),
             opencode_zen_tcm_bridge,
             custom_tool_function_binding,
+            namespace_registry,
         },
         drops,
     })
@@ -79,18 +82,26 @@ pub(super) fn apply_v3_provider_req_compat(
         Value,
         Vec<V3ProjectionDropRecord>,
         Option<CustomToolFunctionBinding>,
+        provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry,
     ),
     V3ProviderCompatError,
 > {
-    let (payload, drops) = build_v3_provider_standard_protocol_payload_from_req07(input)
-        .map_err(|reason| classify_v3_provider_compat_error("request_protocol", profile, reason))?;
+    let (payload, drops, namespace_registry) =
+        build_v3_provider_standard_protocol_payload_from_req07(input).map_err(|reason| {
+            classify_v3_provider_compat_error("request_protocol", profile, reason)
+        })?;
     let (payload, custom_tool_function_binding) = apply_v3_provider_req_compat_to_provider_payload(
         payload,
         input.selected_target(),
         input.provider_protocol,
         profile,
     )?;
-    Ok((payload, drops, custom_tool_function_binding))
+    Ok((
+        payload,
+        drops,
+        custom_tool_function_binding,
+        namespace_registry,
+    ))
 }
 
 pub(crate) fn provider_req_compat_reasoning_effort_explicit(payload: &Value) -> bool {
@@ -180,10 +191,22 @@ use provider_req_compat_06_reasoning_effort::project_reasoning_effort_for_select
 
 fn build_v3_provider_standard_protocol_payload_from_req07(
     input: &V3HubReqOutbound07ProviderSemantic,
-) -> Result<(Value, Vec<V3ProjectionDropRecord>), String> {
+) -> Result<
+    (
+        Value,
+        Vec<V3ProjectionDropRecord>,
+        provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry,
+    ),
+    String,
+> {
     let selected = input.selected_target();
     let mut drops = Vec::new();
-    let provider_protocol_payload = match input.provider_protocol {
+    let namespace_registry =
+        provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::from_request(
+            input.provider_semantic_payload(),
+            &provider_protocol_compat_id(input.provider_protocol),
+        )?;
+    let mut provider_protocol_payload = match input.provider_protocol {
         V3HubProviderWireProtocol::OpenAiChat => {
             let (payload, openai_chat_drops) =
                 build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording(
@@ -239,9 +262,12 @@ fn build_v3_provider_standard_protocol_payload_from_req07(
             payload
         }
     };
+    if input.provider_protocol == V3HubProviderWireProtocol::Responses {
+        namespace_registry.project_request(&mut provider_protocol_payload, "openai-responses")?;
+    }
     let payload = bind_v3_selected_provider_model(provider_protocol_payload, selected)
         .map(V3SelectedProviderModelBinding::into_payload)?;
-    Ok((payload, drops))
+    Ok((payload, drops, namespace_registry))
 }
 
 #[path = "provider_req_compat_06_deepseek.rs"]

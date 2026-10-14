@@ -505,8 +505,8 @@ Anthropic tool_use response
     -> for a fresh provider response, select the custom branch only when the
        active governed declaration marks the exact tool name as custom
     -> bind the provider-generated tool_use.id as the current call identity
-    -> require the registered wrapper shape and string input
-    -> restore the exact Chat custom raw input
+    -> restore the exact Chat custom raw input from a recognized string wrapper
+    -> otherwise preserve the complete JSON value once as custom input text
 
 Historical replay or tool_result pairing
     -> require the previously bound call identity to match exactly
@@ -525,9 +525,14 @@ request declared that exact tool name as custom and the wrapper contains exactly
 the registered keys/types. A fresh provider-generated `tool_use.id` is bound
 after that branch is selected; it is not a prerequisite for selecting the
 branch. Historical replay and `tool_result` pairing must then match that bound
-call identity exactly. Unknown wrappers, extra fields, missing string input,
-silent relabeling, wrapper leakage to Responses/OpenAI clients, `{}` repair,
-double stringify, result deletion, and provider switching are forbidden.
+call identity exactly. For a declared custom call whose parameters do not match
+the registered wrapper, serialize the complete JSON value once into the client's
+string-valued custom input. Do not extract a plausible inner value or reject
+representable model-generated parameters. The consumer can return its error
+under the same call ID. Follow-up history wraps that exact client-visible string;
+it does not parse JSON text to reconstruct the original native object.
+Silent relabeling, loss of fields, `{}` repair, double stringify of a raw string,
+result deletion, and provider switching are forbidden.
 
 Malformed function-call arguments use a different registered compatibility
 mapping: `v3.function_call.anthropic_raw_argument_wrapper.v1`. When a governed

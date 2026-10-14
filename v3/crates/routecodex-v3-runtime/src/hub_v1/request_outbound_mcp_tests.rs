@@ -1,4 +1,105 @@
 #[test]
+fn openai_chat_wire_projects_responses_web_search_tool_to_options() {
+    let payload = json!({
+        "model":"gpt-test", "messages":[{"role":"user", "content":"search"}],
+        "tools":[
+            {"type":"function", "name":"read_file", "description":"Read one file",
+             "parameters":{"type":"object", "properties":{}}},
+            {"type":"web_search_preview", "search_context_size":"medium",
+             "user_location":{"type":"approximate", "country":"CN", "city":"Shanghai"}},
+            {"type":"tool_search", "execution":"client", "description":"Search deferred tools",
+             "parameters":{"type":"object", "properties":{"query":{"type":"string"}},
+                           "required":["query"], "additionalProperties":false}}
+        ]
+    });
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("Responses web search must project to Chat web_search_options");
+    let tools = request["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), 2);
+    // Tool availability is keyed by name. Hosted declarations can precede
+    // registry identities; neither position supplies dispatch authority.
+    for (name, source) in [
+        ("read_file", &payload["tools"][0]),
+        ("tool_search", &payload["tools"][2]),
+    ] {
+        let tool = tools
+            .iter()
+            .find(|tool| tool["function"]["name"] == name)
+            .unwrap();
+        assert_eq!(tool["type"], "function");
+        assert_eq!(tool["function"]["description"], source["description"]);
+        assert_eq!(tool["function"]["parameters"], source["parameters"]);
+    }
+    assert_eq!(
+        request["web_search_options"],
+        json!({
+            "search_context_size":"medium",
+            "user_location":{"type":"approximate", "country":"CN", "city":"Shanghai"}
+        })
+    );
+}
+
+#[test]
+fn openai_chat_wire_projects_local_websearch_tool_for_metadata_center_local_search() {
+    let payload = json!({
+        "model":"local-model", "messages":[{"role":"user", "content":"search"}],
+        "tools":[
+            {"type":"function", "name":"read_file", "description":"Read one file",
+             "parameters":{"type":"object", "properties":{}}},
+            {"type":"web_search", "external_web_access":true,
+             "search_content_types":["text"], "search_context_size":"medium"}
+        ]
+    });
+    let request = build_v3_openai_chat_standard_request_for_selected_web_search_mode(
+        &payload,
+        routecodex_v3_config::V3WebSearchExecutionMode::MetadataCenterLocalSearch,
+        true,
+    )
+    .expect("Mode B local websearch projection must compile");
+    let tools = request["tools"].as_array().expect("tools array");
+    assert_eq!(tools.len(), 2, "ordinary tools must remain unchanged");
+    let read = tools
+        .iter()
+        .find(|tool| tool["function"]["name"] == "read_file")
+        .unwrap();
+    let search = tools
+        .iter()
+        .find(|tool| tool["function"]["name"] == "websearch")
+        .unwrap();
+    assert_eq!(
+        read,
+        &json!({"type":"function", "function":{
+            "name":"read_file", "description":payload["tools"][0]["description"],
+            "parameters":payload["tools"][0]["parameters"]
+        }})
+    );
+    assert_eq!(search["type"], "function");
+    assert_eq!(
+        search["function"]["parameters"]["required"],
+        json!(["query"])
+    );
+    let description = search["function"]["description"].as_str().unwrap();
+    assert_eq!(description, "Search the web for up-to-date information.");
+    let query_description = search["function"]["parameters"]["properties"]["query"]["description"]
+        .as_str()
+        .unwrap();
+    assert!(query_description.contains("concise query"));
+    assert!(!description.contains("RouteCodex") && !description.contains("ServerTool"));
+    assert_eq!(
+        search["function"]["parameters"]["properties"]["search_context_size"]["default"],
+        "medium"
+    );
+    assert_eq!(
+        search["function"]["parameters"]["properties"]["search_content_types"]["default"],
+        json!(["text"])
+    );
+    assert!(
+        request.get("web_search_options").is_none(),
+        "Mode B must not emit hosted web_search_options"
+    );
+}
+
+#[test]
 fn responses_namespace_custom_tool_projects_to_chat_provider_function() {
     let canonical =
         super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
@@ -42,9 +143,18 @@ fn responses_additional_tools_refreshes_same_namespace_tool_before_chat_projecti
     let request = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
         .expect("later additional_tools declaration must refresh the provider schema");
     assert_eq!(request["tools"].as_array().unwrap().len(), 1);
-    assert_eq!(request["tools"][0]["function"]["name"], "mcp__collab__collab_context");
-    assert_eq!(request["tools"][0]["function"]["description"], "loaded tool");
-    assert_eq!(request["tools"][0]["function"]["parameters"]["properties"]["query"]["type"], "string");
+    assert_eq!(
+        request["tools"][0]["function"]["name"],
+        "mcp__collab__collab_context"
+    );
+    assert_eq!(
+        request["tools"][0]["function"]["description"],
+        "loaded tool"
+    );
+    assert_eq!(
+        request["tools"][0]["function"]["parameters"]["properties"]["query"]["type"],
+        "string"
+    );
     assert!(request["tools"][0]["function"]["parameters"]["properties"]["placeholder"].is_null());
 }
 
@@ -68,14 +178,30 @@ fn responses_additional_tools_refreshes_nested_mcpx_alias_before_chat_projection
                 ]}]
             }),
         )
-        .expect("nested namespace and flat alias must share one client identity");
+        .expect("nested namespace and plain name remain distinct identities");
     let request = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
-        .expect("additional nested alias must refresh provider projection");
-    assert_eq!(request["tools"].as_array().unwrap().len(), 1);
-    assert_eq!(request["tools"][0]["function"]["name"], "mcp__mcpx__workspace__read");
-    assert_eq!(request["tools"][0]["function"]["description"], "current read schema");
-    assert_eq!(request["tools"][0]["function"]["parameters"]["properties"]["path"]["type"], "string");
-    assert!(request["tools"][0]["function"]["parameters"]["properties"]["placeholder"].is_null());
+        .expect("additional plain declaration must not refresh the namespace schema");
+    let tools = request["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), 2);
+    let current = tools
+        .iter()
+        .find(|tool| tool["function"]["description"] == "current read schema")
+        .unwrap();
+    let deferred = tools
+        .iter()
+        .find(|tool| tool["function"]["description"] == "deferred schema")
+        .unwrap();
+    assert_eq!(current["function"]["name"], "mcp__mcpx__workspace__read");
+    assert_ne!(current["function"]["name"], deferred["function"]["name"]);
+    assert_eq!(
+        deferred["function"]["parameters"]["properties"]["placeholder"]["type"],
+        "string"
+    );
+    assert_eq!(
+        current["function"]["parameters"]["properties"]["path"]["type"],
+        "string"
+    );
+    assert!(current["function"]["parameters"]["properties"]["placeholder"].is_null());
 }
 
 #[test]
@@ -100,7 +226,10 @@ fn responses_additional_tools_refreshes_functions_exec_shell_wrapper() {
         .expect("repeated shell tool declaration must project as one Chat function");
     assert_eq!(request["tools"].as_array().unwrap().len(), 1);
     assert_eq!(request["tools"][0]["function"]["name"], "functions__exec");
-    assert_eq!(request["tools"][0]["function"]["description"], "current shell tool");
+    assert_eq!(
+        request["tools"][0]["function"]["description"],
+        "current shell tool"
+    );
 }
 
 #[test]
@@ -194,7 +323,10 @@ fn responses_namespace_custom_tool_choice_uses_declared_chat_provider_name() {
     let request = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
         .expect("namespace custom choice must project");
     assert_eq!(request["tools"][0]["function"]["name"], "functions__exec");
-    assert_eq!(request["tool_choice"]["function"]["name"], "functions__exec");
+    assert_eq!(
+        request["tool_choice"]["function"]["name"],
+        "functions__exec"
+    );
 }
 
 #[test]
@@ -204,7 +336,7 @@ fn openai_chat_provider_normalizes_dotted_mcp_history_content_names() {
     })).expect("dotted MCP history names must be legal on provider wire");
     assert_eq!(
         request["messages"][0]["content"][0]["name"],
-        "mcp__mcpx__workspace"
+        "mcp__mcpx.workspace"
     );
 }
 
@@ -238,11 +370,11 @@ fn openai_chat_provider_strips_functions_prefix_from_history_names() {
     .expect("functions-prefixed MCP history names must be legal on provider wire");
     assert_eq!(
         request["messages"][0]["tool_calls"][0]["function"]["name"],
-        "mcp__codex_review__review_start"
+        "functions.mcp__codex_review__review_start"
     );
     assert_eq!(
         request["messages"][1]["content"][0]["name"],
-        "mcp__codex_review__review_start"
+        "functions.mcp__codex_review__review_start"
     );
 }
 
@@ -282,7 +414,7 @@ fn openai_chat_provider_normalizes_mcp_declaration_and_history_names_consistentl
         ]
     }))
     .expect("MCP declaration and history names must share the provider identity");
-    let expected = json!("mcp__codex_review__review_start");
+    let expected = json!("functions.mcp__codex_review__review_start");
     assert_eq!(request["tools"][0]["function"]["name"], expected);
     assert_eq!(
         request["messages"][0]["tool_calls"][0]["function"]["name"],
@@ -320,10 +452,14 @@ fn openai_chat_provider_deduplicates_legacy_and_dotted_mcp_tools_after_normaliza
     let tools = request["tools"].as_array().expect("provider tools");
     assert_eq!(
         tools.len(),
-        1,
-        "legacy and dotted MCP aliases must not reach the provider as duplicate names: {request}"
+        2,
+        "distinct literal declarations must remain independently callable: {request}"
     );
-    assert_eq!(tools[0]["function"]["name"], "mcp__mcpx__workspace");
+    assert_eq!(
+        tools[0]["function"]["name"],
+        "functions.mcp__mcpx__workspace"
+    );
+    assert_eq!(tools[1]["function"]["name"], "mcp__mcpx.workspace");
 }
 
 #[test]
@@ -418,28 +554,105 @@ fn openai_chat_provider_tools_reject_conflicting_same_source_mcp_identity() {
     let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
         .expect_err("same-source declarations with conflicting schemas are ambiguous");
     assert!(
-        error.contains("ConflictingOutboundFields")
-            && error.contains("mcp__mcpx__workspace"),
+        error.contains("ConflictingOutboundFields") && error.contains("mcp__mcpx__workspace"),
         "unexpected error: {error}"
     );
 }
 
 #[test]
-fn openai_chat_rejects_distinct_custom_tools_with_same_provider_name() {
+fn openai_chat_aliases_distinct_custom_tools_with_same_provider_name() {
     let payload = json!({
         "model": "glm-5.3",
-        "messages": [{"role": "user", "content": "use a tool"}],
+        "messages": [{"role":"assistant", "tool_calls":[
+            {"id":"nested", "type":"function", "namespace":"functions",
+             "function":{"name":"exec", "arguments":"{\"input\":\"pwd\"}"},
+             "routecodex_chat_extension":{"responses_tool_call_type":"custom_tool_call"}},
+            {"id":"plain", "type":"function",
+             "function":{"name":"functions__exec", "arguments":"{\"input\":\"ls\"}"},
+             "routecodex_chat_extension":{"responses_tool_call_type":"custom_tool_call"}}
+        ]}],
+        "tool_choice":{"type":"custom", "namespace":"functions", "name":"exec"},
         "tools": [
             {"type": "namespace", "name": "functions", "tools": [
-                {"type": "custom", "name": "exec", "format": {"type": "text"}}
+                {"type": "custom", "name": "exec", "description":"nested", "format": {"type": "text"}}
             ]},
-            {"type": "custom", "name": "functions__exec", "format": {"type": "text"}}
+            {"type": "custom", "name": "functions__exec", "description":"plain", "format": {"type": "text"}}
         ]
     });
-    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect_err("two client tools must not share one provider dispatch name");
-    assert!(error.contains("functions__exec"), "{error}");
-    assert!(error.contains("functions.exec"), "{error}");
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("distinct declared identities must receive unique dispatch names");
+    let tools = request["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), 2);
+    let nested = tools
+        .iter()
+        .find(|tool| tool["function"]["description"] == "nested")
+        .unwrap();
+    let plain = tools
+        .iter()
+        .find(|tool| tool["function"]["description"] == "plain")
+        .unwrap();
+    let alias = nested["function"]["name"].as_str().unwrap();
+    assert_ne!(alias, "functions__exec");
+    assert!(!alias.is_empty() && alias.len() <= 64);
+    assert!(alias
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-')));
+    assert_eq!(plain["function"]["name"], "functions__exec");
+    for tool in tools {
+        assert_eq!(tool["type"], "function");
+        assert_eq!(
+            tool["function"]["parameters"],
+            json!({"type":"object", "properties":{
+                "input":{"type":"string", "description":"Raw free-form tool input."}
+            }, "required":["input"], "additionalProperties":false})
+        );
+    }
+    assert_eq!(
+        request["tool_choice"],
+        json!({"type":"function", "function":{"name":alias}})
+    );
+    let calls = request["messages"][0]["tool_calls"].as_array().unwrap();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0]["id"], "nested");
+    assert_eq!(calls[0]["function"]["name"], alias);
+    assert_eq!(calls[0]["function"]["arguments"], r#"{"input":"pwd"}"#);
+    assert_eq!(calls[1]["id"], "plain");
+    assert_eq!(calls[1]["function"]["name"], "functions__exec");
+    assert_eq!(calls[1]["function"]["arguments"], r#"{"input":"ls"}"#);
+    let registry =
+        provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::from_request(
+            &payload,
+            "openai-chat",
+        )
+        .unwrap();
+    let inverse = registry.identity_for_wire_name(alias).unwrap();
+    assert_eq!(inverse.namespace_segments, vec!["functions"]);
+    assert_eq!(inverse.leaf_name, "exec");
+    assert_eq!(
+        inverse.kind,
+        provider_compat_core::namespace_tools::ToolKind::Custom
+    );
+    // An unchanged plain name has no inverse namespace authority.
+    assert!(registry.identity_for_wire_name("functions__exec").is_none());
+    let mut response = json!({"output":[
+        {"type":"custom_tool_call", "call_id":"nested", "name":alias, "input":"pwd"},
+        {"type":"custom_tool_call", "call_id":"plain", "name":"functions__exec", "input":"ls"}
+    ]});
+    super::super::request_outbound_mcp_names::restore_responses_mcp_tool_identities(
+        &mut response,
+        &registry.restore_identities(),
+    );
+    assert_eq!(
+        response["output"],
+        json!([
+            {"type":"custom_tool_call", "call_id":"nested", "namespace":"functions", "name":"exec", "input":"pwd"},
+            {"type":"custom_tool_call", "call_id":"plain", "name":"functions__exec", "input":"ls"}
+        ])
+    );
+    assert_eq!(
+        build_v3_openai_chat_standard_request_from_chat_canonical(&payload).unwrap(),
+        request
+    );
 }
 
 #[test]
@@ -564,7 +777,7 @@ fn responses_function_call_history_without_namespace_is_qualified_from_provider_
 
     assert_eq!(
         request["messages"][0]["tool_calls"][0]["function"]["name"],
-        json!("mcp__mcpx__session")
+        json!("session")
     );
 }
 
@@ -579,14 +792,14 @@ fn legacy_mcp_declaration_qualifies_namespace_less_continuation_history() {
             "function":{"name":"session","arguments":"{}"},
             "routecodex_chat_extension":{"responses_item_id":"fc_session"}
         }]}]
-    })).expect("legacy MCP declarations must qualify continuation history");
+    })).expect("plain declaration spelling does not grant a leaf binding");
     assert_eq!(
         request["tools"][0]["function"]["name"],
-        "mcp__mcpx__session"
+        "functions.mcp__mcpx__session"
     );
     assert_eq!(
         request["messages"][0]["tool_calls"][0]["function"]["name"],
-        "mcp__mcpx__session"
+        "session"
     );
 }
 
@@ -749,11 +962,11 @@ fn openai_chat_tool_search_history_strips_legacy_functions_mcp_prefix() {
     })).expect("tool_search history must strip the legacy functions MCP prefix");
     assert_eq!(
         request["messages"][0]["content"][0]["name"],
-        "mcp__codex_review__review_start"
+        "functions.mcp__codex_review__review_start"
     );
     assert_eq!(
         request["messages"][0]["tool_calls"][0]["function"]["name"],
-        "mcp__codex_review__review_start"
+        "functions.mcp__codex_review__review_start"
     );
 }
 
@@ -776,7 +989,7 @@ fn openai_responses_provider_strips_functions_prefix_from_history_names() {
     .expect("Responses provider history names must be legal on provider wire");
     assert_eq!(
         request["input"][0]["name"],
-        "mcp__codex_review__review_start"
+        "functions.mcp__codex_review__review_start"
     );
 }
 
@@ -1089,6 +1302,9 @@ fn openai_chat_outbound_maps_developer_role_to_system() {
     let request = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
         .expect("developer role must project to chat wire");
     assert_eq!(request["messages"][0]["role"], "system");
-    assert_eq!(request["messages"][0]["content"], "You are a helpful assistant.");
+    assert_eq!(
+        request["messages"][0]["content"],
+        "You are a helpful assistant."
+    );
     assert_eq!(request["messages"][1]["role"], "user");
 }

@@ -25,6 +25,7 @@ static COUNTER_ENVIRONMENT: std::sync::Mutex<()> = std::sync::Mutex::new(());
 struct CounterEnvironment {
     _guard: std::sync::MutexGuard<'static, ()>,
     previous: Option<std::ffi::OsString>,
+    previous_home: Option<std::ffi::OsString>,
     directory: std::path::PathBuf,
 }
 
@@ -38,6 +39,8 @@ impl CounterEnvironment {
         ));
         std::fs::create_dir(&directory).unwrap();
         let previous = std::env::var_os("ROUTECODEX_REQUEST_ID_COUNTER_FILE");
+        let previous_home = std::env::var_os("HOME");
+        std::env::set_var("HOME", &directory);
         std::env::set_var(
             "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
             directory.join("request-id-counter.json"),
@@ -45,6 +48,7 @@ impl CounterEnvironment {
         Self {
             _guard: guard,
             previous,
+            previous_home,
             directory,
         }
     }
@@ -52,6 +56,11 @@ impl CounterEnvironment {
 
 impl Drop for CounterEnvironment {
     fn drop(&mut self) {
+        if let Some(previous_home) = &self.previous_home {
+            std::env::set_var("HOME", previous_home);
+        } else {
+            std::env::remove_var("HOME");
+        }
         if let Some(previous) = &self.previous {
             std::env::set_var("ROUTECODEX_REQUEST_ID_COUNTER_FILE", previous);
         } else {

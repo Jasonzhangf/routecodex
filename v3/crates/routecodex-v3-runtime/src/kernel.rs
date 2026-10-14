@@ -713,7 +713,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         };
         trace.push("V3Provider12ResponsesWirePayload");
         let custom_tool_function_binding = wire.custom_tool_function_binding().cloned();
-
+        let ns_tool_identities = wire.namespace_identities().clone();
         let transport_request = match hook_registry.run_provider_transport(wire) {
             Ok(value) => value,
             Err(source) => {
@@ -988,33 +988,30 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             ));
         }
 
-        let direct_response_compat_context =
-            match crate::kernel::v3_direct_protocol_codec::build_direct_response_compat_context(
-                &policy.target,
-                crate::hub_v1::v3_tool_thinking_enabled_for_server(
-                    manifest,
-                    &standardized.server_id,
-                ),
-                crate::hub_v1::v3_toolreason_client_projection_enabled_for_server(
-                    manifest,
-                    &standardized.server_id,
-                ),
-                direct_failure_session_scope.session_id(),
-                standardized.tool_thinking_turn_context.clone(),
-                custom_tool_function_binding.clone(),
-            ) {
-                Ok(context) => context,
-                Err(error) => {
-                    return error_output(
-                        runtime_source("V3DirectResp14ProviderCompat", error),
-                        trace,
-                        &hook_registry,
-                    )
-                }
-            };
+        let compat_context = match v3_direct_protocol_codec::build_direct_response_compat_context(
+            &policy.target,
+            ns_tool_identities.clone(),
+            crate::hub_v1::v3_tool_thinking_enabled_for_server(manifest, &standardized.server_id),
+            crate::hub_v1::v3_toolreason_client_projection_enabled_for_server(
+                manifest,
+                &standardized.server_id,
+            ),
+            direct_failure_session_scope.session_id(),
+            standardized.tool_thinking_turn_context.clone(),
+            custom_tool_function_binding,
+        ) {
+            Ok(context) => context,
+            Err(error) => {
+                return error_output(
+                    runtime_source("V3DirectResp14ProviderCompat", error),
+                    trace,
+                    &hook_registry,
+                )
+            }
+        };
 
         let mut response_projection = match hook_registry
-            .run_response_projection_with_context(provider_raw, direct_response_compat_context)
+            .run_response_projection_with_context(provider_raw, compat_context)
             .await
         {
             Ok(projection) => projection,
@@ -1296,6 +1293,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         &standardized.request_id,
                         retain_response_cipher,
                         &response_projection.compat_plan,
+                        ns_tool_identities.clone(),
                         &hook_registry,
                         &direct_failure_session_scope,
                         attempt_budget.clone(),

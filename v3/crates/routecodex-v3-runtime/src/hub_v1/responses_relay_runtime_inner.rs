@@ -383,19 +383,27 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         };
         let opencode_zen_tcm_bridge = req_compat.opencode_zen_tcm_bridge.clone();
         let custom_tool_function_binding = req_compat.custom_tool_function_binding().cloned();
+        let namespace_registry = req_compat.namespace_registry.clone();
         trace.push("V3HubReqTarget06Resolved");
         trace.push("V3HubReqOutbound07ProviderSemantic");
         trace.push("ProviderReqCompat06ProviderCompat");
         let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
         let _req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
         let provider_semantic = _req09.into_provider_semantic_payload();
-        let wire = match build_v3_provider_12_responses_wire_payload(
+        let wire = match routecodex_v3_provider_responses::wire::build_v3_provider_12_responses_wire_payload_with_registry(
             &input.request_id,
             target,
             provider_semantic,
+            namespace_registry.clone(),
         ) {
             Ok(wire) => {
-                wire.with_custom_tool_function_binding(custom_tool_function_binding.clone())
+                let wire = wire.with_custom_tool_function_binding(custom_tool_function_binding.clone());
+                if provider_wire_protocol == V3HubProviderWireProtocol::Gemini {
+                    wire.with_stream_intent(match provider_request_transport_intent {
+                        V3HubTransportIntent::Json => routecodex_v3_provider_responses::V3ResponsesStreamIntent::Json,
+                        V3HubTransportIntent::Sse => routecodex_v3_provider_responses::V3ResponsesStreamIntent::Sse,
+                    })
+                } else { wire }
             }
             Err(error) => {
                 handle_provider_request_failure!(V3ResponsesRelayRuntimeError::Provider(error));
@@ -705,7 +713,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             expected_model_id: &selected_target_model_id,
                             provider_protocol: hook_provider_protocol,
                             source_provider_protocol: provider_wire_protocol,
-                            projection_context: &anthropic_response_projection_context,
+                            namespace_registry: &namespace_registry,
                             opencode_zen_tcm_bridge: opencode_zen_tcm_bridge.as_ref(),
                             custom_tool_function_binding: custom_tool_function_binding.as_ref(),
                             provider_response_transport_intent: V3HubTransportIntent::Json,
@@ -977,7 +985,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             expected_model_id: &selected_target_model_id,
                             provider_protocol: hook_provider_protocol,
                             source_provider_protocol: provider_wire_protocol,
-                            projection_context: &anthropic_response_projection_context,
+                            namespace_registry: &namespace_registry,
                             opencode_zen_tcm_bridge: opencode_zen_tcm_bridge.as_ref(),
                             custom_tool_function_binding: custom_tool_function_binding.as_ref(),
                             provider_response_transport_intent: V3HubTransportIntent::Sse,

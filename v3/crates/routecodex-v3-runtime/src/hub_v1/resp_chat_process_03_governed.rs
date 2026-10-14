@@ -386,8 +386,25 @@ fn v3_custom_tool_thinking_wrapper_at_resp03(
     };
     let wrapper = wrapper.as_object()?;
     let fields = parse_v3_tool_thinking_fields_from_object_at_resp03(wrapper).ok()?;
-    let native_input = wrapper.get("input")?.as_str()?.to_string();
+    let native_input = recognized_v3_custom_tool_wrapper_input_at_resp03(wrapper)?.to_string();
     Some((fields, native_input))
+}
+
+/// The complete registered custom wrapper boundary. Unknown business fields
+/// make the whole value opaque; they never authorize an inner-input inverse.
+/// Auxiliary-field semantics remain owned by the Tool-Thinking parser.
+pub(super) fn recognized_v3_custom_tool_wrapper_input_at_resp03(
+    wrapper: &Map<String, Value>,
+) -> Option<&str> {
+    if wrapper.keys().any(|key| {
+        !matches!(
+            key.as_str(),
+            "input" | "reason" | "goal_alignment_confidence" | "model_id"
+        )
+    }) {
+        return None;
+    }
+    wrapper.get("input")?.as_str()
 }
 
 fn v3_tool_thinking_raw_parameter_from_tool_call_at_resp03(
@@ -1261,15 +1278,7 @@ fn parse_v3_custom_tool_wrapper_for_resp03(
     let Value::Object(wrapper) = serde_json::from_str::<Value>(arguments).ok()? else {
         return None;
     };
-    if wrapper.keys().any(|key| {
-        !matches!(
-            key.as_str(),
-            "input" | "reason" | "goal_alignment_confidence" | "model_id"
-        )
-    }) {
-        return None;
-    }
-    let native_input = wrapper.get("input")?.as_str()?.to_owned();
+    let native_input = recognized_v3_custom_tool_wrapper_input_at_resp03(&wrapper)?.to_owned();
     wrapper.get("reason")?.as_str()?;
     let fields = ["reason", "goal_alignment_confidence", "model_id"]
         .into_iter()
@@ -1643,6 +1652,42 @@ fn v3_resp03_reasoning_item(reasoning_segments: Vec<String>) -> Value {
     })
 }
 
+/// Each final output lists the pre-transformation positions it derives from.
+/// Update the sole candidate business extension at the transformation owner;
+/// no identity markers or copied responses travel through the payload.
+pub(crate) fn remap_v3_response_candidate_output_indices(
+    payload: &mut Value,
+    output_sources: &[Vec<usize>],
+) {
+    let Some(outcomes) = payload
+        .get_mut("gemini_candidate_outcomes")
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    for outcome in outcomes {
+        let Some(indices) = outcome
+            .get_mut("output_indices")
+            .and_then(Value::as_array_mut)
+        else {
+            continue;
+        };
+        let final_indices = output_sources
+            .iter()
+            .enumerate()
+            .filter(|(_, sources)| {
+                sources.iter().any(|source| {
+                    indices
+                        .iter()
+                        .any(|index| index.as_u64() == Some(*source as u64))
+                })
+            })
+            .map(|(index, _)| json!(index))
+            .collect();
+        *indices = final_indices;
+    }
+}
+
 fn harvest_v3_responses_think_blocks(payload: &mut Value) -> bool {
     let Some(object) = payload.as_object_mut() else {
         return false;
@@ -1652,18 +1697,21 @@ fn harvest_v3_responses_think_blocks(payload: &mut Value) -> bool {
     };
     let mut changed = false;
     let mut next_output = Vec::with_capacity(output.len());
+    let mut output_sources = Vec::with_capacity(output.len());
     let mut aggregate_output_text = String::new();
-    for mut item in std::mem::take(output) {
+    for (source, mut item) in std::mem::take(output).into_iter().enumerate() {
         let mut reasoning_segments = Vec::new();
         if harvest_v3_responses_output_item_think_blocks(&mut item, &mut reasoning_segments) {
             changed = true;
             if !reasoning_segments.is_empty() {
                 next_output.push(v3_resp03_reasoning_item(reasoning_segments));
+                output_sources.push(vec![source]);
             }
         }
         if !is_v3_resp03_empty_visible_text_item(&item) {
             append_v3_resp03_output_text_segments(&mut aggregate_output_text, &item);
             next_output.push(item);
+            output_sources.push(vec![source]);
         } else {
             changed = true;
         }
@@ -1678,6 +1726,7 @@ fn harvest_v3_responses_think_blocks(payload: &mut Value) -> bool {
                 Value::String(aggregate_output_text),
             );
         }
+        remap_v3_response_candidate_output_indices(payload, &output_sources);
     }
     changed
 }
@@ -2029,10 +2078,12 @@ fn map_v3_toolreason_to_reasoning_content_at_resp03_impl(
             }
         }
     }
+    let mut transformed_output_sources = None;
     if let Some(output) = payload.get_mut("output").and_then(Value::as_array_mut) {
-        let tool_names = output
+        let (contributors, tool_names): (Vec<_>, Vec<_>) = output
             .iter()
-            .filter_map(|item| {
+            .enumerate()
+            .filter_map(|(index, item)| {
                 if !matches!(
                     item.get("type").and_then(Value::as_str),
                     Some("function_call" | "tool_call" | "custom_tool_call")
@@ -2041,15 +2092,21 @@ fn map_v3_toolreason_to_reasoning_content_at_resp03_impl(
                 }
                 item.as_object()
                     .and_then(toolreason_display_name_from_object)
+                    .map(|name| (index, name))
             })
-            .collect::<Vec<_>>();
+            .unzip();
         let reasoning_toolreason = json_reasons
             .first()
             .and_then(|reason| format_toolreason_reasoning_from_reason(&tool_names, reason));
         if project_to_client {
             if let Some(reasoning) = reasoning_toolreason {
+                let mut output_sources = (0..output.len())
+                    .map(|index| vec![index])
+                    .collect::<Vec<_>>();
+                // The existing aggregate summary names these calls. Both its
+                // reasoning and visible mirror derive from all those calls.
                 let mut merged = false;
-                for item in output.iter_mut() {
+                for (index, item) in output.iter_mut().enumerate() {
                     if item.get("type").and_then(Value::as_str) != Some("reasoning") {
                         continue;
                     }
@@ -2068,6 +2125,7 @@ fn map_v3_toolreason_to_reasoning_content_at_resp03_impl(
                             "text": reasoning
                         }));
                     }
+                    output_sources[index].extend_from_slice(&contributors);
                     merged = true;
                     break;
                 }
@@ -2090,10 +2148,21 @@ fn map_v3_toolreason_to_reasoning_content_at_resp03_impl(
                             "summary": [{"type": "summary_text", "text": reasoning}]
                         }),
                     );
+                    output_sources.insert(insert_at, contributors.clone());
                 }
-                append_v3_toolreason_visible_text_item_at_resp03(output, &reasoning);
+                let (index, inserted) =
+                    append_v3_toolreason_visible_text_item_at_resp03(output, &reasoning);
+                if inserted {
+                    output_sources.insert(index, contributors);
+                } else {
+                    output_sources[index].extend(contributors);
+                }
+                transformed_output_sources = Some(output_sources);
             }
         }
+    }
+    if let Some(sources) = transformed_output_sources {
+        remap_v3_response_candidate_output_indices(payload, &sources);
     }
     if let Some(content) = payload.get_mut("content").and_then(Value::as_array_mut) {
         let tool_names = content
@@ -3892,14 +3961,17 @@ fn append_v3_toolreason_reasoning_item_at_resp03(
     );
 }
 
-fn append_v3_toolreason_visible_text_item_at_resp03(output: &mut Vec<Value>, reasoning: &str) {
-    if output.iter().any(|item| {
+fn append_v3_toolreason_visible_text_item_at_resp03(
+    output: &mut Vec<Value>,
+    reasoning: &str,
+) -> (usize, bool) {
+    if let Some(index) = output.iter().position(|item| {
         item.get("type").and_then(Value::as_str) == Some("message")
             && item.get("role").and_then(Value::as_str) == Some("assistant")
             && item.pointer("/content/0/type").and_then(Value::as_str) == Some("output_text")
             && item.pointer("/content/0/text").and_then(Value::as_str) == Some(reasoning)
     }) {
-        return;
+        return (index, false);
     }
     let insert_at = output
         .iter()
@@ -3918,6 +3990,7 @@ fn append_v3_toolreason_visible_text_item_at_resp03(output: &mut Vec<Value>, rea
             "content": [{"type": "output_text", "text": reasoning}]
         }),
     );
+    (insert_at, true)
 }
 
 pub(crate) fn build_v3_toolreason_reasoning_done_projection_at_resp03(

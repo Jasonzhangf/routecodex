@@ -1,0 +1,251 @@
+use super::*;
+
+#[test]
+fn anthropic_namespace_tools_expand_to_qualified_children() {
+    let object = json!({
+        "tools": [{
+            "type": "namespace",
+            "name": "mcp__mcpx",
+            "tools": [{
+                "type": "function",
+                "name": "workspace",
+                "parameters": {"type": "object"}
+            }]
+        }]
+    });
+    let tools = responses_tools_for_anthropic_wire(object.as_object().unwrap()).unwrap();
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0]["name"], "mcp__mcpx__workspace");
+    assert_ne!(tools[0]["name"], "mcp__mcpx");
+}
+
+#[test]
+fn anthropic_empty_namespace_is_omitted_from_provider_tools() {
+    let tools = responses_tools_for_anthropic_wire(
+        json!({"tools": [{"type": "namespace", "name": "mcp__mcpx", "tools": []}]} )
+            .as_object()
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(tools.is_empty());
+}
+
+#[test]
+fn anthropic_namespace_custom_child_is_projected_without_tools_shape_failure() {
+    let object = json!({
+        "tools": [{
+            "type": "namespace",
+            "name": "functions",
+            "tools": [{
+                "type": "namespace",
+                "name": "mcp__mcpx",
+                "tools": [{
+                    "type": "function",
+                    "name": "workspace",
+                    "parameters": {"type": "object"}
+                }]
+            }]
+        }]
+    });
+    let tools = responses_tools_for_anthropic_wire(object.as_object().unwrap())
+        .expect("custom namespace child must have a legal Anthropic projection");
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0]["name"], "functions__mcp__mcpx__workspace");
+}
+
+#[test]
+fn anthropic_namespace_custom_history_uses_the_declared_provider_name() {
+    let request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model": "glm-5.3",
+        "messages": [
+            {"role": "assistant", "tool_calls": [{"id": "call_exec", "type": "function", "function": {"name": "functions.exec", "arguments": "{\"input\":\"pwd\"}"}}]},
+            {"role": "tool", "tool_call_id": "call_exec", "content": "/tmp"}
+        ],
+        "tools": [{"type": "namespace", "name": "functions", "tools": [
+            {"type": "custom", "name": "exec", "format": {"type": "text"}}
+        ]}]
+    }))
+    .expect("declared custom history must project to Anthropic");
+    assert_eq!(request["tools"][0]["name"], "functions__exec");
+    assert_eq!(
+        request["messages"][0]["content"][0]["name"],
+        "functions__exec"
+    );
+    assert_eq!(
+        request["messages"][1]["content"][0]["tool_use_id"],
+        "call_exec"
+    );
+}
+
+#[test]
+fn anthropic_nested_namespace_custom_history_matches_its_declaration() {
+    let request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"glm-5.3",
+        "messages":[{"role":"assistant","tool_calls":[{"id":"call_nested","function":{"name":"functions.mcp__mcpx.exec","arguments":"{\"input\":\"pwd\"}"}}]}],
+        "tools":[{"type":"namespace","name":"functions","tools":[{"type":"namespace","name":"mcp__mcpx","tools":[{"type":"custom","name":"exec","format":{"type":"text"}}]}]}]
+    })).expect("nested custom history must project");
+    assert_eq!(request["tools"][0]["name"], "functions__mcp__mcpx__exec");
+    assert_eq!(
+        request["messages"][0]["content"][0]["name"],
+        "functions__mcp__mcpx__exec"
+    );
+}
+
+#[test]
+fn anthropic_namespace_custom_choice_uses_declared_provider_name() {
+    let request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"glm-5.3", "input":"run pwd",
+        "tool_choice":{"type":"custom","name":"functions.exec"},
+        "tools":[{"type":"namespace","name":"functions","tools":[
+            {"type":"custom","name":"exec","format":{"type":"text"}}
+        ]}]
+    }))
+    .expect("namespace custom choice must project to Anthropic");
+    assert_eq!(request["tools"][0]["name"], "functions__exec");
+    assert_eq!(request["tool_choice"]["name"], "functions__exec");
+}
+
+#[test]
+fn anthropic_namespace_tool_call_history_uses_declared_provider_name() {
+    let request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"glm-5.3",
+        "input":[
+            {"type":"tool_call","call_id":"call_exec","name":"functions.exec","arguments":"{\"input\":\"pwd\"}"},
+            {"type":"tool_call_output","call_id":"call_exec","output":"/tmp"}
+        ],
+        "tools":[{"type":"namespace","name":"functions","tools":[
+            {"type":"custom","name":"exec","format":{"type":"text"}}
+        ]}]
+    })).expect("tool_call history must project to Anthropic");
+    assert_eq!(
+        request["messages"][0]["content"][0]["name"],
+        "functions__exec"
+    );
+}
+
+#[test]
+fn openai_chat_tool_call_malformed_arguments_project_reversible_anthropic_input() {
+    let tool_use = openai_chat_tool_call_as_anthropic_tool_use(&json!({
+        "id": "call_malformed_chat",
+        "type": "function",
+        "function": {
+            "name": "exec_command",
+            "arguments": "{\"cmd\":\"one\"}{\"cmd\":\"two\"}"
+        }
+    }))
+    .expect("malformed historical Chat arguments project to legal Anthropic input");
+    assert_eq!(
+        tool_use["input"],
+        json!({"input":"{\"cmd\":\"one\"}{\"cmd\":\"two\"}"})
+    );
+}
+
+#[test]
+fn anthropic_tool_use_normalizes_legacy_mcp_function_name() {
+    let mut system_parts = Vec::new();
+    let messages = chat_messages_as_anthropic_messages(
+        &json!([{
+            "role": "assistant",
+            "tool_calls": [{
+                "id": "call_review",
+                "type": "function",
+                "function": {
+                    "name": "functions.mcp__codex_review__review_start",
+                    "arguments": "{}"
+                }
+            }]
+        }]),
+        &mut system_parts,
+    )
+    .expect("Anthropic messages must use the provider-safe MCP name");
+    assert_eq!(
+        messages[0]["content"][0]["name"],
+        "functions.mcp__codex_review__review_start"
+    );
+}
+
+#[test]
+fn anthropic_tool_declaration_normalizes_legacy_mcp_function_name() {
+    let tools = responses_tools_for_anthropic_wire(
+        json!({
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "functions.mcp__codex_review__review_start",
+                        "parameters": {"type": "object"}
+                    }
+                }]
+            }
+        )
+        .as_object()
+        .unwrap(),
+    )
+    .expect("Anthropic tools must use the provider-safe MCP name");
+    assert_eq!(
+        tools[0]["name"],
+        "functions.mcp__codex_review__review_start"
+    );
+}
+
+#[test]
+fn responses_tool_history_normalizes_legacy_mcp_function_name() {
+    let mut messages = Vec::new();
+    responses_input_item_as_anthropic_messages(
+        &json!({
+            "type": "function_call",
+            "call_id": "call_review",
+            "name": "functions.mcp__codex_review__review_start",
+            "arguments": "{}"
+        }),
+        &mut messages,
+        &mut Vec::new(),
+    )
+    .expect("Responses tool history must use the provider-safe MCP name");
+    assert_eq!(
+        messages[0]["content"][0]["name"],
+        "functions.mcp__codex_review__review_start"
+    );
+}
+
+#[test]
+fn responses_function_call_malformed_arguments_project_reversible_anthropic_input() {
+    let mut object = Map::new();
+    object.insert("type".to_string(), json!("function_call"));
+    object.insert(
+        "arguments".to_string(),
+        json!("{\"cmd\":\"one\"}{\"cmd\":\"two\"}"),
+    );
+    let input = responses_function_call_input(&object)
+        .expect("malformed historical Responses arguments project to legal Anthropic input");
+    assert_eq!(input, json!({"input":"{\"cmd\":\"one\"}{\"cmd\":\"two\"}"}));
+}
+
+#[test]
+fn websearch_function_tool_maps_to_anthropic_hosted_web_search_server_tool() {
+    // chat 入口 client 声明 `{"type":"function","function":{"name":"websearch"}}`，
+    // Anthropic wire 必须以官方 hosted server tool（web_search_20250305）编码，
+    // 否则 MiniMax 等 provider 收不到搜索工具。
+    let tool = json!({
+        "type": "function",
+        "function": {
+            "name": "websearch",
+            "description": "Search the web",
+            "parameters": {"type":"object","properties":{"query":{"type":"string"}}}
+        }
+    });
+    let anthropic =
+        responses_tool_as_anthropic_tool(tool.as_object().unwrap()).expect("map must succeed");
+    assert_eq!(anthropic["type"], "web_search_20250305");
+    assert_eq!(anthropic["name"], "web_search");
+    // 大小写不敏感：WebSearch / WEBSEARCH 同样映射。
+    let upper = json!({"type":"function","function":{"name":"WEBSEARCH"}});
+    let mapped =
+        responses_tool_as_anthropic_tool(upper.as_object().unwrap()).expect("map must succeed");
+    assert_eq!(mapped["name"], "web_search");
+    // web_search 名（hosted 语义）保持官方 server tool。
+    let hosted = json!({"type":"web_search"});
+    let mapped =
+        responses_tool_as_anthropic_tool(hosted.as_object().unwrap()).expect("map must succeed");
+    assert_eq!(mapped["name"], "web_search");
+    assert_eq!(mapped["type"], "web_search_20250305");
+}
