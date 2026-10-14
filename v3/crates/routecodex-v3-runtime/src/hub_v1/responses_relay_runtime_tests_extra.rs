@@ -5,6 +5,130 @@ use routecodex_v3_provider_responses::build_v3_transport_13_responses_http_reque
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[test]
+fn namespace_target_bindings_keep_kind_choice_history_and_inverse() {
+    let request = json!({"model":"gpt-5.5","tools":[
+        {"type":"function","name":"alpha__read","description":"plain","parameters":{"type":"object"}},
+        {"type":"namespace","name":"alpha","tools":[
+            {"type":"function","name":"read","description":"namespaced","parameters":{"type":"object"}},
+            {"type":"custom","name":"read","description":"custom","format":{"type":"text"}},
+            {"type":"function","name":"beta__read","description":"separator","parameters":{"type":"object"}}]},
+        {"type":"namespace","name":"alpha__beta","tools":[{"type":"function","name":"read","description":"nested-collision","parameters":{"type":"object"}}]}
+    ],"tool_choice":{"type":"custom","name":"alpha.read"},"messages":[{"role":"assistant","tool_calls":[
+        {"id":"function_history","type":"function","function":{"name":"alpha.read","arguments":"{}"}},
+        {"id":"custom_history","type":"function","function":{"name":"alpha.read","arguments":"{\"input\":\"raw_probe\"}"},"routecodex_chat_extension":{"responses_tool_call_type":"custom_tool_call"}}
+    ]}]});
+    for protocol in ["openai-chat", "anthropic"] {
+        let registry =
+            provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::from_request(
+                &request, protocol,
+            )
+            .unwrap();
+        let wire = if protocol == "openai-chat" {
+            build_v3_openai_chat_standard_request_from_chat_canonical(&request).unwrap()
+        } else {
+            super::super::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request(
+                request.clone(),
+            )
+            .unwrap()
+        };
+        let names: Vec<_> = wire["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| {
+                tool.get("name")
+                    .or_else(|| tool.pointer("/function/name"))
+                    .unwrap()
+                    .as_str()
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(names.len(), 5, "{protocol}: {wire}");
+        assert_eq!(
+            names
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            5
+        );
+        let custom = registry
+            .wire_name_for_client(
+                Some("alpha"),
+                "read",
+                provider_compat_core::namespace_tools::ToolKind::Custom,
+            )
+            .unwrap();
+        let function = registry
+            .wire_name_for_client(
+                Some("alpha"),
+                "read",
+                provider_compat_core::namespace_tools::ToolKind::Function,
+            )
+            .unwrap();
+        assert_eq!(
+            wire.pointer(if protocol == "openai-chat" {
+                "/tool_choice/function/name"
+            } else {
+                "/tool_choice/name"
+            })
+            .unwrap(),
+            custom
+        );
+        if protocol == "openai-chat" {
+            assert_eq!(
+                wire["messages"][0]["tool_calls"][0]["function"]["name"],
+                function
+            );
+            assert_eq!(
+                wire["messages"][0]["tool_calls"][1]["function"]["name"],
+                custom
+            );
+            let calls: Vec<_> = registry.identities().map(|identity| json!({"id":identity.source["description"],"type":"function","function":{"name":identity.actual_wire_name,"arguments": if identity.kind == provider_compat_core::namespace_tools::ToolKind::Custom { "{\"input\":\"raw_probe\"}" } else { "{\"probe\":1}" }}})).collect();
+            let response = build_v3_responses_provider_response_from_openai_chat_payload(&json!({"choices":[{"message":{"role":"assistant","tool_calls":calls},"finish_reason":"tool_calls"}]}), &request).unwrap();
+            for identity in registry.identities() {
+                let call = response["output"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|call| call["call_id"] == identity.source["description"])
+                    .unwrap();
+                assert_eq!(call["name"], identity.leaf_name);
+                assert_eq!(
+                    call["namespace"].as_str(),
+                    identity
+                        .is_namespaced()
+                        .then(|| identity.client_namespace())
+                        .as_deref()
+                );
+                assert_eq!(
+                    call["type"],
+                    if identity.kind == provider_compat_core::namespace_tools::ToolKind::Custom {
+                        "custom_tool_call"
+                    } else {
+                        "function_call"
+                    }
+                );
+            }
+        } else {
+            assert_eq!(wire["messages"][0]["content"][0]["name"], function);
+            assert_eq!(wire["messages"][0]["content"][1]["name"], custom);
+            let context = super::super::anthropic_codec::V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&request).unwrap();
+            for identity in registry.identities() {
+                let call = super::super::anthropic_codec_tool_projection::anthropic_tool_use_as_responses_call(&json!({"type":"tool_use","id":"call","name":identity.actual_wire_name,"input":if identity.kind == provider_compat_core::namespace_tools::ToolKind::Custom { json!({"input":"raw_probe"}) } else { json!({"probe":1}) }}), &context).unwrap();
+                assert_eq!(call["name"], identity.leaf_name);
+                assert_eq!(
+                    call["namespace"].as_str(),
+                    identity
+                        .is_namespaced()
+                        .then(|| identity.client_namespace())
+                        .as_deref()
+                );
+            }
+        }
+    }
+}
+
 struct AnthropicToolSearchJsonTransport;
 
 #[async_trait::async_trait]
@@ -312,9 +436,6 @@ fn responses_provider_json_restores_declared_mcp_identity_for_tool_followup() {
             ]}
         ]}]
     });
-    let projection_context =
-        V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&request)
-            .expect("request tool declaration must establish response identity context");
     let provider_response = json!({
         "id":"resp_mcpx_json_read",
         "status":"requires_action",
@@ -342,7 +463,12 @@ fn responses_provider_json_restores_declared_mcp_identity_for_tool_followup() {
             expected_model_id: "chat-test",
             provider_protocol: V3HubProviderWireProtocol::Responses,
             source_provider_protocol: V3HubProviderWireProtocol::Responses,
-            projection_context: &projection_context,
+            namespace_registry:
+                &provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::from_request(
+                    &request,
+                    "openai-responses",
+                )
+                .unwrap(),
             provider_response_transport_intent: V3HubTransportIntent::Json,
             compatibility_profile: None,
             custom_tool_function_binding: None,
@@ -386,7 +512,7 @@ fn responses_provider_json_restores_declared_mcp_identity_for_tool_followup() {
     );
     assert_eq!(
         chat["messages"][0]["tool_calls"][0]["function"]["name"],
-        "mcp__mcpx__workspace__read"
+        "mcp__mcpx.workspace__read"
     );
     assert_eq!(chat["messages"][1]["tool_call_id"], "call_mcpx_json_read");
     assert_eq!(chat["messages"][1]["content"], "README contents");
@@ -417,7 +543,41 @@ async fn responses_provider_sse_restores_declared_mcp_identity_for_tool_followup
             &context,
         )
         .await
-        .expect("Responses provider SSE must restore identity from the request declaration");
+        .expect("Responses provider SSE must materialize the complete provider attempt");
+    let manifest = super::responses_relay_runtime_tests::anthropic_then_openai_chat_manifest();
+    let registry =
+        provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::from_request(
+            &request,
+            "openai-responses",
+        )
+        .unwrap();
+    let (response, _) = run_json_response_hooks(
+        V3ResponsesRelayJsonResponseHookInput {
+            session_id: "mcp-sse-roundtrip",
+            request_id: "mcp-sse-roundtrip",
+            provider_value: &response,
+            provider_semantic_body: &request,
+            manifest: &manifest,
+            server_id: "test",
+            provider_id: Some("openai_second"),
+            interface_id: Some("default"),
+            expected_model_id: "chat-test",
+            provider_protocol: V3HubProviderWireProtocol::Responses,
+            source_provider_protocol: V3HubProviderWireProtocol::Responses,
+            namespace_registry: &registry,
+            provider_response_transport_intent: V3HubTransportIntent::Sse,
+            compatibility_profile: None,
+            opencode_zen_tcm_bridge: None,
+            custom_tool_function_binding: None,
+            web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode::None,
+            web_search_center_state: None,
+            retain_response_cipher: false,
+            tool_thinking_enabled: false,
+            tool_thinking_turn_context: &V3ToolThinkingTurnContext::disabled(),
+        },
+        &mut Vec::new(),
+    )
+    .expect("Resp03 must restore the actual namespace inverse after provider compat");
 
     assert_eq!(response["output"][0]["call_id"], "call_mcpx_read");
     assert_eq!(response["output"][0]["namespace"], "mcp__mcpx.workspace");
@@ -446,7 +606,7 @@ async fn responses_provider_sse_restores_declared_mcp_identity_for_tool_followup
     assert_eq!(chat["messages"][0]["tool_calls"][0]["id"], "call_mcpx_read");
     assert_eq!(
         chat["messages"][0]["tool_calls"][0]["function"]["name"],
-        "mcp__mcpx__workspace__read"
+        "mcp__mcpx.workspace__read"
     );
     assert_eq!(chat["messages"][1]["tool_call_id"], "call_mcpx_read");
     assert_eq!(chat["messages"][1]["content"], "README contents");
@@ -505,11 +665,10 @@ fn openai_chat_functions_exec_call_restores_shell_namespace_for_responses_client
         &json!({"tools":[
             {"type":"namespace","name":"functions","tools":[
                 {"type":"custom","name":"exec","description":"deferred shell tool","format":{"type":"text"}}
-            ]},
-            {"type":"namespace","name":"functions","tools":[
-                {"type":"custom","name":"exec","description":"current shell tool","format":{"type":"text"}}
             ]}
-        ]}),
+        ],"input":[{"type":"additional_tools","tools":[{"type":"namespace","name":"functions","tools":[
+                {"type":"custom","name":"exec","description":"current shell tool","format":{"type":"text"}}
+            ]}]}]}),
     )
     .expect("flattened shell call must restore its client namespace");
 
@@ -877,6 +1036,8 @@ fn anthropic_sse_minimax_profile_still_harvests_text_tool_calls() {
             session_id: "anthropic-sse-minimax",
             opencode_zen_tcm_bridge: None,
             request_id: "anthropic-sse-minimax",
+            namespace_registry:
+                &provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::default(),
             provider_value: &provider_response,
             provider_semantic_body: &json!({"model":"client-model"}),
             manifest: &manifest,
@@ -886,7 +1047,6 @@ fn anthropic_sse_minimax_profile_still_harvests_text_tool_calls() {
             expected_model_id: "claude-test",
             provider_protocol: V3HubProviderWireProtocol::Responses,
             source_provider_protocol: V3HubProviderWireProtocol::Anthropic,
-            projection_context: &V3AnthropicResponsesProjectionContext::default(),
             provider_response_transport_intent: V3HubTransportIntent::Sse,
             compatibility_profile: Some("chat:minimax"),
             custom_tool_function_binding: None,
@@ -933,6 +1093,8 @@ fn anthropic_json_relay_keeps_literal_control_text_unchanged() {
             session_id: "anthropic-json-literal",
             opencode_zen_tcm_bridge: None,
             request_id: "anthropic-json-literal",
+            namespace_registry:
+                &provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::default(),
             provider_value: &provider_response,
             provider_semantic_body: &json!({"model":"client-model"}),
             manifest: &manifest,
@@ -942,7 +1104,6 @@ fn anthropic_json_relay_keeps_literal_control_text_unchanged() {
             expected_model_id: "claude-test",
             provider_protocol: V3HubProviderWireProtocol::Anthropic,
             source_provider_protocol: V3HubProviderWireProtocol::Anthropic,
-            projection_context: &V3AnthropicResponsesProjectionContext::default(),
             provider_response_transport_intent: V3HubTransportIntent::Json,
             compatibility_profile: None,
             custom_tool_function_binding: None,
@@ -988,6 +1149,8 @@ fn anthropic_sse_whole_item_thinking_literal_stays_visible() {
             session_id: "anthropic-sse-thinking-literal",
             opencode_zen_tcm_bridge: None,
             request_id: "anthropic-sse-thinking-literal",
+            namespace_registry:
+                &provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::default(),
             provider_value: &provider_response,
             provider_semantic_body: &json!({"model":"client-model"}),
             manifest: &manifest,
@@ -997,7 +1160,6 @@ fn anthropic_sse_whole_item_thinking_literal_stays_visible() {
             expected_model_id: "claude-test",
             provider_protocol: V3HubProviderWireProtocol::Responses,
             source_provider_protocol: V3HubProviderWireProtocol::Anthropic,
-            projection_context: &V3AnthropicResponsesProjectionContext::default(),
             provider_response_transport_intent: V3HubTransportIntent::Sse,
             compatibility_profile: None,
             custom_tool_function_binding: None,

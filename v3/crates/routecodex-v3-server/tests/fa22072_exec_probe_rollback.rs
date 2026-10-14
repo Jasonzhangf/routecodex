@@ -2,6 +2,7 @@
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
+use std::ffi::OsString;
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc,
@@ -15,6 +16,10 @@ use tokio::{
 
 #[path = "../../../crates/routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
 mod hub_v1_fixture;
+#[path = "support/fa22072_test_home.rs"]
+mod test_home;
+
+static TEST_LOCK: test_home::ServerTestLock = test_home::ServerTestLock::new();
 
 fn business_payload() -> Value {
     json!({"id":"rollback-complete","object":"chat.completion","model":"test","choices":[{"index":0,"message":{"role":"assistant","content":"complete retained business payload","tool_calls":[{"id":"paired-call","type":"function","function":{"name":"fixture","arguments":"{invalid arguments preserved"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":3,"completion_tokens":5,"total_tokens":8},"tail":{"complete":[1,2,3]}})
@@ -221,11 +226,44 @@ async fn sample_drain_timeout_restores_due_only_owner() {
     witness(Exit::SampleTimeout).await;
 }
 
+// Owns the two fixture auth variables for one witness lifetime. It restores the
+// exact prior Option<OsString> (absence as absence) on drop, while the caller
+// still holds the shared fixture lock.
+struct AuthEnvGuard {
+    key: Option<OsString>,
+    spare: Option<OsString>,
+}
+
+impl AuthEnvGuard {
+    fn capture() -> Self {
+        let guard = Self {
+            key: std::env::var_os("FA22072_ROLLBACK_KEY"),
+            spare: std::env::var_os("FA22072_ROLLBACK_SPARE"),
+        };
+        std::env::set_var("FA22072_ROLLBACK_KEY", "rollback-fixture-secret");
+        std::env::set_var("FA22072_ROLLBACK_SPARE", "rollback-spare-secret");
+        guard
+    }
+}
+
+impl Drop for AuthEnvGuard {
+    fn drop(&mut self) {
+        match &self.key {
+            Some(value) => std::env::set_var("FA22072_ROLLBACK_KEY", value),
+            None => std::env::remove_var("FA22072_ROLLBACK_KEY"),
+        }
+        match &self.spare {
+            Some(value) => std::env::set_var("FA22072_ROLLBACK_SPARE", value),
+            None => std::env::remove_var("FA22072_ROLLBACK_SPARE"),
+        }
+    }
+}
+
 async fn witness(exit: Exit) {
+    let _guard = TEST_LOCK.lock().await;
+    let _auth = AuthEnvGuard::capture();
     static NEXT: AtomicUsize = AtomicUsize::new(0);
     let provider = format!("rollback_{}", NEXT.fetch_add(1, Ordering::SeqCst));
-    std::env::set_var("FA22072_ROLLBACK_KEY", "rollback-fixture-secret");
-    std::env::set_var("FA22072_ROLLBACK_SPARE", "rollback-spare-secret");
     let (tx, mut rx) = mpsc::unbounded_channel();
     let peer = Arc::new(Peer {
         captures: tx,

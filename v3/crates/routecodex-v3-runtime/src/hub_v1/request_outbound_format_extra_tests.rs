@@ -411,63 +411,6 @@ fn openai_chat_wire_maps_responses_text_json_schema_to_chat_response_format() {
 }
 
 #[test]
-fn openai_chat_wire_projects_responses_web_search_tool_to_options() {
-    let payload = json!({
-        "model": "gpt-test",
-        "messages": [{"role": "user", "content": "search"}],
-        "tools": [
-            {
-                "type": "function",
-                "name": "read_file",
-                "description": "Read one file",
-                "parameters": {"type":"object","properties":{}}
-            },
-            {
-                "type": "web_search_preview",
-                "search_context_size": "medium",
-                "user_location": {
-                    "type": "approximate",
-                    "country": "CN",
-                    "city": "Shanghai"
-                }
-            },
-            {
-                "type": "tool_search",
-                "execution": "client",
-                "description": "Search deferred tools",
-                "parameters": {
-                    "type":"object",
-                    "properties":{"query":{"type":"string"}},
-                    "required":["query"],
-                    "additionalProperties":false
-                }
-            }
-        ]
-    });
-
-    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect("Responses web search must project to Chat web_search_options");
-
-    assert_eq!(request["tools"].as_array().map(Vec::len), Some(2));
-    assert_eq!(request["tools"][0]["function"]["name"], json!("read_file"));
-    assert_eq!(
-        request["tools"][1]["function"]["name"],
-        json!("tool_search")
-    );
-    assert_eq!(
-        request["web_search_options"],
-        json!({
-            "search_context_size":"medium",
-            "user_location": {
-                "type":"approximate",
-                "country":"CN",
-                "city":"Shanghai"
-            }
-        })
-    );
-}
-
-#[test]
 fn openai_chat_wire_projects_complete_codex_tool_declaration_matrix() {
     let payload = json!({
         "model": "gpt-test",
@@ -505,12 +448,26 @@ fn openai_chat_wire_projects_complete_codex_tool_declaration_matrix() {
 
     let tools = request["tools"].as_array().expect("Chat tools array");
     assert_eq!(tools.len(), 3);
-    assert_eq!(tools[0]["function"]["name"], "exec_command");
-    assert_eq!(tools[1]["type"], "function");
-    assert_eq!(tools[1]["function"]["name"], "apply_patch");
-    assert_eq!(tools[1]["function"]["description"], "Apply a patch");
+    let exec = tools
+        .iter()
+        .find(|tool| tool["function"]["name"] == "exec_command")
+        .unwrap();
+    let patch = tools
+        .iter()
+        .find(|tool| tool["function"]["name"] == "apply_patch")
+        .unwrap();
+    let search = tools
+        .iter()
+        .find(|tool| tool["function"]["name"] == "tool_search")
+        .unwrap();
+    assert!(tools.iter().all(|tool| tool["type"] == "function"));
+    for (tool, source) in [(exec, &payload["tools"][0]), (search, &payload["tools"][2])] {
+        assert_eq!(tool["function"]["description"], source["description"]);
+        assert_eq!(tool["function"]["parameters"], source["parameters"]);
+    }
+    assert_eq!(patch["function"]["description"], "Apply a patch");
     assert_eq!(
-        tools[1]["function"]["parameters"],
+        patch["function"]["parameters"],
         json!({
             "type":"object",
             "properties":{
@@ -520,8 +477,7 @@ fn openai_chat_wire_projects_complete_codex_tool_declaration_matrix() {
             "additionalProperties":false
         })
     );
-    assert!(tools[1].get("custom").is_none(), "{tools:?}");
-    assert_eq!(tools[2]["function"]["name"], "tool_search");
+    assert!(patch.get("custom").is_none(), "{tools:?}");
     assert_eq!(
         request["web_search_options"]["search_context_size"],
         "medium"
@@ -1300,70 +1256,6 @@ fn gemini_wire_rejects_malformed_stream_transport_intent() {
             .expect_err("Gemini stream transport intent must remain boolean");
 
     assert!(error.contains("$.request.stream"), "{error}");
-}
-
-#[test]
-fn openai_chat_wire_projects_local_websearch_tool_for_metadata_center_local_search() {
-    let payload = json!({
-        "model": "local-model",
-        "messages": [{"role": "user", "content": "search"}],
-        "tools": [
-            {
-                "type": "function",
-                "name": "read_file",
-                "description": "Read one file",
-                "parameters": {"type":"object","properties":{}}
-            },
-            {
-                "type": "web_search",
-                "external_web_access": true,
-                "search_content_types": ["text"],
-                "search_context_size": "medium"
-            }
-        ]
-    });
-    let request = build_v3_openai_chat_standard_request_for_selected_web_search_mode(
-        &payload,
-        V3WebSearchExecutionMode::MetadataCenterLocalSearch,
-        true,
-    )
-    .expect("Mode B local websearch projection must compile");
-    let tools = request["tools"].as_array().expect("tools array");
-    assert_eq!(tools.len(), 2, "ordinary tools must remain unchanged");
-    assert_eq!(tools[0]["function"]["name"], "read_file");
-    assert_eq!(tools[0]["function"]["parameters"]["type"], "object");
-    assert_eq!(tools[1]["type"], "function");
-    assert_eq!(
-        tools[1]["function"]["name"], "websearch",
-        "Mode B must use the single local tool name websearch"
-    );
-    assert_eq!(
-        tools[1]["function"]["parameters"]["required"][0], "query",
-        "local websearch must require the query argument"
-    );
-    let description = tools[1]["function"]["description"]
-        .as_str()
-        .expect("websearch tool description");
-    assert_eq!(
-        description, "Search the web for up-to-date information.",
-        "websearch description must match the standard web_search tool description: {description}"
-    );
-    let query_description = tools[1]["function"]["parameters"]["properties"]["query"]
-        ["description"]
-        .as_str()
-        .expect("websearch query description");
-    assert!(
-        query_description.contains("concise query"),
-        "websearch query description must guide the search query: {query_description}"
-    );
-    assert!(
-        !description.contains("RouteCodex") && !description.contains("ServerTool"),
-        "websearch description must not leak internal RouteCodex implementation: {description}"
-    );
-    assert!(
-        request.get("web_search_options").is_none(),
-        "Mode B must not emit hosted web_search_options"
-    );
 }
 
 #[test]

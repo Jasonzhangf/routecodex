@@ -486,37 +486,91 @@ fn anthropic_unregistered_input_wrapper_is_not_unwrapped_as_custom() {
 }
 
 #[test]
-fn anthropic_custom_wrapper_rejects_extra_or_non_string_input_without_repair() {
-    let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+fn anthropic_custom_wrapper_preserves_extra_or_non_string_input_without_repair() {
+    // A declared custom tool whose provider value is not the exact recognized
+    // raw-string wrapper is still representable: the complete JSON value is
+    // serialized once into the string-valued `custom_tool_call.input`. The
+    // declaration provenance stays authoritative; the extra key or the inner
+    // object is never guessed, extracted, or relabeled.
+    let flat = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
         "tools":[{
             "type":"custom",
             "name":"apply_patch",
             "format":{"type":"text"}
         }]
     }))
-    .expect("custom declaration context");
+    .expect("flat custom declaration context");
+    let namespaced = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+        "tools":[{
+            "type":"namespace",
+            "name":"functions",
+            "tools":[{
+                "type":"custom",
+                "name":"apply_patch",
+                "format":{"type":"text"}
+            }]
+        }]
+    }))
+    .expect("namespaced custom declaration context");
     for malformed in [
         json!({"input":"raw","extra":true}),
         json!({"input":{"patch":"raw"}}),
     ] {
-        let error = project_v3_anthropic_message_as_responses_response_with_context(
+        let flat_call = project_v3_anthropic_message_as_responses_response_with_context(
             &json!({
-                "id":"msg_malformed_custom",
+                "id":"msg_flat_custom",
                 "role":"assistant",
                 "content":[{
                     "type":"tool_use",
-                    "id":"toolu_malformed",
+                    "id":"toolu_flat_custom",
                     "name":"apply_patch",
                     "input":malformed
                 }],
                 "stop_reason":"tool_use"
             }),
-            &context,
+            &flat,
         )
-        .expect_err("malformed registered wrapper must fail without repair");
-        assert!(
-            error.to_string().contains("custom tool_use.input"),
-            "{error}"
+        .expect("flat declared custom must preserve the complete provider input");
+        assert_eq!(flat_call["output"][0]["type"], "custom_tool_call");
+        assert_eq!(flat_call["output"][0]["name"], "apply_patch");
+        assert!(flat_call["output"][0].get("namespace").is_none());
+        assert_eq!(flat_call["output"][0]["call_id"], "toolu_flat_custom");
+        let flat_wire = flat_call["output"][0]["input"]
+            .as_str()
+            .expect("custom_tool_call.input is string-valued");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(flat_wire).unwrap(),
+            malformed
+        );
+
+        let namespaced_call = project_v3_anthropic_message_as_responses_response_with_context(
+            &json!({
+                "id":"msg_namespaced_custom",
+                "role":"assistant",
+                "content":[{
+                    "type":"tool_use",
+                    "id":"toolu_namespaced_custom",
+                    "name":"functions__apply_patch",
+                    "input":malformed
+                }],
+                "stop_reason":"tool_use"
+            }),
+            &namespaced,
+        )
+        .expect("namespaced declared custom must preserve the complete provider input");
+        assert_eq!(namespaced_call["output"][0]["type"], "custom_tool_call");
+        assert_eq!(namespaced_call["output"][0]["namespace"], "functions");
+        assert_eq!(namespaced_call["output"][0]["name"], "apply_patch");
+        assert_eq!(
+            namespaced_call["output"][0]["call_id"],
+            "toolu_namespaced_custom"
+        );
+        let namespaced_wire = namespaced_call["output"][0]["input"]
+            .as_str()
+            .expect("custom_tool_call.input is string-valued");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(namespaced_wire).unwrap(),
+            malformed
         );
     }
 }

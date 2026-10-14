@@ -381,6 +381,7 @@ data: {"type":"response.completed","response":{"id":"resp_live_observation","sta
         Some(request_id.clone()),
         Some("gpt-5.6-sol".to_string()),
         true,
+        std::collections::HashMap::new(),
     );
 
     while let Some(chunk) = projected.next().await {
@@ -429,6 +430,7 @@ data: {"type":"response.completed","response":{"id":"resp_live_missing","status"
         Some(request_id.clone()),
         Some("gpt-5.6-sol".to_string()),
         true,
+        std::collections::HashMap::new(),
     );
     let mut client_sse = Vec::new();
     while let Some(chunk) = projected.next().await {

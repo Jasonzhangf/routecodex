@@ -7,6 +7,10 @@ use super::super::request_outbound_mcp_names::provider_function_name;
 use super::super::request_outbound_tool_id::compact_tool_id;
 use super::{project_outbound_nested_payload_for_target_protocol, V3OutboundTargetProtocol};
 
+#[cfg(test)]
+#[path = "signature_target_projection_tests.rs"]
+mod signature_target_projection_tests;
+
 pub(super) fn normalize_responses_content_part_for_role(
     part: &Value,
     role: &str,
@@ -164,6 +168,7 @@ pub(super) fn chat_tool_call_to_responses_input_item(
                 .unwrap_or_else(|| Value::String(arguments_text.to_string()));
             item.insert("input".to_string(), input);
         }
+        project_responses_call_signature(row, &mut item);
         return Ok(Some(Value::Object(item)));
     }
 
@@ -206,7 +211,18 @@ pub(super) fn chat_tool_call_to_responses_input_item(
     if let Some(arguments_text) = arguments_text {
         item.insert("arguments".to_string(), Value::String(arguments_text));
     }
+    project_responses_call_signature(row, &mut item);
     Ok(Some(Value::Object(item)))
+}
+
+/// Same-protocol opaque business extension: preserve the exact call-local value.
+fn project_responses_call_signature(
+    chat_call: &Map<String, Value>,
+    responses_call: &mut Map<String, Value>,
+) {
+    if let Some(signature) = chat_call.get("thought_signature") {
+        responses_call.insert("thought_signature".to_string(), signature.clone());
+    }
 }
 
 fn responses_item_id_from_chat_extension(row: &Map<String, Value>) -> Option<&str> {

@@ -183,7 +183,7 @@ for (const [label, pattern] of [
   ],
   [
     'V3ProviderReqOutbound08WirePayload failure branch',
-    /let\s+wire\s*=\s*match\s+build_v3_provider_12_responses_wire_payload\s*\([\s\S]{0,1200}?\)\s*\{[\s\S]{0,1200}?Err\s*\(\s*error\s*\)\s*=>\s*\{\s*handle_provider_request_failure!\s*\(\s*V3ResponsesRelayRuntimeError::Provider\s*\(\s*error\s*\)\s*\)\s*;/u,
+    /let\s+wire\s*=\s*match\s+(?:routecodex_v3_provider_responses::wire::)?build_v3_provider_12_responses_wire_payload(?:_with_registry)?\s*\([\s\S]{0,1200}?\)\s*\{[\s\S]{0,1200}?Err\s*\(\s*error\s*\)\s*=>\s*\{\s*handle_provider_request_failure!\s*\(\s*V3ResponsesRelayRuntimeError::Provider\s*\(\s*error\s*\)\s*\)\s*;/u,
   ],
 ]) {
   if (!pattern.test(responsesRelayRequestBody)) {
