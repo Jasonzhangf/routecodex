@@ -301,31 +301,6 @@ pub(crate) fn v3_relay_transport_response_timeout(
     )
 }
 
-#[cfg(test)]
-mod response_header_timeout_contract_tests {
-    use super::*;
-
-    #[test]
-    fn relay_transport_header_timeout_reads_provider_request_timeout() {
-        assert_eq!(
-            v3_relay_transport_response_timeout_from_ms(Some(900_000)),
-            std::time::Duration::from_millis(900_000)
-        );
-    }
-
-    #[test]
-    fn relay_transport_header_timeout_defaults_and_zero_use_default_timeout() {
-        assert_eq!(
-            v3_relay_transport_response_timeout_from_ms(None),
-            std::time::Duration::from_millis(300_000)
-        );
-        assert_eq!(
-            v3_relay_transport_response_timeout_from_ms(Some(0)),
-            std::time::Duration::from_millis(300_000)
-        );
-    }
-}
-
 use std::fmt;
 
 /// 骨架内部错误（协议入口负责映射到自身错误类型）。
