@@ -136,11 +136,14 @@ features:
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/persistence.rs
   - v3/crates/routecodex-v3-provider-responses/tests/provider_global_cooldown_persistence_contract.rs
+  - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
+  - v3/crates/routecodex-v3-server/tests/multi_listener_server/issue127_disabled_health.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - docs/architecture
   required_gates:
   - npm run test:v3-provider-global-cooldown-persistence
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue127_disabled_health_persistence_direct_public_blackbox -- --nocapture
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - git diff --check
@@ -5554,6 +5557,11 @@ features:
   - V3ProviderFailureRuntimeHealth::run_due_provider_health_probes
   - V3ProviderHealthStore::configured_failure_policy
   allowed_paths:
+  - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
+  - v3/crates/routecodex-v3-server/tests/multi_listener_server/issue231_stale_probe.rs
+  - v3/crates/routecodex-v3-server/tests/multi_listener_server/issue231_stale_probe_fixture.rs
+  - v3/crates/routecodex-v3-server/tests/multi_listener_server/issue245_permission_search.rs
+  - v3/crates/routecodex-v3-server/tests/multi_listener_server/issue245_permission_search_fixture.rs
   - v3/crates/routecodex-v3-error/src/lib.rs
   - v3/crates/routecodex-v3-error/src/subscription.rs
   - v3/crates/routecodex-v3-server/tests/no_first_failure_cooldown_blackbox.rs
@@ -5575,6 +5583,8 @@ features:
   - response.client_payload
   - protocol.metadata
   required_gates:
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue231_responses_relay_stale_probe_public_blackbox -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue245_permission_11128_search_continuation_public_blackbox -- --nocapture
   - npm run test:v3-provider-health-contract
   - npm run test:v3-p5-router-target
   - npm run verify:v3-resource-map

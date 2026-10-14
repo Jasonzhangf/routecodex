@@ -38,6 +38,15 @@ mod image_input_blackbox;
 #[path = "support/pool_empty_recovery_blackbox.rs"]
 mod pool_empty_recovery_blackbox;
 
+#[path = "multi_listener_server/issue127_disabled_health.rs"]
+mod issue127_disabled_health;
+
+#[path = "multi_listener_server/issue231_stale_probe.rs"]
+mod issue231_stale_probe;
+
+#[path = "multi_listener_server/issue245_permission_search.rs"]
+mod issue245_permission_search;
+
 async fn read_raw_content_length_response(socket: &mut TcpStream) -> Vec<u8> {
     let mut wire = Vec::new();
     while !wire.ends_with(b"\r\n\r\n") {

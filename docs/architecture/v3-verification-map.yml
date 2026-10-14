@@ -105,6 +105,7 @@ features:
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-function-map.yml
   required_positive:
+  - issue127_disabled_health_persistence_direct_public_blackbox proves a real Direct Responses consumer ignores persisted cooldown when health is disabled, attempts a genuine upstream failure without persisting automatic cooldown, and preserves fresh and independent requests; the health-enabled control honors the same seed
   - persisted cooldown remains unavailable after restart until startup probe succeeds
   - due probe failure preserves cooldown and success removes it
   - provider startup or cooldown probe HTTP/transport failure is recorded as provider-local degraded health and never escapes as a listener or managed-lifecycle startup failure
@@ -114,6 +115,7 @@ features:
   - non-provider probe target or internal health failures remain observable
   required_gates:
   - npm run test:v3-provider-global-cooldown-persistence
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue127_disabled_health_persistence_direct_public_blackbox -- --nocapture
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - git diff --check
@@ -3327,6 +3329,8 @@ features:
   - select_v3_expanded_target_with_admission_rescue
   - resolve_v3_relay_target_outcome_with_admission_rescue
   required_positive:
+  - issue231_responses_relay_stale_probe_public_blackbox proves current Responses Relay delivers the real healthy later-tier payload while a preferred probe is held, then both stale completion branches preserve newer failure state and release their owner; exhausted requests close transport without an empty success while a healthy sibling continues
+  - issue245_permission_11128_search_continuation_public_blackbox proves genuine HTTP400 permission_error cools the exact identity, preserves paired function-search and executed nonce history through Relay, remains excluded beyond the original deadline after a failed probe, restores only after a matching successful probe, and closes exhausted transport while explicit current-turn native hosted search continues; it does not replay or resolve the historical upstream/channel cause
   - one opaque typed acquisition identity owns each scheduled or rescue probe; matching current-health-generation success atomically resets score, streak, delta window, cooldown, and probe backoff state
   - old_probe_outcomes_release_only_their_owner_and_preserve_stored_health proves stale cancel/success/failure preserve stored health and schedule while releasing only A
   - late_probe_outcomes_cannot_release_replacement_or_sibling_owners and acquired_owner_release_preserves_due_time_and_rejects_late_a_after_actual_b prove same-generation replacement ownership, non-default interface and exact sibling isolation, and deterministic due-time admission
@@ -3362,6 +3366,8 @@ features:
   - Capacity saturation cannot trigger health rescue probes for the full candidate, provider-action waits, oversubscription, or escape from an explicit provider.model pin
   - WebSocketV2 session-slot contention cannot retain provider capacity, starve another request that owns the session, or leak its session slot or provider lease on cancellation
   required_gates:
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue231_responses_relay_stale_probe_public_blackbox -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue245_permission_11128_search_continuation_public_blackbox -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test provider_account_pool_blackbox
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --lib
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_probe_status_contract
