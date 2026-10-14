@@ -31,6 +31,438 @@ struct ProviderState {
     body: String,
     captures: mpsc::UnboundedSender<Value>,
     mixed: Option<MixedRoundtrip>,
+    attempt_bodies: Vec<String>,
+    attempts: std::sync::atomic::AtomicUsize,
+    header_captures: Option<mpsc::UnboundedSender<String>>,
+}
+
+/// Explicit Anthropic SSE failures must stay failures at the public entry.
+/// This covers the user-reported risk: an explicit provider error or an
+/// underterminated Anthropic message must not become `response.completed` with
+/// empty output. The provider payload is deliberately not returned to clients.
+#[tokio::test]
+async fn anthropic_relay_explicit_error_and_missing_stop_break_transport_without_fake_completion() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let upstream_marker = "provider_private.explicit_empty_failure_marker";
+    let failures = [
+        format!(
+            "{}{}",
+            sse(
+                "message_start",
+                &json!({
+                    "type": "message_start",
+                    "message": {
+                        "id": "msg_explicit_failure",
+                        "type": "message",
+                        "role": "assistant",
+                        "model": "wire-test",
+                        "content": [],
+                        "stop_reason": null,
+                        "usage": {"input_tokens": 1, "output_tokens": 0}
+                    }
+                })
+            ),
+            sse(
+                "error",
+                &json!({
+                    "type": "error",
+                    "error": {"type": "provider_empty_failure", "message": upstream_marker}
+                })
+            )
+        ),
+        format!(
+            "{}{}{}",
+            sse(
+                "message_start",
+                &json!({
+                    "type": "message_start",
+                    "message": {
+                        "id": "msg_missing_stop",
+                        "type": "message",
+                        "role": "assistant",
+                        "model": "wire-test",
+                        "content": [],
+                        "stop_reason": null,
+                        "usage": {"input_tokens": 1, "output_tokens": 0}
+                    }
+                })
+            ),
+            sse(
+                "content_block_start",
+                &json!({
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": {"type": "text", "text": ""}
+                })
+            ),
+            sse(
+                "content_block_delta",
+                &json!({
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "text_delta", "text": "partial before EOF"}
+                })
+            )
+        ),
+    ];
+
+    for (index, upstream) in failures.into_iter().enumerate() {
+        let (endpoint, handle, mut captures, shutdown) = start_entry(
+            "anthropic",
+            "chat",
+            StatusCode::OK,
+            "text/event-stream",
+            upstream,
+        )
+        .await;
+        let client = client();
+        assert_incomplete_transport(post_request(&client, &endpoint, "test.test").await).await;
+        assert_one_attempt(&mut captures, "wire-test").await;
+        let independent =
+            successful_body(post_request(&client, &endpoint, "independent.test").await).await;
+        let independent_events = events(&independent);
+        let independent_terminal = independent_events
+            .iter()
+            .find(|event| event["type"] == "response.completed")
+            .unwrap_or_else(|| {
+                panic!("independent candidate index {index} must complete: {independent}")
+            });
+        assert_eq!(
+            independent_terminal["response"]["output"],
+            text_response("independent ok")["output"]
+        );
+        stop_entry(handle, shutdown).await;
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+mod empty_attempt_adjudication_blackbox {
+    use super::*;
+
+    /// Whole-attempt emptiness is judged by accumulated business content, not
+    /// by the last terminal frame. A Responses stream that already carried a
+    /// text delta must keep that text and its successful terminal even when the
+    /// provider's terminal `response.completed` carries `output:[]`.
+    #[tokio::test]
+    async fn responses_prior_business_delta_survives_empty_terminal() {
+        let _guard = TEST_LOCK.lock().await;
+        std::env::set_var(KEY_ENV, "controlled-secret");
+        let upstream = format!(
+            "{}{}",
+            sse(
+                "response.output_text.delta",
+                &json!({"type":"response.output_text.delta","output_index":0,"delta":"kept"}),
+            ),
+            response_sse(&json!({"status":"completed","output":[],
+                "usage":{"input_tokens":3,"output_tokens":1,"total_tokens":4}})),
+        );
+        let (endpoint, handle, mut captures, shutdown) = start_entry(
+            "responses",
+            "chat",
+            StatusCode::OK,
+            "text/event-stream",
+            upstream,
+        )
+        .await;
+        let (content_type, body) =
+            successful_transfer(post_request(&client(), &endpoint, "test.test").await).await;
+        assert_one_attempt(&mut captures, "wire-test").await;
+        stop_entry(handle, shutdown).await;
+        assert!(
+            content_type.starts_with("text/event-stream"),
+            "Relay projects the requested SSE: {body}"
+        );
+        let payloads = events(&body);
+        assert!(
+            payloads
+                .iter()
+                .any(|event| event["type"] == "response.completed"),
+            "a prior business delta must keep the successful terminal, not be \
+             reclassified as an empty attempt: {body}"
+        );
+        let terminal = payloads
+            .iter()
+            .find(|event| event["type"] == "response.completed")
+            .unwrap();
+        let terminal_response = &terminal["response"];
+        let output = terminal_response["output"].clone();
+        let output_is_empty = output.as_array().is_none_or(|items| items.is_empty());
+        let output_text = terminal_response["output_text"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(
+            !output_is_empty || !output_text.is_empty(),
+            "the terminal frame's empty output must not erase the accumulated delta: {body}"
+        );
+        assert!(
+            output.to_string().contains("kept") || output_text.contains("kept"),
+            "accumulated business delta must reach the client: {body}"
+        );
+        std::env::remove_var(KEY_ENV);
+    }
+
+    /// Complete Direct/JSON empty provider attempts must take the same internal
+    /// 502 path: client transport abort, no normal completion and no error
+    /// payload. Legal Direct business content keeps its own positive controls.
+    #[tokio::test]
+    async fn responses_direct_and_relay_empty_json_attempt_is_internal_502() {
+        let _guard = TEST_LOCK.lock().await;
+        std::env::set_var(KEY_ENV, "controlled-secret");
+        for process in ["direct", "chat"] {
+            let empty = json!({"id":"resp_empty_json","object":"response","status":"completed",
+                "model":"wire-test","output":[]});
+            let (endpoint, handle, mut captures, shutdown) = start_entry(
+                "responses",
+                process,
+                StatusCode::OK,
+                "application/json",
+                empty.to_string(),
+            )
+            .await;
+            assert_incomplete_transport(post_request(&client(), &endpoint, "test.test").await)
+                .await;
+            assert_one_attempt(&mut captures, "wire-test").await;
+            let body =
+                successful_body(post_request(&client(), &endpoint, "independent.test").await).await;
+            stop_entry(handle, shutdown).await;
+            assert_one_attempt(&mut captures, "wire-independent").await;
+            let payloads = events(&body);
+            let terminal = payloads
+                .iter()
+                .find(|event| event["type"] == "response.completed")
+                .expect("independent request completes");
+            assert_eq!(
+                terminal["response"]["output"],
+                text_response("independent ok")["output"]
+            );
+        }
+        std::env::remove_var(KEY_ENV);
+    }
+
+    /// Explicit Anthropic `stop_reason=refusal` is a legal business terminal
+    /// even with an empty text array. It must keep its refusal details and
+    /// content_filter reason instead of being reclassified as an empty attempt.
+    #[tokio::test]
+    async fn anthropic_empty_text_refusal_keeps_business_terminal() {
+        let _guard = TEST_LOCK.lock().await;
+        std::env::set_var(KEY_ENV, "controlled-secret");
+        let upstream = [
+            sse(
+                "message_start",
+                &json!({"type":"message_start","message":{"id":"msg_refusal_empty","type":"message",
+                    "role":"assistant","model":"wire-test","content":[],
+                    "stop_reason":null,"stop_details":null,
+                    "usage":{"input_tokens":7,"output_tokens":0}}}),
+            ),
+            sse(
+                "message_delta",
+                &json!({"type":"message_delta",
+                    "delta":{"stop_reason":"refusal","stop_sequence":null,
+                        "stop_details":{"type":"refusal","category":"cyber"}},
+                    "usage":{"output_tokens":0}}),
+            ),
+            sse("message_stop", &json!({"type":"message_stop"})),
+        ]
+        .concat();
+        let (endpoint, handle, mut captures, shutdown) = start_entry(
+            "anthropic",
+            "chat",
+            StatusCode::OK,
+            "text/event-stream",
+            upstream,
+        )
+        .await;
+        let body = successful_body(post_request(&client(), &endpoint, "test.test").await).await;
+        stop_entry(handle, shutdown).await;
+        assert_one_attempt(&mut captures, "wire-test").await;
+        let payloads = events(&body);
+        let terminal = payloads
+            .iter()
+            .find(|event| event["type"] == "response.incomplete")
+            .expect("Anthropic refusal maps to incomplete/content_filter");
+        assert_eq!(
+            terminal["response"]["incomplete_details"]["reason"],
+            "content_filter"
+        );
+        assert_eq!(
+            terminal["response"]["stop_details"],
+            json!({"type":"refusal","category":"cyber"}),
+            "empty-text refusal must keep its refusal details: {body}"
+        );
+        assert!(
+            !payloads
+                .iter()
+                .any(|event| event["type"] == "response.completed"),
+            "refusal must not become a completed turn: {body}"
+        );
+        std::env::remove_var(KEY_ENV);
+    }
+}
+
+/// Stable RED ID: a complete Anthropic success with no business content
+/// (`message_start content:[] -> end_turn -> message_stop`) is not deliverable.
+/// It must become an internal 502 in the Error chain and terminate the client
+/// transport, never a normal empty `response.completed`.
+#[tokio::test]
+async fn anthropic_relay_empty_success_is_internal_502_not_normal_completion() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let provider_wire = anthropic_empty_success_sse("msg_empty_success");
+    let (endpoint, handle, mut captures, _headers, shutdown) = start_entry_configured(
+        "anthropic",
+        "chat",
+        StatusCode::OK,
+        "text/event-stream",
+        provider_wire.clone(),
+        EntryOptions::default(),
+    )
+    .await;
+    let consumed = consume_response(post_request(&client(), &endpoint, "test.test").await).await;
+    eprintln!("EMPTY_SUCCESS provider_wire={provider_wire:?}");
+    eprintln!(
+        "EMPTY_SUCCESS client status={:?} version={:?} transport_error={:?} body={:?}",
+        consumed.status, consumed.version, consumed.transport_error, consumed.body
+    );
+    assert_one_attempt(&mut captures, "wire-test").await;
+    stop_entry(handle, shutdown).await;
+    assert!(
+        consumed.transport_error.is_some(),
+        "an empty complete provider attempt must terminate the client transport, not return a normal empty completion: {consumed:?}"
+    );
+    assert!(
+        !consumed.body.contains("response.completed"),
+        "an empty complete provider attempt must not become response.completed: {:?}",
+        consumed.body
+    );
+    assert!(
+        !consumed.body.contains("\"error\"")
+            && !consumed.body.contains("event: error")
+            && !consumed.body.contains("network_error"),
+        "the internal 502 must not be projected to the client: {:?}",
+        consumed.body
+    );
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Stable RED ID: one selected target expands its two auth aliases into two
+/// candidates. An empty first attempt must enter the internal 502 path and the
+/// healthy second candidate must deliver its business content to the client.
+#[tokio::test]
+async fn anthropic_relay_empty_attempt_reselects_healthy_within_target_candidate() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    std::env::set_var("V3_NO_RESPONSE_TEST_KEY_A", "empty-key-secret");
+    std::env::set_var("V3_NO_RESPONSE_TEST_KEY_B", "healthy-key-secret");
+    let options = EntryOptions {
+        attempt_bodies: vec![
+            anthropic_empty_success_sse("msg_empty_first"),
+            anthropic_text_sse("msg_healthy_second", "healthy candidate recovered"),
+        ],
+        auth_entries: vec![
+            ("key-a".to_string(), "V3_NO_RESPONSE_TEST_KEY_A".to_string()),
+            ("key-b".to_string(), "V3_NO_RESPONSE_TEST_KEY_B".to_string()),
+        ],
+        pin_key: None,
+        capture_headers: true,
+        ..EntryOptions::default()
+    };
+    let (endpoint, handle, mut captures, headers, shutdown) = start_entry_configured(
+        "anthropic",
+        "chat",
+        StatusCode::OK,
+        "text/event-stream",
+        String::new(),
+        options,
+    )
+    .await;
+    let mut headers = headers.expect("recovery fixture must capture provider auth headers");
+    let consumed = consume_response(post_request(&client(), &endpoint, "test.test").await).await;
+    let capture_count = captures.len();
+    let first_auth = headers
+        .try_recv()
+        .expect("first provider auth header captured");
+    let second_auth = headers.try_recv().ok();
+    let first_request = captures.try_recv().ok();
+    let second_request = captures.try_recv().ok();
+    let extra_request = captures.try_recv().ok();
+    eprintln!(
+        "RECOVERY client status={:?} version={:?} transport_error={:?} captures={capture_count} first_auth={first_auth:?} second_auth={second_auth:?} body={:?}",
+        consumed.status,
+        consumed.version,
+        consumed.transport_error,
+        consumed.body
+    );
+    stop_entry(handle, shutdown).await;
+    assert!(
+        consumed.body.contains("healthy candidate recovered"),
+        "the healthy second candidate must deliver business content: {:?}",
+        consumed.body
+    );
+    assert!(
+        consumed.transport_error.is_none(),
+        "the recovered request must not end in a transport error: {:?}",
+        consumed.body
+    );
+    let second_auth = second_auth.expect("a second within-target candidate attempt must occur");
+    assert_ne!(
+        first_auth, second_auth,
+        "recovery must use the other auth key of the same selected target"
+    );
+    let first_request = first_request.expect("first provider request captured");
+    let second_request = second_request.expect("second provider request captured");
+    assert_eq!(first_request["model"], "wire-test");
+    assert_eq!(second_request["model"], "wire-test");
+    assert!(
+        extra_request.is_none(),
+        "exactly two within-target attempts are expected"
+    );
+    std::env::remove_var("V3_NO_RESPONSE_TEST_KEY_A");
+    std::env::remove_var("V3_NO_RESPONSE_TEST_KEY_B");
+    std::env::remove_var(KEY_ENV);
+}
+
+/// A tool-only Anthropic terminal has no text but still carries business
+/// content. It must remain a normal completion and must not be classified as
+/// the empty attempt above.
+#[tokio::test]
+async fn anthropic_relay_tool_only_terminal_stays_deliverable() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let provider_wire = anthropic_tool_only_sse("msg_tool_only_guard");
+    let (endpoint, handle, mut captures, _headers, shutdown) = start_entry_configured(
+        "anthropic",
+        "chat",
+        StatusCode::OK,
+        "text/event-stream",
+        provider_wire,
+        EntryOptions::default(),
+    )
+    .await;
+    let (content_type, body) =
+        successful_transfer(post_request(&client(), &endpoint, "test.test").await).await;
+    assert_one_attempt(&mut captures, "wire-test").await;
+    stop_entry(handle, shutdown).await;
+    assert!(content_type.starts_with("text/event-stream"));
+    let payloads = events(&body);
+    let terminal = payloads
+        .iter()
+        .find(|event| event["type"] == "response.completed")
+        .expect("tool-only attempt must complete");
+    let output = terminal["response"]["output"]
+        .as_array()
+        .expect("completed response output array");
+    assert!(
+        output
+            .iter()
+            .any(|item| item["type"] == "function_call" && item["name"] == "lookup"),
+        "tool-only business content must survive: {body}"
+    );
+    assert!(
+        body.contains("guard"),
+        "tool-only arguments must survive: {body}"
+    );
+    std::env::remove_var(KEY_ENV);
 }
 
 struct MixedRoundtrip {
@@ -1281,9 +1713,40 @@ async fn tool_parameter_values_and_matching_results_survive_request_projection()
 
 async fn controlled_upstream(
     State(state): State<Arc<ProviderState>>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<Value>,
 ) -> Response<Body> {
     state.captures.send(body.clone()).unwrap();
+    if let Some(header_captures) = &state.header_captures {
+        let auth = headers
+            .iter()
+            .filter(|(name, _)| matches!(name.as_str(), "authorization" | "x-api-key"))
+            .map(|(name, value)| {
+                format!(
+                    "{}: {}",
+                    name.as_str(),
+                    value.to_str().unwrap_or("<binary>")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        let _ = header_captures.send(auth);
+    }
+    if !state.attempt_bodies.is_empty() {
+        let attempt = state
+            .attempts
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let wire = state
+            .attempt_bodies
+            .get(attempt)
+            .cloned()
+            .unwrap_or_else(|| state.body.clone());
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", state.content_type)
+            .body(Body::from(wire))
+            .unwrap();
+    }
     if let Some(mixed) = &state.mixed {
         let mut response = mixed.response.clone();
         if body["input"].as_array().is_some_and(|items| {
@@ -1424,6 +1887,142 @@ fn response_sse(response: &Value) -> String {
     sse(event, &json!({"type":event,"response":response}))
 }
 
+fn anthropic_empty_success_sse(message_id: &str) -> String {
+    format!(
+        "{}{}{}",
+        sse(
+            "message_start",
+            &json!({"type":"message_start","message":{"id":message_id,"type":"message",
+                "role":"assistant","model":"wire-test","content":[],
+                "stop_reason":null,"usage":{"input_tokens":1,"output_tokens":0}}})
+        ),
+        sse(
+            "message_delta",
+            &json!({"type":"message_delta",
+                "delta":{"stop_reason":"end_turn","stop_sequence":null},
+                "usage":{"output_tokens":0}})
+        ),
+        sse("message_stop", &json!({"type":"message_stop"}))
+    )
+}
+
+fn anthropic_text_sse(message_id: &str, text: &str) -> String {
+    format!(
+        "{}{}{}{}{}{}",
+        sse(
+            "message_start",
+            &json!({"type":"message_start","message":{"id":message_id,"type":"message",
+                "role":"assistant","model":"wire-test","content":[],
+                "stop_reason":null,"usage":{"input_tokens":1,"output_tokens":0}}})
+        ),
+        sse(
+            "content_block_start",
+            &json!({"type":"content_block_start","index":0,
+                "content_block":{"type":"text","text":""}})
+        ),
+        sse(
+            "content_block_delta",
+            &json!({"type":"content_block_delta","index":0,
+                "delta":{"type":"text_delta","text":text}})
+        ),
+        sse(
+            "content_block_stop",
+            &json!({"type":"content_block_stop","index":0})
+        ),
+        sse(
+            "message_delta",
+            &json!({"type":"message_delta",
+                "delta":{"stop_reason":"end_turn","stop_sequence":null},
+                "usage":{"output_tokens":1}})
+        ),
+        sse("message_stop", &json!({"type":"message_stop"}))
+    )
+}
+
+fn anthropic_tool_only_sse(message_id: &str) -> String {
+    format!(
+        "{}{}{}{}{}{}",
+        sse(
+            "message_start",
+            &json!({"type":"message_start","message":{"id":message_id,"type":"message",
+                "role":"assistant","model":"wire-test","content":[],
+                "stop_reason":null,"usage":{"input_tokens":1,"output_tokens":0}}})
+        ),
+        sse(
+            "content_block_start",
+            &json!({"type":"content_block_start","index":0,
+                "content_block":{"type":"tool_use","id":"toolu_guard","name":"lookup","input":{}}})
+        ),
+        sse(
+            "content_block_delta",
+            &json!({"type":"content_block_delta","index":0,
+                "delta":{"type":"input_json_delta","partial_json":"{\"q\":\"guard\"}"}})
+        ),
+        sse(
+            "content_block_stop",
+            &json!({"type":"content_block_stop","index":0})
+        ),
+        sse(
+            "message_delta",
+            &json!({"type":"message_delta",
+                "delta":{"stop_reason":"tool_use","stop_sequence":null},
+                "usage":{"output_tokens":1}})
+        ),
+        sse("message_stop", &json!({"type":"message_stop"}))
+    )
+}
+
+#[derive(Debug)]
+struct ConsumedResponse {
+    status: Option<StatusCode>,
+    version: Option<reqwest::Version>,
+    body: String,
+    transport_error: Option<String>,
+}
+
+async fn consume_response(result: Result<reqwest::Response, reqwest::Error>) -> ConsumedResponse {
+    match result {
+        Err(error) => ConsumedResponse {
+            status: None,
+            version: None,
+            body: String::new(),
+            transport_error: Some(error.to_string()),
+        },
+        Ok(mut response) => {
+            let status = Some(response.status());
+            let version = Some(response.version());
+            let mut body = Vec::new();
+            let mut transport_error = None;
+            loop {
+                match response.chunk().await {
+                    Ok(Some(chunk)) => body.extend_from_slice(&chunk),
+                    Ok(None) => break,
+                    Err(error) => {
+                        transport_error = Some(error.to_string());
+                        break;
+                    }
+                }
+            }
+            ConsumedResponse {
+                status,
+                version,
+                body: String::from_utf8_lossy(&body).into_owned(),
+                transport_error,
+            }
+        }
+    }
+}
+
+#[derive(Default)]
+struct EntryOptions {
+    health_enabled: bool,
+    mixed: Option<MixedRoundtrip>,
+    attempt_bodies: Vec<String>,
+    auth_entries: Vec<(String, String)>,
+    pin_key: Option<String>,
+    capture_headers: bool,
+}
+
 async fn start_entry(
     kind: &str,
     process: &str,
@@ -1436,7 +2035,16 @@ async fn start_entry(
     mpsc::UnboundedReceiver<Value>,
     oneshot::Sender<()>,
 ) {
-    start_entry_with_health(kind, process, status, content_type, body, false).await
+    let (endpoint, handle, captures, _headers, shutdown) = start_entry_configured(
+        kind,
+        process,
+        status,
+        content_type,
+        body,
+        EntryOptions::default(),
+    )
+    .await;
+    (endpoint, handle, captures, shutdown)
 }
 
 async fn start_entry_with_health(
@@ -1452,16 +2060,19 @@ async fn start_entry_with_health(
     mpsc::UnboundedReceiver<Value>,
     oneshot::Sender<()>,
 ) {
-    start_entry_fixture(
+    let (endpoint, handle, captures, _headers, shutdown) = start_entry_configured(
         kind,
         process,
         status,
         content_type,
         body,
-        health_enabled,
-        None,
+        EntryOptions {
+            health_enabled,
+            ..EntryOptions::default()
+        },
     )
-    .await
+    .await;
+    (endpoint, handle, captures, shutdown)
 }
 
 async fn start_entry_fixture(
@@ -1478,16 +2089,56 @@ async fn start_entry_fixture(
     mpsc::UnboundedReceiver<Value>,
     oneshot::Sender<()>,
 ) {
+    let (endpoint, handle, captures, _headers, shutdown) = start_entry_configured(
+        kind,
+        process,
+        status,
+        content_type,
+        body,
+        EntryOptions {
+            health_enabled,
+            mixed,
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    (endpoint, handle, captures, shutdown)
+}
+
+async fn start_entry_configured(
+    kind: &str,
+    process: &str,
+    status: StatusCode,
+    content_type: &'static str,
+    body: String,
+    options: EntryOptions,
+) -> (
+    String,
+    V3ServerAggregateHandle,
+    mpsc::UnboundedReceiver<Value>,
+    Option<mpsc::UnboundedReceiver<String>>,
+    oneshot::Sender<()>,
+) {
+    let EntryOptions {
+        health_enabled,
+        attempt_bodies,
+        auth_entries,
+        pin_key,
+        capture_headers,
+        mixed,
+    } = options;
     let upstream = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("public regression requires loopback sockets");
     let upstream_addr = upstream.local_addr().unwrap();
     let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let (header_tx, header_rx) = mpsc::unbounded_channel::<String>();
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let app = Router::new()
         .route("/v1/responses", post(controlled_upstream))
         .route("/v1/chat/completions", post(controlled_upstream))
         .route("/v1/messages", post(controlled_upstream))
+        .fallback(post(controlled_upstream))
         .with_state(Arc::new(ProviderState {
             kind: kind.to_string(),
             health_enabled,
@@ -1495,6 +2146,9 @@ async fn start_entry_fixture(
             content_type,
             body,
             captures: captures_tx,
+            attempt_bodies,
+            attempts: std::sync::atomic::AtomicUsize::new(0),
+            header_captures: capture_headers.then_some(header_tx),
             mixed,
         }));
     tokio::spawn(async move {
@@ -1508,11 +2162,30 @@ async fn start_entry_fixture(
     let declaration = hub_v1_fixture::hub_v1_test_declaration();
     let execution = hub_v1_fixture::hub_v1_server_execution("a");
     let port = test_ports::free_port();
-    let alias = if health_enabled {
-        format!("representation-key-{port}")
+    let auth_entries = if auth_entries.is_empty() {
+        let alias = if health_enabled {
+            format!("representation-key-{port}")
+        } else {
+            "key".to_string()
+        };
+        vec![(alias, KEY_ENV.to_string())]
     } else {
-        "key".to_string()
+        auth_entries
     };
+    let auth_entries_toml = auth_entries
+        .iter()
+        .map(|(alias, env)| format!("{{ alias = \"{alias}\", env = \"{env}\" }}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let pin_key = if pin_key.is_none() && auth_entries.len() == 1 {
+        Some(auth_entries[0].0.clone())
+    } else {
+        pin_key
+    };
+    let target_key = pin_key
+        .as_ref()
+        .map(|key| format!(", key = \"{key}\""))
+        .unwrap_or_default();
     // Anthropic's transport appends /v1/messages; Responses and Chat append
     // their endpoint to an API base that already includes /v1.
     let provider_base_url = if kind == "anthropic" {
@@ -1528,13 +2201,13 @@ version = 3
 bind = "127.0.0.1"
 port = {port}
 routing_group = "default"
-endpoints = ["responses", "openai_chat", "anthropic"]
+endpoints = ["responses", "openai_chat", "anthropic", "gemini"]
 {execution}
 [providers.test]
 type = "{kind}"
 base_url = "{provider_base_url}"
 default_model = "test"
-auth = {{ type = "api_key", entries = [{{ alias = "{alias}", env = "{KEY_ENV}" }}] }}
+auth = {{ type = "api_key", entries = [{auth_entries_toml}] }}
 health = {{ enabled = {health_enabled}, failure_threshold = 2, cooldown_ms = 5000 }}
 responses = {{ process = "{process}", streaming = "always" }}
 [providers.test.models.test]
@@ -1556,7 +2229,7 @@ capabilities = ["text", "tools"]
 supports_streaming = true
 [route_groups.default.pools.default]
 selection = {{ strategy = "priority" }}
-targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "{alias}", priority = 1 }}]
+targets = [{{ kind = "provider_model", provider = "test", model = "test"{target_key}, priority = 1 }}]
 "#
     );
     let mut manifest =
@@ -1573,6 +2246,7 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
         format!("http://{}/v1/responses", handle.listeners[0].addr),
         handle,
         captures_rx,
+        capture_headers.then_some(header_rx),
         shutdown_tx,
     )
 }
@@ -1605,6 +2279,621 @@ fn events(body: &str) -> Vec<Value> {
         .filter(|data| !data.is_empty() && *data != "[DONE]")
         .map(|data| serde_json::from_str(data).expect("client SSE must preserve valid JSON"))
         .collect()
+}
+
+/// b878f6c review regression: existing reasoning representations remain business.
+#[tokio::test]
+async fn b878f6c_chat_reasoning_business_shapes_survive_json_admission() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let shapes = [
+        (
+            "reasoning",
+            json!({"summary":[{"type":"summary_text","text":"preserved plan"}]}),
+        ),
+        (
+            "reasoning",
+            json!({"content":[{"type":"reasoning_text","text":"preserved plan"}]}),
+        ),
+        ("reasoning", json!({"encrypted_content":"preserved cipher"})),
+        ("reasoning_content", json!([{"text":"preserved plan"}])),
+        (
+            "reasoning_content",
+            json!({"content":[{"text":"preserved plan"}]}),
+        ),
+        ("reasoning_text", json!("preserved plan")),
+    ];
+    for (entry, process) in [
+        ("responses", "chat"),
+        ("openai_chat", "direct"),
+        ("openai_chat", "chat"),
+    ] {
+        for (field, reasoning) in &shapes {
+            let mut upstream = json!({"id":"reasoning-control","object":"chat.completion","model":"wire-test","choices":[{"index":0,"message":{"role":"assistant","content":null},"finish_reason":"stop"}]});
+            upstream["choices"][0]["message"][field] = reasoning.clone();
+            let (endpoint, handle, mut captures, shutdown) = start_entry_with_health(
+                "openai_chat",
+                process,
+                StatusCode::OK,
+                "application/json",
+                upstream.to_string(),
+                true,
+            )
+            .await;
+            let base = endpoint.trim_end_matches("/v1/responses");
+            let request = if entry == "responses" {
+                json!({"model":"test.test","input":"representation-invalid-reasoning-control","stream":false})
+            } else {
+                json!({"model":"test.test","messages":[{"role":"user","content":"representation-invalid-reasoning-control"}],"stream":false})
+            };
+            let path = if entry == "responses" {
+                "/v1/responses"
+            } else {
+                "/v1/chat/completions"
+            };
+            let (_, body) = successful_transfer(
+                client()
+                    .post(format!("{base}{path}"))
+                    .json(&request)
+                    .send()
+                    .await,
+            )
+            .await;
+            assert!(
+                body.contains("preserved"),
+                "{entry}/{process}/{field}: {body}"
+            );
+            if entry == "openai_chat" {
+                let delivered: Value = serde_json::from_str(&body).unwrap();
+                assert_eq!(
+                    delivered["choices"][0]["message"][field], *reasoning,
+                    "{process}: {body}"
+                );
+            }
+            let health: Value = client()
+                .get(format!("{base}/_routecodex/health/cooldown-pool"))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            assert!(
+                health["entries"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|row| row["provider_id"] != "test"),
+                "{health}"
+            );
+            stop_entry(handle, shutdown).await;
+            let mut business_attempts = 0;
+            while let Some(capture) = captures.recv().await {
+                if capture
+                    .to_string()
+                    .contains("representation-invalid-reasoning-control")
+                {
+                    business_attempts += 1;
+                }
+            }
+            assert_eq!(business_attempts, 1, "reasoning must not reselect");
+        }
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+/// b878f6c review regression: filtering is a Gemini business result, empty STOP is not.
+#[tokio::test]
+async fn b878f6c_gemini_filtering_json_sse_preserves_terminal_without_reselection() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for streaming in [false, true] {
+        for reason in [
+            "SAFETY",
+            "RECITATION",
+            "BLOCKLIST",
+            "PROHIBITED_CONTENT",
+            "SPII",
+            "STOP",
+        ] {
+            eprintln!("Gemini filtering control: stream={streaming} reason={reason}");
+            let expected = json!({"candidates":[{"index":0,"content":{"role":"model","parts":[]},"finishReason":reason}]});
+            let upstream = if streaming {
+                format!("data: {expected}\n\n")
+            } else {
+                expected.to_string()
+            };
+            let (endpoint, handle, mut captures, shutdown) = start_entry(
+                "gemini",
+                "direct",
+                StatusCode::OK,
+                if streaming {
+                    "text/event-stream"
+                } else {
+                    "application/json"
+                },
+                upstream,
+            )
+            .await;
+            let base = endpoint.trim_end_matches("/v1/responses");
+            let action = "generateContent";
+            let request = json!({"contents":[{"role":"user","parts":[{"text":"filter control"}]}],"stream":streaming});
+            let response = client()
+                .post(format!("{base}/v1beta/models/test.test/{action}"))
+                .json(&request)
+                .send()
+                .await;
+            if reason == "STOP" {
+                assert_incomplete_transport(response).await;
+            } else {
+                let (_, body) = successful_transfer(response).await;
+                assert!(
+                    body.contains(reason),
+                    "provider filtering must survive: {body}"
+                );
+                let health: Value = client()
+                    .get(format!("{base}/_routecodex/health/cooldown-pool"))
+                    .send()
+                    .await
+                    .unwrap()
+                    .json()
+                    .await
+                    .unwrap();
+                assert!(
+                    health["entries"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .all(|row| row["provider_id"] != "test"),
+                    "{health}"
+                );
+            }
+            stop_entry(handle, shutdown).await;
+            let mut business_attempts = 0;
+            while let Some(capture) = captures.recv().await {
+                if capture.to_string().contains("filter control") {
+                    business_attempts += 1;
+                }
+            }
+            assert_eq!(business_attempts, 1);
+        }
+    }
+    for feedback in [
+        json!({"candidates":[],"promptFeedback":{"blockReason":"SAFETY"}}),
+        json!({"promptFeedback":{"blockReason":"SAFETY"}}),
+    ] {
+        for streaming in [false, true] {
+            eprintln!("Gemini prompt feedback control: {feedback}");
+            let (endpoint, handle, mut captures, shutdown) = start_entry(
+                "gemini",
+                "direct",
+                StatusCode::OK,
+                if streaming {
+                    "text/event-stream"
+                } else {
+                    "application/json"
+                },
+                if streaming {
+                    format!("data: {feedback}\n\n")
+                } else {
+                    feedback.to_string()
+                },
+            )
+            .await;
+            let base = endpoint.trim_end_matches("/v1/responses");
+            let (_, body) = successful_transfer(
+            client()
+                .post(format!("{base}/v1beta/models/test.test/generateContent"))
+                .json(&json!({"contents":[{"role":"user","parts":[{"text":"filter control"}]}],"stream":streaming}))
+                .send()
+                .await,
+        )
+        .await;
+            assert!(body.contains("SAFETY"), "{body}");
+            stop_entry(handle, shutdown).await;
+            assert!(captures.recv().await.is_some());
+            assert!(
+                captures.try_recv().is_err(),
+                "filter feedback must not retry"
+            );
+        }
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Stable RED ID: an explicit Gemini Relay (JSON and SSE) provider filter
+/// terminal whose candidate carries genuinely missing `content` must survive
+/// the codec instead of becoming a local PartsNotArray failure. The fixture is
+/// the real accepted shape `{"candidates":[{"index":0,"finishReason":"SAFETY"}]}`;
+/// no synthetic content/parts are inserted. The ordinary empty STOP control
+/// stays an incomplete transport (internal 502), not a fabricated success.
+#[tokio::test]
+async fn b878f6c_gemini_relay_filtering_candidate_without_content_preserves_terminal() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for streaming in [false, true] {
+        for reason in ["SAFETY", "RECITATION"] {
+            eprintln!(
+                "Gemini relay filtering candidate control: stream={streaming} reason={reason}"
+            );
+            let expected = json!({"candidates":[{"index":0,"finishReason":reason}]});
+            let upstream = if streaming {
+                format!("data: {expected}\n\n")
+            } else {
+                expected.to_string()
+            };
+            let (endpoint, handle, mut captures, shutdown) = start_entry(
+                "gemini",
+                "relay",
+                StatusCode::OK,
+                if streaming {
+                    "text/event-stream"
+                } else {
+                    "application/json"
+                },
+                upstream,
+            )
+            .await;
+            let base = endpoint.trim_end_matches("/v1/responses");
+            let request = json!({"contents":[{"role":"user","parts":[{"text":"filter control"}]}],"stream":streaming});
+            let response = client()
+                .post(format!("{base}/v1beta/models/test.test/generateContent"))
+                .json(&request)
+                .send()
+                .await;
+            let (_, body) = successful_transfer(response).await;
+            assert!(
+                body.contains(reason),
+                "provider filter terminal must survive explicit Relay: {body}"
+            );
+            let payload: Value = if streaming {
+                body.lines()
+                    .filter_map(|line| line.strip_prefix("data:"))
+                    .filter_map(|data| serde_json::from_str::<Value>(data.trim()).ok())
+                    .find(|value| value.get("candidates").is_some())
+                    .expect("Relay SSE must contain the real filtering candidate")
+            } else {
+                serde_json::from_str(&body).unwrap()
+            };
+            assert_eq!(payload["candidates"], expected["candidates"]);
+            let health: Value = client()
+                .get(format!("{base}/_routecodex/health/cooldown-pool"))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            assert!(
+                health["entries"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|row| row["provider_id"] != "test"),
+                "filter terminal must not cool the provider identity: {health}"
+            );
+            stop_entry(handle, shutdown).await;
+            let mut business_attempts = 0;
+            while let Some(capture) = captures.recv().await {
+                if capture.to_string().contains("filter control") {
+                    business_attempts += 1;
+                }
+            }
+            assert_eq!(
+                business_attempts, 1,
+                "filter terminal must deliver on the first business attempt without reselection"
+            );
+        }
+    }
+    // Ordinary empty STOP stays a genuine empty attempt: the transport
+    // terminates without a fabricated completion and without cooling the
+    // healthy identity.
+    for streaming in [false, true] {
+        eprintln!("Gemini relay ordinary empty STOP control: stream={streaming}");
+        let expected = json!({"candidates":[{"index":0,"content":{"role":"model","parts":[]},"finishReason":"STOP"}]});
+        let upstream = if streaming {
+            format!("data: {expected}\n\n")
+        } else {
+            expected.to_string()
+        };
+        let (endpoint, handle, mut captures, shutdown) = start_entry(
+            "gemini",
+            "relay",
+            StatusCode::OK,
+            if streaming {
+                "text/event-stream"
+            } else {
+                "application/json"
+            },
+            upstream,
+        )
+        .await;
+        let base = endpoint.trim_end_matches("/v1/responses");
+        let request = json!({"contents":[{"role":"user","parts":[{"text":"filter control"}]}],"stream":streaming});
+        let response = client()
+            .post(format!("{base}/v1beta/models/test.test/generateContent"))
+            .json(&request)
+            .send()
+            .await;
+        assert_incomplete_transport(response).await;
+        let health: Value = client()
+            .get(format!("{base}/_routecodex/health/cooldown-pool"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(
+            health["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|row| row["provider_id"] != "test"),
+            "genuine empty STOP must not cool the provider identity: {health}"
+        );
+        stop_entry(handle, shutdown).await;
+        let mut business_attempts = 0;
+        while let Some(capture) = captures.recv().await {
+            if capture.to_string().contains("filter control") {
+                business_attempts += 1;
+            }
+        }
+        assert_eq!(business_attempts, 1);
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+#[tokio::test]
+async fn b878f6c_compact_responses_message_fields_are_business_content() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for streaming in [false, true] {
+        for reasoning_only in [false, true] {
+            eprintln!(
+                "compact message control: stream={streaming} reasoning_only={reasoning_only}"
+            );
+            let item = if reasoning_only {
+                json!({"id":"compact-message","type":"message","role":"assistant",
+                    "text":"","reasoning_content":"compact reasoning"})
+            } else {
+                json!({"id":"compact-message","type":"message","role":"assistant",
+                    "text":"compact answer"})
+            };
+            let expected = json!({"id":"compact-response","object":"response",
+                "status":"completed","output":[item]});
+            let upstream = if streaming {
+                format!(
+                    "event: response.completed\ndata: {}\n\n",
+                    json!({"type":"response.completed","response":expected})
+                )
+            } else {
+                expected.to_string()
+            };
+            let (endpoint, handle, mut captures, shutdown) = start_entry(
+                "responses",
+                "direct",
+                StatusCode::OK,
+                if streaming {
+                    "text/event-stream"
+                } else {
+                    "application/json"
+                },
+                upstream,
+            )
+            .await;
+            let response = client()
+                .post(&endpoint)
+                .json(&json!({
+                    "model":"test.test","input":"compact control","stream":streaming,
+                }))
+                .send()
+                .await;
+            let (_, body) = successful_transfer(response).await;
+            let payload: Value = if streaming {
+                body.lines()
+                    .filter_map(|line| line.strip_prefix("data:"))
+                    .filter_map(|data| serde_json::from_str::<Value>(data.trim()).ok())
+                    .find_map(|event| event.get("response").cloned())
+                    .expect("compact terminal must reach the actual consumer")
+            } else {
+                serde_json::from_str(&body).unwrap()
+            };
+            assert_eq!(payload["output"], expected["output"]);
+            let base = endpoint.trim_end_matches("/v1/responses");
+            let health: Value = client()
+                .get(format!("{base}/_routecodex/health/cooldown-pool"))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            assert!(health["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|row| row["provider_id"] != "test"));
+            stop_entry(handle, shutdown).await;
+            let mut attempts = 0;
+            while let Some(capture) = captures.recv().await {
+                if capture.to_string().contains("compact control") {
+                    attempts += 1;
+                }
+            }
+            assert_eq!(attempts, 1);
+        }
+    }
+    for streaming in [false, true] {
+        let empty = json!({"id":"empty-compact","object":"response","status":"completed",
+            "output":[{"type":"message","text":"","reasoning_content":""}]});
+        let upstream = if streaming {
+            format!(
+                "event: response.completed\ndata: {}\n\n",
+                json!({"type":"response.completed","response":empty})
+            )
+        } else {
+            empty.to_string()
+        };
+        let (endpoint, handle, mut captures, shutdown) = start_entry(
+            "responses",
+            "direct",
+            StatusCode::OK,
+            if streaming {
+                "text/event-stream"
+            } else {
+                "application/json"
+            },
+            upstream,
+        )
+        .await;
+        assert_incomplete_transport(
+            client()
+                .post(endpoint)
+                .json(&json!({
+                    "model":"test.test","input":"empty compact control","stream":streaming,
+                }))
+                .send()
+                .await,
+        )
+        .await;
+        stop_entry(handle, shutdown).await;
+        let mut attempts = 0;
+        while let Some(capture) = captures.recv().await {
+            if capture.to_string().contains("empty compact control") {
+                attempts += 1;
+            }
+        }
+        assert_eq!(attempts, 1);
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+#[tokio::test]
+async fn b878f6c_compact_responses_reach_real_chat_consumer() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for streaming in [false, true] {
+        for (item, expected_text, expected_reasoning) in [
+            (
+                json!({"type":"message","role":"assistant","text":"compact answer"}),
+                "compact answer",
+                "",
+            ),
+            (
+                json!({"type":"message","role":"assistant","reasoning_content":"  compact reasoning\n"}),
+                "",
+                "  compact reasoning\n",
+            ),
+            (
+                json!({"type":"message","role":"assistant","reasoning":"  compact reasoning\n"}),
+                "",
+                "  compact reasoning\n",
+            ),
+            (
+                json!({"type":"message","role":"assistant","reasoning":{"summary":[{"type":"summary_text","text":"  compact reasoning\n"}]}}),
+                "",
+                "  compact reasoning\n",
+            ),
+            (
+                json!({"type":"message","role":"assistant","reasoning":{"content":[{"type":"reasoning_text","text":"  compact reasoning\n"}]}}),
+                "",
+                "  compact reasoning\n",
+            ),
+            (
+                json!({"type":"message","role":"assistant","reasoning_text":"  compact reasoning\n"}),
+                "",
+                "  compact reasoning\n",
+            ),
+            (
+                json!({"type":"message","role":"assistant","text":"compact answer","content":[{"type":"output_text","text":"compact answer"}],"reasoning_content":"compact reasoning","extension":{"keep":true}}),
+                "compact answer",
+                "compact reasoning",
+            ),
+        ] {
+            let response = json!({"id":"compact-chat","object":"response","status":"completed","output":[item]});
+            let upstream = if streaming {
+                response_sse(&response)
+            } else {
+                response.to_string()
+            };
+            let (endpoint, handle, mut captures, shutdown) = start_entry(
+                "responses",
+                "chat",
+                StatusCode::OK,
+                if streaming {
+                    "text/event-stream"
+                } else {
+                    "application/json"
+                },
+                upstream,
+            )
+            .await;
+            let chat_endpoint = endpoint.replace("/v1/responses", "/v1/chat/completions");
+            let (client_content_type, body) = successful_transfer(client().post(&chat_endpoint).json(&json!({
+                "model":"test.test","messages":[{"role":"user","content":"compact chat consumer"}],"stream":streaming
+            })).send().await).await;
+            let health: Value = client()
+                .get(format!(
+                    "{}/_routecodex/health/cooldown-pool",
+                    endpoint.trim_end_matches("/v1/responses")
+                ))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            stop_entry(handle, shutdown).await;
+            assert_one_attempt(&mut captures, "wire-test").await;
+            assert!(health["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|row| row["provider_id"] != "test"));
+            assert!(client_content_type.starts_with(if streaming {
+                "text/event-stream"
+            } else {
+                "application/json"
+            }));
+            let (text, reasoning, terminal) = if streaming {
+                let frames = events(&body);
+                assert!(body.contains("data: [DONE]"), "{body}");
+                (
+                    frames
+                        .iter()
+                        .filter_map(|frame| frame["choices"][0]["delta"]["content"].as_str())
+                        .collect::<String>(),
+                    frames
+                        .iter()
+                        .filter_map(|frame| {
+                            frame["choices"][0]["delta"]["reasoning_content"].as_str()
+                        })
+                        .collect::<String>(),
+                    frames
+                        .iter()
+                        .any(|frame| frame["choices"][0]["finish_reason"] == "stop"),
+                )
+            } else {
+                let payload: Value = serde_json::from_str(&body).unwrap();
+                (
+                    payload["choices"][0]["message"]["content"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_owned(),
+                    payload["choices"][0]["message"]["reasoning_content"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_owned(),
+                    payload["choices"][0]["finish_reason"] == "stop",
+                )
+            };
+            assert_eq!(text, expected_text, "stream={streaming}: {body}");
+            assert_eq!(reasoning, expected_reasoning, "stream={streaming}: {body}");
+            assert!(terminal, "stream={streaming}: {body}");
+        }
+    }
+    std::env::remove_var(KEY_ENV);
 }
 
 #[tokio::test]
@@ -2206,6 +3495,22 @@ async fn responses_wire_representation_survives_chat_and_anthropic_entries() {
                     } else if streaming {
                         request["stream_options"] = json!({"include_usage":true});
                     }
+                    if case == "empty_completed" {
+                        // v8 user contract (requirements v8 active):
+                        // "上游的空响应 我们直接判为502 错误重试走错误链".
+                        // A complete provider attempt with no deliverable
+                        // business content is an internal 502 in the Error
+                        // chain. The client gets neither a normal empty
+                        // completion nor an error payload; only the transport
+                        // terminates.
+                        assert_incomplete_transport(
+                            client().post(endpoint).json(&request).send().await,
+                        )
+                        .await;
+                        stop_entry(handle, shutdown).await;
+                        assert_one_attempt(&mut captures, "wire-test").await;
+                        continue;
+                    }
                     let (content_type, body) =
                         successful_transfer(client().post(endpoint).json(&request).send().await)
                             .await;
@@ -2214,8 +3519,6 @@ async fn responses_wire_representation_survives_chat_and_anthropic_entries() {
                     assert!(!body.contains("\"error\""), "{entry}/{case}: {body}");
                     let expected_text = if case == "refusal" {
                         "NATIVE_REFUSAL"
-                    } else if case == "empty_completed" {
-                        ""
                     } else {
                         "NATIVE_OK"
                     };
@@ -2244,11 +3547,7 @@ async fn responses_wire_representation_survives_chat_and_anthropic_entries() {
                             assert_eq!(payload["usage"]["prompt_tokens"], 3);
                             assert_eq!(payload["usage"]["completion_tokens"], 2);
                         } else {
-                            if case == "empty_completed" {
-                                assert_eq!(payload["content"], json!([]));
-                            } else {
-                                assert_eq!(payload["content"][0]["text"], expected_text);
-                            }
+                            assert_eq!(payload["content"][0]["text"], expected_text);
                             assert_eq!(payload["stop_reason"], expected_finish);
                             assert_eq!(payload["id"], "msg_control");
                             assert_eq!(payload["usage"]["input_tokens"], 3);
@@ -2487,6 +3786,32 @@ async fn anthropic_refusal_details_survive_json_and_sse_public_entries() {
                             } else {
                                 endpoint
                             };
+                            // v8 user contract: only a genuinely empty attempt
+                            // becomes the internal 502. `refusal` (Anthropic
+                            // `stop_reason=refusal` -> Responses
+                            // `incomplete_details.reason=content_filter`) and
+                            // `tool_use` (a real tool-call block) carry legal
+                            // business content and keep their original fidelity
+                            // assertions below. The remaining terminal reasons
+                            // with an empty content array carry no business
+                            // content at all, so they are the empty-attempt
+                            // branch: internal 502, transport abort, no normal
+                            // completion and no client error payload.
+                            let empty_attempt = text.is_empty()
+                                && details.get("type").and_then(Value::as_str) != Some("refusal")
+                                && matches!(
+                                    stop_reason,
+                                    "end_turn" | "max_tokens" | "stop_sequence" | "pause_turn"
+                                );
+                            if empty_attempt {
+                                assert_incomplete_transport(
+                                    client().post(endpoint).json(&request).send().await,
+                                )
+                                .await;
+                                stop_entry(handle, shutdown).await;
+                                assert_one_attempt(&mut captures, "wire-test").await;
+                                continue;
+                            }
                             let (content_type, body) = successful_transfer(
                                 client().post(endpoint).json(&request).send().await,
                             )

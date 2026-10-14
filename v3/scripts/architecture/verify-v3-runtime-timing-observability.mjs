@@ -38,6 +38,10 @@ const directSseRuntimePath = path.join(
   root,
   "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs",
 );
+const directTimingPath = path.join(
+  root,
+  "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_timing.rs",
+);
 const directSseConsumerPath = path.join(
   root,
   "v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs",
@@ -159,6 +163,7 @@ const runtimeObservability = relayRuntime.slice(
   ) + 2,
 );
 const kernel = readRequired(kernelPath);
+const directTiming = readRequired(directTimingPath);
 const directCore = readRequired(directCorePath);
 const nodes = readRequired(nodesPath);
 const serverExecutors = readRequired(serverExecutorsPath);
@@ -376,34 +381,33 @@ requireMatch(
   /return model_no_response_output/,
   "Relay failures must return typed no-response intent without projecting an SSE error",
 );
-const directSseFinishRuntimeCalls =
-  directSseOutcomeWrapper.match(/\.finish_runtime\(\)/g) ?? [];
-if (directSseFinishRuntimeCalls.length !== 2) {
-  failures.push(
-    "Direct SSE timing owner must call finish_runtime in terminal-event and clean-EOF branches",
-  );
-}
+forbidMatch(
+  directSseOutcomeWrapper,
+  /\.finish_runtime\(\)|\.record_timing\(/,
+  "Direct SSE frames must not finalize or publish Runtime timing before attempt admission",
+);
 const directSseDecoderFinish = directSseOutcomeWrapper.indexOf(".finish()");
 const directSseTerminalGuard = directSseOutcomeWrapper.indexOf("terminal_observed");
-const directSseRuntimeFinish = directSseOutcomeWrapper.indexOf(
-  "state.runtime_timing.finish_runtime()",
-);
-const directSseTimingPublish = directSseOutcomeWrapper.indexOf(
-  "state.stream_observation.record_timing(timing)",
-);
+const directSseRuntimeFinish = directTiming.indexOf(".finish_runtime()");
+const directSseTimingPublish = directTiming.indexOf(".record_timing(timing)");
+const directSseCollect = kernel.indexOf("project_and_collect_direct_sse_attempt(");
+const directSseSeal = kernel.indexOf("V3AttemptSuccessReceipt::from_sealed_sse_attempt(");
+const directSseCloseout = kernel.indexOf("finish_v3_direct_runtime_timing(");
 if (
   !(
     directSseDecoderFinish >= 0 &&
     directSseTerminalGuard >= 0 &&
     directSseRuntimeFinish >= 0 &&
     directSseTimingPublish >= 0 &&
-    directSseDecoderFinish >= 0 &&
     directSseOutcomeWrapper.indexOf("finish_external_if_active()") >= 0 &&
-    directSseRuntimeFinish < directSseTimingPublish
+    directSseRuntimeFinish < directSseTimingPublish &&
+    (directTiming.match(/\.finish_runtime\(\)/g) ?? []).length === 1 &&
+    directSseCollect >= 0 && directSseCollect < directSseSeal &&
+    directSseSeal < directSseCloseout
   )
 ) {
   failures.push(
-    "Direct SSE finish_runtime must follow decoder clean EOF/terminal observation and precede timing publication",
+    "Direct Runtime timing closeout must follow complete-attempt collection and sealing, then publish timing once",
   );
 }
 forbidMatch(
@@ -537,7 +541,9 @@ for (const [source, label] of [
   );
   if (
     directTimingPublication?.caller_symbol !==
-      "wrap_direct_sse_provider_event_json_observation_stream_with_compat" ||
+      "finish_v3_direct_runtime_timing" ||
+    directTimingPublication?.caller_file !==
+      "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_timing.rs" ||
     directTimingPublication?.callee_symbol !== "record_timing" ||
     directTimingPublication?.callee_file !==
       "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs"

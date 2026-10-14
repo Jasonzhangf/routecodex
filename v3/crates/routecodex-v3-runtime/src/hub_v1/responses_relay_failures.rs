@@ -106,7 +106,9 @@ pub(crate) fn provider_runtime_failure(
             source_stage,
             observability,
             terminal_projection: Some(projected),
-            terminal_disposition: None,
+            terminal_disposition: Some(
+                routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+            ),
             matched_policy: None,
         };
     }

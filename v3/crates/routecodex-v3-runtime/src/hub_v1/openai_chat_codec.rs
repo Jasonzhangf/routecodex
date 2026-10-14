@@ -177,6 +177,31 @@ pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
     let mut reasoning_content = String::new();
     let mut tool_calls = Vec::new();
     for item in output.into_iter().flatten() {
+        let message_reasoning = if item.get("type").and_then(Value::as_str) == Some("message") {
+            item.as_object().and_then(
+                super::responses_relay_runtime::build_v3_responses_reasoning_item_from_openai_chat_message,
+            )
+        } else {
+            None
+        };
+        let reasoning = if item.get("type").and_then(Value::as_str) == Some("reasoning") {
+            Some(item)
+        } else {
+            message_reasoning.as_ref()
+        };
+        for part in reasoning
+            .and_then(|item| item.get("summary"))
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if let Some(text) = part.get("text").and_then(Value::as_str) {
+                if !reasoning_content.is_empty() {
+                    reasoning_content.push('\n');
+                }
+                reasoning_content.push_str(text);
+            }
+        }
         match item.get("type").and_then(Value::as_str) {
             Some("output_text") => {
                 if let Some(text) = item.get("text").and_then(Value::as_str) {
@@ -184,6 +209,7 @@ pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
                 }
             }
             Some("message") => {
+                let content_start = content.len();
                 for part in item
                     .get("content")
                     .and_then(Value::as_array)
@@ -204,19 +230,11 @@ pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
                         _ => {}
                     }
                 }
-            }
-            Some("reasoning") => {
-                for part in item
-                    .get("summary")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                {
-                    if let Some(text) = part.get("text").and_then(Value::as_str) {
-                        if !reasoning_content.is_empty() {
-                            reasoning_content.push('\n');
-                        }
-                        reasoning_content.push_str(text);
+                // Compact text is the message's text representation when no
+                // content text was projected; mixed shapes must emit it once.
+                if content.len() == content_start {
+                    if let Some(text) = item.get("text").and_then(Value::as_str) {
+                        content.push_str(text);
                     }
                 }
             }
