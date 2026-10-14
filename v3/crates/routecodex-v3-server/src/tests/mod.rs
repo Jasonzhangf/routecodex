@@ -1140,6 +1140,7 @@ fn test_provider_failure_observation() -> V3RuntimeProviderFailureObservation {
         action: "switch_provider".to_string(),
         next_provider_key: Some("second:key:gpt-5.5".to_string()),
         wait_ms: None,
+        diagnostic_source: None,
     }
 }
 
@@ -2364,6 +2365,7 @@ fn provider_failure_console_content_exposes_red_error_and_switch() {
         action: "switch_provider".to_string(),
         next_provider_key: Some("minimax:key1:MiniMax-M3".to_string()),
         wait_ms: None,
+        diagnostic_source: None,
     };
     let error_content = format_v3_provider_failure_console_content("req-provider-switch", &event);
     assert!(error_content.contains("❌ [provider-error]"));
@@ -2744,6 +2746,8 @@ fn openai_chat_relay_internal_error_returns_typed_no_response() {
         observability: None,
         stream_observation: None,
         provider_snapshots: None,
+        provider_failure_attempts: Vec::new(),
+        diagnostic_source: None,
         terminal_disposition: None,
     };
     let response = openai_chat_relay_output_response(output, None, Duration::from_secs(1), false);

@@ -655,6 +655,11 @@ pub struct V3Error06ClientProjected {
     pub error_detail: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub health_action: Option<V3ErrorActionPlan>,
+    /// The complete Error01 source retained internally across the Error05 ->
+    /// Error06 boundary. It is private diagnostic state, never serialized into
+    /// the public client projection.
+    #[serde(skip)]
+    pub diagnostic_source: V3Error01SourceRaised,
 }
 
 fn internal_client_status(source: &V3Error01SourceRaised) -> u16 {
@@ -1030,6 +1035,7 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
         error_class,
         error_detail,
         health_action,
+        diagnostic_source: source.clone(),
     }
 }
 

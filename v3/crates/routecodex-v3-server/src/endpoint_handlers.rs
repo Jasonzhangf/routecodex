@@ -573,6 +573,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 Ok(output) => output,
                 Err(error) => project_v3_openai_chat_relay_runtime_failure(error),
             };
+        persist_v3_chat_failure_evidence(&state, &entry_protocol, &path, &request_id, &output);
         if let Some(disposition) = output.terminal_disposition.clone() {
             return provider_terminal_response(
                 &state,

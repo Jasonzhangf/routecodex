@@ -7,10 +7,9 @@ use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecove
 use crate::provider_failure_runtime_policy::{
     expand_v3_relay_target_plan_for_selected, project_v3_client_disconnect,
     provider_runtime_failure_stage, resolve_v3_relay_target_outcome_with_admission_rescue,
-    run_v3_relay_provider_failure_policy, v3_relay_provider_candidate_key_parts,
-    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
-    V3ProviderFailureRuntimeHealth, V3RelayProviderAdmittedTargetResolution,
-    V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyEvent,
+    run_v3_relay_provider_failure_policy, v3_relay_provider_policy_now_epoch_ms,
+    v3_relay_provider_target_selection_sample, V3ProviderFailureRuntimeHealth,
+    V3RelayProviderAdmittedTargetResolution, V3RelayProviderFailurePolicyContext,
     V3RelayProviderFailurePolicyState, V3RelayProviderFailureRetryPolicy,
     V3RelayProviderTargetResolutionInput, V3RuntimeProviderAdmission,
 };
@@ -375,39 +374,6 @@ fn v3_provider_failure_message_from_body(body: &Value) -> String {
         .filter(|value| !value.trim().is_empty())
         .unwrap_or("provider failure")
         .to_string()
-}
-
-fn build_v3_runtime_provider_failure_observation_from_policy_event(
-    event: &V3RelayProviderFailurePolicyEvent,
-) -> V3RuntimeProviderFailureObservation {
-    V3RuntimeProviderFailureObservation {
-        provider_key: v3_relay_provider_candidate_key_parts(
-            &event.candidate.provider_id,
-            Some(&event.candidate.interface_id),
-            Some(&event.candidate.auth_alias),
-            Some(&event.candidate.model_id),
-        ),
-        provider_id: event.candidate.provider_id.clone(),
-        auth_alias: Some(event.candidate.auth_alias.clone()),
-        model_id: event.candidate.model_id.clone(),
-        status: event.status,
-        error_type: event.error_type.clone(),
-        external_error_kind: None,
-        external_error_code: event.error_type.clone(),
-        // The real upstream HTTP status; `None` for a response-less failure.
-        external_error_status: event.provider_status,
-        internal_code: None,
-        // V3RelayProviderFailurePolicyEvent does not carry the upstream request
-        // id: record an honest unknown rather than a synthesised value.
-        upstream_request_id: None,
-        message: event.message.clone(),
-        failure_count: event.health_record.failure_count,
-        health_state: event.health_record.state.clone(),
-        cooldown_until_ms: event.health_record.cooldown_until_ms,
-        action: event.action.clone(),
-        next_provider_key: event.next_provider_key.clone(),
-        wait_ms: event.wait_ms,
-    }
 }
 
 fn attach_v3_provider_failure_events_to_failure(

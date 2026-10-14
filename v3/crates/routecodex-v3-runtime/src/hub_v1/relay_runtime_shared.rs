@@ -9,10 +9,14 @@
 //! 错误统一以 `String` 表达，调用方（协议 runtime）负责 map_err 到自身错误类型；
 //! 统一失败结构 [`V3RelayProviderFailure`] 替代各协议 `V3*RelayProviderFailure` 副本。
 
-use crate::hub_v1::{V3HubEntryProtocol, V3RuntimeObservability, V3RuntimeStreamObservation};
+use crate::hub_v1::{
+    V3HubEntryProtocol, V3RuntimeObservability, V3RuntimeProviderFailureObservation,
+    V3RuntimeStreamObservation,
+};
 use crate::provider_failure_runtime_policy::{
     project_v3_client_disconnect, provider_runtime_failure_stage,
-    run_v3_relay_provider_failure_policy, V3RelayProviderFailurePolicyContext,
+    run_v3_relay_provider_failure_policy, v3_relay_provider_candidate_key_parts,
+    V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyEvent,
     V3RelayProviderFailurePolicyState,
 };
 use futures_util::StreamExt;
@@ -215,6 +219,7 @@ pub async fn handle_provider_failure(
     state: &mut V3RelayProviderFailurePolicyState<'_>,
     retry_selected: &mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
     pending_recovery: &mut Option<V3Error05RecoveryAdmissionWitness>,
+    provider_failure_events: &mut Vec<V3RuntimeProviderFailureObservation>,
 ) -> Result<Option<V3RelayProviderFailure>, String> {
     if failure.terminal_projection.is_some() {
         return Ok(Some(failure));
@@ -231,6 +236,9 @@ pub async fn handle_provider_failure(
     )
     .await
     .map_err(|error| error.to_string())?;
+    result.event.provider_status = failure.provider_status;
+    provider_failure_events
+        .push(build_v3_runtime_provider_failure_observation_from_policy_event(&result.event));
     match result.decision.action {
         V3Error05ExecutionAction::WaitThenReselect { recovery } => {
             *retry_selected = result.retry_selected.map(|selected| *selected);
@@ -261,6 +269,40 @@ pub async fn handle_provider_failure(
         | V3Error05ExecutionAction::RejectNonProviderError => {
             Err("provider failure entered a non-provider Error05 lane".to_string())
         }
+    }
+}
+
+pub(crate) fn build_v3_runtime_provider_failure_observation_from_policy_event(
+    event: &V3RelayProviderFailurePolicyEvent,
+) -> V3RuntimeProviderFailureObservation {
+    V3RuntimeProviderFailureObservation {
+        provider_key: v3_relay_provider_candidate_key_parts(
+            &event.candidate.provider_id,
+            Some(&event.candidate.interface_id),
+            Some(&event.candidate.auth_alias),
+            Some(&event.candidate.model_id),
+        ),
+        provider_id: event.candidate.provider_id.clone(),
+        auth_alias: Some(event.candidate.auth_alias.clone()),
+        model_id: event.candidate.model_id.clone(),
+        status: event.status,
+        error_type: event.error_type.clone(),
+        external_error_kind: None,
+        external_error_code: event.error_type.clone(),
+        // The real upstream HTTP status; `None` for a response-less failure.
+        external_error_status: event.provider_status,
+        internal_code: None,
+        // V3RelayProviderFailurePolicyEvent does not carry the upstream request
+        // id: record an honest unknown rather than a synthesised value.
+        upstream_request_id: None,
+        message: event.message.clone(),
+        failure_count: event.health_record.failure_count,
+        health_state: event.health_record.state.clone(),
+        cooldown_until_ms: event.health_record.cooldown_until_ms,
+        action: event.action.clone(),
+        next_provider_key: event.next_provider_key.clone(),
+        wait_ms: event.wait_ms,
+        diagnostic_source: Some(event.diagnostic_source.clone()),
     }
 }
 

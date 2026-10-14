@@ -7,6 +7,7 @@ struct V3RelayProviderFailurePolicyEventInput {
     action: &'static str,
     next_provider_key: Option<String>,
     wait_ms: Option<u64>,
+    diagnostic_source: V3Error01SourceRaised,
 }
 
 fn build_v3_relay_provider_failure_policy_event(
@@ -24,6 +25,7 @@ fn build_v3_relay_provider_failure_policy_event(
         action: input.action.to_string(),
         next_provider_key: input.next_provider_key,
         wait_ms: input.wait_ms,
+        diagnostic_source: input.diagnostic_source,
     }
 }
 

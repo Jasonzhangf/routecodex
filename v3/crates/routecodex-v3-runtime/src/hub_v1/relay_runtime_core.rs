@@ -507,6 +507,7 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
     fn assemble_failure_output(
         failure: V3RelayProviderFailure,
         trace: Vec<&'static str>,
+        provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
     ) -> Self::Output;
 
     /// request 失败 body 形状（协议 wire 差异：gemini/responses 用 error.code，
@@ -606,6 +607,7 @@ where
     let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> = None;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut last_external_http = None;
+    let mut failure_events: Vec<V3RuntimeProviderFailureObservation> = Vec::new();
     let request_execution_control = match initial_request_execution_control {
         Some(control) => control,
         None => V3RequestExecutionControl::from_manifest(manifest, server_id).map_err(|error| {
@@ -670,6 +672,7 @@ where
                     return Ok(C::assemble_failure_output(
                         terminalize_provider_failure(failure, last_external_http.clone()),
                         trace,
+                        failure_events,
                     ));
                 }
             }
@@ -720,11 +723,12 @@ where
                     },
                     &mut retry_selected,
                     &mut pending_provider_action_recovery,
+                    &mut failure_events,
                 )
                 .await
                 .map_err(V3RelayCoreError::Target)?;
                 if let Some(failure) = terminal_failure {
-                    return Ok(C::assemble_failure_output(failure, trace));
+                    return Ok(C::assemble_failure_output(failure, trace, failure_events));
                 }
                 continue;
             }
@@ -754,11 +758,12 @@ where
                     },
                     &mut retry_selected,
                     &mut pending_provider_action_recovery,
+                    &mut failure_events,
                 )
                 .await
                 .map_err(V3RelayCoreError::Target)?;
                 if let Some(failure) = terminal_failure {
-                    return Ok(C::assemble_failure_output(failure, trace));
+                    return Ok(C::assemble_failure_output(failure, trace, failure_events));
                 }
                 continue;
             }};
@@ -945,11 +950,12 @@ where
                         },
                         &mut retry_selected,
                         &mut pending_provider_action_recovery,
+                        &mut failure_events,
                     )
                     .await
                     .map_err(V3RelayCoreError::Target)?
                     {
-                        return Ok(C::assemble_failure_output(failure, trace));
+                        return Ok(C::assemble_failure_output(failure, trace, failure_events));
                     }
                     continue;
                 }
@@ -974,11 +980,12 @@ where
                         },
                         &mut retry_selected,
                         &mut pending_provider_action_recovery,
+                        &mut failure_events,
                     )
                     .await
                     .map_err(V3RelayCoreError::Target)?
                     {
-                        return Ok(C::assemble_failure_output(failure, trace));
+                        return Ok(C::assemble_failure_output(failure, trace, failure_events));
                     }
                     continue;
                 }
@@ -998,7 +1005,7 @@ where
                 let provider_value: Value = match serde_json::from_slice(&bytes) {
                     Ok(value) => value,
                     Err(error) => {
-                        let failure = provider_runtime_failure(
+                        let mut failure = provider_runtime_failure(
                             V3ProviderError::ResponseBody {
                                 request_id: request_id.to_string(),
                                 provider_id: selected_target_provider_id.clone(),
@@ -1006,6 +1013,7 @@ where
                             },
                             &selected_target_provider_id,
                         );
+                        failure.provider_status = Some(provider_status);
                         drop(provider_action_permit.take());
                         let terminal_failure = handle_provider_failure(
                             &failure_context,
@@ -1019,16 +1027,18 @@ where
                             },
                             &mut retry_selected,
                             &mut pending_provider_action_recovery,
+                            &mut failure_events,
                         )
                         .await
                         .map_err(V3RelayCoreError::Target)?;
                         if let Some(failure) = terminal_failure {
-                            return Ok(C::assemble_failure_output(failure, trace));
+                            return Ok(C::assemble_failure_output(failure, trace, failure_events));
                         }
                         if attempt_budget.residence_deadline() <= std::time::Instant::now() {
                             return Ok(C::assemble_failure_output(
                                 terminalize_provider_failure(failure, last_external_http.clone()),
                                 trace,
+                                failure_events,
                             ));
                         }
                         continue;
@@ -1057,7 +1067,7 @@ where
                         return Err(V3RelayCoreError::WebSearchIntercepted(message));
                     }
                     Err(error) => {
-                        let failure = provider_runtime_failure(
+                        let mut failure = provider_runtime_failure(
                             V3ProviderError::ResponseBody {
                                 request_id: request_id.to_string(),
                                 provider_id: selected_target_provider_id.clone(),
@@ -1065,6 +1075,7 @@ where
                             },
                             &selected_target_provider_id,
                         );
+                        failure.provider_status = Some(provider_status);
                         drop(provider_action_permit.take());
                         if let Some(failure) = handle_provider_failure(
                             &failure_context,
@@ -1078,11 +1089,12 @@ where
                             },
                             &mut retry_selected,
                             &mut pending_provider_action_recovery,
+                            &mut failure_events,
                         )
                         .await
                         .map_err(V3RelayCoreError::Target)?
                         {
-                            return Ok(C::assemble_failure_output(failure, trace));
+                            return Ok(C::assemble_failure_output(failure, trace, failure_events));
                         }
                         continue;
                     }
@@ -1110,6 +1122,7 @@ where
                         "json"
                     },
                 );
+                observability.provider_failure_events = failure_events;
                 observability.provider_status = Some(provider_status);
                 observability.response_status = Some("completed".to_string());
                 observability.finish_reason = read_v3_runtime_finish_reason(&client_response);
@@ -1177,7 +1190,7 @@ where
                         // The client owns this lifecycle termination. Do not feed it
                         // into provider Error01-05, health, retry, or reselect.
                         let failure = provider_runtime_failure(error, &selected_target_provider_id);
-                        return Ok(C::assemble_failure_output(failure, trace));
+                        return Ok(C::assemble_failure_output(failure, trace, failure_events));
                     }
                     Err(error) => {
                         let residence_deadline_error = matches!(
@@ -1185,7 +1198,9 @@ where
                             V3ProviderError::Transport { reason, .. }
                                 if reason.contains("provider SSE attempt exceeded the request residence deadline")
                         );
-                        let failure = provider_runtime_failure(error, &selected_target_provider_id);
+                        let mut failure =
+                            provider_runtime_failure(error, &selected_target_provider_id);
+                        failure.provider_status = Some(provider_status);
                         drop(provider_action_permit.take());
                         let terminal_failure = handle_provider_failure(
                             &failure_context,
@@ -1199,11 +1214,12 @@ where
                             },
                             &mut retry_selected,
                             &mut pending_provider_action_recovery,
+                            &mut failure_events,
                         )
                         .await
                         .map_err(V3RelayCoreError::Target)?;
                         if let Some(failure) = terminal_failure {
-                            return Ok(C::assemble_failure_output(failure, trace));
+                            return Ok(C::assemble_failure_output(failure, trace, failure_events));
                         }
                         if residence_deadline_error
                             || attempt_budget.residence_deadline() <= std::time::Instant::now()
@@ -1211,6 +1227,7 @@ where
                             return Ok(C::assemble_failure_output(
                                 terminalize_provider_failure(failure, last_external_http.clone()),
                                 trace,
+                                failure_events,
                             ));
                         }
                         continue;
@@ -1256,7 +1273,7 @@ where
                         return Err(error);
                     }
                     Err(error) => {
-                        let failure = provider_runtime_failure(
+                        let mut failure = provider_runtime_failure(
                             V3ProviderError::ResponseBody {
                                 request_id: request_id.to_string(),
                                 provider_id: selected_target_provider_id.clone(),
@@ -1266,6 +1283,7 @@ where
                             },
                             &selected_target_provider_id,
                         );
+                        failure.provider_status = Some(provider_status);
                         drop(provider_action_permit.take());
                         if let Some(failure) = handle_provider_failure(
                             &failure_context,
@@ -1279,11 +1297,12 @@ where
                             },
                             &mut retry_selected,
                             &mut pending_provider_action_recovery,
+                            &mut failure_events,
                         )
                         .await
                         .map_err(V3RelayCoreError::Target)?
                         {
-                            return Ok(C::assemble_failure_output(failure, trace));
+                            return Ok(C::assemble_failure_output(failure, trace, failure_events));
                         }
                         continue;
                     }
@@ -1382,8 +1401,9 @@ where
                         }
                     };
                     drop(provider_action_permit.take());
-                    let failure =
+                    let mut failure =
                         provider_runtime_failure(provider_error, &selected_target_provider_id);
+                    failure.provider_status = Some(provider_status);
                     let terminal_failure = handle_provider_failure(
                         &failure_context,
                         selected,
@@ -1396,11 +1416,12 @@ where
                         },
                         &mut retry_selected,
                         &mut pending_provider_action_recovery,
+                        &mut failure_events,
                     )
                     .await
                     .map_err(V3RelayCoreError::Target)?;
                     if let Some(failure) = terminal_failure {
-                        return Ok(C::assemble_failure_output(failure, trace));
+                        return Ok(C::assemble_failure_output(failure, trace, failure_events));
                     }
                     let deadline_expired =
                         attempt_budget.residence_deadline() <= std::time::Instant::now();
@@ -1408,6 +1429,7 @@ where
                         return Ok(C::assemble_failure_output(
                             terminalize_provider_failure(failure, last_external_http.clone()),
                             trace,
+                            failure_events,
                         ));
                     }
                     continue;
@@ -1438,6 +1460,7 @@ where
                     .map_err(|error| V3RelayCoreError::Target(error.to_string()))?;
                 let mut observability =
                     build_v3_relay_observability(C::ENTRY_KIND, &selected, "sse");
+                observability.provider_failure_events = failure_events;
                 observability.provider_status = Some(provider_status);
                 observability.response_status = Some("completed".to_string());
                 observability.usage = stream_observation

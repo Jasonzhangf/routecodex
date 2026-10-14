@@ -1,4 +1,5 @@
 use super::*;
+use routecodex_v3_error::V3Error01SourceRaised;
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -184,6 +185,11 @@ pub struct V3RuntimeProviderFailureObservation {
     pub action: String,
     pub next_provider_key: Option<String>,
     pub wait_ms: Option<u64>,
+    /// The original typed Error01 source of the provider attempt. It stays on
+    /// the runtime side-channel only: the private provider-failed-attempt
+    /// artifact serializes it explicitly, and the existing log/admin
+    /// projections keep their field set unchanged.
+    pub diagnostic_source: Option<V3Error01SourceRaised>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

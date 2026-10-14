@@ -59,6 +59,8 @@ pub struct V3OpenAiChatRelayRuntimeOutput {
     pub observability: Option<V3RuntimeObservability>,
     pub stream_observation: Option<V3RuntimeStreamObservation>,
     pub provider_snapshots: Option<V3RelayProviderSnapshots>,
+    pub provider_failure_attempts: Vec<V3RuntimeProviderFailureObservation>,
+    pub diagnostic_source: Option<routecodex_v3_error::V3Error01SourceRaised>,
 }
 impl V3OpenAiChatRelayRuntimeOutput {
     pub fn into_v3_resp_15_client_payload(self) -> V3Resp15ClientPayload {
@@ -1514,6 +1516,8 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             error_chain: None,
             error_class: None,
             error_detail: None,
+            provider_failure_attempts: Vec::new(),
+            diagnostic_source: None,
             observability: Some(observability),
             stream_observation: None,
             provider_snapshots: Some(provider_snapshots),
@@ -1535,6 +1539,8 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             error_chain: None,
             error_class: None,
             error_detail: None,
+            provider_failure_attempts: Vec::new(),
+            diagnostic_source: None,
             observability: Some(observability),
             stream_observation: Some(stream_observation),
             provider_snapshots: Some(provider_snapshots),
@@ -1544,8 +1550,9 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
     fn assemble_failure_output(
         failure: V3RelayProviderFailure,
         trace: Vec<&'static str>,
+        provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
     ) -> V3OpenAiChatRelayRuntimeOutput {
-        provider_failure_output(failure, trace)
+        provider_failure_output(failure, trace, provider_failure_events)
     }
 }
 

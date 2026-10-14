@@ -409,6 +409,7 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
     fn assemble_failure_output(
         failure: V3RelayProviderFailure,
         trace: Vec<&'static str>,
+        _provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
     ) -> V3GeminiRelayRuntimeOutput {
         provider_failure_output(failure, trace)
     }

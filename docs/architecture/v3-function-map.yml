@@ -625,6 +625,11 @@ features:
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
   - v3/crates/routecodex-v3-runtime/src/foundation.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_failure_output.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_request_dry_run.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs
@@ -678,6 +683,8 @@ features:
   - v3-de-20
   - v3-de-21
   - v3-de-22
+  - v3-de-23
+  - v3-de-24
   entry_symbols:
   - execute_v3_foundation_pending_runtime
   - execute_v3_responses_direct_dry_run_runtime
@@ -695,6 +702,8 @@ features:
   - V3InternalErrorCode
   - build_v3_provider_error_source
   - build_v3_error_01_source_raised_external
+  - build_v3_relay_provider_attempt_source
+  - build_v3_runtime_provider_failure_observation_from_policy_event
   - build_v3_error_01_source_raised_internal
   - build_v3_error_02_classified_from_v3_error_01
   - build_v3_error_03_target_local_action_from_v3_error_02
@@ -4580,13 +4589,17 @@ features:
   - v3.error.raw_wire_evidence
   - v3.debug.codex_sample_persist_queue
   - v3.debug.codex_sample_persist_failure
+  - v3.error.source
+  - v3.runtime.responses_observability
   entry_symbols:
   - persist_v3_error_evidence_payload
   - capture_v3_responses_relay_provider_snapshots
   - finalize_v3_responses_relay_server_output
+  - persist_v3_chat_failure_evidence
   allowed_paths:
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/live_snapshot.rs
+  - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
   - v3/crates/routecodex-v3-debug/src/sample_store.rs
   - v3/crates/routecodex-v3-server/tests
   - docs/architecture
@@ -4603,6 +4616,8 @@ features:
   - v3-responses-relay-error-evidence-01
   - v3-responses-relay-error-evidence-02
   - v3-responses-relay-error-evidence-03
+  - v3-chat-relay-error-evidence-01
+  - v3-chat-relay-error-evidence-02
 - feature_id: v3.build_test_artifact_budget
   status: active
   owner_module: v3-build-test-artifact-budget

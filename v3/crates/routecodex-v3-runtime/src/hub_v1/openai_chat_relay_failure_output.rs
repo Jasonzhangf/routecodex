@@ -3,6 +3,7 @@ use super::*;
 pub(super) fn provider_failure_output(
     failure: V3RelayProviderFailure,
     mut trace: Vec<&'static str>,
+    provider_failure_attempts: Vec<V3RuntimeProviderFailureObservation>,
 ) -> V3OpenAiChatRelayRuntimeOutput {
     let projected = failure
         .terminal_projection
@@ -21,6 +22,8 @@ pub(super) fn provider_failure_output(
         observability: None,
         stream_observation: None,
         provider_snapshots: None,
+        provider_failure_attempts,
+        diagnostic_source: Some(projected.diagnostic_source),
     }
 }
 
@@ -41,6 +44,8 @@ pub(super) fn error_output(
         error_chain: Some(projected.chain.to_vec()),
         error_class: Some(error_class),
         error_detail: Some(error_detail),
+        provider_failure_attempts: Vec::new(),
+        diagnostic_source: Some(projected.diagnostic_source),
         observability: None,
         stream_observation: None,
         provider_snapshots: None,
