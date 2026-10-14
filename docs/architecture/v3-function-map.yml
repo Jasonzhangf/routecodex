@@ -5913,6 +5913,7 @@ features:
   - v3/admin-webui/app/views/provider-model-picker.js
   - v3/admin-webui/app/views/routes.js
   - v3/admin-webui/requests-filter-smoke.mjs
+  - v3/admin-webui/records-network-facet-smoke.mjs
   - v3/admin-webui/requests-usage-layout-smoke.mjs
   - v3/admin-webui/routes-reload-smoke.mjs
   - v3/admin-webui/providers-onboarding-smoke.mjs
