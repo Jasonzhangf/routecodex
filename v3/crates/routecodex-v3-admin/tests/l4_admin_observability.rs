@@ -658,6 +658,302 @@ async fn observability_records_expose_the_entry_protocol_facet() {
     assert_eq!(body["facets"]["error_status_codes"]["502"], 1);
 }
 
+fn network_facet_fixture_rows() -> Vec<Value> {
+    let terminal_network = json!({
+        "request_key": "4444:terminal-network",
+        "event_type": "request.failed",
+        "started_epoch_ms": 1,
+        "updated_epoch_ms": 100,
+        "finished_epoch_ms": 100,
+        "duration_ms": 1,
+        "meta": {
+            "request_id": "terminal-network",
+            "endpoint": "/v1/responses",
+            "entry_protocol": "responses",
+            "provider_status": null,
+            "error_category": "provider_transport_error",
+            "error_detail": "provider transport failed before a response"
+        },
+        "scope": {"port": 4444},
+        "result": "error",
+        "attempts": 1,
+        "failed_attempts": 1,
+        "switches": 0,
+        "usage": null
+    });
+
+    let attempt_network = json!({
+        "request_key": "4444:attempt-network",
+        "event_type": "request.provider_attempt_failed",
+        "started_epoch_ms": 2,
+        "updated_epoch_ms": 80,
+        "finished_epoch_ms": null,
+        "duration_ms": null,
+        "meta": {
+            "request_id": "attempt-network",
+            "endpoint": "/v1/responses",
+            "entry_protocol": "responses",
+            "provider_status": null,
+            "error_category": "provider_transport_error",
+            "error_detail": "provider attempt transport failed",
+            "provider": "p1",
+            "model": "m1",
+            "route_reason": "default:first-try"
+        },
+        "scope": {"port": 4444},
+        "result": null,
+        "attempts": 0,
+        "failed_attempts": 1,
+        "switches": 0,
+        "usage": null
+    });
+
+    let upstream = json!({
+        "request_key": "4444:upstream-429",
+        "event_type": "request.failed",
+        "started_epoch_ms": 3,
+        "updated_epoch_ms": 40,
+        "finished_epoch_ms": 40,
+        "duration_ms": 1,
+        "meta": {
+            "request_id": "upstream-429",
+            "endpoint": "/v1/responses",
+            "entry_protocol": "responses",
+            "provider_status": 429,
+            "error_category": "provider_http_429",
+            "error_detail": "upstream rate limited"
+        },
+        "scope": {"port": 4444},
+        "result": "error",
+        "attempts": 1,
+        "failed_attempts": 1,
+        "switches": 0,
+        "usage": null
+    });
+
+    let control =
+        |request_key: &str, result: &str, started_epoch_ms: u64, updated_epoch_ms: u64| {
+            json!({
+                "request_key": request_key,
+                "event_type": "request.completed",
+                "started_epoch_ms": started_epoch_ms,
+                "updated_epoch_ms": updated_epoch_ms,
+                "finished_epoch_ms": updated_epoch_ms,
+                "duration_ms": 1,
+                "meta": {
+                    "request_id": request_key.split(':').next_back().unwrap_or(request_key),
+                    "endpoint": "/v1/responses",
+                    "entry_protocol": "responses"
+                },
+                "scope": {"port": 4444},
+                "result": result,
+                "attempts": 1,
+                "failed_attempts": 0,
+                "switches": 0,
+                "usage": null
+            })
+        };
+
+    vec![
+        terminal_network,
+        attempt_network,
+        upstream,
+        control("4444:success", "success", 4, 30),
+        control("4444:cancelled", "cancelled", 5, 20),
+    ]
+}
+
+fn collect_sort_options(html: &str) -> Vec<String> {
+    let select_start = html
+        .find("id=\"sort-field\"")
+        .expect("requests.html must contain the sort-field select");
+    let select = &html[select_start..];
+    let select_end = select
+        .find("</select>")
+        .expect("sort-field select must close");
+    select[..select_end]
+        .split("value=\"")
+        .skip(1)
+        .filter_map(|rest| rest.split('"').next())
+        .map(str::to_string)
+        .collect()
+}
+
+#[tokio::test]
+async fn observability_records_accept_declared_network_facet_label_from_frontend() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows(&home, &network_facet_fixture_rows());
+    let fixture_paths = [
+        home.join("config.toml"),
+        home.join("provider/p1/config.v2.toml"),
+        home.join("state/admin-token"),
+        home.join("logs/server-v3-4444.request-records.jsonl"),
+    ];
+    let fixture_before: Vec<_> = fixture_paths
+        .iter()
+        .map(|path| std::fs::read(path).expect("fixture file"))
+        .collect();
+
+    let initial: Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("initial records response")
+        .json()
+        .await
+        .expect("initial records json");
+    assert_eq!(initial["facets"]["error_status_codes"]["network"], 2);
+    assert_eq!(initial["facets"]["error_status_codes"]["429"], 1);
+
+    let harness = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../admin-webui/records-network-facet-smoke.mjs");
+    let output = tokio::process::Command::new("node")
+        .arg(&harness)
+        .arg(&base)
+        .output()
+        .await
+        .expect("frontend records-network consumer");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "actual usage.js loadErrors/buildQueryParams/drilldown must round-trip through the real router: {stdout}\n{stderr}"
+    );
+    assert!(
+        stdout.contains("records-network-facet smoke passed"),
+        "frontend consumer did not report its pass marker: {stdout}"
+    );
+
+    let rejected = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&status=error&error_status_code=network&error_origin=local"
+        ))
+        .send()
+        .await
+        .expect("network records response");
+    let rejected_status = rejected.status();
+    let rejected_body = rejected.text().await.expect("network records body");
+    assert_eq!(
+        rejected_status,
+        reqwest::StatusCode::OK,
+        "the backend-generated network facet must round-trip through the public records query: {rejected_body}"
+    );
+    let filtered: Value = serde_json::from_str(&rejected_body).expect("network records json");
+    assert_eq!(filtered["total"], 2);
+    assert_eq!(
+        filtered["records"][0]["request_key"],
+        "4444:attempt-network"
+    );
+    assert_eq!(
+        filtered["records"][1]["request_key"],
+        "4444:terminal-network"
+    );
+
+    let illegal_status = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&error_status_code=bogus"
+        ))
+        .send()
+        .await
+        .expect("illegal status response");
+    assert_eq!(illegal_status.status(), reqwest::StatusCode::BAD_REQUEST);
+    let illegal_body: Value = illegal_status.json().await.expect("illegal status json");
+    assert_eq!(illegal_body["error"], "invalid error_status_code: bogus");
+
+    let illegal_sort = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&sort_by=error_origin"
+        ))
+        .send()
+        .await
+        .expect("illegal sort response");
+    assert_eq!(illegal_sort.status(), reqwest::StatusCode::BAD_REQUEST);
+    let illegal_sort_body: Value = illegal_sort.json().await.expect("illegal sort json");
+    assert_eq!(
+        illegal_sort_body["error"],
+        "invalid sort field: error_origin"
+    );
+
+    let requests_html = http_client()
+        .get(format!("{base}/requests.html"))
+        .send()
+        .await
+        .expect("requests html response")
+        .text()
+        .await
+        .expect("requests html body");
+    let sort_options = collect_sort_options(&requests_html);
+    assert!(!sort_options.is_empty(), "requests.html sort options");
+    for option in &sort_options {
+        let response = http_client()
+            .get(format!(
+                "{base}/api/observability/records?page=1&page_size=10&range=all&sort_by={option}&sort_order=asc"
+            ))
+            .send()
+            .await
+            .unwrap_or_else(|error| panic!("sort option {option} request failed: {error}"));
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::OK,
+            "served sort option {option} must remain legal"
+        );
+    }
+
+    let updated: Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all&sort_by=updated_epoch_ms&sort_order=desc"
+        ))
+        .send()
+        .await
+        .expect("updated sort response")
+        .json()
+        .await
+        .expect("updated sort json");
+    let updated_keys: Vec<&str> = updated["records"]
+        .as_array()
+        .expect("updated records array")
+        .iter()
+        .map(|row| row["request_key"].as_str().expect("request key"))
+        .collect();
+    assert_eq!(
+        updated_keys,
+        vec![
+            "4444:terminal-network",
+            "4444:attempt-network",
+            "4444:upstream-429",
+            "4444:success",
+            "4444:cancelled",
+        ]
+    );
+
+    let retrying: Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all&status=retrying&error_status_code=network"
+        ))
+        .send()
+        .await
+        .expect("retrying network response")
+        .json()
+        .await
+        .expect("retrying network json");
+    assert_eq!(retrying["total"], 1);
+    assert_eq!(
+        retrying["records"][0]["request_key"],
+        "4444:attempt-network"
+    );
+
+    for (path, before) in fixture_paths.iter().zip(fixture_before) {
+        assert_eq!(
+            std::fs::read(path).expect("fixture file"),
+            before,
+            "GET changed {}",
+            path.display()
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Manual cooldown actions (add / probe).
 //

@@ -1,6 +1,6 @@
 {
   "name": "routecodex-v3",
-  "version": "0.90.4898",
+  "version": "0.90.4899",
   "private": true,
   "description": "RouteCodex V3 independent build domain",
   "type": "module",
@@ -28,7 +28,7 @@
     "test:isolation:red": "node tests/scripts/v3-independent-build-isolation-red-fixtures.mjs",
     "test:cargo": "node scripts/run-v3-cargo-test.mjs",
     "verify:v3-architecture-ci": "node scripts/run-admission-gate.mjs scripts/architecture/verify-v3-architecture-ci.mjs",
-    "verify:webui-smoke": "cd .. && node v3/admin-webui/requests-filter-smoke.mjs && node v3/admin-webui/requests-usage-layout-smoke.mjs && node v3/admin-webui/routes-reload-smoke.mjs && node v3/admin-webui/providers-onboarding-smoke.mjs && node v3/admin-webui/deploy-page-smoke.mjs",
+    "verify:webui-smoke": "cd .. && node v3/admin-webui/requests-filter-smoke.mjs && node v3/admin-webui/requests-usage-layout-smoke.mjs && node v3/admin-webui/routes-reload-smoke.mjs && node v3/admin-webui/providers-onboarding-smoke.mjs && node v3/admin-webui/deploy-page-smoke.mjs && node v3/admin-webui/records-network-facet-smoke.mjs",
     "test:v3-architecture-ci-failure-aggregation-regression": "node scripts/tests/v3-architecture-ci-failure-aggregation-regression.mjs",
     "verify:v3-direct-sse-accept-skeleton": "node scripts/run-admission-gate.mjs scripts/architecture/verify-v3-direct-sse-accept-skeleton.mjs",
     "verify:v3-direct-sse-full-attempt-commit": "node scripts/run-admission-gate.mjs scripts/architecture/verify-v3-direct-sse-full-attempt-commit.mjs",
