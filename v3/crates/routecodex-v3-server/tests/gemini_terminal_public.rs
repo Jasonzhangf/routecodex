@@ -306,7 +306,7 @@ async fn run_checked(
             None => {
                 if response.is_some() {
                     failures.push(format!(
-                        "unfinished candidate committed a business terminal: {response:?}"
+                        "undeliverable attempt committed a business terminal: {response:?}"
                     ));
                 }
             }
@@ -488,11 +488,28 @@ async fn gemini_model_tool_error_terminal_preserves_business_public() {
 async fn gemini_opaque_part_preserves_business_public() {
     let _serial = LOCK.lock().await;
     let _home = Home::new();
-    let part = json!({"fileData":{"mimeType":"image/png","fileUri":"https://example.test/result.png"},"opaque":{"original":[false,17]}});
+    let part = json!({"thought":false,"fileData":{"mimeType":"image/png","fileUri":"https://example.test/result.png"},"opaque":{"original":[false,17]}});
     let output = [json!({"type":"message","role":"assistant","content":[part.clone()]})];
     let outcome = json!({"candidate_index":0,"finishReason":"STOP","output_indices":[0]});
     for json_provider in [false, true] {
         run_checked(vec![json!({"candidates":[{"index":0,"finishReason":"STOP","content":{"parts":[part.clone()]}}]})], json_provider, Some("STOP"), &[], None, Some((&output, &outcome))).await;
+    }
+}
+
+#[tokio::test]
+async fn gemini_empty_text_thought_flag_is_not_business_public() {
+    let _serial = LOCK.lock().await;
+    let _home = Home::new();
+    for json_provider in [false, true] {
+        for thought in [false, true] {
+            run(
+                vec![json!({"candidates":[{"index":0,"finishReason":"STOP","content":{"parts":[{"text":"","thought":thought}]}}]})],
+                json_provider,
+                None,
+                &[],
+            )
+            .await;
+        }
     }
 }
 async fn mixed(reason: &str, json_provider: bool) {

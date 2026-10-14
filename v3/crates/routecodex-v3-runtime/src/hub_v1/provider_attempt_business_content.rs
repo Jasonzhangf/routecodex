@@ -145,6 +145,7 @@ fn v3_gemini_part_has_deliverable_content(part: &Value) -> bool {
                         | "inlineData"
                         | "executableCode"
                         | "codeExecutionResult"
+                        | "thought"
                 ) && opaque_gemini_value_has_content(value)
             })
         })
