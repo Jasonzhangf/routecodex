@@ -268,3 +268,106 @@ targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test
     let _ = task.await;
     env::remove_var("V3_COOLDOWN_BINARY_SPARE_KEY");
 }
+
+// A business 2xx must restore the adaptive concurrency budget that a 429
+// reduced, otherwise a recovered key stays admission-busy and a later business
+// request is silently routed to the fallback key.
+#[tokio::test]
+async fn business_success_restores_budget_for_a_later_business_request() {
+    let _guard = TEST_LOCK.lock().await;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let failures = Arc::new(Mutex::new(0));
+    let success_release = Arc::new(Semaphore::new(0));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream_port = listener.local_addr().unwrap().port();
+    static NEXT_BUDGET_PROVIDER_ID: std::sync::atomic::AtomicU64 =
+        std::sync::atomic::AtomicU64::new(0);
+    let provider_id = format!(
+        "budget_state_{}",
+        NEXT_BUDGET_PROVIDER_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    );
+    let peer = Peer {
+        receipts: tx,
+        release: Arc::new(Semaphore::new(0)),
+        failures: failures.clone(),
+        success_release: success_release.clone(),
+        fail_streaming_probe: false,
+    };
+    let task = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new()
+                .route("/v1/responses", post(upstream))
+                .with_state(peer),
+        )
+        .await
+        .unwrap();
+    });
+    env::set_var("V3_COOLDOWN_BINARY_SPARE_KEY", "spare-secret");
+    let execution = hub_v1_fixture::hub_v1_test_declaration();
+    let managed = Managed::start_source("budget-state", false, |port| format!(r#"
+version = 3
+[servers.main]
+bind = "127.0.0.1"
+port = {port}
+routing_group = "default"
+endpoints = ["responses"]
+{execution}
+[providers.{provider_id}]
+type = "responses"
+base_url = "http://127.0.0.1:{upstream_port}/v1"
+default_model = "test"
+concurrency = {{ max_in_flight = 4, acquire_timeout_ms = 60000, stale_lease_ms = 120000 }}
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_COOLDOWN_MANUAL_TEST_KEY" }}, {{ alias = "spare", env = "V3_COOLDOWN_BINARY_SPARE_KEY" }}] }}
+[providers.{provider_id}.models.test]
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test", key = "key", priority = 100 }}, {{ kind = "provider_model", provider = "{provider_id}", model = "test", key = "spare", priority = 1 }}]
+"#)).await;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .unwrap();
+    // Held A is dispatched before the failures accumulate, so it completes with
+    // a real 2xx once three business 429s have drained the budget to 1.
+    let held_a = {
+        let client = client.clone();
+        let base = managed.base.clone();
+        tokio::spawn(async move { business_at(&client, &base, "held success").await })
+    };
+    wait_receipt(&mut rx, ("Bearer controlled-secret", false)).await;
+    for expected in 1..=3u32 {
+        assert!(business(&client, &managed).await.contains("spare-secret"));
+        assert_eq!(*failures.lock().await, expected);
+    }
+    // Held A completes with a real 2xx; it must restore the budget from 1 to 2.
+    success_release.add_permits(1);
+    let held_a_body = held_a.await.unwrap();
+    assert!(
+        held_a_body.contains("controlled-secret"),
+        "held A response: {held_a_body}"
+    );
+    while rx.try_recv().is_ok() {}
+    // Held B occupies the single restored slot. Without the fix the budget is
+    // still 1, so the next business request is busy and falls to the spare key.
+    let held_b = {
+        let client = client.clone();
+        let base = managed.base.clone();
+        tokio::spawn(async move { business_at(&client, &base, "held success").await })
+    };
+    wait_receipt(&mut rx, ("Bearer controlled-secret", false)).await;
+    assert!(
+        business(&client, &managed).await.contains("controlled-secret"),
+        "a business 2xx must restore the adaptive concurrency budget"
+    );
+    success_release.add_permits(1);
+    let held_b_body = held_b.await.unwrap();
+    assert!(
+        held_b_body.contains("controlled-secret"),
+        "held B response: {held_b_body}"
+    );
+    managed.finish().await;
+    task.abort();
+    let _ = task.await;
+    env::remove_var("V3_COOLDOWN_BINARY_SPARE_KEY");
+}
