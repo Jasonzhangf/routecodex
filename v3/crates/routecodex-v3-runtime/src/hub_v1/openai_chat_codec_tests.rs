@@ -6,6 +6,48 @@
 use super::*;
 use serde_json::json;
 
+#[test]
+fn compact_chat_message_projection_preserves_text_and_reasoning_once() {
+    for (item, text, reasoning) in [
+        (
+            json!({"type":"message","text":"compact answer"}),
+            "compact answer",
+            "",
+        ),
+        (
+            json!({"type":"message","reasoning_content":"compact reasoning"}),
+            "",
+            "compact reasoning",
+        ),
+        (
+            json!({"type":"message","reasoning_text":"compact reasoning"}),
+            "",
+            "compact reasoning",
+        ),
+        (
+            json!({"type":"message","text":"compact answer","content":[{"type":"output_text","text":"compact answer"}],"reasoning_content":"compact reasoning","extension":{"keep":true}}),
+            "compact answer",
+            "compact reasoning",
+        ),
+    ] {
+        let canonical = json!({"status":"completed","output":[item]});
+        let original = canonical.clone();
+        let projected = project_v3_openai_chat_client_response_from_canonical(&canonical).unwrap();
+        let message = &projected["choices"][0]["message"];
+        assert_eq!(message["content"], text, "{canonical}");
+        assert_eq!(
+            message["reasoning_content"].as_str().unwrap_or_default(),
+            reasoning,
+            "{canonical}"
+        );
+        assert_eq!(projected["choices"][0]["finish_reason"], "stop");
+        assert_eq!(
+            canonical, original,
+            "projection must retain source extensions"
+        );
+    }
+}
+
 fn created_event() -> Value {
     json!({
         "type": "response.created",

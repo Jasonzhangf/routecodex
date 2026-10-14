@@ -34,6 +34,7 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
 enum V3RelayAttemptCollectFailure {
+    EmptyProviderAttempt,
     ProviderResponseBody(String),
     ProviderTransport(String),
     LocalStore(V3AttemptStoreError),
@@ -282,30 +283,6 @@ pub(crate) fn guard_v3_provider_sse_idle(
             }
         },
     ))
-}
-
-fn observe_v3_provider_sse(
-    stream: routecodex_v3_provider_responses::V3ProviderSseStream,
-    observation: V3RuntimeStreamObservation,
-) -> routecodex_v3_provider_responses::V3ProviderSseStream {
-    use futures_util::StreamExt;
-    Box::pin(stream.map(move |item| {
-        if let Ok(chunk) = &item {
-            if let Err(error) = observation.record_provider_raw_sse_chunk(chunk) {
-                // This is runtime observation state, not provider health. Keep
-                // the failure on the typed side-channel while preserving the
-                // provider/client bytes and their protocol semantics.
-                if let Err(receipt_error) = observation.record_observation_error(&format!(
-                    "provider_raw_sse_observation_failed: {error}"
-                )) {
-                    eprintln!(
-                        "V3 runtime observation failure could not be recorded: {receipt_error}; original: {error}"
-                    );
-                }
-            }
-        }
-        item
-    }))
 }
 
 pub(crate) use super::relay_runtime_shared::{
@@ -1035,36 +1012,55 @@ where
                     }
                 };
                 let provider_response_snapshot = provider_value.clone();
-                let client_response = match C::project_json_response(
-                    &request_id,
-                    failure_session_scope.session_id(),
-                    provider_value,
-                    provider_wire_protocol,
-                    &req05.previous.previous.previous.payload.0,
-                    V3HubTransportIntent::Json,
-                    &mut trace,
-                    selected_target_compatibility_profile.as_deref(),
-                    selected.candidate.web_search_execution_mode,
-                    request_web_search_state.as_ref(),
-                    retain_response_cipher,
-                    request_tool_thinking_enabled,
-                    &selected_target_model_id,
-                ) {
+                let has_business_content =
+                    v3_provider_json_attempt_has_deliverable_business_content(
+                        provider_wire_protocol,
+                        &provider_value,
+                    );
+                let projection = if has_business_content {
+                    C::project_json_response(
+                        &request_id,
+                        failure_session_scope.session_id(),
+                        provider_value,
+                        provider_wire_protocol,
+                        &req05.previous.previous.previous.payload.0,
+                        V3HubTransportIntent::Json,
+                        &mut trace,
+                        selected_target_compatibility_profile.as_deref(),
+                        selected.candidate.web_search_execution_mode,
+                        request_web_search_state.as_ref(),
+                        retain_response_cipher,
+                        request_tool_thinking_enabled,
+                        &selected_target_model_id,
+                    )
+                } else {
+                    Err(V3RelayCoreError::Target(
+                        "provider_response_empty".to_string(),
+                    ))
+                };
+                let client_response = match projection {
                     Ok(client_response) => client_response,
-                    // 治理层拦截但入口无投影路径：非 provider 失败，禁止进入失败
-                    // 重试链，fail-fast 返回（openai_chat Mode B web-search 剥离）。
                     Err(V3RelayCoreError::WebSearchIntercepted(message)) => {
                         return Err(V3RelayCoreError::WebSearchIntercepted(message));
                     }
                     Err(error) => {
-                        let failure = provider_runtime_failure(
-                            V3ProviderError::ResponseBody {
-                                request_id: request_id.to_string(),
-                                provider_id: selected_target_provider_id.clone(),
-                                reason: format!("provider response governance failed: {error}"),
-                            },
-                            &selected_target_provider_id,
-                        );
+                        let mut failure = if !has_business_content {
+                            provider_request_failure(
+                                "V3ProviderRespInbound01Raw",
+                                "provider_response_empty",
+                                "provider returned no deliverable business content",
+                            )
+                        } else {
+                            provider_runtime_failure(
+                                V3ProviderError::ResponseBody {
+                                    request_id: request_id.to_string(),
+                                    provider_id: selected_target_provider_id.clone(),
+                                    reason: format!("provider response governance failed: {error}"),
+                                },
+                                &selected_target_provider_id,
+                            )
+                        };
+                        failure.provider_status = Some(provider_status);
                         drop(provider_action_permit.take());
                         if let Some(failure) = handle_provider_failure(
                             &failure_context,
@@ -1226,8 +1222,13 @@ where
                         .map_err(V3RelayCoreError::Target)?,
                 );
                 let stream_observation = V3RuntimeStreamObservation::default();
-                let idle_guarded_stream =
-                    observe_v3_provider_sse(idle_guarded_stream, stream_observation.clone());
+                let idle_guarded_stream = observe_v3_provider_sse(
+                    idle_guarded_stream,
+                    stream_observation.clone(),
+                    provider_wire_protocol,
+                    request_id.to_string(),
+                    selected_target_provider_id.clone(),
+                );
                 let projected_sse = match C::project_sse(
                     &request_id,
                     idle_guarded_stream,
@@ -1345,11 +1346,28 @@ where
                         Some(Err(reason)) => {
                             break Some(V3RelayAttemptCollectFailure::ProviderResponseBody(reason))
                         }
-                        None => break None,
+                        None => {
+                            break match stream_observation.has_provider_business_content() {
+                                Ok(true) => None,
+                                Ok(false) => {
+                                    Some(V3RelayAttemptCollectFailure::EmptyProviderAttempt)
+                                }
+                                Err(error) => {
+                                    Some(V3RelayAttemptCollectFailure::Observation(error))
+                                }
+                            }
+                        }
                     }
                 };
                 if let Some(failure) = stream_failure {
-                    let provider_error = match failure {
+                    let mut failure = match failure {
+                        V3RelayAttemptCollectFailure::EmptyProviderAttempt => {
+                            provider_request_failure(
+                                "V3ProviderRespInbound01Raw",
+                                "provider_response_empty",
+                                "provider returned no deliverable business content",
+                            )
+                        }
                         V3RelayAttemptCollectFailure::LocalStore(error) => {
                             drop(provider_action_permit.take());
                             return Err(V3RelayCoreError::Target(format!(
@@ -1367,23 +1385,30 @@ where
                                 drop(provider_action_permit.take());
                                 return Err(V3RelayCoreError::WebSearchIntercepted(reason));
                             }
-                            V3ProviderError::ResponseBody {
-                                request_id: request_id.to_string(),
-                                provider_id: selected_target_provider_id.clone(),
-                                reason: format!("provider response event codec failed: {reason}"),
-                            }
+                            provider_runtime_failure(
+                                V3ProviderError::ResponseBody {
+                                    request_id: request_id.to_string(),
+                                    provider_id: selected_target_provider_id.clone(),
+                                    reason: format!(
+                                        "provider response event codec failed: {reason}"
+                                    ),
+                                },
+                                &selected_target_provider_id,
+                            )
                         }
                         V3RelayAttemptCollectFailure::ProviderTransport(reason) => {
-                            V3ProviderError::Transport {
-                                request_id: request_id.to_string(),
-                                provider_id: selected_target_provider_id.clone(),
-                                reason,
-                            }
+                            provider_runtime_failure(
+                                V3ProviderError::Transport {
+                                    request_id: request_id.to_string(),
+                                    provider_id: selected_target_provider_id.clone(),
+                                    reason,
+                                },
+                                &selected_target_provider_id,
+                            )
                         }
                     };
+                    failure.provider_status = Some(provider_status);
                     drop(provider_action_permit.take());
-                    let failure =
-                        provider_runtime_failure(provider_error, &selected_target_provider_id);
                     let terminal_failure = handle_provider_failure(
                         &failure_context,
                         selected,

@@ -8,6 +8,8 @@ use routecodex_v3_runtime::V3AnthropicRelayClientBody;
 use std::collections::BTreeMap;
 use std::sync::Mutex as StdMutex;
 
+mod local599_output;
+
 #[tokio::test]
 async fn listener_bind_retries_eintr_once_before_success() {
     let probe = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

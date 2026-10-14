@@ -161,9 +161,63 @@
         "version": 1
       },
       "version": 6
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "上游的空响应 我们直接判为502 错误重试走错误链",
+          "role": "user",
+          "source": "Current Codex conversation 01a1345f-00c7-7f72-89b3-538b61fb4e66, user clarification 2026-10-13"
+        },
+        "base_version": 1,
+        "operation": "replace",
+        "project_id": "routecodex",
+        "request_id": "req-20261013-b878f6c-empty-provider-response-502",
+        "requirement_id": "routecodex-client-provider-error-decoupling",
+        "text": "客户端与 provider 解耦。provider 的 HTTP/error-channel 错误只进入 RCC 内部 typed Error 处理、重试、冷却与诊断，不返回给客户端。RCC 只能向客户端交付 provider 已作为业务/模型内容返回、且客户端协议可忠实表示的响应；若没有可用 provider，或所有候选均无法产生可交付响应，必须中止或关闭该请求的客户端连接，不返回 provider 错误、代理生成的替代错误、HTTP 错误状态、SSE error payload 或伪造成功。内部路由、冷却、重试、provider 状态与诊断信息不得进入 client payload。\n\n上游整次响应没有任何可交付业务内容时，RCC 将该尝试判为内部 502 错误，进入现有 typed Error 链，按已声明政策重试或重选；不能把它作为正常 completed 空响应交付。空响应判定基于完整尝试的业务内容，不依赖 usage 或 output_tokens；tool-call-only、refusal、reasoning、content_filter 等实际业务结果不算空响应。该 502 只用于 RCC 内部分类、恢复和诊断，不返回客户端；恢复耗尽后仍按本条中止或关闭该请求的传输，不伪造成功。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "上游的空响应 我们直接判为502 错误重试走错误链",
+          "role": "user",
+          "source": "Current Codex conversation 01a1345f-00c7-7f72-89b3-538b61fb4e66, user clarification 2026-10-13"
+        },
+        "requirement_id": "routecodex-client-provider-error-decoupling",
+        "status": "active",
+        "text": "客户端与 provider 解耦。provider 的 HTTP/error-channel 错误只进入 RCC 内部 typed Error 处理、重试、冷却与诊断，不返回给客户端。RCC 只能向客户端交付 provider 已作为业务/模型内容返回、且客户端协议可忠实表示的响应；若没有可用 provider，或所有候选均无法产生可交付响应，必须中止或关闭该请求的客户端连接，不返回 provider 错误、代理生成的替代错误、HTTP 错误状态、SSE error payload 或伪造成功。内部路由、冷却、重试、provider 状态与诊断信息不得进入 client payload。\n\n上游整次响应没有任何可交付业务内容时，RCC 将该尝试判为内部 502 错误，进入现有 typed Error 链，按已声明政策重试或重选；不能把它作为正常 completed 空响应交付。空响应判定基于完整尝试的业务内容，不依赖 usage 或 output_tokens；tool-call-only、refusal、reasoning、content_filter 等实际业务结果不算空响应。该 502 只用于 RCC 内部分类、恢复和诊断，不返回客户端；恢复耗尽后仍按本条中止或关闭该请求的传输，不伪造成功。",
+        "version": 2
+      },
+      "version": 7
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "。现在你会遇到几个不同路径的错误：1. 请求路径错误：错误就算很严重，要进入错误路径，也是走错误链响应。如果本身是错误，直接走错误链。2. 处理过程错误：如果本身响应的是 200，但在我们的处理过程中产生了错误（即 599 错误），它也是进错误链。3. 空响应：也进错误链。",
+          "role": "user",
+          "source": "Current Codex conversation 01a1345f-00c7-7f72-89b3-538b61fb4e66, user clarification 2026-10-13"
+        },
+        "base_version": 2,
+        "operation": "replace",
+        "project_id": "routecodex",
+        "request_id": "req-20261013-b878f6c-three-error-paths",
+        "requirement_id": "routecodex-client-provider-error-decoupling",
+        "text": "客户端与 provider 解耦。provider 的 HTTP/error-channel 错误只进入 RCC 内部 typed Error 处理、重试、冷却与诊断，不返回给客户端。RCC 只能向客户端交付 provider 已作为业务/模型内容返回、且客户端协议可忠实表示的响应；若没有可用 provider，或所有候选均无法产生可交付响应，必须中止或关闭该请求的客户端连接，不返回 provider 错误、代理生成的替代错误、HTTP 错误状态、SSE error payload 或伪造成功。内部路由、冷却、重试、provider 状态与诊断信息不得进入 client payload。\n\n上游整次响应没有任何可交付业务内容时，RCC 将该尝试判为内部 502 错误，进入现有 typed Error 链，按已声明政策重试或重选；不能把它作为正常 completed 空响应交付。空响应判定基于完整尝试的业务内容，不依赖 usage 或 output_tokens；tool-call-only、refusal、reasoning、content_filter 等实际业务结果不算空响应。该 502 只用于 RCC 内部分类、恢复和诊断，不返回客户端；恢复耗尽后仍按本条中止或关闭该请求的传输，不伪造成功。\n\n请求路径错误直接进入 Error 链，不因严重程度退出该请求的错误主线，也不继续构造成功响应。上游原本返回 200，但 RCC 响应处理过程产生内部 599 错误时，也进入 Error 链。请求路径错误、响应处理错误和空响应保留各自 typed 来源、内部分类及上游实际状态，统一由现有 Error 链决定恢复、重试或终止；不得旁路、吞错或把错误包装为成功空响应。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "。现在你会遇到几个不同路径的错误：1. 请求路径错误：错误就算很严重，要进入错误路径，也是走错误链响应。如果本身是错误，直接走错误链。2. 处理过程错误：如果本身响应的是 200，但在我们的处理过程中产生了错误（即 599 错误），它也是进错误链。3. 空响应：也进错误链。",
+          "role": "user",
+          "source": "Current Codex conversation 01a1345f-00c7-7f72-89b3-538b61fb4e66, user clarification 2026-10-13"
+        },
+        "requirement_id": "routecodex-client-provider-error-decoupling",
+        "status": "active",
+        "text": "客户端与 provider 解耦。provider 的 HTTP/error-channel 错误只进入 RCC 内部 typed Error 处理、重试、冷却与诊断，不返回给客户端。RCC 只能向客户端交付 provider 已作为业务/模型内容返回、且客户端协议可忠实表示的响应；若没有可用 provider，或所有候选均无法产生可交付响应，必须中止或关闭该请求的客户端连接，不返回 provider 错误、代理生成的替代错误、HTTP 错误状态、SSE error payload 或伪造成功。内部路由、冷却、重试、provider 状态与诊断信息不得进入 client payload。\n\n上游整次响应没有任何可交付业务内容时，RCC 将该尝试判为内部 502 错误，进入现有 typed Error 链，按已声明政策重试或重选；不能把它作为正常 completed 空响应交付。空响应判定基于完整尝试的业务内容，不依赖 usage 或 output_tokens；tool-call-only、refusal、reasoning、content_filter 等实际业务结果不算空响应。该 502 只用于 RCC 内部分类、恢复和诊断，不返回客户端；恢复耗尽后仍按本条中止或关闭该请求的传输，不伪造成功。\n\n请求路径错误直接进入 Error 链，不因严重程度退出该请求的错误主线，也不继续构造成功响应。上游原本返回 200，但 RCC 响应处理过程产生内部 599 错误时，也进入 Error 链。请求路径错误、响应处理错误和空响应保留各自 typed 来源、内部分类及上游实际状态，统一由现有 Error 链决定恢复、重试或终止；不得旁路、吞错或把错误包装为成功空响应。",
+        "version": 3
+      },
+      "version": 8
     }
   ],
   "project_id": "routecodex",
   "schema_version": 1,
-  "version": 6
+  "version": 8
 }

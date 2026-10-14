@@ -12,6 +12,13 @@ use crate::namespace_tools::{openai_chat_namespace_wire_name, provider_function_
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+/// Fixed wire name of the standard Responses native tool-discovery declaration.
+///
+/// It is protocol data only. A request that actually declares this native tool
+/// lets a same-request provider call regain the declared native kind; the
+/// spelling alone never authorizes an undeclared or ordinary call.
+pub const NATIVE_TOOL_SEARCH_WIRE_NAME: &str = "tool_search";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ToolKind {
     Function,
@@ -76,6 +83,12 @@ pub struct NamespaceToolIdentityRegistry {
     /// Every current plain tool name and namespace wire name. Alias
     /// allocation must reserve these names before assigning generated names.
     declared_wire_names: BTreeSet<String>,
+    /// Whether the current declaration grants the client executor for the
+    /// standard native `tool_search` discovery tool. Declaration presence alone
+    /// never grants it: the current official default is server-hosted, and an
+    /// omitted `execution` field follows that same default. Only the explicit
+    /// client declaration authorizes client-native restoration.
+    client_executed_native_tool_search: bool,
 }
 
 impl NamespaceToolIdentityRegistry {
@@ -91,6 +104,7 @@ impl NamespaceToolIdentityRegistry {
         for tool in tools {
             source.collect_declaration(tool)?;
         }
+        self.client_executed_native_tool_search |= source.client_executed_native_tool_search;
         for key in source.declaration_order {
             if !self.by_identity.contains_key(&key) {
                 self.declaration_order.push(key.clone());
@@ -432,6 +446,26 @@ impl NamespaceToolIdentityRegistry {
         &self.declared_wire_names
     }
 
+    /// The single owner of "a declared native discovery tool regains its kind".
+    ///
+    /// True only when the current request actually declares the standard
+    /// native `tool_search` tool and no ordinary function/custom declaration
+    /// claims the same provider name. Ordinary and custom precedence therefore
+    /// keeps its own kind, and a call that is not declared never gains the
+    /// native kind from its name alone.
+    ///
+    /// The declaration must also grant client execution. An explicit
+    /// `execution = "server"` declaration, and a declaration that omits the
+    /// field, stay with their own ordinary projection: they never gain
+    /// client-native authority from being named `tool_search`.
+    pub fn declares_native_tool_search(&self) -> bool {
+        self.client_executed_native_tool_search
+            && !self.identities().any(|identity| {
+                matches!(identity.kind, ToolKind::Function | ToolKind::Custom)
+                    && identity.actual_wire_name == NATIVE_TOOL_SEARCH_WIRE_NAME
+            })
+    }
+
     /// The request-local inverse map consumed by every response projection
     /// owner: provider wire name -> `(client namespace, leaf name)`. Ambiguous
     /// wire names and plain flat declarations are omitted, so an undeclared or
@@ -481,6 +515,13 @@ impl NamespaceToolIdentityRegistry {
                     children,
                     &format!("provider namespace tool {name}"),
                 )?;
+            }
+            Some("tool_search") => {
+                // The standard native discovery declaration is protocol data.
+                // The response inverse restores client-native execution only
+                // when the current declaration grants that executor.
+                self.client_executed_native_tool_search |=
+                    object.get("execution").and_then(Value::as_str) == Some("client");
             }
             Some(kind @ ("function" | "custom")) => {
                 let Some(name) = provider_function_tool_name(tool) else {
@@ -783,5 +824,165 @@ mod tests {
         })])
         .unwrap();
         assert!(other.restore_identities().is_empty());
+    }
+
+    #[test]
+    fn native_tool_search_declaration_is_request_local_and_kind_bearing() {
+        let declared = NamespaceToolIdentityRegistry::from_tools(&[json!({
+            "type":"tool_search",
+            "execution":"client",
+            "parameters":{"type":"object","properties":{"query":{"type":"string"}}}
+        })])
+        .unwrap();
+        assert!(declared.declares_native_tool_search());
+
+        // The declaration is request-local: another request without it cannot
+        // promote a same-named call.
+        let other = NamespaceToolIdentityRegistry::from_tools(&[json!({
+            "type":"function",
+            "name":"local_note",
+            "parameters":{"type":"object"}
+        })])
+        .unwrap();
+        assert!(!other.declares_native_tool_search());
+    }
+
+    #[test]
+    fn native_tool_search_declaration_is_collected_from_every_source() {
+        let additional = NamespaceToolIdentityRegistry::from_request(
+            &json!({
+                "tools":[{"type":"function","name":"local_note","parameters":{"type":"object"}}],
+                "input":[{"type":"additional_tools","tools":[{"type":"tool_search","execution":"client"}]}]
+            }),
+            "anthropic",
+        )
+        .unwrap();
+        assert!(additional.declares_native_tool_search());
+
+        let discovered = NamespaceToolIdentityRegistry::from_request(
+            &json!({
+                "tools":[{"type":"function","name":"local_note","parameters":{"type":"object"}}],
+                "input":[{"type":"tool_search_output","call_id":"call_search","tools":[{"type":"tool_search","execution":"client"}]}]
+            }),
+            "anthropic",
+        )
+        .unwrap();
+        assert!(discovered.declares_native_tool_search());
+    }
+
+    #[test]
+    fn only_a_client_executed_tool_search_declaration_grants_client_native_authority() {
+        let client = NamespaceToolIdentityRegistry::from_tools(&[json!({
+            "type":"tool_search",
+            "execution":"client",
+            "parameters":{"type":"object"}
+        })])
+        .unwrap();
+        assert!(client.declares_native_tool_search());
+
+        // Server execution is a real legal declaration, and it must not gain
+        // client-native authority from its name.
+        let server = NamespaceToolIdentityRegistry::from_tools(&[json!({
+            "type":"tool_search",
+            "execution":"server",
+            "parameters":{"type":"object"}
+        })])
+        .unwrap();
+        assert!(!server.declares_native_tool_search());
+
+        // The current official default is server-hosted, so an omitted
+        // execution field must not grant client-native authority either.
+        let omitted = NamespaceToolIdentityRegistry::from_tools(&[json!({
+            "type":"tool_search",
+            "parameters":{"type":"object"}
+        })])
+        .unwrap();
+        assert!(!omitted.declares_native_tool_search());
+    }
+
+    #[test]
+    fn merged_declaration_sources_keep_native_authority_request_local() {
+        // A client-executed declaration in a later source still grants the
+        // shared inverse, while an earlier server declaration does not leak.
+        let merged = NamespaceToolIdentityRegistry::from_request(
+            &json!({
+                "tools":[{"type":"function","name":"local_note","parameters":{"type":"object"}}],
+                "input":[{"type":"additional_tools","tools":[{"type":"tool_search","execution":"server"}]}]
+            }),
+            "anthropic",
+        )
+        .unwrap();
+        assert!(!merged.declares_native_tool_search());
+
+        let registry = NamespaceToolIdentityRegistry::from_request(
+            &json!({
+                "tools":[{"type":"function","name":"local_note","parameters":{"type":"object"}}],
+                "input":[
+                    {"type":"additional_tools","tools":[{"type":"tool_search","execution":"server"}]},
+                    {"type":"tool_search_output","call_id":"call_search","tools":[{"type":"tool_search","execution":"client"}]}
+                ]
+            }),
+            "anthropic",
+        )
+        .unwrap();
+        assert!(registry.declares_native_tool_search());
+
+        // One source reporting both shapes must not make the server
+        // declaration eligible.
+        let both = NamespaceToolIdentityRegistry::from_tools(&[
+            json!({"type":"tool_search","execution":"server"}),
+            json!({"type":"tool_search","execution":"client"}),
+        ])
+        .unwrap();
+        assert!(both.declares_native_tool_search());
+    }
+
+    #[test]
+    fn ordinary_function_named_tool_search_keeps_its_kind_over_native_declaration() {
+        let registry = NamespaceToolIdentityRegistry::from_tools(&[
+            json!({"type":"tool_search","execution":"client"}),
+            json!({"type":"function","name":"tool_search","parameters":{"type":"object"}}),
+        ])
+        .unwrap();
+        assert!(
+            !registry.declares_native_tool_search(),
+            "an ordinary declaration that claims the native name keeps its own kind"
+        );
+    }
+
+    #[test]
+    fn native_tool_search_declaration_projects_unchanged_and_once() {
+        let tool = json!({
+            "type":"tool_search",
+            "execution":"client",
+            "parameters":{"type":"object","properties":{"query":{"type":"string"}}}
+        });
+        let tools = vec![
+            tool.clone(),
+            json!({"type":"function","name":"local_note","parameters":{"type":"object"}}),
+        ];
+        let registry = NamespaceToolIdentityRegistry::from_tools(&tools).unwrap();
+        let projected = registry.project_tools("openai-responses", &tools).unwrap();
+        let native: Vec<_> = projected
+            .iter()
+            .filter(|candidate| candidate["type"] == "tool_search")
+            .collect();
+        assert_eq!(
+            native.len(),
+            1,
+            "native declaration must project exactly once"
+        );
+        assert_eq!(
+            native[0], &tool,
+            "native declaration must project unchanged"
+        );
+        let sourced = registry.source_tools(&tools);
+        assert_eq!(
+            sourced
+                .iter()
+                .filter(|candidate| candidate["type"] == "tool_search")
+                .count(),
+            1
+        );
     }
 }

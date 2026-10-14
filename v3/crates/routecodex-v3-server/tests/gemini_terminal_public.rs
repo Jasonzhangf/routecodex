@@ -189,7 +189,7 @@ async fn run(
     expected: Option<&str>,
     outcomes: &[(&str, u64)],
 ) {
-    run_checked(frames, json_provider, expected, outcomes, None).await;
+    run_checked(frames, json_provider, expected, outcomes, None, None).await;
 }
 
 async fn run_checked(
@@ -198,6 +198,7 @@ async fn run_checked(
     expected: Option<&str>,
     outcomes: &[(&str, u64)],
     association: Option<(&[Vec<usize>], &[Value])>,
+    business: Option<(&[Value], &Value)>,
 ) {
     let (tx, mut captures) = mpsc::unbounded_channel();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -305,7 +306,7 @@ async fn run_checked(
             None => {
                 if response.is_some() {
                     failures.push(format!(
-                        "unfinished candidate committed a business terminal: {response:?}"
+                        "undeliverable attempt committed a business terminal: {response:?}"
                     ));
                 }
             }
@@ -314,6 +315,18 @@ async fn run_checked(
                 match response {
                     None => failures.push("legal terminal did not deliver".into()),
                     Some(response) => {
+                        if let Some((output, outcome)) = business {
+                            assert_eq!(
+                                response["output"],
+                                json!(output),
+                                "opaque business changed"
+                            );
+                            assert_eq!(
+                                response["gemini_candidate_outcomes"],
+                                json!([outcome]),
+                                "business terminal changed"
+                            );
+                        }
                         let status = if reason == "STOP" {
                             "completed"
                         } else {
@@ -373,6 +386,9 @@ async fn run_checked(
                 }
             }
         }
+        if !failures.is_empty() {
+            break;
+        }
     }
     assert!(handle.shutdown().await.is_empty());
     shutdown.send(()).unwrap();
@@ -426,6 +442,74 @@ async fn gemini_genuine_terminal_controls_public() {
             &[],
         )
         .await;
+        for reason in [
+            "IMAGE_RECITATION",
+            "MODEL_ARMOR",
+            "IMAGE_PROHIBITED_CONTENT",
+        ] {
+            run(
+                vec![json!({"candidates":[{"index":0,"finishReason":reason}]})],
+                json_provider,
+                Some("content_filter"),
+                &[],
+            )
+            .await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn gemini_model_tool_error_terminal_preserves_business_public() {
+    let _serial = LOCK.lock().await;
+    let _home = Home::new();
+    for json_provider in [false, true] {
+        for reason in [
+            "MALFORMED_FUNCTION_CALL",
+            "UNEXPECTED_TOOL_CALL",
+            "TOO_MANY_TOOL_CALLS",
+            "OTHER",
+        ] {
+            let candidate = json!({"index":0,"finishReason":reason,"finishMessage":"invalid generated call","content":{"parts":[]}});
+            let outcome = json!({"candidate_index":0,"finishReason":reason,"finishMessage":"invalid generated call","output_indices":[]});
+            run_checked(
+                vec![json!({"candidates":[candidate]})],
+                json_provider,
+                Some("STOP"),
+                &[],
+                None,
+                Some((&[], &outcome)),
+            )
+            .await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn gemini_opaque_part_preserves_business_public() {
+    let _serial = LOCK.lock().await;
+    let _home = Home::new();
+    let part = json!({"thought":false,"fileData":{"mimeType":"image/png","fileUri":"https://example.test/result.png"},"opaque":{"original":[false,17]}});
+    let output = [json!({"type":"message","role":"assistant","content":[part.clone()]})];
+    let outcome = json!({"candidate_index":0,"finishReason":"STOP","output_indices":[0]});
+    for json_provider in [false, true] {
+        run_checked(vec![json!({"candidates":[{"index":0,"finishReason":"STOP","content":{"parts":[part.clone()]}}]})], json_provider, Some("STOP"), &[], None, Some((&output, &outcome))).await;
+    }
+}
+
+#[tokio::test]
+async fn gemini_empty_text_thought_flag_is_not_business_public() {
+    let _serial = LOCK.lock().await;
+    let _home = Home::new();
+    for json_provider in [false, true] {
+        for thought in [false, true] {
+            run(
+                vec![json!({"candidates":[{"index":0,"finishReason":"STOP","content":{"parts":[{"text":"","thought":thought}]}}]})],
+                json_provider,
+                None,
+                &[],
+            )
+            .await;
+        }
     }
 }
 async fn mixed(reason: &str, json_provider: bool) {
@@ -512,6 +596,7 @@ async fn transformed_association(json_provider: bool, think: bool) {
         Some("STOP"),
         &[],
         Some((&indices, &output)),
+        None,
     )
     .await;
 }

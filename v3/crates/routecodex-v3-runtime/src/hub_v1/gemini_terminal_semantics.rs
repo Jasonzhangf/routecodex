@@ -10,7 +10,7 @@ pub(super) fn candidate_finish_reason(candidate: &Value) -> Option<&str> {
         .filter(|reason| !reason.is_empty() && *reason != "FINISH_REASON_UNSPECIFIED")
 }
 
-fn prompt_block_reason(payload: &Value) -> Option<&str> {
+pub(super) fn prompt_block_reason(payload: &Value) -> Option<&str> {
     payload
         .pointer("/promptFeedback/blockReason")
         .and_then(Value::as_str)
@@ -26,10 +26,29 @@ fn terminal_rank(reason: &str) -> u8 {
         | "SPII"
         | "IMAGE_SAFETY"
         | "IMAGE_PROHIBITED_CONTENT"
-        | "IMAGE_RECITATION" => 0,
+        | "IMAGE_RECITATION"
+        | "MODEL_ARMOR" => 0,
         "MAX_TOKENS" => 1,
         _ => 2,
     }
+}
+
+pub(super) fn candidate_finish_reason_is_filter(reason: Option<&str>) -> bool {
+    reason.is_some_and(|reason| terminal_rank(reason) == 0)
+}
+
+pub(super) fn candidate_finish_reason_has_business_outcome(reason: Option<&str>) -> bool {
+    candidate_finish_reason_is_filter(reason)
+        || matches!(
+            reason,
+            Some(
+                "MAX_TOKENS"
+                    | "MALFORMED_FUNCTION_CALL"
+                    | "UNEXPECTED_TOOL_CALL"
+                    | "TOO_MANY_TOOL_CALLS"
+                    | "OTHER"
+            )
+        )
 }
 
 pub(super) struct GeminiTerminal<'a> {

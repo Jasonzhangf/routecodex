@@ -9,6 +9,11 @@ pub struct V3AnthropicResponsesProjectionContext {
     custom_tool_names: BTreeMap<String, String>,
     namespaced_custom_tool_identities: BTreeMap<String, (String, String)>,
     mcp_tool_identities: HashMap<String, (String, String)>,
+    /// Whether the current request actually declares the standard native
+    /// `tool_search` discovery tool. It comes from the same request-local
+    /// namespace registry that owns namespace identity, so the inverse restores
+    /// the native kind from the declaration and never from a provider name.
+    native_tool_search: bool,
     reasoning_summary_policy: Option<String>,
 }
 
@@ -33,6 +38,7 @@ impl V3AnthropicResponsesProjectionContext {
                 "anthropic",
             )
             .map_err(|_| V3AnthropicCodecError::MalformedField { field: "tools" })?;
+        let native_tool_search = registry.declares_native_tool_search();
         let mcp_tool_identities = registry.restore_identities();
         let custom_tool_names = registry
             .identities()
@@ -59,6 +65,7 @@ impl V3AnthropicResponsesProjectionContext {
             custom_tool_names,
             namespaced_custom_tool_identities,
             mcp_tool_identities,
+            native_tool_search,
             reasoning_summary_policy,
         })
     }
@@ -75,6 +82,13 @@ impl V3AnthropicResponsesProjectionContext {
 
     pub(crate) fn mcp_tool_identities(&self) -> &HashMap<String, (String, String)> {
         &self.mcp_tool_identities
+    }
+
+    /// The single owner of "a declared native discovery tool regains its kind"
+    /// for the Anthropic inverse. See
+    /// [`provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::declares_native_tool_search`].
+    pub(crate) fn declares_native_tool_search(&self) -> bool {
+        self.native_tool_search
     }
 
     pub(super) fn metadata(&self) -> Option<&Value> {

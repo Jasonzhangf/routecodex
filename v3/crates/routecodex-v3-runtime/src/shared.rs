@@ -370,6 +370,32 @@ async fn project_provider_raw_to_client_payload_inner(
                 compat_plan.custom_tool_function_binding.as_ref(),
             )?;
         }
+        // Complete-attempt success acceptance for the buffered JSON body: a
+        // provider response with no deliverable business content is an internal
+        // 502 for the Error chain, never a normal empty completion. The
+        // judgment is shared with the Relay/SSE boundaries.
+        if !crate::hub_v1::v3_provider_json_attempt_has_deliverable_business_content(
+            compat_plan.provider_protocol,
+            &parsed,
+        ) {
+            return Err(build_v3_error_01_source_raised_external(
+                V3ErrorSourceKind::ProviderFailure,
+                "V3ProviderResp14Raw",
+                "provider_response_empty",
+                "provider returned a complete response with no deliverable business content",
+                V3ExternalErrorLink {
+                    kind: V3ExternalErrorKind::Provider,
+                    status: Some(status),
+                    code: Some("PROVIDER_RESPONSE_EMPTY".to_string()),
+                    provider_id: Some(provider_id.clone()),
+                    upstream_request_id: None,
+                    message: Some(
+                        "provider returned a complete response with no deliverable business content"
+                            .to_string(),
+                    ),
+                },
+            ));
+        }
         (V3ProviderAttemptBody::Json(parsed), None)
     } else {
         return Err(build_v3_error_01_source_raised_external(
@@ -1607,6 +1633,47 @@ mod tests {
         ))
         .await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn direct_json_empty_complete_response_is_provider_failure() {
+        let raw = V3ProviderResp14Raw::from_json(
+            "req",
+            "provider",
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            br#"{"id":"resp_empty","object":"response","status":"completed","output":[]}"#.to_vec(),
+        );
+        let error = project_provider_raw_to_client_payload(raw)
+            .await
+            .expect_err("an empty complete Direct JSON response must become a provider failure");
+        assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
+        assert_eq!(error.code, "provider_response_empty");
+    }
+
+    #[tokio::test]
+    async fn direct_json_text_response_still_projects() {
+        let raw = V3ProviderResp14Raw::from_json(
+            "req",
+            "provider",
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            br#"{"id":"resp_ok","object":"response","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"hi"}]}]}"#
+                .to_vec(),
+        );
+        let projection = project_provider_raw_to_client_payload(raw)
+            .await
+            .expect("a text-bearing Direct JSON response must still project");
+        let V3ProviderAttemptBody::Json(body) = projection.attempt_payload.body else {
+            panic!("expected Direct JSON body");
+        };
+        assert_eq!(body["output"][0]["content"][0]["text"], "hi");
     }
     #[tokio::test]
     async fn direct_sse_response_failed_projects_provider_error_before_client_stream() {

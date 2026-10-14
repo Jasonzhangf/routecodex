@@ -14,6 +14,7 @@
 - Compatibility projection may perform only the transformations required by the target protocol. An allowlist/denylist field-selection mechanism does its declared mechanical job and makes no judgment: it does not judge model meaning, validate business correctness, classify errors, or decide whether a response is acceptable. If a target field is string-valued and the Provider returned a structured value, serialize that complete value faithfully. Do not turn a schema/parser preference mismatch into a locally generated `502 network_error` or a closed stream when the content can be represented.
 - The protocol terminal `content_filter` is the Provider's own content filter reporting that it filtered the response. It is a legal Provider terminal, not a Provider failure: forward it (`status=incomplete` with `incomplete_details.reason=content_filter`; OpenAI Chat `finish_reason=content_filter`).
 - Internal routing, cooldown, retry, and transport diagnostics stay in typed control/error resources. They must not rewrite, suppress, or fabricate business response semantics.
+- Request failures and local response-processing failures enter the same typed Error chain. Preserve the request source, internal response 599, and actual upstream status separately. A complete upstream attempt with no deliverable business content becomes internal 502 and follows declared retry/reselection. Count the entire attempt; prior content, tools, refusal, reasoning and content_filter remain business results. Exhaustion terminates only the request transport detectably, without client error numbers, error payloads or a normal empty completion.
 - Regression tests must prove that a Provider HTTP error is not returned to the client and triggers candidate recovery where possible; separately prove that a successful Provider response containing invalid/model-generated arguments is faithfully returned and remains available to the client's next-turn correction flow. Unit-only tests do not replace public-entry evidence.
 
 ## Mandatory: Runtime Lifecycle — Only `rcc restart`, Never stop/start
@@ -138,27 +139,31 @@ Each issue run has one entry and one disposition exit:
 ```text
 bug intake/dedup -> issue-owned clean worktree at latest origin/main
 -> reproduce + bind feature DAG/maps, first divergence, unique owner, and regression evidence
--> minimal owner-scoped fix -> fetch/combine latest origin/main -> candidate commit + exact SHA
+-> minimal owner-scoped fix -> fetch/combine latest origin/main -> freeze candidate tree identity
 -> mapped tests/build + author debug + real-entry E2E or scoped consumer verification
 -> when runtime-impacting: install/restart candidate, check health/replay, audit Codex samples
+-> independent overall architecture review under the global host contract -> candidate commit + exact SHA
 -> applicable PR CI PASS -> recheck origin/main -> merge validated candidate into clean main -> push
 -> candidate/main equivalence + remote receipt
 -> post-merge verification: runtime path rebuild/install/restart -> health -> real-entry replay -> sample audit; otherwise scoped consumer check
--> independent Codex and AGY architecture reviews bound to the delivered main content and verified candidate
 -> issue-owner cleanup of its worktree/playground and temporary resources
 -> one bug disposition receipt: solved or open
 ```
 
-**项目交付顺序：作者验证和适用 CI 通过后，先合并到 main、从 main 重建安装并重启、完成真实入口验收，再等待并完成独立架构 review。** Review pending does not block this main/runtime sequence; it does block defect closure and any claim of complete delivery. Required repository checks and Git protection remain enforced. A blocking review finding requires an owner-scoped repair and affected verification; a confirmed regression caused by the delivered change follows the traceable revert/rebuild/restart/replay recovery contract.
+The global host orchestrator owns delivery order and independent review roles.
+Author verification and applicable candidate runtime acceptance precede the
+independent overall review; review and applicable CI must pass before integration.
+Fix blocking findings in their owner and revalidate the affected behavior.
+Required repository checks and Git protection remain enforced.
 
 Before merge, a newer `origin/main` or any candidate change invalidates only
 evidence whose bound inputs changed. Record the new candidate under the same
-bug ID and rerun affected gates and E2E. Bind post-delivery reviews to that
+bug ID and rerun affected gates and E2E. Bind the independent review to that
 exact candidate and prove its content equivalent to delivered main; do not
 reuse a stale review as PASS for changed scope.
 
-`solved` requires every applicable test/build/E2E and runtime gate, both
-required architecture reviews, merge and remote receipts, candidate/main
+`solved` requires every applicable test/build/E2E and runtime gate, an effective
+independent architecture review, merge and remote receipts, candidate/main
 equivalence, post-merge replay and sample audit after any managed restart, and
 verified removal of the issue owner's resources. Post-merge verification uses
 the real entrypoint for runtime changes and the scoped consumer for non-runtime
