@@ -282,7 +282,7 @@ impl RecordQuery {
                 "response_type" => query.response_type = Some(value.to_string()),
                 "error_category" => query.error_category = Some(value.to_string()),
                 "error_status_code" => {
-                    if value != "unknown" && value.parse::<u16>().is_err() {
+                    if !matches!(value, "unknown" | "network") && value.parse::<u16>().is_err() {
                         return Err(format!("invalid error_status_code: {value}"));
                     }
                     query.error_status_code = Some(value.to_string());
