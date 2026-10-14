@@ -51,8 +51,12 @@ pub(crate) enum V3RelayProviderAdmittedTargetResolution {
     Failed(routecodex_v3_error::V3Error01SourceRaised),
 }
 
+pub(crate) fn v3_provider_concurrency_key_parts(provider_id: &str, auth_alias: &str) -> String {
+    format!("{provider_id}:{auth_alias}")
+}
+
 fn v3_provider_concurrency_key(candidate: &V3TargetCandidate) -> String {
-    format!("{}:{}", candidate.provider_id, candidate.auth_alias)
+    v3_provider_concurrency_key_parts(&candidate.provider_id, &candidate.auth_alias)
 }
 
 pub(crate) fn try_admit_v3_selected_target(

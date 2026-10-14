@@ -460,6 +460,27 @@ impl V3AdaptiveConcurrencyController {
         Ok(())
     }
 
+    /// A completed business 2xx is the recovery counterpart of an observed 429.
+    /// It restores one unit of adaptive budget and clears the saturation window.
+    /// Keys without tracked state have nothing to restore.
+    pub fn observe_business_success(&self, provider_key: &str) -> Result<(), String> {
+        let mut states = self
+            .inner
+            .states
+            .lock()
+            .expect("adaptive concurrency state lock should not be poisoned");
+        let Some(state) = states.get_mut(provider_key) else {
+            return Ok(());
+        };
+        state.budget = state.budget.saturating_add(1).min(state.hard_max_in_flight);
+        state.saturated = false;
+        state.next_probe_at_ms = None;
+        let notify = state.notify.clone();
+        drop(states);
+        notify.notify_waiters();
+        Ok(())
+    }
+
     pub fn release(&self, permit: V3AdaptiveConcurrencyPermit) -> Result<(), String> {
         let mut states = self
             .inner
@@ -617,6 +638,36 @@ mod tests {
         assert_eq!(snapshot.next_probe_at_ms, Some(600_100));
         let held = controller.try_acquire("opencode-go:key1", 100).unwrap();
         assert!(controller.try_acquire("opencode-go:key1", 100).is_none());
+        controller.release(held.into_permit()).unwrap();
+    }
+
+    #[test]
+    fn business_success_restores_budget_drained_by_rate_limits() {
+        let controller = V3AdaptiveConcurrencyController::new(8).unwrap();
+        let key = "provider:key";
+        controller.ensure_initial_budget(key, 8).unwrap();
+        for _ in 0..7 {
+            controller.observe_rate_limit(key, 0).unwrap();
+        }
+        let drained = controller.snapshot(key).unwrap();
+        assert_eq!(drained.budget, 1);
+        assert!(drained.saturated);
+        // The drained budget plus one in-flight lease must report busy; a
+        // completed business success must restore the next admission.
+        let held = controller.try_acquire_business(key).unwrap();
+        assert!(
+            controller.try_acquire_business(key).is_none(),
+            "drained budget with an in-flight lease must report busy"
+        );
+        controller.observe_business_success(key).unwrap();
+        let recovered = controller.snapshot(key).unwrap();
+        assert_eq!(recovered.budget, 2);
+        assert!(!recovered.saturated);
+        assert_eq!(recovered.next_probe_at_ms, None);
+        let admitted = controller
+            .try_acquire_business(key)
+            .expect("business success must admit the next request");
+        controller.release(admitted.into_permit()).unwrap();
         controller.release(held.into_permit()).unwrap();
     }
 
