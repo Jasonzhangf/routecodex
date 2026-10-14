@@ -808,6 +808,57 @@ fn openai_chat_tool_search_function_call_projects_to_responses_tool_search_call(
     );
 }
 
+/// The shared eligibility owner must keep the Chat inverse aligned with the
+/// Anthropic one: only a client-executed declaration grants the native kind.
+/// Server execution and omitted execution stay ordinary function calls.
+#[test]
+fn openai_chat_non_client_tool_search_function_call_keeps_ordinary_kind() {
+    for declaration in [
+        json!({"type":"tool_search","execution":"server","parameters":{"type":"object"}}),
+        json!({"type":"tool_search","parameters":{"type":"object"}}),
+    ] {
+        let response = build_v3_responses_provider_response_from_openai_chat_payload(
+            &json!({
+                "id":"chatcmpl_tool_search_call",
+                "choices":[{
+                    "message":{
+                        "role":"assistant",
+                        "content":"",
+                        "tool_calls":[{
+                            "id":"call_search_tools",
+                            "type":"function",
+                            "function":{
+                                "name":"tool_search",
+                                "arguments":"{\"query\":\"ssh-manager\",\"limit\":8}"
+                            }
+                        }]
+                    },
+                    "finish_reason":"tool_calls"
+                }]
+            }),
+            &json!({"tools":[declaration]}),
+        )
+        .expect("a non-client tool_search call must still project to the Responses client");
+
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["output"][0]["type"], "function_call");
+        assert_eq!(response["output"][0]["name"], "tool_search");
+        assert_eq!(response["output"][0]["call_id"], "call_search_tools");
+        assert_eq!(
+            response["output"][0]["arguments"], "{\"query\":\"ssh-manager\",\"limit\":8}",
+            "original arguments must stay verbatim"
+        );
+        assert!(
+            response["output"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|item| item["type"] != "tool_search_call"),
+            "a non-client declaration must not gain client-native authority: {response}"
+        );
+    }
+}
+
 #[test]
 fn openai_chat_declared_namespace_function_call_restores_namespace_for_responses_client() {
     let response = build_v3_responses_provider_response_from_openai_chat_payload(

@@ -5014,6 +5014,7 @@ chains:
     owner_feature_id: v3.protocol_conversion_field_parity
     semantic_contract:
       - Provider-private inverse precedes standard namespace inverse; JSON and materialized SSE use the same attempt holder before existing Resp05 projection.
+      - Native tool_search client execution eligibility comes only from an explicit execution=client declaration in NamespaceToolIdentityRegistry::declares_native_tool_search; Chat conversion and the Anthropic request-local projection context use that same fact to restore tool_search_call with complete arguments and call ID. Server execution, omitted execution, ordinary tools and undeclared calls never gain client-native authority.
     resource_flow:
       consumes: [v3.hub.response_semantic]
       produces: [v3.hub.response_semantic]

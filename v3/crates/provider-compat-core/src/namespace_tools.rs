@@ -3,7 +3,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeSet, HashMap};
 
 pub use crate::namespace_identity::{
-    NamespaceToolIdentity, NamespaceToolIdentityRegistry, ToolKind,
+    NamespaceToolIdentity, NamespaceToolIdentityRegistry, ToolKind, NATIVE_TOOL_SEARCH_WIRE_NAME,
 };
 
 /// OpenAI Chat permits at most 64 characters. The current request declaration

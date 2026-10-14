@@ -1,4 +1,3 @@
-use super::request_outbound_mcp_names::provider_function_name;
 use super::*;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -70,42 +69,11 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload(
         })
         .collect();
     let mcp_tool_identities = registry.restore_identities();
-    let discovered =
-        super::request_outbound_builtin_tool_projection::collect_tool_search_output_tools(
-            provider_semantic_body,
-        )
-        .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
-    let declarations: Vec<&Value> = provider_semantic_body
-        .get("tools")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .chain(
-            provider_semantic_body
-                .get("input")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter(|item| item["type"] == "additional_tools")
-                .flat_map(|item| {
-                    item.get("tools")
-                        .and_then(Value::as_array)
-                        .into_iter()
-                        .flatten()
-                }),
-        )
-        .chain(discovered.iter())
-        .collect();
-    let native_tool_search = declarations
-        .iter()
-        .any(|tool| tool["type"] == "tool_search")
-        && !declarations.iter().any(|tool| {
-            matches!(
-                tool.get("type").and_then(Value::as_str),
-                Some("function" | "custom")
-            ) && provider_compat_core::namespace_tools::provider_function_tool_name(tool)
-                .is_some_and(|name| provider_function_name(name) == "tool_search")
-        });
+    // One shared owner decides the native discovery kind from the same
+    // request-local declaration registry that owns namespace identity. This
+    // replaces the earlier scope-local inference that re-walked tools,
+    // additional_tools and discovered tool_search_output separately.
+    let native_tool_search = registry.declares_native_tool_search();
     for choice in choices {
         if finish_reason.is_none() {
             finish_reason = choice
