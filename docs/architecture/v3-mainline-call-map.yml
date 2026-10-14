@@ -7927,7 +7927,7 @@ chains:
 
 - chain_id: v3-provider-admission-lease-lifecycle
   owner_feature_id: v3.provider_global_subscription_probe
-  summary: Runtime acquires one provider+authAlias capacity lease before transport and hands it to Provider; WebSocketV2 releases that lease before waiting for a shared session slot and reacquires it only after slot ownership, while every path releases owned resources through RAII.
+  summary: Runtime acquires one provider+authAlias capacity lease before transport and hands it to Provider; WebSocketV2 releases that lease before waiting for a shared session slot and reacquires it only after slot ownership, every path releases owned resources through RAII, and a completed business success restores one unit of the exact provider+authAlias adaptive budget.
   edges:
   - step_id: v3-provider-admission-lease-acquire
     from_node: V3Target10ConcreteProviderSelected
@@ -8073,6 +8073,23 @@ chains:
       - Streaming responses retain the guard until stream EOF or drop, then release the exact selected provider+authAlias lease.
     resource_flow:
       consumes: [v3.provider.adaptive_concurrency_admission, v3.response.provider_raw]
+      produces: [v3.provider.adaptive_concurrency_admission]
+      side_channel_reads: [v3.provider.adaptive_concurrency_admission]
+      side_channel_writes: [v3.provider.adaptive_concurrency_admission]
+  - step_id: v3-provider-admission-budget-recover-business-success
+    from_node: V3ProviderHealthStateMutated
+    to_node: V3AdaptiveConcurrencyController
+    caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope_for_interface
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
+    callee_symbol: V3AdaptiveConcurrencyController::observe_business_success
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/adaptive_concurrency.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    semantic_contract:
+      - A completed business 2xx restores one unit of the exact provider+authAlias adaptive budget and clears its saturation and next-probe deadline.
+      - Recovery is a no-op for an unknown provider+authAlias identity and does not mutate provider health or cooldown policy.
+    resource_flow:
+      consumes: [v3.provider.adaptive_concurrency_admission]
       produces: [v3.provider.adaptive_concurrency_admission]
       side_channel_reads: [v3.provider.adaptive_concurrency_admission]
       side_channel_writes: [v3.provider.adaptive_concurrency_admission]
