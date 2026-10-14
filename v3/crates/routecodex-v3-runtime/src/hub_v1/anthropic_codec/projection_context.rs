@@ -1,5 +1,5 @@
 use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 
 use super::V3AnthropicCodecError;
 
@@ -27,32 +27,33 @@ impl V3AnthropicResponsesProjectionContext {
             .map(valid_responses_reasoning_summary_policy)
             .transpose()?
             .map(str::to_string);
-        let mut mcp_tool_identities =
-            super::super::request_outbound_mcp_names::responses_mcp_dispatch_identities(request)
-                .map_err(|_| V3AnthropicCodecError::MalformedField { field: "tools" })?;
-        let (anthropic_client_names, _) =
-            super::namespace_tool_names::anthropic_declared_tool_names(request);
-        for (client_path, provider_name) in anthropic_client_names {
-            if let Some((namespace, name)) = client_path.rsplit_once('.') {
-                mcp_tool_identities
-                    .insert(provider_name, (namespace.to_string(), name.to_string()));
-            }
-        }
-        let custom_tool_names = governed_custom_tool_names(request)?;
-        let namespaced_custom_tool_identities =
-            super::namespace_tool_names::anthropic_declared_tool_names(request)
-                .0
-                .into_iter()
-                .filter_map(|(client_path, provider_name)| {
-                    (custom_tool_names.get(&provider_name) == Some(&client_path))
-                        .then(|| {
-                            client_path.rsplit_once('.').map(|(namespace, name)| {
-                                (provider_name, (namespace.to_string(), name.to_string()))
-                            })
-                        })
-                        .flatten()
-                })
-                .collect();
+        let registry =
+            provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::from_request(
+                request,
+                "anthropic",
+            )
+            .map_err(|_| V3AnthropicCodecError::MalformedField { field: "tools" })?;
+        let mcp_tool_identities = registry.restore_identities();
+        let custom_tool_names = registry
+            .identities()
+            .filter(|identity| {
+                identity.kind == provider_compat_core::namespace_tools::ToolKind::Custom
+            })
+            .map(|identity| (identity.actual_wire_name.clone(), identity.client_path()))
+            .collect();
+        let namespaced_custom_tool_identities = registry
+            .identities()
+            .filter(|identity| {
+                identity.is_namespaced()
+                    && identity.kind == provider_compat_core::namespace_tools::ToolKind::Custom
+            })
+            .map(|identity| {
+                (
+                    identity.actual_wire_name.clone(),
+                    (identity.client_namespace(), identity.leaf_name.clone()),
+                )
+            })
+            .collect();
         Ok(Self {
             metadata,
             custom_tool_names,
@@ -92,46 +93,4 @@ fn valid_responses_reasoning_summary_policy(value: &Value) -> Result<&str, V3Ant
         .ok_or(V3AnthropicCodecError::MalformedField {
             field: "reasoning_summary_policy",
         })
-}
-
-fn governed_custom_tool_names(
-    request: &Value,
-) -> Result<BTreeMap<String, String>, V3AnthropicCodecError> {
-    let mut names = BTreeSet::new();
-    collect_governed_custom_tool_names(request.get("tools"), &mut names)?;
-    for item in request
-        .get("input")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        if item.get("type").and_then(Value::as_str) == Some("additional_tools") {
-            collect_governed_custom_tool_names(item.get("tools"), &mut names)?;
-        }
-    }
-    let mut mapped = super::namespace_tool_names::anthropic_declared_tool_names(request).1;
-    for name in names {
-        mapped.entry(name.clone()).or_insert(name);
-    }
-    Ok(mapped)
-}
-
-fn collect_governed_custom_tool_names(
-    tools: Option<&Value>,
-    names: &mut BTreeSet<String>,
-) -> Result<(), V3AnthropicCodecError> {
-    for tool in tools.and_then(Value::as_array).into_iter().flatten() {
-        if tool.get("type").and_then(Value::as_str) != Some("custom") {
-            continue;
-        }
-        let name = tool
-            .get("name")
-            .and_then(Value::as_str)
-            .filter(|name| !name.trim().is_empty())
-            .ok_or(V3AnthropicCodecError::MalformedField {
-                field: "tools[].name",
-            })?;
-        names.insert(name.to_string());
-    }
-    Ok(())
 }

@@ -789,6 +789,9 @@ pub(crate) fn project_v3_responses_tool_call_to_openai_chat(
         "type": "function",
         "function": Value::Object(function)
     });
+    if let Some(signature) = item.get("thought_signature") {
+        tool_call["thought_signature"] = signature.clone();
+    }
     let responses_item_id = read_v3_non_empty_str(item.get("id"));
     if item_type == "custom_tool_call" || responses_item_id.is_some() {
         let mut extension = Map::new();

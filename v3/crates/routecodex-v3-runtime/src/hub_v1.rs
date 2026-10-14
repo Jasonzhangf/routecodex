@@ -129,6 +129,8 @@ pub use anthropic_codec::*;
 mod openai_chat_codec;
 pub use openai_chat_codec::*;
 mod gemini_codec;
+mod gemini_responses_codec;
+mod gemini_terminal_semantics;
 pub use gemini_codec::*;
 mod gemini_relay_runtime;
 pub use gemini_relay_runtime::*;
@@ -156,6 +158,14 @@ mod relay_sse_hooks;
 mod resource_hooks;
 pub mod usage_normalization;
 pub use resource_hooks::*;
+
+// The request-local declared namespace identity inverse used by the Direct
+// Responses response owner. Both share the single traversal in
+// `request_outbound_mcp_names` with the Relay and cross-protocol callers.
+pub(crate) use request_outbound_mcp_names::{
+    responses_mcp_dispatch_identities as responses_namespace_restore_identities,
+    restore_v3_responses_namespace_in_value as restore_v3_responses_namespace_identities,
+};
 
 #[cfg(test)]
 mod tests;

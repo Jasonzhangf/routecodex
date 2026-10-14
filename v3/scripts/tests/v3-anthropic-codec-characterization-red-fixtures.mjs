@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative as relativePath, resolve, sep } from 'node:path';
+import { dirname, join, relative as relativePath, resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const repoRoot = process.cwd();
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const verifier = resolve(repoRoot, 'v3/scripts/architecture/verify-v3-anthropic-codec-characterization.mjs');
 const fixtures = [
   ['hook registration', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', 'use super::{', 'use super::{ compile_v3_hub_v1_static_registry,', /forbidden.*compile_v3_hub_v1_static_registry/],
@@ -29,15 +30,22 @@ const fixtures = [
 ];
 
 const failures = [];
-for (const [name, relative, from, to, diagnostic] of fixtures) {
+for (const [index, [name, relative, from, to, diagnostic]] of fixtures.entries()) {
   const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-anthropic-codec-red-'));
   try {
-    for (const relative of ['v3', 'docs', 'package.json']) {
+    for (const relative of ['v3', 'docs', 'scripts', 'package.json']) {
       const sourceRoot = resolve(repoRoot, relative);
       cpSync(sourceRoot, join(root, relative), {
         recursive: true,
+        dereference: relative === 'scripts',
         filter: (source) => !relativePath(sourceRoot, source).split(sep).some((part) => part === 'target' || part === 'build-control'),
       });
+    }
+    if (index === 0) {
+      const baseline = spawnSync(process.execPath, [verifier], { cwd: root, encoding: 'utf8' });
+      if (baseline.status !== 0) {
+        throw new Error('unmutated fixture must pass: ' + (baseline.stdout ?? '') + (baseline.stderr ?? ''));
+      }
     }
     const target = join(root, relative);
     const source = readFileSync(target, 'utf8');

@@ -65,6 +65,17 @@ pub fn build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_reque
 }
 
 impl V3HubRespInbound02Normalized {
+    pub(crate) fn normalize_gemini_business_response(
+        &mut self,
+        request_id: &str,
+    ) -> Result<(), String> {
+        let canonical = super::gemini_responses_codec::project_gemini_response(
+            self.provider_payload(),
+            request_id,
+        )?;
+        self.set_responses_semantic_payload(canonical);
+        Ok(())
+    }
     pub fn provider_raw(&self) -> &V3ProviderRespInbound01Raw {
         self.previous.raw()
     }

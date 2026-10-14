@@ -374,6 +374,12 @@ no Tool-Thinking reasoning. If the wrapper itself is malformed or `input` is not
 a string, Resp03 does not guess or repair it; the malformed provider-native call
 remains unchanged and the turn is `INVALID`.
 
+This Resp03 rule does not reject representable model parameters at a protocol
+boundary. The declared Anthropic custom mapping preserves an unrecognized native
+JSON value once as complete client custom-input text. It does not unwrap an inner
+field, validate the tool input, or authorize Tool-Thinking. Follow-up keeps that
+exact client-visible text and its paired consumer error.
+
 ## 9. Strict validation and redaction
 
 Resp03 also removes the request-local tool-list projection when a provider

@@ -1,351 +1,41 @@
-use provider_compat_core::namespace_tools::{
-    flatten_namespace_tool_for_provider, namespace_tool_name_map, provider_function_tool_name,
-};
+use provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry;
 use serde_json::{Map, Value};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::HashMap;
 
 pub(super) fn provider_function_name(name: &str) -> String {
-    provider_compat_core::namespace_tools::normalize_provider_function_name(name)
-}
-
-fn provider_function_name_preserving_mcp_namespace(name: &str) -> String {
-    name.strip_prefix("functions.mcp__")
-        .map(|rest| format!("mcp__{rest}"))
-        .unwrap_or_else(|| name.to_owned())
-}
-
-pub(super) fn normalize_openai_chat_message_tool_call_names(message: &mut Map<String, Value>) {
-    let responses_extension = message
-        .get("routecodex_chat_extension")
-        .and_then(Value::as_object);
-    let preserve_mcp_namespace = responses_extension.is_some_and(|extension| {
-        extension
-            .get("responses_tool_call_type")
-            .and_then(Value::as_str)
-            .is_some_and(|kind| matches!(kind, "tool_search_call" | "tool_search_output"))
-            || extension
-                .get("responses_tool_output_type")
-                .and_then(Value::as_str)
-                .is_some_and(|kind| kind == "tool_search_output")
-    });
-    if let Some(tool_calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut) {
-        for call in tool_calls {
-            let Some(call) = call.as_object_mut() else {
-                continue;
-            };
-            if is_custom_tool_call(call) {
-                continue;
-            }
-            if let Some(name) = call.get("name").and_then(Value::as_str) {
-                call.insert(
-                    "name".to_string(),
-                    Value::String(if preserve_mcp_namespace {
-                        provider_function_name_preserving_mcp_namespace(name)
-                    } else {
-                        provider_function_name(name)
-                    }),
-                );
-            }
-            if let Some(function) = call.get_mut("function").and_then(Value::as_object_mut) {
-                if let Some(name) = function.get("name").and_then(Value::as_str) {
-                    function.insert(
-                        "name".to_string(),
-                        Value::String(if preserve_mcp_namespace {
-                            provider_function_name_preserving_mcp_namespace(name)
-                        } else {
-                            provider_function_name(name)
-                        }),
-                    );
-                }
-            }
-        }
-    }
-    let is_custom_tool_output = message
-        .get("routecodex_chat_extension")
-        .and_then(Value::as_object)
-        .and_then(|extension| extension.get("responses_tool_output_type"))
-        .and_then(Value::as_str)
-        == Some("custom_tool_call_output");
-    if !is_custom_tool_output {
-        if let Some(parts) = message.get_mut("content").and_then(Value::as_array_mut) {
-            for part in parts {
-                let Some(part_object) = part.as_object_mut() else {
-                    continue;
-                };
-                if let Some(name) = part_object.get("name").and_then(Value::as_str) {
-                    part_object.insert(
-                        "name".to_string(),
-                        Value::String(if preserve_mcp_namespace {
-                            provider_function_name_preserving_mcp_namespace(name)
-                        } else {
-                            provider_function_name(name)
-                        }),
-                    );
-                }
-            }
-        }
-    }
-}
-
-pub(super) fn qualify_openai_chat_missing_mcp_tool_call_names(payload: &mut Value) {
-    let Some(root) = payload.as_object_mut() else {
-        return;
-    };
-    let Some(tools) = root.get("tools").and_then(Value::as_array).cloned() else {
-        return;
-    };
-    let Some(messages) = root.get_mut("messages").and_then(Value::as_array_mut) else {
-        return;
-    };
-    let mut qualified_by_leaf = HashMap::<String, Option<String>>::new();
-    let mut ordinary_callable_names = HashSet::new();
-    for tool in &tools {
-        if let Ok(Some(children)) = flatten_namespace_tool_for_provider("openai-chat", tool) {
-            for child in children {
-                if let Some(name) = provider_function_tool_name(&child) {
-                    let name = provider_function_name(name);
-                    insert_provider_mcp_name(&mut qualified_by_leaf, &name);
-                }
-            }
-            continue;
-        }
-        if let Some(name) = provider_function_tool_name(tool) {
-            let name = provider_function_name(name);
-            if mcp_tool_leaf_name(&name).is_some() {
-                insert_provider_mcp_name(&mut qualified_by_leaf, &name);
-            } else {
-                ordinary_callable_names.insert(name);
-            }
-        }
-    }
-    for name in ordinary_callable_names {
-        if qualified_by_leaf.contains_key(&name) {
-            qualified_by_leaf.insert(name, None);
-        }
-    }
-    if qualified_by_leaf.is_empty() {
-        return;
-    }
-    for message in messages {
-        let Some(message_row) = message.as_object_mut() else {
-            continue;
-        };
-        let Some(tool_calls) = message_row
-            .get_mut("tool_calls")
-            .and_then(Value::as_array_mut)
-        else {
-            continue;
-        };
-        for tool_call in tool_calls {
-            let Some(tool_call_row) = tool_call.as_object_mut() else {
-                continue;
-            };
-            if is_custom_tool_call(tool_call_row) {
-                continue;
-            }
-            if !has_responses_item_id(tool_call_row) {
-                continue;
-            }
-            let Some(name) = tool_call_row
-                .get("function")
-                .and_then(Value::as_object)
-                .and_then(|function| function.get("name"))
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-            else {
-                continue;
-            };
-            if name.starts_with("mcp__") {
-                continue;
-            }
-            let Some(qualified) = qualified_by_leaf.get(&name).and_then(Option::as_ref) else {
-                continue;
-            };
-            if let Some(function) = tool_call_row
-                .get_mut("function")
-                .and_then(Value::as_object_mut)
-            {
-                function.insert("name".to_string(), Value::String(qualified.clone()));
-            }
-        }
-    }
+    name.to_owned()
 }
 
 pub(super) fn rewrite_openai_chat_declared_namespace_history(
     payload: &mut Value,
 ) -> Result<(), String> {
-    let mut names = HashMap::new();
-    for tool in payload
-        .get("tools")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        if let Some(mapping) = namespace_tool_name_map(tool)? {
-            names.extend(mapping);
-        }
-    }
-    for item in payload
-        .get("input")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        if item.get("type").and_then(Value::as_str) != Some("additional_tools") {
-            continue;
-        }
-        for tool in item
-            .get("tools")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            if let Some(mapping) = namespace_tool_name_map(tool)? {
-                names.extend(mapping);
-            }
-        }
-    }
-    if names.is_empty() {
-        return Ok(());
-    }
-    if let Some(choice) = payload
-        .get_mut("tool_choice")
-        .and_then(Value::as_object_mut)
-    {
-        if let Some(name) = choice
-            .get("name")
-            .and_then(Value::as_str)
-            .and_then(|name| names.get(name))
-        {
-            choice.insert("name".to_string(), Value::String(name.clone()));
-        }
-        if let Some(function) = choice.get_mut("function").and_then(Value::as_object_mut) {
-            if let Some(name) = function
-                .get("name")
-                .and_then(Value::as_str)
-                .and_then(|name| names.get(name))
-            {
-                function.insert("name".to_string(), Value::String(name.clone()));
-            }
-        }
-    }
-    for message in payload
-        .get_mut("messages")
-        .and_then(Value::as_array_mut)
-        .into_iter()
-        .flatten()
-    {
-        for call in message
-            .get_mut("tool_calls")
-            .and_then(Value::as_array_mut)
-            .into_iter()
-            .flatten()
-        {
-            if let Some(function) = call.get_mut("function").and_then(Value::as_object_mut) {
-                if let Some(name) = function.get("name").and_then(Value::as_str) {
-                    if let Some(provider_name) = names.get(name) {
-                        function.insert("name".to_string(), Value::String(provider_name.clone()));
-                    }
-                }
-            }
-        }
-    }
+    let registry = NamespaceToolIdentityRegistry::from_request(payload, "openai-chat")?;
+    registry.project_references(payload);
     Ok(())
 }
 
-pub(super) fn responses_mcp_dispatch_identities(
+pub(crate) fn responses_mcp_dispatch_identities(
     request: &Value,
 ) -> Result<HashMap<String, (String, String)>, String> {
-    Ok(responses_mcp_dispatch_names(request)?.0)
-}
-
-fn responses_mcp_dispatch_names(
-    request: &Value,
-) -> Result<(HashMap<String, (String, String)>, BTreeSet<String>), String> {
-    let mut identities = HashMap::new();
-    let mut names = BTreeSet::new();
-    collect_responses_mcp_dispatch_identities(request.get("tools"), &mut identities, &mut names)?;
-    for item in request
-        .get("input")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        if item.get("type").and_then(Value::as_str) == Some("additional_tools") {
-            collect_responses_mcp_dispatch_identities(
-                item.get("tools"),
-                &mut identities,
-                &mut names,
-            )?;
-        }
-    }
-    let discovered =
-        super::request_outbound_builtin_tool_projection::collect_tool_search_output_tools(request)?;
-    collect_responses_mcp_dispatch_identities(
-        Some(&Value::Array(discovered)),
-        &mut identities,
-        &mut names,
-    )?;
-    Ok((identities, names))
-}
-
-fn collect_responses_mcp_dispatch_identities(
-    tools: Option<&Value>,
-    identities: &mut HashMap<String, (String, String)>,
-    declared_names: &mut BTreeSet<String>,
-) -> Result<(), String> {
-    for tool in tools.and_then(Value::as_array).into_iter().flatten() {
-        if let Some(namespace_names) = namespace_tool_name_map(tool)? {
-            for (client_path, provider_name) in namespace_names {
-                let Some((namespace, name)) = client_path.rsplit_once('.') else {
-                    continue;
-                };
-                declared_names.insert(provider_name.clone());
-                identities.insert(provider_name, (namespace.to_string(), name.to_string()));
-            }
-            continue;
-        }
-        let kind = tool.get("type").and_then(Value::as_str);
-        if !matches!(kind, Some("function" | "custom")) {
-            continue;
-        }
-        let Some(name) = provider_function_tool_name(tool) else {
-            continue;
-        };
-        let provider_name = if kind == Some("function") {
-            provider_function_name(name)
-        } else {
-            name.to_owned()
-        };
-        declared_names.insert(provider_name.clone());
-        if kind != Some("function") {
-            continue;
-        }
-        let client_name =
-            provider_compat_core::namespace_tools::normalize_client_tool_dispatch_name(name);
-        let Some((namespace, name)) = client_name.rsplit_once('.') else {
-            continue;
-        };
-        identities.insert(provider_name, (namespace.to_string(), name.to_string()));
-    }
-    Ok(())
+    Ok(
+        NamespaceToolIdentityRegistry::from_request(request, "openai-responses")?
+            .restore_identities(),
+    )
 }
 
 pub(super) fn normalize_openai_chat_namespace_history_names(
     payload: &mut Value,
 ) -> Result<(), String> {
-    qualify_openai_chat_missing_mcp_tool_call_names(payload);
     rewrite_openai_chat_declared_namespace_history(payload)
 }
 
+/// Target encoding only. All collision bindings are assigned before tools and
+/// references are projected; this final adapter only encodes remaining names.
 pub(super) fn project_openai_chat_namespace_wire_names(
     wire: &mut Value,
     request: &Value,
 ) -> Result<(), String> {
     let aliases = openai_chat_namespace_wire_aliases(request)?;
-    if aliases.is_empty() {
-        return Ok(());
-    }
     let rewrite = |value: Option<&mut Value>| {
         if let Some(value) = value {
             if let Some(alias) = value.as_str().and_then(|name| aliases.get(name)) {
@@ -385,86 +75,93 @@ pub(super) fn project_openai_chat_namespace_wire_names(
 pub(super) fn openai_chat_namespace_wire_aliases(
     request: &Value,
 ) -> Result<HashMap<String, String>, String> {
-    let (identities, names) = responses_mcp_dispatch_names(request)?;
-    Ok(
-        provider_compat_core::namespace_tools::openai_chat_namespace_wire_names(
-            identities.into_keys().collect(),
-            names,
-        ),
-    )
-}
-
-fn is_custom_tool_call(tool_call: &Map<String, Value>) -> bool {
-    tool_call
-        .get("routecodex_chat_extension")
-        .and_then(Value::as_object)
-        .and_then(|extension| extension.get("responses_tool_call_type"))
-        .and_then(Value::as_str)
-        == Some("custom_tool_call")
-}
-
-fn has_responses_item_id(tool_call: &Map<String, Value>) -> bool {
-    tool_call
-        .get("routecodex_chat_extension")
-        .and_then(Value::as_object)
-        .and_then(|extension| extension.get("responses_item_id"))
-        .and_then(Value::as_str)
-        .is_some_and(|value| !value.trim().is_empty())
-}
-
-fn insert_provider_mcp_name(map: &mut HashMap<String, Option<String>>, name: &str) {
-    let Some(leaf) = mcp_tool_leaf_name(name) else {
-        return;
-    };
-    match map.get(leaf) {
-        Some(Some(existing)) if existing != name => {
-            map.insert(leaf.to_string(), None);
-        }
-        None => {
-            map.insert(leaf.to_string(), Some(name.to_string()));
-        }
-        _ => {}
-    }
-}
-
-fn mcp_tool_leaf_name(name: &str) -> Option<&str> {
-    let rest = name.strip_prefix("mcp__")?;
-    let (_, tool) = rest.rsplit_once("__")?;
-    (!tool.is_empty()).then_some(tool)
+    let responses = NamespaceToolIdentityRegistry::from_request(request, "openai-responses")?;
+    let chat = NamespaceToolIdentityRegistry::from_request(request, "openai-chat")?;
+    Ok(responses
+        .identities()
+        .filter_map(|identity| {
+            let wire = chat.wire_name_for_client(
+                identity
+                    .is_namespaced()
+                    .then(|| identity.client_namespace())
+                    .as_deref(),
+                &identity.leaf_name,
+                identity.kind,
+            )?;
+            (identity.actual_wire_name != wire)
+                .then(|| (identity.actual_wire_name.clone(), wire.to_owned()))
+        })
+        .collect())
 }
 
 pub(super) fn restore_responses_mcp_namespace(
     object: &mut Map<String, Value>,
-    declared_identities: &HashMap<String, (String, String)>,
+    identities: &HashMap<String, (String, String)>,
 ) -> bool {
-    if object.get("namespace").is_some() {
+    if object
+        .get("namespace")
+        .is_some_and(|namespace| !namespace.is_null())
+    {
         return false;
     }
     let Some(name) = object.get("name").and_then(Value::as_str) else {
         return false;
     };
-    let Some((namespace, tool)) = declared_identities.get(name) else {
+    let Some((namespace, leaf)) = identities.get(name) else {
         return false;
     };
-    object.insert("namespace".to_owned(), Value::String(namespace.clone()));
-    object.insert("name".to_owned(), Value::String(tool.clone()));
+    if namespace.is_empty() {
+        object.remove("namespace");
+    } else {
+        object.insert("namespace".into(), Value::String(namespace.clone()));
+    }
+    object.insert("name".into(), Value::String(leaf.clone()));
     true
 }
 
 pub(super) fn restore_responses_mcp_tool_identities(
     response: &mut Value,
-    declared_identities: &HashMap<String, (String, String)>,
+    identities: &HashMap<String, (String, String)>,
 ) {
-    let Some(items) = response.get_mut("output").and_then(Value::as_array_mut) else {
-        return;
-    };
-    for item in items {
-        if item.get("type").and_then(Value::as_str) != Some("function_call") {
-            continue;
+    for item in response
+        .get_mut("output")
+        .and_then(Value::as_array_mut)
+        .into_iter()
+        .flatten()
+    {
+        restore_responses_mcp_tool_identity_item(item, identities);
+    }
+}
+
+pub(super) fn restore_responses_mcp_tool_identity_item(
+    item: &mut Value,
+    identities: &HashMap<String, (String, String)>,
+) {
+    if matches!(
+        item.get("type").and_then(Value::as_str),
+        Some("function_call" | "custom_tool_call")
+    ) {
+        if let Some(object) = item.as_object_mut() {
+            restore_responses_mcp_namespace(object, identities);
         }
-        let Some(object) = item.as_object_mut() else {
-            continue;
-        };
-        restore_responses_mcp_namespace(object, declared_identities);
+    }
+}
+
+pub(crate) fn restore_v3_responses_namespace_in_value(
+    value: &mut Value,
+    identities: &HashMap<String, (String, String)>,
+) {
+    match value.get("type").and_then(Value::as_str) {
+        Some("response.output_item.added" | "response.output_item.done") => {
+            if let Some(item) = value.get_mut("item") {
+                restore_responses_mcp_tool_identity_item(item, identities);
+            }
+        }
+        Some("response.completed" | "response.done" | "response.incomplete") => {
+            if let Some(response) = value.get_mut("response") {
+                restore_responses_mcp_tool_identities(response, identities);
+            }
+        }
+        _ => restore_responses_mcp_tool_identities(value, identities),
     }
 }
