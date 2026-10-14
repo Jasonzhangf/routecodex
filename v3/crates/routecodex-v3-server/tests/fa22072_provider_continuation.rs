@@ -42,6 +42,8 @@ use tokio::time::timeout;
 
 #[path = "../../../crates/routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
 mod hub_v1_fixture;
+#[path = "fa22072_provider_continuation/local_buffer_failure.rs"]
+mod local_buffer_failure;
 #[path = "support/fa22072_test_home.rs"]
 mod test_home;
 #[path = "../../../crates/routecodex-v3-runtime/tests/support/test_ports.rs"]

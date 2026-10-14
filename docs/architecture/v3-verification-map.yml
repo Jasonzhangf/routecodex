@@ -3126,6 +3126,7 @@ features:
   - Terminal Relay failure enqueues verbatim request and Error chain evidence through the declared side-channel edge, and the shared sample worker persists it.
   - One Chat client request retains its connection across failed Provider A and genuine Provider B completion in JSON and SSE, while the private artifact retains the exact original typed cause and actual upstream status.
   - Diagnostic filesystem failure remains request/file-qualified in the failure ledger while the same client request completes from B without extra attempts.
+  - A generic Relay runtime error after an earlier Provider failure preserves that original ordered attempt source and the distinct later terminal source; a controlled SSE frame-limit failure has healthy before/after controls and never fabricates client completion.
   - Worker filesystem failures for error evidence are logged immediately and retained as request/file-qualified barrier errors.
   required_negative:
   - Clean successes without a failed attempt or terminal source do not force failure evidence persistence.

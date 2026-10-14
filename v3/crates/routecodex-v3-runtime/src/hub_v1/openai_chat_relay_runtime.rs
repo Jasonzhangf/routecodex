@@ -101,6 +101,11 @@ impl std::fmt::Debug for V3OpenAiChatRelayRuntimeOutput {
 }
 #[derive(Debug, thiserror::Error)]
 pub enum V3OpenAiChatRelayRuntimeError {
+    #[error("{source}")]
+    WithProviderFailureEvidence {
+        source: Box<V3OpenAiChatRelayRuntimeError>,
+        attempts: Vec<V3RuntimeProviderFailureObservation>,
+    },
     #[error(transparent)]
     Request(#[from] V3HubRelayRequestError),
     #[error(transparent)]
@@ -253,6 +258,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
     let routing_group = server_routing_group(manifest, &input.server_id)
         .map_err(|error| V3OpenAiChatRelayRuntimeError::Target(error.to_string()))?
         .to_string();
+    let mut failure_events = Vec::new();
     execute_v3_relay_runtime_core::<V3OpenAiChatRelayCodec, T>(
         manifest,
         &input.server_id,
@@ -268,29 +274,48 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
         true,
         request_execution_control,
         route_policy_pending,
+        &mut failure_events,
     )
     .await
-    .map_err(|error| match error {
-        // 治理层拦截（Mode B web-search）必须保留原变体：fail-fast 投影语义
-        // 由 server 端 `project_v3_openai_chat_relay_runtime_failure` 区分。
-        V3RelayCoreError::WebSearchIntercepted(_) => {
-            V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected
+    .map_err(|error| {
+        let source = match error {
+            // 治理层拦截（Mode B web-search）必须保留原变体：fail-fast 投影语义
+            // 由 server 端 `project_v3_openai_chat_relay_runtime_failure` 区分。
+            V3RelayCoreError::WebSearchIntercepted(_) => {
+                V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected
+            }
+            V3RelayCoreError::ProviderPoolExhausted {
+                attempted_candidates,
+            } => V3OpenAiChatRelayRuntimeError::ProviderPoolExhausted {
+                attempted_candidates,
+            },
+            // 直接取内部消息，不叠加 V3RelayCoreError 的 Display 前缀（与原实现消息一致）。
+            V3RelayCoreError::Target(message)
+            | V3RelayCoreError::StaticRegistry(message)
+            | V3RelayCoreError::EndpointPath(message) => {
+                V3OpenAiChatRelayRuntimeError::Target(message)
+            }
+        };
+        if failure_events.is_empty() {
+            source
+        } else {
+            V3OpenAiChatRelayRuntimeError::WithProviderFailureEvidence {
+                source: Box::new(source),
+                attempts: failure_events,
+            }
         }
-        V3RelayCoreError::ProviderPoolExhausted {
-            attempted_candidates,
-        } => V3OpenAiChatRelayRuntimeError::ProviderPoolExhausted {
-            attempted_candidates,
-        },
-        // 直接取内部消息，不叠加 V3RelayCoreError 的 Display 前缀（与原实现消息一致）。
-        V3RelayCoreError::Target(message)
-        | V3RelayCoreError::StaticRegistry(message)
-        | V3RelayCoreError::EndpointPath(message) => V3OpenAiChatRelayRuntimeError::Target(message),
     })
 }
 
 pub fn project_v3_openai_chat_relay_runtime_failure(
     error: V3OpenAiChatRelayRuntimeError,
 ) -> V3OpenAiChatRelayRuntimeOutput {
+    let (error, attempts) = match error {
+        V3OpenAiChatRelayRuntimeError::WithProviderFailureEvidence { source, attempts } => {
+            (*source, attempts)
+        }
+        error => (error, Vec::new()),
+    };
     let request_payload_invalid = matches!(
         &error,
         V3OpenAiChatRelayRuntimeError::ProviderCompat(error)
@@ -334,6 +359,7 @@ pub fn project_v3_openai_chat_relay_runtime_failure(
         "none",
         Vec::new(),
     );
+    output.provider_failure_attempts = attempts;
     if provider_pool_exhausted {
         output.terminal_disposition =
             Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse);

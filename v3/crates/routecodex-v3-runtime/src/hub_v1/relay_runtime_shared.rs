@@ -37,7 +37,38 @@ use routecodex_v3_sse::{
 };
 use routecodex_v3_target::V3Target10ConcreteProviderSelected;
 use serde_json::{json, Value};
+use std::fmt;
 use std::pin::Pin;
+
+/// 骨架内部错误（协议入口负责映射到自身错误类型）。
+#[derive(Debug, Clone, PartialEq)]
+pub enum V3RelayCoreError {
+    StaticRegistry(String),
+    EndpointPath(String),
+    Target(String),
+    ProviderPoolExhausted {
+        attempted_candidates: Vec<String>,
+    },
+    /// 治理层拦截但入口无投影路径（如 openai_chat 入口遇 Mode B web-search 剥离）：
+    /// 非 provider 失败，禁止进入失败重试链，骨架 fail-fast 返回。
+    WebSearchIntercepted(String),
+}
+
+impl fmt::Display for V3RelayCoreError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            V3RelayCoreError::StaticRegistry(message) => write!(f, "static registry: {message}"),
+            V3RelayCoreError::EndpointPath(message) => write!(f, "endpoint path: {message}"),
+            V3RelayCoreError::Target(message) => write!(f, "target: {message}"),
+            V3RelayCoreError::ProviderPoolExhausted {
+                attempted_candidates,
+            } => write!(f, "provider pool exhausted after {attempted_candidates:?}"),
+            V3RelayCoreError::WebSearchIntercepted(message) => {
+                write!(f, "web search intercepted unprojected: {message}")
+            }
+        }
+    }
+}
 
 /// Provider attempt timeout, with the published default of five minutes.
 pub(crate) fn v3_relay_transport_response_timeout_from_ms(
@@ -69,6 +100,18 @@ mod response_header_timeout_contract_tests {
             std::time::Duration::from_millis(300_000)
         );
     }
+}
+
+pub(crate) fn v3_relay_transport_response_timeout(
+    manifest: &V3Config05ManifestPublished,
+    provider_id: &str,
+) -> std::time::Duration {
+    v3_relay_transport_response_timeout_from_ms(
+        manifest
+            .providers
+            .get(provider_id)
+            .map(|p| p.request_timeout_ms),
+    )
 }
 
 /// The published SSE timeout covers both first frame and inter-frame idle time.
