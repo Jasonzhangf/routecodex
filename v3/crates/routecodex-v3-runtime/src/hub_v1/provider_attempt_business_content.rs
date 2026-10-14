@@ -90,26 +90,14 @@ pub(crate) fn v3_provider_attempt_has_deliverable_business_content(
 /// `inlineData`, `executableCode`, `codeExecutionResult`). Explicit provider
 /// filtering is also a business result; usage alone is not.
 pub(crate) fn v3_gemini_prompt_feedback_is_terminal(response: &Value) -> bool {
-    has_non_empty_string(response.pointer("/promptFeedback/blockReason"))
+    super::gemini_terminal_semantics::prompt_block_reason(response).is_some()
 }
 
 /// The declared Gemini `finishReason` values that mean the provider filtered
-/// the candidate. This is the single owner of the filter-reason set, shared by
-/// the business-content judgment and the response codec.
+/// the candidate. The terminal interpreter owns the filter-reason set, shared
+/// by the business-content judgment and the response codec.
 pub(crate) fn v3_gemini_candidate_finish_reason_is_filter(finish_reason: Option<&str>) -> bool {
-    matches!(
-        finish_reason,
-        Some(
-            "SAFETY"
-                | "RECITATION"
-                | "BLOCKLIST"
-                | "PROHIBITED_CONTENT"
-                | "SPII"
-                | "IMAGE_SAFETY"
-                | "IMAGE_PROHIBITED_CONTENT"
-                | "MODEL_ARMOR"
-        )
-    )
+    super::gemini_terminal_semantics::candidate_finish_reason_is_filter(finish_reason)
 }
 
 pub(crate) fn v3_gemini_attempt_has_deliverable_business_content(response: &Value) -> bool {
@@ -120,7 +108,7 @@ pub(crate) fn v3_gemini_attempt_has_deliverable_business_content(response: &Valu
         return false;
     };
     candidates.iter().any(|candidate| {
-        v3_gemini_candidate_finish_reason_is_filter(
+        super::gemini_terminal_semantics::candidate_finish_reason_has_business_outcome(
             candidate.get("finishReason").and_then(Value::as_str),
         ) || candidate
             .get("content")
@@ -148,6 +136,28 @@ fn v3_gemini_part_has_deliverable_content(part: &Value) -> bool {
             .get("codeExecutionResult")
             .and_then(Value::as_object)
             .is_some_and(|result| !result.is_empty())
+        || part.as_object().is_some_and(|row| {
+            row.iter().any(|(key, value)| {
+                !matches!(
+                    key.as_str(),
+                    "text"
+                        | "functionCall"
+                        | "inlineData"
+                        | "executableCode"
+                        | "codeExecutionResult"
+                ) && opaque_gemini_value_has_content(value)
+            })
+        })
+}
+
+fn opaque_gemini_value_has_content(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::String(text) => !text.is_empty(),
+        Value::Array(values) => values.iter().any(opaque_gemini_value_has_content),
+        Value::Object(row) => row.values().any(opaque_gemini_value_has_content),
+        Value::Bool(_) | Value::Number(_) => true,
+    }
 }
 
 /// Typed internal 502 for a complete provider attempt with no deliverable

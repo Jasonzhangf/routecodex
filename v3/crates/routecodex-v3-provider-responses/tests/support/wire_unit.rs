@@ -223,8 +223,8 @@ mod tests {
         let mut routed = target();
         routed.canonical_model_id = "gpt-5.5".into();
         routed.compatibility_profile = Some("responses:deepseek-official".into());
-        let wire =
-            build_v3_provider_12_responses_wire_payload("req-official-routed", routed, body).unwrap();
+        let wire = build_v3_provider_12_responses_wire_payload("req-official-routed", routed, body)
+            .unwrap();
         assert_eq!(
             wire.body()["input"][0]["content"],
             json!([{"type": "reasoning_text", "text": "run ls"}]),
@@ -305,7 +305,8 @@ mod tests {
             ]
         });
         let wire =
-            build_v3_provider_12_responses_wire_payload("req-narrow-cleanup", target(), body).unwrap();
+            build_v3_provider_12_responses_wire_payload("req-narrow-cleanup", target(), body)
+                .unwrap();
         assert!(
             wire.body()["input"][0]["content"].is_null(),
             "non-official targets must not gain a synthesized reasoning_text: {}",
@@ -425,7 +426,10 @@ mod tests {
     }
 
     #[test]
-    fn wire_maps_historical_namespace_tool_use_name_in_anthropic_messages() {
+    fn wire_preserves_undeclared_anthropic_dotted_tool_use_name() {
+        // An undeclared dotted history name is not a declared namespace
+        // identity, so the wire forwards it verbatim instead of guessing a
+        // flattened provider name from a string convention.
         let mut anthropic_target = target();
         anthropic_target.provider_type = "anthropic".into();
         let body = json!({
@@ -439,10 +443,10 @@ mod tests {
             anthropic_target,
             body,
         )
-        .expect("Anthropic tool-use history names must be normalized before provider transport");
+        .expect("undeclared Anthropic tool-use history name must be forwarded verbatim");
         assert_eq!(
             wire.body()["messages"][0]["content"][0]["name"],
-            "mcp__codex_review__review_start"
+            "mcp__codex_review.review_start"
         );
     }
 
@@ -480,7 +484,10 @@ mod tests {
     }
 
     #[test]
-    fn wire_maps_legacy_functions_mcp_names_before_provider_validation() {
+    fn wire_preserves_undeclared_legacy_prefixed_history_names() {
+        // `functions.`-prefixed and dotted history names with no matching
+        // declaration keep their exact spelling; the wire no longer guesses a
+        // canonical MCP name from a legacy string prefix.
         let mut anthropic_target = target();
         anthropic_target.provider_type = "anthropic".into();
         let body = json!({
@@ -495,14 +502,14 @@ mod tests {
             anthropic_target,
             body,
         )
-        .expect("legacy MCP names must be normalized before provider wire validation");
+        .expect("undeclared legacy history names must be forwarded verbatim");
         assert_eq!(
             wire.body()["messages"][0]["content"][0]["name"],
-            "mcp__codex_review__review_start"
+            "functions.mcp__codex_review.review_start"
         );
         assert_eq!(
             wire.body()["input"][0]["name"],
-            "mcp__codex_review__review_start"
+            "functions.mcp__codex_review__review_start"
         );
     }
 
@@ -565,12 +572,15 @@ mod tests {
         assert_eq!(
             tools[1],
             json!({
-                "type": "function", "name": "mcp__node_repl__js", "description": "run js",
+                "type": "function", "name": "mcp__node_repl__mcp__node_repl__js", "description": "run js",
                 "parameters": {"type": "object", "properties": {}}, "strict": false
             })
         );
         assert_eq!(tools[2]["type"], json!("function"));
-        assert_eq!(tools[2]["name"], json!("mcp__node_repl__npm"));
+        assert_eq!(
+            tools[2]["name"],
+            json!("mcp__node_repl__mcp__node_repl__npm")
+        );
         assert!(
             tools.iter().all(|tool| tool["type"] != json!("namespace")),
             "no namespace container may cross provider wire payload: {tools:?}"
@@ -706,18 +716,16 @@ mod tests {
     }
 
     #[test]
-    fn wire_namespace_tool_empty_children_fails_explicitly() {
+    fn wire_namespace_tool_empty_children_has_no_callable_binding() {
         let body = json!({
             "model": "upstream-model", "input": "hello", "tools": [
                 {"type": "namespace", "name": "mcp__node_repl", "tools": []}
             ]
         });
-        let error = build_v3_provider_12_responses_wire_payload("req-empty-ns", target(), body)
-            .expect_err("empty namespace container must fail explicitly, not reach provider");
-        assert!(matches!(
-            error,
-            V3ProviderError::NamespaceToolFlattenFailed { request_id, .. } if request_id == "req-empty-ns"
-        ));
+        let wire = build_v3_provider_12_responses_wire_payload("req-empty-ns", target(), body)
+            .expect("empty namespace grants no callable identity");
+        assert_eq!(wire.body()["tools"], json!([]));
+        assert!(wire.namespace_identities().is_empty());
     }
 
     #[test]
@@ -800,7 +808,10 @@ mod tests {
     }
 
     #[test]
-    fn wire_maps_namespace_qualified_openai_chat_tool_call_names_by_convention() {
+    fn wire_preserves_undeclared_openai_chat_dotted_tool_call_name() {
+        // Without a matching namespace declaration the dotted call name is not
+        // a known client identity, so it is forwarded verbatim rather than
+        // rewritten by a name-shape convention.
         let mut chat_target = target();
         chat_target.provider_type = "openai_chat".into();
         let body = json!({
@@ -817,15 +828,15 @@ mod tests {
             chat_target,
             body,
         )
-        .expect("convention namespace call names must be mapped before provider transport");
+        .expect("undeclared Chat dotted call name must be forwarded verbatim");
         assert_eq!(
             wire.body()["messages"][0]["tool_calls"][0]["function"]["name"],
-            "mcp__node_repl__js"
+            "mcp__node_repl.js"
         );
     }
 
     #[test]
-    fn wire_maps_multi_agent_tool_names_in_chat_history_before_provider_validation() {
+    fn wire_preserves_undeclared_multi_agent_history_names() {
         let mut chat_target = target();
         chat_target.provider_type = "openai_chat".into();
         let body = json!({
@@ -852,14 +863,14 @@ mod tests {
             chat_target,
             body,
         )
-        .expect("multi-agent history names must be normalized before provider validation");
+        .expect("undeclared multi-agent history names must be forwarded verbatim");
         assert_eq!(
             wire.body()["messages"][0]["content"][0]["name"],
-            "multi_agent_v1__spawn_agent"
+            "multi_agent_v1.spawn_agent"
         );
         assert_eq!(
             wire.body()["messages"][0]["tool_calls"][0]["function"]["name"],
-            "multi_agent_v1__spawn_agent"
+            "multi_agent_v1.spawn_agent"
         );
     }
 
@@ -892,7 +903,7 @@ mod tests {
     }
 
     #[test]
-    fn wire_maps_historical_namespace_call_without_current_tools() {
+    fn wire_preserves_undeclared_dotted_call_without_current_tools() {
         let body = json!({
             "model": "upstream-model",
             "input": [{"type": "function_call", "name": "mcp__codex_review.review_start"}]
@@ -902,15 +913,15 @@ mod tests {
             target(),
             body,
         )
-        .expect("known historical MCP namespace call must be normalized");
+        .expect("undeclared historical dotted call must be forwarded verbatim");
         assert_eq!(
             wire.body()["input"][0]["name"],
-            "mcp__codex_review__review_start"
+            "mcp__codex_review.review_start"
         );
     }
 
     #[test]
-    fn wire_maps_historical_namespace_call_with_empty_current_tools() {
+    fn wire_preserves_undeclared_dotted_call_with_empty_current_tools() {
         let body = json!({
             "model": "upstream-model",
             "tools": [],
@@ -921,15 +932,15 @@ mod tests {
             target(),
             body,
         )
-        .expect("known historical MCP namespace call must be normalized");
+        .expect("undeclared historical dotted call must be forwarded verbatim");
         assert_eq!(
             wire.body()["input"][0]["name"],
-            "mcp__codex_review__review_start"
+            "mcp__codex_review.review_start"
         );
     }
 
     #[test]
-    fn wire_maps_historical_namespace_tool_use_name_in_input() {
+    fn wire_preserves_undeclared_dotted_tool_use_name_in_input() {
         let body = json!({
             "model": "upstream-model",
             "input": [{"type": "tool_use", "name": "mcp__codex_review.review_start"}]
@@ -939,15 +950,15 @@ mod tests {
             target(),
             body,
         )
-        .expect("historical MCP tool_use names must be normalized");
+        .expect("undeclared historical tool_use name must be forwarded verbatim");
         assert_eq!(
             wire.body()["input"][0]["name"],
-            "mcp__codex_review__review_start"
+            "mcp__codex_review.review_start"
         );
     }
 
     #[test]
-    fn wire_maps_historical_namespace_call_with_empty_current_tools_for_openai_chat() {
+    fn wire_preserves_undeclared_dotted_call_with_empty_current_tools_for_openai_chat() {
         let body = json!({
             "model": "upstream-model",
             "tools": [],
@@ -964,16 +975,16 @@ mod tests {
             chat_target,
             body,
         )
-        .expect("known historical MCP namespace call must be normalized");
+        .expect("undeclared historical dotted call must be forwarded verbatim");
 
         assert_eq!(
             wire.body()["input"][0]["name"],
-            "mcp__codex_review__review_start"
+            "mcp__codex_review.review_start"
         );
     }
 
     #[test]
-    fn wire_maps_historical_codex_namespace_call_for_both_provider_shapes() {
+    fn wire_preserves_undeclared_codex_dotted_calls_for_both_provider_shapes() {
         for provider_type in ["responses", "openai_chat"] {
             let mut provider = target();
             provider.provider_type = provider_type.into();
@@ -992,16 +1003,16 @@ mod tests {
                 provider,
                 body,
             )
-            .expect("historical Codex namespace calls must project to legal provider names");
-            assert_eq!(wire.body()["input"][0]["name"], "functions__exec");
-            assert_eq!(wire.body()["input"][1]["name"], "functions__exec");
+            .expect("undeclared historical Codex dotted calls must be forwarded verbatim");
+            assert_eq!(wire.body()["input"][0]["name"], "functions.exec");
+            assert_eq!(wire.body()["input"][1]["name"], "functions.exec");
             assert_eq!(
                 wire.body()["messages"][0]["content"][0]["name"],
-                "functions__exec"
+                "functions.exec"
             );
             assert_eq!(
                 wire.body()["messages"][0]["tool_calls"][0]["function"]["name"],
-                "functions__exec"
+                "functions.exec"
             );
         }
     }
@@ -1061,7 +1072,10 @@ mod tests {
     }
 
     #[test]
-    fn wire_maps_historical_namespace_call_when_namespace_declaration_is_incomplete() {
+    fn wire_preserves_dotted_call_not_covered_by_incomplete_namespace_declaration() {
+        // The declaration only contains `other`; `review_start` is not a
+        // declared child, so the call name is forwarded verbatim instead of
+        // being guessed from the namespace prefix.
         let body = json!({
             "model": "upstream-model",
             "tools": [{"type": "namespace", "name": "mcp__codex_review", "tools": [
@@ -1074,10 +1088,10 @@ mod tests {
             target(),
             body,
         )
-        .expect("incomplete namespace declarations still require convention mapping");
+        .expect("undeclared call name must be forwarded verbatim");
         assert_eq!(
             wire.body()["input"][0]["name"],
-            "mcp__codex_review__review_start"
+            "mcp__codex_review.review_start"
         );
     }
 
@@ -1114,9 +1128,9 @@ mod tests {
         assert_eq!(
             tools[1],
             json!({
-                "type": "function", "name": "mcp__node_repl__js",
+                "type": "function", "name": "mcp__node_repl__mcp__node_repl__js",
                 "function": {
-                    "name": "mcp__node_repl__js", "description": "run js",
+                    "name": "mcp__node_repl__mcp__node_repl__js", "description": "run js",
                     "parameters": {"type": "object", "properties": {}}, "strict": false
                 }
             }),
@@ -1124,8 +1138,14 @@ mod tests {
             tools[1]
         );
         assert_eq!(tools[2]["type"], json!("function"));
-        assert_eq!(tools[2]["name"], json!("mcp__node_repl__npm"));
-        assert_eq!(tools[2]["function"]["name"], json!("mcp__node_repl__npm"));
+        assert_eq!(
+            tools[2]["name"],
+            json!("mcp__node_repl__mcp__node_repl__npm")
+        );
+        assert_eq!(
+            tools[2]["function"]["name"],
+            json!("mcp__node_repl__mcp__node_repl__npm")
+        );
         assert!(
             tools.iter().all(|tool| tool["type"] != json!("namespace")),
             "no namespace container may cross provider wire payload: {tools:?}"

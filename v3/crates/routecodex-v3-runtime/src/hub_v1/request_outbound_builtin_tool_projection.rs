@@ -108,6 +108,18 @@ pub(super) fn promote_tool_search_output_tools_to_provider_tools(
     if discovered.is_empty() {
         return Ok(());
     }
+    let registry =
+        provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::from_request(
+            payload,
+            "openai-responses",
+        )?;
+    let source_tools = registry.source_tools(
+        payload
+            .get("tools")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default(),
+    );
     let top_level = payload.as_object_mut().ok_or_else(|| {
         "MalformedOutboundField target_protocol=provider path=$: expected object".to_string()
     })?;
@@ -117,11 +129,54 @@ pub(super) fn promote_tool_search_output_tools_to_provider_tools(
     let tools = tools.as_array_mut().ok_or_else(|| {
         "MalformedOutboundField target_protocol=provider path=$.tools: expected array".to_string()
     })?;
-    for tool in discovered {
-        if !tools.iter().any(|existing| existing == &tool) {
-            tools.push(tool);
-        }
+    *tools = source_tools;
+    Ok(())
+}
+
+/// Merge the current request's `input[].additional_tools.tools` into the
+/// provider-visible `tools` declaration set. The original `additional_tools`
+/// input surface is preserved; this only makes the same client capability
+/// declarations reachable on the provider wire, with the existing
+/// `additional_tools` schema-refresh precedence (a later declaration for the
+/// same tool identity supersedes the earlier one).
+pub(super) fn promote_additional_tools_to_provider_tools(
+    payload: &mut Value,
+) -> Result<(), String> {
+    let additional: Vec<Value> = payload
+        .get("input")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("additional_tools"))
+        .filter_map(|item| item.get("tools").and_then(Value::as_array))
+        .flatten()
+        .cloned()
+        .collect();
+    if additional.is_empty() {
+        return Ok(());
     }
+    let registry =
+        provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::from_request(
+            payload,
+            "openai-responses",
+        )?;
+    let source_tools = registry.source_tools(
+        payload
+            .get("tools")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default(),
+    );
+    let top_level = payload.as_object_mut().ok_or_else(|| {
+        "MalformedOutboundField target_protocol=provider path=$: expected object".to_string()
+    })?;
+    let tools = top_level
+        .entry("tools".to_string())
+        .or_insert_with(|| Value::Array(Vec::new()));
+    let tools = tools.as_array_mut().ok_or_else(|| {
+        "MalformedOutboundField target_protocol=provider path=$.tools: expected array".to_string()
+    })?;
+    *tools = source_tools;
     Ok(())
 }
 
@@ -211,6 +266,33 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode_recording(
     drops: &mut Vec<V3ProjectionDropRecord>,
 ) -> Result<(), String> {
     let refreshed_provider_tool_names = validate_namespace_tool_dispatch_names(payload)?;
+    let registry =
+        provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::from_request(
+            payload,
+            "openai-chat",
+        )?;
+    registry.project_references(payload);
+    if let Some(choice) = payload
+        .get_mut("tool_choice")
+        .and_then(Value::as_object_mut)
+    {
+        if choice.get("type").and_then(Value::as_str) == Some("custom")
+            && choice
+                .get("name")
+                .and_then(Value::as_str)
+                .is_some_and(|name| {
+                    registry.identities().any(|identity| {
+                        identity.kind == provider_compat_core::namespace_tools::ToolKind::Custom
+                            && identity.actual_wire_name == name
+                    })
+                })
+        {
+            choice.insert("type".into(), Value::String("function".into()));
+        }
+    }
+    if let Some(tools) = payload.get("tools").and_then(Value::as_array) {
+        payload["tools"] = Value::Array(registry.project_tools("openai-responses", tools)?);
+    }
     let Some(root) = payload.as_object_mut() else {
         return Ok(());
     };

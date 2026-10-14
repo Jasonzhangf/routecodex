@@ -539,6 +539,27 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
     let profile = crate::hub_v1::V3ProviderCompatProfileId::from_config(
         candidate.compatibility_profile.as_deref(),
     );
+    let namespace_registry =
+        provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::from_request(
+            &request_body,
+            &crate::hub_v1::provider_protocol_compat_id(provider_protocol),
+        )
+        .and_then(|registry| {
+            registry.project_request(
+                &mut request_body,
+                &crate::hub_v1::provider_protocol_compat_id(provider_protocol),
+            )?;
+            Ok(registry)
+        })
+        .map_err(|error| {
+            build_v3_error_01_source_raised_internal(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3ResponsesDirect11Policy",
+                "namespace_projection_failed",
+                error,
+                V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+            )
+        })?;
     let (compat_body, custom_tool_function_binding) =
         crate::hub_v1::apply_v3_provider_req_compat_to_provider_payload(
             request_body,
@@ -574,7 +595,7 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
             V3InternalErrorCode::V3Provider12ResponsesWirePayload,
         )
     })?;
-    build_v3_provider_12_responses_wire_payload(
+    routecodex_v3_provider_responses::wire::build_v3_provider_12_responses_wire_payload_with_registry(
         policy.request_id.clone(),
         V3ResponsesProviderTarget {
             provider_id: candidate.provider_id.clone(),
@@ -598,6 +619,7 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
             concurrency_acquire_timeout_ms: candidate.concurrency_acquire_timeout_ms,
         },
         request_body,
+        namespace_registry,
     )
     .map(|wire| wire.with_custom_tool_function_binding(custom_tool_function_binding))
     .map_err(provider_error_source("V3Provider12ResponsesWirePayload"))
@@ -654,6 +676,12 @@ pub(crate) fn responses_direct_response_projection_hook_with_context(
             context.toolreason_observation_session_id.as_deref(),
         )
         .await?;
+        if let V3ProviderAttemptBody::Json(payload) = &mut projection.attempt_payload.body {
+            crate::hub_v1::restore_v3_responses_namespace_identities(
+                payload,
+                &context.namespace_tool_identities,
+            );
+        }
         if context.tool_thinking_enabled {
             if let V3ProviderAttemptBody::Json(payload) = &mut projection.attempt_payload.body {
                 crate::hub_v1::map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_and_context(

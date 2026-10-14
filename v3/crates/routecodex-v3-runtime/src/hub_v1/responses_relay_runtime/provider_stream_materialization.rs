@@ -1,5 +1,8 @@
 use super::*;
 use crate::hub_v1::anthropic_sse_tree::{V3AnthropicSseReducerState, V3AnthropicSseTreeError};
+use crate::hub_v1::gemini_terminal_semantics::{
+    candidate_finish_reason, interpret_gemini_terminal,
+};
 use crate::hub_v1::relay_sse_hooks::V3RelaySseHookCatalog;
 
 pub(super) async fn build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
@@ -124,16 +127,11 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for
     let replayed = merge_first_chunk_back_into_provider_stream(first_chunk, provider);
     let response = match provider_protocol {
         V3HubProviderWireProtocol::Responses => {
-            let mut response = build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
+            build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
                 replayed,
                 observation,
             )
-            .await?;
-            super::super::request_outbound_mcp_names::restore_responses_mcp_tool_identities(
-                &mut response,
-                anthropic_context.mcp_tool_identities(),
-            );
-            response
+            .await?
         }
         V3HubProviderWireProtocol::OpenAiChat => {
             build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
@@ -150,10 +148,8 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for
             )
             .await?
         }
-        other => {
-            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-                format!("Responses relay cannot decode provider stream protocol {other:?}"),
-            ))
+        V3HubProviderWireProtocol::Gemini => {
+            materialize_gemini_provider_events(replayed, observation).await?
         }
     };
     // Complete-attempt success acceptance: a fully materialized attempt that
@@ -168,6 +164,128 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for
             provider_protocol,
         ));
     }
+    Ok(response)
+}
+
+async fn materialize_gemini_provider_events(
+    mut provider: routecodex_v3_provider_responses::V3ProviderSseStream,
+    observation: &V3RuntimeStreamObservation,
+) -> Result<Value, V3ResponsesRelayRuntimeError> {
+    use futures_util::StreamExt;
+    let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+    let mut response = Value::Object(serde_json::Map::new());
+    // A Gemini attempt may stream several candidates. Each candidate index
+    // keeps its own terminal, so a terminal for one candidate can never
+    // truncate later candidate content, usage or an error frame.
+    while let Some(chunk) = provider.next().await {
+        let frames = decoder
+            .push(build_v3_sse_transport_in_01_raw_chunk(&chunk?))
+            .map_err(|error| {
+                V3ResponsesRelayRuntimeError::ProviderSseTransport(error.to_string())
+            })?;
+        for frame in frames {
+            let Some(data) = parse_v3_runtime_sse_frame_fields(&frame)? else {
+                continue;
+            };
+            let event: Value = serde_json::from_str(&data).map_err(|error| {
+                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
+            })?;
+            if let Some(error) = extract_v3_provider_event_error(&event) {
+                return Err(error);
+            }
+            observation
+                .record_provider_event_json(&event)
+                .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
+            let event_row = event.as_object().ok_or_else(|| {
+                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                    "Gemini event must be an object".into(),
+                )
+            })?;
+            for (key, value) in event_row {
+                if key != "candidates" {
+                    response[key] = value.clone();
+                }
+            }
+            let Some(candidates) = event.get("candidates").and_then(Value::as_array) else {
+                continue;
+            };
+            if response
+                .get("candidates")
+                .and_then(Value::as_array)
+                .is_none()
+            {
+                response["candidates"] = Value::Array(Vec::new());
+            }
+            for (ordinal, candidate) in candidates.iter().enumerate() {
+                let index = candidate
+                    .get("index")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(ordinal as u64);
+                let accumulated = response["candidates"].as_array_mut().unwrap();
+                let position = accumulated.iter().enumerate().find_map(|(ordinal, row)| {
+                    (row.get("index")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(ordinal as u64)
+                        == index)
+                        .then_some(ordinal)
+                });
+                if let Some(position) = position {
+                    let current = &mut accumulated[position];
+                    let has_parts = current.pointer("/content/parts").is_some()
+                        || candidate.pointer("/content/parts").is_some();
+                    let mut parts = current
+                        .pointer("/content/parts")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default();
+                    parts.extend(
+                        candidate
+                            .pointer("/content/parts")
+                            .and_then(Value::as_array)
+                            .into_iter()
+                            .flatten()
+                            .cloned(),
+                    );
+                    for (key, value) in candidate.as_object().ok_or_else(|| {
+                        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                            "Gemini candidate must be an object".into(),
+                        )
+                    })? {
+                        // A later nonterminal tail field cannot erase this
+                        // candidate's already observed genuine business reason.
+                        if key == "finishReason"
+                            && candidate_finish_reason(current).is_some()
+                            && candidate_finish_reason(candidate).is_none()
+                        {
+                            continue;
+                        }
+                        if key == "content"
+                            && current.get("content").is_some_and(Value::is_object)
+                            && value.is_object()
+                        {
+                            for (field, value) in value.as_object().unwrap() {
+                                if field != "parts" {
+                                    current["content"][field] = value.clone();
+                                }
+                            }
+                        } else {
+                            current[key] = value.clone();
+                        }
+                    }
+                    if has_parts {
+                        current["content"]["parts"] = Value::Array(parts);
+                    }
+                } else {
+                    accumulated.push(candidate.clone());
+                }
+            }
+        }
+    }
+    decoder
+        .finish()
+        .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSseTransport(error.to_string()))?;
+    interpret_gemini_terminal(&response)
+        .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
     Ok(response)
 }
 
@@ -561,6 +679,247 @@ pub(super) fn read_v3_trimmed_string(value: Option<&Value>) -> Option<String> {
 mod tests {
     use super::*;
     use futures_util::stream;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn gemini_terminal_buffered_and_json_outcomes_match_despite_nonterminal_tail() {
+        use crate::hub_v1::gemini_responses_codec::project_gemini_response;
+        for (reason, incomplete) in [
+            ("SAFETY", Some("content_filter")),
+            ("MAX_TOKENS", Some("max_output_tokens")),
+            ("FUTURE_TERMINAL", None),
+        ] {
+            for reverse in [false, true] {
+                let original = json!({"index":7,"finishReason":reason,"finishMessage":"original terminal","opaque":{"nested":[true,17]},"content":{"role":"model","opaque_content":{"original":true},"parts":[{"text":"seven"}]}});
+                let stop =
+                    json!({"index":3,"finishReason":"STOP","content":{"parts":[{"text":"three"}]}});
+                let candidates = if reverse {
+                    vec![stop, original.clone()]
+                } else {
+                    vec![original.clone(), stop]
+                };
+                let expected =
+                    project_gemini_response(&json!({"candidates":candidates}), "parity").unwrap();
+                for tail in ["", "FINISH_REASON_UNSPECIFIED"] {
+                    let frames = candidates
+                        .iter()
+                        .map(
+                            |c| Ok(format!("data: {}\n\n", json!({"candidates":[c]})).into_bytes()),
+                        )
+                        .chain([Ok(format!(
+                            "data: {}\n\n",
+                            json!({"candidates":[{"index":7,"finishReason":tail,"content":{"parts":[]}}]})
+                        )
+                        .into_bytes())])
+                        .collect::<Vec<_>>();
+                    let buffered = materialize_gemini_provider_events(
+                        Box::pin(stream::iter(frames)),
+                        &V3RuntimeStreamObservation::default(),
+                    )
+                    .await
+                    .unwrap();
+                    let response = project_gemini_response(&buffered, "parity").unwrap();
+                    assert_eq!(response, expected);
+                    assert_eq!(
+                        response["status"],
+                        if incomplete.is_some() {
+                            "incomplete"
+                        } else {
+                            "completed"
+                        }
+                    );
+                    if let Some(incomplete) = incomplete {
+                        assert_eq!(response["incomplete_details"]["reason"], incomplete);
+                    }
+                    let row = response["gemini_candidate_outcomes"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|r| r["candidate_index"] == 7)
+                        .unwrap();
+                    assert_eq!(row["finishReason"], original["finishReason"]);
+                    assert_eq!(row["finishMessage"], original["finishMessage"]);
+                    assert_eq!(row["opaque"], original["opaque"]);
+                    assert_eq!(row["content"]["role"], "model");
+                    assert_eq!(
+                        row["content"]["opaque_content"],
+                        original["content"]["opaque_content"]
+                    );
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn gemini_terminal_unfinished_candidate_cannot_be_completed_by_defaults_or_feedback() {
+        for reason in [None, Some(""), Some("FINISH_REASON_UNSPECIFIED")] {
+            for feedback in ["", "BLOCK_REASON_UNSPECIFIED", "SAFETY"] {
+                let mut candidate = json!({"index":0,"content":{"parts":[{"text":"unfinished"}]}});
+                if let Some(reason) = reason {
+                    candidate["finishReason"] = json!(reason);
+                }
+                let provider = Box::pin(stream::iter(vec![
+                    Ok(format!("data: {}\n\n", json!({"candidates":[candidate]})).into_bytes()),
+                    Ok(format!(
+                        "data: {}\n\n",
+                        json!({"promptFeedback":{"blockReason":feedback}})
+                    )
+                    .into_bytes()),
+                ]));
+                let result = materialize_gemini_provider_events(
+                    provider,
+                    &V3RuntimeStreamObservation::default(),
+                )
+                .await;
+                assert!(
+                    matches!(
+                        result,
+                        Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(_))
+                    ),
+                    "reason={reason:?} feedback={feedback}: {result:?}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn gemini_materialization_buffers_complete_attempt_and_requires_terminal() {
+        let first = serde_json::json!({"candidates":[{"index":0,"content":{"parts":[{"text":"before tool"}]}}]});
+        let final_frame = serde_json::json!({"candidates":[{"index":0,"content":{"parts":[{"functionCall":{"name":"declared_name","args":{"input":"complete input","extra":[1,2,3]}}}]},"finishReason":"STOP"}],"usageMetadata":{"totalTokenCount":5}});
+        let provider = Box::pin(stream::iter(vec![
+            Ok(format!("data: {first}\n\n").into_bytes()),
+            Ok(format!("data: {final_frame}\n\n").into_bytes()),
+        ]));
+        let response = materialize_v3_provider_sse_as_canonical_response(
+            V3HubProviderWireProtocol::Gemini,
+            provider,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            response["candidates"][0]["content"]["parts"][0]["text"],
+            "before tool"
+        );
+        assert_eq!(
+            response["candidates"][0]["content"]["parts"][1]["functionCall"]["args"]["extra"],
+            serde_json::json!([1, 2, 3])
+        );
+        assert_eq!(response["usageMetadata"]["totalTokenCount"], 5);
+        let provider = Box::pin(stream::iter(vec![Ok(
+            format!("data: {first}\n\n").into_bytes()
+        )]));
+        assert!(
+            matches!(materialize_v3_provider_sse_as_canonical_response(V3HubProviderWireProtocol::Gemini, provider).await,
+            Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(message)) if message.contains("without terminal"))
+        );
+    }
+
+    #[tokio::test]
+    async fn gemini_materialization_preserves_later_candidate_after_first_terminal() {
+        let first = serde_json::json!({"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"candidate zero"}]},"finishReason":"STOP"}]});
+        let second = serde_json::json!({"candidates":[{"index":1,"content":{"role":"model","parts":[{"functionCall":{"name":"declared_name","args":{"left":17,"right":25}}}]}}]});
+        let third = serde_json::json!({"candidates":[{"index":1,"finishReason":"STOP"}],"usageMetadata":{"totalTokenCount":5}});
+        let provider = Box::pin(stream::iter(vec![
+            Ok(format!("data: {first}\n\n").into_bytes()),
+            Ok(format!("data: {second}\n\n").into_bytes()),
+            Ok(format!("data: {third}\n\n").into_bytes()),
+        ]));
+        let response = materialize_v3_provider_sse_as_canonical_response(
+            V3HubProviderWireProtocol::Gemini,
+            provider,
+        )
+        .await
+        .expect("complete buffering must keep reading after the first candidate terminal");
+        assert_eq!(
+            response["candidates"][0]["content"]["parts"][0]["text"],
+            "candidate zero"
+        );
+        assert_eq!(
+            response["candidates"][1]["content"]["parts"][0]["functionCall"]["name"],
+            "declared_name"
+        );
+        assert_eq!(response["usageMetadata"]["totalTokenCount"], 5);
+    }
+
+    #[tokio::test]
+    async fn gemini_materialization_propagates_late_error_after_first_terminal() {
+        let first = serde_json::json!({"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"committed candidate zero"}]},"finishReason":"STOP"}]});
+        let late = serde_json::json!({"error":{"code":"late_provider_error","message":"typed late provider error"}});
+        let provider = Box::pin(stream::iter(vec![
+            Ok(format!("data: {first}\n\n").into_bytes()),
+            Ok(format!("data: {late}\n\n").into_bytes()),
+        ]));
+        let error = materialize_v3_provider_sse_as_canonical_response(
+            V3HubProviderWireProtocol::Gemini,
+            provider,
+        )
+        .await
+        .expect_err("a typed late provider error must not become a committed success");
+        assert!(matches!(
+            error,
+            V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure { ref code, .. }
+                if code == "late_provider_error"
+        ));
+    }
+
+    #[tokio::test]
+    async fn gemini_materialization_propagates_late_transport_error_after_first_terminal() {
+        let first = serde_json::json!({"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"committed candidate zero"}]},"finishReason":"STOP"}]});
+        let provider = Box::pin(stream::iter(vec![
+            Ok(format!("data: {first}\n\n").into_bytes()),
+            Err(
+                routecodex_v3_provider_responses::V3ProviderError::ResponseBody {
+                    request_id: "req-gemini-late-transport".to_owned(),
+                    provider_id: "provider-gemini-late-transport".to_owned(),
+                    reason: "provider read failed after terminal".to_owned(),
+                },
+            ),
+        ]));
+        let error = materialize_v3_provider_sse_as_canonical_response(
+            V3HubProviderWireProtocol::Gemini,
+            provider,
+        )
+        .await
+        .expect_err("a late provider transport error must not become a committed success");
+        assert!(matches!(error, V3ResponsesRelayRuntimeError::Provider(_)));
+    }
+
+    #[tokio::test]
+    async fn gemini_materialization_accepts_prompt_block_without_candidates() {
+        let blocked = serde_json::json!({"promptFeedback":{"blockReason":"SAFETY"}});
+        let provider = Box::pin(stream::iter(vec![Ok(
+            format!("data: {blocked}\n\n").into_bytes()
+        )]));
+        let response = materialize_v3_provider_sse_as_canonical_response(
+            V3HubProviderWireProtocol::Gemini,
+            provider,
+        )
+        .await
+        .expect("a documented prompt-block terminal is a legal business response");
+        assert_eq!(response["promptFeedback"]["blockReason"], "SAFETY");
+        assert!(
+            response.get("candidates").is_none()
+                || response["candidates"]
+                    .as_array()
+                    .is_some_and(|candidates| candidates.is_empty())
+        );
+    }
+
+    #[tokio::test]
+    async fn gemini_materialization_retains_single_candidate_filter_terminal() {
+        let filtered = serde_json::json!({"candidates":[{"index":0,"finishReason":"SAFETY"}],"usageMetadata":{"totalTokenCount":5}});
+        let provider = Box::pin(stream::iter(vec![Ok(
+            format!("data: {filtered}\n\n").into_bytes()
+        )]));
+        let response = materialize_v3_provider_sse_as_canonical_response(
+            V3HubProviderWireProtocol::Gemini,
+            provider,
+        )
+        .await
+        .expect("a provider content-filter terminal is a legal business response");
+        assert_eq!(response["candidates"][0]["finishReason"], "SAFETY");
+        assert_eq!(response["usageMetadata"]["totalTokenCount"], 5);
+    }
 
     struct RewriteChatMaterializationHook {
         notifications: usize,

@@ -73,6 +73,9 @@ pub(crate) struct V3DirectSseContentConsumer {
     pub(crate) request_id: Option<String>,
     pub(crate) expected_model_id: Option<String>,
     pub(crate) client_responses_projection: bool,
+    /// Request-local declared tool identity inverse shared with the Direct JSON
+    /// response owner. Only the Responses provider wire protocol consumes it.
+    pub(crate) namespace_tool_identities: std::collections::HashMap<String, (String, String)>,
     pub(crate) stream_observation: Option<V3RuntimeStreamObservation>,
 }
 
@@ -654,11 +657,20 @@ impl SseObjectConsumer for V3DirectSseContentConsumer {
             self.finalize_toolreason_observation()
                 .map_err(|message| SseObjectError::Consumer { message })?;
         }
-        crate::direct_response_hooks::apply_v3_direct_response_projection_hooks(
-            &mut rewritten,
-            self.strip_client_response_id,
-            self.retain_response_cipher,
-        );
+        if provider_protocol == V3HubProviderWireProtocol::Responses {
+            crate::direct_response_hooks::apply_v3_direct_response_projection_hooks_with_identities(
+                &mut rewritten,
+                self.strip_client_response_id,
+                self.retain_response_cipher,
+                &self.namespace_tool_identities,
+            );
+        } else {
+            crate::direct_response_hooks::apply_v3_direct_response_projection_hooks(
+                &mut rewritten,
+                self.strip_client_response_id,
+                self.retain_response_cipher,
+            );
+        }
         if self.deepseek_console_go {
             rewritten = provider_compat_core::apply_deepseek_console_go_response_compat(rewritten);
         }

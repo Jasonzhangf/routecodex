@@ -35,6 +35,7 @@ fn wrap_direct_sse_provider_event_json_observation_stream(
         None,
         None,
         false,
+        std::collections::HashMap::new(),
     )
 }
 
@@ -56,6 +57,7 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
     request_id: Option<String>,
     expected_model_id: Option<String>,
     client_responses_projection: bool,
+    namespace_tool_identities: std::collections::HashMap<String, (String, String)>,
 ) -> V3SseAttemptStream {
     struct StreamState {
         source: V3ProviderAttemptSseStream,
@@ -89,6 +91,7 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
                 expected_model_id,
                 stream_observation: Some(stream_observation.clone()),
                 provider_response_compat_profile,
+                namespace_tool_identities,
                 ..Default::default()
             }
             .with_typed_hooks(typed_hooks)
@@ -635,6 +638,7 @@ pub(crate) async fn project_and_collect_direct_sse_attempt(
     request_id: &str,
     retain_response_cipher: bool,
     compat_plan: &crate::direct_response_hooks::V3DirectResponseCompatPlan,
+    namespace_tool_identities: std::collections::HashMap<String, (String, String)>,
     hook_registry: &V3HookRegistry,
     failure_session_scope: &V3ProviderFailureSessionScope,
     attempt_budget: V3AttemptBudget,
@@ -662,6 +666,7 @@ pub(crate) async fn project_and_collect_direct_sse_attempt(
         Some(request_id.to_owned()),
         Some(compat_plan.canonical_model_id.clone()),
         true,
+        namespace_tool_identities,
     );
     collect_direct_sse_attempt_after_terminal_with_memory(
         projected,

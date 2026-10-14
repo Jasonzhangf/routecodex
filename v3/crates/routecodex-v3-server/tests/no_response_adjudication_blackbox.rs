@@ -30,6 +30,7 @@ struct ProviderState {
     content_type: &'static str,
     body: String,
     captures: mpsc::UnboundedSender<Value>,
+    mixed: Option<MixedRoundtrip>,
     attempt_bodies: Vec<String>,
     attempts: std::sync::atomic::AtomicUsize,
     header_captures: Option<mpsc::UnboundedSender<String>>,
@@ -462,6 +463,84 @@ async fn anthropic_relay_tool_only_terminal_stays_deliverable() {
         "tool-only arguments must survive: {body}"
     );
     std::env::remove_var(KEY_ENV);
+}
+
+struct MixedRoundtrip {
+    declarations: Vec<Value>,
+    response: Value,
+    results: Vec<Value>,
+}
+
+impl MixedRoundtrip {
+    fn bound_calls(&self, request: &Value) -> Option<Vec<Value>> {
+        let tools = request["tools"].as_array()?;
+        if tools.len() != self.declarations.len() {
+            return None;
+        }
+        let mut names = Vec::new();
+        for (actual, expected) in tools.iter().zip(&self.declarations) {
+            let name = actual["name"].as_str()?;
+            if name.is_empty() || names.contains(&name) {
+                return None;
+            }
+            names.push(name);
+            let mut content = actual.clone();
+            content.as_object_mut()?.remove("name");
+            if content != *expected {
+                return None;
+            }
+        }
+        self.response["output"]
+            .as_array()?
+            .iter()
+            .map(|call| {
+                let kind = match call["type"].as_str()? {
+                    "function_call" => "function",
+                    "custom_tool_call" => "custom",
+                    _ => return None,
+                };
+                let index = self
+                    .declarations
+                    .iter()
+                    .position(|tool| tool["type"] == kind)?;
+                let mut call = call.clone();
+                call["name"] = json!(names[index]);
+                call.as_object_mut()?.remove("namespace");
+                Some(call)
+            })
+            .collect()
+    }
+
+    fn valid_followup(&self, request: &Value) -> bool {
+        let Some(mut expected) = self.bound_calls(request) else {
+            return false;
+        };
+        expected.extend(self.results.clone());
+        let Some(input) = request["input"].as_array() else {
+            return false;
+        };
+        let actual: Vec<_> = input
+            .iter()
+            .filter(|item| {
+                matches!(
+                    item["type"].as_str(),
+                    Some(
+                        "function_call"
+                            | "custom_tool_call"
+                            | "function_call_output"
+                            | "custom_tool_call_output"
+                    )
+                )
+            })
+            .collect();
+        actual.len() == expected.len()
+            && actual.iter().zip(&expected).all(|(actual, expected)| {
+                actual.get("namespace").is_none()
+                    && ["type", "call_id", "name", "arguments", "input", "output"]
+                        .iter()
+                        .all(|field| actual.get(*field) == expected.get(*field))
+            })
+    }
 }
 
 #[tokio::test]
@@ -1668,6 +1747,41 @@ async fn controlled_upstream(
             .body(Body::from(wire))
             .unwrap();
     }
+    if let Some(mixed) = &state.mixed {
+        let mut response = mixed.response.clone();
+        if body["input"].as_array().is_some_and(|items| {
+            items.iter().any(|item| {
+                matches!(
+                    item["type"].as_str(),
+                    Some(
+                        "function_call"
+                            | "custom_tool_call"
+                            | "function_call_output"
+                            | "custom_tool_call_output"
+                    )
+                )
+            })
+        }) {
+            assert!(
+                mixed.valid_followup(&body),
+                "invalid complete mixed followup: {body}"
+            );
+            response = text_response("mixed roundtrip complete");
+        } else {
+            response["output"] = json!(mixed
+                .bound_calls(&body)
+                .expect("complete native declarations"));
+        }
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", state.content_type)
+            .body(Body::from(if state.content_type == "application/json" {
+                response.to_string()
+            } else {
+                response_sse(&response)
+            }))
+            .unwrap();
+    }
     if body.to_string().contains("representation-valid-request")
         || (state.health_enabled && !body.to_string().contains("representation-invalid-"))
     {
@@ -1902,6 +2016,7 @@ async fn consume_response(result: Result<reqwest::Response, reqwest::Error>) -> 
 #[derive(Default)]
 struct EntryOptions {
     health_enabled: bool,
+    mixed: Option<MixedRoundtrip>,
     attempt_bodies: Vec<String>,
     auth_entries: Vec<(String, String)>,
     pin_key: Option<String>,
@@ -1960,6 +2075,36 @@ async fn start_entry_with_health(
     (endpoint, handle, captures, shutdown)
 }
 
+async fn start_entry_fixture(
+    kind: &str,
+    process: &str,
+    status: StatusCode,
+    content_type: &'static str,
+    body: String,
+    health_enabled: bool,
+    mixed: Option<MixedRoundtrip>,
+) -> (
+    String,
+    V3ServerAggregateHandle,
+    mpsc::UnboundedReceiver<Value>,
+    oneshot::Sender<()>,
+) {
+    let (endpoint, handle, captures, _headers, shutdown) = start_entry_configured(
+        kind,
+        process,
+        status,
+        content_type,
+        body,
+        EntryOptions {
+            health_enabled,
+            mixed,
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    (endpoint, handle, captures, shutdown)
+}
+
 async fn start_entry_configured(
     kind: &str,
     process: &str,
@@ -1980,6 +2125,7 @@ async fn start_entry_configured(
         auth_entries,
         pin_key,
         capture_headers,
+        mixed,
     } = options;
     let upstream = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -2003,6 +2149,7 @@ async fn start_entry_configured(
             attempt_bodies,
             attempts: std::sync::atomic::AtomicUsize::new(0),
             header_captures: capture_headers.then_some(header_tx),
+            mixed,
         }));
     tokio::spawn(async move {
         axum::serve(upstream, app)
@@ -2937,6 +3084,21 @@ async fn mixed_duplicate_tool_kinds_complete_public_roundtrip() {
             vec![function.clone(), custom.clone()]
         };
         let native = json!({"id":"resp_mixed","object":"response","status":"completed","model":"wire-test","output":calls});
+        let fixture = || {
+            MixedRoundtrip {
+            declarations: tools.as_array().unwrap().iter().map(|namespace| {
+                let mut tool = namespace["tools"][0].clone();
+                tool.as_object_mut().unwrap().remove("name");
+                tool
+            }).collect(),
+            response: native.clone(),
+            results: calls.iter().map(|call| if call == &function {
+                json!({"type":"function_call_output","call_id":"dup","output":"{\"sum\":5}"})
+            } else {
+                json!({"type":"custom_tool_call_output","call_id":"dup","output":json!({"received":" exact raw\n input "}).to_string()})
+            }).collect(),
+        }
+        };
         for process in ["direct", "chat"] {
             for streaming in [false, true] {
                 let media: &[&str] = if streaming {
@@ -2945,16 +3107,14 @@ async fn mixed_duplicate_tool_kinds_complete_public_roundtrip() {
                     &["application/json"]
                 };
                 for &upstream_type in media {
-                    let (endpoint, handle, mut captures, shutdown) = start_entry(
+                    let (endpoint, handle, mut captures, shutdown) = start_entry_fixture(
                         "responses",
                         process,
                         StatusCode::OK,
                         upstream_type,
-                        if upstream_type == "application/json" {
-                            native.to_string()
-                        } else {
-                            response_sse(&native)
-                        },
+                        String::new(),
+                        false,
+                        Some(fixture()),
                     )
                     .await;
                     let initial = json!({"model":"test.test","input":"execute both declared tools","tools":tools,"stream":streaming});
@@ -2974,22 +3134,39 @@ async fn mixed_duplicate_tool_kinds_complete_public_roundtrip() {
                         returned["output"], native["output"],
                         "{process}/{upstream_type}: {body}"
                     );
-                    assert_one_attempt(&mut captures, "wire-test").await;
+                    let first = captures.recv().await.expect("first provider declarations");
+                    assert_eq!(first["model"], "wire-test");
+                    let raw_calls = fixture()
+                        .bound_calls(&first)
+                        .expect("first declaration binding");
+                    assert_eq!(raw_calls.len(), calls.len());
+                    assert!(
+                        matches!(captures.try_recv(), Err(mpsc::error::TryRecvError::Empty)),
+                        "one first attempt"
+                    );
                     let mut input = vec![
                         json!({"type":"message","role":"user","content":"execute both declared tools"}),
                     ];
                     input.extend(returned["output"].as_array().unwrap().iter().cloned());
                     for call in returned["output"].as_array().unwrap() {
-                        let (kind, program, argument, expected) = if call["type"] == "function_call"
+                        let (kind, program, argument, expected) = if call["type"]
+                            == function["type"]
+                            && call["namespace"] == function["namespace"]
+                            && call["name"] == function["name"]
                         {
                             ("function_call_output", "const a=JSON.parse(process.argv[1]);process.stdout.write(JSON.stringify({sum:a.left+a.right}));", call["arguments"].as_str().unwrap(), "{\"sum\":5}".to_owned())
-                        } else {
+                        } else if call["type"] == custom["type"]
+                            && call["namespace"] == custom["namespace"]
+                            && call["name"] == custom["name"]
+                        {
                             (
                                 "custom_tool_call_output",
                                 "process.stdout.write(JSON.stringify({received:process.argv[1]}));",
                                 call["input"].as_str().unwrap(),
                                 json!({"received":" exact raw\n input "}).to_string(),
                             )
+                        } else {
+                            panic!("undeclared client dispatch: {call}");
                         };
                         let receipt = std::process::Command::new("node")
                             .args(["-e", program, argument])
@@ -3014,52 +3191,45 @@ async fn mixed_duplicate_tool_kinds_complete_public_roundtrip() {
                         .recv()
                         .await
                         .expect("both matching results reach provider");
-                    let actual: Vec<_> = wire["input"]
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .filter(|item| {
-                            matches!(
-                                item["type"].as_str(),
-                                Some(
-                                    "function_call"
-                                        | "custom_tool_call"
-                                        | "function_call_output"
-                                        | "custom_tool_call_output"
-                                )
-                            )
-                        })
-                        .cloned()
-                        .collect();
-                    assert_eq!(actual.len(), 4, "both calls and both results: {wire}");
-                    for (actual, expected) in actual.iter().zip(&input[1..]) {
-                        for field in ["type", "call_id", "arguments", "input", "output"] {
-                            assert_eq!(
-                                actual.get(field),
-                                expected.get(field),
-                                "complete ordered history {field}: {wire}"
-                            );
-                        }
-                        if let Some(name) = expected.get("name").and_then(Value::as_str) {
-                            if process == "direct" {
-                                assert_eq!(actual.get("name"), expected.get("name"));
-                                assert_eq!(actual.get("namespace"), expected.get("namespace"));
-                            } else {
-                                // Relay encodes the namespace in the declared provider
-                                // name. Require the call to reference that declaration.
-                                let qualified =
-                                    format!("{}__{name}", expected["namespace"].as_str().unwrap());
-                                assert_eq!(actual["name"], qualified, "{wire}");
-                                assert!(
-                                    wire["tools"]
-                                        .as_array()
-                                        .unwrap()
-                                        .iter()
-                                        .any(|tool| tool["name"] == qualified),
-                                    "undeclared provider dispatch identity: {wire}"
-                                );
+                    assert_eq!(wire["model"], "wire-test");
+                    let oracle = fixture();
+                    assert!(
+                        oracle.valid_followup(&wire),
+                        "complete bound history: {wire}"
+                    );
+                    for mutation in 0..5 {
+                        let mut invalid = wire.clone();
+                        let items = invalid["input"].as_array_mut().unwrap();
+                        let call = items
+                            .iter()
+                            .position(|item| item.get("name").is_some())
+                            .unwrap();
+                        let result = items
+                            .iter()
+                            .position(|item| item.get("output").is_some())
+                            .unwrap();
+                        match mutation {
+                            0 => {
+                                items[call]["name"] =
+                                    json!(format!("{}\0", items[call]["name"].as_str().unwrap()));
+                            }
+                            1 => {
+                                invalid["tools"][0]["parameters"] = json!({});
+                            }
+                            2 => {
+                                invalid["tools"][0]["type"] = json!("custom");
+                            }
+                            3 => {
+                                items.remove(result);
+                            }
+                            _ => {
+                                items.swap(result, result + 1);
                             }
                         }
+                        assert!(
+                            !oracle.valid_followup(&invalid),
+                            "accepted mutation {mutation}: {invalid}"
+                        );
                     }
                     assert!(
                         matches!(
@@ -3082,6 +3252,13 @@ async fn mixed_duplicate_tool_kinds_complete_public_roundtrip() {
                     assert_eq!(
                         completed["output"],
                         text_response("mixed roundtrip complete")["output"]
+                    );
+                    eprintln!(
+                        "mixed wire evidence: {}",
+                        json!({"process":process,"streaming":streaming,
+                        "upstream_type":upstream_type,"first":first,"raw_calls":raw_calls,
+                        "client":returned,"followup":wire,"consumer_results":oracle.results,
+                        "rejected_mutations":["undeclared_name","schema","kind","missing_result","result_order"]})
                     );
                 }
             }

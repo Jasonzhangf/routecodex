@@ -2628,6 +2628,7 @@ features:
     - resp03_restores_registered_codex_integer_argument_values
   owner_files:
   - v3/crates/provider-compat-core/src/namespace_tools.rs
+  - v3/crates/provider-compat-core/src/namespace_identity.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
@@ -2671,8 +2672,12 @@ features:
   - v3.hub.response_semantic
   - v3.response.client_payload
   - v3.protocol_conversion.field_parity_contract
+  - v3.protocol_conversion.attempt_tool_binding
   mainline_bindings:
   - v3-protocol-field-parity-responses-chat-inbound-order-01
+  - v3-protocol-field-parity-gemini-request-01
+  - v3-protocol-field-parity-gemini-response-01
+  - v3-protocol-field-parity-attempt-inverse-01
   - v3-protocol-field-parity-responses-chat-req-01
   - v3-protocol-field-parity-responses-chat-malformed-arguments-project-01
   - v3-protocol-field-parity-responses-chat-resp-01
@@ -2693,8 +2698,17 @@ features:
   - build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat
   - project_v3_responses_tool_call_to_openai_chat
   - build_v3_openai_chat_standard_request_from_chat_canonical
-  - qualify_openai_chat_missing_mcp_tool_call_names
-  - openai_chat_namespace_wire_names
+  - NamespaceToolIdentityRegistry::from_request
+  - NamespaceToolIdentityRegistry::bind_wire_names
+  - NamespaceToolIdentityRegistry::project_tools
+  - NamespaceToolIdentityRegistry::project_references
+  - NamespaceToolIdentityRegistry::project_request
+  - project_gemini_chat_request
+  - project_gemini_response
+  - remap_v3_response_candidate_output_indices
+  - restore_gemini_tool_kinds
+  - materialize_gemini_provider_events
+  - responses_client_reaches_gemini_and_anthropic_namespace_targets
   - openai_chat_namespace_wire_aliases
   - project_openai_chat_namespace_wire_names
   - project_openai_client_metadata_to_metadata
@@ -2738,9 +2752,45 @@ features:
   - responses_agent_message_with_encrypted_content_part_does_not_leak_ciphertext
   - responses_chat_long_namespace_names_round_trip_on_first_attempt_json_and_sse
   - responses_discovered_custom_tools_restore_kind_and_identity_json_and_sse
+  - gemini_signature_filter_public::gemini_signed_namespace_json_consumer_followup
+  - gemini_signature_filter_public::gemini_signed_namespace_sse_consumer_followup
+  - gemini_signature_filter_public::gemini_prompt_block_json_omitted_candidates
+  - gemini_signature_filter_public::gemini_prompt_block_json_empty_candidates
+  - gemini_signature_filter_public::gemini_prompt_block_sse_omitted_candidates
+  - gemini_signature_filter_public::gemini_prompt_block_sse_empty_candidates
+  - gemini_sse_complete_attempt_buffering_and_late_error_public
+  - signed_namespace_history_responses_exact_projection_consumer
+  - signed_namespace_history_anthropic_declared_drop_diagnostic
+  - signed_namespace_history_chat_declared_drop_diagnostic
+  - gemini_empty_finish_reason_public
+  - gemini_unspecified_finish_reason_public
+  - gemini_default_feedback_unfinished_public
+  - gemini_genuine_prompt_block_with_unfinished_candidate_public
+  - gemini_genuine_terminal_controls_public
+  - gemini_safety_stop_sse_both_orders_public
+  - gemini_max_tokens_stop_sse_both_orders_public
+  - gemini_safety_stop_json_both_orders_public
+  - gemini_max_tokens_stop_json_both_orders_public
+  - gemini_association_empty_text_json_public
+  - gemini_association_empty_text_sse_public
+  - gemini_association_think_split_json_public
+  - gemini_association_think_split_sse_public
   allowed_paths:
   - v3/crates/provider-compat-core/src/namespace_tools.rs
+  - v3/crates/provider-compat-core/src/namespace_identity.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_responses_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_terminal_semantics.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_inline_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/signature_target_projection.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/signature_target_projection_tests.rs
+  - v3/crates/routecodex-v3-server/tests/namespace_cross_protocol_public.rs
+  - v3/crates/routecodex-v3-server/tests/namespace_cross_protocol_public/anthropic_invalid.rs
+  - v3/crates/routecodex-v3-server/tests/support/gemini_signature_filter_public.rs
+  - v3/crates/routecodex-v3-server/tests/gemini_sse_attempt_public.rs
+  - v3/crates/routecodex-v3-server/tests/gemini_terminal_public.rs
+  - v3/crates/routecodex-v3-server/tests/namespace_signature_targets_public.rs
   - v3/crates/routecodex-v3-server/tests/openai_chat_namespace_names.rs
   - package.json
   - v3/package.json
@@ -2818,6 +2868,7 @@ features:
   required_gates:
   - npm run render:v3-protocol-semantic-field-matrix
   - npm run test:v3-protocol-conversion-field-parity
+  - npm run test:v3-gemini-responses-bridge-public
   - npm run verify:v3-protocol-conversion-field-parity
   - npm run test:v3-protocol-conversion-field-parity-red-fixtures
   - npm run verify:v3-protocol-conversion-field-parity-ci
@@ -3086,6 +3137,7 @@ features:
   - v3-responses-relay-server-03
   - v3-responses-relay-server-04
   - v3-responses-provider-event-terminal-merge-01
+  - v3-gemini-provider-event-materialization-01
   entry_symbols:
   - execute_v3_anthropic_relay_runtime_with_servertool_profile
   - execute_v3_responses_relay_runtime_with_default_transport
@@ -5592,6 +5644,7 @@ features:
   - V3ToolThinkingTurnContext
   - compile_v3_tool_thinking_turn_context_at_req04
   - restore_v3_tool_thinking_custom_calls_in_payload_at_resp03
+  - recognized_v3_custom_tool_wrapper_input_at_resp03
   - finalize_v3_toolreason_observation_at_resp03_with_context
   - project_v3_toolreason_sse_chunk_at_resp03_with_projection_and_context
   pending_entry_symbols: []
@@ -5648,6 +5701,7 @@ features:
   - missing, empty, or invalid reason; invalid supplied diagnostics; duplicate or misplaced active reserved fields; and incomplete native calls never authorize reasoning or active-field rewrite; legacy model_id cleanup remains response-only compatibility, and malformed JSON/custom wrappers stay unchanged
   - a parallel tool turn is OK only when every eligible native call is valid; mixed status produces one deterministic non-OK terminal result and no reasoning
   - provenance-matched custom restoration is an independent mechanical inverse and preserves valid custom input for every terminal status
+  - Anthropic mechanical inverse, serialized custom parsing and typed-provenance restoration read one pure recognized-wrapper boundary; unknown business fields keep the complete value opaque and never authorize inner extraction or Tool-Thinking. The predicate reads shape only and does not run Resp03 governance from a codec.
   - the typed turn result projects one separate normal reasoning item before the first native tool call without changing provider-native reasoning
   - visible IDs, 调用工具 text, ordinary reasoning, pending message text, and legacy fences are not identity or active sources; their parsers and replay paths are physically removed
   - Resp03 removes only the provider model-identity instruction shape identified by both canonical identity markers; ordinary client instructions and the legal response model field remain unchanged

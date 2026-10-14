@@ -8165,6 +8165,1321 @@ async fn responses_direct_followup_preserves_function_strict_presence() {
 }
 
 #[tokio::test]
+async fn responses_direct_declared_namespace_restores_mcp_identity_for_public_consumer() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("direct-namespace-identity");
+    std::env::set_var("V3_PROTOCOL_DECISION_KEY", "controlled-namespace-identity");
+
+    #[derive(Clone)]
+    struct NamespaceIdentityState {
+        captures: mpsc::UnboundedSender<ProviderCapture>,
+    }
+
+    async fn namespace_identity_upstream(
+        State(state): State<Arc<NamespaceIdentityState>>,
+        headers: HeaderMap,
+        axum::Json(body): axum::Json<Value>,
+    ) -> Response<Body> {
+        state
+            .captures
+            .send(ProviderCapture::from_http(&headers, body.clone()))
+            .unwrap();
+        let input_text =
+            serde_json::to_string(body.get("input").unwrap_or(&Value::Null)).unwrap_or_default();
+        let has_tool_output = body
+            .get("input")
+            .and_then(Value::as_array)
+            .is_some_and(|items| {
+                items.iter().any(|item| {
+                    item.get("type").and_then(Value::as_str) == Some("function_call_output")
+                })
+            });
+        let declares = |name: &str| {
+            body.get("tools")
+                .and_then(Value::as_array)
+                .is_some_and(|tools| {
+                    tools.iter().any(|tool| {
+                        tool.get("name").and_then(Value::as_str) == Some(name)
+                            || tool.pointer("/function/name").and_then(Value::as_str) == Some(name)
+                    })
+                })
+        };
+        let output = if has_tool_output {
+            json!([{
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{"type": "output_text", "text": "NS_DIRECT_ROUNDTRIP_DONE"}]
+            }])
+        } else if input_text.contains("NS_REQUEST_B") {
+            json!([{
+                "type": "function_call",
+                "call_id": "call_ns_request_b",
+                "name": "mcp__codex_app__list_threads",
+                "arguments": "{\"limit\":1}"
+            }])
+        } else if input_text.contains("NS_UNDECLARED") {
+            json!([{
+                "type": "function_call",
+                "call_id": "call_ns_undeclared",
+                "name": "mcp__undeclared__tool",
+                "arguments": "{}"
+            }])
+        } else if input_text.contains("NS_ORDINARY_DOUBLE_UNDERSCORE") {
+            json!([{
+                "type": "function_call",
+                "call_id": "call_ns_ordinary",
+                "name": "mcp__workspace",
+                "arguments": "{}"
+            }])
+        } else if input_text.contains("NS_EXISTING_NAMESPACE") {
+            json!([{
+                "type": "function_call",
+                "call_id": "call_ns_existing",
+                "name": "existing",
+                "namespace": "mcp__provider",
+                "arguments": "{}"
+            }])
+        } else if declares("mcp__codex_app__list_threads")
+            || input_text.contains("NS_DIRECT_ROUNDTRIP")
+        {
+            json!([{
+                "type": "function_call",
+                "call_id": "call_ns_list_threads",
+                "name": "mcp__codex_app__list_threads",
+                "arguments": "{\"limit\":1}"
+            }])
+        } else if declares("mcp__codex_apps__gmail___archive_emails") {
+            json!([{
+                "type": "function_call",
+                "call_id": "call_ns_archive",
+                "name": "mcp__codex_apps__gmail___archive_emails",
+                "arguments": "{\"thread_ids\":[\"t1\"]}"
+            }])
+        } else {
+            json!([{
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{"type": "output_text", "text": "NS_DIRECT_NO_CALL"}]
+            }])
+        };
+        let response = json!({
+            "id": "resp_ns_identity",
+            "object": "response",
+            "status": "completed",
+            "model": "wire-protocol",
+            "output": output
+        });
+        if body.get("stream").and_then(Value::as_bool) == Some(true) {
+            let mut wire = format!(
+                "event: response.created\ndata: {}\n\n",
+                json!({
+                    "type": "response.created",
+                    "response": {"id": "resp_ns_identity", "status": "in_progress", "output": []}
+                })
+            );
+            for (index, item) in output.as_array().unwrap().iter().enumerate() {
+                wire.push_str(&format!(
+                    "event: response.output_item.added\ndata: {}\n\n",
+                    json!({
+                        "type": "response.output_item.added",
+                        "output_index": index,
+                        "item": item
+                    })
+                ));
+                wire.push_str(&format!(
+                    "event: response.output_item.done\ndata: {}\n\n",
+                    json!({
+                        "type": "response.output_item.done",
+                        "output_index": index,
+                        "item": item
+                    })
+                ));
+            }
+            wire.push_str(&format!(
+                "event: response.completed\ndata: {}\n\ndata: [DONE]\n\n",
+                json!({"type": "response.completed", "response": response})
+            ));
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "text/event-stream")
+                .body(Body::from(wire))
+                .unwrap()
+        } else {
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "application/json")
+                .body(Body::from(response.to_string()))
+                .unwrap()
+        }
+    }
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let (captures_tx, mut captures) = mpsc::unbounded_channel();
+    let (shutdown, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route("/v1/responses", post(namespace_identity_upstream))
+        .with_state(Arc::new(NamespaceIdentityState {
+            captures: captures_tx,
+        }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    let manifest = responses_direct_binding_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        "responses",
+        &base_url,
+        r#""direct""#,
+    );
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .unwrap();
+    let declared_tool = json!({
+        "type": "namespace",
+        "name": "mcp__codex_app",
+        "tools": [{
+            "type": "function",
+            "name": "list_threads",
+            "description": "List threads",
+            "parameters": {"type": "object", "properties": {"limit": {"type": "integer"}}}
+        }]
+    });
+
+    for stream in [false, true] {
+        let request = json!({
+            "model": "client-test",
+            "stream": stream,
+            "input": [{
+                "role": "user",
+                "content": [{"type": "input_text", "text": "NS_DIRECT_ROUNDTRIP list_threads"}]
+            }],
+            "tools": [declared_tool.clone()]
+        });
+        let response = client
+            .post(&endpoint)
+            .header(
+                "accept",
+                if stream {
+                    "text/event-stream"
+                } else {
+                    "application/json"
+                },
+            )
+            .json(&request)
+            .send()
+            .await
+            .expect("public Direct Responses request must complete");
+        assert_eq!(response.status(), StatusCode::OK);
+        let content_type = response.headers()["content-type"]
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let wire = response.text().await.unwrap();
+        let first_capture = timeout(Duration::from_secs(5), captures.recv())
+            .await
+            .expect("first provider attempt must reach controlled upstream")
+            .expect("controlled upstream must capture first request");
+        let provider_tools = first_capture.body["tools"].as_array().unwrap();
+        assert!(
+            provider_tools.iter().any(|tool| {
+                tool.get("name").and_then(Value::as_str) == Some("mcp__codex_app__list_threads")
+                    || tool.pointer("/function/name").and_then(Value::as_str)
+                        == Some("mcp__codex_app__list_threads")
+            }),
+            "provider-bound declaration must carry the flattened namespace name: {}",
+            first_capture.body
+        );
+
+        let call = if stream {
+            assert!(content_type.starts_with("text/event-stream"));
+            let events = wire
+                .lines()
+                .filter_map(|line| line.strip_prefix("data: "))
+                .filter(|data| *data != "[DONE]")
+                .map(|data| serde_json::from_str::<Value>(data).unwrap())
+                .collect::<Vec<_>>();
+            let added = events
+                .iter()
+                .find(|event| event["type"] == "response.output_item.added")
+                .expect("client SSE must include response.output_item.added");
+            let done = events
+                .iter()
+                .find(|event| event["type"] == "response.output_item.done")
+                .expect("client SSE must include response.output_item.done");
+            let completed = events
+                .iter()
+                .find(|event| event["type"] == "response.completed")
+                .expect("client SSE must include response.completed");
+            let call = completed["response"]["output"][0].clone();
+            for item in [&added["item"], &done["item"], &call] {
+                assert_eq!(item["call_id"], "call_ns_list_threads");
+                assert_eq!(item["arguments"], "{\"limit\":1}");
+                assert_eq!(
+                    item["namespace"], "mcp__codex_app",
+                    "client SSE item must carry the declared namespace: {item}"
+                );
+                assert_eq!(
+                    item["name"], "list_threads",
+                    "client SSE item must carry the declared tool leaf: {item}"
+                );
+            }
+            call
+        } else {
+            assert!(content_type.starts_with("application/json"));
+            let body: Value = serde_json::from_str(&wire).unwrap();
+            let call = body["output"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["type"] == "function_call")
+                .cloned()
+                .expect("client JSON must carry the function call");
+            assert_eq!(call["call_id"], "call_ns_list_threads");
+            assert_eq!(call["arguments"], "{\"limit\":1}");
+            assert_eq!(
+                call["namespace"], "mcp__codex_app",
+                "client JSON must carry the declared namespace: {call}"
+            );
+            assert_eq!(
+                call["name"], "list_threads",
+                "client JSON must carry the declared tool leaf: {call}"
+            );
+            call
+        };
+
+        let output = match (call["namespace"].as_str(), call["name"].as_str()) {
+            (Some("mcp__codex_app"), Some("list_threads")) => {
+                json!({"threads": [{"id": "thread-1"}], "read_only": true})
+            }
+            _ => panic!("consumer unsupported call: {}", call),
+        };
+        let output_text = output.to_string();
+
+        let mut followup = request.clone();
+        followup["input"].as_array_mut().unwrap().push(call.clone());
+        followup["input"].as_array_mut().unwrap().push(json!({
+            "type": "function_call_output",
+            "call_id": call["call_id"],
+            "output": output_text
+        }));
+        followup["tool_choice"] = json!("none");
+        let second = client
+            .post(&endpoint)
+            .header(
+                "accept",
+                if stream {
+                    "text/event-stream"
+                } else {
+                    "application/json"
+                },
+            )
+            .json(&followup)
+            .send()
+            .await
+            .expect("public Direct follow-up request must complete");
+        assert_eq!(second.status(), StatusCode::OK);
+        let second_wire = second.text().await.unwrap();
+        let second_capture = timeout(Duration::from_secs(5), captures.recv())
+            .await
+            .expect("second provider attempt must reach controlled upstream")
+            .expect("controlled upstream must capture second request");
+        let second_input = second_capture.body["input"].as_array().unwrap();
+        let paired_call = second_input
+            .iter()
+            .find(|item| {
+                item["type"] == "function_call" && item["call_id"] == "call_ns_list_threads"
+            })
+            .expect("follow-up provider request must retain the function call");
+        let paired_output = second_input
+            .iter()
+            .find(|item| {
+                item["type"] == "function_call_output" && item["call_id"] == "call_ns_list_threads"
+            })
+            .expect("follow-up provider request must retain the paired tool output");
+        assert_eq!(paired_call["call_id"], paired_output["call_id"]);
+        assert_eq!(paired_output["output"], output_text);
+        assert!(
+            second_wire.contains("NS_DIRECT_ROUNDTRIP_DONE"),
+            "follow-up client response must carry the completed business response: {second_wire}"
+        );
+    }
+
+    for (marker, expected_name, expected_namespace, expected_call_id) in [
+        (
+            "NS_UNDECLARED",
+            "mcp__undeclared__tool",
+            None,
+            "call_ns_undeclared",
+        ),
+        (
+            "NS_ORDINARY_DOUBLE_UNDERSCORE",
+            "mcp__workspace",
+            None,
+            "call_ns_ordinary",
+        ),
+        (
+            "NS_EXISTING_NAMESPACE",
+            "existing",
+            Some("mcp__provider"),
+            "call_ns_existing",
+        ),
+        (
+            "NS_REQUEST_B",
+            "mcp__codex_app__list_threads",
+            None,
+            "call_ns_request_b",
+        ),
+    ] {
+        let request = json!({
+            "model": "client-test",
+            "stream": false,
+            "input": [{
+                "role": "user",
+                "content": [{"type": "input_text", "text": marker}]
+            }],
+            "tools": [{
+                "type": "namespace",
+                "name": "mcp__declared",
+                "tools": [{
+                    "type": "function",
+                    "name": "existing",
+                    "parameters": {"type": "object"}
+                }]
+            }]
+        });
+        let response = client
+            .post(&endpoint)
+            .json(&request)
+            .send()
+            .await
+            .expect("negative namespace request must complete");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value = response.json().await.unwrap();
+        let call = body["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["type"] == "function_call")
+            .cloned()
+            .expect("negative case must return a function call");
+        let _capture = timeout(Duration::from_secs(5), captures.recv())
+            .await
+            .expect("negative provider attempt must reach controlled upstream")
+            .expect("controlled upstream must capture negative request");
+        assert_eq!(call["call_id"], expected_call_id);
+        assert_eq!(call["name"], expected_name);
+        match expected_namespace {
+            Some(namespace) => assert_eq!(call["namespace"], namespace),
+            None => assert!(
+                call.get("namespace").is_none(),
+                "undeclared or request-local identity must not gain namespace: {call}"
+            ),
+        }
+    }
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+}
+
+#[derive(Clone)]
+struct NamespacePublicUpstreamState {
+    captures: mpsc::UnboundedSender<ProviderCapture>,
+}
+
+fn namespace_public_tool_wire_name(tool: &Value) -> Option<&str> {
+    tool.get("name")
+        .and_then(Value::as_str)
+        .or_else(|| tool.pointer("/function/name").and_then(Value::as_str))
+}
+
+fn namespace_public_tool_description(tool: &Value) -> Option<&str> {
+    tool.get("description").and_then(Value::as_str).or_else(|| {
+        tool.pointer("/function/description")
+            .and_then(Value::as_str)
+    })
+}
+
+fn namespace_public_provider_tools(body: &Value) -> Vec<Value> {
+    body.get("tools")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
+async fn namespace_public_upstream(
+    State(state): State<Arc<NamespacePublicUpstreamState>>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response<Body> {
+    state
+        .captures
+        .send(ProviderCapture::from_http(&headers, body.clone()))
+        .unwrap();
+    let has_tool_output = body
+        .get("input")
+        .and_then(Value::as_array)
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                matches!(
+                    item.get("type").and_then(Value::as_str),
+                    Some("function_call_output" | "custom_tool_call_output")
+                )
+            })
+        });
+    let output = if has_tool_output {
+        json!([{
+            "type": "message",
+            "role": "assistant",
+            "status": "completed",
+            "content": [{"type": "output_text", "text": "NS_CASE_DONE"}]
+        }])
+    } else {
+        let calls = namespace_public_provider_tools(&body)
+            .iter()
+            .filter_map(|tool| {
+                let call_id = namespace_public_tool_description(tool)?.strip_prefix("NS_DECL:")?;
+                let name = namespace_public_tool_wire_name(tool)?;
+                Some(if tool.get("type").and_then(Value::as_str) == Some("custom") {
+                    json!({"type":"custom_tool_call","call_id":call_id,"name":name,"input":"raw_probe"})
+                } else {
+                    json!({"type":"function_call","call_id":call_id,"name":name,"arguments":"{\"probe\":1}"})
+                })
+            })
+            .collect::<Vec<_>>();
+        if calls.is_empty() {
+            json!([{
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{"type": "output_text", "text": "NS_CASE_NO_DECLARATION"}]
+            }])
+        } else {
+            Value::Array(calls)
+        }
+    };
+    let response = json!({
+        "id": "resp_ns_public",
+        "object": "response",
+        "status": "completed",
+        "model": "wire-protocol",
+        "output": output
+    });
+    if body.get("stream").and_then(Value::as_bool) == Some(true) {
+        let mut wire = format!(
+            "event: response.created\ndata: {}\n\n",
+            json!({
+                "type": "response.created",
+                "response": {"id": "resp_ns_public", "status": "in_progress", "output": []}
+            })
+        );
+        for (index, item) in output.as_array().unwrap().iter().enumerate() {
+            wire.push_str(&format!(
+                "event: response.output_item.added\ndata: {}\n\n",
+                json!({
+                    "type": "response.output_item.added",
+                    "output_index": index,
+                    "item": item
+                })
+            ));
+            wire.push_str(&format!(
+                "event: response.output_item.done\ndata: {}\n\n",
+                json!({
+                    "type": "response.output_item.done",
+                    "output_index": index,
+                    "item": item
+                })
+            ));
+        }
+        wire.push_str(&format!(
+            "event: response.completed\ndata: {}\n\ndata: [DONE]\n\n",
+            json!({"type": "response.completed", "response": response})
+        ));
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from(wire))
+            .unwrap()
+    } else {
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "application/json")
+            .body(Body::from(response.to_string()))
+            .unwrap()
+    }
+}
+
+fn namespace_public_client_call(wire: &str, stream: bool, call_id: &str) -> Value {
+    if stream {
+        let events = wire
+            .lines()
+            .filter_map(|line| line.strip_prefix("data: "))
+            .filter(|data| *data != "[DONE]")
+            .map(|data| serde_json::from_str::<Value>(data).unwrap())
+            .collect::<Vec<_>>();
+        let completed = events
+            .iter()
+            .find(|event| event["type"] == "response.completed")
+            .unwrap_or_else(|| panic!("client SSE must include response.completed: {wire}"));
+        let call = completed["response"]["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["call_id"] == call_id)
+            .cloned()
+            .unwrap_or_else(|| panic!("client SSE must carry call {call_id}: {wire}"));
+        for kind in ["response.output_item.added", "response.output_item.done"] {
+            let item = events
+                .iter()
+                .find(|event| event["type"] == kind && event["item"]["call_id"] == call_id)
+                .unwrap_or_else(|| panic!("client SSE must include {kind} for {call_id}: {wire}"));
+            assert_eq!(item["item"]["namespace"], call["namespace"]);
+            assert_eq!(item["item"]["name"], call["name"]);
+            assert_eq!(item["item"]["arguments"], call["arguments"]);
+        }
+        call
+    } else {
+        let body: Value = serde_json::from_str(wire).unwrap();
+        body["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["call_id"] == call_id)
+            .cloned()
+            .unwrap_or_else(|| panic!("client JSON must carry call {call_id}: {wire}"))
+    }
+}
+
+#[tokio::test]
+async fn namespace_wire_bindings_preserve_plain_calls_colliding_paths_and_native_custom() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("namespace-wire-binding-consumer");
+    std::env::set_var(
+        "V3_PROTOCOL_DECISION_KEY",
+        "namespace-wire-binding-consumer",
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/v1", listener.local_addr().unwrap());
+    let (tx, mut captures) = mpsc::unbounded_channel();
+    let (shutdown, rx) = oneshot::channel();
+    tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new()
+                .route("/v1/responses", post(namespace_public_upstream))
+                .with_state(Arc::new(NamespacePublicUpstreamState { captures: tx })),
+        )
+        .with_graceful_shutdown(async {
+            let _ = rx.await;
+        })
+        .await
+        .unwrap();
+    });
+    let handle = spawn_v3_server_aggregate(responses_direct_binding_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        "responses",
+        &base,
+        r#""direct""#,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = reqwest::Client::new();
+    for stream in [false, true] {
+        let mut request = json!({"model":"gpt-5.5","stream":stream,"input":[{"role":"user","content":"read local probes"}],
+            "tool_choice":{"type":"function","name":"alpha__read"},"tools":[
+            {"type":"function","name":"alpha__read","description":"NS_DECL:plain","parameters":{"type":"object"}},
+            {"type":"namespace","name":"alpha","tools":[
+                {"type":"function","name":"read","description":"NS_DECL:namespaced","parameters":{"type":"object"}},
+                {"type":"function","name":"beta__read","description":"NS_DECL:separator","parameters":{"type":"object"}},
+                {"type":"custom","name":"read","description":"NS_DECL:custom","format":{"type":"text"}}]},
+            {"type":"namespace","name":"alpha__beta","tools":[
+                {"type":"function","name":"read","description":"NS_DECL:nested-collision","parameters":{"type":"object"}}]}
+        ]});
+        let response = client.post(&endpoint).json(&request).send().await.unwrap();
+        let status = response.status();
+        let wire = response.text().await.unwrap();
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "all declared identities must reach provider: {wire}"
+        );
+        let first = timeout(Duration::from_secs(5), captures.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        println!("namespace_binding_first_wire={}", first.body);
+        let tools = namespace_public_provider_tools(&first.body);
+        let bindings: std::collections::BTreeMap<_, _> = tools
+            .iter()
+            .filter_map(|t| {
+                Some((
+                    namespace_public_tool_description(t)?
+                        .strip_prefix("NS_DECL:")?
+                        .to_owned(),
+                    namespace_public_tool_wire_name(t)?.to_owned(),
+                ))
+            })
+            .collect();
+        assert_eq!(
+            bindings.len(),
+            5,
+            "declarations/kinds must survive: {}",
+            first.body
+        );
+        assert_eq!(
+            bindings
+                .values()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            5
+        );
+        assert_eq!(first.body["tool_choice"]["name"], bindings["plain"]);
+        for (id, namespace, name, kind) in [
+            ("plain", None, "alpha__read", "function_call"),
+            ("namespaced", Some("alpha"), "read", "function_call"),
+            ("separator", Some("alpha"), "beta__read", "function_call"),
+            (
+                "nested-collision",
+                Some("alpha__beta"),
+                "read",
+                "function_call",
+            ),
+            ("custom", Some("alpha"), "read", "custom_tool_call"),
+        ] {
+            let call = namespace_public_client_call(&wire, stream, id);
+            assert_eq!(call["name"], name, "{id}: {call}");
+            assert_eq!(call["namespace"].as_str(), namespace, "{id}: {call}");
+            assert_eq!(call["type"], kind, "{id}: {call}");
+            let output = if kind == "custom_tool_call" {
+                assert_eq!(call["input"], "raw_probe");
+                "custom_tool_call_output"
+            } else {
+                assert_eq!(call["arguments"], "{\"probe\":1}");
+                "function_call_output"
+            };
+            // A real local consumer dispatches by the original namespace/name/kind.
+            let handled = format!("READ_ONLY:{id}");
+            request["input"].as_array_mut().unwrap().push(call);
+            request["input"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({"type":output,"call_id":id,"output":handled}));
+        }
+        request["tool_choice"] = json!("none");
+        let second = client.post(&endpoint).json(&request).send().await.unwrap();
+        assert_eq!(second.status(), StatusCode::OK);
+        assert!(second.text().await.unwrap().contains("NS_CASE_DONE"));
+        let second = timeout(Duration::from_secs(5), captures.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        println!("namespace_binding_followup_wire={}", second.body);
+        for (id, name) in bindings {
+            let history = second.body["input"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|v| {
+                    v["call_id"] == id
+                        && matches!(
+                            v["type"].as_str(),
+                            Some("function_call" | "custom_tool_call")
+                        )
+                })
+                .unwrap();
+            assert_eq!(
+                history["name"], name,
+                "paired history must use same wire binding"
+            );
+            let output = second.body["input"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|v| {
+                    v["call_id"] == id
+                        && matches!(
+                            v["type"].as_str(),
+                            Some("function_call_output" | "custom_tool_call_output")
+                        )
+                })
+                .unwrap();
+            assert_eq!(output["output"], format!("READ_ONLY:{id}"));
+        }
+    }
+    assert!(handle.shutdown().await.is_empty());
+    let _ = shutdown.send(());
+}
+
+struct NamespacePublicCase {
+    label: &'static str,
+    call_id: &'static str,
+    expected_provider_name: Option<&'static str>,
+    expected_namespace: &'static str,
+    expected_name: &'static str,
+    stream: bool,
+    expect_provider_choice: bool,
+    distinct_from_description: Option<&'static str>,
+}
+
+async fn run_namespace_public_case(
+    client: &reqwest::Client,
+    endpoint: &str,
+    captures: &mut mpsc::UnboundedReceiver<ProviderCapture>,
+    case: &NamespacePublicCase,
+    request: Value,
+) -> String {
+    let response = client
+        .post(endpoint)
+        .header(
+            "accept",
+            if case.stream {
+                "text/event-stream"
+            } else {
+                "application/json"
+            },
+        )
+        .json(&request)
+        .send()
+        .await
+        .unwrap_or_else(|error| {
+            panic!(
+                "[{}] public request must complete through /v1/responses: {error}",
+                case.label
+            )
+        });
+    let status = response.status();
+    let content_type = response.headers()["content-type"]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let wire = response.text().await.unwrap();
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "[{}] public request must succeed: {wire}",
+        case.label
+    );
+    assert!(
+        content_type.starts_with(if case.stream {
+            "text/event-stream"
+        } else {
+            "application/json"
+        }),
+        "[{}] unexpected client content type {content_type}",
+        case.label
+    );
+
+    let first_capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "[{}] first provider attempt must reach controlled upstream",
+                case.label
+            )
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "[{}] controlled upstream must capture first request",
+                case.label
+            )
+        });
+    let provider_tools = namespace_public_provider_tools(&first_capture.body);
+    let expected_description = format!("NS_DECL:{}", case.call_id);
+    let declared = provider_tools
+        .iter()
+        .find(|tool| {
+            namespace_public_tool_description(tool)
+                .is_some_and(|description| description == expected_description)
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "[{}] provider-bound tools must declare {expected_description}; client_wire={wire}; provider_body={}",
+                case.label, first_capture.body
+            )
+        });
+    let wire_name = namespace_public_tool_wire_name(declared)
+        .unwrap_or_else(|| {
+            panic!(
+                "[{}] declared tool must have a wire name: {declared}",
+                case.label
+            )
+        })
+        .to_owned();
+    if let Some(expected) = case.expected_provider_name {
+        assert_eq!(
+            wire_name, expected,
+            "[{}] provider-bound declaration must use the flattened namespace name: {}",
+            case.label, first_capture.body
+        );
+    }
+    if let Some(plain_description) = case.distinct_from_description {
+        let plain = provider_tools
+            .iter()
+            .find(|tool| {
+                namespace_public_tool_description(tool)
+                    .is_some_and(|description| description == plain_description)
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "[{}] provider-bound tools must keep colliding declaration {plain_description}: {}",
+                    case.label, first_capture.body
+                )
+            });
+        let plain_name = namespace_public_tool_wire_name(plain).unwrap_or_else(|| {
+            panic!(
+                "[{}] colliding plain declaration must have a wire name: {plain}",
+                case.label
+            )
+        });
+        assert_ne!(
+            plain_name, wire_name,
+            "[{}] colliding declarations must receive distinct wire names: {}",
+            case.label, first_capture.body
+        );
+    }
+    if case.expect_provider_choice {
+        assert_eq!(
+            first_capture.body["tool_choice"]["name"].as_str(),
+            Some(wire_name.as_str()),
+            "[{}] provider-bound tool_choice must be synchronized with the declaration; client_wire={wire}; provider_body={}",
+            case.label,
+            first_capture.body
+        );
+    }
+
+    let call = namespace_public_client_call(&wire, case.stream, case.call_id);
+    assert_eq!(
+        call["namespace"], case.expected_namespace,
+        "[{}] client identity namespace: {call}; client_wire={wire}",
+        case.label
+    );
+    assert_eq!(
+        call["name"], case.expected_name,
+        "[{}] client identity leaf: {call}; client_wire={wire}",
+        case.label
+    );
+    let custom = declared["type"] == "custom";
+    assert_eq!(
+        call["type"],
+        if custom {
+            "custom_tool_call"
+        } else {
+            "function_call"
+        }
+    );
+    if custom {
+        assert_eq!(call["input"], "raw_probe", "{}: {call}", case.label);
+        assert_eq!(declared["format"], json!({"type":"text"}));
+    } else {
+        assert_eq!(call["arguments"], "{\"probe\":1}", "{}: {call}", case.label);
+    }
+    assert_eq!(call["call_id"], case.call_id);
+
+    let output = match (call["namespace"].as_str(), call["name"].as_str()) {
+        (Some(namespace), Some(name))
+            if namespace == case.expected_namespace && name == case.expected_name =>
+        {
+            json!({"handled": name, "read_only": true})
+        }
+        other => panic!(
+            "[{}] consumer cannot dispatch namespace identity {other:?}: {call}",
+            case.label
+        ),
+    };
+    let output_text = output.to_string();
+
+    let mut followup = request.clone();
+    followup["input"].as_array_mut().unwrap().push(call.clone());
+    followup["input"].as_array_mut().unwrap().push(json!({
+        "type": if custom { "custom_tool_call_output" } else { "function_call_output" },
+        "call_id": case.call_id,
+        "output": output_text
+    }));
+    followup["tool_choice"] = json!("none");
+    let second = client
+        .post(endpoint)
+        .header(
+            "accept",
+            if case.stream {
+                "text/event-stream"
+            } else {
+                "application/json"
+            },
+        )
+        .json(&followup)
+        .send()
+        .await
+        .unwrap_or_else(|error| {
+            panic!(
+                "[{}] follow-up request must complete through /v1/responses: {error}",
+                case.label
+            )
+        });
+    assert_eq!(
+        second.status(),
+        StatusCode::OK,
+        "[{}] follow-up request must succeed",
+        case.label
+    );
+    let second_wire = second.text().await.unwrap();
+    assert!(
+        second_wire.contains("NS_CASE_DONE"),
+        "[{}] follow-up client response must carry the business completion: {second_wire}",
+        case.label
+    );
+    let second_capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "[{}] follow-up provider attempt must reach controlled upstream",
+                case.label
+            )
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "[{}] controlled upstream must capture follow-up request",
+                case.label
+            )
+        });
+    assert_eq!(
+        second_capture.body["tool_choice"], "none",
+        "[{}] follow-up provider choice: {}",
+        case.label, second_capture.body
+    );
+    let second_input = second_capture.body["input"].as_array().unwrap_or_else(|| {
+        panic!(
+            "[{}] follow-up provider input must be an array: {}",
+            case.label, second_capture.body
+        )
+    });
+    let history_call = second_input
+        .iter()
+        .find(|item| {
+            item["type"]
+                == if custom {
+                    "custom_tool_call"
+                } else {
+                    "function_call"
+                }
+                && item["call_id"] == case.call_id
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "[{}] follow-up provider input must retain the function call: {}",
+                case.label, second_capture.body
+            )
+        });
+    assert_eq!(
+        history_call[if custom { "input" } else { "arguments" }],
+        if custom { "raw_probe" } else { "{\"probe\":1}" },
+        "[{}] follow-up history arguments: {}",
+        case.label,
+        second_capture.body
+    );
+    assert_eq!(
+        history_call["name"].as_str(),
+        Some(wire_name.as_str()),
+        "[{}] follow-up history must reuse the declared wire name: {}",
+        case.label,
+        second_capture.body
+    );
+    let history_output = second_input
+        .iter()
+        .find(|item| {
+            item["type"]
+                == if custom {
+                    "custom_tool_call_output"
+                } else {
+                    "function_call_output"
+                }
+                && item["call_id"] == case.call_id
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "[{}] follow-up provider input must retain the paired tool output: {}",
+                case.label, second_capture.body
+            )
+        });
+    assert_eq!(
+        history_output["output"], output_text,
+        "[{}] follow-up tool output: {}",
+        case.label, second_capture.body
+    );
+
+    wire_name
+}
+
+// Public negative coverage for the unified namespace identity contract. Each case
+// binds a distinct failure mechanism: source discovery, nested traversal, separator
+// preservation, custom kind projection, or plain-name collision allocation.
+#[tokio::test]
+async fn responses_direct_namespace_identity_covers_declaration_sources_and_collisions_for_public_consumer(
+) {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("direct-namespace-public-sources");
+    std::env::set_var(
+        "V3_PROTOCOL_DECISION_KEY",
+        "controlled-namespace-public-sources",
+    );
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let (captures_tx, mut captures) = mpsc::unbounded_channel();
+    let (shutdown, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route("/v1/responses", post(namespace_public_upstream))
+        .with_state(Arc::new(NamespacePublicUpstreamState {
+            captures: captures_tx,
+        }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    let manifest = responses_direct_binding_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        "responses",
+        &base_url,
+        r#""direct""#,
+    );
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .unwrap();
+    let user_message = |marker: &str| {
+        json!({
+            "role": "user",
+            "content": [{"type": "input_text", "text": marker}]
+        })
+    };
+
+    let ordinary = NamespacePublicCase {
+        label: "ordinary-namespace-separator",
+        call_id: "call_ns_ordinary",
+        expected_provider_name: Some("workspace__tools__read"),
+        expected_namespace: "workspace__tools",
+        expected_name: "read",
+        stream: false,
+        expect_provider_choice: true,
+        distinct_from_description: None,
+    };
+    let ordinary_request = json!({
+        "model": "client-test",
+        "stream": false,
+        "input": [user_message("NS_CASE_ORDINARY")],
+        "tools": [{
+            "type": "namespace",
+            "name": "workspace__tools",
+            "tools": [{
+                "type": "function",
+                "name": "read",
+                "description": "NS_DECL:call_ns_ordinary",
+                "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}
+            }]
+        }],
+        "tool_choice": {"type": "function", "name": "workspace__tools.read"}
+    });
+    run_namespace_public_case(
+        &client,
+        &endpoint,
+        &mut captures,
+        &ordinary,
+        ordinary_request,
+    )
+    .await;
+
+    for stream in [false, true] {
+        let nested = NamespacePublicCase {
+            label: if stream {
+                "nested-additional-tools-sse"
+            } else {
+                "nested-additional-tools-json"
+            },
+            call_id: "call_ns_nested",
+            expected_provider_name: Some("outer__inner__leaf"),
+            expected_namespace: "outer.inner",
+            expected_name: "leaf",
+            stream,
+            expect_provider_choice: false,
+            distinct_from_description: None,
+        };
+        let nested_request = json!({
+            "model": "client-test",
+            "stream": stream,
+            "input": [
+                {
+                    "type": "additional_tools",
+                    "tools": [{
+                        "type": "namespace",
+                        "name": "outer",
+                        "tools": [{
+                            "type": "namespace",
+                            "name": "inner",
+                            "tools": [{
+                                "type": "function",
+                                "name": "leaf",
+                                "description": "NS_DECL:call_ns_nested",
+                                "parameters": {"type": "object"}
+                            }]
+                        }]
+                    }]
+                },
+                user_message("NS_CASE_NESTED")
+            ]
+        });
+        run_namespace_public_case(&client, &endpoint, &mut captures, &nested, nested_request).await;
+    }
+
+    let discovered = NamespacePublicCase {
+        label: "discovered-leading-underscore-leaf",
+        call_id: "call_ns_discovered",
+        expected_provider_name: Some("mcp__codex_apps__gmail___archive_emails"),
+        expected_namespace: "mcp__codex_apps__gmail",
+        expected_name: "_archive_emails",
+        stream: false,
+        expect_provider_choice: false,
+        distinct_from_description: None,
+    };
+    let discovered_request = json!({
+        "model": "client-test",
+        "stream": false,
+        "input": [
+            {
+                "type": "tool_search_call",
+                "call_id": "call_search",
+                "execution": "client",
+                "status": "completed",
+                "arguments": {"query": "gmail archive"}
+            },
+            {
+                "type": "tool_search_output",
+                "call_id": "call_search",
+                "execution": "client",
+                "status": "completed",
+                "tools": [{
+                    "type": "namespace",
+                    "name": "mcp__codex_apps__gmail",
+                    "tools": [{
+                        "type": "function",
+                        "name": "_archive_emails",
+                        "description": "NS_DECL:call_ns_discovered",
+                        "parameters": {"type": "object"}
+                    }]
+                }]
+            },
+            user_message("NS_CASE_DISCOVERED")
+        ]
+    });
+    run_namespace_public_case(
+        &client,
+        &endpoint,
+        &mut captures,
+        &discovered,
+        discovered_request,
+    )
+    .await;
+
+    let custom = NamespacePublicCase {
+        label: "custom-child",
+        call_id: "call_ns_custom",
+        expected_provider_name: Some("workspace__run"),
+        expected_namespace: "workspace",
+        expected_name: "run",
+        stream: false,
+        expect_provider_choice: false,
+        distinct_from_description: None,
+    };
+    let custom_request = json!({
+        "model": "client-test",
+        "stream": false,
+        "input": [user_message("NS_CASE_CUSTOM")],
+        "tools": [{
+            "type": "namespace",
+            "name": "workspace",
+            "tools": [{
+                "type": "custom",
+                "name": "run",
+                "description": "NS_DECL:call_ns_custom",
+                "format": {"type": "text"}
+            }]
+        }]
+    });
+    run_namespace_public_case(&client, &endpoint, &mut captures, &custom, custom_request).await;
+
+    let collision = NamespacePublicCase {
+        label: "plain-name-collision",
+        call_id: "call_ns_collision",
+        expected_provider_name: None,
+        expected_namespace: "collision",
+        expected_name: "leaf",
+        stream: false,
+        expect_provider_choice: true,
+        distinct_from_description: Some("NS_PLAIN:collision__leaf"),
+    };
+    let collision_request = json!({
+        "model": "client-test",
+        "stream": false,
+        "input": [user_message("NS_CASE_COLLISION")],
+        "tools": [
+            {
+                "type": "namespace",
+                "name": "collision",
+                "tools": [{
+                    "type": "function",
+                    "name": "leaf",
+                    "description": "NS_DECL:call_ns_collision",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"namespace_side": {"type": "string"}}
+                    }
+                }]
+            },
+            {
+                "type": "function",
+                "name": "collision__leaf",
+                "description": "NS_PLAIN:collision__leaf",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"plain_side": {"type": "string"}}
+                }
+            }
+        ],
+        "tool_choice": {"type": "function", "name": "collision.leaf"}
+    });
+    run_namespace_public_case(
+        &client,
+        &endpoint,
+        &mut captures,
+        &collision,
+        collision_request,
+    )
+    .await;
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+}
+
+#[tokio::test]
 async fn responses_without_snap_authorization_writes_no_codex_sample() {
     let _test_guard = TEST_LOCK.lock().await;
     let home_guard = TestHomeGuard::new("no-snap-authorization");

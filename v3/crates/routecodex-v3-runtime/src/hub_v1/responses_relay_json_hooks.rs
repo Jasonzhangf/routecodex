@@ -13,7 +13,8 @@ pub(crate) struct V3ResponsesRelayJsonResponseHookInput<'a> {
     pub(crate) expected_model_id: &'a str,
     pub(crate) provider_protocol: V3HubProviderWireProtocol,
     pub(crate) source_provider_protocol: V3HubProviderWireProtocol,
-    pub(crate) projection_context: &'a V3AnthropicResponsesProjectionContext,
+    pub(crate) namespace_registry:
+        &'a provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry,
     pub(crate) provider_response_transport_intent: V3HubTransportIntent,
     pub(crate) compatibility_profile: Option<&'a str>,
     pub(crate) opencode_zen_tcm_bridge:
@@ -33,7 +34,7 @@ pub(crate) fn run_json_response_hooks(
     input: V3ResponsesRelayJsonResponseHookInput<'_>,
     trace: &mut Vec<&'static str>,
 ) -> Result<(Value, Option<V3WebSearchCenterState>), V3ResponsesRelayRuntimeError> {
-    let mut normalized_provider_value = match input.provider_protocol {
+    let normalized_provider_value = match input.provider_protocol {
         V3HubProviderWireProtocol::Responses => {
             normalize_v3_responses_json_document(input.provider_value, "Responses")?
         }
@@ -42,12 +43,6 @@ pub(crate) fn run_json_response_hooks(
         }
         _ => input.provider_value.clone(),
     };
-    if input.provider_protocol == V3HubProviderWireProtocol::Responses {
-        super::super::request_outbound_mcp_names::restore_responses_mcp_tool_identities(
-            &mut normalized_provider_value,
-            input.projection_context.mcp_tool_identities(),
-        );
-    }
     // `provider_protocol` stays the canonical semantic protocol so ProviderRespCompat02
     // and normalization keep their existing meaning. The raw wire protocol is carried
     // separately as a typed witness that only the Resp03 source-provenance gate reads.
@@ -74,6 +69,11 @@ pub(crate) fn run_json_response_hooks(
     trace.push("V3ProviderRespInbound01Raw");
     let hooks = compile_v3_hub_relay_response_hooks();
     let mut resp02 = hooks.normalize(resp01)?;
+    if input.provider_protocol == V3HubProviderWireProtocol::Gemini {
+        resp02
+            .normalize_gemini_business_response(input.request_id)
+            .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
+    }
     trace.push("ProviderRespCompat02ProviderCompat");
     if input.provider_protocol == V3HubProviderWireProtocol::OpenAiChat {
         let converted = build_v3_responses_provider_response_from_openai_chat_payload(
@@ -106,6 +106,16 @@ pub(crate) fn run_json_response_hooks(
     let (resp03, response_web_search_state, _response_web_search_hook_outcome) =
         resp03.into_parts();
     let mut resp03 = resp03;
+    if input.source_provider_protocol == V3HubProviderWireProtocol::Gemini {
+        super::gemini_responses_codec::restore_gemini_tool_kinds(
+            std::sync::Arc::make_mut(resp03.previous.provider_payload_mut()),
+            input.namespace_registry,
+        );
+    }
+    super::request_outbound_mcp_names::restore_responses_mcp_tool_identities(
+        std::sync::Arc::make_mut(resp03.previous.provider_payload_mut()),
+        &input.namespace_registry.restore_identities(),
+    );
     super::resp_chat_process_codex_integer_values::normalize_v3_codex_integer_tool_values_at_resp03(
         input.provider_semantic_body,
         std::sync::Arc::make_mut(resp03.previous.provider_payload_mut()),

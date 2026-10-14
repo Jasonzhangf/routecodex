@@ -1,6 +1,5 @@
 use super::request_outbound_mcp_names::provider_function_name;
 use super::*;
-use provider_compat_core::namespace_tools::namespace_tool_name_map;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
@@ -49,21 +48,28 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload(
         provider_semantic_body,
     )
     .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
-    let custom_tool_names = collect_v3_responses_custom_tool_names(provider_semantic_body)
-        .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?
-        .into_iter()
-        .map(|(name, identity)| {
-            let name = aliases.get(&name).cloned().unwrap_or(name);
-            (name, identity)
+    let registry =
+        provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::from_request(
+            provider_semantic_body,
+            "openai-chat",
+        )
+        .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
+    let custom_tool_names = registry
+        .identities()
+        .filter(|identity| identity.kind == provider_compat_core::namespace_tools::ToolKind::Custom)
+        .map(|identity| {
+            (
+                identity.actual_wire_name.clone(),
+                V3ClientCustomToolName {
+                    name: identity.leaf_name.clone(),
+                    namespace: identity
+                        .is_namespaced()
+                        .then(|| identity.client_namespace()),
+                },
+            )
         })
         .collect();
-    let mcp_tool_identities = super::request_outbound_mcp_names::responses_mcp_dispatch_identities(
-        provider_semantic_body,
-    )
-    .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?
-    .into_iter()
-    .map(|(name, identity)| (aliases.get(&name).cloned().unwrap_or(name), identity))
-    .collect();
+    let mcp_tool_identities = registry.restore_identities();
     let discovered =
         super::request_outbound_builtin_tool_projection::collect_tool_search_output_tools(
             provider_semantic_body,
@@ -475,94 +481,5 @@ fn parse_v3_openai_chat_custom_tool_input(arguments: &str) -> Value {
         },
         Ok(Value::String(value)) => Value::String(value),
         _ => Value::String(arguments.to_string()),
-    }
-}
-
-pub(crate) fn collect_v3_responses_custom_tool_names(
-    payload: &Value,
-) -> Result<BTreeMap<String, V3ClientCustomToolName>, String> {
-    let mut names = BTreeMap::new();
-    collect_v3_responses_custom_tool_names_from_tools(payload.get("tools"), &mut names);
-    for item in payload
-        .get("input")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        if item.get("type").and_then(Value::as_str) == Some("additional_tools") {
-            collect_v3_responses_custom_tool_names_from_tools(item.get("tools"), &mut names);
-        }
-    }
-    let discovered =
-        super::request_outbound_builtin_tool_projection::collect_tool_search_output_tools(payload)?;
-    collect_v3_responses_custom_tool_names_from_tools(Some(&Value::Array(discovered)), &mut names);
-    Ok(names)
-}
-
-pub(crate) fn collect_v3_responses_custom_tool_names_from_tools(
-    tools: Option<&Value>,
-    names: &mut BTreeMap<String, V3ClientCustomToolName>,
-) {
-    for tool in tools.and_then(Value::as_array).into_iter().flatten() {
-        if tool.get("type").and_then(Value::as_str) == Some("namespace") {
-            if let Ok(Some(namespace_names)) = namespace_tool_name_map(tool) {
-                let namespace = tool.get("name").and_then(Value::as_str).unwrap_or_default();
-                collect_namespace_custom_tool_names(tool, namespace, &namespace_names, names);
-            }
-            continue;
-        }
-        if tool.get("type").and_then(Value::as_str) != Some("custom") {
-            continue;
-        }
-        if let Some(name) = tool
-            .get("name")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            names.insert(
-                name.to_string(),
-                V3ClientCustomToolName {
-                    name: name.to_string(),
-                    namespace: None,
-                },
-            );
-        }
-    }
-}
-
-fn collect_namespace_custom_tool_names(
-    namespace: &Value,
-    client_namespace: &str,
-    namespace_names: &std::collections::HashMap<String, String>,
-    names: &mut BTreeMap<String, V3ClientCustomToolName>,
-) {
-    for child in namespace
-        .get("tools")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        let Some(name) = child.get("name").and_then(Value::as_str) else {
-            continue;
-        };
-        let client_name = format!("{client_namespace}.{name}");
-        match child.get("type").and_then(Value::as_str) {
-            Some("namespace") => {
-                collect_namespace_custom_tool_names(child, &client_name, namespace_names, names)
-            }
-            Some("custom") => {
-                if let Some(provider_name) = namespace_names.get(&client_name) {
-                    names.insert(
-                        provider_name.clone(),
-                        V3ClientCustomToolName {
-                            name: name.to_string(),
-                            namespace: Some(client_namespace.to_string()),
-                        },
-                    );
-                }
-            }
-            _ => {}
-        }
     }
 }

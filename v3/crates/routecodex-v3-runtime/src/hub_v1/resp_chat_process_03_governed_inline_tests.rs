@@ -1,6 +1,112 @@
 use super::*;
 
 #[test]
+fn resp03_candidate_association_think_removal_and_split() {
+    let mut payload = json!({
+        "output":[
+            {"type":"output_text","text":""},
+            {"type":"output_text","text":"<think>one</think>visible"},
+            {"type":"output_text","text":"<think>two</think>"},
+            {"type":"function_call","name":"evaluate","call_id":"call","arguments":"{}"}
+        ],
+        "gemini_candidate_outcomes":[
+            {"candidate_index":7,"finishReason":"STOP","output_indices":[0,2]},
+            {"candidate_index":3,"finishReason":"STOP","output_indices":[1,3]}
+        ]
+    });
+    assert!(harvest_v3_responses_think_blocks(&mut payload));
+    assert_eq!(payload["output"].as_array().unwrap().len(), 4);
+    assert_eq!(
+        payload["gemini_candidate_outcomes"][0]["output_indices"],
+        json!([2])
+    );
+    assert_eq!(
+        payload["gemini_candidate_outcomes"][1]["output_indices"],
+        json!([0, 1, 3])
+    );
+    assert_eq!(payload["output"][2]["summary"][0]["text"], "two");
+    assert_eq!(payload["output"][3]["call_id"], "call");
+    let once = payload.clone();
+    assert!(!harvest_v3_responses_think_blocks(&mut payload));
+    assert_eq!(payload, once);
+}
+
+#[test]
+fn resp03_candidate_association_toolreason_synthetic_contributors() {
+    let mut payload = json!({
+        "output":[
+            {"type":"function_call","name":"first","call_id":"a","arguments":r#"{"reason":"evaluate","left":17}"#},
+            {"type":"function_call","name":"second","call_id":"b","arguments":"{}"}
+        ],
+        "gemini_candidate_outcomes":[
+            {"candidate_index":7,"output_indices":[0]},
+            {"candidate_index":3,"output_indices":[1]},
+            {"candidate_index":9,"output_indices":[]}
+        ]
+    });
+    map_v3_toolreason_to_reasoning_content_at_resp03_with_projection(&mut payload, true, true);
+    // Existing toolreason summary names both calls. Its reasoning and visible
+    // mirror are business derivations of both, not the first output's owner.
+    assert_eq!(payload["output"].as_array().unwrap().len(), 4);
+    assert_eq!(
+        payload["gemini_candidate_outcomes"][0]["output_indices"],
+        json!([0, 1, 2])
+    );
+    assert_eq!(
+        payload["gemini_candidate_outcomes"][1]["output_indices"],
+        json!([0, 1, 3])
+    );
+    assert_eq!(
+        payload["gemini_candidate_outcomes"][2]["output_indices"],
+        json!([])
+    );
+    // Enabled tool-thinking already consumes its registered reason field.
+    // Preserve the complete remaining native arguments and both call IDs.
+    assert_eq!(payload["output"][2]["arguments"], r#"{"left":17}"#);
+    assert_eq!(payload["output"][2]["call_id"], "a");
+    assert_eq!(payload["output"][3]["call_id"], "b");
+}
+
+#[test]
+fn resp03_candidate_association_toolreason_merge_and_disabled_control() {
+    let payload = json!({
+        "output":[
+            {"type":"reasoning","summary":[{"type":"summary_text","text":"original thought"}]},
+            {"type":"function_call","name":"evaluate","call_id":"call","arguments":r#"{"reason":"evaluate","left":17}"#}
+        ],
+        "gemini_candidate_outcomes":[
+            {"candidate_index":0,"output_indices":[0]},
+            {"candidate_index":1,"output_indices":[1]}
+        ]
+    });
+    let mut disabled = payload.clone();
+    map_v3_toolreason_to_reasoning_content_at_resp03_with_projection(&mut disabled, true, false);
+    assert_eq!(
+        disabled["gemini_candidate_outcomes"],
+        payload["gemini_candidate_outcomes"]
+    );
+    assert_eq!(disabled["output"].as_array().unwrap().len(), 2);
+
+    let mut merged = payload;
+    map_v3_toolreason_to_reasoning_content_at_resp03_with_projection(&mut merged, true, true);
+    assert_eq!(merged["output"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        merged["output"][0]["summary"][0]["text"],
+        "original thought"
+    );
+    assert_eq!(merged["output"][0]["summary"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        merged["gemini_candidate_outcomes"][0]["output_indices"],
+        json!([0])
+    );
+    assert_eq!(
+        merged["gemini_candidate_outcomes"][1]["output_indices"],
+        json!([0, 1, 2])
+    );
+    assert_eq!(merged["output"][2]["call_id"], "call");
+}
+
+#[test]
 fn resp03_native_apply_patch_input_that_looks_like_json_is_preserved() {
     let native_inputs = [
         r#"{"input":"*** Begin Patch\\n*** End Patch","other":"\\u4e2d"}"#,

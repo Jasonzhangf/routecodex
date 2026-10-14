@@ -6,7 +6,9 @@ const root = process.cwd();
 const sourcePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs';
 const source = [
   readFileSync(resolve(root, sourcePath), 'utf8'),
-  ...filesBelow('v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec').map((path) => readFileSync(path, 'utf8')),
+  ...filesBelow('v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec')
+    .filter((path) => !path.endsWith('_tests.rs'))
+    .map((path) => readFileSync(path, 'utf8')),
 ].join('\n');
 const tests = readFileSync(resolve(root, 'v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs'), 'utf8');
 const failures = [];
