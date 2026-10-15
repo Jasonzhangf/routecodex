@@ -1450,7 +1450,7 @@ if (!/RuntimeAttemptCleanup releases/.test(cancelRelease) || !/RuntimeRequestFin
 
 const failureTerminal = (lifecycleManifest.lifecycle_terminals ?? []).find((entry) => entry?.name === 'failure');
 const failureRelease = failureTerminal?.release ?? '';
-if (!/terminal_client_error commits through Server\/SSE and then RuntimeAttemptCleanup/.test(failureRelease) || !/RuntimeRequestFinalizer releases request scope/.test(failureRelease)) {
+if (!/terminal_client_error terminates transport without client commit through Server\/SSE and then RuntimeAttemptCleanup/.test(failureRelease) || !/RuntimeRequestFinalizer releases request scope/.test(failureRelease)) {
   failures.push('v3.operation_runner.lifecycle.manifest.yml: terminal_client_error must release attempt scope before request scope');
 }
 

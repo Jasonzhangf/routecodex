@@ -58,6 +58,8 @@ budget_contract:
   per_request: required
   process_global: required
   residence_or_deadline: required
+  provider_stream_deadline_guard: required_for_direct_and_relay_before_semantic_terminal
+  residence_expiry: typed_error_terminal_without_new_attempt_or_unstarted_provider_penalty
   reserve_before_append_or_copy: true
   provider_attempt_and_client_replay_share_request_budget: true
   server_budget_construction: forbidden
@@ -71,11 +73,17 @@ sealed_replay_body_contract:
 failure_kinds:
   - Upstream
   - Protocol
+  - ResidenceDeadlineExceeded
   - LocalResourceExhausted
   - ObservationFailure
   - PersistenceFailure
   - ClientCancelled
 failure_attribution_contract:
+  residence_deadline:
+    active_attempt: typed_provider_timeout_enters_Error_chain_before_client_commit
+    exhausted_request: typed_NoResponse_terminal_without_reselection
+    unstarted_candidate_health_mutation: forbidden
+    local_resource_exhaustion_classification: forbidden
   responses_client_replay:
     runtime_variant: ExecutionControlResponse
     source_kind: RuntimeFailure

@@ -3594,7 +3594,7 @@ flowchart TD
 
 ## v3.operation_runner.dagpipe.error
 
-Design-only DAGpipe error graph; exact ErrorErr01-06 chain with HostCaptured. Error06 stages an optional projection; Runtime consumes Error05 decision after the graph and alone submits terminal error output through Server/SSE. Retry launches a new attempt after typed attempt_cleanup; only terminal_client_error reaches RuntimeRequestFinalizer.
+Design-only DAGpipe error graph; exact ErrorErr01-06 chain with HostCaptured. Error06 records internal failure evidence only; Runtime consumes Error05 and terminates exhausted transport without a client error commit through Server/SSE. Retry launches a new attempt after typed attempt_cleanup; terminal failure releases attempt scope before RuntimeRequestFinalizer.
 
 Owner feature: `v3.unified_operation_runner_design`
 Manifest: `docs/architecture/dagpipe/v3.operation_runner.error.graph.json`

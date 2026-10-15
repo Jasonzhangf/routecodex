@@ -527,11 +527,25 @@ where
         send_attempts = match attempt_budget.admit_transport_attempt() {
             Ok(attempts) => attempts,
             Err(error) => {
+                if let Err(release_error) = C::release_after_error(
+                    &control,
+                    manifest,
+                    C::server_id(&standardized),
+                    &standardized,
+                    C::request_id(&standardized),
+                    &mut trace,
+                ) {
+                    return error_output(
+                        release_error,
+                        trace,
+                        &crate::hooks::register_responses_direct_hooks(),
+                    );
+                }
                 return error_output(
-                    runtime_source("V3ExecutionAttemptBudget", error),
+                    direct_runtime_helpers_stream::direct_attempt_budget_error_source(error),
                     trace,
                     &crate::hooks::register_responses_direct_hooks(),
-                )
+                );
             }
         };
         if let Err(error) = runtime_timing.start_external() {
@@ -1107,7 +1121,7 @@ where
                             );
                         }
                         drop(provider_action_permit.take());
-                        let policy_result = match run_v3_direct_provider_failure_policy(
+                        let mut policy_result = match run_v3_direct_provider_failure_policy(
                             &V3DirectProviderFailurePolicyContext {
                                 failure_session_scope: &direct_failure_session_scope,
                                 provider_health: &provider_health,
@@ -1137,6 +1151,7 @@ where
                                 )
                             }
                         };
+                        policy_result.exhaust_if_residence_expired(&attempt_budget);
                         if let Some(event) = policy_result.event.clone() {
                             provider_failure_events.push(event.clone());
                             publish_v3_direct_provider_failure_event(
@@ -1150,7 +1165,8 @@ where
                                 total_attempts(&accumulator, send_attempts),
                             );
                         }
-                        match &policy_result.decision.action {
+                        let decision = policy_result.decision;
+                        match &decision.action {
                             V3Error05ExecutionAction::WaitThenReselect { recovery } => {
                                 if !policy_result.retryable_transient {
                                     pending_provider_action_recovery = Some(recovery.clone());
@@ -1191,7 +1207,7 @@ where
                                 observability.attempts =
                                     Some(total_attempts(&accumulator, send_attempts));
                                 return direct_runtime_helpers_stream::provider_terminal_output(
-                                    policy_result.decision,
+                                    decision,
                                     last_external_http,
                                     trace,
                                     Some(observability),

@@ -9829,7 +9829,7 @@ chains:
 - chain_id: v3.operation_runner.dagpipe.error
   owner_feature_id: v3.unified_operation_runner_design
   manifest: docs/architecture/dagpipe/v3.operation_runner.error.graph.json
-  summary: Design-only DAGpipe error graph; exact ErrorErr01-06 chain with HostCaptured. Error06 stages an optional projection; Runtime consumes Error05 decision after the graph and alone submits terminal error output through Server/SSE. Retry launches a new attempt after typed attempt_cleanup; only terminal_client_error reaches RuntimeRequestFinalizer.
+  summary: Design-only DAGpipe error graph; exact ErrorErr01-06 chain with HostCaptured. Error06 records internal failure evidence only; Runtime consumes Error05 and terminates exhausted transport without a client error commit through Server/SSE. Retry launches a new attempt after typed attempt_cleanup; terminal failure releases attempt scope before RuntimeRequestFinalizer.
   entry_contract:
     node: ErrorErr01SourceRaised
     owner_doc: docs/design/v3-unified-operation-runner-design.md
@@ -9913,8 +9913,8 @@ chains:
       consumers: [ErrorErr06ClientProjected, RuntimeRetryLaunch, RuntimeAttemptCleanup, V3OperationRunnerNormalizeRequest]
       effect: Error06 stages no client error; Runtime discards that empty result, releases failed attempt context through typed attempt_cleanup, and re-enters the request graph; RuntimeRequestFinalizer is not triggered
     terminal_client_error:
-      consumers: [ErrorErr06ClientProjected, RuntimeClientCommit, RuntimeRequestFinalizer]
-      effect: Error06 stages the terminal projection; Runtime alone submits it through Server/SSE
+      consumers: [ErrorErr06ClientProjected, RuntimeAttemptCleanup, RuntimeRequestFinalizer]
+      effect: Error06 records internal failure evidence; Runtime terminates the affected transport through Server/SSE without committing a client error
 
 - chain_id: v3.admin.control_plane_admission
   owner_feature_id: v3.config_management

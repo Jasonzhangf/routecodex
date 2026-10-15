@@ -49,6 +49,8 @@ flowchart LR
 - Per request: `required`
 - Process global: `required`
 - Residence/deadline: `required`
+- Provider stream deadline guard: `required_for_direct_and_relay_before_semantic_terminal`
+- Residence expiry: `typed_error_terminal_without_new_attempt_or_unstarted_provider_penalty`
 - Reserve before append/copy: `true`
 - Initial storage: `bounded_memory_only`
 - Disk spill: `forbidden`
@@ -58,7 +60,7 @@ flowchart LR
 - Success issuer: `response_semantic_owner_after_protocol_terminal_and_payload_seal`
 - Success consumers: `provider_health_success`, `route_policy_commit`, `continuation_commit`, `client_semantic_commit`
 - Forbidden success evidence: `http_2xx`, `response_headers`, `stream_constructed`, `first_business_frame`, `transport_accepted`
-- Failure kinds: `Upstream`, `Protocol`, `LocalResourceExhausted`, `ObservationFailure`, `PersistenceFailure`, `ClientCancelled`
+- Failure kinds: `Upstream`, `Protocol`, `ResidenceDeadlineExceeded`, `LocalResourceExhausted`, `ObservationFailure`, `PersistenceFailure`, `ClientCancelled`
 - Responses client replay local failure: `ExecutionControlResponse` → `599` / `responses_relay_response_execution_control_error`; provider classification `forbidden`
 
 ## Current Runtime-Red Bindings

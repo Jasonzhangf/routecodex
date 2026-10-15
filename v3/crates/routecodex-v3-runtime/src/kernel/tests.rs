@@ -1,5 +1,34 @@
 include!("../../tests/support/kernel_unit.rs");
 
+#[test]
+fn residence_expiry_is_not_a_local_store_598_and_never_commits_an_error() {
+    let source = direct_attempt_store_error_source(
+        crate::nodes::V3AttemptStoreError::ResidenceDeadlineExceeded("expired".into()),
+        "V3ExecutionAttemptPayloadStore",
+        "direct_sse_attempt_store_rejected",
+    );
+    assert_eq!(source.code, "request_residence_deadline_exceeded");
+    let output = error_output(
+        source,
+        Vec::new(),
+        &crate::hooks::register_responses_direct_hooks(),
+    );
+    assert_ne!(output.client_payload.status, 598);
+    assert_eq!(
+        output.terminal_disposition,
+        Some(V3ProviderTerminalDisposition::NoResponse)
+    );
+    assert_eq!(output.error_chain.as_ref().unwrap().len(), 6);
+
+    let source = direct_attempt_store_error_source(
+        crate::nodes::V3AttemptStoreError::LocalResourceExhausted("byte cap".into()),
+        "V3ExecutionAttemptPayloadStore",
+        "direct_sse_attempt_store_rejected",
+    );
+    assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
+    assert_eq!(source.code, "direct_sse_attempt_store_rejected");
+}
+
 #[cfg(test)]
 #[tokio::test]
 async fn normal_direct_request_does_not_consume_unrelated_provider_failure_gate() {

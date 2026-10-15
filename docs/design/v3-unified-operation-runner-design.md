@@ -121,7 +121,7 @@ The design validates three DAGpipe SESE graphs:
   explicit in the graph artifact. Only RuntimeClientCommit may submit a staged candidate when the
   disposition is `client_commit`.
 - [error graph](../architecture/dagpipe/v3.operation_runner.error.graph.json): one source ARC
-  `source-failure`, one exit ARC `error-client-projected-candidate`; every node always runs once
+  `source-failure`, one exit ARC `internal-error-outcome`; every node always runs once
   in fixed order. Error06 stages internal failure evidence only, never a client-error candidate.
   Runtime consumes the typed Error05 decision: retry starts a new attempt; terminal failure ends
   the affected transport without an error response. Retry releases attempt resources and re-enters
@@ -186,8 +186,8 @@ or payload-carried control replaces this chain.
 | error_err02_host_captured | `error.provider_failure_policy` (existing ErrorErr02) | error-source | error-host-captured | error.chain read/write | error-host-captured produced | no skip path; this node is mandatory | HostCaptured never skipped |
 | error_err03_runtime_classified | `error.pipeline_contract` (existing ErrorErr03) | error-host-captured | error-classified | error.chain, provider_runtime.observation read/write | error-classified produced | classification failure remains in error chain | classification is typed, not payload metadata |
 | error_err04_router_policy_applied | `error.execution_decision_consumer` (existing ErrorErr04) | error-classified | error-policy-applied | error.chain, route.retry_exclusion_set read/write | error-policy-applied produced | policy failure remains in error chain | cooldown/retry policy preserved |
-| error_err05_execution_decision | `error.execution_decision_owner` (existing ErrorErr05) | error-policy-applied | error-for-projection | error.chain, v3.error.execution_decision read/write | error-for-projection produced; typed decision stays in the side resource | decision failure remains in error chain | writes retry/terminal decision only to typed control resource |
-| error_err06_client_projected | Error (existing ErrorErr06, internal resource despite legacy name) | error-for-projection | error-client-projected-candidate (internal only) | error.chain and error_execution_decision read | typed internal failure evidence; no client error candidate | typed source failure to ErrorErr01 | Runtime alone consumes retry/terminal decisions; Server/SSE only commits success or aborts transport |
+| error_err05_execution_decision | `error.execution_decision_owner` (existing ErrorErr05) | error-policy-applied | error-execution-decision | error.chain, v3.error.execution_decision read/write | error-execution-decision produced; typed decision stays in the side resource | decision failure remains in error chain | writes retry/terminal decision only to typed control resource |
+| error_err06_client_projected | Error (existing ErrorErr06, internal resource despite legacy name) | error-execution-decision | internal-error-outcome | error.chain and error_execution_decision read | typed internal failure evidence; no client error candidate | typed source failure to ErrorErr01 | Runtime alone consumes retry/terminal decisions; Server/SSE only commits success or aborts transport |
 
 ## Runtime runner
 

@@ -104,6 +104,28 @@ pub(crate) struct V3DirectProviderFailurePolicyResult {
     retryable_transient: bool,
 }
 
+impl V3DirectProviderFailurePolicyResult {
+    fn exhaust_if_residence_expired(&mut self, budget: &V3AttemptBudget) {
+        if std::time::Instant::now() < budget.residence_deadline()
+            || self.decision.action.is_terminal()
+        {
+            return;
+        }
+        // Retain Error01-03 provenance and the exact attempted-provider action.
+        // The expired request has no eligible next attempt, regardless of pool health.
+        let exhaustion = routecodex_v3_error::build_v3_error_04_target_exhaustion_decision_with_provider_availability(
+            self.decision.exhaustion.local_action.clone(), 0, false, false,
+        );
+        self.decision = routecodex_v3_error::build_v3_error_05_execution_decision_from_v3_error_04(
+            exhaustion, None,
+        );
+        if let Some(event) = self.event.as_mut() {
+            event.action = "terminal_no_response".to_owned();
+            event.next_provider_key = None;
+        }
+    }
+}
+
 pub(crate) struct V3DirectProviderFailurePolicyContext<
     'ctx,
     R: V3ProviderAvailabilityReader + ?Sized,
