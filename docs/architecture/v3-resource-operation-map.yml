@@ -2079,7 +2079,7 @@ resources:
     owner_feature_id: v3.runtime_timing_observability
     owner_crate: routecodex-v3-runtime
     owner_node: V3RuntimeTimingSummary
-    allowed_readers: [record_timing, emit_v3_request_complete_console_line, V3ResponsesProtocolRelayHandoff, V3ResponsesProtocolDirectHandoff]
+    allowed_readers: [record_timing, emit_v3_request_complete_console_line, V3ResponsesProtocolRelayHandoff, V3ResponsesProtocolDirectHandoff, relay_handoff_entry_state, execute_v3_relay_runtime_core]
     allowed_writers: [V3RuntimeObservabilityAccumulator, V3RuntimeTimingState::start, start_external, finish_external, finish_runtime, finish_v3_direct_runtime_timing, execute_v3_responses_direct_runtime_kernel_core, execute_v3_responses_relay_runtime_inner]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-sse, ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic, response.client_payload]
     may_enter_provider_body: false
@@ -3101,7 +3101,7 @@ resources:
       target_contract: One resident request controller owns immutable target plan, cumulative attempt/deadline budget, cancellation, Error05 recovery execution, and terminal closeout.
       runtime_driver: Provider network requests and lazy response streams remain on a resident Tokio Runtime for their complete lifetime.
     allowed_writers: [execute_v3_direct_runtime_kernel_core_resident, execute_v3_responses_direct_runtime_kernel_core_resident, execute_v3_relay_runtime_core]
-    allowed_readers: [V3Error05ExecutionDecision, ProviderTransport, AttemptPayloadStore]
+    allowed_readers: [V3Error05ExecutionDecision, ProviderTransport, AttemptPayloadStore, relay_request_execution_control]
     forbidden_writers: [SSE_stream_wrapper, routecodex-v3-server, protocol_codec, compat_hook, observability, provider_payload, client_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -3119,7 +3119,7 @@ resources:
       immutable_after_hit: true
       recovery_scope: Target-local reselect consumes this plan and never re-enters Router classify, route policy evaluation, or opaque pool hit.
     allowed_writers: [V3Target09CandidateSetExpanded]
-    allowed_readers: [execute_v3_direct_runtime_kernel_core_resident, execute_v3_responses_direct_runtime_kernel_core_resident, execute_v3_relay_runtime_core, V3Error05ExecutionDecision]
+    allowed_readers: [execute_v3_direct_runtime_kernel_core_resident, execute_v3_responses_direct_runtime_kernel_core_resident, execute_v3_relay_runtime_core, V3Error05ExecutionDecision, resolve_v3_relay_entry_target]
     forbidden_writers: [SSE_stream_wrapper, ProviderTransport, protocol_codec, compat_hook, observability]
     may_enter_provider_body: false
     may_enter_client_body: false

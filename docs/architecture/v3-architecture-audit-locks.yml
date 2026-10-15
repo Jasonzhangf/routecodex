@@ -242,8 +242,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:7b3839cd5ac05ce2266e74742ed50b5126a2e67af82593392d7abc251a3187ea
-    last_manual_authorization_id: auth-20260915-v3-remove-continuation-openai-chat-relay
+    fingerprint: sha256:1e4a8e874c0d9182b335773716def39be574af4c193ddc1a0df06dbef7986923
+    last_manual_authorization_id: auth-20261014-fa22072-chat-handoff-wiring
   - item_id: chain:v3.gemini_relay.controlled_runtime
     chain_id: v3.gemini_relay.controlled_runtime
     status: audited_locked
@@ -1342,3 +1342,10 @@ manual_authorizations:
     reason: "Jason explicitly approved: 授权这第三条诊断入口锁. This scoped refresh binds the existing original Error01 source edge v3-hub-relay-response-failure-01 to build_v3_relay_provider_attempt_source, extracted from build_v3_relay_provider_error_05_decision so the original cause is retained before target resolution. Callee, owner, resource flow, status and runtime policy remain unchanged. Only this caller binding, fingerprint and authorization record are covered; no install, restart, shutdown or production configuration writes. Authorization recorded at the stated time; independent review and CI remain required."
     fingerprint_before: sha256:a19e427d0ac7643bb355d4949f77d61b689def1db0aa77c37f39c748b25027cf
     fingerprint_after: sha256:bbaa71c6d43f564dcc8fa94e77542e9eac85e9226fbff3c26497a1415b1fa767
+  - authorization_id: auth-20261014-fa22072-chat-handoff-wiring
+    item_id: chain:v3.openai_chat_relay.controlled_runtime
+    approved_by: Jason
+    approved_at: '2026-10-15T00:16:39Z'
+    reason: "Jason explicitly approved: 授权本轮这条接线锁修复. This scoped refresh appends v3-chat-direct-relay-handoff-01 through -04 in order and implements the corresponding Chat Direct-to-Relay typed handoff consumption and captured-plan admission bindings. The existing selected target, candidate plan, request-local exclusions, cumulative control, timing and failure sequence continue through the sole Relay owner; selection policy, pins, retry budgets, health, payload and client framing rules remain unchanged. Authorization recorded at the stated time, not the user-message timestamp. Source and mapped verification only; tests, reverse proof, independent review and CI are still required. No install, restart, shutdown or production configuration writes."
+    fingerprint_before: sha256:7b3839cd5ac05ce2266e74742ed50b5126a2e67af82593392d7abc251a3187ea
+    fingerprint_after: sha256:1e4a8e874c0d9182b335773716def39be574af4c193ddc1a0df06dbef7986923

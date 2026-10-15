@@ -312,6 +312,7 @@ where
             drop(provider_action_permit.take());
             provider_action_permit_target = None;
         }
+        attempt_budget.set_transport_attempt_limit(selected.candidate_count);
         trace.push("V3Target10ConcreteProviderSelected");
         if let Some(sink) = route_selection_event_sink.as_ref() {
             let transport_label = if C::body(&standardized)

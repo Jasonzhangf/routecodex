@@ -170,13 +170,11 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport_provide
     .await
 }
 
-pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_execution_mode_and_request_control(
+pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_handoff(
     manifest: &V3Config05ManifestPublished,
     input: V3OpenAiChatRelayRuntimeInput,
     provider_health: V3ProviderFailureRuntimeHealth,
-    execution_mode: V3HubExecutionMode,
-    request_execution_control: crate::nodes::V3RequestExecutionControl,
-    route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
+    handoff: crate::V3ResponsesProtocolRelayHandoff,
 ) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
     execute_v3_openai_chat_relay_runtime_inner(
         manifest,
@@ -184,9 +182,8 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport_provide
         crate::default_responses_transport(),
         provider_health,
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
-        execution_mode,
-        Some(request_execution_control),
-        route_policy_pending,
+        V3HubExecutionMode::Relay,
+        Some(handoff),
     )
     .await
 }
@@ -238,7 +235,6 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_provider_health_and_execu
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         execution_mode,
         None,
-        None,
     )
     .await
 }
@@ -250,15 +246,17 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3RelayProviderFailureRetryPolicy,
     execution_mode: V3HubExecutionMode,
-    request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
-    route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
+    mut initial_handoff: Option<crate::V3ResponsesProtocolRelayHandoff>,
 ) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
     // 统一 relay 主循环骨架（大骨架）：生命周期与编排在 execute_v3_relay_runtime_core，
     // 协议差异收敛在 V3OpenAiChatRelayCodec。
     let routing_group = server_routing_group(manifest, &input.server_id)
         .map_err(|error| V3OpenAiChatRelayRuntimeError::Target(error.to_string()))?
         .to_string();
-    let mut failure_events = Vec::new();
+    let mut failure_events = initial_handoff
+        .as_mut()
+        .map(|handoff| std::mem::take(&mut handoff.provider_failure_events))
+        .unwrap_or_default();
     execute_v3_relay_runtime_core::<V3OpenAiChatRelayCodec, T>(
         manifest,
         &input.server_id,
@@ -272,8 +270,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
         retry_policy,
         Vec::new(),
         true,
-        request_execution_control,
-        route_policy_pending,
+        initial_handoff,
         &mut failure_events,
     )
     .await

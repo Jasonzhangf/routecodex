@@ -4,11 +4,11 @@ owner_feature_id: v3.openai_chat_relay_runtime_integration
 entrypoint:
   node_id: V3OpenAiChatRelayRuntimeInput
   symbol: execute_v3_openai_chat_completions_request
-  source: v3/crates/routecodex-v3-server/src/lib.rs
+  source: v3/crates/routecodex-v3-server/src/executors.rs
 return_path:
   node_id: V3ServerRespOutbound06ClientFrame
   symbol: openai_chat_relay_output_response
-  source: v3/crates/routecodex-v3-server/src/lib.rs
+  source: v3/crates/routecodex-v3-server/src/executors.rs
 call_map_chain_id: v3.openai_chat_relay.controlled_runtime
 canonical_docs:
   - docs/goals/v3-openai-chat-relay-runtime-integration-plan.md
@@ -32,6 +32,11 @@ node_ids:
   - V3HubRespChatProcess03Governed
   - V3HubRespOutbound05ClientSemantic
   - V3ServerRespOutbound06ClientFrame
+  - V3ResponsesProtocolRelayHandoff
+  - V3OpenAiChatRelaySeededEntry
+  - V3RelayRuntimeCore
+  - V3RelayCapturedPlanAdmission
+  - V3Target10ConcreteProviderSelected
 edges:
   - { step_id: v3-openai-chat-relay-01, from_node: V3OpenAiChatRelayRuntimeInput, to_node: V3HubReqInbound01ClientRaw, status: anchored }
   - { step_id: v3-openai-chat-relay-02, from_node: V3HubReqInbound01ClientRaw, to_node: V3HubReqInbound02Normalized, status: anchored }
@@ -48,6 +53,10 @@ edges:
   - { step_id: v3-openai-chat-relay-14, from_node: V3HubRespInbound02Normalized, to_node: V3HubRespChatProcess03Governed, status: anchored }
   - { step_id: v3-openai-chat-relay-15, from_node: V3HubRespChatProcess03Governed, to_node: V3HubRespOutbound05ClientSemantic, status: anchored }
   - { step_id: v3-openai-chat-relay-17, from_node: V3HubRespOutbound05ClientSemantic, to_node: V3ServerRespOutbound06ClientFrame, status: anchored }
+  - { step_id: v3-chat-direct-relay-handoff-01, from_node: V3ResponsesProtocolRelayHandoff, to_node: V3OpenAiChatRelaySeededEntry, status: anchored }
+  - { step_id: v3-chat-direct-relay-handoff-02, from_node: V3OpenAiChatRelaySeededEntry, to_node: V3RelayRuntimeCore, status: anchored }
+  - { step_id: v3-chat-direct-relay-handoff-03, from_node: V3RelayRuntimeCore, to_node: V3RelayCapturedPlanAdmission, status: anchored }
+  - { step_id: v3-chat-direct-relay-handoff-04, from_node: V3RelayCapturedPlanAdmission, to_node: V3Target10ConcreteProviderSelected, status: anchored }
 error_path:
   node_ids:
     - V3Error01SourceRaised
@@ -64,6 +73,7 @@ isolation:
 verification:
   required_gates:
     - npm run test:v3-openai-chat-relay-runtime-integration
+    - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test fa22072_direct_relay_handoff -- --nocapture --test-threads=1
     - npm run test:v3-h2-chat-direct-isolation
     - npm run verify:v3-openai-chat-relay-runtime-integration
     - npm run test:v3-openai-chat-relay-runtime-integration-red-fixtures

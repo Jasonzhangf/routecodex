@@ -44,6 +44,7 @@ const copied = [
   "v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs",
   "v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_sidecar.rs",
   "v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs",
+  "v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs",
   "v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs",
   "v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs",
   "v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs",
@@ -327,6 +328,24 @@ const cases = [
         "V3RelayProviderFailureRetryPolicy::from_manifest(manifest),\n        true,\n    )",
       ),
     diagnostic: /Anthropic request dry-run must pass the rescue-probe-disabled gate/u,
+  },
+  {
+    name: "Unseeded Relay adapter enables rescue probes",
+    path: "v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs",
+    mutate: (source) => source.replace(
+      "            input,\n            allow_exhaustion_rescue_probe,\n            preferred_selected,",
+      "            input,\n            true,\n            preferred_selected,",
+    ),
+    diagnostic: /Unseeded Relay entry must preserve the rescue-probe mode/u,
+  },
+  {
+    name: "Captured-plan Relay adapter enables rescue probes",
+    path: "v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs",
+    mutate: (source) => source.replace(
+      "        input.deterministic_sample,\n        allow_exhaustion_rescue_probe,\n        preferred_selected,",
+      "        input.deterministic_sample,\n        true,\n        preferred_selected,",
+    ),
+    diagnostic: /Captured-plan Relay entry must preserve the rescue-probe mode/u,
   },
   {
     name: "Shared rescue owner ignores dry-run gate",

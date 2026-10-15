@@ -105,7 +105,7 @@ const V3_DEDICATED_REVIEW_SURFACES = new Map([
     ],
     logicCards: [
       ['Runtime owns protocol lifecycle', 'OpenAI Chat request/response protocol handling stays in Rust runtime/codec owners, not Server or SSE.'],
-      ['SSE stays streaming transport', 'Controlled SSE evidence proves first frame does not wait for terminal and no full-stream materialization.'],
+      ['SSE transports sealed provider content', 'Provider attempts stay client-invisible until a valid terminal. Server owns client SSE headers and keepalives before the sealed business payload.'],
       ['Error and isolation are explicit', 'Provider failure enters Error01-06; metadata_center never enters provider/client normal payload.'],
     ],
     resources: [
