@@ -100,6 +100,7 @@ const files = {
   webSearchSidecar:
     "v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_sidecar.rs",
   relayCore: "v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs",
+  relayShared: "v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs",
   directState: "v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs",
   directProtocolPlan: "v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs",
   v3DirectCore: "v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs",
@@ -566,8 +567,23 @@ requireMatch(
 );
 requireMatch(
   source.relayCore,
-  /provider_header_overrides:\s*Vec<V3ProviderRequestHeader>,[\s\S]*allow_exhaustion_rescue_probe:\s*bool[\s\S]*resolve_v3_relay_target_outcome_with_admission_rescue\([\s\S]*allow_exhaustion_rescue_probe/u,
+  /provider_header_overrides:\s*Vec<V3ProviderRequestHeader>,[\s\S]*allow_exhaustion_rescue_probe:\s*bool[\s\S]*resolve_v3_relay_entry_target\([\s\S]*allow_exhaustion_rescue_probe/u,
   "Generic relay core must require an explicit provider rescue-probe mode",
+);
+const relayEntryTarget = extractBracedBlock(
+  source.relayShared,
+  "pub(crate) async fn resolve_v3_relay_entry_target(",
+  "Relay entry target adapter",
+);
+requireMatch(
+  relayEntryTarget,
+  /resolve_v3_relay_target_outcome_with_admission_rescue\(\s*input,\s*allow_exhaustion_rescue_probe,\s*preferred_selected,/u,
+  "Unseeded Relay entry must preserve the rescue-probe mode",
+);
+requireMatch(
+  relayEntryTarget,
+  /select_v3_expanded_target_with_admission_rescue\([\s\S]*input\.deterministic_sample,\s*allow_exhaustion_rescue_probe,\s*preferred_selected,/u,
+  "Captured-plan Relay entry must preserve the rescue-probe mode",
 );
 requireMatch(
   source.directState,

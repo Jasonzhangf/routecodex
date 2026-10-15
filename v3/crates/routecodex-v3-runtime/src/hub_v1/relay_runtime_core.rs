@@ -10,19 +10,21 @@
 //! 里程碑 2：trait + 骨架。SSE 状态机（协议特定）经 [`V3RelayProtocolCodec::project_sse`]
 //! 收敛；JSON 响应链（resp01->02->03->04->05->06）经 `project_json_response` 收敛。
 
+use super::relay_runtime_shared::{
+    relay_handoff_entry_state, relay_request_execution_control, resolve_v3_relay_entry_target,
+};
 use super::*;
-use crate::nodes::{V3AttemptStoreError, V3CommittedClientSseBuilder, V3RequestExecutionControl};
+use crate::nodes::{V3AttemptStoreError, V3CommittedClientSseBuilder};
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key;
 use crate::provider_failure_runtime_policy::{
-    admit_v3_selected_target_after_recovery, resolve_v3_relay_target_outcome_with_admission_rescue,
-    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
-    V3AdmitAfterRecovery, V3ProviderFailureRuntimeHealth, V3RelayProviderAdmittedTargetResolution,
+    admit_v3_selected_target_after_recovery, v3_relay_provider_policy_now_epoch_ms,
+    v3_relay_provider_target_selection_sample, V3AdmitAfterRecovery,
+    V3ProviderFailureRuntimeHealth, V3RelayProviderAdmittedTargetResolution,
     V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyState,
     V3RelayProviderFailureRetryPolicy, V3RelayProviderTargetResolutionInput,
     V3RuntimeProviderAdmission,
 };
-use crate::runtime_timing::V3RuntimeTimingState;
 use futures_util::StreamExt;
 use routecodex_v3_config::{V3Config05ManifestPublished, V3WebSearchExecutionMode};
 use routecodex_v3_error::V3ProviderFailureSessionScope;
@@ -31,7 +33,7 @@ use routecodex_v3_provider_responses::{
     V3ProviderSseStream, V3ResponsesProviderTarget, V3Transport13ResponsesHttpRequest,
 };
 use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 enum V3RelayAttemptCollectFailure {
     EmptyProviderAttempt,
@@ -447,8 +449,7 @@ pub async fn execute_v3_relay_runtime_core<C, T>(
     retry_policy: V3RelayProviderFailureRetryPolicy,
     provider_header_overrides: Vec<V3ProviderRequestHeader>,
     allow_exhaustion_rescue_probe: bool,
-    initial_request_execution_control: Option<V3RequestExecutionControl>,
-    route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
+    initial_handoff: Option<crate::V3ResponsesProtocolRelayHandoff>,
     failure_events: &mut Vec<V3RuntimeProviderFailureObservation>,
 ) -> Result<C::Output, V3RelayCoreError>
 where
@@ -460,7 +461,11 @@ where
     let mut trace = Vec::with_capacity(17);
     // 统一 relay timing：internal = RouteCodex 处理，external = provider 等待；
     // 只写入 typed observability，不进入 payload。
-    let runtime_timing = V3RuntimeTimingState::start();
+    let (runtime_timing, mut failed_candidates, mut retry_selected) =
+        relay_handoff_entry_state(initial_handoff.as_ref());
+    let route_policy_pending = initial_handoff
+        .as_ref()
+        .and_then(|handoff| handoff.route_policy_pending.clone());
     let transport_intent = if payload.get("stream").and_then(Value::as_bool) == Some(true) {
         V3HubTransportIntent::Sse
     } else {
@@ -509,26 +514,18 @@ where
         &requested_model,
     )?;
     let routing_payload_ref: &Value = routing_payload.as_ref();
-    let mut failed_candidates = BTreeSet::new();
-    let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
     let mut pending_provider_action_recovery = None;
     let mut provider_action_permit: Option<V3ProviderActionPermit> = None;
     let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> = None;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut last_external_http = None;
-    let request_execution_control = match initial_request_execution_control {
-        Some(control) => control,
-        None => V3RequestExecutionControl::from_manifest(manifest, server_id).map_err(|error| {
-            V3RelayCoreError::Target(format!(
-                "V3ExecutionAttemptBudget rejected relay request: {error}"
-            ))
-        })?,
-    };
+    let request_execution_control =
+        relay_request_execution_control(manifest, server_id, initial_handoff.as_ref())?;
     let attempt_budget = request_execution_control.attempt_budget();
     let deterministic_sample = v3_relay_provider_target_selection_sample(request_id);
     let failure_context = V3RelayProviderFailurePolicyContext {
         manifest,
-        captured_target_09: None,
+        captured_target_09: initial_handoff.as_ref().map(|handoff| &handoff.expanded),
         failure_session_scope: failure_session_scope.clone(),
         provider_health: &provider_health,
         retry_policy,
@@ -553,10 +550,11 @@ where
                     .map_err(V3RelayCoreError::Target)?,
                 deterministic_sample,
             };
-            let target_resolution = resolve_v3_relay_target_outcome_with_admission_rescue(
+            let target_resolution = resolve_v3_relay_entry_target(
                 target_resolution_input,
                 allow_exhaustion_rescue_probe,
                 preferred_selected,
+                initial_handoff.as_ref(),
             )
             .await;
             match target_resolution {

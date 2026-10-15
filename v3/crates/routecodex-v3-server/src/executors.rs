@@ -261,11 +261,9 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
                 ),
             );
         }
-        let relay_trace = handoff.node_trace;
-        let request_execution_control = handoff.request_execution_control;
-        let route_policy_pending = handoff.route_policy_pending;
+        let relay_trace = handoff.node_trace.clone();
         let relay_result =
-            execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_execution_mode_and_request_control(
+            execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_handoff(
                 &state.manifest,
                 V3OpenAiChatRelayRuntimeInput {
                     server_id: state.server.id.clone(),
@@ -274,9 +272,7 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
                     payload,
                 },
                 state.provider_health.runtime_health(),
-                V3HubExecutionMode::Relay,
-                request_execution_control,
-                route_policy_pending,
+                handoff,
             )
             .await;
         let mut relay_output = match relay_result {

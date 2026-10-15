@@ -1697,6 +1697,8 @@ features:
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
   - v3/crates/routecodex-v3-server/tests/openai_chat_relay_controlled.rs
   - v3/crates/routecodex-v3-server/tests/openai_chat_direct_isolation_controlled.rs
+  - v3/crates/routecodex-v3-server/tests/fa22072_direct_relay_handoff.rs
+  - v3/crates/routecodex-v3-server/tests/fa22072_direct_relay_handoff
   - v3/crates/routecodex-v3-cli/tests/h2_chat_direct_isolation.rs
   design:
   - docs/goals/v3-openai-chat-relay-runtime-integration-plan.md
@@ -1723,8 +1725,14 @@ features:
   - rejected metadata_center request produces zero upstream captures
   - chat entry pool exhaustion and provider terminals break the client transport for both the same-protocol Direct lane and the cross-protocol Relay lane instead of projecting an error payload
   - a real external upstream status (429/503) never reaches the client on either lane; the client observes a transport break and a healthy later candidate is reselected to serve the request, while the failed request's provider-terminal evidence keeps the real upstream status, headers, and body
+  - Standard Chat Direct JSON and SSE recover from an owned pre-head A failure through the already-selected Responses B; A1/B1, held-client pending, genuine B model/content/stop/usage/DONE, privacy and owned cleanup are required.
+  - Direct-to-Relay continuation consumes the captured target plan and request-local exclusions without Router re-entry or a new request execution control.
+  - fa22072_direct_relay_captured_plan_and_exclusions_public_consumer requires captured A/B/C execution and D0 after the receiving manifest routes to D; captured-plan and exclusion reverses must each fail.
+  - Exact provider/model pins retain their declared scope; failure does not admit an unrelated default-pool provider.
+  - Seeded continuation preserves declared exhaustion and cumulative attempt/deadline admission; an exhausted request breaks only its own transport without provider error payload or fabricated completion.
   required_gates:
   - npm run test:v3-openai-chat-relay-runtime-integration
+  - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test fa22072_direct_relay_handoff -- --nocapture --test-threads=1
   - npm run test:v3-h2-chat-direct-isolation
   - npm run verify:v3-openai-chat-relay-runtime-integration
   - npm run test:v3-openai-chat-relay-runtime-integration-red-fixtures
@@ -3239,6 +3247,9 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract zero_sse_first_frame_timeout_is_rejected_at_config_owner -- --nocapture
   - npm run verify:v3-architecture-ci
   - npm run verify:v3-provider-action-gate
+  - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-runtime --test openai_chat_relay_runtime_integration -- --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-runtime --test gemini_relay_runtime_integration -- --nocapture
+  - npm run verify:v3-file-size
   red_tests:
   - npm run test:v3-provider-action-gate-red-fixtures
   completion_rule:
@@ -3748,10 +3759,14 @@ features:
   change_risk: critical
   owner_kind: rust_v3_resident_request_execution_lifecycle
   owner_scope: Resident Direct and Relay transitions reuse one request control, target plan, Error05 recovery state, deadline, and attempt budget.
+  required_positive:
+  - Generic Direct registers the selected plan candidate count before transport admission or protocol handoff; cumulative attempts and the configured hard ceiling remain unchanged.
+  - fa22072_direct_to_relay_business_continuation_public_entry requires JSON/SSE A1/B1; removing only Direct plan-budget registration reproduces A1/B0.
   required_gates:
   - npm run verify:v3-execution-control-payload-architecture
   - npm run test:v3-execution-control-payload-architecture-red-fixtures
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime execution_control_payload_architecture -- --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test fa22072_direct_relay_handoff -- --nocapture --test-threads=1
   completion_boundary: {source_controlled: true, live_cutover: required}
 
 - feature_id: v3.execution_attempt_budget_store

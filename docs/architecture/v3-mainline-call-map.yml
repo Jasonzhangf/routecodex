@@ -4305,6 +4305,62 @@ chains:
       side_channel_reads:
       - v3.error.chain
       side_channel_writes: []
+  - step_id: v3-chat-direct-relay-handoff-01
+    from_node: V3ResponsesProtocolRelayHandoff
+    to_node: V3OpenAiChatRelaySeededEntry
+    caller_symbol: execute_v3_openai_chat_direct_server_outcome
+    caller_file: v3/crates/routecodex-v3-server/src/executors.rs
+    callee_symbol: execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_handoff
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+    status: anchored
+    owner_feature_id: v3.openai_chat_relay_runtime_integration
+    resource_flow:
+      consumes: [v3.execution.protocol_decision, v3.execution.target_plan, v3.execution.request_lifecycle_control]
+      produces: [v3.hub.resolved_target]
+      side_channel_reads: [v3.runtime.responses_timing_observability, v3.runtime.responses_observability]
+      side_channel_writes: []
+  - step_id: v3-chat-direct-relay-handoff-02
+    from_node: V3OpenAiChatRelaySeededEntry
+    to_node: V3RelayRuntimeCore
+    caller_symbol: execute_v3_openai_chat_relay_runtime_inner
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+    callee_symbol: execute_v3_relay_runtime_core
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+    status: anchored
+    owner_feature_id: v3.relay_runtime_core
+    resource_flow:
+      consumes: [v3.execution.protocol_decision, v3.execution.target_plan, v3.execution.request_lifecycle_control]
+      produces: [v3.hub.resolved_target]
+      side_channel_reads: [v3.runtime.responses_timing_observability, v3.runtime.responses_observability]
+      side_channel_writes: []
+  - step_id: v3-chat-direct-relay-handoff-03
+    from_node: V3RelayRuntimeCore
+    to_node: V3RelayCapturedPlanAdmission
+    caller_symbol: execute_v3_relay_runtime_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+    callee_symbol: resolve_v3_relay_entry_target
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
+    status: anchored
+    owner_feature_id: v3.relay_runtime_shared
+    resource_flow:
+      consumes: [v3.execution.protocol_decision, v3.execution.target_plan, v3.execution.request_lifecycle_control]
+      produces: [v3.hub.resolved_target]
+      side_channel_reads: [v3.runtime.responses_timing_observability, v3.runtime.responses_observability]
+      side_channel_writes: []
+  - step_id: v3-chat-direct-relay-handoff-04
+    from_node: V3RelayCapturedPlanAdmission
+    to_node: V3Target10ConcreteProviderSelected
+    caller_symbol: resolve_v3_relay_entry_target
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
+    callee_symbol: select_v3_expanded_target_with_admission_rescue
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
+    status: anchored
+    owner_feature_id: v3.relay_runtime_shared
+    resource_flow:
+      consumes: [v3.execution.target_plan, v3.execution.request_lifecycle_control]
+      produces: [v3.hub.resolved_target]
+      side_channel_reads: [v3.provider.availability_projection]
+      side_channel_writes: []
 - chain_id: v3.gemini_relay.controlled_runtime
   owner_feature_id: v3.gemini_relay_runtime_integration
   summary: Controlled /v1beta/models/:model/generateContent Relay through the sole Hub v1 request/response lifecycle; Gemini codec and Runtime own protocol semantics while Server only transports typed JSON/SSE output.

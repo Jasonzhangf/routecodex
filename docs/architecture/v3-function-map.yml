@@ -2384,6 +2384,11 @@ features:
   - v3.response.client_payload
   - v3.error.chain
   - v3.openai_chat.client_sse_stream
+  - v3.execution.protocol_decision
+  - v3.execution.target_plan
+  - v3.execution.request_lifecycle_control
+  - v3.runtime.responses_timing_observability
+  - v3.runtime.responses_observability
   mainline_bindings:
   - v3-openai-chat-relay-01
   - v3-openai-chat-relay-02
@@ -2402,10 +2407,12 @@ features:
   - v3-openai-chat-relay-15
   - v3-openai-chat-relay-16
   - v3-openai-chat-relay-17
+  - v3-chat-direct-relay-handoff-01
   entry_symbols:
   - execute_v3_openai_chat_completions_request
   - execute_v3_openai_chat_direct_server_outcome
   - execute_v3_openai_chat_relay_runtime_with_default_transport
+  - execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_handoff
   - execute_v3_openai_chat_relay_runtime
   - project_v3_openai_chat_relay_runtime_failure
   - openai_chat_relay_output_response
@@ -2421,14 +2428,16 @@ features:
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
   - v3/crates/routecodex-v3-server/tests/openai_chat_relay_controlled.rs
   - v3/crates/routecodex-v3-server/tests/openai_chat_direct_isolation_controlled.rs
+  - v3/crates/routecodex-v3-server/tests/fa22072_direct_relay_handoff.rs
+  - v3/crates/routecodex-v3-server/tests/fa22072_direct_relay_handoff
   - v3/crates/routecodex-v3-cli/tests/h2_chat_direct_isolation.rs
   - docs/goals/v3-openai-chat-relay-runtime-integration-plan.md
   - docs/goals/v3-openai-chat-relay-runtime-integration-test-design.md
   - docs/architecture/manifests/v3.openai_chat_relay.controlled_runtime.mainline.yml
   - docs/architecture/wiki/v3-openai-chat-relay-controlled-runtime.md
   - docs/architecture/wiki/html/v3-openai-chat-relay-controlled-runtime.html
-  - scripts/architecture/verify-v3-openai-chat-relay-runtime-integration.mjs
-  - scripts/tests/v3-openai-chat-relay-runtime-integration-red-fixtures.mjs
+  - v3/scripts/architecture/verify-v3-openai-chat-relay-runtime-integration.mjs
+  - v3/scripts/tests/v3-openai-chat-relay-runtime-integration-red-fixtures.mjs
   - package.json
   forbidden_paths:
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
@@ -2439,6 +2448,7 @@ features:
   - fallback
   required_gates:
   - npm run test:v3-openai-chat-relay-runtime-integration
+  - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test fa22072_direct_relay_handoff -- --nocapture --test-threads=1
   - npm run test:v3-h2-chat-direct-isolation
   - npm run verify:v3-openai-chat-relay-runtime-integration
   - npm run test:v3-openai-chat-relay-runtime-integration-red-fixtures
@@ -4775,6 +4785,10 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
   resource_bindings:
   - v3.config.provider_sse_first_frame_timeout
+  - v3.execution.target_plan
+  - v3.execution.request_lifecycle_control
+  - v3.runtime.responses_timing_observability
+  - v3.runtime.responses_observability
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
@@ -4794,6 +4808,7 @@ features:
   - v3-provider-action-gate-13
   - v3-provider-action-gate-22
   - v3-provider-action-gate-27
+  - v3-chat-direct-relay-handoff-02
   runtime_status: source_controlled_runtime_boundary_verified
 
 - feature_id: v3.relay_runtime_shared
@@ -4810,6 +4825,14 @@ features:
   - routecodex-v3-runtime
   owner_files:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
+  entry_symbols:
+  - relay_handoff_entry_state
+  - relay_request_execution_control
+  - resolve_v3_relay_entry_target
+  resource_bindings:
+  - v3.execution.target_plan
+  - v3.execution.request_lifecycle_control
+  - v3.runtime.responses_timing_observability
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
   forbidden_paths:
@@ -4820,6 +4843,8 @@ features:
   - npm run verify:v3-hub-relay-runtime-closeout
   mainline_bindings:
   - v3-provider-action-gate-16
+  - v3-chat-direct-relay-handoff-03
+  - v3-chat-direct-relay-handoff-04
   runtime_status: source_controlled_runtime_boundary_verified
 
 - feature_id: v3.protocol_tables
@@ -6109,6 +6134,8 @@ features:
   - real local TCP SSE replacement stream reaches protocol terminal on the resident Runtime
   - no SSE wrapper creates a Runtime or re-enters a full executor
   - one request-level attempt/deadline budget survives Direct, Relay, and typed handoff
+  - generic Direct registers the selected plan candidate count before admission without resetting cumulative attempts or changing the configured ceiling
+  - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test fa22072_direct_relay_handoff -- --nocapture --test-threads=1
   - git diff --check
 
 - feature_id: v3.execution_attempt_budget_store

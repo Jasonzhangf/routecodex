@@ -884,6 +884,91 @@ fn observe_relay_client_sse_usage_chunk(
     Ok(())
 }
 
+pub(crate) fn relay_handoff_entry_state(
+    handoff: Option<&crate::V3ResponsesProtocolRelayHandoff>,
+) -> (
+    crate::runtime_timing::V3RuntimeTimingState,
+    std::collections::BTreeSet<String>,
+    Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
+) {
+    match handoff {
+        Some(handoff) => (
+            handoff.observability_accumulator.timing(),
+            handoff.request_local_excluded_candidates.clone(),
+            Some(handoff.target.clone()),
+        ),
+        None => (
+            crate::runtime_timing::V3RuntimeTimingState::start(),
+            std::collections::BTreeSet::new(),
+            None,
+        ),
+    }
+}
+
+pub(crate) fn relay_request_execution_control(
+    manifest: &V3Config05ManifestPublished,
+    server_id: &str,
+    handoff: Option<&crate::V3ResponsesProtocolRelayHandoff>,
+) -> Result<crate::nodes::V3RequestExecutionControl, V3RelayCoreError> {
+    match handoff {
+        Some(handoff) => Ok(handoff.request_execution_control.clone()),
+        None => crate::nodes::V3RequestExecutionControl::from_manifest(manifest, server_id)
+            .map_err(|error| {
+                V3RelayCoreError::Target(format!(
+                    "V3ExecutionAttemptBudget rejected relay request: {error}"
+                ))
+            }),
+    }
+}
+
+pub(crate) async fn resolve_v3_relay_entry_target(
+    input: crate::provider_failure_runtime_policy::V3RelayProviderTargetResolutionInput<'_>,
+    allow_exhaustion_rescue_probe: bool,
+    preferred_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
+    handoff: Option<&crate::V3ResponsesProtocolRelayHandoff>,
+) -> crate::provider_failure_runtime_policy::V3RelayProviderAdmittedTargetResolution {
+    use crate::provider_failure_runtime_policy::{
+        resolve_v3_relay_target_outcome_with_admission_rescue,
+        select_v3_expanded_target_with_admission_rescue, V3AdmittedTargetSelectionAfterRescue,
+        V3RelayProviderAdmittedTargetResolution,
+    };
+
+    let Some(handoff) = handoff else {
+        return resolve_v3_relay_target_outcome_with_admission_rescue(
+            input,
+            allow_exhaustion_rescue_probe,
+            preferred_selected,
+        )
+        .await;
+    };
+
+    match select_v3_expanded_target_with_admission_rescue(
+        input.manifest,
+        handoff.expanded.clone(),
+        input.failure_session_scope,
+        input.provider_health,
+        input.request_local_excluded_candidates,
+        input.now_ms,
+        input.deterministic_sample,
+        allow_exhaustion_rescue_probe,
+        preferred_selected,
+    )
+    .await
+    {
+        V3AdmittedTargetSelectionAfterRescue::Selected(selected) => {
+            V3RelayProviderAdmittedTargetResolution::Selected(selected)
+        }
+        V3AdmittedTargetSelectionAfterRescue::Exhausted(exhausted) => {
+            V3RelayProviderAdmittedTargetResolution::Exhausted {
+                attempted_candidates: exhausted.attempted_candidates,
+            }
+        }
+        V3AdmittedTargetSelectionAfterRescue::Failed(source) => {
+            V3RelayProviderAdmittedTargetResolution::Failed(source)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

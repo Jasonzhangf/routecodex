@@ -48,9 +48,15 @@ mod tests {
 
     #[test]
     fn responses_transport_keepalives_are_not_semantic_events() {
-        assert!(crate::hub_v1::is_v3_provider_sse_transport_keepalive_data("ping"));
-        assert!(crate::hub_v1::is_v3_provider_sse_transport_keepalive_data("null"));
-        assert!(crate::hub_v1::is_v3_provider_sse_transport_keepalive_data("\n  \n"));
+        assert!(crate::hub_v1::is_v3_provider_sse_transport_keepalive_data(
+            "ping"
+        ));
+        assert!(crate::hub_v1::is_v3_provider_sse_transport_keepalive_data(
+            "null"
+        ));
+        assert!(crate::hub_v1::is_v3_provider_sse_transport_keepalive_data(
+            "\n  \n"
+        ));
         assert!(!crate::hub_v1::is_v3_provider_sse_transport_keepalive_data(
             r#"{"type":"response.output_text.delta","delta":"x"}"#
         ));
@@ -82,7 +88,8 @@ mod tests {
         );
         let mut chunks = Vec::new();
         while let Some(chunk) = stream.next().await {
-            chunks.push(chunk.expect("transport keepalive must not be projected as provider error"));
+            chunks
+                .push(chunk.expect("transport keepalive must not be projected as provider error"));
         }
         let joined_bytes = chunks.concat();
         let joined = String::from_utf8_lossy(&joined_bytes);
@@ -429,9 +436,9 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
         async fn send(
             &self,
             _request: V3Transport13ResponsesHttpRequest,
-        ) -> Result<routecodex_v3_provider_responses::V3ProviderResp14Raw, V3ProviderError> {
-            self.sends
-                .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        ) -> Result<routecodex_v3_provider_responses::V3ProviderResp14Raw, V3ProviderError>
+        {
+            self.sends.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
             panic!("shared request attempt budget must reject before transport.send")
         }
     }
@@ -451,17 +458,47 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
         let transport = ExecutionControlRejectingTransport {
             sends: std::sync::atomic::AtomicUsize::new(0),
         };
+        let failure_session_scope = V3ProviderFailureSessionScope::new(
+            "test",
+            "default",
+            "shared-openai-chat-attempt-budget",
+        )
+        .expect("session scope")
+        .with_transport_handoff_scope("shared-openai-chat-budget-pipeline", 4444, 1)
+        .expect("transport handoff scope");
+        let mut raw = crate::build_v3_server_03_http_request_raw(
+            "test".into(),
+            failure_session_scope.clone(),
+            "req-shared-openai-chat-attempt-budget".into(),
+            "exec-shared-openai-chat-attempt-budget".into(),
+            "POST".into(),
+            "/v1/chat/completions".into(),
+            json!({"model":"client-model","messages":[{"role":"user","content":"hello"}]}),
+        );
+        raw.port = Some(4444);
+        raw.pipeline_id = Some("shared-openai-chat-budget-pipeline".into());
+        let mut handoff =
+            crate::execute_v3_direct_runtime_kernel_core::<crate::V3ChatDirectCodec, _>(
+                (),
+                &manifest,
+                raw,
+                &transport,
+                V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
+                0,
+                true,
+                None,
+                None,
+            )
+            .await
+            .protocol_relay_handoff
+            .expect("cross-protocol Direct producer returns the full handoff");
+        handoff.request_execution_control = request_execution_control;
 
         let error = execute_v3_openai_chat_relay_runtime_inner(
             &manifest,
             V3OpenAiChatRelayRuntimeInput {
                 server_id: "test".to_string(),
-                failure_session_scope: V3ProviderFailureSessionScope::new(
-                    "test",
-                    "default",
-                    "shared-openai-chat-attempt-budget",
-                )
-                .expect("session scope"),
+                failure_session_scope,
                 request_id: "req-shared-openai-chat-attempt-budget".to_string(),
                 payload: json!({
                     "model": "client-model",
@@ -473,13 +510,15 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
             V3RelayProviderFailureRetryPolicy::default(),
             V3HubExecutionMode::Relay,
-            Some(request_execution_control),
-            None,
+            Some(handoff),
         )
         .await
         .expect_err("Relay must reject the next transport attempt from the shared budget");
 
-        assert!(matches!(error, V3OpenAiChatRelayRuntimeError::Target(_)));
+        assert!(
+            matches!(error, V3OpenAiChatRelayRuntimeError::Target(ref message)
+            if message.contains("request provider transport attempt limit 1 exhausted"))
+        );
         assert_eq!(
             transport.sends.load(std::sync::atomic::Ordering::Acquire),
             0

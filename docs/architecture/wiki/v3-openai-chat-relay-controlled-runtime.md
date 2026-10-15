@@ -36,12 +36,18 @@ Machine edges omit the retired continuation step slots. Server owns only HTTP en
 transport. Runtime owns OpenAI Chat protocol characterization, adjacent Hub orchestration,
 provider invocation, response governance, and Error01–06 projection.
 
+When Chat Direct selects a Relay provider, the existing typed handoff carries the selected
+target, captured plan, exclusions, request control, timing, and preceding failures into this
+same lifecycle. Target recovery uses that captured plan. Generic Direct registers its plan
+count before transport admission; the receiving Relay retains cumulative attempts and the
+configured hard ceiling.
+
 ## JSON, SSE, error, isolation
 
 | Surface | Controlled evidence | Locked risk |
 |---|---|---|
 | JSON | Loopback captures one `/v1/chat/completions` request and returns exact Chat response | model wire rewrite without messages/tools/tool-result loss |
-| SSE | Runtime seals one complete provider attempt; Server transports the typed committed stream | failed/intermediate attempts never commit client headers or frames |
+| SSE | Runtime seals one complete provider attempt; Server transports the typed committed stream | failed/intermediate business frames stay client-invisible until a valid terminal; Server owns client headers and keepalives |
 | Error | Loopback 429 enters `V3Error01SourceRaised` through `V3Error06ClientProjected` | provider failure never becomes Resp01/success |
 | Isolation | `metadata_center` fails before provider send; capture count stays unchanged | internal control truth never enters provider/client normal payload |
 
@@ -60,6 +66,7 @@ provider invocation, response governance, and Error01–06 projection.
 
 ```text
 npm run test:v3-openai-chat-relay-runtime-integration
+node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test fa22072_direct_relay_handoff -- --nocapture --test-threads=1
 npm run test:v3-h2-chat-direct-isolation
 npm run verify:v3-openai-chat-relay-runtime-integration
 npm run test:v3-openai-chat-relay-runtime-integration-red-fixtures
