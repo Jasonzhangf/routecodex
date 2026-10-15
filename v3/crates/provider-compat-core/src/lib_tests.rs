@@ -478,6 +478,71 @@ fn glm_unsupported_fields_profile_removes_unsupported_provider_fields() {
 }
 
 #[test]
+fn opencode_deepseek_rejects_verbosity_without_changing_other_fields() {
+    for (profile, protocol, model, wire_model, strip) in [
+        (
+            Some("chat:opencode-zen-tcm"),
+            "openai-chat",
+            "deepseek-v4.1-flash",
+            None,
+            true,
+        ),
+        (
+            Some("chat:opencode-zen-tcm"),
+            "openai-chat",
+            "alias",
+            Some("deepseek-v4.1-flash"),
+            true,
+        ),
+        (
+            Some("chat:opencode-zen-tcm"),
+            "openai-responses",
+            "deepseek-v4.1-flash",
+            None,
+            false,
+        ),
+        (
+            Some("chat:opencode-zen-tcm"),
+            "openai-chat",
+            "step-5-preview-free",
+            None,
+            false,
+        ),
+        (
+            Some("compat:passthrough"),
+            "openai-chat",
+            "deepseek-v4.1-flash",
+            None,
+            false,
+        ),
+        (None, "openai-chat", "deepseek-v4.1-flash", None, false),
+    ] {
+        let payload = json!({"model":model,"verbosity":"high","prompt_cache_key":"keep","messages":[{"role":"user","content":"hello"}],"tools":[]});
+        let mut expected = payload.clone();
+        if strip {
+            expected.as_object_mut().unwrap().remove("verbosity");
+        }
+        let result = run_req_outbound_stage3_compat(ReqOutboundCompatInput {
+            payload,
+            adapter_context: AdapterContext {
+                provider_id: Some("fixture-provider".to_string()),
+                provider_protocol: Some(protocol.to_string()),
+                model_id: Some(model.to_string()),
+                original_model_id: wire_model.map(str::to_string),
+                compatibility_profile: profile.map(str::to_string),
+                ..Default::default()
+            },
+            explicit_profile: None,
+        })
+        .unwrap();
+        assert_eq!(result.payload, expected, "{profile:?}/{protocol}/{model}");
+        if strip {
+            assert_eq!(result.applied_profile.as_deref(), profile);
+        }
+    }
+}
+
+#[test]
 fn single_tool_call_history_profile_splits_parallel_assistant_messages() {
     let input = ReqOutboundCompatInput {
         payload: json!({
