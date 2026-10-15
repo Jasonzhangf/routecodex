@@ -82,6 +82,7 @@ impl Default for V3AttemptStoreLimits {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum V3AttemptStoreError {
+    ResidenceDeadlineExceeded(String),
     LocalResourceExhausted(String),
     InvalidAttemptState(String),
 }
@@ -89,9 +90,9 @@ pub(crate) enum V3AttemptStoreError {
 impl fmt::Display for V3AttemptStoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::LocalResourceExhausted(message) | Self::InvalidAttemptState(message) => {
-                formatter.write_str(message)
-            }
+            Self::ResidenceDeadlineExceeded(message)
+            | Self::LocalResourceExhausted(message)
+            | Self::InvalidAttemptState(message) => formatter.write_str(message),
         }
     }
 }
@@ -132,7 +133,7 @@ impl V3RequestExecutionControl {
     pub fn deadline_unix_ms(&self) -> Result<u64, V3AttemptStoreError> {
         let now = Instant::now();
         if now >= self.attempt_budget.inner.deadline {
-            return Err(V3AttemptStoreError::LocalResourceExhausted(
+            return Err(V3AttemptStoreError::ResidenceDeadlineExceeded(
                 "request execution deadline has expired".to_string(),
             ));
         }
@@ -260,7 +261,7 @@ impl V3AttemptBudget {
 
     fn ensure_resident(&self) -> Result<(), V3AttemptStoreError> {
         if Instant::now() >= self.inner.deadline {
-            return Err(V3AttemptStoreError::LocalResourceExhausted(
+            return Err(V3AttemptStoreError::ResidenceDeadlineExceeded(
                 "provider SSE attempt exceeded the request residence deadline".to_string(),
             ));
         }

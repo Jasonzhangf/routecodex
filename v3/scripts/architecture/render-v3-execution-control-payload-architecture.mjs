@@ -347,6 +347,8 @@ function renderMarkdown() {
     `- Per request: \`${manifest.budget_contract.per_request}\``,
     `- Process global: \`${manifest.budget_contract.process_global}\``,
     `- Residence/deadline: \`${manifest.budget_contract.residence_or_deadline}\``,
+    `- Provider stream deadline guard: \`${manifest.budget_contract.provider_stream_deadline_guard}\``,
+    `- Residence expiry: \`${manifest.budget_contract.residence_expiry}\``,
     `- Reserve before append/copy: \`${manifest.budget_contract.reserve_before_append_or_copy}\``,
     `- Initial storage: \`${manifest.budget_contract.initial_storage}\``,
     `- Disk spill: \`${manifest.budget_contract.disk_spill}\``,

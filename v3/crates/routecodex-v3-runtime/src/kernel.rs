@@ -776,7 +776,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             Ok(attempts) => attempts,
             Err(error) => {
                 return error_output(
-                    runtime_source("V3ExecutionAttemptBudget", error),
+                    direct_runtime_helpers_stream::direct_attempt_budget_error_source(error),
                     trace,
                     &hook_registry,
                 )
@@ -1321,7 +1321,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                 );
                             }
                             drop(provider_action_permit.take());
-                            let policy_result = match run_v3_direct_provider_failure_policy(
+                            let mut policy_result = match run_v3_direct_provider_failure_policy(
                                 &V3DirectProviderFailurePolicyContext {
                                     failure_session_scope: &direct_failure_session_scope,
                                     provider_health: &provider_health,
@@ -1345,6 +1345,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                 Ok(result) => result,
                                 Err(source) => return error_output(source, trace, &hook_registry),
                             };
+                            policy_result.exhaust_if_residence_expired(&attempt_budget);
                             if let Some(event) = policy_result.event.clone() {
                                 provider_failure_events.push(event.clone());
                                 publish_v3_direct_provider_failure_event(

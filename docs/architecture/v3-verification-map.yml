@@ -3580,11 +3580,15 @@ features:
   required_positive:
   - OpenAI Chat [DONE] after terminal finish_reason commits the complete attempt.
   - A failed pre-commit attempt is discarded before any replacement attempt is exposed.
+  - A provider SSE timeout recovers to a completed candidate while request residence remains.
+  - Residence expiry terminates through the typed Error chain without a store598 or client error commit; client cancellation releases activity without provider cooldown.
   required_negative:
   - OpenAI Chat [DONE] before terminal finish_reason enters the typed provider response error chain.
   - Semantic frames after [DONE] do not become a successful client stream.
+  - An expired request never dispatches or cools an unattempted backup candidate.
   required_gates:
   - npm run verify:v3-direct-sse-full-attempt-commit
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test e041a3b_response_timeout -- --test-threads=1
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_full_attempt_commit -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib openai_chat_direct_sse_ -- --nocapture
   - npm run verify:v3-resource-map

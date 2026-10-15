@@ -255,19 +255,30 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
     manifest: Option<&V3Config05ManifestPublished>,
     request_id: Option<&str>,
 ) -> Result<crate::nodes::V3CommittedClientSseStream, V3Error01SourceRaised> {
+    let deadline = tokio::time::Instant::from_std(attempt_budget.residence_deadline());
     let mut committed = crate::nodes::V3CommittedClientSseBuilder::with_budget(attempt_budget)
-        .map_err(|message| {
-            build_v3_error_01_source_raised(
-                V3ErrorSourceKind::RuntimeFailure,
+        .map_err(|error| {
+            direct_attempt_store_error_source(
+                error,
                 "V3ExecutionAttemptPayloadStore",
                 "direct_sse_attempt_store_rejected",
-                message.to_string(),
             )
         })?;
     let mut terminal_seen = false;
     let mut business_decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
     let mut has_business_content = false;
-    while let Some(frame) = stream.next().await {
+    loop {
+        let next = match tokio::time::timeout_at(deadline, stream.next()).await {
+            Ok(next) => next,
+            Err(_) if terminal_seen => break,
+            Err(_) => return Err(build_v3_error_01_source_raised(
+                V3ErrorSourceKind::ProviderFailure,
+                "V3ProviderResp14Raw",
+                "provider_response_residence_timeout",
+                "provider SSE attempt exceeded the request residence deadline before a semantic terminal",
+            )),
+        };
+        let Some(frame) = next else { break };
         // The attempt is complete at the protocol terminal.  A provider
         // transport error or an unterminated tail after the terminal is
         // post-terminal noise and must seal the already-validated attempt
@@ -293,12 +304,11 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
             &frame,
             &mut business_decoder,
         )?;
-        committed.push(frame).map_err(|message| {
-            build_v3_error_01_source_raised(
-                V3ErrorSourceKind::RuntimeFailure,
+        committed.push(frame).map_err(|error| {
+            direct_attempt_store_error_source(
+                error,
                 "V3ExecutionAttemptPayloadStore",
                 "direct_sse_attempt_store_rejected",
-                message.to_string(),
             )
         })?;
         if matches!(
@@ -314,12 +324,11 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
                 ));
             }
             terminal_seen = true;
-            committed.mark_last_frame_as_terminal().map_err(|message| {
-                build_v3_error_01_source_raised(
-                    V3ErrorSourceKind::RuntimeFailure,
+            committed.mark_last_frame_as_terminal().map_err(|error| {
+                direct_attempt_store_error_source(
+                    error,
                     "V3ExecutionAttemptPayloadStore",
                     "direct_sse_terminal_seal_rejected",
-                    message.to_string(),
                 )
             })?;
             if disposition == V3SseFrameDisposition::LegalCloseout {
@@ -327,22 +336,20 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
                     return Err(direct_sse_empty_attempt_failure());
                 }
                 rewrite_direct_sse_memory(&mut committed, manifest, request_id).map_err(
-                    |message| {
-                        build_v3_error_01_source_raised(
-                            V3ErrorSourceKind::RuntimeFailure,
+                    |error| {
+                        direct_attempt_store_error_source(
+                            error,
                             "V3ExecutionAttemptPayloadStore",
                             "direct_sse_memory_strip_failed",
-                            message.to_string(),
                         )
                     },
                 )?;
                 let sealed = committed.seal_after_validated_terminal();
-                let sealed = sealed.map_err(|message| {
-                    build_v3_error_01_source_raised(
-                        V3ErrorSourceKind::RuntimeFailure,
+                let sealed = sealed.map_err(|error| {
+                    direct_attempt_store_error_source(
+                        error,
                         "V3ExecutionAttemptPayloadStore",
                         "direct_sse_terminal_seal_rejected",
-                        message.to_string(),
                     )
                 });
                 return sealed;
@@ -362,30 +369,27 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
         if provider_protocol == V3HubProviderWireProtocol::OpenAiChat {
             committed
                 .push(b"data: [DONE]\n\n".to_vec())
-                .map_err(|message| {
-                    build_v3_error_01_source_raised(
-                        V3ErrorSourceKind::RuntimeFailure,
+                .map_err(|error| {
+                    direct_attempt_store_error_source(
+                        error,
                         "V3ExecutionAttemptPayloadStore",
                         "direct_sse_attempt_store_rejected",
-                        message.to_string(),
                     )
                 })?;
         }
-        rewrite_direct_sse_memory(&mut committed, manifest, request_id).map_err(|message| {
-            build_v3_error_01_source_raised(
-                V3ErrorSourceKind::RuntimeFailure,
+        rewrite_direct_sse_memory(&mut committed, manifest, request_id).map_err(|error| {
+            direct_attempt_store_error_source(
+                error,
                 "V3ExecutionAttemptPayloadStore",
                 "direct_sse_memory_strip_failed",
-                message.to_string(),
             )
         })?;
         let sealed = committed.seal_after_validated_terminal();
-        let sealed = sealed.map_err(|message| {
-            build_v3_error_01_source_raised(
-                V3ErrorSourceKind::RuntimeFailure,
+        let sealed = sealed.map_err(|error| {
+            direct_attempt_store_error_source(
+                error,
                 "V3ExecutionAttemptPayloadStore",
                 "direct_sse_terminal_seal_rejected",
-                message.to_string(),
             )
         });
         return sealed;
@@ -401,6 +405,39 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
 /// Typed provider-failure source for a complete Direct SSE attempt that carries
 /// no deliverable business content. It enters the existing provider failure
 /// policy (reselect/cooldown), never a client error or an empty completion.
+pub(crate) fn direct_attempt_budget_error_source(
+    error: crate::nodes::V3AttemptStoreError,
+) -> V3Error01SourceRaised {
+    direct_attempt_store_error_source(
+        error,
+        "V3ExecutionAttemptBudget",
+        "direct_transport_attempt_rejected",
+    )
+}
+
+pub(crate) fn direct_attempt_store_error_source(
+    error: crate::nodes::V3AttemptStoreError,
+    stage: &'static str,
+    code: &'static str,
+) -> V3Error01SourceRaised {
+    match error {
+        crate::nodes::V3AttemptStoreError::ResidenceDeadlineExceeded(message) => {
+            build_v3_error_01_source_raised(
+                V3ErrorSourceKind::TargetPoolExhausted,
+                stage,
+                "request_residence_deadline_exceeded",
+                message,
+            )
+        }
+        error => build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            stage,
+            code,
+            error.to_string(),
+        ),
+    }
+}
+
 fn direct_sse_empty_attempt_failure() -> V3Error01SourceRaised {
     build_v3_error_01_source_raised(
         V3ErrorSourceKind::ProviderFailure,

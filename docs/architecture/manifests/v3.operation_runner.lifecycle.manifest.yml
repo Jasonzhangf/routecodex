@@ -80,9 +80,9 @@ lifecycle_terminals:
   owner: ErrorChain
   condition: any fixed node returns typed source failure
   consumes: [source-failure]
-  projects: ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified -> ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision -> ErrorErr06ClientProjected; Error06 emits an empty client stage for retry and a projected candidate for terminal_client_error
-  effect: Runtime consumes error_execution_decision after the graph; retry discards the empty stage and re-enters the request graph, terminal_client_error submits the projected candidate through Server/SSE
-  release: retry releases failed attempt context through typed attempt_cleanup before re-entry; terminal_client_error commits through Server/SSE and then RuntimeAttemptCleanup releases attempt scope before RuntimeRequestFinalizer releases request scope
+  projects: ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified -> ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision -> ErrorErr06ClientProjected; Error06 records internal-error-outcome only, never a client error candidate
+  effect: Runtime consumes error_execution_decision after the graph; retry releases the failed attempt and re-enters the request graph, terminal_client_error terminates the affected transport without client commit through Server/SSE
+  release: retry releases failed attempt context through typed attempt_cleanup before re-entry; terminal_client_error terminates transport without client commit through Server/SSE and then RuntimeAttemptCleanup releases attempt scope before RuntimeRequestFinalizer releases request scope
 - name: disconnect
   owner: ServerDisconnectReceipt
   condition: client transport disconnects before the first committed client frame or after accepted frames
@@ -90,13 +90,13 @@ lifecycle_terminals:
   release: RuntimeAttemptCleanup releases attempt-scoped contexts, response buffers, and provider permits before RuntimeRequestFinalizer releases request scope; accepted frames are recorded separately from remote tool execution
 - name: finalize
   owner: RuntimeRequestFinalizer
-  condition: final client commit, terminal_client_error projection submitted, cancel, or disconnect reached
+  condition: final client commit, terminal_client_error transport terminated without client commit, cancel, or disconnect reached
   consumes: [request_id, execution_disposition, error_execution_decision]
   release: inverse context, explicit_history_pairing, execution mode, MetadataCenter request-scoped control slots, and provider permits; request_origin_kind is invocation-scoped storage none and is not consumed or released by RuntimeRequestFinalizer; terminal_client_error, cancel, and disconnect attempt-scoped contexts are already released through typed attempt_cleanup before this finalizer
 typed_cleanup_events:
   attempt_cleanup:
     owner: RuntimeAttemptCleanup (same Runtime runner)
-    condition: retry launch, servertool follow-up, final successful client_commit, terminal_client_error, cancel, or disconnect; terminal_client_error cleanup runs after Server/SSE projection is submitted and before RuntimeRequestFinalizer; cancel and disconnect cleanup runs before RuntimeRequestFinalizer
+    condition: retry launch, servertool follow-up, final successful client_commit, terminal_client_error, cancel, or disconnect; terminal_client_error cleanup runs after Server/SSE transport termination without client commit and before RuntimeRequestFinalizer; cancel and disconnect cleanup runs before RuntimeRequestFinalizer
     consumes:
       retry: [attempt_id, error_execution_decision]
       servertool_followup: [attempt_id, execution_disposition, servertool_sidecar_plan]
@@ -125,12 +125,12 @@ execution_disposition:
 error_execution_decision:
   owner: ErrorErr05ExecutionDecision
   producer: ErrorErr05ExecutionDecision
-  consumers: [ErrorErr06ClientProjected, RuntimeClientCommit, RuntimeRetryLaunch]
-  finalizer_rule: RuntimeRequestFinalizer consumes this decision only after terminal_client_error projection is submitted; retry launch performs typed attempt_cleanup and never triggers request-scoped cleanup
+  consumers: [ErrorErr06ClientProjected, RuntimeAttemptCleanup, RuntimeRetryLaunch, RuntimeRequestFinalizer]
+  finalizer_rule: RuntimeRequestFinalizer consumes this decision only after terminal_client_error transport is terminated without client commit; retry launch performs typed attempt_cleanup and never triggers request-scoped cleanup
   legal_values: [retry, terminal_client_error]
   retry_effect: failed attempt context is released; RuntimeRetryLaunch admits one new attempt through the request graph without a response-graph backedge
-  terminal_effect: ErrorErr06 always runs as the fixed graph sink; it returns an empty candidate for retry and a projected candidate for terminal_client_error, which Runtime alone may submit through Server/SSE
-  finalization: terminal_client_error and client_commit reach RuntimeRequestFinalizer after submission; retry launches one new attempt through the request graph after typed attempt_cleanup
+  terminal_effect: ErrorErr06 always runs as the fixed graph sink; it returns internal failure evidence, never a client error candidate; Runtime consumes retry or terminal_client_error and only terminates the failed transport through Server/SSE
+  finalization: terminal_client_error reaches RuntimeRequestFinalizer after transport termination; client_commit reaches it after successful submission; retry launches one new attempt through the request graph after typed attempt_cleanup
 typed_resources:
   request_origin_kind:
     resource: v3.operation_runner.request_origin_kind
@@ -223,14 +223,14 @@ typed_resources:
     producer: ErrorErr05ExecutionDecision
     readers:
     - ErrorErr06ClientProjected
-    - runtime_client_commit
+    - RuntimeAttemptCleanup
     - RuntimeRetryLaunch
     - RuntimeRequestFinalizer
     legal_values: [retry, terminal_client_error]
     retry_effect: Error06 stages no client error; RuntimeRetryLaunch discards that empty stage and re-enters the request graph without a response-graph backedge
-    terminal_effect: Error06 stages the terminal projection; RuntimeClientCommit alone submits it through Server/SSE
-    finalizer_rule: RuntimeRequestFinalizer reads this decision only after terminal_client_error projection is submitted
-    release: runtime_request_finalizer after terminal projection; retry decision is consumed by RuntimeRetryLaunch and attempt_cleanup before the next candidate
+    terminal_effect: Error06 records internal failure evidence; Runtime terminates the affected transport through Server/SSE without a client error commit
+    finalizer_rule: RuntimeRequestFinalizer reads this decision only after terminal_client_error transport termination
+    release: runtime_request_finalizer after transport termination; retry decision is consumed by RuntimeRetryLaunch and attempt_cleanup before the next candidate
   client_frame_candidate:
     resource: v3.operation_runner.client_frame_candidate
     producer: frame_v3_operation_runner_committed_client_response
@@ -253,10 +253,10 @@ typed_resources:
     resource: v3.error.client_projection_candidate
     producer: ErrorErr06ClientProjected
     readers:
-    - runtime_client_commit
-    staging_only: the error graph sink is a staged error candidate; terminal error is submitted only through Server/SSE
+    - RuntimeAttemptCleanup
+    staging_only: the error graph sink is internal diagnostic evidence only; it must never be submitted to a client body or committed by Server/SSE
     retry_rule: Error06 returns an empty candidate for retry; Runtime discards it and re-enters the request graph
-    release: runtime_client_commit for terminal projection; empty retry candidate is released by attempt_cleanup before request re-entry
+    release: attempt_cleanup after failed transport termination or before retry re-entry; never runtime_client_commit
 dry_run:
   owner: DebugDryRun
   condition: same runner traverses graphs with Provider transport effect replaced by no-network hook

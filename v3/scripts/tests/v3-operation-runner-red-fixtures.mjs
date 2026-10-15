@@ -877,7 +877,7 @@ const mutations = [
       const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
       const terminal = doc.lifecycle_terminals.find((entry) => entry.name === 'failure');
       if (!terminal) throw new Error('missing failure terminal');
-      terminal.release = 'terminal_client_error commits through Server/SSE and then RuntimeRequestFinalizer releases request scope';
+      terminal.release = 'terminal_client_error terminates transport without client commit through Server/SSE and then RuntimeRequestFinalizer releases request scope';
       fs.writeFileSync(file, YAML.stringify(doc));
     },
     expect: /terminal_client_error must release attempt scope before request scope/u,

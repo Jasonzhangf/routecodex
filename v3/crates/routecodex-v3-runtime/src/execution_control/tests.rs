@@ -261,7 +261,7 @@ fn attempt_store_rejects_expired_request_before_reservation() {
     };
     assert!(matches!(
         error,
-        V3AttemptStoreError::LocalResourceExhausted(_)
+        V3AttemptStoreError::ResidenceDeadlineExceeded(_)
     ));
     assert_eq!(process_bytes.load(Ordering::Acquire), 0);
 }
