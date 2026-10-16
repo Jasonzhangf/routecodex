@@ -1432,14 +1432,7 @@ fn get_failure_session_scope(
     )
 }
 
-/// Record the ordered provider-attempt failure evidence for an OpenAI Chat
-/// relay request as provider-private diagnostic state.
-///
-/// The artifact exists so the original typed Error01 source of every failed
-/// provider attempt survives the Error05 boundary, including a request that
-/// recovered by switching providers and finished successfully. It is
-/// best-effort: a queue failure is recorded by the existing debug failure
-/// ledger and can never turn the client response into an error.
+/// Record private Chat Relay failure evidence through the shared serializer.
 pub(crate) fn persist_v3_chat_failure_evidence(
     state: &Arc<V3ListenerState>,
     entry_protocol: &str,
@@ -1451,41 +1444,13 @@ pub(crate) fn persist_v3_chat_failure_evidence(
         Some(observation) => &observation.provider_failure_events,
         None => &output.provider_failure_attempts,
     };
-    let terminal_source = output.diagnostic_source.as_ref();
-    if attempts.is_empty() && terminal_source.is_none() {
-        return;
-    }
-    let attempts = attempts
-        .iter()
-        .map(|attempt| {
-            let mut projected = project_v3_runtime_provider_failure_event_debug(attempt);
-            if let Value::Object(fields) = &mut projected {
-                fields.insert(
-                    "diagnostic_source".to_string(),
-                    json!(&attempt.diagnostic_source),
-                );
-                fields.insert(
-                    "provider_status".to_string(),
-                    json!(attempt.external_error_status),
-                );
-            }
-            projected
-        })
-        .collect::<Vec<Value>>();
-    let payload = json!({
-        "object": "routecodex.v3.provider_failed_attempt_evidence",
-        "request_id": request_id,
-        "attempts": attempts,
-        "terminal_source": terminal_source,
-    });
-    let _persisted = persist_v3_error_evidence_payload(
+    persist_v3_chat_failure_evidence_sources(
         state,
         entry_protocol,
         endpoint,
         request_id,
-        "provider-failed-attempts.json",
-        &state.debug.project_payload_verbatim(payload),
-        None,
+        attempts,
+        output.diagnostic_source.as_ref(),
     );
 }
 #[cfg(test)]

@@ -981,6 +981,7 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
         stream_observation: None,
         protocol_relay_handoff: None,
         terminal_disposition: None,
+        diagnostic_source: None,
     };
     assert!(capture_v3_responses_direct_provider_snapshots(
         &state,
@@ -1029,6 +1030,7 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
         stream_observation: None,
         protocol_relay_handoff: None,
         terminal_disposition: None,
+        diagnostic_source: None,
     };
     assert!(capture_v3_responses_direct_provider_snapshots(
         &state,
@@ -1068,6 +1070,7 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
         stream_observation: Some(V3RuntimeStreamObservation::default()),
         protocol_relay_handoff: None,
         terminal_disposition: None,
+        diagnostic_source: None,
     };
     assert!(capture_v3_responses_direct_provider_snapshots(
         &state,
