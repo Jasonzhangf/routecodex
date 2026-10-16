@@ -317,10 +317,9 @@ verify_runtime_health() {
 
   restart_release_runtime_for_aggregate() {
     echo "♻️  使用成员端口 ${VERIFY_PORT} 定位并重启聚合 RouteCodex server instance（只请求一次）"
+    local restart_wait_ms="${ROUTECODEX_RESTART_WAIT_MS:-${RCC_RESTART_WAIT_MS:-120000}}"
     ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT=1 \
-    ROUTECODEX_RESTART_WAIT_MS="${ROUTECODEX_RESTART_WAIT_MS:-120000}" \
-    RCC_RESTART_WAIT_MS="${RCC_RESTART_WAIT_MS:-120000}" \
-    rcc restart -c "$VERIFY_CONFIG"
+    rcc restart -c "$VERIFY_CONFIG" --timeout-ms "$restart_wait_ms"
   }
 
   start_release_runtime_when_stopped() {
