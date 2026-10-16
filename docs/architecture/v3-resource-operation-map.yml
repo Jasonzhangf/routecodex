@@ -664,7 +664,7 @@ resources:
     owner_node: V3ProviderResp14Raw
     identity: [requestId, providerId, statusCode]
     allowed_writers: [V3ProviderResp14Raw, ProviderResponsesTransport::send_http]
-    allowed_readers: [V3Resp15ClientPayload, V3ProviderRespInbound01Raw, V3Error01SourceRaised, collapse_direct_client_sse_to_json]
+    allowed_readers: [V3Resp15ClientPayload, V3ProviderRespInbound01Raw, V3Error01SourceRaised, collect_direct_sse_attempt_after_terminal]
     forbidden_writers: [V3Server16HttpFrame, V3Provider12ResponsesWirePayload]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -3060,8 +3060,8 @@ resources:
     owner_module: direct_runtime_helpers_stream
     owner_node: V3CommittedClientSseBuilder
     identity: [requestId, attemptId, providerKey, protocol]
-    allowed_writers: [V3CommittedClientSseBuilder::push, V3CommittedClientSseBuilder::seal, V3CommittedClientSseBuilder::drop]
-    allowed_readers: [collect_direct_sse_attempt_after_terminal, V3CommittedClientSseStream]
+    allowed_writers: [V3CommittedClientSseBuilder::push, V3CommittedClientSseBuilder::seal, V3CommittedClientSseBuilder::drop, collect_direct_sse_attempt_after_terminal]
+    allowed_readers: [collect_direct_sse_attempt_after_terminal, V3CommittedClientSseStream, collapse_direct_client_sse_to_json]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-sse, MetadataCenter, request.normal_payload, response.client_payload, provider.wire_payload, session.cache]
     must_pass_through: [V3ProviderResp14Raw, V3DirectResp14ProviderProjectionPrepared, Error01, Error03, Error04, Error05]
     may_enter_provider_body: false

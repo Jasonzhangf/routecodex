@@ -239,6 +239,7 @@ async fn provider(State(peer): State<Peer>, Json(body): Json<Value>) -> Response
             first["choices"][0]["delta"]["mirror"] = json!("kept");
             let mut last = last;
             last["service_tier"] = json!("tier-a");
+            last["choices"][0]["logprobs"] = json!({"content":[{"token":"b","logprob":-2.0}]});
             return (
                 [("content-type", "text/event-stream")],
                 format!("data: {first}\n\ndata: {last}\n\ndata: [DONE]\n\n"),
@@ -812,6 +813,10 @@ async fn zen_tcm_forced_sse_collapse_keeps_chat_extensions_for_json_client() {
     assert_eq!(
         chat["choices"][0]["logprobs"]["content"][0]["token"], "a",
         "choice extension lost in the SSE-to-JSON collapse: {chat}"
+    );
+    assert_eq!(
+        chat["choices"][0]["logprobs"]["content"][1]["token"], "b",
+        "cross-chunk logprobs must be merged in stream order: {chat}"
     );
     assert_eq!(
         chat["choices"][0]["message"]["mirror"], "kept",

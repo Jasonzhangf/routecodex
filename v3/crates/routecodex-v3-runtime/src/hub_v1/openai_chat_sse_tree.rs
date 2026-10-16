@@ -214,7 +214,7 @@ impl V3OpenAiChatSseMaterializedChoice {
             self.finish_reason = Some(finish_reason.clone());
         }
         for extension in &choice.extensions {
-            accumulate_extension(&mut self.extensions, extension);
+            accumulate_choice_extension(&mut self.extensions, extension);
         }
         match &choice.delta {
             V3OpenAiChatSseDelta::Empty => {}
@@ -908,6 +908,53 @@ fn accumulate_extension(
     target
         .entry(extension.name.clone())
         .or_insert_with(|| extension.value.clone());
+}
+
+/// Choice extensions can repeat across chunks. `logprobs` in particular is
+/// emitted one token per chunk, so merge it in stream order instead of keeping
+/// only the first observation.
+fn accumulate_choice_extension(
+    target: &mut BTreeMap<String, Value>,
+    extension: &V3OpenAiChatSseExtension,
+) {
+    if extension.name != "logprobs" {
+        accumulate_extension(target, extension);
+        return;
+    }
+    match target.get_mut("logprobs") {
+        Some(existing) => merge_logprobs_value(existing, &extension.value),
+        None => {
+            target.insert("logprobs".to_owned(), extension.value.clone());
+        }
+    }
+}
+
+fn merge_logprobs_value(existing: &mut Value, incoming: &Value) {
+    if incoming.is_null() {
+        return;
+    }
+    if existing.is_null() {
+        *existing = incoming.clone();
+        return;
+    }
+    if !(existing.is_object() && incoming.is_object()) {
+        *existing = incoming.clone();
+        return;
+    }
+    let incoming = incoming.as_object().expect("object checked");
+    let existing = existing.as_object_mut().expect("object checked");
+    for (name, value) in incoming {
+        match existing.get_mut(name) {
+            Some(slot) if slot.is_null() => *slot = value.clone(),
+            Some(Value::Array(slot)) if value.is_array() => {
+                slot.extend(value.as_array().expect("array checked").iter().cloned());
+            }
+            Some(slot) => *slot = value.clone(),
+            None => {
+                existing.insert(name.clone(), value.clone());
+            }
+        }
+    }
 }
 
 fn string_field(object: &serde_json::Map<String, Value>, field: &str) -> Option<String> {

@@ -105,7 +105,7 @@ mod tests {
     async fn collapses_chat_client_sse_replay_preserving_extensions_and_fingerprint() {
         let stream = sealed_replay(&[
             "data: {\"id\":\"chatcmpl_x\",\"object\":\"chat.completion.chunk\",\"created\":7,\"model\":\"m\",\"system_fingerprint\":\"fp_x\",\"service_tier\":\"tier-a\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"logprobs\":{\"content\":[{\"token\":\"a\",\"logprob\":-1.0}]},\"finish_reason\":null}]}\n\n",
-            "data: {\"id\":\"chatcmpl_x\",\"object\":\"chat.completion.chunk\",\"created\":7,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"FREE_OK\",\"mirror\":\"kept\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"chatcmpl_x\",\"object\":\"chat.completion.chunk\",\"created\":7,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"FREE_OK\",\"mirror\":\"kept\"},\"logprobs\":{\"content\":[{\"token\":\"b\",\"logprob\":-2.0}]},\"finish_reason\":null}]}\n\n",
             "data: {\"id\":\"chatcmpl_x\",\"object\":\"chat.completion.chunk\",\"created\":7,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n",
             "data: [DONE]\n\n",
         ]);
@@ -117,6 +117,10 @@ mod tests {
         assert_eq!(
             completion["choices"][0]["logprobs"]["content"][0]["token"],
             "a"
+        );
+        assert_eq!(
+            completion["choices"][0]["logprobs"]["content"][1]["token"], "b",
+            "logprobs tokens emitted across chunks must be merged in stream order"
         );
         assert_eq!(
             completion["choices"][0]["message"]["mirror"], "kept",
