@@ -390,6 +390,11 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
         let _req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
         let provider_semantic = _req09.into_provider_semantic_payload();
+        // 声明必须走上游 SSE 的 provider 契约（如 OpenCode Zen 免费层）会强制
+        // provider transport intent 为 SSE，客户端响应格式仍按客户端 intent 投影。
+        let upstream_requires_sse = crate::hub_v1::v3_provider_profile_requires_upstream_sse(
+            target.compatibility_profile.as_deref(),
+        );
         let wire = match routecodex_v3_provider_responses::wire::build_v3_provider_12_responses_wire_payload_with_registry(
             &input.request_id,
             target,
@@ -417,11 +422,13 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     handle_provider_request_failure!(V3ResponsesRelayRuntimeError::Target(error));
                 }
             };
-        if let Err(error) = validate_v3_responses_relay_provider_request_transport_intent(
-            provider_request_transport_intent,
-            transport_request.stream_intent(),
-        ) {
-            handle_provider_request_failure!(error);
+        if !upstream_requires_sse {
+            if let Err(error) = validate_v3_responses_relay_provider_request_transport_intent(
+                provider_request_transport_intent,
+                transport_request.stream_intent(),
+            ) {
+                handle_provider_request_failure!(error);
+            }
         }
         trace.push("V3ProviderReqOutbound09TransportRequest");
         if pending_provider_action_recovery.is_some() {

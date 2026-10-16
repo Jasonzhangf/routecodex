@@ -57,6 +57,7 @@ include!("kernel/direct_web_search.rs");
 pub mod direct_request_key_hooks;
 mod direct_runtime_helpers_stream;
 pub(crate) use direct_runtime_helpers_stream::wrap_direct_sse_provider_event_json_observation_stream_with_compat as wrap_direct_sse_provider_event_json_observation_stream_with_compat_hook;
+mod direct_client_sse_collapse;
 mod direct_execution_control;
 mod direct_runtime_timing;
 mod direct_sse_consumers;

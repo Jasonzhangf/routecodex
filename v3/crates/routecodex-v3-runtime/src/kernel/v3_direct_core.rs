@@ -415,6 +415,11 @@ where
                 }
             };
         trace.push("V3Provider12ResponsesWirePayload");
+        // 客户端声明的响应 transport intent（wire 构建后即固定）。provider 契约
+        // 可能强制上游走 SSE（如 OpenCode Zen 免费层），但客户端响应格式仍由
+        // 该 intent 决定：JSON 客户端必须拿到缓冲后的 JSON，而不是泄漏的 SSE。
+        let client_response_wants_json = wire.stream_intent()
+            == routecodex_v3_provider_responses::V3ResponsesStreamIntent::Json;
         let custom_tool_function_binding = wire.custom_tool_function_binding().cloned();
         let namespace_identities = wire.namespace_identities().clone();
         let transport_request = match C::run_provider_transport(wire) {
@@ -1041,6 +1046,7 @@ where
             V3ProviderAttemptBody::Bytes(Vec::new()),
         );
         let committed_client_sse = matches!(&attempt_body, V3ProviderAttemptBody::Sse(_));
+        let mut collapsed_sse_to_json = false;
         let (client_body, attempt_success_receipt) = match attempt_body {
             V3ProviderAttemptBody::Sse(stream) => {
                 let target_observation =
@@ -1219,8 +1225,33 @@ where
                     }
                 };
                 drop(provider_action_permit.take());
-                let receipt = V3AttemptSuccessReceipt::from_sealed_sse_attempt(&committed);
-                (V3ClientBody::CommittedSse(committed), receipt)
+                // 客户端要 JSON，但上游只给了 SSE：按客户端 intent 缓冲成 JSON，
+                // 不把 SSE 泄漏给非流式客户端。仅 Chat 入口使用 Chat chunk reducer。
+                if client_response_wants_json && C::ENTRY_PROTOCOL == "openai_chat" {
+                    let completion =
+                        match direct_client_sse_collapse::collapse_direct_client_sse_to_json(
+                            committed,
+                        )
+                        .await
+                        {
+                            Ok(completion) => completion,
+                            Err(source) => {
+                                return error_output(
+                                    source,
+                                    trace,
+                                    &crate::hooks::register_responses_direct_hooks(),
+                                )
+                            }
+                        };
+                    collapsed_sse_to_json = true;
+                    (
+                        V3ClientBody::Json(completion),
+                        V3AttemptSuccessReceipt::from_buffered_terminal_attempt(),
+                    )
+                } else {
+                    let receipt = V3AttemptSuccessReceipt::from_sealed_sse_attempt(&committed);
+                    (V3ClientBody::CommittedSse(committed), receipt)
+                }
             }
             V3ProviderAttemptBody::Json(body) => (
                 V3ClientBody::Json(body),
@@ -1231,9 +1262,15 @@ where
                 V3AttemptSuccessReceipt::from_buffered_terminal_attempt(),
             ),
         };
+        let mut client_headers = std::mem::take(&mut response_projection.attempt_payload.headers);
+        if collapsed_sse_to_json {
+            // 上游 SSE 已被缓冲成 JSON，客户端帧必须按 JSON 投影，不能沿用
+            // provider 的 text/event-stream content-type。
+            client_headers.insert("content-type".to_string(), "application/json".to_string());
+        }
         let client_payload = V3Resp15ClientPayload {
             status: response_projection.attempt_payload.status,
-            headers: std::mem::take(&mut response_projection.attempt_payload.headers),
+            headers: client_headers,
             body: client_body,
         };
         if let Err(commit_error) = C::commit_after_response(

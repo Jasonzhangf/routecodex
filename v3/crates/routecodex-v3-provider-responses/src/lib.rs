@@ -4,6 +4,7 @@ pub mod global_cooldown;
 #[cfg_attr(not(test), allow(dead_code))]
 mod health;
 pub mod key_health;
+mod opencode_zen_headers;
 pub mod probe;
 mod probe_backoff;
 mod provider_auth;
@@ -31,6 +32,7 @@ pub use key_health::{
     V3ProviderHealthProbePermit, V3ProviderKeyHealthProjection, V3ProviderKeyHealthStore,
     V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
 };
+pub use opencode_zen_headers::stamp_opencode_zen_dynamic_request_headers;
 pub use probe::{build_v3_provider_global_probe_request, build_v3_provider_global_request};
 pub use provider_auth::{V3DiscoveredModel, V3DiscoveredModelSource};
 pub use raw_response::{
