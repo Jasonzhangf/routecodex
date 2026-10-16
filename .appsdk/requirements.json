@@ -215,9 +215,36 @@
         "version": 3
       },
       "version": 8
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "必须由新代接管旧请求的处理中状态和回传",
+          "role": "user",
+          "source": "Current Codex conversation 01a1345f-00c7-7f72-89b3-538b61fb4e66, explicit restart choice 2026-10-13"
+        },
+        "base_version": 0,
+        "operation": "create",
+        "project_id": "routecodex",
+        "request_id": "req-20261013-6bb0153-new-generation-live-continuity",
+        "requirement_id": "routecodex-managed-restart-live-continuity",
+        "text": "正式 restart 必须使新运行代际接管旧代际在途请求的处理中状态及后续上游回传。不能以等待所有请求排空、旧代继续完成旧请求、超时后中止旧请求、重发上游调用或伪造成功作为该目标的交付。接续须保留请求与响应绑定、真实执行状态及客户端可观察的协议语义；控制面与数据面保持分离。每个请求及其 provider attempt 同时只有一个执行 owner，交接不重复调用、不重复或丢失客户端业务字节。实现和验收必须证明真实 binary 代际切换后，由新代继续处理原在途请求和回传，而不是只恢复 checkpoint 元数据或报告新代健康。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "必须由新代接管旧请求的处理中状态和回传",
+          "role": "user",
+          "source": "Current Codex conversation 01a1345f-00c7-7f72-89b3-538b61fb4e66, explicit restart choice 2026-10-13"
+        },
+        "requirement_id": "routecodex-managed-restart-live-continuity",
+        "status": "active",
+        "text": "正式 restart 必须使新运行代际接管旧代际在途请求的处理中状态及后续上游回传。不能以等待所有请求排空、旧代继续完成旧请求、超时后中止旧请求、重发上游调用或伪造成功作为该目标的交付。接续须保留请求与响应绑定、真实执行状态及客户端可观察的协议语义；控制面与数据面保持分离。每个请求及其 provider attempt 同时只有一个执行 owner，交接不重复调用、不重复或丢失客户端业务字节。实现和验收必须证明真实 binary 代际切换后，由新代继续处理原在途请求和回传，而不是只恢复 checkpoint 元数据或报告新代健康。",
+        "version": 1
+      },
+      "version": 9
     }
   ],
   "project_id": "routecodex",
   "schema_version": 1,
-  "version": 8
+  "version": 9
 }
