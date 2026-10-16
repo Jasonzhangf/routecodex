@@ -48,7 +48,9 @@ mod tests {
         for frame in frames {
             builder.push(frame.as_bytes().to_vec()).expect("push frame");
         }
-        builder.mark_last_frame_as_terminal().expect("mark terminal");
+        builder
+            .mark_last_frame_as_terminal()
+            .expect("mark terminal");
         builder
             .seal_after_validated_terminal()
             .expect("seal committed replay")

@@ -6,10 +6,21 @@
   ],
   "nodes": [
     {
+      "id": "zen_h00_upstream_sse_contract_declared",
+      "operator": "v3_provider_profile_requires_upstream_sse",
+      "operator_version": "1",
+      "inputs": ["selected-provider-wire-request"],
+      "output": { "id": "upstream-sse-contract", "schema": "Boolean", "schema_ref": "v3.opencode_zen_provider_headers.arc.upstream_sse_contract" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.target.concrete_provider"], "writes": [] }
+    },
+    {
       "id": "zen_h01_chat_transport_request_built",
       "operator": "build_v3_openai_chat_transport_request_from_v3_provider_08",
       "operator_version": "1",
-      "inputs": ["selected-provider-wire-request"],
+      "inputs": ["selected-provider-wire-request", "upstream-sse-contract"],
       "output": { "id": "transport-request", "schema": "Object", "schema_ref": "v3.opencode_zen_provider_headers.arc.transport_request" },
       "input_selector": { "include": [], "exclude": [], "predicate": null },
       "output_selector": { "include": [], "exclude": [], "predicate": null },
@@ -26,10 +37,24 @@
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": { "reads": ["v3.provider.transport_request"], "writes": ["v3.response.provider_raw"] }
+    },
+    {
+      "id": "zen_h03_direct_client_json_collapse",
+      "operator": "collapse_direct_client_sse_to_json",
+      "operator_version": "1",
+      "inputs": ["provider-attempt-outcome", "upstream-sse-contract"],
+      "output": { "id": "client-json-body", "schema": "Object", "schema_ref": "v3.opencode_zen_provider_headers.arc.client_json_body" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.response.provider_raw"], "writes": ["v3.response.client_payload"] }
     }
   ],
   "edges": [
-    { "from": "zen_h01_chat_transport_request_built", "to": "zen_h02_provider_http_attempt", "arc_id": "transport-request" }
+    { "from": "zen_h00_upstream_sse_contract_declared", "to": "zen_h01_chat_transport_request_built", "arc_id": "upstream-sse-contract" },
+    { "from": "zen_h01_chat_transport_request_built", "to": "zen_h02_provider_http_attempt", "arc_id": "transport-request" },
+    { "from": "zen_h02_provider_http_attempt", "to": "zen_h03_direct_client_json_collapse", "arc_id": "provider-attempt-outcome" },
+    { "from": "zen_h00_upstream_sse_contract_declared", "to": "zen_h03_direct_client_json_collapse", "arc_id": "upstream-sse-contract" }
   ],
-  "outputs": ["provider-attempt-outcome"]
+  "outputs": ["client-json-body"]
 }

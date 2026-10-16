@@ -7,7 +7,7 @@ use axum::{
     Json, Router,
 };
 use routecodex_v3_config::{parse_v3_config_02_authoring, V3UserConfigStore};
-use routecodex_v3_server::spawn_v3_server_aggregate;
+use routecodex_v3_server::{spawn_v3_server_aggregate, V3ServerAggregateHandle};
 use serde_json::{json, Value};
 use std::{
     fs,
@@ -56,9 +56,24 @@ struct Peer {
     correction: bool,
     guarded: bool,
     image: bool,
+    /// 真实免费层拒绝没有 `tools` 的请求；单发契约用例只声明它要覆盖的部分。
+    declared_tools: bool,
+    /// 第一发就返回终态，便于断言单次请求的客户端响应形状。
+    immediate_terminal: bool,
+    /// 模拟上游 403 `FreeTierError`。
+    reject: bool,
 }
 
 fn check_wire(body: &Value, peer: &Peer, stage: usize) -> Result<(), String> {
+    if body["stream"] != true {
+        return Err(format!(
+            "free tier requires upstream stream=true, got {}",
+            body["stream"]
+        ));
+    }
+    if !peer.declared_tools {
+        return Ok(());
+    }
     if peer.image {
         let messages = body["messages"].as_array().ok_or("messages missing")?;
         let images: Vec<_> = messages
@@ -170,6 +185,14 @@ fn check_wire(body: &Value, peer: &Peer, stage: usize) -> Result<(), String> {
 }
 
 async fn provider(State(peer): State<Peer>, Json(body): Json<Value>) -> Response {
+    if peer.reject {
+        peer.captures.lock().await.push(body.clone());
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({"error":{"message":"FreeTierError","type":"FreeTierError"}})),
+        )
+            .into_response();
+    }
     let mut captures = peer.captures.lock().await;
     let stage = captures.len();
     captures.push(body.clone());
@@ -183,7 +206,8 @@ async fn provider(State(peer): State<Peer>, Json(body): Json<Value>) -> Response
         )
             .into_response();
     }
-    let terminal = peer.guarded || stage >= if peer.correction { 2 } else { 1 };
+    let terminal =
+        peer.guarded || peer.immediate_terminal || stage >= if peer.correction { 2 } else { 1 };
     let args = if peer.correction && stage == 0 {
         "{\"command\":42,\"unknown\":true}"
     } else {
@@ -257,7 +281,7 @@ version = 3
 [servers.test]
 bind = "127.0.0.1"
 port = {server_port}
-endpoints = ["responses"]
+endpoints = ["responses", "openai_chat", "anthropic"]
 [servers.test.routes.default]
 tiers = [[{{use="zenpeer/model"}}]]
 {}
@@ -359,6 +383,101 @@ async fn roundtrip(native: &'static str, stream: bool, correction: bool, guarded
     roundtrip_with_image(native, stream, correction, guarded, false).await;
 }
 
+async fn send_raw(
+    client: &reqwest::Client,
+    port: u16,
+    path: &str,
+    body: &Value,
+) -> (reqwest::StatusCode, String, String) {
+    let reply = client
+        .post(format!("http://127.0.0.1:{port}{path}"))
+        .json(body)
+        .send()
+        .await
+        .expect("public request must reach the client boundary");
+    let status = reply.status();
+    let content_type = reply
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let raw = reply.text().await.unwrap_or_default();
+    (status, content_type, raw)
+}
+
+struct ZenHarness {
+    root: tempfile::TempDir,
+    port: u16,
+    peer: Peer,
+    handle: V3ServerAggregateHandle,
+    shutdown_tx: oneshot::Sender<()>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl ZenHarness {
+    async fn start(peer: Peer) -> Self {
+        let root = tempfile::tempdir().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let provider_port = listener.local_addr().unwrap().port();
+        let app = Router::new().route(
+            "/v1/chat/completions",
+            post(provider).with_state(peer.clone()),
+        );
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await
+                .unwrap();
+        });
+        let port = free_port();
+        let manifest = store(root.path(), port, provider_port)
+            .load_manifest()
+            .unwrap();
+        let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+        Self {
+            root,
+            port,
+            peer,
+            handle,
+            shutdown_tx,
+            task,
+        }
+    }
+
+    async fn stop(self) {
+        let ZenHarness {
+            root: _root,
+            port: _port,
+            peer: _peer,
+            handle,
+            shutdown_tx,
+            task,
+        } = self;
+        handle.shutdown().await;
+        let _ = shutdown_tx.send(());
+        task.await.unwrap();
+    }
+}
+
+fn contract_peer(immediate_terminal: bool, reject: bool) -> Peer {
+    Peer {
+        captures: Arc::new(Mutex::new(Vec::new())),
+        errors: Arc::new(Mutex::new(Vec::new())),
+        native: "bash",
+        arguments: "{}".to_string(),
+        correction: false,
+        guarded: false,
+        image: false,
+        declared_tools: false,
+        immediate_terminal,
+        reject,
+    }
+}
+
 async fn roundtrip_with_image(
     native: &'static str,
     stream: bool,
@@ -396,6 +515,9 @@ async fn roundtrip_with_image(
         correction,
         guarded,
         image,
+        declared_tools: true,
+        immediate_terminal: false,
+        reject: false,
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let provider_port = listener.local_addr().unwrap().port();
@@ -540,4 +662,134 @@ async fn zen_tcm_direct_shell_file_write_history_roundtrip() {
 #[tokio::test]
 async fn zen_tcm_latest_view_image_and_read_followup_preserve_bytes_and_pairing() {
     roundtrip_with_image("read", true, false, false, true).await;
+}
+
+#[tokio::test]
+async fn zen_tcm_free_tier_forces_upstream_stream_and_keeps_client_json() {
+    let _lock = TEST_LOCK.lock().await;
+    let harness = ZenHarness::start(contract_peer(true, false)).await;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .unwrap();
+
+    let (status, content_type, raw) = send_raw(
+        &client,
+        harness.port,
+        "/v1/chat/completions",
+        &json!({"model":"zenpeer.model","stream":false,"messages":[{"role":"user","content":"hi"}]}),
+    )
+    .await;
+    assert!(
+        status.is_success(),
+        "chat JSON client status: {status} body: {raw}"
+    );
+    assert!(
+        content_type.contains("application/json"),
+        "chat JSON client content-type: {content_type}"
+    );
+    let chat: Value =
+        serde_json::from_str(&raw).expect("chat JSON client must receive a JSON body");
+    assert_eq!(chat["choices"][0]["message"]["content"], MARKER);
+
+    let (status, content_type, raw) = send_raw(
+        &client,
+        harness.port,
+        "/v1/responses",
+        &json!({"model":"zenpeer.model","stream":false,"input":[{"role":"user","content":"hi"}]}),
+    )
+    .await;
+    assert!(
+        status.is_success(),
+        "responses JSON client status: {status} body: {raw}"
+    );
+    assert!(
+        content_type.contains("application/json"),
+        "responses JSON client content-type: {content_type}"
+    );
+    let responses: Value =
+        serde_json::from_str(&raw).expect("responses JSON client must receive a JSON body");
+    assert!(
+        raw.contains(MARKER),
+        "responses JSON client lost the model answer: {responses}"
+    );
+
+    let (status, content_type, raw) = send_raw(
+        &client,
+        harness.port,
+        "/v1/messages",
+        &json!({"model":"zenpeer.model","max_tokens":64,"stream":false,"messages":[{"role":"user","content":"hi"}]}),
+    )
+    .await;
+    assert!(
+        status.is_success(),
+        "anthropic JSON client status: {status} body: {raw}"
+    );
+    assert!(
+        content_type.contains("application/json"),
+        "anthropic JSON client content-type: {content_type}"
+    );
+    let message: Value =
+        serde_json::from_str(&raw).expect("anthropic JSON client must receive a JSON body");
+    assert_eq!(
+        message["type"], "message",
+        "anthropic JSON client shape: {message}"
+    );
+    assert_eq!(message["content"][0]["text"], MARKER);
+
+    let captures = harness.peer.captures.lock().await;
+    assert_eq!(
+        captures.len(),
+        3,
+        "one provider attempt per entry: {captures:?}"
+    );
+    for (index, captured) in captures.iter().enumerate() {
+        assert_eq!(
+            captured["stream"], true,
+            "attempt {index} must force upstream stream: {captured}"
+        );
+    }
+    drop(captures);
+    assert!(harness.peer.errors.lock().await.is_empty());
+    harness.stop().await;
+}
+
+#[tokio::test]
+async fn zen_tcm_provider_403_never_projects_an_error_payload_to_the_client() {
+    let _lock = TEST_LOCK.lock().await;
+    let harness = ZenHarness::start(contract_peer(false, true)).await;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .unwrap();
+    let outcome = client
+        .post(format!(
+            "http://127.0.0.1:{}/v1/chat/completions",
+            harness.port
+        ))
+        .json(&json!({"model":"zenpeer.model","stream":false,"messages":[{"role":"user","content":"hi"}]}))
+        .send()
+        .await;
+    match outcome {
+        Err(_) => {}
+        Ok(reply) => {
+            let status = reply.status();
+            let content_type = reply
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or_default()
+                .to_string();
+            let raw = reply.text().await.unwrap_or_default();
+            assert!(
+                !raw.contains("FreeTierError"),
+                "provider error leaked to the client: status={status} body={raw}"
+            );
+            assert!(
+                !(content_type.contains("json") && raw.contains("\"error\"")),
+                "client received a projected error payload: status={status} content-type={content_type} body={raw}"
+            );
+        }
+    }
+    harness.stop().await;
 }

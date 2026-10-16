@@ -900,6 +900,8 @@ features:
   - v3/crates/routecodex-v3-provider-responses/src/transport.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport/tests.rs
   - v3/crates/routecodex-v3-provider-responses/src/raw_response.rs
+  - v3/crates/routecodex-v3-provider-responses/src/opencode_zen_headers.rs
+  - v3/crates/routecodex-v3-provider-responses/src/probe.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_shared.rs
   - v3/crates/routecodex-v3-runtime/src/hooks.rs
   - v3/crates/routecodex-v3-target/src/lib.rs
@@ -925,6 +927,7 @@ features:
   - validate_current_responses_data_images
   - build_v3_transport_13_responses_http_request_from_v3_provider_12
   - build_v3_openai_chat_transport_request_from_v3_provider_08
+  - v3_provider_profile_requires_upstream_sse
   - ReqwestResponsesTransport::send
   - V3ProviderResp14Raw::from_json
   - current_turn_invalid_png_data_image_is_rejected_before_provider_transport
@@ -936,6 +939,7 @@ features:
   - v3/crates/routecodex-v3-provider-responses
   - v3/crates/routecodex-v3-runtime/src/hooks.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_shared.rs
+  - v3/crates/routecodex-v3-provider-responses/src/opencode_zen_headers.rs
   - v3/crates/routecodex-v3-target
   - v3/crates/routecodex-v3-config/src/lib.rs
   - v3/crates/routecodex-v3-config/src/provider_config.rs
@@ -4914,11 +4918,13 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_client_sse_collapse.rs
   - v3/crates/routecodex-v3-runtime/src/nodes.rs
   - v3/crates/routecodex-v3-runtime/src/hooks.rs
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_client_sse_collapse.rs
   - v3/crates/routecodex-v3-runtime/src/nodes.rs
   - v3/crates/routecodex-v3-runtime/src/hooks.rs
   forbidden_paths:
@@ -4930,6 +4936,7 @@ features:
   - npm run verify:v3-stage-protocol-shapes
   entry_symbols:
   - V3_RESPONSES_DIRECT_TRANSPORT_RESPONSE_TIMEOUT
+  - collapse_direct_client_sse_to_json
   mainline_bindings:
   - v3-provider-action-gate-19
   - v3-provider-action-gate-20

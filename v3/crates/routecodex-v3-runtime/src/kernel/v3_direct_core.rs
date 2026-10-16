@@ -420,6 +420,13 @@ where
         // 该 intent 决定：JSON 客户端必须拿到缓冲后的 JSON，而不是泄漏的 SSE。
         let client_response_wants_json = wire.stream_intent()
             == routecodex_v3_provider_responses::V3ResponsesStreamIntent::Json;
+        // 只有声明了“上游必须 SSE”的 provider 契约（如 OpenCode Zen 免费层）才会把
+        // JSON 客户端的上游请求强制成 SSE，因此也只有该契约下的 JSON 客户端需要把
+        // 上游 SSE 折叠回 JSON。其他 provider 保持既有直通行为不变。
+        let provider_requires_upstream_sse =
+            crate::hub_v1::v3_provider_profile_requires_upstream_sse(
+                wire.target().compatibility_profile.as_deref(),
+            );
         let custom_tool_function_binding = wire.custom_tool_function_binding().cloned();
         let namespace_identities = wire.namespace_identities().clone();
         let transport_request = match C::run_provider_transport(wire) {
@@ -1225,9 +1232,12 @@ where
                     }
                 };
                 drop(provider_action_permit.take());
-                // 客户端要 JSON，但上游只给了 SSE：按客户端 intent 缓冲成 JSON，
-                // 不把 SSE 泄漏给非流式客户端。仅 Chat 入口使用 Chat chunk reducer。
-                if client_response_wants_json && C::ENTRY_PROTOCOL == "openai_chat" {
+                // 客户端要 JSON，但声明契约强制了上游 SSE：按客户端 intent 缓冲成
+                // JSON，不把 SSE 泄漏给非流式客户端。仅 Chat 入口使用 Chat chunk reducer。
+                if client_response_wants_json
+                    && provider_requires_upstream_sse
+                    && C::ENTRY_PROTOCOL == "openai_chat"
+                {
                     let completion =
                         match direct_client_sse_collapse::collapse_direct_client_sse_to_json(
                             committed,

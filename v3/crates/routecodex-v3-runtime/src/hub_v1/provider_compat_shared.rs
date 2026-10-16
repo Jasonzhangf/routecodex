@@ -504,6 +504,76 @@ mod tests {
         assert_eq!(request.body()["tools"][0]["function"]["name"], "read");
     }
 
+    fn zen_chat_wire(
+        request_id: &str,
+        compatibility_profile: Option<&str>,
+        stream: bool,
+    ) -> V3Provider12ResponsesWirePayload {
+        build_v3_provider_12_responses_wire_payload(
+            request_id,
+            V3ResponsesProviderTarget {
+                provider_id: "opencode-go-zen".into(),
+                interface_id: "default".into(),
+                provider_type: "openai_chat".into(),
+                base_url: "https://opencode.ai/zen/v1".into(),
+                canonical_model_id: "deepseek-v4.1-flash-free".into(),
+                wire_model: "deepseek-v4.1-flash-free".into(),
+                compatibility_profile: compatibility_profile.map(|value| value.to_string()),
+                headers: Default::default(),
+                auth: V3ProviderAuthHandle {
+                    alias: "key5".into(),
+                    secret: V3ProviderAuthSecretHandle::ApiKey("secret-value".into()),
+                },
+                responses_transport: V3ResponsesTransportKind::Http,
+                websocket_v2_url: None,
+                provider_request_cleanup: Default::default(),
+                request_timeout_ms: 300_000,
+                sse_first_frame_timeout_ms: None,
+                initial_concurrency_budget: 8,
+                concurrency_acquire_timeout_ms: 60_000,
+            },
+            json!({
+                "model": "deepseek-v4.1-flash-free",
+                "stream": stream,
+                "tools": [{"type":"function","function":{"name":"read","parameters":{"type":"object","properties":{"filePath":{"type":"string"}}}}}]
+            }),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn opencode_zen_chat_transport_forces_upstream_sse_for_json_client() {
+        let wire = zen_chat_wire(
+            "req-opencode-zen-json-client",
+            Some(provider_compat_core::opencode_zen_tcm::PROFILE),
+            false,
+        );
+        assert_eq!(wire.stream_intent(), V3ResponsesStreamIntent::Json);
+        let request = build_v3_provider_transport_request_for_protocol(
+            V3HubProviderWireProtocol::OpenAiChat,
+            wire,
+        )
+        .unwrap();
+        assert_eq!(
+            request.body()["stream"],
+            true,
+            "the chat:opencode-zen-tcm contract must force the upstream body to stream even for a JSON client"
+        );
+        assert_eq!(request.stream_intent(), V3ResponsesStreamIntent::Sse);
+    }
+
+    #[test]
+    fn opencode_zen_chat_transport_keeps_json_intent_for_non_zen_profile() {
+        let wire = zen_chat_wire("req-non-zen-json-client", None, false);
+        let request = build_v3_provider_transport_request_for_protocol(
+            V3HubProviderWireProtocol::OpenAiChat,
+            wire,
+        )
+        .unwrap();
+        assert_eq!(request.body()["stream"], false);
+        assert_eq!(request.stream_intent(), V3ResponsesStreamIntent::Json);
+    }
+
     #[test]
     fn anthropic_transport_request_keeps_provider_sse_first_frame_timeout() {
         let wire = build_v3_provider_12_responses_wire_payload(
