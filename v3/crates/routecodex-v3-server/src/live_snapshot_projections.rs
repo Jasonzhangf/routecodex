@@ -186,3 +186,52 @@ pub(crate) fn persist_v3_provider_terminal_evidence(
         None,
     );
 }
+
+/// Serialize typed Chat failure sources into one private diagnostic artifact.
+///
+/// Queue failures remain in the existing Debug persistence-failure ledger, so a
+/// diagnostic write can never turn a client response into an error.
+pub(crate) fn persist_v3_chat_failure_evidence_sources(
+    state: &Arc<V3ListenerState>,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+    attempts: &[V3RuntimeProviderFailureObservation],
+    terminal_source: Option<&routecodex_v3_error::V3Error01SourceRaised>,
+) {
+    if attempts.is_empty() && terminal_source.is_none() {
+        return;
+    }
+    let attempts = attempts
+        .iter()
+        .map(|attempt| {
+            let mut projected = project_v3_runtime_provider_failure_event_debug(attempt);
+            if let Value::Object(fields) = &mut projected {
+                fields.insert(
+                    "diagnostic_source".to_string(),
+                    json!(&attempt.diagnostic_source),
+                );
+                fields.insert(
+                    "provider_status".to_string(),
+                    json!(attempt.external_error_status),
+                );
+            }
+            projected
+        })
+        .collect::<Vec<Value>>();
+    let payload = json!({
+        "object": "routecodex.v3.provider_failed_attempt_evidence",
+        "request_id": request_id,
+        "attempts": attempts,
+        "terminal_source": terminal_source,
+    });
+    let _persisted = persist_v3_error_evidence_payload(
+        state,
+        entry_protocol,
+        endpoint,
+        request_id,
+        "provider-failed-attempts.json",
+        &state.debug.project_payload_verbatim(payload),
+        None,
+    );
+}

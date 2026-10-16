@@ -306,8 +306,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:ddcd35e83878ee54238869d004bc60e7de8ae1cd72d3c83f451af2ee2876334f
-    last_manual_authorization_id: auth-20261014-fa22072-failed-attempt-evidence
+    fingerprint: sha256:8f401aeebf4fa429260f7e2bb66b726bae68bdc818190dc9ac58dd6d350ec3d3
+    last_manual_authorization_id: auth-20261015-fa22072-direct-raw-wire-evidence
   - item_id: chain:v3.servertool_center.skeleton
     chain_id: v3.servertool_center.skeleton
     status: audited_locked
@@ -1349,3 +1349,10 @@ manual_authorizations:
     reason: "Jason explicitly approved: 授权本轮这条接线锁修复. This scoped refresh appends v3-chat-direct-relay-handoff-01 through -04 in order and implements the corresponding Chat Direct-to-Relay typed handoff consumption and captured-plan admission bindings. The existing selected target, candidate plan, request-local exclusions, cumulative control, timing and failure sequence continue through the sole Relay owner; selection policy, pins, retry budgets, health, payload and client framing rules remain unchanged. Authorization recorded at the stated time, not the user-message timestamp. Source and mapped verification only; tests, reverse proof, independent review and CI are still required. No install, restart, shutdown or production configuration writes."
     fingerprint_before: sha256:7b3839cd5ac05ce2266e74742ed50b5126a2e67af82593392d7abc251a3187ea
     fingerprint_after: sha256:1e4a8e874c0d9182b335773716def39be574af4c193ddc1a0df06dbef7986923
+  - authorization_id: auth-20261015-fa22072-direct-raw-wire-evidence
+    item_id: chain:v3.error.raw_wire_evidence
+    approved_by: Jason
+    approved_at: '2026-10-15T18:52:16Z'
+    reason: "Jason explicitly approved the exact scope with the answer 批准该精确范围 (Codex thread 01a133aa-f739-7381-ba21-14a871d9f584, turn 01a14266-9254-74a3-bf7a-3a420d46a131, user message 01a14266-933d-75c1-9739-4c85ba602680; captured in /Volumes/Intel/playground/routecodex/fa22072-evidence-01a133d7/direct-recording-r41/actual-jason-approval.json against the request /Volumes/Intel/playground/routecodex/fa22072-evidence-01a133d7/raw-wire-authorization-r40/request.md). This scoped refresh rebinds the existing serializer edge v3-chat-relay-error-evidence-02 to persist_v3_chat_failure_evidence_sources and appends v3-chat-relay-error-evidence-03, v3-chat-direct-error-evidence-01, v3-chat-direct-relay-error-evidence-01 and v3-chat-direct-compaction-error-evidence-01 in order. The seeded Relay source is the receiving V3OpenAiChatRelayRuntimeOutput and the compaction source is the not-yet-moved V3ResponsesProtocolRelayHandoff. Only this one locked fingerprint and this record are refreshed; the other four locked chains are unchanged. The raw feature keeps its Runtime forbidden path and never carries business payload or control; pin, routing, budgets, deadlines, retry, health and client framing are unchanged. Source and mapped verification only; affected tests, independent review and CI are still required, and no install, restart, shutdown or production configuration writes are covered. approved_at is the actual-jason-approval.json capture time."
+    fingerprint_before: sha256:ddcd35e83878ee54238869d004bc60e7de8ae1cd72d3c83f451af2ee2876334f
+    fingerprint_after: sha256:8f401aeebf4fa429260f7e2bb66b726bae68bdc818190dc9ac58dd6d350ec3d3

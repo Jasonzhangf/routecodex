@@ -1200,7 +1200,7 @@ resources:
     owner_node: V3Error01SourceRaised
     identity: [sourceStage, code, sourceKind]
     allowed_writers: [build_v3_error_01_source_raised, build_v3_error_01_source_raised_external]
-    allowed_readers: [V3Error02Classified, build_v3_error_06_client_projected_from_v3_error_05, build_v3_runtime_provider_failure_observation_from_policy_event, persist_v3_chat_failure_evidence]
+    allowed_readers: [V3Error02Classified, build_v3_error_06_client_projected_from_v3_error_05, build_v3_runtime_provider_failure_observation_from_policy_event, persist_v3_chat_failure_evidence, projected_error_output_with_observability_and_snapshots, execute_v3_openai_chat_direct_server_outcome, persist_v3_chat_failure_evidence_sources]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -2063,7 +2063,7 @@ resources:
     owner_crate: routecodex-v3-runtime
     owner_node: V3RuntimeObservability
     identity: [requestId, entryProtocol, executionMode, routingGroupId, providerId, modelId]
-    allowed_readers: [emit_v3_request_complete_console_line, emit_direct_sse_complete_console_lines, build_v3_route_selection_event_sink, build_v3_provider_failure_event_sink, emit_v3_request_route_hit_console_line_for_observability, emit_v3_provider_failure_console_event, emit_v3_provider_observability_console_lines, persist_v3_chat_failure_evidence]
+    allowed_readers: [emit_v3_request_complete_console_line, emit_direct_sse_complete_console_lines, build_v3_route_selection_event_sink, build_v3_provider_failure_event_sink, emit_v3_request_route_hit_console_line_for_observability, emit_v3_provider_failure_console_event, emit_v3_provider_observability_console_lines, persist_v3_chat_failure_evidence, execute_v3_openai_chat_direct_server_outcome, persist_v3_chat_failure_evidence_sources]
     allowed_writers: [build_v3_relay_observability_from_selected, build_v3_direct_runtime_observability, record_timing, handle_v3_responses_relay_provider_failure, handle_v3_responses_direct_provider_failure, handle_provider_failure, execute_v3_relay_runtime_core, build_v3_runtime_provider_failure_observation_from_policy_event]
     forbidden_writers: [ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic, response.client_payload, provider.wire_payload]
     may_enter_provider_body: false

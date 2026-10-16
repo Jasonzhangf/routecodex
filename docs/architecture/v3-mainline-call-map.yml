@@ -5423,11 +5423,71 @@ chains:
       side_channel_writes: [v3.debug.codex_sample_persist_queue]
   - step_id: v3-chat-relay-error-evidence-02
     from_node: V3ChatFailedAttemptEvidence
-    to_node: V3ErrorEvidencePersistQueued
+    to_node: V3ChatFailedAttemptEvidenceSerialized
     caller_symbol: persist_v3_chat_failure_evidence
     caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: persist_v3_chat_failure_evidence_sources
+    callee_file: v3/crates/routecodex-v3-server/src/live_snapshot_projections.rs
+    status: anchored
+    edge_kind: failure_side_channel_edge
+    owner_feature_id: v3.error.raw_wire_evidence
+    resource_flow:
+      consumes: [v3.error.source, v3.runtime.responses_observability]
+      produces: [v3.debug.codex_sample_persist_queue]
+      side_channel_reads: [v3.error.source, v3.runtime.responses_observability]
+      side_channel_writes: [v3.debug.codex_sample_persist_queue]
+  - step_id: v3-chat-relay-error-evidence-03
+    from_node: V3ChatFailedAttemptEvidenceSerialized
+    to_node: V3ErrorEvidencePersistQueued
+    caller_symbol: persist_v3_chat_failure_evidence_sources
+    caller_file: v3/crates/routecodex-v3-server/src/live_snapshot_projections.rs
     callee_symbol: persist_v3_error_evidence_payload
     callee_file: v3/crates/routecodex-v3-server/src/live_snapshot.rs
+    status: anchored
+    edge_kind: failure_side_channel_edge
+    owner_feature_id: v3.error.raw_wire_evidence
+    resource_flow:
+      consumes: [v3.error.source, v3.runtime.responses_observability]
+      produces: [v3.debug.codex_sample_persist_queue]
+      side_channel_reads: [v3.error.source, v3.runtime.responses_observability]
+      side_channel_writes: [v3.debug.codex_sample_persist_queue]
+  - step_id: v3-chat-direct-error-evidence-01
+    from_node: V3ResponsesDirectRuntimeOutput
+    to_node: V3ChatFailedAttemptEvidenceSerialized
+    caller_symbol: execute_v3_openai_chat_direct_server_outcome
+    caller_file: v3/crates/routecodex-v3-server/src/executors.rs
+    callee_symbol: persist_v3_chat_failure_evidence_sources
+    callee_file: v3/crates/routecodex-v3-server/src/live_snapshot_projections.rs
+    status: anchored
+    edge_kind: failure_side_channel_edge
+    owner_feature_id: v3.error.raw_wire_evidence
+    resource_flow:
+      consumes: [v3.error.source, v3.runtime.responses_observability]
+      produces: [v3.debug.codex_sample_persist_queue]
+      side_channel_reads: [v3.error.source, v3.runtime.responses_observability]
+      side_channel_writes: [v3.debug.codex_sample_persist_queue]
+  - step_id: v3-chat-direct-relay-error-evidence-01
+    from_node: V3OpenAiChatRelayRuntimeOutput
+    to_node: V3ChatFailedAttemptEvidence
+    caller_symbol: execute_v3_openai_chat_direct_server_outcome
+    caller_file: v3/crates/routecodex-v3-server/src/executors.rs
+    callee_symbol: persist_v3_chat_failure_evidence
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    status: anchored
+    edge_kind: failure_side_channel_edge
+    owner_feature_id: v3.error.raw_wire_evidence
+    resource_flow:
+      consumes: [v3.error.source, v3.runtime.responses_observability]
+      produces: [v3.debug.codex_sample_persist_queue]
+      side_channel_reads: [v3.error.source, v3.runtime.responses_observability]
+      side_channel_writes: [v3.debug.codex_sample_persist_queue]
+  - step_id: v3-chat-direct-compaction-error-evidence-01
+    from_node: V3ResponsesProtocolRelayHandoff
+    to_node: V3ChatFailedAttemptEvidenceSerialized
+    caller_symbol: execute_v3_openai_chat_direct_server_outcome
+    caller_file: v3/crates/routecodex-v3-server/src/executors.rs
+    callee_symbol: persist_v3_chat_failure_evidence_sources
+    callee_file: v3/crates/routecodex-v3-server/src/live_snapshot_projections.rs
     status: anchored
     edge_kind: failure_side_channel_edge
     owner_feature_id: v3.error.raw_wire_evidence
