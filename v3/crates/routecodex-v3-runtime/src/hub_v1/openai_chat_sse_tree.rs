@@ -118,6 +118,12 @@ pub struct V3OpenAiChatSseMaterializedChoice {
     pub refusal: String,
     pub finish_reason: Option<String>,
     pub tool_calls: BTreeMap<usize, V3OpenAiChatSseMaterializedToolCall>,
+    /// Choice-level fields other than `index`/`delta`/`finish_reason`, for
+    /// example `logprobs`, preserved on the materialized choice object.
+    pub extensions: BTreeMap<String, Value>,
+    /// Delta-level fields that are not consumed as Chat semantics, preserved
+    /// on the materialized message object.
+    pub message_extensions: BTreeMap<String, Value>,
     pub active_tool_call_by_wire_index: BTreeMap<usize, usize>,
     pub tool_call_by_wire_index_and_id: BTreeMap<(usize, String), usize>,
 }
@@ -207,6 +213,9 @@ impl V3OpenAiChatSseMaterializedChoice {
         if let Some(finish_reason) = &choice.finish_reason {
             self.finish_reason = Some(finish_reason.clone());
         }
+        for extension in &choice.extensions {
+            accumulate_extension(&mut self.extensions, extension);
+        }
         match &choice.delta {
             V3OpenAiChatSseDelta::Empty => {}
             V3OpenAiChatSseDelta::Role(role) => self.role = Some(role.clone()),
@@ -223,13 +232,26 @@ impl V3OpenAiChatSseMaterializedChoice {
         for extension in &choice.delta_extensions {
             if let Some(text) = extension.value.as_str() {
                 match extension.name.as_str() {
-                    "content" => self.content.push_str(text),
-                    "reasoning_content" | "reasoning" => self.reasoning_content.push_str(text),
-                    "refusal" => self.refusal.push_str(text),
-                    "role" => self.role = Some(text.to_owned()),
+                    "content" => {
+                        self.content.push_str(text);
+                        continue;
+                    }
+                    "reasoning_content" | "reasoning" => {
+                        self.reasoning_content.push_str(text);
+                        continue;
+                    }
+                    "refusal" => {
+                        self.refusal.push_str(text);
+                        continue;
+                    }
+                    "role" => {
+                        self.role = Some(text.to_owned());
+                        continue;
+                    }
                     _ => {}
                 }
             }
+            accumulate_extension(&mut self.message_extensions, extension);
         }
         Ok(())
     }
@@ -279,11 +301,23 @@ impl V3OpenAiChatSseMaterializedChoice {
             }
             message.insert("tool_calls".to_owned(), Value::Array(calls));
         }
-        Ok(serde_json::json!({
-            "index": index,
-            "message": Value::Object(message),
-            "finish_reason": self.finish_reason.clone().map(Value::String).unwrap_or(Value::Null)
-        }))
+        for (name, value) in &self.message_extensions {
+            message.entry(name.clone()).or_insert_with(|| value.clone());
+        }
+        let mut choice = serde_json::Map::new();
+        choice.insert("index".to_owned(), Value::from(index));
+        choice.insert("message".to_owned(), Value::Object(message));
+        choice.insert(
+            "finish_reason".to_owned(),
+            self.finish_reason
+                .clone()
+                .map(Value::String)
+                .unwrap_or(Value::Null),
+        );
+        for (name, value) in &self.extensions {
+            choice.entry(name.clone()).or_insert_with(|| value.clone());
+        }
+        Ok(Value::Object(choice))
     }
 }
 
@@ -321,6 +355,9 @@ impl V3OpenAiChatSseReducerState {
             .system_fingerprint
             .or(self.system_fingerprint.take());
         let semantic = classify_v3_openai_chat_sse_chunk(chunk)?;
+        for extension in &semantic.extensions {
+            self.extensions.push(extension.clone());
+        }
         for mut choice in semantic.choices {
             if let Some(reason) = choice
                 .finish_reason
@@ -383,6 +420,17 @@ impl V3OpenAiChatSseReducerState {
         }
         if let Some(created) = self.created {
             response.insert("created".to_owned(), Value::from(created));
+        }
+        if let Some(fingerprint) = &self.system_fingerprint {
+            response.insert(
+                "system_fingerprint".to_owned(),
+                Value::String(fingerprint.clone()),
+            );
+        }
+        for extension in &self.extensions {
+            response
+                .entry(extension.name.clone())
+                .or_insert_with(|| extension.value.clone());
         }
         if let Some(usage) = &self.usage {
             let mut usage_value = serde_json::Map::new();
@@ -848,6 +896,18 @@ fn object_extensions(
             value: value.clone(),
         })
         .collect()
+}
+
+/// Store the first observation of a chunk extension. Chat providers emit
+/// repeatable extension keys only when they intend to overwrite an earlier
+/// value, and materialization must stay deterministic on the observed order.
+fn accumulate_extension(
+    target: &mut BTreeMap<String, Value>,
+    extension: &V3OpenAiChatSseExtension,
+) {
+    target
+        .entry(extension.name.clone())
+        .or_insert_with(|| extension.value.clone());
 }
 
 fn string_field(object: &serde_json::Map<String, Value>, field: &str) -> Option<String> {

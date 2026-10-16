@@ -100,4 +100,27 @@ mod tests {
             "{\"filePath\":\"/tmp/x\"}"
         );
     }
+
+    #[tokio::test]
+    async fn collapses_chat_client_sse_replay_preserving_extensions_and_fingerprint() {
+        let stream = sealed_replay(&[
+            "data: {\"id\":\"chatcmpl_x\",\"object\":\"chat.completion.chunk\",\"created\":7,\"model\":\"m\",\"system_fingerprint\":\"fp_x\",\"service_tier\":\"tier-a\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"logprobs\":{\"content\":[{\"token\":\"a\",\"logprob\":-1.0}]},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"chatcmpl_x\",\"object\":\"chat.completion.chunk\",\"created\":7,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"FREE_OK\",\"mirror\":\"kept\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"chatcmpl_x\",\"object\":\"chat.completion.chunk\",\"created\":7,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n",
+            "data: [DONE]\n\n",
+        ]);
+        let completion = collapse_direct_client_sse_to_json(stream)
+            .await
+            .expect("collapse chat client replay");
+        assert_eq!(completion["system_fingerprint"], "fp_x");
+        assert_eq!(completion["service_tier"], "tier-a");
+        assert_eq!(
+            completion["choices"][0]["logprobs"]["content"][0]["token"],
+            "a"
+        );
+        assert_eq!(
+            completion["choices"][0]["message"]["mirror"], "kept",
+            "unconsumed delta extensions must stay on the message object"
+        );
+    }
 }

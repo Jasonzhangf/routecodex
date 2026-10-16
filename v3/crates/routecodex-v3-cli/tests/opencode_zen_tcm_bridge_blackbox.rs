@@ -62,6 +62,9 @@ struct Peer {
     immediate_terminal: bool,
     /// 模拟上游 403 `FreeTierError`。
     reject: bool,
+    /// 让上游在终态 chunk 带上 envelope/choice/delta 扩展字段，用于断言
+    /// 折叠回 JSON 时不丢字段。
+    echo_extensions: bool,
 }
 
 fn check_wire(body: &Value, peer: &Peer, stage: usize) -> Result<(), String> {
@@ -228,6 +231,20 @@ async fn provider(State(peer): State<Peer>, Json(body): Json<Value>) -> Response
         }
         let first = json!({"id":"chatcmpl-peer","object":"chat.completion.chunk","created":0,"model":body["model"],"choices":[{"index":0,"delta":delta,"finish_reason":null}]});
         let last = json!({"id":"chatcmpl-peer","object":"chat.completion.chunk","created":0,"model":body["model"],"choices":[{"index":0,"delta":{},"finish_reason":finish}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}});
+        if peer.echo_extensions {
+            let mut first = first;
+            first["system_fingerprint"] = json!("fp_peer");
+            first["service_tier"] = json!("tier-a");
+            first["choices"][0]["logprobs"] = json!({"content":[{"token":"a","logprob":-1.0}]});
+            first["choices"][0]["delta"]["mirror"] = json!("kept");
+            let mut last = last;
+            last["service_tier"] = json!("tier-a");
+            return (
+                [("content-type", "text/event-stream")],
+                format!("data: {first}\n\ndata: {last}\n\ndata: [DONE]\n\n"),
+            )
+                .into_response();
+        }
         (
             [("content-type", "text/event-stream")],
             format!("data: {first}\n\ndata: {last}\n\ndata: [DONE]\n\n"),
@@ -475,6 +492,7 @@ fn contract_peer(immediate_terminal: bool, reject: bool) -> Peer {
         declared_tools: false,
         immediate_terminal,
         reject,
+        echo_extensions: false,
     }
 }
 
@@ -518,6 +536,7 @@ async fn roundtrip_with_image(
         declared_tools: true,
         immediate_terminal: false,
         reject: false,
+        echo_extensions: false,
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let provider_port = listener.local_addr().unwrap().port();
@@ -755,6 +774,53 @@ async fn zen_tcm_free_tier_forces_upstream_stream_and_keeps_client_json() {
 }
 
 #[tokio::test]
+async fn zen_tcm_forced_sse_collapse_keeps_chat_extensions_for_json_client() {
+    let _lock = TEST_LOCK.lock().await;
+    let mut peer = contract_peer(true, false);
+    peer.echo_extensions = true;
+    let harness = ZenHarness::start(peer).await;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .unwrap();
+    let (status, content_type, raw) = send_raw(
+        &client,
+        harness.port,
+        "/v1/chat/completions",
+        &json!({"model":"zenpeer.model","stream":false,"messages":[{"role":"user","content":"hi"}]}),
+    )
+    .await;
+    assert!(
+        status.is_success(),
+        "chat JSON client status: {status} body: {raw}"
+    );
+    assert!(
+        content_type.contains("application/json"),
+        "chat JSON client content-type: {content_type}"
+    );
+    let chat: Value =
+        serde_json::from_str(&raw).expect("chat JSON client must receive a JSON body");
+    assert_eq!(chat["choices"][0]["message"]["content"], MARKER);
+    assert_eq!(
+        chat["system_fingerprint"], "fp_peer",
+        "envelope fingerprint lost in the SSE-to-JSON collapse: {chat}"
+    );
+    assert_eq!(
+        chat["service_tier"], "tier-a",
+        "envelope extension lost in the SSE-to-JSON collapse: {chat}"
+    );
+    assert_eq!(
+        chat["choices"][0]["logprobs"]["content"][0]["token"], "a",
+        "choice extension lost in the SSE-to-JSON collapse: {chat}"
+    );
+    assert_eq!(
+        chat["choices"][0]["message"]["mirror"], "kept",
+        "delta extension lost in the SSE-to-JSON collapse: {chat}"
+    );
+    harness.stop().await;
+}
+
+#[tokio::test]
 async fn zen_tcm_provider_403_never_projects_an_error_payload_to_the_client() {
     let _lock = TEST_LOCK.lock().await;
     let harness = ZenHarness::start(contract_peer(false, true)).await;
@@ -770,8 +836,13 @@ async fn zen_tcm_provider_403_never_projects_an_error_payload_to_the_client() {
         .json(&json!({"model":"zenpeer.model","stream":false,"messages":[{"role":"user","content":"hi"}]}))
         .send()
         .await;
-    match outcome {
-        Err(_) => {}
+    // A provider 403 leaves no provider for this request, so the client
+    // transport must terminate before any response status or body is
+    // committed. A completed reply of any status (empty 200, {}, a 502
+    // substitute error, or a projected error payload) is a contract
+    // violation, and a client timeout or connect failure is not the declared
+    // termination.
+    let error = match outcome {
         Ok(reply) => {
             let status = reply.status();
             let content_type = reply
@@ -781,15 +852,26 @@ async fn zen_tcm_provider_403_never_projects_an_error_payload_to_the_client() {
                 .unwrap_or_default()
                 .to_string();
             let raw = reply.text().await.unwrap_or_default();
-            assert!(
-                !raw.contains("FreeTierError"),
-                "provider error leaked to the client: status={status} body={raw}"
-            );
-            assert!(
-                !(content_type.contains("json") && raw.contains("\"error\"")),
-                "client received a projected error payload: status={status} content-type={content_type} body={raw}"
+            panic!(
+                "provider 403 must not commit any client response: status={status} content-type={content_type} body={raw}"
             );
         }
-    }
+        Err(error) => error,
+    };
+    assert!(
+        !error.is_timeout(),
+        "provider 403 left the client waiting: {error}"
+    );
+    assert!(
+        !error.is_connect(),
+        "test client failed to reach the server: {error}"
+    );
+    let captures = harness.peer.captures.lock().await;
+    assert_eq!(
+        captures.len(),
+        1,
+        "one provider attempt must reach the peer before exhaustion: {captures:?}"
+    );
+    drop(captures);
     harness.stop().await;
 }

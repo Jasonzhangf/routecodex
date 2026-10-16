@@ -44,7 +44,7 @@
       "operator_version": "1",
       "inputs": ["provider-attempt-outcome", "upstream-sse-contract"],
       "output": { "id": "client-json-body", "schema": "Object", "schema_ref": "v3.opencode_zen_provider_headers.arc.client_json_body" },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "input_selector": { "include": [], "exclude": [], "predicate": { "op": "equals", "field": "v3.request.client_transport_intent", "value": "json" } },
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": { "reads": ["v3.response.provider_raw"], "writes": ["v3.response.client_payload"] }
