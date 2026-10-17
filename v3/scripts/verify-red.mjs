@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { runAll } from './_common.mjs';
+import { runAll, v3Root } from './_common.mjs';
+import { resolve } from 'node:path';
 
 const entries = [
   {
@@ -60,7 +61,9 @@ const entries = [
 ].map((fixture) => ({
     label: fixture,
     command: 'node',
-    args: [fixture],
+    args: [resolve(v3Root, fixture)],
+    cwd: resolve(v3Root, '..'),
+    tempDir: false,
     severity: 'BLOCK',
   })),
 ];
