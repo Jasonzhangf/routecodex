@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 94 functional paths, 575 caller edges.
+Generated view: 94 functional paths, 579 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -84,7 +84,7 @@ flowchart TD
   module_v3_server -->|3 edges / 2 paths| module_v3_error
   module_v3_server -->|6 edges / 4 paths| module_v3_runtime
   module_v3_server -->|7 edges / 5 paths| module_v3_runtime__hub_v1
-  module_v3_server -->|43 edges / 20 paths| module_v3_server
+  module_v3_server -->|47 edges / 20 paths| module_v3_server
   module_v3_server -->|1 edges / 1 paths| module_v3_vendor
   module_v3_target -->|1 edges / 1 paths| module_v3_provider_responses
   module_v3_target -->|1 edges / 1 paths| module_v3_target
@@ -143,7 +143,7 @@ flowchart TD
 | v3-server | v3-error | 3 | `v3.debug_error_foundation.mainline`<br/>`v3.server.startup` |
 | v3-server | v3-runtime | 6 | `v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline` |
 | v3-server | v3-runtime::hub_v1 | 7 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.runtime_timing_observability.mainline` |
-| v3-server | v3-server | 43 | `v3.client_sse_head_commit`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.managed_restart_attempt`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_restart_handoff_skeleton`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
+| v3-server | v3-server | 47 | `v3.client_sse_head_commit`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.managed_restart_attempt`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_restart_handoff_skeleton`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
 | v3-server | v3/vendor | 1 | `v3.server.startup` |
 | v3-target | v3-provider-responses | 1 | `v3.provider_key_health_model_granularity` |
 | v3-target | v3-target | 1 | `v3.provider_oauth_credentials.mainline` |
@@ -2148,12 +2148,18 @@ flowchart TD
     c_50_v3_error_raw_wire_evidence_1["v3-server<br/>persist_v3_error_evidence_payload<br/><small>routecodex-v3-server/src/live_snapshot.rs</small>"]
     c_50_v3_error_raw_wire_evidence_5["v3-server<br/>pending_endpoint_after_responses_admission_inner<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small>"]
     c_50_v3_error_raw_wire_evidence_6["v3-server<br/>persist_v3_chat_failure_evidence<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_50_v3_error_raw_wire_evidence_7["v3-server<br/>persist_v3_chat_failure_evidence_sources<br/><small>routecodex-v3-server/src/live_snapshot_projections.rs</small>"]
+    c_50_v3_error_raw_wire_evidence_8["v3-server<br/>execute_v3_openai_chat_direct_server_outcome<br/><small>routecodex-v3-server/src/executors.rs</small>"]
   end
   c_50_v3_error_raw_wire_evidence_0 -->|v3-responses-relay-error-evidence-01<br/>V3Error06ClientProjected → V3ErrorEvidencePersistQueued| c_50_v3_error_raw_wire_evidence_1
   c_50_v3_error_raw_wire_evidence_2 -->|v3-responses-relay-error-evidence-02<br/>V3ErrorEvidencePersistQueued → V3ErrorEvidenceFlushOnTerminalFailure| c_50_v3_error_raw_wire_evidence_3
   c_50_v3_error_raw_wire_evidence_3 -->|v3-responses-relay-error-evidence-03<br/>V3ErrorEvidencePersistFailed → V3ErrorEvidencePersistFailureReported| c_50_v3_error_raw_wire_evidence_4
   c_50_v3_error_raw_wire_evidence_5 -->|v3-chat-relay-error-evidence-01<br/>V3OpenAiChatRelayRuntimeOutput → V3ChatFailedAttemptEvidence| c_50_v3_error_raw_wire_evidence_6
-  c_50_v3_error_raw_wire_evidence_6 -->|v3-chat-relay-error-evidence-02<br/>V3ChatFailedAttemptEvidence → V3ErrorEvidencePersistQueued| c_50_v3_error_raw_wire_evidence_1
+  c_50_v3_error_raw_wire_evidence_6 -->|v3-chat-relay-error-evidence-02<br/>V3ChatFailedAttemptEvidence → V3ChatFailedAttemptEvidenceSerialized| c_50_v3_error_raw_wire_evidence_7
+  c_50_v3_error_raw_wire_evidence_7 -->|v3-chat-relay-error-evidence-03<br/>V3ChatFailedAttemptEvidenceSerialized → V3ErrorEvidencePersistQueued| c_50_v3_error_raw_wire_evidence_1
+  c_50_v3_error_raw_wire_evidence_8 -->|v3-chat-direct-error-evidence-01<br/>V3ResponsesDirectRuntimeOutput → V3ChatFailedAttemptEvidenceSerialized| c_50_v3_error_raw_wire_evidence_7
+  c_50_v3_error_raw_wire_evidence_8 -->|v3-chat-direct-relay-error-evidence-01<br/>V3OpenAiChatRelayRuntimeOutput → V3ChatFailedAttemptEvidence| c_50_v3_error_raw_wire_evidence_6
+  c_50_v3_error_raw_wire_evidence_8 -->|v3-chat-direct-compaction-error-evidence-01<br/>V3ResponsesProtocolRelayHandoff → V3ChatFailedAttemptEvidenceSerialized| c_50_v3_error_raw_wire_evidence_7
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -2162,7 +2168,11 @@ flowchart TD
 | `v3-responses-relay-error-evidence-02` | `V3ErrorEvidencePersistQueued` → `V3ErrorEvidenceFlushOnTerminalFailure` | anchored | run_v3_codex_sample_persist_worker<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | persist_v3_codex_sample_persist_job<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.error.raw_wire_evidence` |
 | `v3-responses-relay-error-evidence-03` | `V3ErrorEvidencePersistFailed` → `V3ErrorEvidencePersistFailureReported` | anchored | persist_v3_codex_sample_persist_job<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | record_v3_codex_sample_persist_failure<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.error.raw_wire_evidence` |
 | `v3-chat-relay-error-evidence-01` | `V3OpenAiChatRelayRuntimeOutput` → `V3ChatFailedAttemptEvidence` | anchored | pending_endpoint_after_responses_admission_inner<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | persist_v3_chat_failure_evidence<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.error.raw_wire_evidence` |
-| `v3-chat-relay-error-evidence-02` | `V3ChatFailedAttemptEvidence` → `V3ErrorEvidencePersistQueued` | anchored | persist_v3_chat_failure_evidence<br/><small>routecodex-v3-server/src/lib.rs</small> | persist_v3_error_evidence_payload<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | `v3.error.raw_wire_evidence` |
+| `v3-chat-relay-error-evidence-02` | `V3ChatFailedAttemptEvidence` → `V3ChatFailedAttemptEvidenceSerialized` | anchored | persist_v3_chat_failure_evidence<br/><small>routecodex-v3-server/src/lib.rs</small> | persist_v3_chat_failure_evidence_sources<br/><small>routecodex-v3-server/src/live_snapshot_projections.rs</small> | `v3.error.raw_wire_evidence` |
+| `v3-chat-relay-error-evidence-03` | `V3ChatFailedAttemptEvidenceSerialized` → `V3ErrorEvidencePersistQueued` | anchored | persist_v3_chat_failure_evidence_sources<br/><small>routecodex-v3-server/src/live_snapshot_projections.rs</small> | persist_v3_error_evidence_payload<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | `v3.error.raw_wire_evidence` |
+| `v3-chat-direct-error-evidence-01` | `V3ResponsesDirectRuntimeOutput` → `V3ChatFailedAttemptEvidenceSerialized` | anchored | execute_v3_openai_chat_direct_server_outcome<br/><small>routecodex-v3-server/src/executors.rs</small> | persist_v3_chat_failure_evidence_sources<br/><small>routecodex-v3-server/src/live_snapshot_projections.rs</small> | `v3.error.raw_wire_evidence` |
+| `v3-chat-direct-relay-error-evidence-01` | `V3OpenAiChatRelayRuntimeOutput` → `V3ChatFailedAttemptEvidence` | anchored | execute_v3_openai_chat_direct_server_outcome<br/><small>routecodex-v3-server/src/executors.rs</small> | persist_v3_chat_failure_evidence<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.error.raw_wire_evidence` |
+| `v3-chat-direct-compaction-error-evidence-01` | `V3ResponsesProtocolRelayHandoff` → `V3ChatFailedAttemptEvidenceSerialized` | anchored | execute_v3_openai_chat_direct_server_outcome<br/><small>routecodex-v3-server/src/executors.rs</small> | persist_v3_chat_failure_evidence_sources<br/><small>routecodex-v3-server/src/live_snapshot_projections.rs</small> | `v3.error.raw_wire_evidence` |
 
 ## v3.servertool_center.skeleton
 

@@ -1027,6 +1027,7 @@ pub(crate) fn projected_error_output_with_observability_and_snapshots(
     V3ResponsesDirectRuntimeOutput {
         observability,
         terminal_disposition: None,
+        diagnostic_source: Some(projected.diagnostic_source),
         stream_observation: None,
         provider_request_snapshot,
         provider_response_snapshot,
@@ -1202,6 +1203,7 @@ pub(crate) fn relay_handoff_output(
     V3ResponsesDirectRuntimeOutput {
         observability: None,
         terminal_disposition: None,
+        diagnostic_source: None,
         stream_observation: None,
         provider_request_snapshot: None,
         provider_response_snapshot: None,

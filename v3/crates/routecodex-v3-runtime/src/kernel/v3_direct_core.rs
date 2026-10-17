@@ -1363,6 +1363,7 @@ where
         return V3ResponsesDirectRuntimeOutput {
             client_payload,
             terminal_disposition: None,
+            diagnostic_source: None,
             provider_request_snapshot,
             provider_response_snapshot,
             node_trace: trace,

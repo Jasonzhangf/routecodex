@@ -3131,9 +3131,11 @@ features:
   status: source_active_live_verification_required
   change_risk: medium
   owner_kind: rust_v3_failure_scoped_diagnostic_artifact
-  owner_scope: Server persists terminal Responses evidence and ordered Chat failed-attempt sources, including recovered requests; artifacts remain outside MetadataCenter and normal payload.
+  owner_scope: Server persists terminal Responses evidence and ordered Chat Direct or Relay failed-attempt sources, including recovered requests; seeded Relay recording reads the receiving output once, and artifacts remain outside MetadataCenter and normal payload.
   owner_modules:
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/live_snapshot_projections.rs
+  - v3/crates/routecodex-v3-server/src/executors.rs
   contract:
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-resource-operation-map.yml
@@ -3144,16 +3146,27 @@ features:
   - Diagnostic filesystem failure remains request/file-qualified in the failure ledger while the same client request completes from B without extra attempts.
   - A generic Relay runtime error after an earlier Provider failure preserves that original ordered attempt source and the distinct later terminal source; a controlled SSE frame-limit failure has healthy before/after controls and never fabricates client completion.
   - Worker filesystem failures for error evidence are logged immediately and retained as request/file-qualified barrier errors.
+  - Pinned Chat Direct JSON and SSE GOOD/DROP/GOOD controls attempt the exact one-candidate pin once per request, never admit the unrelated default pool, and retain the original typed failed-attempt source plus the separate terminal source in the request-qualified private artifact.
+  - Direct recovered success retains the original ordered failed-attempt sources; clean Direct success without failures or a terminal source creates no provider-failed-attempt artifact.
+  - Direct attempt-zero failure persists the exact original Error06 source as terminal_source with an empty attempts array and no provider transport attempt.
+  - 'Seeded Chat Relay success and terminal failure record the receiving output authoritative sequence once: original Direct failure A followed by later Relay failure B, preserving their exact typed sources and order.'
+  - The existing compaction early-return branch records any preceding typed failures before returning, without moving or reusing a consumed handoff and without changing its existing client behavior.
   required_negative:
   - Clean successes without a failed attempt or terminal source do not force failure evidence persistence.
   - Private source fields never enter client payload, SSE frames, or ordinary diagnostic projections; no generic reason code substitutes for the original source.
   - Failure evidence never enters MetadataCenter, provider payload, or client payload.
+  - Direct recording cannot alter pin selection, captured candidate plans, exclusions, cumulative attempt budgets, configured hard ceilings, deadlines, retries, health, payloads or client framing.
+  - Recording the seeded Relay output must not concatenate a preceding handoff sequence or duplicate A; removing only the seeded Server recording call loses the artifact while the same business continuation remains unchanged.
+  - Removing only Direct Error06 source retention loses the exact attempt-zero terminal source; removing only the final Direct Server recording call loses the controlled DROP artifact.
+  - Diagnostic enqueue or filesystem failure stays in the existing request/file-qualified persistence ledger and cannot leak private causes, add attempts, emit client error semantics or fabricate completion.
   required_gates:
   - npm run verify:v3-resource-relation-edge-lock
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib -- --nocapture
   - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test fa22072_provider_continuation -- --nocapture --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test fa22072_direct_failure_evidence -- --nocapture --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test fa22072_direct_relay_handoff -- --nocapture --test-threads=1
   completion_rule:
     source: Resource, function, mainline, module, and Server unit gates pass.
     runtime: Live failed request evidence capture remains required before production closeout.

@@ -1482,6 +1482,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         return V3ResponsesDirectRuntimeOutput {
             observability: Some(observability),
             terminal_disposition: None,
+            diagnostic_source: None,
             stream_observation: response_projection.stream_observation.clone(),
             client_payload,
             provider_request_snapshot,

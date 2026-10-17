@@ -306,8 +306,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:ddcd35e83878ee54238869d004bc60e7de8ae1cd72d3c83f451af2ee2876334f
-    last_manual_authorization_id: auth-20261014-fa22072-failed-attempt-evidence
+    fingerprint: sha256:8f401aeebf4fa429260f7e2bb66b726bae68bdc818190dc9ac58dd6d350ec3d3
+    last_manual_authorization_id: auth-20261015-fa22072-direct-raw-wire-evidence
   - item_id: chain:v3.servertool_center.skeleton
     chain_id: v3.servertool_center.skeleton
     status: audited_locked
@@ -1363,3 +1363,10 @@ manual_authorizations:
     reason: "Jason approved completing this review-4 remediation and the streaming delivery, and the review-4 P2 finding requires the Responses Relay transport-intent guard to be bound in the existing chain, so this scoped refresh appends the single edge v3-responses-relay-transport-intent-guard-01. It binds execute_v3_responses_relay_runtime_inner to validate_v3_responses_relay_provider_request_transport_intent and records that a declared profile forcing upstream SSE retargets the expected provider transport intent to Sse while every other profile keeps the client intent. Owner v3.hub_relay_runtime_closeout, the existing 14 adjacent closeout edges and all other edges, resources and policy are unchanged. Only this caller binding, fingerprint and authorization record are covered; no unrelated approval is claimed. Authorization recorded at the stated time, not the user-message timestamp. Tests, independent review and CI remain required. No install, restart, shutdown or production configuration writes."
     fingerprint_before: sha256:a17caf420809f314d8e038f2882e9a5cbb06e8ca2b464bb4a0b406b51da1dbfb
     fingerprint_after: sha256:9442f3c2daa89dbc23f76e1be42583d8b237aab7bd86f1610be90150a95e3587
+  - authorization_id: auth-20261015-fa22072-direct-raw-wire-evidence
+    item_id: chain:v3.error.raw_wire_evidence
+    approved_by: Jason
+    approved_at: '2026-10-15T18:52:16Z'
+    reason: "Jason explicitly approved the exact scope with the answer 批准该精确范围 (Codex thread 01a133aa-f739-7381-ba21-14a871d9f584, turn 01a14266-9254-74a3-bf7a-3a420d46a131, user message 01a14266-933d-75c1-9739-4c85ba602680; captured in /Volumes/Intel/playground/routecodex/fa22072-evidence-01a133d7/direct-recording-r41/actual-jason-approval.json against the request /Volumes/Intel/playground/routecodex/fa22072-evidence-01a133d7/raw-wire-authorization-r40/request.md). This scoped refresh rebinds the existing serializer edge v3-chat-relay-error-evidence-02 to persist_v3_chat_failure_evidence_sources and appends v3-chat-relay-error-evidence-03, v3-chat-direct-error-evidence-01, v3-chat-direct-relay-error-evidence-01 and v3-chat-direct-compaction-error-evidence-01 in order. The seeded Relay source is the receiving V3OpenAiChatRelayRuntimeOutput and the compaction source is the not-yet-moved V3ResponsesProtocolRelayHandoff. Only this one locked fingerprint and this record are refreshed; the other four locked chains are unchanged. The raw feature keeps its Runtime forbidden path and never carries business payload or control; pin, routing, budgets, deadlines, retry, health and client framing are unchanged. Source and mapped verification only; affected tests, independent review and CI are still required, and no install, restart, shutdown or production configuration writes are covered. approved_at is the actual-jason-approval.json capture time."
+    fingerprint_before: sha256:ddcd35e83878ee54238869d004bc60e7de8ae1cd72d3c83f451af2ee2876334f
+    fingerprint_after: sha256:8f401aeebf4fa429260f7e2bb66b726bae68bdc818190dc9ac58dd6d350ec3d3

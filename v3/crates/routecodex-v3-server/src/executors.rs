@@ -251,6 +251,14 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
         .await;
     if let Some(handoff) = output.protocol_relay_handoff {
         if request_purpose.is_compaction() {
+            persist_v3_chat_failure_evidence_sources(
+                state,
+                "openai_chat",
+                &path,
+                &request_id,
+                &handoff.provider_failure_events,
+                output.diagnostic_source.as_ref(),
+            );
             return error_output_response_for_server(
                 &state.server,
                 &path,
@@ -279,6 +287,7 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
             Ok(output) => output,
             Err(error) => project_v3_openai_chat_relay_runtime_failure(error),
         };
+        persist_v3_chat_failure_evidence(state, "openai_chat", &path, &request_id, &relay_output);
         if let Some(disposition) = relay_output.terminal_disposition.take() {
             return provider_terminal_response(
                 state,
@@ -341,6 +350,18 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
             v3_entry_request_wants_sse(request_headers, &console_payload),
         );
     }
+    persist_v3_chat_failure_evidence_sources(
+        state,
+        "openai_chat",
+        &path,
+        &request_id,
+        output
+            .observability
+            .as_ref()
+            .map(|observation| observation.provider_failure_events.as_slice())
+            .unwrap_or(&[]),
+        output.diagnostic_source.as_ref(),
+    );
     if let Some(disposition) = output.terminal_disposition {
         return provider_terminal_response(
             state,
