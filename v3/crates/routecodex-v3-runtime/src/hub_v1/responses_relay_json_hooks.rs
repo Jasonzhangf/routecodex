@@ -125,15 +125,16 @@ pub(crate) fn run_json_response_hooks(
         resp03,
         client_payload,
     );
-    let mut finalized_payload = resp05.client_payload().clone();
     trace.push("V3HubRespOutbound05ClientSemantic");
-    crate::direct_response_hooks::apply_v3_memory_raw_capture_json_payload(
-        &mut finalized_payload,
-        input.manifest,
+    let resp06 = super::server_resp_outbound_06_client_frame::
+        try_build_v3_server_resp_outbound_06_with_framer_and_memory_raw_capture(
+        resp05,
+        &input.manifest.memory_raw_capture,
         input.request_id,
-    );
+    )
+    .map_err(V3ResponsesRelayRuntimeError::ExecutionControlResponse)?;
     trace.push("V3ServerRespOutbound06ClientFrame");
-    Ok((finalized_payload, response_web_search_state))
+    Ok((resp06.into_client_payload(), response_web_search_state))
 }
 
 fn normalize_v3_responses_json_document(

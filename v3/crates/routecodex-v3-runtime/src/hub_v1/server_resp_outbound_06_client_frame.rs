@@ -42,6 +42,23 @@ where
     })
 }
 
+pub(crate) fn try_build_v3_server_resp_outbound_06_with_framer_and_memory_raw_capture(
+    input: V3HubRespOutbound05ClientSemantic,
+    memory_raw_capture: &routecodex_v3_config::V3MemoryRawCaptureManifest,
+    request_id: &str,
+) -> Result<V3ServerRespOutbound06ClientFrame, String> {
+    let memory_raw_capture = memory_raw_capture.clone();
+    let request_id = request_id.to_owned();
+    try_build_v3_server_resp_outbound_06_with_framer(input, move |mut input| {
+        crate::direct_response_hooks::apply_v3_memory_raw_capture_json_payload_with_config(
+            &mut input,
+            &memory_raw_capture,
+            &request_id,
+        );
+        Ok(input)
+    })
+}
+
 struct FrameCommittedClientResponseJsonOperator<F> {
     frame_json: Mutex<Option<F>>,
 }
@@ -254,6 +271,128 @@ mod tests {
         .into_client_payload();
         assert_eq!(output["semantic"], "candidate");
         assert_eq!(output["finalized"], true);
+    }
+
+    #[test]
+    fn frame_committed_client_response_memory_raw_capture_consumer() {
+        use super::super::*;
+        use std::fs;
+        use std::path::PathBuf;
+
+        struct TempRoot(PathBuf);
+
+        impl TempRoot {
+            fn new(tag: &str) -> Self {
+                let path = std::env::temp_dir().join(format!(
+                    "rcc-{tag}-{}-{}",
+                    std::process::id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .expect("system clock must be after the Unix epoch")
+                        .as_nanos()
+                ));
+                fs::create_dir_all(&path).expect("memory consumer temp root must be created");
+                Self(path)
+            }
+        }
+
+        impl Drop for TempRoot {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+
+        let request_id = "request/frame-memory-consumer";
+        let host_id_prefix = "frame-memory-consumer-";
+        let root = TempRoot::new("frame-memory-consumer");
+        let envelope = json!({
+            "memory": {
+                "entries": [{
+                    "schema": "routecodex.memory.raw-entry.v1",
+                    "category": "knowledge",
+                    "title": "Client frame memory consumer",
+                    "content": "The frame strips the terminal memory unit before client commit.",
+                    "tags": ["client-frame", "memory"]
+                }]
+            }
+        });
+        let envelope_text =
+            serde_json::to_string(&envelope).expect("memory envelope must serialize");
+        let raw = build_v3_provider_resp_inbound_01_raw(
+            json!({
+                "id": "resp_memory_frame",
+                "status": "completed",
+                "opaque_provider_field": {"keep": [null, true]},
+                "output": [{
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{
+                        "type": "output_text",
+                        "text": format!("Answer retained. {envelope_text}")
+                    }]
+                }]
+            }),
+            V3HubEntryProtocol::Responses,
+            V3HubProviderWireProtocol::Responses,
+            V3HubExecutionMode::Direct,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+        let compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(raw).unwrap();
+        let normalized = build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(compat).unwrap();
+        let governed = build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02(normalized);
+        let semantic = build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03(governed);
+        let manifest = routecodex_v3_config::V3MemoryRawCaptureManifest {
+            enabled: true,
+            project_root: root.0.clone(),
+            output_contract: "responses.output_text".to_owned(),
+            host_id_prefix: host_id_prefix.to_owned(),
+        };
+
+        let output = try_build_v3_server_resp_outbound_06_with_framer_and_memory_raw_capture(
+            semantic, &manifest, request_id,
+        )
+        .expect("memory-aware client framing must succeed")
+        .into_client_payload();
+
+        assert_eq!(
+            output["output"][0]["content"][0]["text"],
+            "Answer retained."
+        );
+        assert_eq!(output["opaque_provider_field"]["keep"], json!([null, true]));
+        assert!(
+            !serde_json::to_string(&output)
+                .expect("client output must serialize")
+                .contains("\"memory\""),
+            "memory envelope residue reached the client: {output}"
+        );
+
+        let published = fs::read_dir(root.0.join("memory").join("L3"))
+            .expect("memory publication directory must exist")
+            .map(|entry| {
+                entry
+                    .expect("memory publication entry must be readable")
+                    .path()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            published.len(),
+            1,
+            "one terminal memory entry must publish one L3 file: {published:?}"
+        );
+        assert_eq!(
+            published[0]
+                .extension()
+                .and_then(|extension| extension.to_str()),
+            Some("md")
+        );
+        let markdown = fs::read_to_string(&published[0])
+            .expect("memory publication must exist at the library-owned L3 path");
+        assert!(markdown.contains("<!-- project-memory:v1 "));
+        assert!(markdown.contains("# Client frame memory consumer"));
+        assert!(
+            markdown.contains("The frame strips the terminal memory unit before client commit.")
+        );
     }
 
     #[test]
