@@ -1,9 +1,9 @@
 use super::V3HubProviderWireProtocol;
 use routecodex_v3_provider_responses::{
     build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency,
-    build_v3_transport_13_responses_http_request_from_v3_provider_12,
-    V3Provider12ResponsesWirePayload, V3ProviderRequestHeader, V3ResponsesProviderTarget,
-    V3Transport13ResponsesHttpRequest,
+    build_v3_transport_13_responses_request_from_wire_parts, V3Provider12ResponsesWirePayload,
+    V3ProviderRequestHeader, V3ResponsesProviderTarget, V3ResponsesRequestEndpoint,
+    V3ResponsesStreamIntent, V3Transport13ResponsesHttpRequest,
 };
 use std::time::Duration;
 
@@ -64,61 +64,114 @@ pub(crate) fn build_v3_anthropic_messages_transport_request_from_v3_provider_08_
     wire: V3Provider12ResponsesWirePayload,
     provider_headers: Vec<V3ProviderRequestHeader>,
 ) -> Result<V3Transport13ResponsesHttpRequest, String> {
-    let request_id = wire.request_id().to_string();
-    let target = wire.target().clone();
-    let sse_first_frame_timeout_ms = target.sse_first_frame_timeout_ms;
-    let stream_intent = wire.stream_intent();
-    let body = wire.body().clone();
-    let timeout = Some(Duration::from_millis(target.request_timeout_ms));
-    let url_text = anthropic_messages_url(&target.base_url);
-    if provider_headers.is_empty() {
-        return build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
-            request_id,
-            target.provider_id,
-            url_text,
-            target.auth,
-            stream_intent,
-            body,
-            Vec::new(),
-            timeout,
-            target.concurrency_acquire_timeout_ms,
-            sse_first_frame_timeout_ms,
-        )
-        .map_err(|error| error.to_string());
-    }
-    build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
-        request_id,
-        target.provider_id,
-        url_text,
-        target.auth,
-        stream_intent,
-        body,
+    build_v3_provider_transport_request_from_parts(
+        V3HubProviderWireProtocol::Anthropic,
+        V3ProviderWireTransportContext::from_wire(&wire),
+        wire.body().clone(),
         provider_headers,
-        timeout,
-        target.concurrency_acquire_timeout_ms,
-        sse_first_frame_timeout_ms,
     )
-    .map_err(|error| error.to_string())
 }
 
 pub(crate) fn build_v3_provider_transport_request_for_protocol(
     provider_protocol: V3HubProviderWireProtocol,
     wire: V3Provider12ResponsesWirePayload,
 ) -> Result<V3Transport13ResponsesHttpRequest, String> {
+    build_v3_provider_transport_request_from_parts(
+        provider_protocol,
+        V3ProviderWireTransportContext::from_wire(&wire),
+        wire.body().clone(),
+        Vec::new(),
+    )
+}
+
+#[derive(Clone)]
+pub(crate) struct V3ProviderWireTransportContext {
+    request_id: String,
+    target: V3ResponsesProviderTarget,
+    stream_intent: V3ResponsesStreamIntent,
+    endpoint: V3ResponsesRequestEndpoint,
+}
+
+impl V3ProviderWireTransportContext {
+    pub(crate) fn from_wire(wire: &V3Provider12ResponsesWirePayload) -> Self {
+        Self {
+            request_id: wire.request_id().to_string(),
+            target: wire.target().clone(),
+            stream_intent: wire.stream_intent(),
+            endpoint: wire.endpoint(),
+        }
+    }
+}
+
+pub(crate) fn build_v3_provider_transport_request_from_parts(
+    provider_protocol: V3HubProviderWireProtocol,
+    context: V3ProviderWireTransportContext,
+    body: serde_json::Value,
+    provider_headers: Vec<V3ProviderRequestHeader>,
+) -> Result<V3Transport13ResponsesHttpRequest, String> {
+    let V3ProviderWireTransportContext {
+        request_id,
+        target,
+        stream_intent,
+        endpoint,
+    } = context;
     match provider_protocol {
         V3HubProviderWireProtocol::Responses => {
-            build_v3_transport_13_responses_http_request_from_v3_provider_12(wire)
-                .map_err(|error| error.to_string())
+            build_v3_transport_13_responses_request_from_wire_parts(
+                request_id,
+                target,
+                stream_intent,
+                endpoint,
+                body,
+            )
+            .map_err(|error| error.to_string())
         }
         V3HubProviderWireProtocol::OpenAiChat => {
-            build_v3_openai_chat_transport_request_from_v3_provider_08(wire)
+            let mut body = body;
+            if is_v3_deepseek_reasoning_target(&target.canonical_model_id) {
+                provider_compat_core::apply_deepseek_v4_thinking_chat_compat(&mut body);
+            }
+            if is_v3_deepseek_v4_compat_target(&target) {
+                provider_compat_core::apply_deepseek_function_call_arguments_compat(&mut body);
+            }
+            let url = format!("{}/chat/completions", target.base_url.trim_end_matches('/'));
+            let headers = target
+                .headers
+                .iter()
+                .map(|(name, value)| V3ProviderRequestHeader::new(name, value))
+                .collect();
+            build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+                request_id,
+                target.provider_id,
+                url,
+                target.auth,
+                stream_intent,
+                body,
+                headers,
+                Some(Duration::from_millis(target.request_timeout_ms)),
+                target.concurrency_acquire_timeout_ms,
+                target.sse_first_frame_timeout_ms,
+            )
+            .map_err(|error| error.to_string())
         }
         V3HubProviderWireProtocol::Anthropic => {
-            build_v3_anthropic_messages_transport_request_from_v3_provider_08(wire)
-                .map_err(|error| error.to_string())
+            let url = anthropic_messages_url(&target.base_url);
+            build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+                request_id,
+                target.provider_id,
+                url,
+                target.auth,
+                stream_intent,
+                body,
+                provider_headers,
+                Some(Duration::from_millis(target.request_timeout_ms)),
+                target.concurrency_acquire_timeout_ms,
+                target.sse_first_frame_timeout_ms,
+            )
+            .map_err(|error| error.to_string())
         }
         V3HubProviderWireProtocol::Gemini => {
-            let transport_intent = match wire.stream_intent() {
+            let transport_intent = match stream_intent {
                 routecodex_v3_provider_responses::V3ResponsesStreamIntent::Sse => {
                     super::V3HubTransportIntent::Sse
                 }
@@ -126,49 +179,10 @@ pub(crate) fn build_v3_provider_transport_request_for_protocol(
                     super::V3HubTransportIntent::Json
                 }
             };
-            super::build_v3_gemini_transport_09(
-                wire.request_id(),
-                wire.target().clone(),
-                transport_intent,
-                wire.body().clone(),
-            )
-            .map_err(|error| error.to_string())
+            super::build_v3_gemini_transport_09(&request_id, target, transport_intent, body)
+                .map_err(|error| error.to_string())
         }
     }
-}
-
-fn build_v3_openai_chat_transport_request_from_v3_provider_08(
-    wire: V3Provider12ResponsesWirePayload,
-) -> Result<V3Transport13ResponsesHttpRequest, String> {
-    let request_id = wire.request_id().to_string();
-    let target = wire.target().clone();
-    let sse_first_frame_timeout_ms = target.sse_first_frame_timeout_ms;
-    let stream_intent = wire.stream_intent();
-    let mut body = wire.body().clone();
-    if is_v3_deepseek_reasoning_target(&target.canonical_model_id) {
-        provider_compat_core::apply_deepseek_v4_thinking_chat_compat(&mut body);
-    }
-    if is_v3_deepseek_v4_compat_target(&target) {
-        provider_compat_core::apply_deepseek_function_call_arguments_compat(&mut body);
-    }
-    let url_text = format!("{}/chat/completions", target.base_url.trim_end_matches('/'));
-    build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
-        request_id,
-        target.provider_id,
-        url_text,
-        target.auth,
-        stream_intent,
-        body,
-        target
-            .headers
-            .iter()
-            .map(|(name, value)| V3ProviderRequestHeader::new(name, value))
-            .collect(),
-        Some(Duration::from_millis(target.request_timeout_ms)),
-        target.concurrency_acquire_timeout_ms,
-        sse_first_frame_timeout_ms,
-    )
-    .map_err(|error| error.to_string())
 }
 
 /// opencode 对 DeepSeek 系模型的标准 reasoning 回传处理（transform.ts interleaved）：
@@ -253,7 +267,11 @@ mod tests {
             }),
         )
         .unwrap();
-        let request = build_v3_openai_chat_transport_request_from_v3_provider_08(wire).unwrap();
+        let request = build_v3_provider_transport_request_for_protocol(
+            V3HubProviderWireProtocol::OpenAiChat,
+            wire,
+        )
+        .unwrap();
         assert_eq!(
             request.body()["messages"][0]["tool_calls"][0]["function"]["arguments"],
             "{\"cmd\":\"pwd\""
