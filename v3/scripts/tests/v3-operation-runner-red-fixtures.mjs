@@ -547,12 +547,36 @@ const mutations = [
       const rel = 'docs/architecture/dagpipe/v3.operation_runner.error.graph.json';
       const file = path.join(tmp, rel);
       const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-      const node = parsed.nodes.find((item) => item.id === 'error_err02_host_captured');
-      if (!node) throw new Error('missing error_err02_host_captured node');
+      const node = parsed.nodes.find((item) => item.id === 'error_err02_classified');
+      if (!node) throw new Error('missing error_err02_classified node');
       node.resources.reads.push('v3.error.unknown_resource');
       fs.writeFileSync(file, JSON.stringify(parsed, null, 2));
     },
-    expect: /node error_err02_host_captured typed resources mismatch/u,
+    expect: /node error_err02_classified typed resources mismatch/u,
+  },
+  {
+    name: 'error-graph-missing-classification',
+    mutate(tmp) {
+      const rel = 'docs/architecture/dagpipe/v3.operation_runner.error.graph.json';
+      const file = path.join(tmp, rel);
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+      parsed.nodes = parsed.nodes.filter((node) => node.id !== 'error_err02_classified');
+      parsed.edges = parsed.edges.filter((edge) => edge.from !== 'error_err02_classified' && edge.to !== 'error_err02_classified');
+      fs.writeFileSync(file, JSON.stringify(parsed, null, 2));
+    },
+    expect: /error_err02_classified|canonical Error stage/u,
+  },
+  {
+    name: 'error-graph-legacy-host-stage',
+    mutate(tmp) {
+      const rel = 'docs/architecture/dagpipe/v3.operation_runner.error.graph.json';
+      const file = path.join(tmp, rel);
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+      parsed.nodes[1].id = 'error_err02_host_captured';
+      parsed.nodes[1].operator = 'routecodex.v3.error.err02_host_captured';
+      fs.writeFileSync(file, JSON.stringify(parsed, null, 2));
+    },
+    expect: /canonical Error stage|missing canonical Error node error_err02_classified/u,
   },
   {
     name: 'capture-reads-metadata-center',
