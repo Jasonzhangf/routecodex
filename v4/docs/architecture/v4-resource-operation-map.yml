@@ -2015,7 +2015,6 @@ resources:
   verification_gate:
   - v4_node_container_l2_regression
   - v4_cordis_host_l3_regression
-  - v4_parity_gate_node_container
   resource_kind: state_machine
   lifecycle: v4.plugin_management
   owner_crate: routecodex-v4-node-container
@@ -2042,7 +2041,6 @@ resources:
   verification_gate:
   - v4_node_container_l2_regression
   - v4_cordis_host_l3_regression
-  - v4_parity_gate_node_container
   - v4_parity_gate_cordis_host
   resource_kind: lifecycle_failure_fact
   lifecycle: v4.plugin_management
@@ -2075,7 +2073,6 @@ resources:
   verification_gate:
   - v4_node_container_l2_regression
   - v4_cordis_host_l3_regression
-  - v4_parity_gate_node_container
   - v4_parity_gate_cordis_host
   resource_kind: execution_failure_fact
   lifecycle: v4.plugin_management
@@ -2138,7 +2135,6 @@ resources:
   axis: control
   verification_gate:
   - v4_node_container_l2_regression
-  - v4_parity_gate_node_container
   resource_kind: binding
   lifecycle: v4.plugin_management
   owner_crate: routecodex-v4-node-container
