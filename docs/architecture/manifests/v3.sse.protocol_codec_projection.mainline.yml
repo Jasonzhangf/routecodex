@@ -54,7 +54,6 @@ forbidden_semantics_in_transport:
 verification_gates:
   - npm run verify:sse-architecture-boundary
   - npm run verify:v3-provider-action-gate
-  - npm run verify:v3-runtime-timing-observability
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - git diff --check

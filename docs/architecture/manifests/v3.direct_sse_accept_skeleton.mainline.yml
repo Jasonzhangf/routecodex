@@ -69,8 +69,6 @@ canonical_docs:
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-verification-map.yml
 verification_gates:
-  - npm run verify:v3-direct-sse-accept-skeleton
-  - npm run verify:v3-direct-sse-full-attempt-commit
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_guard_rejects_typed_responses_shape_before_client_commit -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_full_attempt_commit -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib direct_sse_http_projection_injects_keepalive_and_preserves_provider_bytes -- --nocapture

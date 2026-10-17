@@ -20,8 +20,9 @@
 ## Mandatory: Runtime Lifecycle — Only `rcc restart`, Never stop/start
 
 - **禁止把 `rcc stop` + `rcc start`（或 `rcc start --restart`）当作重启手段。** 需要让新构建生效时，只调用一次 `rcc restart`（或 `rcc restart --port <locator-port>`），由**原进程/原 supervisor 在原 session 内**重新拉起 server child。
-- **`rcc stop`、`rcc start --snap`、`rcc restart` 均须人类明确批准。** 未取得明确批准不得对 live runtime 执行任何 lifecycle 动作；live runtime 存在时 `rcc restart` 只允许调用一次，禁止自行 spawn `start --restart` 接管。
-- 4444/7777 承载用户与其他 agent 的实时流量。任何 lifecycle 动作前必须先说明将造成的中断并取得批准；禁止 `pkill`、`killall`、`kill $(...)`。
+- 正式 `rccv3 restart`（含兼容入口 `rcc restart`）无需另行人类授权。每次加载新构建只执行一次正式 restart；失败后先查明原因，不盲目重复。禁止自行 spawn `start --restart` 接管。
+- `rccv3 stop`、`rccv3 start`（含所有参数及兼容入口）仍须人类明确批准；不得用 stop+start 代替 restart。
+- 4444/7777 承载用户与其他 agent 的实时流量。restart 前必须说明预计中断；stop/start 前必须说明中断并取得批准。禁止 `pkill`、`killall`、`kill $(...)`。
 - 依据：`docs/loops/runtime-lifecycle/gate-matrix.md`（Blackbox 层）与 `docs/design/server-runtime-lifecycle-ssot.md`（`rcc restart` 第 6、9、10 条）。
 - 反例（2026-10-04）：用 stop+start 代替 `rcc restart`，导致 4444 中断并触发 supervisor 二次拉起，用户明确抗议。禁止重犯。
 
@@ -102,7 +103,7 @@ Use `rcc-dev-skills` as the sole V3 development workflow; generic skills supply 
 | build/install/restart | `docs/agent-routing/20-build-test-release-routing.md` |
 | servertool | `docs/agent-routing/30-servertool-lifecycle-routing.md` |
 | task memory | `docs/agent-routing/40-task-memory-routing.md` |
-| AppSDK lifecycle | `.appsdk/skills/appsdk-project-governance/SKILL.md` |
+| AppSDK governance and legacy ablation | installed `~/.agents/skills/appsdk-project-governance/SKILL.md` |
 
 ## Evidence Boundary
 
@@ -113,7 +114,9 @@ Report source, test, build, install, restart, health, same-entry replay, review,
 `rcc-dev-skills` owns the V3 defect procedure; see
 `.agents/skills/rcc-dev-skills/references/60-defect-lifecycle.md` for its
 issue, sample-audit, and resource-close DAGs. AppSDK's project-governance Skill
-owns bug intake and solution-record commands. This section fixes the project
+owns bug intake and solution-record commands. Use the installed Skill above;
+the pinned `.appsdk/skills/` distribution is not the daily procedure owner.
+This section fixes the project
 contract and terminal conditions; it does not define a second command flow.
 
 Every execution-bound local defect, including one found in post-restart Codex
@@ -139,12 +142,12 @@ Each issue run has one entry and one disposition exit:
 ```text
 bug intake/dedup -> issue-owned clean worktree at latest origin/main
 -> reproduce + bind feature DAG/maps, first divergence, unique owner, and regression evidence
--> minimal owner-scoped fix -> fetch/combine latest origin/main -> freeze candidate tree identity
+-> minimal owner-scoped fix -> fetch/combine latest origin/main
 -> mapped tests/build + author debug + real-entry E2E or scoped consumer verification
 -> when runtime-impacting: install/restart candidate, check health/replay, audit Codex samples
--> independent overall architecture review under the global host contract -> candidate commit + exact SHA
+-> independent overall architecture review under the global host contract -> candidate commit
 -> applicable PR CI PASS -> recheck origin/main -> merge validated candidate into clean main -> push
--> candidate/main equivalence + remote receipt
+-> remote receipt
 -> post-merge verification: runtime path rebuild/install/restart -> health -> real-entry replay -> sample audit; otherwise scoped consumer check
 -> issue-owner cleanup of its worktree/playground and temporary resources
 -> one bug disposition receipt: solved or open
@@ -158,13 +161,16 @@ Required repository checks and Git protection remain enforced.
 
 Before merge, a newer `origin/main` or any candidate change invalidates only
 evidence whose bound inputs changed. Record the new candidate under the same
-bug ID and rerun affected gates and E2E. Bind the independent review to that
-exact candidate and prove its content equivalent to delivered main; do not
-reuse a stale review as PASS for changed scope.
+bug ID and rerun affected gates and E2E. The independent review covers the
+tested changes; do not reuse results for changed behavior. Before external
+release preparation, do not compute or compare SHA/checksums, freeze snapshots,
+bind candidate identities, reconstruct patches, or add packaging checks. Use
+necessary diffs, actual behavior results and ordinary Git receipts. Release
+checks cover actual distribution needs only.
 
 `solved` requires every applicable test/build/E2E and runtime gate, an effective
-independent architecture review, merge and remote receipts, candidate/main
-equivalence, post-merge replay and sample audit after any managed restart, and
+independent architecture review, merge and remote receipts,
+post-merge replay and sample audit after any managed restart, and
 verified removal of the issue owner's resources. Post-merge verification uses
 the real entrypoint for runtime changes and the scoped consumer for non-runtime
 changes; sample audit covers every managed restart in the issue run. Any failed

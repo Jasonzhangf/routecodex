@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -36,15 +35,10 @@ try {
   if (result.status !== 0 || !result.stdout.includes(version)) {
     throw new Error(`previous-release version failed: ${result.stderr || result.stdout}`);
   }
-  writeFileSync(join(fixture, 'provenance.json'), `${JSON.stringify({
-    source_commit: sourceCommit, version, platform: process.platform, arch: process.arch,
-    binary, sha256: createHash('sha256').update(readFileSync(binary)).digest('hex'),
-  }, null, 2)}\n`);
   if (process.env.GITHUB_ENV) {
     appendFileSync(process.env.GITHUB_ENV, `ROUTECODEX_V3_PREVIOUS_RELEASE_BINARY=${binary}\n`);
   }
   console.log(`ROUTECODEX_V3_PREVIOUS_RELEASE_BINARY=${binary}`);
-  console.log(`previous-release provenance: ${join(fixture, 'provenance.json')}`);
 } finally {
   rmSync(source, { recursive: true, force: true });
   rmSync(target, { recursive: true, force: true });

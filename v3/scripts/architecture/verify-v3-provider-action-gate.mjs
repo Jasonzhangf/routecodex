@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 import { attachProviderActionGateHelpers } from './v3-provider-action-gate-lib.mjs';
 
-const root = process.cwd();
+const v3Root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const root = process.env.ROUTECODEX_V3_SOURCE_ROOT
+  ? path.resolve(process.env.ROUTECODEX_V3_SOURCE_ROOT)
+  : path.resolve(v3Root, '..');
 const failures = [];
 const files = {
   gate: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
@@ -48,7 +52,7 @@ const files = {
   manifest: 'docs/architecture/manifests/v3.provider_action_gate.mainline.yml',
   wiki: 'docs/architecture/wiki/v3-provider-action-gate.md',
   plan: 'docs/goals/direct-relay-cross-request-error-storm-control-plan.md',
-  packageJson: 'package.json',
+  packageJson: 'v3/package.json',
   workflow: '.github/workflows/test.yml',
 };
 const {
@@ -936,17 +940,11 @@ try {
 } catch (error) {
   failures.push(`package.json: JSON parse failed: ${error.message}`);
 }
-const commands = process.env.ROUTECODEX_V3_ADMISSION_WORKSPACE === '1'
-  ? {
-      'test:v3-provider-action-gate': 'CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test provider_action_gate_contract -- --test-threads=1 --nocapture',
-      'verify:v3-provider-action-gate': 'node scripts/run-admission-gate.mjs scripts/architecture/verify-v3-provider-action-gate.mjs',
-      'test:v3-provider-action-gate-red-fixtures': 'node scripts/tests/v3-provider-action-gate-red-fixtures.mjs',
-    }
-  : {
-      'test:v3-provider-action-gate': 'CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-error && CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --test provider_action_gate_contract -- --test-threads=1 --nocapture',
-      'verify:v3-provider-action-gate': 'node v3/scripts/architecture/verify-v3-provider-action-gate.mjs',
-      'test:v3-provider-action-gate-red-fixtures': 'npm --prefix v3 run test:v3-provider-action-gate-red-fixtures',
-    };
+const commands = {
+  'test:v3-provider-action-gate': 'CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test provider_action_gate_contract -- --test-threads=1 --nocapture',
+  'verify:v3-provider-action-gate': 'node scripts/architecture/verify-v3-provider-action-gate.mjs',
+  'test:v3-provider-action-gate-red-fixtures': 'node scripts/tests/v3-provider-action-gate-red-fixtures.mjs',
+};
 for (const [name, command] of Object.entries(commands)) {
   if (packageJson.scripts?.[name] !== command) failures.push(`package.json: script ${name} must equal ${command}`);
 }

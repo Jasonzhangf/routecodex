@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const v3Root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const admissionRoot = resolve(v3Root, 'build-contracts', 'architecture-admission', 'repo');
+const repoRoot = resolve(v3Root, '..');
 const verifier = resolve(v3Root, 'scripts/architecture/verify-v3-selected-provider-model-binding.mjs');
 const copied = [
   'package.json',
@@ -88,11 +88,7 @@ for (const testCase of cases) {
   const root = mkdtempSync(join(tmpdir(), 'v3-model-binding-red-'));
   try {
     for (const rel of copied) {
-      const source = rel === 'package.json'
-        ? resolve(v3Root, rel)
-        : rel.startsWith('v3/')
-          ? resolve(v3Root, rel.slice('v3/'.length))
-          : resolve(admissionRoot, rel);
+      const source = resolve(repoRoot, rel);
       cpSync(source, resolve(root, rel), { recursive: true });
     }
     const target = resolve(root, testCase.path);
@@ -103,7 +99,11 @@ for (const testCase of cases) {
       continue;
     }
     writeFileSync(target, mutated);
-    const result = spawnSync(process.execPath, [verifier], { cwd: root, encoding: 'utf8' });
+    const result = spawnSync(process.execPath, [verifier], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, ROUTECODEX_V3_SOURCE_ROOT: root },
+    });
     const output = `${result.stdout || ''}\n${result.stderr || ''}`;
     if (result.status === 0) failures.push(`${testCase.name}: verifier unexpectedly passed`);
     else if (!testCase.diagnostic.test(output)) failures.push(`${testCase.name}: wrong diagnostic: ${output.slice(-1200)}`);

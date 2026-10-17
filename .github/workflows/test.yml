@@ -38,6 +38,8 @@ jobs:
           cache-dependency-path: package-lock.json
       - name: Install scope dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Git hook behavior regression
+        run: npm run --silent test:git-hooks
       - name: Changed-path fast gate and scope classification
         id: changed
         env:
@@ -98,21 +100,12 @@ jobs:
       - name: Install pinned DAGPipe graph CLI
         if: ${{ !cancelled() && needs.scope.outputs.v3_architecture == 'true' }}
         run: cargo install --git https://github.com/Jasonzhangf/DAGpipe.git --rev 8cb59fb5262b5e1e440638faf3b04e06a2762cfb --locked pipeline_runtime
-      - name: V3 CI gate wiring regression
-        if: ${{ !cancelled() && needs.scope.outputs.v3_architecture == 'true' }}
-        run: node --test tests/scripts/v3-ci-gate-dedup.test.mjs
       - name: Fallback and internal policy hardcode gate
         if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
         run: npm run verify:fallback-hardcode
       - name: V3 Responses session admission behavior
         if: ${{ !cancelled() && needs.scope.outputs.v3_session == 'true' }}
         run: npm run test:v3-responses-session-admission
-      - name: File line-limit gate (<500)
-        if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
-        run: npm run verify:file-line-limit
-      - name: File line-limit behavior regression
-        if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
-        run: npm run test:file-line-limit
       - name: V3 provider action gate
         if: ${{ !cancelled() && needs.scope.outputs.v3_provider == 'true' }}
         run: npm run test:v3-provider-action-gate
@@ -146,9 +139,6 @@ jobs:
       - name: V3 route-classifier semantic gate
         if: ${{ !cancelled() && needs.scope.outputs.v3_router == 'true' }}
         run: npm run test:route-classifier-semantics
-      - name: Servertool Rust-only gate
-        if: ${{ !cancelled() && needs.scope.outputs.v3_tool == 'true' }}
-        run: node scripts/verify-servertool-rust-only.mjs
       - name: Build (release)
         if: needs.scope.outputs.v3_build == 'true'
         env:
@@ -191,44 +181,6 @@ jobs:
         env:
           RCCV4_REAL_RUNTIME_ADMISSION_MODE: contract
         run: npm --prefix v4 run verify:ci
-
-  appsdk-admission:
-    runs-on: macos-14
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: Build global AppSDK from pinned canonical source
-        run: |
-          git clone --no-checkout --depth 1 \
-            https://github.com/Jasonzhangf/appsdk.git "$RUNNER_TEMP/appsdk-src"
-          git -C "$RUNNER_TEMP/appsdk-src" fetch --depth 1 origin \
-            5318761dc2e65b416e409d0913321a62e769e7c4
-          git -C "$RUNNER_TEMP/appsdk-src" checkout --detach \
-            5318761dc2e65b416e409d0913321a62e769e7c4
-          test "$(git -C "$RUNNER_TEMP/appsdk-src" rev-parse HEAD)" = \
-            5318761dc2e65b416e409d0913321a62e769e7c4
-          cargo build --release --locked \
-            --manifest-path "$RUNNER_TEMP/appsdk-src/rust/Cargo.toml"
-          mkdir -p "$HOME/.local/bin"
-          install -m 0755 \
-            "$RUNNER_TEMP/appsdk-src/rust/target/release/appsdk" \
-            "$HOME/.local/bin/appsdk"
-          "$HOME/.local/bin/appsdk" version
-          shasum -a 256 "$HOME/.local/bin/appsdk"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: AppSDK hook regression
-        run: npm run --silent test:appsdk-admission-hook
-      - name: AppSDK contract admission
-        run: |
-          command -v appsdk
-          appsdk version
-          test -x "$(command -v appsdk)"
-          npm run --silent verify:appsdk-admission
 
   v4-scoped:
     needs: scope

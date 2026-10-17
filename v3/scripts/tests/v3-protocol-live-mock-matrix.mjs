@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 // CLI glue only. Protocol behavior, assertions and evidence have one helper owner.
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -88,13 +87,11 @@ Defaults are anchored to this script, so root and v3 working directories work.`)
   if (options.caseId && selected.length === 0) throw new Error('unknown case: ' + options.caseId);
   const runtimeIdentity = { ...captureRuntimeIdentity(binary),
     kind: options.binaryKind ?? (binary === installedBinary ? 'installed' : 'candidate') };
-  const source = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: v3Root, encoding: 'utf8' });
   const report = {
     harness_id: HARNESS_ID, status: 'running', evidence_root: evidenceRoot, fixture_root: fixtureRoot,
     binary: runtimeIdentity,
-    source_identity: { sha: source.status === 0 ? source.stdout.trim() : null, fixture_sha: SOURCE_SHA },
+    source_identity: { repo: SOURCE_REPO },
     fixture_source: { repo: SOURCE_REPO, sha: SOURCE_SHA },
-    fixture_digest: createHash('sha256').update(JSON.stringify(corpus.fixtures)).digest('hex'),
     corpus: { findings: corpus.findings, coverage: corpus.coverage },
     cases: [], cleanup: { complete: true, cases: [] },
   };
@@ -156,7 +153,7 @@ Defaults are anchored to this script, so root and v3 working directories work.`)
         writeFileSync(writtenPath, file.text);
         providerFileReceipts.push({
           provider_id: file.provider_id, path: file.path, written_path: writtenPath,
-          model: file.model, wire_model: file.wire_model, sha256: sha256Text(file.text),
+          model: file.model, wire_model: file.wire_model,
         });
       }
       if (providerFiles.length === 1) {
@@ -268,11 +265,6 @@ function sanitizeFileName(value) {
   const text = String(value ?? 'provider');
   return text.replace(/[^A-Za-z0-9_.-]/g, '_') || 'provider';
 }
-
-function sha256Text(value) {
-  return createHash('sha256').update(String(value ?? ''), 'utf8').digest('hex');
-}
-
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { process.exitCode = await main(); }
   catch (error) { console.error(error.stack ?? error.message); process.exitCode = 1; }

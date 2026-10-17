@@ -9,9 +9,7 @@ const installedV3Root = path.resolve(path.dirname(fileURLToPath(import.meta.url)
 const explicitSourceRoot = String(process.env.ROUTECODEX_V3_SOURCE_ROOT ?? "").trim();
 const root = explicitSourceRoot
   ? path.resolve(explicitSourceRoot)
-  : process.env.ROUTECODEX_V3_ADMISSION_WORKSPACE === "1"
-    ? path.dirname(installedV3Root)
-    : path.join(installedV3Root, "build-contracts", "architecture-admission", "repo");
+  : path.dirname(installedV3Root);
 const v3Root = explicitSourceRoot ? path.join(root, "v3") : installedV3Root;
 const failures = [];
 

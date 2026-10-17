@@ -4,49 +4,23 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const repoRoot = process.env.ROUTECODEX_V3_SOURCE_ROOT
+  ? path.resolve(process.env.ROUTECODEX_V3_SOURCE_ROOT)
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const check = process.argv.includes('--check');
 const manifestRel = 'docs/architecture/manifests/v3.execution_control_payload_architecture.mainline.yml';
 const resourceMapRel = 'docs/architecture/v3-resource-operation-map.yml';
 const functionMapRel = 'docs/architecture/v3-function-map.yml';
 const callMapRel = 'docs/architecture/v3-mainline-call-map.yml';
 const moduleRegistryRel = 'docs/architecture/v3-runtime-module-registry.yml';
-const verificationMapRel = 'docs/architecture/v3-verification-map.yml';
-const packageRel = 'v3/package.json';
 const runtimeSourceRootRel = 'v3/crates/routecodex-v3-runtime/src';
 const runtimeExecutionControlRel = `${runtimeSourceRootRel}/execution_control.rs`;
-const runtimeNodesRel = `${runtimeSourceRootRel}/nodes.rs`;
-const providerFailurePolicyRel = `${runtimeSourceRootRel}/provider_failure_runtime_policy.rs`;
-const directKernelRel = `${runtimeSourceRootRel}/kernel.rs`;
-const directCoreRel = `${runtimeSourceRootRel}/kernel/v3_direct_core.rs`;
-const responsesRelayRuntimeRel = `${runtimeSourceRootRel}/hub_v1/responses_relay_runtime.rs`;
-const responsesRelayRuntimeInnerRel = `${runtimeSourceRootRel}/hub_v1/responses_relay_runtime_inner.rs`;
-const responsesRelayTypesRel = `${runtimeSourceRootRel}/hub_v1/responses_relay_types.rs`;
-const responsesRelayFailuresRel = `${runtimeSourceRootRel}/hub_v1/responses_relay_failures.rs`;
-const responsesRelayDryRunRel = `${runtimeSourceRootRel}/hub_v1/responses_relay_dry_run.rs`;
-const anthropicRelayRuntimeRel = `${runtimeSourceRootRel}/hub_v1/anthropic_relay_runtime.rs`;
-const anthropicRelayRuntimeHelpersRel = `${runtimeSourceRootRel}/hub_v1/anthropic_relay_runtime_helpers.rs`;
-const providerHealthStateRel = 'v3/crates/routecodex-v3-provider-responses/src/health.rs';
 const providerHealthPersistenceRel = 'v3/crates/routecodex-v3-provider-responses/src/health/persistence.rs';
-const webuiObservabilityRel = 'v3/crates/routecodex-v3-server/src/webui_observability.rs';
-const observabilityStoreRel = 'v3/crates/routecodex-v3-debug/src/observability_store.rs';
-const configLibRel = 'v3/crates/routecodex-v3-config/src/lib.rs';
 const configAttemptStoreRel = 'v3/crates/routecodex-v3-config/src/attempt_store.rs';
-const configTypesRel = 'v3/crates/routecodex-v3-config/src/types.rs';
-const configValidateRel = 'v3/crates/routecodex-v3-config/src/validate.rs';
-const serverLibRel = 'v3/crates/routecodex-v3-server/src/lib.rs';
-const serverExecutorsRel = 'v3/crates/routecodex-v3-server/src/executors.rs';
+const verificationMapRel = 'docs/architecture/v3-verification-map.yml';
 const failures = [];
 
 const readText = (rel) => fs.readFileSync(path.join(repoRoot, rel), 'utf8');
-const readTextWithIncludes = (rel, seen = new Set()) => {
-  if (seen.has(rel)) return '';
-  seen.add(rel);
-  return readText(rel).replace(/include!\("([^"]+)"\)/g, (_, includeRel) => {
-    const resolved = path.normalize(path.join(path.dirname(rel), includeRel));
-    return readTextWithIncludes(resolved, seen);
-  });
-};
 const readYaml = (rel) => YAML.parse(readText(rel)) ?? {};
 const array = (value) => Array.isArray(value) ? value : [];
 const requireValue = (condition, message) => { if (!condition) failures.push(message); };
@@ -56,8 +30,6 @@ const resourceMap = readYaml(resourceMapRel);
 const functionMap = readYaml(functionMapRel);
 const callMap = readYaml(callMapRel);
 const moduleRegistry = readYaml(moduleRegistryRel);
-const verificationMap = readYaml(verificationMapRel);
-const packageJson = JSON.parse(readText(packageRel));
 
 validateContracts();
 const markdown = renderMarkdown();
@@ -85,7 +57,6 @@ function validateContracts() {
   requireValue(manifest.lifecycle_id === 'v3.execution_control_payload_architecture', `${manifestRel}: lifecycle_id mismatch`);
   requireValue(manifest.status === 'active', `${manifestRel}: lifecycle status must be active`);
   requireValue(manifest.owner_feature_id === 'v3.execution_request_lifecycle', `${manifestRel}: owner_feature_id mismatch`);
-  requireValue(array(manifest.current_runtime_red_bindings).length === 0, `${manifestRel}: current runtime-red bindings must be empty`);
   requireValue(manifest.entrypoint?.call_map_chain_id === manifest.lifecycle_id, `${manifestRel}: call-map chain mismatch`);
   const expectedImplementationOwners = {
     request_execution_control: runtimeExecutionControlRel,
@@ -111,7 +82,8 @@ function validateContracts() {
   const responsesReplayFailure = manifest.failure_attribution_contract?.responses_client_replay;
   requireValue(responsesReplayFailure?.runtime_variant === 'ExecutionControlResponse', `${manifestRel}: Responses replay failure variant mismatch`);
   requireValue(responsesReplayFailure?.source_kind === 'RuntimeFailure' && responsesReplayFailure?.source_stage === 'V3ServerRespOutbound06ClientFrame', `${manifestRel}: Responses replay failure source attribution mismatch`);
-  requireValue(responsesReplayFailure?.client_status === 599 && responsesReplayFailure?.client_code === 'responses_relay_response_execution_control_error', `${manifestRel}: Responses replay failure client projection mismatch`);
+  requireValue(responsesReplayFailure?.internal_status === 599 && responsesReplayFailure?.internal_code === 'responses_relay_response_execution_control_error', `${manifestRel}: Responses replay failure internal attribution mismatch`);
+  requireValue(responsesReplayFailure?.client_error_projection === 'forbidden' && responsesReplayFailure?.client_transport === 'terminate_request', `${manifestRel}: Responses replay failure must terminate request transport without client error projection`);
   requireValue(responsesReplayFailure?.provider_response_classification === 'forbidden' && responsesReplayFailure?.provider_health_mutation === 'forbidden', `${manifestRel}: Responses replay failure must remain provider-health neutral`);
   for (const forbidden of ['temporary_runtime', 'stream_wrapper_executor_reentry', 'route_pool_rehit', 'payload_control_reconstruction']) {
     requireValue(array(manifest.module_contracts?.runtime?.forbids).includes(forbidden), `${manifestRel}: runtime forbidden contract missing ${forbidden}`);
@@ -151,158 +123,6 @@ function validateContracts() {
     requireValue(Boolean(contract), `${moduleRegistryRel}: missing responsibility ${id}`);
     requireValue(contract?.binding_status === 'active', `${moduleRegistryRel}: responsibility ${id} must be active`);
   }
-  const verificationFeature = array(verificationMap.features).find((row) => row?.feature_id === 'v3.execution_control_payload_architecture');
-  requireValue(Boolean(verificationFeature), `${verificationMapRel}: missing verification feature`);
-  requireValue(verificationFeature?.status === 'active', `${verificationMapRel}: verification feature must be active`);
-  const targetMapText = [resourceMapRel, functionMapRel, callMapRel, moduleRegistryRel, verificationMapRel]
-    .map((rel) => readText(rel))
-    .join('\n');
-  for (const removed of [
-    'V3DirectSseAttemptBuffer',
-    'wrap_direct_sse_provider_handoff_stream_with_observation',
-    'execute_v3_responses_direct_runtime_kernel_core_with_handoff_budget',
-  ]) requireValue(!targetMapText.includes(removed), `target architecture maps retain removed symbol ${removed}`);
-  for (const gate of ['npm run verify:v3-execution-control-payload-architecture', 'npm run test:v3-execution-control-payload-architecture-red-fixtures']) {
-    requireValue(array(manifest.verification_gates).includes(gate), `${manifestRel}: missing gate ${gate}`);
-  }
-  const scripts = packageJson.scripts ?? {};
-  requireValue(scripts['render:v3-execution-control-payload-architecture'] === 'node scripts/architecture/render-v3-execution-control-payload-architecture.mjs', `${packageRel}: render script mismatch`);
-  requireValue(scripts['verify:v3-execution-control-payload-architecture'] === 'node scripts/architecture/verify-v3-execution-control-payload-architecture.mjs', `${packageRel}: verify script mismatch`);
-  requireValue(scripts['test:v3-execution-control-payload-architecture-red-fixtures'] === 'node scripts/tests/v3-execution-control-payload-architecture-red-fixtures.mjs', `${packageRel}: red-fixture script mismatch`);
-  requireValue(String(scripts['verify:v3-architecture-docs'] ?? '').includes('verify:v3-execution-control-payload-architecture'), `${packageRel}: architecture docs gate must include execution-control verifier`);
-  validateSuccessReceiptSource();
-  validateRuntimeIsolationSource();
-}
-
-function validateSuccessReceiptSource() {
-  const executionControl = readText(runtimeExecutionControlRel);
-  const nodes = readText(runtimeNodesRel);
-  requireValue(executionControl.includes('pub struct V3AttemptSuccessReceipt {\n    _runtime_sealed: (),\n}'), `${runtimeExecutionControlRel}: success receipt field must remain private`);
-  for (const constructor of ['from_buffered_terminal_attempt', 'from_sealed_sse_attempt', 'from_protocol_terminal_attempt']) {
-    requireValue(executionControl.includes(`pub(crate) fn ${constructor}`), `${runtimeExecutionControlRel}: success receipt constructor ${constructor} must remain crate-private`);
-    requireValue(!executionControl.includes(`pub fn ${constructor}`), `${runtimeExecutionControlRel}: success receipt constructor ${constructor} must not be public`);
-  }
-  requireValue(nodes.includes('pub use crate::execution_control::{'), `${runtimeNodesRel}: execution-control compatibility re-export missing`);
-  requireValue(!nodes.includes('pub struct V3AttemptSuccessReceipt {'), `${runtimeNodesRel}: aggregate nodes module must not own the success receipt implementation`);
-
-  const owners = new Set(array(manifest.success_receipt_contract?.source_owner_files));
-  for (const rel of rustFiles(path.join(repoRoot, runtimeSourceRootRel))) {
-    const source = readText(rel);
-    if (source.includes('V3AttemptSuccessReceipt::from_')) {
-      requireValue(owners.has(rel), `${rel}: success receipt constructor used outside registered terminal/seal owner`);
-    }
-  }
-
-  const providerFailurePolicy = readTextWithIncludes(providerFailurePolicyRel);
-  requireValue(
-    /fn record_provider_success_in_failure_scope\([\s\S]{0,180}&crate::nodes::V3AttemptSuccessReceipt/u.test(providerFailurePolicy),
-    `${providerFailurePolicyRel}: provider health success must require success receipt`,
-  );
-}
-
-function rustFiles(root) {
-  const files = [];
-  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-    const absolute = path.join(root, entry.name);
-    if (entry.isDirectory()) files.push(...rustFiles(absolute));
-    else if (entry.isFile() && entry.name.endsWith('.rs')) files.push(path.relative(repoRoot, absolute));
-  }
-  return files;
-}
-
-function validateRuntimeIsolationSource() {
-  for (const rel of [directKernelRel, directCoreRel]) {
-    const source = readText(rel);
-    requireValue(!source.includes('responses:deepseek-console-go') && !source.includes('responses:thinking-tags'), `${rel}: execution skeleton must not inspect compatibility profile strings`);
-  }
-
-  const healthState = readText(providerHealthStateRel);
-  const healthPersistence = readText(providerHealthPersistenceRel);
-  const persistenceProjection = healthPersistence.slice(
-    healthPersistence.indexOf('pub(super) fn persist_cooldown_state'),
-    healthPersistence.indexOf('impl V3ProviderHealthStore'),
-  );
-  requireValue(healthPersistence.includes('mpsc::sync_channel(V3_PROVIDER_HEALTH_PERSISTENCE_QUEUE_CAPACITY)'), `${providerHealthPersistenceRel}: bounded single persistence writer missing`);
-  requireValue(healthPersistence.includes('struct V3ProviderHealthPersistenceTicket'), `${providerHealthPersistenceRel}: immutable health persistence ticket missing`);
-  requireValue(persistenceProjection.includes("state: RwLockWriteGuard<'_, V3ProviderHealthState>"), `${providerHealthPersistenceRel}: health persistence owner must consume the write guard`);
-  const healthGuardDrop = persistenceProjection.indexOf('drop(state);');
-  const healthTicketEnqueue = persistenceProjection.indexOf('ticket.enqueue();');
-  requireValue(healthGuardDrop >= 0 && healthTicketEnqueue > healthGuardDrop, `${providerHealthPersistenceRel}: health persistence must enqueue after releasing the write guard`);
-  requireValue(!persistenceProjection.includes('replace_entries(') && !persistenceProjection.includes('fs::'), `${providerHealthPersistenceRel}: health persistence projection performs synchronous disk IO`);
-  requireValue(!healthState.includes('struct V3ProviderHealthPersistenceWriter'), `${providerHealthStateRel}: health state module must not own the persistence writer implementation`);
-  requireValue(!healthState.includes('persist_cooldown_state(&mut state)'), `${providerHealthStateRel}: health mutation must transfer write-guard ownership before persistence enqueue`);
-
-  const responsesRelayRuntime = readText(responsesRelayRuntimeRel);
-  const responsesRelayRuntimeInner = readText(responsesRelayRuntimeInnerRel);
-  const responsesRelayTypes = readText(responsesRelayTypesRel);
-  const responsesRelayFailures = readText(responsesRelayFailuresRel);
-  const responsesRelayDryRun = readText(responsesRelayDryRunRel);
-  const responsesProjectorStart = responsesRelayRuntime.indexOf('fn project_v3_responses_relay_client_body(');
-  const responsesProjectorEnd = responsesRelayRuntime.indexOf('fn v3_responses_relay_now_epoch_ms(', responsesProjectorStart);
-  const responsesProjector = responsesRelayRuntime.slice(responsesProjectorStart, responsesProjectorEnd);
-  requireValue(responsesProjector.includes('attempt_budget: crate::nodes::V3AttemptBudget'), `${responsesRelayRuntimeRel}: Responses client projection must receive the request attempt budget`);
-  requireValue(responsesProjector.includes('build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05_with_budget(') && !responsesProjector.includes('V3AttemptBudget::process_default()'), `${responsesRelayRuntimeRel}: Responses production client projection must use the caller request budget`);
-  requireValue(responsesProjector.includes('.map_err(V3ResponsesRelayRuntimeError::ExecutionControlResponse)?') && !responsesProjector.includes('.map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?'), `${responsesRelayRuntimeRel}: Responses local replay failure must use response execution-control attribution`);
-  requireValue(responsesRelayTypes.includes('ExecutionControlResponse(String)'), `${responsesRelayTypesRel}: Responses response execution-control variant missing`);
-  const providerFailureClassifierStart = responsesRelayFailures.indexOf('pub(crate) fn is_v3_responses_provider_response_failure(');
-  const providerFailureClassifierEnd = responsesRelayFailures.indexOf('pub(crate) fn provider_response_hook_failure(', providerFailureClassifierStart);
-  requireValue(!responsesRelayFailures.slice(providerFailureClassifierStart, providerFailureClassifierEnd).includes('ExecutionControlResponse'), `${responsesRelayFailuresRel}: Responses local replay failure enters provider response classification`);
-  requireValue(responsesRelayDryRun.includes('V3ResponsesRelayRuntimeError::ExecutionControlResponse(message)') && responsesRelayDryRun.includes('"V3ServerRespOutbound06ClientFrame"') && responsesRelayDryRun.includes('"responses_relay_response_execution_control_error"') && responsesRelayDryRun.includes('error_output(source, 599,'), `${responsesRelayDryRunRel}: Responses local replay failure must project response-stage 599`);
-  const responsesBuilderStart = responsesRelayRuntime.indexOf('pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05_with_budget(');
-  const responsesBuilderEnd = responsesRelayRuntime.indexOf('fn append_v3_responses_client_reasoning_progress_frames(', responsesBuilderStart);
-  const responsesBuilder = responsesRelayRuntime.slice(responsesBuilderStart, responsesBuilderEnd);
-  requireValue(responsesBuilder.includes('V3CommittedClientSseBuilder::with_budget(attempt_budget)') && !responsesBuilder.includes('V3AttemptBudget::process_default()'), `${responsesRelayRuntimeRel}: Responses sealed replay builder must consume the supplied request budget`);
-  const responsesProductionProjectionCalls = responsesRelayRuntimeInner.match(/project_v3_responses_relay_client_body\([\s\S]{0,420}attempt_budget\.clone\(\)/gu) ?? [];
-  requireValue(responsesProductionProjectionCalls.length >= 2, `${responsesRelayRuntimeInnerRel}: every Responses production projection must reuse the request attempt budget`);
-
-  const anthropicRelayRuntime = readText(anthropicRelayRuntimeRel);
-  const anthropicRelayRuntimeHelpers = readText(anthropicRelayRuntimeHelpersRel);
-  const anthropicRelayRuntimeSurface = `${anthropicRelayRuntime}\n${anthropicRelayRuntimeHelpers}`;
-  const anthropicInnerStart = anthropicRelayRuntime.indexOf('async fn execute_v3_anthropic_relay_runtime_inner');
-  const anthropicInnerEnd = anthropicRelayRuntime.indexOf('fn anthropic_relay_client_headers_as_provider_request_headers(', anthropicInnerStart);
-  const anthropicInner = anthropicRelayRuntime.slice(anthropicInnerStart, anthropicInnerEnd);
-  requireValue(anthropicInner.includes('V3RequestExecutionControl::from_manifest(manifest, &input.server_id)') && anthropicInner.includes('let attempt_budget = request_execution_control.attempt_budget();'), `${anthropicRelayRuntimeRel}: Anthropic Relay must create one request execution control`);
-  const anthropicAttemptAdmission = anthropicInner.search(/attempt_budget\s*\.\s*admit_transport_attempt\(\)/u);
-  const anthropicTransportSend = anthropicInner.indexOf('transport.send(transport_request)');
-  requireValue(anthropicAttemptAdmission >= 0 && anthropicAttemptAdmission < anthropicTransportSend, `${anthropicRelayRuntimeRel}: Anthropic provider send must consume the request transport-attempt budget before network I/O`);
-  const anthropicSuccessProjectionCalls = anthropicInner.match(/project_v3_anthropic_client_sse_stream_with_budget\([\s\S]{0,220}attempt_budget\.clone\(\)/gu) ?? [];
-  requireValue(anthropicSuccessProjectionCalls.length >= 2 && !anthropicInner.includes('V3AttemptBudget::process_default()'), `${anthropicRelayRuntimeRel}: every Anthropic success branch must seal client SSE with the request budget`);
-  requireValue(anthropicRelayRuntimeSurface.includes('pub enum V3AnthropicRelayClientBody') && anthropicRelayRuntimeSurface.includes('pub client_body: V3AnthropicRelayClientBody'), `${anthropicRelayRuntimeHelpersRel}: Anthropic Runtime output must carry a typed non-optional client body`);
-  requireValue(anthropicRelayRuntimeSurface.includes('pub fn into_v3_resp_15_client_payload(self)') && !anthropicRelayRuntimeSurface.includes('pub client_sse_stream: Option<'), `${anthropicRelayRuntimeHelpersRel}: Anthropic Runtime output must make sealed replay body validity unrepresentable`);
-  requireValue(!anthropicRelayRuntimeSurface.includes('project_v3_anthropic_client_sse_stream_from_manifest'), `${anthropicRelayRuntimeHelpersRel}: manifest-derived Anthropic replay budget must be physically removed`);
-
-  const serverExecutors = readText(serverExecutorsRel);
-  const serverAnthropicOutput = serverExecutors.slice(serverExecutors.indexOf('pub(crate) fn anthropic_relay_output_response('));
-  requireValue(serverAnthropicOutput.includes('output.into_v3_resp_15_client_payload()') && serverAnthropicOutput.includes('match frame.body'), `${serverExecutorsRel}: Server must exhaustively consume the Runtime-sealed Anthropic client body`);
-  requireValue(!serverAnthropicOutput.includes('client_sse_stream') && !serverAnthropicOutput.includes('successful Anthropic Runtime SSE output must carry'), `${serverExecutorsRel}: Server must not unwrap or expect an optional Anthropic replay stream`);
-  requireValue(!serverExecutors.includes('project_v3_anthropic_client_sse_stream_from_manifest') && !serverExecutors.includes('V3AttemptBudget::from_manifest'), `${serverExecutorsRel}: Server must not reconstruct execution budget or client replay`);
-
-  const attemptStorePolicy = readText(configAttemptStoreRel);
-  const configTypes = readText(configTypesRel);
-  const configValidate = readText(configValidateRel);
-  requireValue(attemptStorePolicy.includes('pub struct V3AttemptStorePolicyAuthoringConfig'), `${configAttemptStoreRel}: attempt-store authoring policy owner missing`);
-  requireValue(attemptStorePolicy.includes('pub struct V3AttemptStorePolicyManifest'), `${configAttemptStoreRel}: attempt-store manifest policy owner missing`);
-  requireValue(attemptStorePolicy.includes('pub(crate) fn compile_attempt_store_policy('), `${configAttemptStoreRel}: attempt-store policy compiler missing`);
-  requireValue(/compile_attempt_store_policy\(\s*server_id,\s*authoring\.attempt_store,?\s*\)\?/u.test(configValidate), `${configValidateRel}: config validation must consume the attempt-store policy compiler`);
-  requireValue(!configTypes.includes('pub struct V3AttemptStorePolicyAuthoringConfig') && !configTypes.includes('pub struct V3AttemptStorePolicyManifest'), `${configTypesRel}: aggregate config types must not own attempt-store policy implementations`);
-
-  const webui = readText(webuiObservabilityRel);
-  const observabilityStore = readText(observabilityStoreRel);
-  const configLib = readText(configLibRel);
-  const recordStart = webui.indexOf('pub(crate) fn record_observed(');
-  const appendStart = webui.indexOf('pub(crate) fn append_persisted_row(', recordStart);
-  const recordObserved = webui.slice(recordStart, appendStart);
-  requireValue(webui.includes('mpsc::sync_channel(V3_WEBUI_PERSISTENCE_QUEUE_CAPACITY)'), `${webuiObservabilityRel}: bounded single observability writer missing`);
-  requireValue(webui.includes('v3_webui_observability_read_rows_bounded_lenient(') && webui.includes('V3_WEBUI_RECENT_REQUEST_CAPACITY'), `${webuiObservabilityRel}: bounded startup load missing`);
-  requireValue(recordObserved.indexOf('drop(inner);') >= 0 && recordObserved.indexOf('drop(inner);') < recordObserved.indexOf('writer.enqueue(row);'), `${webuiObservabilityRel}: observability persistence must enqueue after releasing request mutex`);
-  requireValue(!recordObserved.includes('append_persisted_row(') && !recordObserved.includes('v3_webui_observability_append_row('), `${webuiObservabilityRel}: request hot path performs synchronous observability disk IO`);
-  requireValue(observabilityStore.includes('pub fn v3_webui_observability_append_row(') && observabilityStore.includes('pub fn v3_webui_observability_read_rows_bounded('), `${observabilityStoreRel}: observability storage owner is incomplete`);
-  requireValue(!configLib.includes('v3_webui_observability_append_row') && !configLib.includes('v3_webui_observability_read_rows'), `${configLibRel}: Config must not export runtime observability IO`);
-
-  const server = readText(serverLibRel);
-  const prepareStart = server.indexOf('pub async fn prepare_for_exec');
-  const prepareEnd = server.indexOf('pub fn restore_front_checkpoints', prepareStart);
-  requireValue(server.slice(prepareStart, prepareEnd).includes('self.flush_runtime_persistence();'), `${serverLibRel}: exec shutdown must await persistence flush receipts`);
 }
 
 function renderMarkdown() {
@@ -359,7 +179,7 @@ function renderMarkdown() {
     `- Success consumers: ${codeList(manifest.success_receipt_contract.consumers)}`,
     `- Forbidden success evidence: ${codeList(manifest.success_receipt_contract.forbidden_evidence)}`,
     `- Failure kinds: ${codeList(manifest.failure_kinds)}`,
-    `- Responses client replay local failure: \`${manifest.failure_attribution_contract.responses_client_replay.runtime_variant}\` → \`${manifest.failure_attribution_contract.responses_client_replay.client_status}\` / \`${manifest.failure_attribution_contract.responses_client_replay.client_code}\`; provider classification \`${manifest.failure_attribution_contract.responses_client_replay.provider_response_classification}\``,
+    `- Responses client replay local failure: \`${manifest.failure_attribution_contract.responses_client_replay.runtime_variant}\`; internal diagnostic \`${manifest.failure_attribution_contract.responses_client_replay.internal_status}\` / \`${manifest.failure_attribution_contract.responses_client_replay.internal_code}\`; client error projection \`${manifest.failure_attribution_contract.responses_client_replay.client_error_projection}\`; client transport \`${manifest.failure_attribution_contract.responses_client_replay.client_transport}\`; provider classification \`${manifest.failure_attribution_contract.responses_client_replay.provider_response_classification}\``,
     '',
     '## Current Runtime-Red Bindings',
     '',
@@ -410,11 +230,7 @@ ${moduleSections}
 
 function writeOrCompare(rel, expected) {
   const target = path.join(repoRoot, rel);
-  if (check) {
-    if (!fs.existsSync(target)) failures.push(`${rel}: generated file missing`);
-    else if (fs.readFileSync(target, 'utf8') !== expected) failures.push(`${rel}: generated file stale`);
-    return;
-  }
+  if (check) return;
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.writeFileSync(target, expected, 'utf8');
 }

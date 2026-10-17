@@ -5,8 +5,7 @@
 // bounded utilities live in the sibling lifecycle modules.
 
 import { spawn, spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { readFileSync, statSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import {
@@ -323,7 +322,6 @@ export function captureRuntimeIdentity(binary) {
     version_stderr: null,
     exit_code: null,
     signal: null,
-    sha256: null,
     size: null,
     mtime_ms: null,
     error: null,
@@ -333,7 +331,6 @@ export function captureRuntimeIdentity(binary) {
     const stat = statSync(path);
     identity.size = stat.size;
     identity.mtime_ms = stat.mtimeMs;
-    identity.sha256 = createHash('sha256').update(readFileSync(path)).digest('hex');
   } catch (error) {
     identity.error = errorDetails(error);
   }

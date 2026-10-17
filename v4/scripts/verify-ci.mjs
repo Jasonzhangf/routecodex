@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Complete V4 admission matrix: workspace tests + the positive surface (which
- * owns the locked release build, architecture gates, consumers, active index,
+ * owns the release build, architecture gates, consumers,
  * and the isolation matrix) + architecture red suites. Root CI and root npm
  * aliases call only this entrypoint.
  */

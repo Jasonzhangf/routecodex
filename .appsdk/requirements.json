@@ -242,9 +242,36 @@
         "version": 1
       },
       "version": 9
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "读取 ~/.agents/skills/appsdk-project-governance/SKILL.md，以及\nreferences/bootstrap-migration.md 中的\n“Existing project: governance ablation”章节。\n\n按当前项目需求执行旧治理消融。检查实际生效的 AGENTS、Skills、\n设计、CI/hooks 和程序入口，删除对外 release 准备前的 SHA/checksum、\n候选身份包装、冻结材料、重复检查，以及无独立行为保障的测试与治理。\n同步修改唯一 owner 和实际调用，不只改说明。\n\n保留真实公开入口行为、安全和数据正确性验证，复用有效结果。\n纯文档直接修改；代码和 gate 行为沿项目现有开发流程执行。\n不要 reset/fresh、清空控制面、重启无关 daemon、伪造 PASS 或绕过 hook。\n\n完成后报告实际删除项、保留的行为保障、入口结果和剩余缺口，\n并按项目授权完成交付。",
+          "role": "user",
+          "source": "Codex chat 01a12fd2-c340-7dd1-89d0-36b3b692e1e9, explicit user governance ablation instruction, 2026-10-16"
+        },
+        "base_version": 2,
+        "operation": "replace",
+        "project_id": "routecodex",
+        "request_id": "req-20261016-c60437c-governance-ablation",
+        "requirement_id": "routecodex-governance-unification",
+        "text": "根、v3、v4 的既有 AppSDK 0.1.0015 项目资源保持一致；本次不手改 sdk.lock、pin、受管分发副本或历史升级记录。旧版本升级需求不再要求日常开发、提交、推送或CI运行全局SDK安装、固定CLI版本准入、appsdk verify/review-admission、身份记录链或冻结材料。按2026-10-16用户明确授权，退役对外release准备前的SHA/checksum、候选身份包装、冻结材料、重复检查和无独立行为保障测试与治理，并修改项目唯一owner、实际CI/hooks与程序调用。实际对外release仅保留分发需要的核验。\n\n保留真实公开入口行为、安全、数据正确性验证及Git main/master受保护提交/推送入口；适用检查按真实暂存/推送改动范围执行，复用未变的有效结果，不以候选摘要或临时冻结副本证明身份。禁止伪造PASS、绕过hook、--no-verify、破坏性Git、覆盖他人改动或扩大业务运行时变更。\n\n继续禁止appsdk init、fresh/reset、清空AppSDK/Collab控制面、手工改身份/邮箱/注册状态及无关daemon重启。受管资源确需刷新但正常入口受限时，列明实际SDK owner与缺口，不手工修pin或清控制面。纯项目文档直接修改；代码/gate按项目现有外置独占worktree、必要红测和公开入口回归执行。完成重大可交付milestone后按既有独立Review与受保护Git流程合入origin/main，报告实际删除项、保留保障、入口结果和剩余缺口。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "读取 ~/.agents/skills/appsdk-project-governance/SKILL.md，以及\nreferences/bootstrap-migration.md 中的\n“Existing project: governance ablation”章节。\n\n按当前项目需求执行旧治理消融。检查实际生效的 AGENTS、Skills、\n设计、CI/hooks 和程序入口，删除对外 release 准备前的 SHA/checksum、\n候选身份包装、冻结材料、重复检查，以及无独立行为保障的测试与治理。\n同步修改唯一 owner 和实际调用，不只改说明。\n\n保留真实公开入口行为、安全和数据正确性验证，复用有效结果。\n纯文档直接修改；代码和 gate 行为沿项目现有开发流程执行。\n不要 reset/fresh、清空控制面、重启无关 daemon、伪造 PASS 或绕过 hook。\n\n完成后报告实际删除项、保留的行为保障、入口结果和剩余缺口，\n并按项目授权完成交付。",
+          "role": "user",
+          "source": "Codex chat 01a12fd2-c340-7dd1-89d0-36b3b692e1e9, explicit user governance ablation instruction, 2026-10-16"
+        },
+        "requirement_id": "routecodex-governance-unification",
+        "status": "active",
+        "text": "根、v3、v4 的既有 AppSDK 0.1.0015 项目资源保持一致；本次不手改 sdk.lock、pin、受管分发副本或历史升级记录。旧版本升级需求不再要求日常开发、提交、推送或CI运行全局SDK安装、固定CLI版本准入、appsdk verify/review-admission、身份记录链或冻结材料。按2026-10-16用户明确授权，退役对外release准备前的SHA/checksum、候选身份包装、冻结材料、重复检查和无独立行为保障测试与治理，并修改项目唯一owner、实际CI/hooks与程序调用。实际对外release仅保留分发需要的核验。\n\n保留真实公开入口行为、安全、数据正确性验证及Git main/master受保护提交/推送入口；适用检查按真实暂存/推送改动范围执行，复用未变的有效结果，不以候选摘要或临时冻结副本证明身份。禁止伪造PASS、绕过hook、--no-verify、破坏性Git、覆盖他人改动或扩大业务运行时变更。\n\n继续禁止appsdk init、fresh/reset、清空AppSDK/Collab控制面、手工改身份/邮箱/注册状态及无关daemon重启。受管资源确需刷新但正常入口受限时，列明实际SDK owner与缺口，不手工修pin或清控制面。纯项目文档直接修改；代码/gate按项目现有外置独占worktree、必要红测和公开入口回归执行。完成重大可交付milestone后按既有独立Review与受保护Git流程合入origin/main，报告实际删除项、保留保障、入口结果和剩余缺口。",
+        "version": 3
+      },
+      "version": 10
     }
   ],
   "project_id": "routecodex",
   "schema_version": 1,
-  "version": 9
+  "version": 10
 }

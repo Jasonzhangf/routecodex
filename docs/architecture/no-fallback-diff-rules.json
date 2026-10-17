@@ -112,10 +112,6 @@
     },
     {
       "ruleId": "fallback-keyword",
-      "pathContains": "scripts/verify-servertool-rust-only.mjs"
-    },
-    {
-      "ruleId": "fallback-keyword",
       "pathContains": "scripts/architecture/verify-repository-filesystem-governance.mjs",
       "textContains": "no-fallback-diff-rules.json"
     },
@@ -914,11 +910,6 @@
     {
       "ruleId": "catch-return-or-continue",
       "pathContains": "scripts/monitor/memory-guard.mjs",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "scripts/ci/check-file-line-limit.mjs",
       "textContains": ""
     },
     {

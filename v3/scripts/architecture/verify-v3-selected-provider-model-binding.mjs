@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 
-const root = process.cwd();
+const v3Root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const root = process.env.ROUTECODEX_V3_SOURCE_ROOT
+  ? path.resolve(process.env.ROUTECODEX_V3_SOURCE_ROOT)
+  : path.resolve(v3Root, '..');
 const failures = [];
 const files = {
   owner: 'v3/crates/routecodex-v3-runtime/src/selected_provider_model_binding.rs',
@@ -21,7 +25,7 @@ const files = {
   design: 'docs/design/v3-selected-provider-model-binding.md',
   testDesign: 'docs/goals/v3-selected-provider-model-binding-test-design.md',
   sop: '.agents/skills/rcc-dev-skills/references/96-v3-selected-provider-model-binding-sop.md',
-  packageJson: 'package.json',
+  packageJson: 'v3/package.json',
 };
 
 const abs = (rel) => path.join(root, rel);
@@ -45,7 +49,7 @@ let packageJson = {};
 try { packageJson = JSON.parse(text.packageJson); }
 catch (error) { failures.push(`package.json: JSON parse failed: ${error.message}`); }
 for (const [name, command] of Object.entries({
-  'verify:v3-selected-provider-model-binding': 'node scripts/run-admission-gate.mjs scripts/architecture/verify-v3-selected-provider-model-binding.mjs',
+  'verify:v3-selected-provider-model-binding': 'node scripts/architecture/verify-v3-selected-provider-model-binding.mjs',
   'test:v3-selected-provider-model-binding-red-fixtures': 'node scripts/tests/v3-selected-provider-model-binding-red-fixtures.mjs',
 })) {
   if (packageJson.scripts?.[name] !== command) failures.push(`package.json: script ${name} must equal ${command}`);

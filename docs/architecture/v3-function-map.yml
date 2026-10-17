@@ -313,8 +313,6 @@ features:
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-verification-map.yml
   - docs/architecture/wiki/v3-managed-server-lifecycle.md
-  - scripts/architecture/verify-v3-managed-server-lifecycle.mjs
-  - scripts/tests/v3-managed-server-lifecycle-red-fixtures.mjs
   - scripts/architecture/verify-v3-module-boundaries.mjs
   forbidden_paths:
   - sharedmodule/llmswitch-core
@@ -322,14 +320,11 @@ features:
   - v3/crates/routecodex-v3-runtime
   - v3/crates/routecodex-v3-provider-responses
   required_gates:
-  - npm run verify:v3-managed-server-lifecycle
   - npm run verify:v3-dagpipe-feature-graphs
-  - npm run test:v3-managed-server-lifecycle-red-fixtures
   - npm run test:v3-managed-server-lifecycle
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
   - npm run verify:function-map-compile-gate
   - npm run verify:v3-cargo-fmt
   - npm run verify:v3-clippy
@@ -455,7 +450,6 @@ features:
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
   - npm run test:v3-workspace
   - git diff --check
   runtime_status: owner_queryability_bound_to_existing_config_contract_source
@@ -525,7 +519,6 @@ features:
   - npm run verify:v3-module-boundaries
   - npm run test:v3-user-config-contract
   - npm run test:v3-user-config-cli
-  - npm run verify:v3-managed-server-lifecycle
   - git diff --check
   runtime_status: default_config_toml_source_cutover_pending_installed_restart
 - feature_id: v3.foundation_p0_p2
@@ -603,10 +596,8 @@ features:
   - restart
   required_gates:
   - npm run verify:v3-architecture-docs
-  - npm run verify:v3-rust-only
   - npm run verify:v3-module-boundaries
   - npm run test:v3-source-gate-red-fixtures
-  - npm run verify:v3-static-hook-registry
   - npm run verify:v3-resource-map
   - npm run test:v3-compile-fail
   - npm run verify:v3-cargo-fmt
@@ -765,9 +756,7 @@ features:
   - npm run test:v3-foundation-runtime-contract
   - npm run test:v3-server-debug-error-blackbox
   - npm run verify:v3-architecture-docs
-  - npm run verify:v3-rust-only
   - npm run verify:v3-module-boundaries
-  - npm run verify:v3-static-hook-registry
   - npm run verify:v3-resource-map
   - npm run verify:v3-provider-session-cooldown
   - npm run test:v3-provider-session-cooldown-red-fixtures
@@ -871,10 +860,8 @@ features:
   - npm run test:v3-mainline-caller-flow-red-fixtures
   - npm run verify:architecture-wiki-html-sync
   - npm run verify:v3-architecture-docs
-  - npm run verify:v3-rust-only
   - npm run verify:v3-module-boundaries
   - npm run test:v3-source-gate-red-fixtures
-  - npm run verify:v3-static-hook-registry
   - npm run verify:v3-resource-map
   - npm run test:v3-compile-fail
   - npm run test:v3-provider-responses
@@ -972,8 +959,6 @@ features:
   - npm run test:v3-source-gate-red-fixtures
   - npm run test:v3-compile-fail
   - npm run verify:v3-architecture-docs
-  - npm run verify:v3-rust-only
-  - npm run verify:v3-static-hook-registry
   - npm run verify:v3-resource-map
   - npm run verify:v3-cargo-fmt
   - npm run verify:v3-clippy
@@ -1196,7 +1181,6 @@ features:
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
   - npm run verify:v3-cargo-fmt
   - npm run verify:v3-clippy
   - npm run test:v3-workspace
@@ -1284,7 +1268,6 @@ features:
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
   - npm run verify:architecture-wiki-html-sync
   - git diff --check
   runtime_status: source_binding_registry_and_server_consumer_verified_gemini_runtime_implemented
@@ -1570,16 +1553,11 @@ features:
   - npm run test:v3-hub-pipeline-core-manifest-red-fixtures
   - npm run verify:v3-hub-v1-node-file-topology
   - npm run test:v3-hub-v1-node-file-topology-red-fixtures
-  - npm run verify:v3-p6-freeze
-  - npm run test:v3-p6-freeze-red-fixtures
-  - npm run verify:v3-static-hook-registry
   - npm run verify:v3-relay-hook-resources
   - npm run test:v3-relay-hook-resource-red-fixtures
-  - npm run test:v3-h1-source-red-fixtures
   - npm run test:v3-compile-fail
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
-  - npm run verify:v3-rust-only
   - npm run verify:v3-cargo-fmt
   - npm run verify:v3-clippy
   - npm run test:v3-workspace
@@ -1634,8 +1612,6 @@ features:
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
-  - npm run verify:v3-static-hook-registry
   - npm run test:v3-hub-skeleton-doc-red-fixtures
   - npm run test:v3-compile-fail
   - npm run verify:v3-cargo-fmt
@@ -1704,8 +1680,6 @@ features:
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
-  - npm run verify:v3-static-hook-registry
   - npm run verify:v3-cargo-fmt
   runtime_status: relay_request_source_slice_only
   pending_runtime:
@@ -1766,8 +1740,6 @@ features:
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
-  - npm run verify:v3-static-hook-registry
   - npm run verify:v3-cargo-fmt
   runtime_status: relay_response_source_slice_only
   pending_runtime:
@@ -1816,7 +1788,6 @@ features:
   - npm run verify:v3-relay-payload-copy-budget
   - npm run test:v3-relay-payload-copy-budget-red-fixtures
   - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
   - npm run verify:v3-resource-map
   - npm run verify:v3-cargo-fmt
   - git diff --check
@@ -1885,13 +1856,11 @@ features:
   - ~/.rcc
   required_gates:
   - npm run test:v3-relay-hook-resources
-  - npm run verify:v3-static-hook-registry
   - npm run verify:v3-relay-hook-resources
   - npm run test:v3-relay-hook-resource-red-fixtures
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
   - npm run test:v3-compile-fail
   - npm run verify:v3-cargo-fmt
   - npm run verify:v3-clippy
@@ -1951,8 +1920,6 @@ features:
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
-  - npm run verify:v3-static-hook-registry
   - npm run test:v3-hub-skeleton-doc-red-fixtures
   - npm run test:v3-compile-fail
   runtime_status: relay_architecture_review_surface_only
@@ -2013,7 +1980,6 @@ features:
   - npm run verify:v3-anthropic-codec-characterization
   - npm run test:v3-anthropic-codec-characterization-red-fixtures
   - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
   - npm run verify:v3-resource-map
   - npm run verify:v3-cargo-fmt
   - git diff --check
@@ -2062,7 +2028,6 @@ features:
   - npm run verify:v3-openai-chat-codec-characterization
   - npm run test:v3-openai-chat-codec-characterization-red-fixtures
   - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
   - npm run verify:v3-resource-map
   - npm run verify:v3-cargo-fmt
   - git diff --check
@@ -2122,7 +2087,6 @@ features:
   - npm run verify:v3-gemini-codec-characterization
   - npm run test:v3-gemini-codec-characterization-red-fixtures
   - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
   - npm run verify:v3-resource-map
   - npm run verify:v3-cargo-fmt
   - git diff --check
@@ -2297,8 +2261,6 @@ features:
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
-  - npm run verify:v3-static-hook-registry
   - npm run verify:v3-relay-payload-copy-budget
   - npm run verify:v3-cargo-fmt
   - npm run verify:v3-clippy
@@ -2358,7 +2320,6 @@ features:
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
   - npm run verify:v3-cargo-fmt
   - npm run verify:v3-clippy
   - npm run test:v3-workspace
@@ -2460,7 +2421,6 @@ features:
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
   - cargo fmt --manifest-path v3/Cargo.toml --all -- --check
   - CARGO_NET_OFFLINE=true cargo clippy --manifest-path v3/Cargo.toml --workspace
     --all-targets -- -D warnings
@@ -2537,7 +2497,6 @@ features:
   required_gates:
   - npm run verify:sse-architecture-boundary
   - npm run verify:v3-provider-action-gate
-  - npm run verify:v3-runtime-timing-observability
   - npm run test:v3-openai-chat-relay-runtime-integration
   migration_target: rust
   notes:
@@ -2907,7 +2866,6 @@ features:
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
   - npm run verify:v3-cargo-fmt
   - git diff --check
   notes:
@@ -3017,7 +2975,6 @@ features:
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
   - cargo fmt --manifest-path v3/Cargo.toml --all -- --check
   - CARGO_NET_OFFLINE=true cargo clippy --manifest-path v3/Cargo.toml --workspace
     --all-targets -- -D warnings
@@ -3093,7 +3050,6 @@ features:
     -- --nocapture
   - npm run verify:v3-cargo-fmt
   - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - git diff --check
@@ -3268,8 +3224,6 @@ features:
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
-  - npm run verify:v3-static-hook-registry
   - npm run verify:v3-cargo-fmt
   - npm run verify:v3-clippy
   - npm run test:v3-workspace
@@ -3366,8 +3320,6 @@ features:
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
-  - npm run verify:v3-static-hook-registry
   - npm run verify:v3-cargo-fmt
   - npm run verify:v3-clippy
   - npm run test:v3-workspace
@@ -3426,7 +3378,6 @@ features:
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
   - npm run verify:v3-cargo-fmt
   - npm run verify:v3-clippy
   - npm run test:v3-workspace
@@ -3518,7 +3469,6 @@ features:
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
   - npm run verify:v3-cargo-fmt
   - npm run verify:v3-clippy
   - npm run test:v3-workspace
@@ -3711,7 +3661,6 @@ features:
   - v3/crates/routecodex-v3-config/src/types.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
   - scripts/architecture/verify-v3-normalization-payload-logic-boundary.mjs
-  - scripts/architecture/verify-v3-static-hook-registry.mjs
   - scripts/tests/v3-normalization-payload-logic-boundary-red-fixtures.mjs
   resource_bindings:
   - v3.request.normal_payload
@@ -3752,7 +3701,6 @@ features:
   - v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs
   - v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs
   - scripts/architecture/verify-v3-normalization-payload-logic-boundary.mjs
-  - scripts/architecture/verify-v3-static-hook-registry.mjs
   - scripts/tests/v3-normalization-payload-logic-boundary-red-fixtures.mjs
   - scripts/architecture/verify-v3-openai-chat-codec-characterization.mjs
   - scripts/tests/v3-openai-chat-codec-characterization-red-fixtures.mjs
@@ -3794,9 +3742,7 @@ features:
   - npm run verify:v3-architecture-docs
   - npm run verify:function-map-compile-gate
   - npm run verify:architecture-mainline-manifest-sync
-  - npm run verify:v3-static-hook-registry
   - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
   - npm run verify:v3-cargo-fmt
   - npm run verify:v3-clippy
   - git diff --check
@@ -3853,7 +3799,7 @@ features:
   - git diff --check
   runtime_status: source_controlled_no_live_cutover
 - feature_id: v3.module_decomposition
-  status: phase0_gate_active_modules_pending
+  status: modules_pending
   design_truth: docs/goals/v3-god-file-decomposition-plan.md
   sop: docs/architecture/wiki/v3-module-decomposition-sop.md
   decomposed_modules:
@@ -3902,9 +3848,6 @@ features:
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
   - v3/crates/routecodex-v3-server/src/restart_handoff.rs
-  - v3/scripts/architecture/verify-v3-file-size.mjs
-  - v3/scripts/tests/v3-file-size-red-fixtures.mjs
-  - v3/config/v3-file-size-policy.json
   resource_bindings: []
   entry_symbols:
   - execute_v3_responses_relay_runtime
@@ -3936,20 +3879,14 @@ features:
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-architecture-audit-locks.yml
-  - v3/scripts/architecture/verify-v3-file-size.mjs
-  - v3/scripts/tests/v3-file-size-red-fixtures.mjs
-  - v3/config/v3-file-size-policy.json
   - scripts/architecture/verify-v3-module-boundaries.mjs
   forbidden_paths:
   - src
   - sharedmodule
   required_gates:
-  - npm run verify:v3-file-size
-  - npm run test:v3-file-size-red-fixtures
   - npm run verify:v3-mainline-caller-flow
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
   - npm run verify:v3-architecture-docs
   - npm run test:v3-compile-fail
   - npm run test:v3-workspace
@@ -4421,7 +4358,6 @@ features:
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-verification-map.yml
   - docs/architecture/manifests/v3.runtime_timing_observability.mainline.yml
-  - scripts/architecture/verify-v3-runtime-timing-observability.mjs
   - package.json
   - .github/workflows/test.yml
   forbidden_paths:
@@ -4436,7 +4372,6 @@ features:
     --lib -- --nocapture
   - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime direct_sse_
     --lib -- --nocapture
-  - npm run verify:v3-runtime-timing-observability
   - npm run verify:v3-architecture-docs
   runtime_status: source_active_live_verification_required
 - feature_id: v3.provider_action_gate
@@ -5375,7 +5310,6 @@ features:
   - v3/crates/routecodex-v3-runtime/src/execution_control.rs
   - v3/crates/routecodex-v3-runtime/src/nodes.rs
   - v3/crates/routecodex-v3-runtime/tests/support/kernel_unit.rs
-  - v3/scripts/architecture/verify-v3-direct-sse-full-attempt-commit.mjs
   - docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml
   - docs/architecture/wiki/v3-direct-sse-accept-skeleton.md
   - docs/goals/v3-responses-direct-precommit-sse-failure-test-design.md
@@ -5391,7 +5325,6 @@ features:
   - provider.wire_payload
   - MetadataCenter
   required_gates:
-  - npm run verify:v3-direct-sse-full-attempt-commit
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_full_attempt_commit -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib openai_chat_direct_sse_ -- --nocapture
   - npm run verify:v3-resource-map
@@ -5448,7 +5381,6 @@ features:
   - v3/vendor/hyper
   - v3/Cargo.toml
   - v3/Cargo.lock
-  - v3/scripts/run-admission-gate.mjs
   - scripts/verify-fast.mjs
   - scripts/tests/verify-fast-scope.mjs
   - v3/scripts/tests/v3-compile-fail-boundaries.mjs
@@ -5508,7 +5440,6 @@ features:
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
-  - v3/scripts/architecture/verify-v3-direct-sse-accept-skeleton.mjs
   - docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml
   - docs/architecture/wiki/v3-direct-sse-accept-skeleton.md
   - docs/architecture/v3-resource-operation-map.yml
@@ -5524,7 +5455,6 @@ features:
   - provider.wire_payload
   - MetadataCenter
   required_gates:
-  - npm run verify:v3-direct-sse-accept-skeleton
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_guard_rejects_typed_responses_shape_before_client_commit -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib direct_sse_http_projection_injects_keepalive_and_preserves_provider_bytes -- --nocapture
   - npm run verify:sse-architecture-boundary

@@ -22,7 +22,7 @@ const cases = [
   { relative: 'docs/schemas/v3-gate.yml', v3: true, v4: false },
   { relative: '.agents/skills/gate/SKILL.md', v3: false, v4: false },
   { relative: 'scripts/unrelated-tool.mjs', contents: 'export const scopeFixture = true;\n', v3: false, v4: false },
-  { relative: 'scripts/architecture/verify-v3-dependency-projection.mjs', contents: 'export const scopeFixture = true;\n', fine: { v3_architecture: true }, v3: true, v4: false },
+  { relative: 'scripts/architecture/verify-runtime-lifecycle-pid-rebase.mjs', contents: 'export const scopeFixture = true;\n', fine: { v3_architecture: true }, v3: true, v4: false },
   { relative: 'scripts/architecture/architecture-wiki-lib.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
   { relative: 'scripts/architecture/verify-architecture-mainline-call-map.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
   { relative: 'scripts/architecture/verify-runtime-responses-provider-compat.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
@@ -36,7 +36,6 @@ const cases = [
   { relative: '.agents/skills/rcc-dev-skills/references/96-v3-selected-provider-model-binding-sop.md', v3: true, v4: false },
   { relative: 'sharedmodule/llmswitch-core/src/conversion/compat/provider-resolution-config.json', contents: '{}\n', v3: true, v4: false },
   { relative: 'scripts/ci/unrelated-check.mjs', contents: 'export const scopeFixture = true;\n', v3: false, v4: false },
-  { relative: 'scripts/ci/check-file-line-limit.mjs', contents: 'export const scopeFixture = true;\n', fine: { v3_architecture: false }, v3: true, v4: false },
   { relative: 'scripts/ci/repo-sanity.mjs', contents: 'export const scopeFixture = true;\n', fine: { v3_architecture: false }, v3: true, v4: false },
   { relative: 'scripts/ci/mempalace-scan-artifact-audit.mjs', contents: 'export const scopeFixture = true;\n', fine: { v3_architecture: false }, v3: true, v4: false },
   { relative: 'scripts/tests/repository-filesystem-governance-red-fixtures.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
@@ -46,8 +45,6 @@ const cases = [
   { relative: 'package.json', contents: '{"scripts":{"verify:v3":"npm --prefix v3 run verify:ci"}}\n', fine: { v3_architecture: true }, v3: true, v4: false, v4Full: false },
   { relative: 'package.json', contents: '{"scripts":{"verify:v4":"npm --prefix v4 run verify:ci"}}\n', fine: Object.fromEntries(fineScopes.map((name) => [name, false])), v3: false, v4: true, v4Full: true },
   { relative: 'package.json', contents: '{"scripts":{"verify:fallback-hardcode":"npm run verify:no-fallback-all && npm run verify:internal-policy-hardcode"}}\n', fine: Object.fromEntries(fineScopes.map((name) => [name, false])), v3: true, v4: false, v4Full: false },
-  { relative: 'package.json', contents: '{"scripts":{"verify:file-line-limit":"node scripts/ci/check-file-line-limit.mjs"}}\n', fine: Object.fromEntries(fineScopes.map((name) => [name, false])), v3: true, v4: false, v4Full: false },
-  { relative: 'package.json', contents: '{"scripts":{"test:file-line-limit":"node --test tests/scripts/file-line-limit.test.mjs"}}\n', fine: Object.fromEntries(fineScopes.map((name) => [name, false])), v3: true, v4: false, v4Full: false },
   { relative: 'package-lock.json', contents: '{"lockfileVersion":3}\n', fine: Object.fromEntries(fineScopes.map((name) => [name, false])), v3: false, v4: false, v4Full: false },
   { relative: 'scripts/verify-fast.mjs', contents: 'export const scopeFixture = true;\n', fine: Object.fromEntries(fineScopes.map((name) => [name, false])), v3: true, v4: false },
   {
@@ -197,8 +194,6 @@ const metadataScopedPlan = spawnSync(process.execPath, [join(repo, 'v4', 'script
 });
 if (metadataScopedPlan.status !== 0
     || !`${metadataScopedPlan.stdout || ''}`.includes('metadata-only')
-    || !`${metadataScopedPlan.stdout || ''}`.includes('checks=3')
-    || !`${metadataScopedPlan.stdout || ''}`.includes('contract:verification-map')
     || !`${metadataScopedPlan.stdout || ''}`.includes('contract:verification-map-binding')
     || !`${metadataScopedPlan.stdout || ''}`.includes('shared:data-control-plane')) {
   failures.push(`V4 metadata-only plan must not require a module owner, got status=${metadataScopedPlan.status}\n${metadataScopedPlan.stdout || ''}\n${metadataScopedPlan.stderr || ''}`);
@@ -221,7 +216,6 @@ if (docsOnlyPlan.status !== 0
 const independentGateScopes = {
   'Fallback and internal policy hardcode gate': 'v3',
   'V3 Responses session admission behavior': 'v3_session',
-  'File line-limit gate (<500)': 'v3',
   'V3 provider action gate': 'v3_provider',
   'V3 provider action architecture gate': 'v3_provider',
   'V3 provider action red fixtures': 'v3_provider',
@@ -230,7 +224,6 @@ const independentGateScopes = {
   'V3 debug payload budget': 'v3_debug',
   'V3 debug payload budget red fixtures': 'v3_debug',
   'V3 route-classifier semantic gate': 'v3_router',
-  'Servertool Rust-only gate': 'v3_tool',
 };
 for (const [name, scope] of Object.entries(independentGateScopes)) {
   const start = workflow.indexOf(`      - name: ${name}\n`);

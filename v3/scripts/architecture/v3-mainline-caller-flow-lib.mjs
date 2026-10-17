@@ -1,12 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import YAML from 'yaml';
 
 export const V3_MAINLINE_CALL_MAP_PATH = 'docs/architecture/v3-mainline-call-map.yml';
 export const V3_CALLER_FLOW_PATH = 'docs/architecture/wiki/v3-mainline-caller-flow.md';
 export const V3_CALLER_FLOW_HTML_PATH = 'docs/architecture/wiki/html/v3-mainline-caller-flow.html';
-export const V3_ARCHITECTURE_AUDIT_LOCKS_PATH = 'docs/architecture/v3-architecture-audit-locks.yml';
 export const V3_RESOURCE_OPERATION_MAP_PATH = 'docs/architecture/v3-resource-operation-map.yml';
 export const V3_MAINLINE_SKELETON_SOP_PATH = 'docs/architecture/wiki/v3-mainline-skeleton-sop.md';
 
@@ -28,45 +26,11 @@ export function loadV3MainlineCallMap(root, relPath = V3_MAINLINE_CALL_MAP_PATH)
   return YAML.parse(text) ?? {};
 }
 
-export function loadV3ArchitectureAuditLocks(root, relPath = V3_ARCHITECTURE_AUDIT_LOCKS_PATH) {
-  const fullPath = path.join(root, relPath);
-  if (!fs.existsSync(fullPath)) return {};
-  const text = fs.readFileSync(fullPath, 'utf8');
-  return YAML.parse(text) ?? {};
-}
-
 export function loadV3ResourceOperationMap(root, relPath = V3_RESOURCE_OPERATION_MAP_PATH) {
   const fullPath = path.join(root, relPath);
   if (!fs.existsSync(fullPath)) return {};
   const text = fs.readFileSync(fullPath, 'utf8');
   return YAML.parse(text) ?? {};
-}
-
-function stableJson(value) {
-  if (Array.isArray(value)) return `[${value.map((item) => stableJson(item)).join(',')}]`;
-  if (value && typeof value === 'object') {
-    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`;
-  }
-  return JSON.stringify(value);
-}
-
-export function chainFingerprint(chain) {
-  const payload = {
-    chain_id: chain?.chain_id,
-    owner_feature_id: chain?.owner_feature_id,
-    edges: (chain?.edges ?? []).map((edge) => ({
-      step_id: edge?.step_id,
-      from_node: edge?.from_node,
-      to_node: edge?.to_node,
-      owner_feature_id: edge?.owner_feature_id,
-      caller_symbol: edge?.caller_symbol,
-      caller_file: edge?.caller_file,
-      callee_symbol: edge?.callee_symbol,
-      callee_file: edge?.callee_file,
-      resource_flow: edge?.resource_flow ?? null,
-    })),
-  };
-  return `sha256:${crypto.createHash('sha256').update(stableJson(payload)).digest('hex')}`;
 }
 
 function stripRoot(relPath) {
@@ -316,33 +280,6 @@ function resourceFlowHtml(edge) {
   return rows.map(([label, values]) => `<div class="resource-row"><strong>${escapeHtml(label)}:</strong> ${values.map((value) => `<code>${escapeHtml(value)}</code>`).join(' ')}</div>`).join('');
 }
 
-function lockStateForChain(chain, locks) {
-  const chainId = chain?.chain_id ?? '<missing-chain>';
-  const itemId = `chain:${chainId}`;
-  const locked = (locks?.locked_items ?? []).find((item) => item?.item_id === itemId);
-  const fingerprint = chainFingerprint(chain);
-  if (!locked) {
-    return {
-      item_id: itemId,
-      status: 'pending_manual_review',
-      label: 'pending review',
-      fingerprint,
-      className: 'pending_review',
-    };
-  }
-  const matches = locked.fingerprint === fingerprint;
-  return {
-    item_id: itemId,
-    status: matches ? 'audited_locked' : 'locked_changed',
-    label: matches ? 'locked by Jason' : 'locked item changed',
-    fingerprint,
-    locked_fingerprint: locked.fingerprint,
-    className: matches ? 'audited_locked' : 'locked_changed',
-    reviewed_by: locked.reviewed_by,
-    locked_at: locked.locked_at,
-  };
-}
-
 function edgeReadableLabel(edge) {
   const step = String(edge?.step_id ?? '<missing-step>');
   const note = EDGE_STEP_NOTES.get(step);
@@ -583,91 +520,6 @@ export function auditV3CallerFlow(parsed) {
     forbiddenResponsesDirectProtocolShortcut: detectForbiddenResponsesDirectProtocolShortcutEdges(parsed),
     invalidAggregateEntry: detectInvalidAggregateEntryEdges(parsed),
   };
-}
-
-export function auditV3ArchitectureLocks(parsed, locks, previousLocks = null) {
-  const failures = [];
-  const warnings = [];
-  const chainsById = new Map((parsed?.chains ?? []).map((chain) => [chain?.chain_id, chain]));
-  const lockedItems = Array.isArray(locks?.locked_items) ? locks.locked_items : [];
-  const authorizations = Array.isArray(locks?.manual_authorizations) ? locks.manual_authorizations : [];
-  const authorizationById = new Map(authorizations.map((item) => [item?.authorization_id, item]));
-
-  if (locks?.schema_version !== 1) {
-    failures.push(`${V3_ARCHITECTURE_AUDIT_LOCKS_PATH}: schema_version must be 1`);
-  }
-  if (!Array.isArray(locks?.locked_items)) {
-    failures.push(`${V3_ARCHITECTURE_AUDIT_LOCKS_PATH}: locked_items must be an array`);
-  }
-  if (!Array.isArray(locks?.manual_authorizations)) {
-    failures.push(`${V3_ARCHITECTURE_AUDIT_LOCKS_PATH}: manual_authorizations must be an array`);
-  }
-  if (locks?.policy?.gate_audit_status !== 'determined_locked') {
-    failures.push(`${V3_ARCHITECTURE_AUDIT_LOCKS_PATH}: policy.gate_audit_status must be determined_locked`);
-  }
-  if (locks?.policy?.main_skeleton_sop !== V3_MAINLINE_SKELETON_SOP_PATH) {
-    failures.push(`${V3_ARCHITECTURE_AUDIT_LOCKS_PATH}: policy.main_skeleton_sop must be ${V3_MAINLINE_SKELETON_SOP_PATH}`);
-  }
-  const requiredLockedChains = Array.isArray(locks?.policy?.required_locked_chains)
-    ? locks.policy.required_locked_chains.map((item) => String(item))
-    : [];
-  if (requiredLockedChains.length === 0) {
-    failures.push(`${V3_ARCHITECTURE_AUDIT_LOCKS_PATH}: policy.required_locked_chains must list the audited main skeleton chains`);
-  }
-
-  const seen = new Set();
-  for (const item of lockedItems) {
-    const itemId = String(item?.item_id ?? '');
-    const chainId = String(item?.chain_id ?? '');
-    if (!itemId || !chainId) {
-      failures.push('locked audit item missing item_id or chain_id');
-      continue;
-    }
-    if (seen.has(itemId)) failures.push(`duplicate locked audit item: ${itemId}`);
-    seen.add(itemId);
-    if (itemId !== `chain:${chainId}`) failures.push(`${itemId}: item_id must be chain:${chainId}`);
-    if (item?.status !== 'audited_locked') failures.push(`${itemId}: status must be audited_locked`);
-    if (item?.reviewed_by !== 'Jason') failures.push(`${itemId}: reviewed_by must be Jason`);
-    const chain = chainsById.get(chainId);
-    if (!chain) {
-      failures.push(`${itemId}: chain_id not found in ${V3_MAINLINE_CALL_MAP_PATH}`);
-      continue;
-    }
-    const currentFingerprint = chainFingerprint(chain);
-    if (item?.fingerprint !== currentFingerprint) {
-      failures.push(`${itemId}: audited locked fingerprint changed; needs Jason manual authorization and refreshed lock (${item?.fingerprint ?? '<missing>'} != ${currentFingerprint})`);
-    }
-    if (!item?.locked_at) failures.push(`${itemId}: locked_at is required`);
-  }
-
-  if (previousLocks) {
-    const previousItems = new Map((previousLocks?.locked_items ?? []).map((item) => [item?.item_id, item]));
-    for (const item of lockedItems) {
-      const previous = previousItems.get(item?.item_id);
-      if (!previous) continue;
-      if (previous.fingerprint === item.fingerprint) continue;
-      const authId = item.last_manual_authorization_id;
-      const auth = authorizationById.get(authId);
-      if (!auth) {
-        failures.push(`${item.item_id}: locked fingerprint changed without last_manual_authorization_id`);
-        continue;
-      }
-      if (auth.approved_by !== 'Jason') failures.push(`${item.item_id}: authorization ${authId} must be approved_by Jason`);
-      if (auth.item_id !== item.item_id) failures.push(`${item.item_id}: authorization ${authId} item_id mismatch`);
-      if (auth.fingerprint_before !== previous.fingerprint) failures.push(`${item.item_id}: authorization ${authId} fingerprint_before mismatch`);
-      if (auth.fingerprint_after !== item.fingerprint) failures.push(`${item.item_id}: authorization ${authId} fingerprint_after mismatch`);
-    }
-  }
-
-  for (const chain of parsed?.chains ?? []) {
-    if (!seen.has(`chain:${chain?.chain_id}`)) warnings.push(`pending manual audit: ${chain?.chain_id}`);
-  }
-  for (const chainId of requiredLockedChains) {
-    const itemId = `chain:${chainId}`;
-    if (!seen.has(itemId)) failures.push(`${itemId}: required main skeleton chain is not audited_locked`);
-  }
-
-  return { failures, warnings };
 }
 
 function renderAuditList(title, rows, fields) {
@@ -1242,30 +1094,7 @@ function renderAuditHtml(parsed, sourceAudit) {
   `;
 }
 
-function renderManualAuditItems(chains, locks) {
-  const rows = chains.map((chain) => {
-    const s = chainReadableLabel(chain);
-    const lock = lockStateForChain(chain, locks);
-    const resources = resourceSetForChain(chain);
-    return [
-      `<a href="#chain-${sanitizeId(s.chain_id)}"><code>${escapeHtml(s.chain_id)}</code></a><br/>${escapeHtml(s.title)}`,
-      `<span class="status ${escapeHtml(lock.className)}">${escapeHtml(lock.label)}</span>`,
-      String(s.edge_count),
-      String(resources.size),
-      `<code>${escapeHtml(s.owner_feature_id)}</code>`,
-      `<code>${escapeHtml(lock.fingerprint.slice(0, 19))}…</code>`,
-    ];
-  });
-  return `
-    <section class="manual-audit">
-      <h2>Manual audit items / 手工审计项</h2>
-      <p>未审核项可以继续按普通架构 gate 使用；Jason 在 HTML 中审核通过后，把该 chain 写入 <code>${escapeHtml(V3_ARCHITECTURE_AUDIT_LOCKS_PATH)}</code> 的 <code>locked_items</code>，之后改动必须有 Jason 手工授权记录。</p>
-      ${htmlTable(['Audit item', 'State', 'Edges', 'Resources', 'Owner', 'Current fingerprint'], rows)}
-    </section>
-  `;
-}
-
-function renderBranchIndex(chains, locks) {
+function renderBranchIndex(chains) {
   const groups = new Map();
   for (const chain of chains) {
     const id = chain?.chain_id ?? '<missing-chain>';
@@ -1280,14 +1109,12 @@ function renderBranchIndex(chains, locks) {
       <div class="branch-grid">
         ${groupChains.map((chain) => {
           const s = chainReadableLabel(chain);
-          const lock = lockStateForChain(chain, locks);
           const href = `#chain-${sanitizeId(s.chain_id)}`;
           return `<a class="branch-card" href="${href}">
             <span class="chain-id">${escapeHtml(s.title)}</span>
             <span>${escapeHtml(s.note)}</span>
             <span><code>${escapeHtml(s.chain_id)}</code></span>
             <span>${s.edge_count} edges · ${resourceSetForChain(chain).size} resources · ${escapeHtml(s.modules.join(', '))}</span>
-            <span class="status ${escapeHtml(lock.className)}">${escapeHtml(lock.label)}</span>
           </a>`;
         }).join('\n')}
       </div>
@@ -1296,9 +1123,8 @@ function renderBranchIndex(chains, locks) {
   return `<section><h2>Branch index / 分支索引</h2>${groupHtml}</section>`;
 }
 
-function renderBranchDetails(chain, index, locks) {
+function renderBranchDetails(chain, index) {
   const s = chainReadableLabel(chain);
-  const lock = lockStateForChain(chain, locks);
   const open = selectedMainSkeletonChains([chain]).length > 0 || index < 2;
   const edgeRows = (chain?.edges ?? []).map((edge) => [
     `<code>${escapeHtml(edge?.step_id ?? '')}</code>`,
@@ -1320,7 +1146,6 @@ function renderBranchDetails(chain, index, locks) {
         ${chain?.summary ? `<p class="chain-summary">${escapeHtml(chain.summary)}</p>` : ''}
         <div class="branch-meta">
           <span>owner: <code>${escapeHtml(s.owner_feature_id)}</code></span>
-          <span>audit: <span class="status ${escapeHtml(lock.className)}">${escapeHtml(lock.label)}</span></span>
           <span>modules: <code>${escapeHtml(s.modules.join(' · '))}</code></span>
           <span>resources: <code>${resourceSetForChain(chain).size}</code></span>
           ${chain?.manifest ? `<span>manifest: <code>${escapeHtml(chain.manifest)}</code></span>` : ''}
@@ -1338,7 +1163,6 @@ function renderBranchDetails(chain, index, locks) {
 export function renderV3MainlineCallerFlowHtml(root, relPath = V3_MAINLINE_CALL_MAP_PATH) {
   const parsed = loadV3MainlineCallMap(root, relPath);
   const sourceAudit = auditV3CallerFlowSource(root);
-  const locks = loadV3ArchitectureAuditLocks(root);
   const resourceMap = loadV3ResourceOperationMap(root);
   const chains = parsed?.chains ?? [];
   const edgeCount = chains.reduce((sum, chain) => sum + (chain?.edges?.length ?? 0), 0);
@@ -1591,15 +1415,7 @@ export function renderV3MainlineCallerFlowHtml(root, relPath = V3_MAINLINE_CALL_
       background: #e0e7ff;
       color: #3730a3;
     }
-    .status.pending_review {
-      background: #e0f2fe;
-      color: #075985;
-    }
-    .status.audited_locked {
-      background: #dcfce7;
-      color: #166534;
-    }
-    .status.locked_changed, .status.missing {
+    .status.missing {
       background: #fee2e2;
       color: #991b1b;
     }
@@ -1655,15 +1471,13 @@ export function renderV3MainlineCallerFlowHtml(root, relPath = V3_MAINLINE_CALL_
 
     ${renderAuditHtml(parsed, sourceAudit)}
 
-    ${renderManualAuditItems(chains, locks)}
-
-    ${renderBranchIndex(chains, locks)}
+    ${renderBranchIndex(chains)}
 
     <section>
       <h2>Standalone branch diagrams / 分支独立图</h2>
       <p>每个分支图都由该 chain 的 <code>from_node -> to_node</code> edge 自动生成，默认 top-down；表格保留 caller/callee/source 文件用于审计。</p>
     </section>
-    ${chains.map((chain, index) => renderBranchDetails(chain, index, locks)).join('\n')}
+    ${chains.map((chain, index) => renderBranchDetails(chain, index)).join('\n')}
   </main>
 </body>
 </html>
