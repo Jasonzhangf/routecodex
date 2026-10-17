@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 94 functional paths, 578 caller edges.
+Generated view: 94 functional paths, 577 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -37,7 +37,7 @@ flowchart TD
   module_v3_virtual_router["v3-virtual-router"]
   module_v3_scripts["v3/scripts"]
   module_v3_vendor["v3/vendor"]
-  module_pending -->|13 edges / 4 paths| module_pending
+  module_pending -->|12 edges / 4 paths| module_pending
   module_routecodex_v3_admin -->|17 edges / 6 paths| module_routecodex_v3_admin
   module_routecodex_v3_admin -->|1 edges / 1 paths| module_v3_debug
   module_routecodex_v3_hooks -->|6 edges / 1 paths| module_routecodex_v3_hooks
@@ -96,7 +96,7 @@ flowchart TD
 
 | From module | To module | Edges | Functional paths |
 | --- | --- | ---: | --- |
-| pending | pending | 13 | `v3.operation_runner.dagpipe.error`<br/>`v3.operation_runner.dagpipe.request`<br/>`v3.operation_runner.dagpipe.response`<br/>`v3.responses_chat_sse_typed_tree` |
+| pending | pending | 12 | `v3.operation_runner.dagpipe.error`<br/>`v3.operation_runner.dagpipe.request`<br/>`v3.operation_runner.dagpipe.response`<br/>`v3.responses_chat_sse_typed_tree` |
 | routecodex-v3-admin | routecodex-v3-admin | 17 | `v3.admin.control_plane_admission`<br/>`v3.admin.environment_projection`<br/>`v3.admin.provider_authoring_write`<br/>`v3.admin.provider_candidate_probe`<br/>`v3.admin.provider_patrol_plan_authoring`<br/>`v3.admin.provider_patrol_run` |
 | routecodex-v3-admin | v3-debug | 1 | `v3.server.internal_observability_projection` |
 | routecodex-v3-hooks | routecodex-v3-hooks | 6 | `v3.rcc_internal_hooks_sidecar` |
@@ -171,7 +171,6 @@ flowchart TD
 | v3.runtime_restart_handoff_skeleton | v3-runtime-restart-handoff-01 | V3Front01StableRequestOwner | V3Front02RequestLeaseBound |
 | v3.runtime_restart_handoff_skeleton | v3-runtime-restart-handoff-02 | V3Front02RequestLeaseBound | V3Front08ClientTerminalOrError |
 | v3.operation_runner.dagpipe.request | v3-op-runner-req-02 | V3OperationRunnerNormalizeRequest | V3OperationRunnerResolveTarget |
-| v3.operation_runner.dagpipe.request | v3-op-runner-req-02b | V3OperationRunnerNormalizeRequest | V3OperationRunnerPlanExecution |
 | v3.operation_runner.dagpipe.request | v3-op-runner-req-03 | V3OperationRunnerResolveTarget | V3OperationRunnerPlanExecution |
 | v3.operation_runner.dagpipe.request | v3-op-runner-req-04 | V3OperationRunnerPlanExecution | V3OperationRunnerGovernChatRequest |
 | v3.operation_runner.dagpipe.request | v3-op-runner-req-05 | V3OperationRunnerGovernChatRequest | V3OperationRunnerProjectProviderSemantic |
@@ -3563,7 +3562,6 @@ flowchart TD
   end
   c_84_v3_operation_runner_dagpipe_request_0 -->|v3-op-runner-req-01<br/>V3OperationRunnerCaptureClientJson → V3OperationRunnerNormalizeRequest| c_84_v3_operation_runner_dagpipe_request_1
   c_84_v3_operation_runner_dagpipe_request_2 -->|v3-op-runner-req-02<br/>V3OperationRunnerNormalizeRequest → V3OperationRunnerResolveTarget| c_84_v3_operation_runner_dagpipe_request_2
-  c_84_v3_operation_runner_dagpipe_request_2 -->|v3-op-runner-req-02b<br/>V3OperationRunnerNormalizeRequest → V3OperationRunnerPlanExecution| c_84_v3_operation_runner_dagpipe_request_2
   c_84_v3_operation_runner_dagpipe_request_2 -->|v3-op-runner-req-03<br/>V3OperationRunnerResolveTarget → V3OperationRunnerPlanExecution| c_84_v3_operation_runner_dagpipe_request_2
   c_84_v3_operation_runner_dagpipe_request_2 -->|v3-op-runner-req-04<br/>V3OperationRunnerPlanExecution → V3OperationRunnerGovernChatRequest| c_84_v3_operation_runner_dagpipe_request_2
   c_84_v3_operation_runner_dagpipe_request_2 -->|v3-op-runner-req-05<br/>V3OperationRunnerGovernChatRequest → V3OperationRunnerProjectProviderSemantic| c_84_v3_operation_runner_dagpipe_request_2
@@ -3576,7 +3574,6 @@ flowchart TD
 | --- | --- | --- | --- | --- | --- |
 | `v3-op-runner-req-01` | `V3OperationRunnerCaptureClientJson` → `V3OperationRunnerNormalizeRequest` | runtime_bound | V3HubRelayRequestHooks::run<br/><small>routecodex-v3-runtime/src/hub_v1/relay_request.rs</small> | build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01<br/><small>routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs</small> | `v3.unified_operation_runner_design` |
 | `v3-op-runner-req-02` | `V3OperationRunnerNormalizeRequest` → `V3OperationRunnerResolveTarget` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
-| `v3-op-runner-req-02b` | `V3OperationRunnerNormalizeRequest` → `V3OperationRunnerPlanExecution` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
 | `v3-op-runner-req-03` | `V3OperationRunnerResolveTarget` → `V3OperationRunnerPlanExecution` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
 | `v3-op-runner-req-04` | `V3OperationRunnerPlanExecution` → `V3OperationRunnerGovernChatRequest` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
 | `v3-op-runner-req-05` | `V3OperationRunnerGovernChatRequest` → `V3OperationRunnerProjectProviderSemantic` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |

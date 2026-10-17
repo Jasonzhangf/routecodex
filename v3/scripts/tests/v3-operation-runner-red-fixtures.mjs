@@ -636,32 +636,42 @@ const mutations = [
     expect: /missing or malformed capture_client_json -> normalize_request_losslessly edge \(arc client-json\)/u,
   },
   {
-    name: 'missing-normalize-plan-graph-edge',
+    name: 'normalize-plan-graph-bypass',
     mutate(tmp) {
       const rel = 'docs/architecture/dagpipe/v3.operation_runner.request.graph.json';
       const file = path.join(tmp, rel);
       const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-      parsed.edges = parsed.edges.filter(
-        (edge) => !(edge?.from === 'normalize_request_losslessly' && edge?.to === 'plan_execution'),
-      );
+      parsed.edges.push({
+        from: 'normalize_request_losslessly',
+        to: 'plan_execution',
+        arc_id: 'canonical-request',
+      });
       fs.writeFileSync(file, JSON.stringify(parsed, null, 2));
     },
-    expect: /missing or malformed normalize_request_losslessly -> plan_execution edge/u,
+    expect: /canonical-request bypass normalize_request_losslessly -> plan_execution must be absent/u,
   },
   {
-    name: 'missing-normalize-plan-mainline-edge',
+    name: 'normalize-plan-mainline-bypass',
     mutate(tmp) {
       const rel = 'docs/architecture/v3-mainline-call-map.yml';
       const file = path.join(tmp, rel);
       const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
       const chain = doc.chains.find((item) => item.chain_id === 'v3.operation_runner.dagpipe.request');
       if (!chain) throw new Error('missing v3.operation_runner.dagpipe.request chain');
-      chain.edges = chain.edges.filter(
-        (edge) => !(edge?.from_node === 'V3OperationRunnerNormalizeRequest' && edge?.to_node === 'V3OperationRunnerPlanExecution'),
-      );
+      chain.edges.push({
+        step_id: 'v3-op-runner-req-02b',
+        from_node: 'V3OperationRunnerNormalizeRequest',
+        to_node: 'V3OperationRunnerPlanExecution',
+        caller_symbol: 'pending',
+        caller_file: 'pending',
+        callee_symbol: 'pending',
+        callee_file: 'pending',
+        status: 'binding_pending',
+        owner_feature_id: 'v3.unified_operation_runner_design',
+      });
       fs.writeFileSync(file, YAML.stringify(doc));
     },
-    expect: /missing normalize_request_losslessly -> plan_execution caller edge/u,
+    expect: /canonical-request bypass normalize_request_losslessly -> plan_execution must be absent/u,
   },
   {
     name: 'missing-transform-id',

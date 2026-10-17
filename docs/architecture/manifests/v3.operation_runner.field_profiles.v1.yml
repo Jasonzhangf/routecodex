@@ -508,9 +508,9 @@ arc_schema_registry:
       schema: Any
     - id: v3.operation_runner.arc.canonical_request
       schema: Object
-    - id: v3.operation_runner.arc.selected_target
+    - id: v3.operation_runner.arc.target_resolved_request
       schema: Object
-    - id: v3.operation_runner.arc.execution_plan
+    - id: v3.operation_runner.arc.execution_planned_request
       schema: Object
     - id: v3.operation_runner.arc.governed_request
       schema: Object
@@ -747,27 +747,15 @@ arc_schemas:
           enum:
             - v3.operation_runner.arc.canonical_request
       additionalProperties: true
-  - id: v3.operation_runner.arc.selected_target
+  - id: v3.operation_runner.arc.target_resolved_request
     schema:
+      description: The complete unchanged canonical business request after target resolution; target control remains in typed resources and side outputs.
       type: object
-      required:
-        - arc_id
-      properties:
-        arc_id:
-          type: string
-          enum:
-            - v3.operation_runner.arc.selected_target
       additionalProperties: true
-  - id: v3.operation_runner.arc.execution_plan
+  - id: v3.operation_runner.arc.execution_planned_request
     schema:
+      description: The complete unchanged canonical business request after execution planning; execution control remains in typed resources and side outputs.
       type: object
-      required:
-        - arc_id
-      properties:
-        arc_id:
-          type: string
-          enum:
-            - v3.operation_runner.arc.execution_plan
       additionalProperties: true
   - id: v3.operation_runner.arc.governed_request
     schema:

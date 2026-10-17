@@ -9710,23 +9710,6 @@ chains:
       - v3.operation_runner.request_inverse_context
       - v3.operation_runner.metadata_center_control
       side_channel_writes: [v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing]
-  - step_id: v3-op-runner-req-02b
-    from_node: V3OperationRunnerNormalizeRequest
-    to_node: V3OperationRunnerPlanExecution
-    caller_symbol: pending
-    caller_file: pending
-    callee_symbol: pending
-    callee_file: pending
-    status: binding_pending
-    owner_feature_id: v3.unified_operation_runner_design
-    resource_flow:
-      consumes: [v3.request.normal_payload, v3.config.published_manifest]
-      produces: [v3.request.normal_payload, v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing]
-      side_channel_reads:
-      - v3.operation_runner.request_origin_kind
-      - v3.operation_runner.request_inverse_context
-      - v3.operation_runner.metadata_center_control
-      side_channel_writes: [v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing]
   - step_id: v3-op-runner-req-03
     from_node: V3OperationRunnerResolveTarget
     to_node: V3OperationRunnerPlanExecution

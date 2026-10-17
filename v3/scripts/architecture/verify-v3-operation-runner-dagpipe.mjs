@@ -1348,25 +1348,87 @@ if (!captureSlice) {
   }
 }
 
-const normalizePlanEdges = (requestGraph.edges ?? []).filter(
-  (edge) => edge?.from === 'normalize_request_losslessly' && edge?.to === 'plan_execution',
-);
-if (normalizePlanEdges.length !== 1 || normalizePlanEdges[0]?.arc_id !== 'canonical-request') {
-  failures.push(`${requestGraphRel}: missing or malformed normalize_request_losslessly -> plan_execution edge (arc canonical-request)`);
+const requestNodesById = new Map((requestGraph.nodes ?? []).map((node) => [node.id, node]));
+const requestStageArcContract = [
+  {
+    nodeId: 'resolve_target',
+    inputs: ['canonical-request'],
+    outputId: 'target-resolved-request',
+    schemaRef: 'v3.operation_runner.arc.target_resolved_request',
+  },
+  {
+    nodeId: 'plan_execution',
+    inputs: ['target-resolved-request'],
+    outputId: 'execution-planned-request',
+    schemaRef: 'v3.operation_runner.arc.execution_planned_request',
+  },
+  {
+    nodeId: 'govern_chat_request',
+    inputs: ['execution-planned-request'],
+    outputId: 'governed-request',
+    schemaRef: 'v3.operation_runner.arc.governed_request',
+  },
+];
+for (const contract of requestStageArcContract) {
+  const node = requestNodesById.get(contract.nodeId);
+  if (!node) {
+    failures.push(`${requestGraphRel}: missing ${contract.nodeId} node`);
+    continue;
+  }
+  const inputsMatch = node.inputs?.length === contract.inputs.length
+    && node.inputs.every((arcId, index) => arcId === contract.inputs[index]);
+  if (!inputsMatch) {
+    failures.push(`${requestGraphRel}: ${contract.nodeId} inputs must be [${contract.inputs.join(', ')}]`);
+  }
+  if (node.output?.id !== contract.outputId || node.output?.schema_ref !== contract.schemaRef) {
+    failures.push(`${requestGraphRel}: ${contract.nodeId} output must be ${contract.outputId} (${contract.schemaRef})`);
+  }
 }
 
-const requestNormalizePlanMapEdge = (requestChain?.edges ?? []).find(
+for (const expected of [
+  { from: 'normalize_request_losslessly', to: 'resolve_target', arcId: 'canonical-request' },
+  { from: 'resolve_target', to: 'plan_execution', arcId: 'target-resolved-request' },
+  { from: 'plan_execution', to: 'govern_chat_request', arcId: 'execution-planned-request' },
+]) {
+  const edges = (requestGraph.edges ?? []).filter(
+    (edge) => edge?.from === expected.from && edge?.to === expected.to,
+  );
+  if (edges.length !== 1 || edges[0]?.arc_id !== expected.arcId) {
+    failures.push(`${requestGraphRel}: missing or malformed ${expected.from} -> ${expected.to} edge (arc ${expected.arcId})`);
+  }
+}
+
+const normalizePlanGraphEdges = (requestGraph.edges ?? []).filter(
+  (edge) => edge?.from === 'normalize_request_losslessly' && edge?.to === 'plan_execution',
+);
+if (normalizePlanGraphEdges.length !== 0) {
+  failures.push(`${requestGraphRel}: canonical-request bypass normalize_request_losslessly -> plan_execution must be absent`);
+}
+
+const requestNormalizePlanMapEdges = (requestChain?.edges ?? []).filter(
   (edge) => edge?.from_node === 'V3OperationRunnerNormalizeRequest' && edge?.to_node === 'V3OperationRunnerPlanExecution',
 );
-if (!requestNormalizePlanMapEdge) {
-  failures.push('v3-mainline-call-map.yml: v3.operation_runner.dagpipe.request missing normalize_request_losslessly -> plan_execution caller edge');
-} else {
-  if (requestNormalizePlanMapEdge.status !== 'binding_pending') {
-    failures.push('v3-mainline-call-map.yml: v3-op-runner-req-02b must preserve status binding_pending');
+if (requestNormalizePlanMapEdges.length !== 0) {
+  failures.push('v3-mainline-call-map.yml: canonical-request bypass normalize_request_losslessly -> plan_execution must be absent');
+}
+
+for (const expected of [
+  { stepId: 'v3-op-runner-req-03', from: 'V3OperationRunnerResolveTarget', to: 'V3OperationRunnerPlanExecution' },
+  { stepId: 'v3-op-runner-req-04', from: 'V3OperationRunnerPlanExecution', to: 'V3OperationRunnerGovernChatRequest' },
+]) {
+  const edge = (requestChain?.edges ?? []).find(
+    (candidate) => candidate?.from_node === expected.from && candidate?.to_node === expected.to,
+  );
+  if (!edge) {
+    failures.push(`v3-mainline-call-map.yml: v3.operation_runner.dagpipe.request missing ${expected.from} -> ${expected.to} caller edge`);
+    continue;
+  }
+  if (edge.step_id !== expected.stepId || edge.status !== 'binding_pending') {
+    failures.push(`v3-mainline-call-map.yml: ${expected.stepId} must preserve status binding_pending`);
   }
   for (const field of ['caller_symbol', 'caller_file', 'callee_symbol', 'callee_file']) {
-    if (requestNormalizePlanMapEdge[field] !== 'pending') {
-      failures.push(`v3-mainline-call-map.yml: v3-op-runner-req-02b must keep ${field} pending, not fake source binding`);
+    if (edge[field] !== 'pending') {
+      failures.push(`v3-mainline-call-map.yml: ${expected.stepId} must keep ${field} pending, not fake source binding`);
     }
   }
 }
