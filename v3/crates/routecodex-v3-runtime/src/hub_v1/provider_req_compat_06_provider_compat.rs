@@ -3,6 +3,7 @@ use super::{
     V3HubOpaquePayload, V3HubProviderWireProtocol, V3HubReqOutbound07ProviderSemantic,
     V3ProviderCompatError, V3ProviderCompatProfileId,
 };
+use pipeline_runtime::{Operator, OperatorContext, ValueType};
 use provider_compat_core::opencode_zen_tcm::{
     apply_opencode_zen_tcm_request, compile_opencode_zen_tcm_bridge, OpencodeZenTcmBridgeBinding,
     PROFILE as OPENCODE_ZEN_TCM_PROFILE,
@@ -14,8 +15,107 @@ use provider_compat_core::{
     compile_custom_tool_function_binding, CustomToolFunctionBinding, CUSTOM_TOOL_FUNCTION_PROFILE,
 };
 use serde_json::Value;
+use std::sync::{Arc, Mutex};
 
-use crate::projection_drop_log::V3ProjectionDropRecord;
+use crate::operation_runner::{run_v3_single_node_operator, V3OperationGraph};
+use routecodex_v3_target::V3TargetCandidate;
+
+const ADJUST_PROVIDER_PRIVATE_REQUEST_OPERATOR: &str =
+    "routecodex.v3.operation.adjust_provider_private_request";
+const ADJUST_PROVIDER_PRIVATE_REQUEST_NODE: &str = "adjust_provider_private_request";
+
+#[derive(Debug)]
+struct AdjustProviderPrivateRequestOutcome {
+    opencode_zen_tcm_bridge: Option<OpencodeZenTcmBridgeBinding>,
+    custom_tool_function_binding: Option<CustomToolFunctionBinding>,
+}
+
+#[derive(Debug)]
+struct AdjustProviderPrivateRequestError {
+    error: V3ProviderCompatError,
+}
+
+#[derive(Default)]
+struct AdjustProviderPrivateRequestSideOutput {
+    outcome: Mutex<
+        Option<Result<AdjustProviderPrivateRequestOutcome, AdjustProviderPrivateRequestError>>,
+    >,
+}
+
+struct AdjustProviderPrivateRequestOperator {
+    selected_target: V3TargetCandidate,
+    provider_protocol: V3HubProviderWireProtocol,
+    profile: V3ProviderCompatProfileId,
+    governed_source: Value,
+    side_output: Arc<AdjustProviderPrivateRequestSideOutput>,
+    execution_mode: super::V3HubExecutionMode,
+    entry_protocol: super::V3HubEntryProtocol,
+}
+
+impl Operator for AdjustProviderPrivateRequestOperator {
+    fn name(&self) -> &'static str {
+        ADJUST_PROVIDER_PRIVATE_REQUEST_OPERATOR
+    }
+
+    fn version(&self) -> &'static str {
+        "1"
+    }
+
+    fn input_type(&self) -> ValueType {
+        ValueType::Object
+    }
+
+    fn output_type(&self) -> ValueType {
+        ValueType::Object
+    }
+
+    fn execute(&self, input: Value, _: &OperatorContext) -> Result<Value, String> {
+        let result = apply_v3_provider_req_compat_to_provider_payload(
+            input,
+            &self.selected_target,
+            self.provider_protocol,
+            &self.profile,
+        )
+        .map(|(mut payload, custom_tool_function_binding)| {
+            let opencode_zen_tcm_bridge = if self
+                .profile
+                .as_str()
+                .eq_ignore_ascii_case(OPENCODE_ZEN_TCM_PROFILE)
+                && self.entry_protocol == super::V3HubEntryProtocol::Responses
+                && self.provider_protocol == V3HubProviderWireProtocol::OpenAiChat
+                && self.execution_mode == super::V3HubExecutionMode::Relay
+            {
+                compile_opencode_zen_tcm_bridge(&self.governed_source, &payload)
+            } else {
+                None
+            };
+            if let Some(binding) = &opencode_zen_tcm_bridge {
+                apply_opencode_zen_tcm_request(&mut payload, binding);
+            }
+            let outcome = AdjustProviderPrivateRequestOutcome {
+                opencode_zen_tcm_bridge,
+                custom_tool_function_binding,
+            };
+            (payload, outcome)
+        })
+        .map_err(|error| AdjustProviderPrivateRequestError { error });
+        let mut side_output =
+            self.side_output.outcome.lock().map_err(|_| {
+                "adjust_provider_private_request side output lock poisoned".to_string()
+            })?;
+        match result {
+            Ok((payload, outcome)) => {
+                *side_output = Some(Ok(outcome));
+                Ok(payload)
+            }
+            Err(error) => {
+                let message = error.error.to_string();
+                *side_output = Some(Err(error));
+                Err(message)
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProviderReqCompat06ProviderCompat {
@@ -35,59 +135,65 @@ pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
         Some(profile) => V3ProviderCompatProfileId::from_config(Some(profile)),
         None => V3ProviderCompatProfileId::Passthrough,
     };
-    let (mut payload, drops, custom_tool_function_binding, namespace_registry) =
-        apply_v3_provider_req_compat(&input, &profile)?;
-    let opencode_zen_tcm_bridge = if profile
-        .as_str()
-        .eq_ignore_ascii_case(OPENCODE_ZEN_TCM_PROFILE)
-        && input.entry_protocol() == super::V3HubEntryProtocol::Responses
-        && input.provider_protocol == V3HubProviderWireProtocol::OpenAiChat
-        && input.previous.previous.execution == super::V3HubExecutionMode::Relay
-    {
-        compile_opencode_zen_tcm_bridge(input.governed_payload(), &payload)
-    } else {
-        None
+    let side_output = Arc::new(AdjustProviderPrivateRequestSideOutput::default());
+    let output = run_v3_single_node_operator(
+        V3OperationGraph::Request,
+        ADJUST_PROVIDER_PRIVATE_REQUEST_NODE,
+        input.provider_semantic_payload().clone(),
+        AdjustProviderPrivateRequestOperator {
+            selected_target: input.selected_target().clone(),
+            provider_protocol: input.provider_protocol,
+            profile: profile.clone(),
+            governed_source: input.governed_payload().clone(),
+            side_output: Arc::clone(&side_output),
+            execution_mode: input.previous.previous.execution,
+            entry_protocol: input.entry_protocol(),
+        },
+    );
+    let typed_outcome = side_output
+        .outcome
+        .lock()
+        .map_err(|_| {
+            classify_v3_provider_compat_error(
+                "request",
+                &profile,
+                "adjust_provider_private_request side output lock poisoned".to_string(),
+            )
+        })?
+        .take();
+    let outcome = match typed_outcome {
+        Some(Ok(outcome)) => outcome,
+        Some(Err(error)) => return Err(error.error),
+        None => {
+            return match output {
+                Err(error) => Err(classify_v3_provider_compat_error(
+                    "request",
+                    &profile,
+                    error.message,
+                )),
+                Ok(_) => Err(classify_v3_provider_compat_error(
+                    "request",
+                    &profile,
+                    "adjust_provider_private_request produced no typed outcome".to_string(),
+                )),
+            };
+        }
     };
-    if let Some(binding) = &opencode_zen_tcm_bridge {
-        apply_opencode_zen_tcm_request(&mut payload, binding);
-    }
+    let output = output
+        .map_err(|error| classify_v3_provider_compat_error("request", &profile, error.message))?;
+    let namespace_registry = input.namespace_registry.clone();
+    let drops = input.drops.clone();
     Ok(ProviderReqCompat06Projected {
         node: ProviderReqCompat06ProviderCompat {
             previous: input,
             profile,
-            payload: V3HubOpaquePayload(std::sync::Arc::new(payload)),
-            opencode_zen_tcm_bridge,
-            custom_tool_function_binding,
+            payload: V3HubOpaquePayload(Arc::new(output)),
+            opencode_zen_tcm_bridge: outcome.opencode_zen_tcm_bridge,
+            custom_tool_function_binding: outcome.custom_tool_function_binding,
             namespace_registry,
         },
         drops,
     })
-}
-
-pub(super) fn apply_v3_provider_req_compat(
-    input: &V3HubReqOutbound07ProviderSemantic,
-    profile: &V3ProviderCompatProfileId,
-) -> Result<
-    (
-        Value,
-        Vec<V3ProjectionDropRecord>,
-        Option<CustomToolFunctionBinding>,
-        provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry,
-    ),
-    V3ProviderCompatError,
-> {
-    let (payload, custom_tool_function_binding) = apply_v3_provider_req_compat_to_provider_payload(
-        input.provider_semantic_payload().clone(),
-        input.selected_target(),
-        input.provider_protocol,
-        profile,
-    )?;
-    Ok((
-        payload,
-        input.drops.clone(),
-        custom_tool_function_binding,
-        input.namespace_registry.clone(),
-    ))
 }
 
 pub(crate) fn provider_req_compat_reasoning_effort_explicit(payload: &Value) -> bool {
@@ -1175,6 +1281,130 @@ mod tests {
         assert_eq!(
             req_compat.provider_semantic_payload()["reasoning"]["effort"],
             "low"
+        );
+    }
+
+    #[test]
+    fn opencode_zen_tcm_bridge_request_rewrite_executes_inside_private_request_operator() {
+        let client = json!({
+            "model": "client-route-alias",
+            "input": "hello",
+            "tools": [{
+                "type": "namespace",
+                "name": "functions",
+                "tools": [{
+                    "type": "custom",
+                    "name": "exec",
+                    "description": "Evaluates JavaScript in a fresh V8 isolate as an async module. tools.exec_command. Runs raw JavaScript. text(value)",
+                    "format": {
+                        "type": "grammar",
+                        "syntax": "lark",
+                        "definition": provider_compat_core::opencode_zen_tcm::TCM_GRAMMAR
+                    }
+                }]
+            }]
+        });
+        let mut selected = selected_candidate(V3HubProviderWireProtocol::OpenAiChat);
+        selected.compatibility_profile = Some(OPENCODE_ZEN_TCM_PROFILE.to_string());
+        let req07 = relay_req07_for_entry_with_candidate(
+            V3HubEntryProtocol::Responses,
+            client,
+            V3HubProviderWireProtocol::OpenAiChat,
+            selected,
+        )
+        .expect("OpenCode TCM fixture must pass standard provider projection");
+        let governed_source = req07.governed_payload().clone();
+        let provider_semantic_payload = req07.provider_semantic_payload().clone();
+        let side_output = Arc::new(AdjustProviderPrivateRequestSideOutput::default());
+        let output = run_v3_single_node_operator(
+            V3OperationGraph::Request,
+            ADJUST_PROVIDER_PRIVATE_REQUEST_NODE,
+            provider_semantic_payload,
+            AdjustProviderPrivateRequestOperator {
+                selected_target: req07.selected_target().clone(),
+                provider_protocol: req07.provider_protocol,
+                profile: V3ProviderCompatProfileId::from_config(
+                    req07.selected_target().compatibility_profile.as_deref(),
+                ),
+                governed_source,
+                side_output: Arc::clone(&side_output),
+                execution_mode: req07.previous.previous.execution,
+                entry_protocol: req07.entry_protocol(),
+            },
+        )
+        .expect("canonical private request node must execute");
+        let outcome = side_output
+            .outcome
+            .lock()
+            .unwrap()
+            .take()
+            .expect("operator must retain typed side output")
+            .expect("operator must succeed");
+        let bridge = outcome
+            .opencode_zen_tcm_bridge
+            .expect("actual TCM declaration and provider projection must bind");
+        assert_eq!(bridge.executor_wire_name, "functions__exec");
+        assert!(output["tools"]
+            .as_array()
+            .is_some_and(|tools| { tools.iter().any(|tool| tool["function"]["name"] == "bash") }));
+    }
+
+    #[test]
+    fn custom_tool_function_binding_is_retained_from_private_request_operator() {
+        let mut selected = selected_candidate(V3HubProviderWireProtocol::Responses);
+        selected.compatibility_profile = Some(CUSTOM_TOOL_FUNCTION_PROFILE.to_string());
+        let req07 = relay_req07_for_entry_with_candidate(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "tools": [{"type": "custom", "name": "apply_patch"}]
+            }),
+            V3HubProviderWireProtocol::Responses,
+            selected,
+        )
+        .expect("custom tool fixture must pass standard provider projection");
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("private request operator must retain the custom tool binding");
+        let binding = req_compat
+            .custom_tool_function_binding
+            .as_ref()
+            .expect("actual custom tool declaration must produce a typed binding");
+        assert_eq!(
+            binding.wire_name_for("apply_patch"),
+            Some("routecodex_custom__6170706c795f7061746368")
+        );
+    }
+
+    #[test]
+    fn private_request_operator_preserves_original_typed_error() {
+        let mut selected = selected_candidate(V3HubProviderWireProtocol::Responses);
+        selected.reasoning_effort = Some(routecodex_v3_config::V3ReasoningEffort::High);
+        let mut req07 = relay_req07_for_entry_with_candidate(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello"
+            }),
+            V3HubProviderWireProtocol::Responses,
+            selected,
+        )
+        .expect("fixture must reach private provider compat");
+        req07.standard_provider_payload =
+            V3HubOpaquePayload(Arc::new(json!({"reasoning": "opaque-non-object"})));
+
+        let error = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect_err("opaque reasoning data must not be replaced by configured effort");
+        assert_eq!(error.stage, "request_reasoning_effort_policy");
+        assert_eq!(error.profile, "compat:passthrough");
+        assert_eq!(
+            error.classification(),
+            crate::hub_v1::V3ProviderCompatErrorClassification::RequestPayloadInvalid
+        );
+        assert_eq!(
+            error.reason,
+            "cannot represent configured reasoning.effort in non-object reasoning without replacing opaque business data"
         );
     }
 
