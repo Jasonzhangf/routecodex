@@ -482,21 +482,17 @@ fn project_json_response(
     if web_search_transition.is_some() {
         return Err(V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected);
     }
-    let client_payload = if resp03
-        .provider_payload()
-        .get("output")
-        .and_then(Value::as_array)
-        .is_some()
-    {
-        project_v3_openai_chat_client_response_from_canonical(resp03.provider_payload())
-            .map_err(V3OpenAiChatRelayRuntimeError::Target)?
-    } else {
-        resp03.provider_payload().clone()
-    };
-    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload(
+    let resp05 = try_build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_projector(
         resp03,
-        client_payload,
-    );
+        move |payload| {
+            if payload.get("output").and_then(Value::as_array).is_some() {
+                project_v3_openai_chat_client_response_from_canonical(&payload)
+            } else {
+                Ok(payload)
+            }
+        },
+    )
+    .map_err(|error| V3OpenAiChatRelayRuntimeError::Target(error.to_string()))?;
     trace.push("V3HubRespOutbound05ClientSemantic");
     let client = resp05.client_payload().clone();
     let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);

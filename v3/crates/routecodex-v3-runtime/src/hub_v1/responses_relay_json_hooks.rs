@@ -115,11 +115,11 @@ pub(crate) fn run_json_response_hooks(
         input.provider_semantic_body,
         std::sync::Arc::make_mut(resp03.previous.provider_payload_mut()),
     );
-    let client_payload = project_v3_responses_client_completed_response(resp03.provider_payload());
-    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload(
+    let resp05 = try_build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_projector(
         resp03,
-        client_payload,
-    );
+        |payload| Ok(project_v3_responses_client_completed_response(&payload)),
+    )
+    .map_err(|error| V3ResponsesRelayRuntimeError::Target(error.to_string()))?;
     let mut finalized_payload = resp05.client_payload().clone();
     trace.push("V3HubRespOutbound05ClientSemantic");
     crate::direct_response_hooks::apply_v3_memory_raw_capture_json_payload(
