@@ -20,11 +20,11 @@
       }
     },
     {
-      "id": "error_err02_host_captured",
-      "operator": "routecodex.v3.error.err02_host_captured",
+      "id": "error_err02_classified",
+      "operator": "routecodex.v3.error.err02_classified",
       "operator_version": "1",
       "inputs": ["error-source"],
-      "output": { "id": "error-host-captured", "schema": "Object", "schema_ref": "v3.operation_runner.arc.error_host_captured" },
+      "output": { "id": "error-classified", "schema": "Object", "schema_ref": "v3.operation_runner.arc.error_classified" },
       "input_selector": { "include": [], "exclude": [], "predicate": null },
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
@@ -34,44 +34,44 @@
       }
     },
     {
-      "id": "error_err03_runtime_classified",
-      "operator": "routecodex.v3.error.err03_runtime_classified",
+      "id": "error_err03_target_local_action",
+      "operator": "routecodex.v3.error.err03_target_local_action",
       "operator_version": "1",
-      "inputs": ["error-host-captured"],
-      "output": { "id": "error-classified", "schema": "Object", "schema_ref": "v3.operation_runner.arc.error_classified" },
+      "inputs": ["error-classified"],
+      "output": { "id": "error-target-local-action", "schema": "Object", "schema_ref": "v3.operation_runner.arc.error_target_local_action" },
       "input_selector": { "include": [], "exclude": [], "predicate": null },
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": ["v3.error.chain", "provider_runtime.observation"],
-        "writes": ["v3.error.chain", "provider_runtime.observation"]
+        "reads": ["v3.error.chain"],
+        "writes": ["v3.error.chain", "v3.error.action_plan"]
       }
     },
     {
-      "id": "error_err04_router_policy_applied",
-      "operator": "routecodex.v3.error.err04_router_policy_applied",
+      "id": "error_err04_target_exhaustion",
+      "operator": "routecodex.v3.error.err04_target_exhaustion",
       "operator_version": "1",
-      "inputs": ["error-classified"],
-      "output": { "id": "error-policy-applied", "schema": "Object", "schema_ref": "v3.operation_runner.arc.error_policy_applied" },
+      "inputs": ["error-target-local-action"],
+      "output": { "id": "error-target-exhaustion", "schema": "Object", "schema_ref": "v3.operation_runner.arc.error_target_exhaustion" },
       "input_selector": { "include": [], "exclude": [], "predicate": null },
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": ["v3.error.chain", "route.retry_exclusion_set"],
-        "writes": ["v3.error.chain", "route.retry_exclusion_set"]
+        "reads": ["v3.error.chain", "v3.error.action_plan"],
+        "writes": ["v3.error.chain", "v3.error.exhaustion_decision"]
       }
     },
     {
       "id": "error_err05_execution_decision",
       "operator": "routecodex.v3.error.err05_execution_decision",
       "operator_version": "1",
-      "inputs": ["error-policy-applied"],
-      "output": { "id": "error-execution-decision", "schema": "Object", "schema_ref": "v3.operation_runner.arc.error_projection_input" },
+      "inputs": ["error-target-exhaustion"],
+      "output": { "id": "error-execution-decision", "schema": "Object", "schema_ref": "v3.operation_runner.arc.error_execution_decision" },
       "input_selector": { "include": [], "exclude": [], "predicate": null },
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": ["v3.error.chain", "v3.error.execution_decision"],
+        "reads": ["v3.error.chain", "v3.error.exhaustion_decision"],
         "writes": ["v3.error.chain", "v3.error.execution_decision"]
       }
     },
@@ -91,10 +91,10 @@
     }
   ],
   "edges": [
-    { "from": "error_err01_source_raised", "to": "error_err02_host_captured", "arc_id": "error-source" },
-    { "from": "error_err02_host_captured", "to": "error_err03_runtime_classified", "arc_id": "error-host-captured" },
-    { "from": "error_err03_runtime_classified", "to": "error_err04_router_policy_applied", "arc_id": "error-classified" },
-    { "from": "error_err04_router_policy_applied", "to": "error_err05_execution_decision", "arc_id": "error-policy-applied" },
+    { "from": "error_err01_source_raised", "to": "error_err02_classified", "arc_id": "error-source" },
+    { "from": "error_err02_classified", "to": "error_err03_target_local_action", "arc_id": "error-classified" },
+    { "from": "error_err03_target_local_action", "to": "error_err04_target_exhaustion", "arc_id": "error-target-local-action" },
+    { "from": "error_err04_target_exhaustion", "to": "error_err05_execution_decision", "arc_id": "error-target-exhaustion" },
     { "from": "error_err05_execution_decision", "to": "error_err06_client_projected", "arc_id": "error-execution-decision" }
   ],
   "outputs": ["internal-error-outcome"]
