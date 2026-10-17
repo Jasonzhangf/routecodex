@@ -110,6 +110,8 @@ port = {port}
 routing_group = "recovery"
 endpoints = ["openai_chat"]
 {execution}
+[servers.chat.execution.attempt_store]
+request_max_attempts = 1
 [providers.healthy]
 type = "openai_chat"
 base_url = "{base}/healthy/v1"
@@ -370,7 +372,7 @@ async fn public_recovery_witness_with_generation(
     let earlier_business = if advance_generation {
         let request = tokio::spawn(raw_chat(
             port,
-            "cooled.step-5-preview",
+            "step-5-preview",
             "earlier business generation marker",
             false,
         ));

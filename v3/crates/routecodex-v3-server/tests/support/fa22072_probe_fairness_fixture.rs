@@ -67,12 +67,10 @@ async fn serve(
     }
     if marker == "ping; reply pong" {
         assert_eq!(body["model"], "recovery");
-        assert_eq!(
-            index, 4,
-            "the four earlier provider/auth budgets must remain held"
-        );
-        peer.fifth_entered.add_permits(1);
-        peer.fifth_release.acquire().await.unwrap().forget();
+        if index == 4 {
+            peer.fifth_entered.add_permits(1);
+            peer.fifth_release.acquire().await.unwrap().forget();
+        }
         return (StatusCode::OK, Json(json!({"actual":"2xx probe success"})));
     }
     (
@@ -105,7 +103,7 @@ pub fn manifest(base: &str, port: u16) -> (V3Config05ManifestPublished, Vec<Stri
     let ids: Vec<String> = (0..5)
         .map(|index| format!("fairness_{port}_{index}"))
         .collect();
-    let mut source = format!("version = 3\n{}\n[servers.chat]\nbind = \"127.0.0.1\"\nport = {port}\nrouting_group = \"fairness\"\nendpoints = [\"openai_chat\"]\n{}\n[debug]\nlog_console = true\nsnapshots = false\ncodex_samples = false\n", hub_v1_fixture::hub_v1_test_declaration(), hub_v1_fixture::hub_v1_server_execution("chat"));
+    let mut source = format!("version = 3\n{}\n[servers.chat]\nbind = \"127.0.0.1\"\nport = {port}\nrouting_group = \"fairness\"\nendpoints = [\"openai_chat\"]\n{}\n[servers.chat.execution.attempt_store]\nrequest_max_attempts = 1\n[debug]\nlog_console = true\nsnapshots = false\ncodex_samples = false\n", hub_v1_fixture::hub_v1_test_declaration(), hub_v1_fixture::hub_v1_server_execution("chat"));
     for (index, id) in ids.iter().enumerate() {
         source.push_str(&format!(
             r#"

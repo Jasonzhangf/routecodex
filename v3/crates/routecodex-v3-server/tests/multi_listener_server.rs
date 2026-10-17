@@ -35,8 +35,6 @@ static TEST_LOCK: Mutex<()> = Mutex::const_new(());
 #[path = "support/image_input_blackbox.rs"]
 mod image_input_blackbox;
 
-#[path = "support/pool_empty_recovery_blackbox.rs"]
-mod pool_empty_recovery_blackbox;
 
 #[path = "multi_listener_server/issue127_disabled_health.rs"]
 mod issue127_disabled_health;
@@ -656,6 +654,21 @@ allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
 "#;
+
+fn with_attempt_budget(
+    mut manifest: routecodex_v3_config::V3Config05ManifestPublished,
+    attempts: usize,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    for server in manifest.servers.values_mut() {
+        server
+            .execution
+            .as_mut()
+            .unwrap()
+            .attempt_store
+            .request_max_attempts = attempts;
+    }
+    manifest
+}
 
 fn manifest(port_a: u16, port_b: u16) -> routecodex_v3_config::V3Config05ManifestPublished {
     manifest_with_debug(port_a, port_b, true, true)
@@ -2769,10 +2782,9 @@ async fn responses_websocket_provider_429_is_recorded_as_provider_private_eviden
     )
     .await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-ws-429-evidence");
-    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
-        free_port(),
-        free_port(),
-        &provider_base_url,
+    let handle = spawn_v3_server_aggregate(with_attempt_budget(
+        responses_relay_manifest(free_port(), free_port(), &provider_base_url),
+        1,
     ))
     .await
     .unwrap();
@@ -6703,10 +6715,9 @@ async fn responses_inbound_websocket_transport_failure_closes_without_fabricated
         format!("ws://{addr}/v1/responses")
     };
     std::env::set_var("V3_P6_TEST_KEY", "secret-p6-inbound-ws-provider-error");
-    let handle = spawn_v3_server_aggregate(p6_remote_continuation_manifest(
-        free_port(),
-        free_port(),
-        &closed_websocket_url,
+    let handle = spawn_v3_server_aggregate(with_attempt_budget(
+        p6_remote_continuation_manifest(free_port(), free_port(), &closed_websocket_url),
+        1,
     ))
     .await
     .unwrap();
@@ -6778,10 +6789,9 @@ async fn responses_inbound_websocket_provider_429_never_reaches_the_client() {
     )
     .await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-ws-429");
-    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
-        free_port(),
-        free_port(),
-        &provider_base_url,
+    let handle = spawn_v3_server_aggregate(with_attempt_budget(
+        responses_relay_manifest(free_port(), free_port(), &provider_base_url),
+        1,
     ))
     .await
     .unwrap();
@@ -6814,10 +6824,9 @@ async fn responses_inbound_websocket_upstream_502_closes_without_fabricated_even
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_terminal_upstream(StatusCode::BAD_GATEWAY).await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-ws-502");
-    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
-        free_port(),
-        free_port(),
-        &provider_base_url,
+    let handle = spawn_v3_server_aggregate(with_attempt_budget(
+        responses_relay_manifest(free_port(), free_port(), &provider_base_url),
+        1,
     ))
     .await
     .unwrap();
@@ -6862,10 +6871,9 @@ async fn responses_inbound_websocket_binary_provider_error_body_never_reaches_th
     )
     .await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-ws-binary-error");
-    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
-        free_port(),
-        free_port(),
-        &provider_base_url,
+    let handle = spawn_v3_server_aggregate(with_attempt_budget(
+        responses_relay_manifest(free_port(), free_port(), &provider_base_url),
+        1,
     ))
     .await
     .unwrap();
@@ -7399,10 +7407,12 @@ async fn responses_direct_provider_http_error_never_reaches_the_client() {
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_capturing_failure_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-key");
-    let handle =
-        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &provider_base_url))
-            .await
-            .unwrap();
+    let handle = spawn_v3_server_aggregate(with_attempt_budget(
+        p6_manifest(free_port(), free_port(), &provider_base_url),
+        1,
+    ))
+    .await
+    .unwrap();
     let client = reqwest::Client::new();
 
     // The last real upstream HTTP error is provider-side evidence only. The
@@ -7527,7 +7537,7 @@ async fn model_entries_never_deliver_provider_or_sse_decode_errors_blackbox() {
                     server.endpoints.push("anthropic".to_owned());
                     server.endpoints.push("gemini".to_owned());
                 }
-                let handle = spawn_v3_server_aggregate(config).await.unwrap();
+                let handle = spawn_v3_server_aggregate(with_attempt_budget(config, 1)).await.unwrap();
                 let addr = handle.listeners[0].addr;
                 let payload = if endpoint.starts_with("/v1/responses") {
                     json!({"model":"client-test", "input":"hello", "stream":streaming})
@@ -7605,10 +7615,9 @@ async fn responses_inbound_websocket_sse_decode_failure_never_sends_client_error
     )
     .await;
     std::env::set_var("V3_P6_TEST_KEY", "controlled-ws-sse-decode-error");
-    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
-        free_port(),
-        free_port(),
-        &provider_url,
+    let handle = spawn_v3_server_aggregate(with_attempt_budget(
+        responses_relay_manifest(free_port(), free_port(), &provider_url),
+        1,
     ))
     .await
     .unwrap();
@@ -7828,10 +7837,9 @@ async fn anthropic_messages_provider_failure_never_reaches_the_client() {
         .expect("controlled provider base URL must end in /v1")
         .to_string();
     std::env::set_var("V3_P6_ANTHROPIC_KEY", "secret-anthropic");
-    let handle = spawn_v3_server_aggregate(anthropic_failure_manifest(
-        free_port(),
-        free_port(),
-        &provider_base_url,
+    let handle = spawn_v3_server_aggregate(with_attempt_budget(
+        anthropic_failure_manifest(free_port(), free_port(), &provider_base_url),
+        1,
     ))
     .await
     .unwrap();
@@ -7853,10 +7861,9 @@ async fn anthropic_messages_provider_failure_never_reaches_the_client() {
     assert_incomplete_sse_or_no_response(response).await;
 
     handle.shutdown().await;
-    let json_handle = spawn_v3_server_aggregate(anthropic_failure_manifest(
-        free_port(),
-        free_port(),
-        &provider_base_url,
+    let json_handle = spawn_v3_server_aggregate(with_attempt_budget(
+        anthropic_failure_manifest(free_port(), free_port(), &provider_base_url),
+        1,
     ))
     .await
     .unwrap();

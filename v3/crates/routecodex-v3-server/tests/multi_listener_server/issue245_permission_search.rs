@@ -200,9 +200,12 @@ async fn issue245_witness(stream: bool) {
     let reserved = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = reserved.local_addr().unwrap().port();
     drop(reserved);
-    let handle = spawn_v3_server_aggregate(manifest(port, &base_a, &base_b, &base_hosted))
-        .await
-        .unwrap();
+    let handle = spawn_v3_server_aggregate(crate::with_attempt_budget(
+        manifest(port, &base_a, &base_b, &base_hosted),
+        2,
+    ))
+    .await
+    .unwrap();
     let base = format!("http://{}", handle.listeners[0].addr);
     let client = reqwest::Client::builder()
         .no_proxy()
