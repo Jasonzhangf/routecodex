@@ -3,9 +3,9 @@ use crate::hub_v1::{V3HubEntryProtocol, V3HubExecutionMode};
 use crate::nodes::V3Execution11ProtocolDecisionMode;
 use crate::provider_failure_runtime_policy::{
     expand_v3_relay_target_candidates_from_opaque_hit,
-    initiate_v3_target_pre_exhaustion_rescue_probes, step_v3_target_planning_with_admission_sync,
-    V3ProviderFailureRuntimeHealth, V3SynchronousTargetAdmissionStep,
-    V3SynchronousTargetPlanningInput,
+    initiate_v3_target_pre_exhaustion_rescue_probes, select_v3_target_with_session_then_global,
+    step_v3_target_planning_with_admission_sync, V3ProviderFailureRuntimeHealth,
+    V3SynchronousTargetAdmissionStep, V3SynchronousTargetPlanningInput,
 };
 use pipeline_runtime::{Operator, OperatorContext, ValueType};
 use routecodex_v3_config::V3Config05ManifestPublished;
@@ -40,6 +40,12 @@ pub(crate) enum V3PlanExecutionModePolicy {
         entry_protocol: V3HubEntryProtocol,
         allowed_modes: Vec<String>,
     },
+}
+
+#[derive(Clone, Copy)]
+enum V3PlanExecutionPhase {
+    AdmitAtExecution,
+    PreplanWithoutAdmission,
 }
 
 pub(crate) struct V3PlanExecutionCompleted {
@@ -82,6 +88,11 @@ pub(crate) enum V3PlanExecutionOutcome {
 }
 
 enum PlanExecutionOperatorOutput {
+    Preplanned {
+        expanded: V3Target09CandidateSetExpanded,
+        decision: crate::nodes::V3Execution11ProtocolDecision,
+        request_local_excluded_candidates: BTreeSet<String>,
+    },
     Selected {
         expanded: V3Target09CandidateSetExpanded,
         decision: crate::nodes::V3Execution11ProtocolDecision,
@@ -106,6 +117,7 @@ enum PlanExecutionOperatorOutput {
 }
 
 struct PlanExecutionOperator {
+    phase: V3PlanExecutionPhase,
     manifest: V3Config05ManifestPublished,
     target_source: V3PlanExecutionTargetSource,
     failure_session_scope: V3ProviderFailureSessionScope,
@@ -123,6 +135,7 @@ struct PlanExecutionOperator {
 
 impl PlanExecutionOperator {
     fn new(
+        phase: V3PlanExecutionPhase,
         manifest: V3Config05ManifestPublished,
         target_source: V3PlanExecutionTargetSource,
         failure_session_scope: V3ProviderFailureSessionScope,
@@ -138,6 +151,7 @@ impl PlanExecutionOperator {
         side_output: Arc<Mutex<Option<PlanExecutionOperatorOutput>>>,
     ) -> Self {
         Self {
+            phase,
             manifest,
             target_source,
             failure_session_scope,
@@ -194,6 +208,37 @@ impl PlanExecutionOperator {
                 }
             }
         };
+        if matches!(self.phase, V3PlanExecutionPhase::PreplanWithoutAdmission) {
+            let selected = match select_v3_target_with_session_then_global(
+                &routecodex_v3_target::V3TargetInterpreter::default(),
+                expanded.clone(),
+                &self
+                    .provider_health
+                    .session_bound_availability(&self.failure_session_scope),
+                &self.provider_health,
+                &self.request_local_excluded_candidates,
+                self.now_ms,
+                self.deterministic_sample,
+            ) {
+                Ok(selected) => selected,
+                Err(exhaustion) => {
+                    return PlanExecutionOperatorOutput::Exhausted {
+                        expanded,
+                        exhaustion,
+                    }
+                }
+            };
+            return match self.decide_execution_mode(selected) {
+                Ok(decision) => PlanExecutionOperatorOutput::Preplanned {
+                    expanded,
+                    decision,
+                    request_local_excluded_candidates: self
+                        .request_local_excluded_candidates
+                        .clone(),
+                },
+                Err(source) => PlanExecutionOperatorOutput::Failed(source),
+            };
+        }
         let step = step_v3_target_planning_with_admission_sync(V3SynchronousTargetPlanningInput {
             manifest: &self.manifest,
             expanded: expanded.clone(),
@@ -303,6 +348,7 @@ pub(crate) fn run_v3_plan_execution_operator(
 ) -> Result<V3PlanExecutionOutcome, OperationRunnerError> {
     let side_output = Arc::new(Mutex::new(None));
     let operator = PlanExecutionOperator::new(
+        V3PlanExecutionPhase::AdmitAtExecution,
         manifest,
         target_source,
         failure_session_scope,
@@ -337,6 +383,11 @@ pub(crate) fn run_v3_plan_execution_operator(
         OperationRunnerError::new("plan_execution operator omitted typed side output")
     })?;
     Ok(match output {
+        PlanExecutionOperatorOutput::Preplanned { .. } => {
+            return Err(OperationRunnerError::new(
+                "admitting plan_execution operator returned a preplanned output",
+            ))
+        }
         PlanExecutionOperatorOutput::Selected {
             expanded,
             decision,
@@ -385,6 +436,117 @@ pub(crate) fn run_v3_plan_execution_operator(
             request_local_excluded_candidates,
         },
     })
+}
+
+pub(crate) struct V3PlanExecutionPreplan {
+    pub(crate) expanded: V3Target09CandidateSetExpanded,
+    pub(crate) protocol_decision: crate::nodes::V3Execution11ProtocolDecision,
+    pub(crate) request_local_excluded_candidates: BTreeSet<String>,
+}
+
+pub(crate) fn run_v3_plan_execution_preplan_operator(
+    target_resolved_request: Value,
+    manifest: V3Config05ManifestPublished,
+    target_source: V3PlanExecutionTargetSource,
+    failure_session_scope: V3ProviderFailureSessionScope,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    request_local_excluded_candidates: BTreeSet<String>,
+    now_ms: u64,
+    deterministic_sample: u64,
+    mode_policy: V3PlanExecutionModePolicy,
+) -> Result<V3PlanExecutionPreplan, V3PlanExecutionStop> {
+    let side_output = Arc::new(Mutex::new(None));
+    let operator = PlanExecutionOperator::new(
+        V3PlanExecutionPhase::PreplanWithoutAdmission,
+        manifest,
+        target_source,
+        failure_session_scope,
+        provider_health,
+        request_local_excluded_candidates,
+        now_ms,
+        deterministic_sample,
+        false,
+        None,
+        mode_policy,
+        false,
+        false,
+        side_output.clone(),
+    );
+    let runner_result = run_v3_single_node_operator(
+        V3OperationGraph::Request,
+        "plan_execution",
+        target_resolved_request,
+        operator,
+    );
+    let output = side_output
+        .lock()
+        .map_err(|_| {
+            V3PlanExecutionStop::Failed(build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3OperationRunnerPlanExecution",
+                "plan_execution_operator_failed",
+                "plan_execution typed side-output holder is poisoned",
+            ))
+        })?
+        .take();
+    // Preplanning publishes typed control only. The actual request later
+    // consumes the SDK payload output in the admitting execution path.
+    match runner_result {
+        Ok(_) => {}
+        Err(error) => {
+            let source = match output {
+                Some(PlanExecutionOperatorOutput::Failed(source)) => source,
+                _ => build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::RuntimeFailure,
+                    "V3OperationRunnerPlanExecution",
+                    "plan_execution_operator_failed",
+                    error.message,
+                ),
+            };
+            return Err(V3PlanExecutionStop::Failed(source));
+        }
+    }
+    match output {
+        Some(PlanExecutionOperatorOutput::Preplanned {
+            expanded,
+            decision,
+            request_local_excluded_candidates,
+        }) => Ok(V3PlanExecutionPreplan {
+            expanded,
+            protocol_decision: decision,
+            request_local_excluded_candidates,
+        }),
+        Some(PlanExecutionOperatorOutput::Exhausted {
+            expanded,
+            exhaustion,
+        }) => Err(V3PlanExecutionStop::Exhausted {
+            expanded,
+            exhaustion,
+        }),
+        Some(PlanExecutionOperatorOutput::Failed(source)) => {
+            Err(V3PlanExecutionStop::Failed(source))
+        }
+        Some(
+            PlanExecutionOperatorOutput::Selected { .. }
+            | PlanExecutionOperatorOutput::NeedPreExhaustionProbes { .. }
+            | PlanExecutionOperatorOutput::NeedExhaustionProbes { .. },
+        ) => Err(V3PlanExecutionStop::Failed(
+            build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3OperationRunnerPlanExecution",
+                "plan_execution_operator_failed",
+                "preplanning plan_execution operator returned an admitting output",
+            ),
+        )),
+        None => Err(V3PlanExecutionStop::Failed(
+            build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3OperationRunnerPlanExecution",
+                "plan_execution_operator_failed",
+                "plan_execution operator omitted typed side output",
+            ),
+        )),
+    }
 }
 
 pub(crate) async fn run_v3_plan_execution_operator_with_probes(
@@ -664,6 +826,204 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
         );
     }
 
+    fn preplan_test_input(
+        manifest: &V3Config05ManifestPublished,
+        scope: &V3ProviderFailureSessionScope,
+        request: &Value,
+    ) -> (
+        V3Router07OpaqueTargetHitOnce,
+        V3Target09CandidateSetExpanded,
+    ) {
+        let hit = crate::provider_failure_runtime_policy::resolve_v3_relay_opaque_target_once(
+            manifest,
+            "test",
+            "responses",
+            "/v1/responses",
+            request,
+            0,
+        )
+        .expect("opaque hit");
+        let expanded = expand_v3_relay_target_candidates_from_opaque_hit(manifest, hit.clone(), 0)
+            .expect("expanded candidates");
+        let _ = scope;
+        (hit, expanded)
+    }
+
+    #[test]
+    fn preplan_ignores_occupied_provider_capacity_while_admission_excludes_it() {
+        let manifest = test_manifest("r05_preplan_capacity");
+        let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+        let scope = V3ProviderFailureSessionScope::new("test", "default", "r05-preplan-capacity")
+            .expect("session scope");
+        let request = json!({"model": "client-model", "input": "opaque"});
+        let (hit, expanded) = preplan_test_input(&manifest, &scope, &request);
+        let controller = V3AdaptiveConcurrencyController::process_shared();
+        let provider_key =
+            crate::provider_failure_runtime_policy::v3_provider_concurrency_key_parts(
+                "r05_preplan_capacity",
+                "key1",
+            );
+        controller
+            .ensure_initial_budget(&provider_key, 1)
+            .expect("initial budget");
+        let occupied = controller
+            .try_acquire_business(&provider_key)
+            .expect("occupy sole provider permit");
+        let cleanup = TestLeaseCleanup {
+            controller: controller.clone(),
+            permit: Arc::new(std::sync::Mutex::new(Some(occupied.into_permit()))),
+        };
+        let now_ms =
+            crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
+                .expect("clock");
+        let preplan = run_v3_plan_execution_preplan_operator(
+            request.clone(),
+            manifest.clone(),
+            V3PlanExecutionTargetSource::OpaqueHit(hit),
+            scope.clone(),
+            health.clone(),
+            BTreeSet::new(),
+            now_ms,
+            0,
+            V3PlanExecutionModePolicy::DirectEntry {
+                entry_protocol: V3HubEntryProtocol::Responses,
+                allowed_modes: vec!["direct".to_string(), "relay".to_string()],
+            },
+        )
+        .unwrap_or_else(|stop| {
+            panic!(
+                "preplan must not acquire provider capacity: {}",
+                match stop {
+                    V3PlanExecutionStop::Exhausted { exhaustion, .. } => {
+                        format!("exhausted: {exhaustion:?}")
+                    }
+                    V3PlanExecutionStop::Failed(source) => format!("failed: {source:?}"),
+                }
+            )
+        });
+        assert_eq!(
+            preplan.protocol_decision.target.candidate.provider_id,
+            "r05_preplan_capacity"
+        );
+        assert!(preplan.request_local_excluded_candidates.is_empty());
+        assert_eq!(
+            controller
+                .snapshot(&provider_key)
+                .expect("occupied snapshot")
+                .in_flight,
+            1
+        );
+
+        let admission = run_v3_plan_execution_operator(
+            request,
+            manifest,
+            V3PlanExecutionTargetSource::Expanded(expanded),
+            scope,
+            health,
+            BTreeSet::new(),
+            now_ms,
+            0,
+            false,
+            None,
+            V3PlanExecutionModePolicy::DirectEntry {
+                entry_protocol: V3HubEntryProtocol::Responses,
+                allowed_modes: vec!["direct".to_string(), "relay".to_string()],
+            },
+            false,
+            false,
+        )
+        .expect("admission path run");
+        let V3PlanExecutionOutcome::Exhausted { .. } = admission else {
+            panic!("occupied sole-provider capacity must exclude admission");
+        };
+        assert_eq!(
+            controller
+                .snapshot(&provider_key)
+                .expect("post-admission snapshot")
+                .in_flight,
+            1
+        );
+        drop(cleanup);
+        assert_eq!(
+            controller
+                .snapshot(&provider_key)
+                .expect("released snapshot")
+                .in_flight,
+            0
+        );
+    }
+
+    #[test]
+    fn preplan_uses_the_request_derived_nonzero_selection_sample() {
+        let mut manifest = test_manifest("r05_preplan_sample_a");
+        let mut second_provider = manifest.providers["r05_preplan_sample_a"].clone();
+        second_provider.id = "r05_preplan_sample_b".into();
+        manifest
+            .providers
+            .insert("r05_preplan_sample_b".into(), second_provider);
+        let forwarder = manifest.forwarders.get_mut("responses").unwrap();
+        let mut second_target = forwarder.targets[0].clone();
+        second_target.provider = Some("r05_preplan_sample_b".into());
+        forwarder.targets.push(second_target);
+        let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+        let scope = V3ProviderFailureSessionScope::new("test", "default", "r05-preplan-sample")
+            .expect("session scope");
+        let request = json!({"model": "client-model", "input": "opaque"});
+        let (hit, expanded) = preplan_test_input(&manifest, &scope, &request);
+        let now_ms =
+            crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
+                .expect("clock");
+        let deterministic_sample =
+            crate::provider_failure_runtime_policy::v3_relay_provider_target_selection_sample(
+                "r05-nonzero-sample",
+            );
+        assert_ne!(deterministic_sample, 0);
+        let select = |sample| {
+            select_v3_target_with_session_then_global(
+                &V3TargetInterpreter::default(),
+                expanded.clone(),
+                &health.session_bound_availability(&scope),
+                &health,
+                &BTreeSet::new(),
+                now_ms,
+                sample,
+            )
+            .expect("selection")
+        };
+        let zero = select(0).candidate.provider_id;
+        let expected = select(deterministic_sample).candidate.provider_id;
+        assert_ne!(expected, zero, "fixture must distinguish sample zero");
+        let preplan = run_v3_plan_execution_preplan_operator(
+            request,
+            manifest,
+            V3PlanExecutionTargetSource::OpaqueHit(hit),
+            scope,
+            health,
+            BTreeSet::new(),
+            now_ms,
+            deterministic_sample,
+            V3PlanExecutionModePolicy::DirectEntry {
+                entry_protocol: V3HubEntryProtocol::Responses,
+                allowed_modes: vec!["direct".to_string(), "relay".to_string()],
+            },
+        )
+        .unwrap_or_else(|stop| {
+            panic!(
+                "nonzero preplan failed: {}",
+                match stop {
+                    V3PlanExecutionStop::Exhausted { exhaustion, .. } => {
+                        format!("exhausted: {exhaustion:?}")
+                    }
+                    V3PlanExecutionStop::Failed(source) => format!("failed: {source:?}"),
+                }
+            )
+        });
+        assert_eq!(
+            preplan.protocol_decision.target.candidate.provider_id,
+            expected
+        );
+    }
+
     #[test]
     fn typed_planning_failure_is_sdk_error_and_keeps_original_source() {
         let manifest = test_manifest("r05_sdk_failure");
@@ -687,6 +1047,7 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
                 .unwrap();
         let side_output = Arc::new(Mutex::new(None));
         let operator = PlanExecutionOperator::new(
+            V3PlanExecutionPhase::AdmitAtExecution,
             manifest.clone(),
             V3PlanExecutionTargetSource::Expanded(expanded.clone()),
             scope.clone(),
