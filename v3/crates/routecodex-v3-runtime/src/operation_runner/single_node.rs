@@ -8,20 +8,26 @@ use std::sync::OnceLock;
 const RESPONSE_GRAPH_JSON: &str = include_str!(
     "../../../../../docs/architecture/dagpipe/v3.operation_runner.response.graph.json"
 );
+const ERROR_GRAPH_JSON: &str = include_str!(
+    "../../../../../docs/architecture/dagpipe/v3.operation_runner.error.graph.json"
+);
 
 #[derive(Clone, Copy)]
 pub(crate) enum V3OperationGraph {
     Request,
     Response,
+    Error,
 }
 
 impl V3OperationGraph {
     fn source(self) -> Result<&'static Value, OperationRunnerError> {
         static REQUEST: OnceLock<Result<Value, OperationRunnerError>> = OnceLock::new();
         static RESPONSE: OnceLock<Result<Value, OperationRunnerError>> = OnceLock::new();
+        static ERROR: OnceLock<Result<Value, OperationRunnerError>> = OnceLock::new();
         let (slot, source) = match self {
             Self::Request => (&REQUEST, REQUEST_GRAPH_JSON),
             Self::Response => (&RESPONSE, RESPONSE_GRAPH_JSON),
+            Self::Error => (&ERROR, ERROR_GRAPH_JSON),
         };
         slot.get_or_init(|| {
             serde_json::from_str(source)
@@ -32,8 +38,9 @@ impl V3OperationGraph {
     }
 }
 
-/// Runs a real operator against one canonical data edge. Per-call typed control
-/// belongs to the operator instance; only the business value enters the graph.
+/// Runs one canonical node. Request/response edges carry business values;
+/// Error edges carry error-chain projections. Live typed control stays owned
+/// by the operator instance and is never reconstructed from those projections.
 pub(crate) fn run_v3_single_node_operator(
     source: V3OperationGraph,
     node_id: &str,
