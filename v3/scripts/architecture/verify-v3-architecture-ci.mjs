@@ -53,18 +53,17 @@ const STEPS = [
 const failures = [];
 const passedSteps = [];
 for (const [script, description] of STEPS) {
-  const r = spawnSync('npm', ['run', '--silent', script], { encoding: 'utf8', cwd: process.cwd() });
-  const stdout = (r.stdout || '').trim();
-  const stderr = (r.stderr || '').trim();
+  const r = spawnSync('npm', ['run', '--silent', script], { stdio: 'inherit', cwd: process.cwd() });
   const ok = r.status === 0;
   const banner = ok ? 'PASS' : 'FAIL';
-  process.stdout.write(`[verify:v3-architecture-ci] ${banner} ${script} - ${description}\n`);
+  const diagnostic = ok
+    ? ''
+    : ` (exit=${r.status ?? 'null'}${r.signal ? `, signal=${r.signal}` : ''}${r.error ? `, error=${r.error.code ?? r.error.message}` : ''})`;
+  process.stdout.write(`[verify:v3-architecture-ci] ${banner} ${script} - ${description}${diagnostic}\n`);
   if (!ok) {
-    failures.push({ script, description, code: r.status, stdout, stderr });
-    process.stdout.write(`${stdout}\n${stderr}\n`);
+    failures.push({ script });
   } else {
     passedSteps.push(script);
-    if (stdout) process.stdout.write(`${stdout}\n`);
   }
 }
 
