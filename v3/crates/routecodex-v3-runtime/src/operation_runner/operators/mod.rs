@@ -5,6 +5,8 @@ mod err03_target_local_action;
 mod err04_target_exhaustion;
 
 pub(super) use capture_client_json::CaptureClientJsonOperator;
+pub(crate) use err01_source_raised::{run_v3_err01_source_raised_operator, V3Err01SourceInput};
+pub(crate) use err02_classified::run_v3_err02_classified_operator;
 mod err05_execution_decision;
 
 pub(crate) use err05_execution_decision::execute_v3_operation_runner_error_err05_execution_decision;
