@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 mod operators;
+pub(crate) mod plan_execution;
 mod single_node;
 use operators::CaptureClientJsonOperator;
 use operators::ProjectStandardProviderRequestOperator;
