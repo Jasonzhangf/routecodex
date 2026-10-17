@@ -225,6 +225,7 @@ fn build_v3_openai_responses_request_from_projected_chat_canonical(
     for key in [
         "tools",
         "tool_choice",
+        "routecodex_chat_extension",
         "instructions",
         "temperature",
         "top_p",
@@ -774,6 +775,7 @@ fn consume_gemini_transport_intent(projected: &mut Value) -> Result<(), String> 
 fn project_responses_request_chat_extension_to_openai_responses(
     projected: &mut Value,
 ) -> Result<(), String> {
+    consume_anthropic_system_block_text(projected);
     let Some(extension) = take_responses_request_chat_extension(projected, "responses")? else {
         return Ok(());
     };
@@ -788,9 +790,7 @@ fn project_responses_request_chat_extension_to_openai_responses(
     Ok(())
 }
 
-fn project_responses_request_chat_extension_to_openai_chat(
-    projected: &mut Value,
-) -> Result<(), String> {
+fn consume_anthropic_system_block_text(projected: &mut Value) {
     if let Some(parts) = projected
         .pointer_mut("/routecodex_chat_extension/anthropic_request/system")
         .and_then(Value::as_array_mut)
@@ -806,6 +806,12 @@ fn project_responses_request_chat_extension_to_openai_chat(
             }
         }
     }
+}
+
+fn project_responses_request_chat_extension_to_openai_chat(
+    projected: &mut Value,
+) -> Result<(), String> {
+    consume_anthropic_system_block_text(projected);
     let Some(mut extension) = take_responses_request_chat_extension(projected, "openai_chat")?
     else {
         return Ok(());

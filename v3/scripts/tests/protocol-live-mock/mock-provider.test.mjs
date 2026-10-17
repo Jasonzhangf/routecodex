@@ -61,6 +61,29 @@ function postJson(url, body, extraHeaders = {}) {
   return request(url, { method: 'POST', headers: { 'content-type': 'application/json', ...extraHeaders }, body });
 }
 
+test('request shape guard rejects before the scripted business response', async () => {
+  const mock = await startMockProvider({
+    validateRequest(capture) {
+      if (capture.body?.retain !== true) {
+        throw new MockProviderError('mock_missing_retained_field', 'retain must reach the provider');
+      }
+    },
+  });
+  try {
+    mock.setActiveCase(fixture());
+    const rejected = await postJson(`${mock.url}/v1/chat/completions`, {});
+    assert.equal(rejected.status, 400);
+    assert.equal(rejected.json.error, 'mock_missing_retained_field');
+    const accepted = await postJson(`${mock.url}/v1/chat/completions`, { retain: true });
+    assert.equal(accepted.status, 200);
+    assert.deepEqual(accepted.json, { ok: true });
+    assert.equal(mock.getCaptures()[0].response_script.status, 400);
+    assert.equal(mock.getCaptures()[1].response_script.status, 200);
+  } finally {
+    await mock.close();
+  }
+});
+
 // Path smoke observation only. The client closes its own connection after it
 // sees the required bytes; this does not report a completed business response.
 function observeScriptPrefix(url, body, expectedPrefix, timeoutMs = 2000) {
