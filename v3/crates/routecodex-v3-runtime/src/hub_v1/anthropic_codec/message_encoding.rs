@@ -246,13 +246,13 @@ pub(super) fn anthropic_image_part_as_responses_input_image(
             field: "image source",
         },
     )?;
-    match source.get("type").and_then(Value::as_str) {
+    let image_url = match source.get("type").and_then(Value::as_str) {
         Some("url") => source
             .get("url")
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
-            .map(|url| json!({"type":"input_image","image_url":url}))
-            .ok_or(V3AnthropicCodecError::MalformedField { field: "image url" }),
+            .map(str::to_string)
+            .ok_or(V3AnthropicCodecError::MalformedField { field: "image url" })?,
         Some("base64") => {
             let media_type = source
                 .get("media_type")
@@ -268,10 +268,23 @@ pub(super) fn anthropic_image_part_as_responses_input_image(
                 .ok_or(V3AnthropicCodecError::MalformedField {
                     field: "image data",
                 })?;
-            Ok(json!({"type":"input_image","image_url":format!("data:{media_type};base64,{data}")}))
+            format!("data:{media_type};base64,{data}")
         }
-        _ => Err(V3AnthropicCodecError::MalformedField {
-            field: "image source type",
-        }),
+        _ => {
+            return Err(V3AnthropicCodecError::MalformedField {
+                field: "image source type",
+            });
+        }
+    };
+    let mut converted = Map::new();
+    converted.insert("type".to_string(), Value::String("input_image".to_string()));
+    converted.insert("image_url".to_string(), Value::String(image_url));
+    if let Some(object) = part.as_object() {
+        for (key, value) in object {
+            if !matches!(key.as_str(), "type" | "source" | "image_url") {
+                converted.insert(key.clone(), value.clone());
+            }
+        }
     }
+    Ok(Value::Object(converted))
 }
