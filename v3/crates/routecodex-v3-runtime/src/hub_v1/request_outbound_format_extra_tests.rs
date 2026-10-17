@@ -1506,15 +1506,27 @@ fn anthropic_system_extension_consumes_text_without_replaying_or_dropping_residu
                 {"type":"future_system_part","payload":{"keep":[1,2]}}
             ],"extra":{"keep":true}},"future_namespace":{"value":7}
         }});
-        if let Some(value) = responses_request { source["routecodex_chat_extension"]["responses_request"] = value; }
+        if let Some(value) = responses_request {
+            source["routecodex_chat_extension"]["responses_request"] = value;
+        }
         let original = source.clone();
-        let wire = build_v3_openai_chat_standard_request_from_chat_canonical(&source).expect("known system mapping must not reject retained business extensions");
+        let wire = build_v3_openai_chat_standard_request_from_chat_canonical(&source)
+            .expect("known system mapping must not reject retained business extensions");
         assert_eq!(wire["messages"], source["messages"]);
-        assert_eq!(wire["routecodex_chat_extension"]["future_namespace"], json!({"value":7}));
+        assert_eq!(
+            wire["routecodex_chat_extension"]["future_namespace"],
+            json!({"value":7})
+        );
         let residual = &wire["routecodex_chat_extension"]["anthropic_request"];
         assert!(residual["system"][0].get("text").is_none());
-        assert_eq!(residual["system"][0]["cache_control"], json!({"type":"ephemeral"}));
-        assert_eq!(residual["system"][1], original["routecodex_chat_extension"]["anthropic_request"]["system"][1]);
+        assert_eq!(
+            residual["system"][0]["cache_control"],
+            json!({"type":"ephemeral"})
+        );
+        assert_eq!(
+            residual["system"][1],
+            original["routecodex_chat_extension"]["anthropic_request"]["system"][1]
+        );
         assert_eq!(residual["extra"], json!({"keep":true}));
         assert_eq!(source, original);
     }

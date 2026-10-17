@@ -1221,8 +1221,8 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
     // buffers the attempt.
     let client_sse_channel = (v3_request_wants_sse(&request_headers, &payload)
         || (entry_protocol == "gemini" && path.ends_with(":streamGenerateContent")))
-        .then_some(Duration::from_millis(state.server.http_sse_keepalive_ms))
-        .filter(|interval| !interval.is_zero());
+    .then_some(Duration::from_millis(state.server.http_sse_keepalive_ms))
+    .filter(|interval| !interval.is_zero());
     let runtime_outcome: Pin<Box<dyn Future<Output = Response<Body>> + Send>> =
         Box::pin(pending_endpoint_after_responses_admission(
             Arc::clone(&state),

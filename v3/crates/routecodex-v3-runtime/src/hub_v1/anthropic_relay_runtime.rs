@@ -12,7 +12,6 @@ use crate::provider_failure_runtime_policy::{
     V3RelayProviderFailureRetryPolicy, V3RelayProviderTargetResolutionInput,
 };
 use futures_util::StreamExt;
-use routecodex_v3_provider_responses::V3ResponsesStreamIntent;
 use response_closeout::{closeout_anthropic_relay_response, closeout_anthropic_relay_sse_response};
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
@@ -20,6 +19,7 @@ use routecodex_v3_error::{
     V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
     V3ProviderFailureSessionScope, V3_ERROR_CHAIN_NODE_IDS,
 };
+use routecodex_v3_provider_responses::V3ResponsesStreamIntent;
 use routecodex_v3_provider_responses::{
     build_v3_anthropic_provider_request_header, build_v3_provider_12_responses_wire_payload,
     build_v3_transport_13_responses_http_request_from_v3_provider_12,
@@ -171,7 +171,9 @@ pub async fn execute_v3_anthropic_relay_runtime_with_default_transport_client_he
     .await?;
     if output.status < 400 && output.terminal_disposition.is_none() {
         if let Some(pending) = route_policy_pending {
-            pending.commit_manifest_now(manifest).map_err(V3AnthropicRelayRuntimeError::Target)?;
+            pending
+                .commit_manifest_now(manifest)
+                .map_err(V3AnthropicRelayRuntimeError::Target)?;
         }
     }
     Ok(output)
@@ -453,7 +455,9 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     let request_execution_control = match initial_handoff.as_ref() {
         Some(handoff) => handoff.request_execution_control.clone(),
         None => crate::nodes::V3RequestExecutionControl::from_manifest(manifest, &input.server_id)
-            .map_err(|error| V3AnthropicRelayRuntimeError::ExecutionControlRequest(error.to_string()))?,
+            .map_err(|error| {
+                V3AnthropicRelayRuntimeError::ExecutionControlRequest(error.to_string())
+            })?,
     };
     let attempt_budget = request_execution_control.attempt_budget();
     response_hook_profile =
@@ -771,19 +775,20 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             }
         };
         trace.push("V3ProviderReqOutbound09TransportRequest");
-        let transport_request = match super::relay_runtime_shared::bind_v3_selected_business_auth_kind(
-            manifest,
-            &selected.candidate,
-            provider_wire_protocol,
-            transport_request,
-        ) {
-            Ok(request) => request,
-            Err(error) => handle_provider_request_failure!(
-                "V3ProviderReqOutbound09TransportRequest",
-                "provider_transport_request_error",
-                error
-            ),
-        };
+        let transport_request =
+            match super::relay_runtime_shared::bind_v3_selected_business_auth_kind(
+                manifest,
+                &selected.candidate,
+                provider_wire_protocol,
+                transport_request,
+            ) {
+                Ok(request) => request,
+                Err(error) => handle_provider_request_failure!(
+                    "V3ProviderReqOutbound09TransportRequest",
+                    "provider_transport_request_error",
+                    error
+                ),
+            };
         let provider_request_snapshot = transport_request.provider_request_projection();
         if pending_provider_action_recovery.is_some() {
             drop(selected_admission.take());

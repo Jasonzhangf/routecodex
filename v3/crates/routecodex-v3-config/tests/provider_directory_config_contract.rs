@@ -144,8 +144,12 @@ fn provider_directory_responses_omitted_block_preserves_absence() {
     let manifest = V3ConfigStore::new(&config_path)
         .load_snapshot()
         .expect("omitted Responses block must compile");
-    assert!(manifest.providers["external"].interfaces["default"].responses.is_none(),
-        "an omitted Responses block must not invent a process policy");
+    assert!(
+        manifest.providers["external"].interfaces["default"]
+            .responses
+            .is_none(),
+        "an omitted Responses block must not invent a process policy"
+    );
 
     fs::remove_dir_all(root).unwrap();
 }

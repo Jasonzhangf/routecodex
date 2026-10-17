@@ -416,7 +416,8 @@ fn gemini_function_response_identity_is_governed_at_req04_after_normalization() 
         "missing native id must stay missing"
     );
     assert_eq!(
-        tool["routecodex_chat_extension"]["gemini_native_fields"][0]["fields"]["functionResponse"]["name"],
+        tool["routecodex_chat_extension"]["gemini_native_fields"][0]["fields"]["functionResponse"]
+            ["name"],
         "lookup"
     );
 }

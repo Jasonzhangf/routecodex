@@ -732,7 +732,8 @@ fn build_v3_openai_chat_assistant_tool_call_message(
     let mut message = Map::new();
     message.insert("role".to_string(), Value::String("assistant".to_string()));
     if item.contains_key("content") {
-        let (content, _) = build_v3_openai_chat_content_from_responses_content(item.get("content"))?;
+        let (content, _) =
+            build_v3_openai_chat_content_from_responses_content(item.get("content"))?;
         message.insert("content".to_string(), content);
     }
     message.insert("tool_calls".to_string(), Value::Array(vec![tool_call]));

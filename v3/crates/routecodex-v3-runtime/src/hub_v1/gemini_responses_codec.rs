@@ -73,7 +73,8 @@ pub(crate) fn project_gemini_response(payload: &Value, request_id: &str) -> Resu
             }
         }
         let index = outcome
-            .get("index").cloned()
+            .get("index")
+            .cloned()
             .unwrap_or_else(|| json!(candidate_index));
         outcome.insert("candidate_index".into(), index);
         outcome.insert(
@@ -121,27 +122,55 @@ pub(crate) fn project_responses_to_gemini_client(
     source: super::V3HubProviderWireProtocol,
 ) -> Result<Value, String> {
     use super::V3HubProviderWireProtocol;
-    let root = payload.as_object().ok_or("governed response must be an object")?;
+    let root = payload
+        .as_object()
+        .ok_or("governed response must be an object")?;
     let output = root.get("output").and_then(Value::as_array);
     let mut response = root.clone();
-    for key in ["id", "object", "output", "output_text", "status", "incomplete_details", "usage", "gemini_candidate_outcomes", "finishReason"] {
+    for key in [
+        "id",
+        "object",
+        "output",
+        "output_text",
+        "status",
+        "incomplete_details",
+        "usage",
+        "gemini_candidate_outcomes",
+        "finishReason",
+    ] {
         response.remove(key);
     }
     let mut candidates = Vec::new();
     if source == V3HubProviderWireProtocol::Gemini {
-        if let Some(outcomes) = root.get("gemini_candidate_outcomes").and_then(Value::as_array) {
+        if let Some(outcomes) = root
+            .get("gemini_candidate_outcomes")
+            .and_then(Value::as_array)
+        {
             for outcome in outcomes {
-                let mut candidate = outcome.as_object().cloned().ok_or("Gemini candidate outcome must be an object")?;
+                let mut candidate = outcome
+                    .as_object()
+                    .cloned()
+                    .ok_or("Gemini candidate outcome must be an object")?;
                 candidate.remove("candidate_index");
                 candidate.remove("output_indices");
                 let mut parts = Vec::new();
-                for index in outcome.get("output_indices").and_then(Value::as_array).into_iter().flatten() {
-                    let item = index.as_u64().and_then(|i| output.and_then(|items| items.get(i as usize))).ok_or("Gemini output association is unavailable")?;
+                for index in outcome
+                    .get("output_indices")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    let item = index
+                        .as_u64()
+                        .and_then(|i| output.and_then(|items| items.get(i as usize)))
+                        .ok_or("Gemini output association is unavailable")?;
                     parts.extend(gemini_parts_from_governed_item(item, source)?);
                 }
                 if !parts.is_empty() || candidate.get("content").is_some() {
                     let content = candidate.entry("content").or_insert_with(|| json!({}));
-                    let content = content.as_object_mut().ok_or("Gemini content must be an object")?;
+                    let content = content
+                        .as_object_mut()
+                        .ok_or("Gemini content must be an object")?;
                     content.insert("parts".into(), Value::Array(parts));
                 }
                 candidates.push(Value::Object(candidate));
@@ -153,9 +182,15 @@ pub(crate) fn project_responses_to_gemini_client(
             parts.extend(gemini_parts_from_governed_item(item, source)?);
         }
         let mut candidate = json!({"content":{"role":"model","parts":parts}});
-        let reason = root.get("finishReason").and_then(Value::as_str)
+        let reason = root
+            .get("finishReason")
+            .and_then(Value::as_str)
             .or_else(|| root.get("finish_reason").and_then(Value::as_str))
-            .or_else(|| payload.pointer("/incomplete_details/reason").and_then(Value::as_str));
+            .or_else(|| {
+                payload
+                    .pointer("/incomplete_details/reason")
+                    .and_then(Value::as_str)
+            });
         let hub_reason = match reason {
             Some("length" | "max_output_tokens") => Some("max_tokens"),
             Some("end_turn" | "tool_calls") => Some("stop"),
@@ -165,7 +200,9 @@ pub(crate) fn project_responses_to_gemini_client(
         };
         if let Some(reason) = hub_reason {
             let mapped = crate::protocol_tables::map_value(
-                crate::protocol_tables::V3TableKind::FinishReason, "gemini", reason,
+                crate::protocol_tables::V3TableKind::FinishReason,
+                "gemini",
+                reason,
                 crate::protocol_tables::V3TableDirection::Outbound,
             )?;
             candidate["finishReason"] = json!(mapped.unwrap_or(reason));
@@ -180,8 +217,10 @@ pub(crate) fn project_responses_to_gemini_client(
         if let Some(fields) = usage.as_object() {
             let mut projected = fields.clone();
             for (canonical, native) in [
-                ("input_tokens", "promptTokenCount"), ("prompt_tokens", "promptTokenCount"),
-                ("output_tokens", "candidatesTokenCount"), ("completion_tokens", "candidatesTokenCount"),
+                ("input_tokens", "promptTokenCount"),
+                ("prompt_tokens", "promptTokenCount"),
+                ("output_tokens", "candidatesTokenCount"),
+                ("completion_tokens", "candidatesTokenCount"),
                 ("total_tokens", "totalTokenCount"),
             ] {
                 if let Some(value) = fields.get(canonical) {
@@ -203,13 +242,24 @@ pub(crate) fn project_responses_to_gemini_client(
     Ok(Value::Object(response))
 }
 
-fn gemini_parts_from_governed_item(item: &Value, source: super::V3HubProviderWireProtocol) -> Result<Vec<Value>, String> {
+fn gemini_parts_from_governed_item(
+    item: &Value,
+    source: super::V3HubProviderWireProtocol,
+) -> Result<Vec<Value>, String> {
     match item.get("type").and_then(Value::as_str) {
         Some("message") => {
             let mut parts = Vec::new();
-            for part in item.get("content").and_then(Value::as_array).into_iter().flatten() {
+            for part in item
+                .get("content")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
                 let mut part = part.clone();
-                if matches!(part.get("type").and_then(Value::as_str), Some("output_text" | "text")) {
+                if matches!(
+                    part.get("type").and_then(Value::as_str),
+                    Some("output_text" | "text")
+                ) {
                     part.as_object_mut().unwrap().remove("type");
                 }
                 parts.push(part);
@@ -222,33 +272,58 @@ fn gemini_parts_from_governed_item(item: &Value, source: super::V3HubProviderWir
             Ok(vec![part])
         }
         Some("function_call" | "custom_tool_call" | "tool_call") => {
-            let mut call = item.as_object().cloned().ok_or("tool item must be an object")?;
+            let mut call = item
+                .as_object()
+                .cloned()
+                .ok_or("tool item must be an object")?;
             let args = call.remove("arguments").or_else(|| call.remove("input"));
             if let Some(args) = args {
                 let args = match args {
-                    Value::String(text) => serde_json::from_str(&text).unwrap_or(Value::String(text)),
+                    Value::String(text) => {
+                        serde_json::from_str(&text).unwrap_or(Value::String(text))
+                    }
                     value => value,
                 };
                 call.insert("args".into(), args);
             }
             if source != super::V3HubProviderWireProtocol::Gemini {
-                if let Some(id) = call.get("call_id").cloned() { call.insert("id".into(), id); }
+                if let Some(id) = call.get("call_id").cloned() {
+                    call.insert("id".into(), id);
+                }
             }
-            for field in ["type", "call_id"] { call.remove(field); }
+            for field in ["type", "call_id"] {
+                call.remove(field);
+            }
             let signature = call.remove("thought_signature");
             let mut part = json!({"functionCall":call});
-            if let Some(signature) = signature { part["thoughtSignature"] = signature; }
+            if let Some(signature) = signature {
+                part["thoughtSignature"] = signature;
+            }
             Ok(vec![part])
         }
         Some("reasoning") => {
             let mut parts = Vec::new();
-            for content in item.get("summary").or_else(|| item.get("content")).and_then(Value::as_array).into_iter().flatten() {
+            for content in item
+                .get("summary")
+                .or_else(|| item.get("content"))
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
                 let mut part = content.clone();
-                if let Some(part) = part.as_object_mut() { part.remove("type"); part.insert("thought".into(), json!(true)); }
+                if let Some(part) = part.as_object_mut() {
+                    part.remove("type");
+                    part.insert("thought".into(), json!(true));
+                }
                 parts.push(part);
             }
-            if let Some(signature) = item.get("encrypted_content").or_else(|| item.get("thought_signature")) {
-                if parts.is_empty() { parts.push(json!({"thought":true})); }
+            if let Some(signature) = item
+                .get("encrypted_content")
+                .or_else(|| item.get("thought_signature"))
+            {
+                if parts.is_empty() {
+                    parts.push(json!({"thought":true}));
+                }
                 parts[0]["thoughtSignature"] = signature.clone();
             }
             Ok(parts)
@@ -311,7 +386,11 @@ mod tests {
             {"content":{"parts":[{"functionCall":{"name":"tool","args":"invalid arguments"},"thoughtSignature":"sig"}]},"finishReason":"STOP"}
         ],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":2,"totalTokenCount":9,"opaqueCount":11}});
         let canonical = project_gemini_response(&source, "real-request").unwrap();
-        let projected = project_responses_to_gemini_client(&canonical, crate::hub_v1::V3HubProviderWireProtocol::Gemini).unwrap();
+        let projected = project_responses_to_gemini_client(
+            &canonical,
+            crate::hub_v1::V3HubProviderWireProtocol::Gemini,
+        )
+        .unwrap();
         assert_eq!(projected, source);
     }
 
@@ -322,10 +401,17 @@ mod tests {
             {"type":"message","content":[{"type":"output_text","text":"first"},{"type":"output_text","text":"second","annotation":1}]},
             {"type":"function_call","call_id":"paired","name":"tool","arguments":"broken json"}
         ],"usage":{"input_tokens":7,"output_tokens":2,"total_tokens":9}});
-        let projected = project_responses_to_gemini_client(&canonical, crate::hub_v1::V3HubProviderWireProtocol::Responses).unwrap();
-        assert_eq!(projected["candidates"][0]["content"]["parts"], json!([
-            {"text":"first"},{"text":"second","annotation":1},{"functionCall":{"id":"paired","name":"tool","args":"broken json"}}
-        ]));
+        let projected = project_responses_to_gemini_client(
+            &canonical,
+            crate::hub_v1::V3HubProviderWireProtocol::Responses,
+        )
+        .unwrap();
+        assert_eq!(
+            projected["candidates"][0]["content"]["parts"],
+            json!([
+                {"text":"first"},{"text":"second","annotation":1},{"functionCall":{"id":"paired","name":"tool","args":"broken json"}}
+            ])
+        );
         assert_eq!(projected["usageMetadata"]["totalTokenCount"], 9);
         assert_eq!(projected["candidates"][0]["finishReason"], "STOP");
     }

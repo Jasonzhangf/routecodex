@@ -480,7 +480,13 @@ async fn anthropic_sse_namespaced_custom_call_keeps_identity_and_result_pairing(
     let next_request =
         super::super::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request(canonical)
             .expect("call and result must project together to Anthropic");
-    assert_eq!(next_request["messages"][0]["content"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        next_request["messages"][0]["content"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
     assert_eq!(
         next_request["messages"][0]["content"][0]["name"],
         "functions__exec"
@@ -567,7 +573,13 @@ async fn anthropic_sse_top_level_dotted_custom_names_roundtrip_with_results() {
                 canonical,
             )
             .expect("tool call and result must return to Anthropic");
-        assert_eq!(next_request["messages"][0]["content"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            next_request["messages"][0]["content"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
         assert_eq!(
             next_request["messages"][0]["content"][0]["name"],
             provider_name

@@ -126,7 +126,9 @@ pub(crate) fn compile_provider_directory(
             process: responses.process.clone(),
             streaming: streaming_policy(responses.streaming.as_deref())
                 .unwrap_or(V3StreamingPolicy::Always),
-            transport: responses.transport.unwrap_or(V3ResponsesTransportKind::Http),
+            transport: responses
+                .transport
+                .unwrap_or(V3ResponsesTransportKind::Http),
             websocket_v2_url: responses.websocket_v2_url.clone(),
         });
         let v3 = provider.v3.unwrap_or_default();

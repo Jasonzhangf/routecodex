@@ -1132,13 +1132,21 @@ fn entry_protocol_endpoint_pattern_matches(pattern: &str, endpoint_path: &str) -
         return true;
     }
     pattern == "/v1beta/models/:model/generateContent"
-        && endpoint_path.strip_prefix("/v1beta/models/").is_some_and(|tail| {
-            ["/generateContent", ":generateContent", ":streamGenerateContent"]
+        && endpoint_path
+            .strip_prefix("/v1beta/models/")
+            .is_some_and(|tail| {
+                [
+                    "/generateContent",
+                    ":generateContent",
+                    ":streamGenerateContent",
+                ]
                 .iter()
-                .any(|action| tail.strip_suffix(action).is_some_and(|model| {
-                    !model.is_empty() && !model.contains('/') && !model.contains(':')
-                }))
-        })
+                .any(|action| {
+                    tail.strip_suffix(action).is_some_and(|model| {
+                        !model.is_empty() && !model.contains('/') && !model.contains(':')
+                    })
+                })
+            })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

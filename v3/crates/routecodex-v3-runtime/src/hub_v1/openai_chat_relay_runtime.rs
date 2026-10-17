@@ -444,10 +444,13 @@ fn project_json_response(
     )
     .map_err(V3OpenAiChatRelayRuntimeError::Target)?;
     if provider_protocol == V3HubProviderWireProtocol::Gemini {
-        let request_id = request_id.ok_or_else(|| V3OpenAiChatRelayRuntimeError::Target(
-            "Gemini response normalization requires the runtime request ID".to_string(),
-        ))?;
-        resp02.normalize_gemini_business_response(request_id)
+        let request_id = request_id.ok_or_else(|| {
+            V3OpenAiChatRelayRuntimeError::Target(
+                "Gemini response normalization requires the runtime request ID".to_string(),
+            )
+        })?;
+        resp02
+            .normalize_gemini_business_response(request_id)
             .map_err(V3OpenAiChatRelayRuntimeError::Target)?;
     }
     trace.push("V3HubRespInbound02Normalized");
@@ -1491,9 +1494,17 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         let session_id = outcome.failure_session_scope.session_id().to_owned();
         if provider_wire_protocol == V3HubProviderWireProtocol::Gemini {
             return Ok(project_gemini_sse_as_openai_chat_stream(
-                request_id.to_owned(), session_id, provider, compatibility_profile,
-                web_search_execution_mode, web_search_state, _retain_response_cipher,
-                tool_thinking_enabled, stream_observation, client_include_usage, outcome,
+                request_id.to_owned(),
+                session_id,
+                provider,
+                compatibility_profile,
+                web_search_execution_mode,
+                web_search_state,
+                _retain_response_cipher,
+                tool_thinking_enabled,
+                stream_observation,
+                client_include_usage,
+                outcome,
             ));
         }
         if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {

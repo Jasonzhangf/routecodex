@@ -288,8 +288,8 @@ pub(crate) fn guard_v3_provider_sse_idle(
 }
 
 pub(crate) use super::relay_runtime_shared::{
-    bind_v3_selected_business_auth_kind,
-    v3_provider_sse_idle_timeout, v3_relay_transport_response_timeout, V3RelayCoreError,
+    bind_v3_selected_business_auth_kind, v3_provider_sse_idle_timeout,
+    v3_relay_transport_response_timeout, V3RelayCoreError,
 };
 
 /// relay 协议 codec：协议差异的唯一收敛面。
@@ -1225,31 +1225,48 @@ where
                 );
                 if transport_intent == V3HubTransportIntent::Json {
                     let local_failure = std::sync::Arc::new(tokio::sync::Mutex::new(None));
-                    let collector = V3CommittedClientSseBuilder::with_budget(attempt_budget.clone())
-                        .map_err(|error| V3RelayCoreError::Target(format!(
-                            "V3ExecutionAttemptPayloadStore rejected relay attempt: {error}")))?;
+                    let collector =
+                        V3CommittedClientSseBuilder::with_budget(attempt_budget.clone()).map_err(
+                            |error| {
+                                V3RelayCoreError::Target(format!(
+                            "V3ExecutionAttemptPayloadStore rejected relay attempt: {error}"))
+                            },
+                        )?;
                     let stream: V3ProviderSseStream = Box::pin(futures_util::stream::unfold(
-                        (idle_guarded_stream, collector, local_failure.clone(),
-                         request_id.to_string(), selected_target_provider_id.clone(), false),
+                        (
+                            idle_guarded_stream,
+                            collector,
+                            local_failure.clone(),
+                            request_id.to_string(),
+                            selected_target_provider_id.clone(),
+                            false,
+                        ),
                         |(mut stream, mut collector, failure, request_id, provider_id, stopped)| async move {
-                            if stopped { return None; }
+                            if stopped {
+                                return None;
+                            }
                             let next = stream.next().await?;
                             let mut stopped = false;
                             let next = match next {
-                                Ok(chunk) if !chunk.is_empty() => match collector.push(chunk.clone()) {
-                                    Ok(()) => Ok(chunk),
-                                    Err(error) => {
-                                        *failure.lock().await = Some(error);
-                                        stopped = true;
-                                        Err(V3ProviderError::ResponseBody {
+                                Ok(chunk) if !chunk.is_empty() => {
+                                    match collector.push(chunk.clone()) {
+                                        Ok(()) => Ok(chunk),
+                                        Err(error) => {
+                                            *failure.lock().await = Some(error);
+                                            stopped = true;
+                                            Err(V3ProviderError::ResponseBody {
                                             request_id: request_id.clone(), provider_id: provider_id.clone(),
                                             reason: "provider collection stopped by the local attempt store".to_string(),
                                         })
+                                        }
                                     }
-                                },
+                                }
                                 other => other,
                             };
-                            Some((next, (stream, collector, failure, request_id, provider_id, stopped)))
+                            Some((
+                                next,
+                                (stream, collector, failure, request_id, provider_id, stopped),
+                            ))
                         },
                     ));
                     let materialized = tokio::time::timeout_at(attempt_deadline,
@@ -1258,7 +1275,8 @@ where
                     if let Some(error) = local_failure.lock().await.take() {
                         drop(provider_action_permit.take());
                         return Err(V3RelayCoreError::Target(format!(
-                            "V3ExecutionAttemptPayloadStore relay local resource failure: {error}")));
+                            "V3ExecutionAttemptPayloadStore relay local resource failure: {error}"
+                        )));
                     }
                     let provider_value = match materialized {
                         Ok(Ok(value)) => Ok(value),
@@ -1280,18 +1298,34 @@ where
                         Ok(value) => {
                             let snapshot = value.clone();
                             match C::project_json_response(
-                                request_id, failure_session_scope.session_id(), value, provider_wire_protocol,
-                                &req05.previous.previous.previous.payload.0, V3HubTransportIntent::Sse,
-                                &mut trace, selected_target_compatibility_profile.as_deref(),
-                                selected.candidate.web_search_execution_mode, request_web_search_state.as_ref(),
-                                retain_response_cipher, request_tool_thinking_enabled, &selected_target_model_id,
+                                request_id,
+                                failure_session_scope.session_id(),
+                                value,
+                                provider_wire_protocol,
+                                &req05.previous.previous.previous.payload.0,
+                                V3HubTransportIntent::Sse,
+                                &mut trace,
+                                selected_target_compatibility_profile.as_deref(),
+                                selected.candidate.web_search_execution_mode,
+                                request_web_search_state.as_ref(),
+                                retain_response_cipher,
+                                request_tool_thinking_enabled,
+                                &selected_target_model_id,
                             ) {
                                 Ok(client) => Ok((client, snapshot)),
-                                Err(error @ V3RelayCoreError::WebSearchIntercepted(_)) => return Err(error),
-                                Err(error) => Err(provider_runtime_failure(V3ProviderError::ResponseBody {
-                                    request_id: request_id.to_string(), provider_id: selected_target_provider_id.clone(),
-                                    reason: format!("provider response governance failed: {error}"),
-                                }, &selected_target_provider_id)),
+                                Err(error @ V3RelayCoreError::WebSearchIntercepted(_)) => {
+                                    return Err(error)
+                                }
+                                Err(error) => Err(provider_runtime_failure(
+                                    V3ProviderError::ResponseBody {
+                                        request_id: request_id.to_string(),
+                                        provider_id: selected_target_provider_id.clone(),
+                                        reason: format!(
+                                            "provider response governance failed: {error}"
+                                        ),
+                                    },
+                                    &selected_target_provider_id,
+                                )),
                             }
                         }
                         Err(failure) => Err(failure),
@@ -1302,39 +1336,71 @@ where
                             failure.provider_status = Some(provider_status);
                             drop(provider_action_permit.take());
                             if let Some(failure) = handle_provider_failure(
-                                &failure_context, selected, failure,
+                                &failure_context,
+                                selected,
+                                failure,
                                 &mut V3RelayProviderFailurePolicyState {
                                     failed_candidates: &mut failed_candidates,
                                     same_candidate_retries: &mut same_candidate_retries,
-                                    trace: &mut trace, last_external_http: &mut last_external_http,
-                                }, &mut retry_selected, &mut pending_provider_action_recovery, failure_events,
-                            ).await.map_err(V3RelayCoreError::Target)? {
-                                return Ok(C::assemble_failure_output(failure, trace, std::mem::take(failure_events)));
+                                    trace: &mut trace,
+                                    last_external_http: &mut last_external_http,
+                                },
+                                &mut retry_selected,
+                                &mut pending_provider_action_recovery,
+                                failure_events,
+                            )
+                            .await
+                            .map_err(V3RelayCoreError::Target)?
+                            {
+                                return Ok(C::assemble_failure_output(
+                                    failure,
+                                    trace,
+                                    std::mem::take(failure_events),
+                                ));
                             }
                             continue;
                         }
                     };
-                    let receipt = crate::nodes::V3AttemptSuccessReceipt::from_buffered_terminal_attempt();
-                    provider_health.record_provider_success_in_failure_scope_for_interface(
-                        &receipt, &failure_session_scope, &selected_target_provider_id, &selected_target_interface_id,
-                        Some(&selected_target_auth_alias), Some(&selected_target_model_id),
-                        v3_relay_provider_policy_now_epoch_ms().map_err(V3RelayCoreError::Target)?,
-                    ).map_err(|error| V3RelayCoreError::Target(error.to_string()))?;
-                    let mut observability = build_v3_relay_observability(C::ENTRY_KIND, &selected, "json");
+                    let receipt =
+                        crate::nodes::V3AttemptSuccessReceipt::from_buffered_terminal_attempt();
+                    provider_health
+                        .record_provider_success_in_failure_scope_for_interface(
+                            &receipt,
+                            &failure_session_scope,
+                            &selected_target_provider_id,
+                            &selected_target_interface_id,
+                            Some(&selected_target_auth_alias),
+                            Some(&selected_target_model_id),
+                            v3_relay_provider_policy_now_epoch_ms()
+                                .map_err(V3RelayCoreError::Target)?,
+                        )
+                        .map_err(|error| V3RelayCoreError::Target(error.to_string()))?;
+                    let mut observability =
+                        build_v3_relay_observability(C::ENTRY_KIND, &selected, "json");
                     observability.provider_status = Some(provider_status);
                     observability.response_status = Some("completed".to_string());
                     observability.finish_reason = read_v3_runtime_finish_reason(&client_response);
                     observability.usage = extract_v3_runtime_usage_summary(&client_response);
-                    observability.timing = Some(runtime_timing.finish_runtime().map_err(V3RelayCoreError::Target)?);
+                    observability.timing = Some(
+                        runtime_timing
+                            .finish_runtime()
+                            .map_err(V3RelayCoreError::Target)?,
+                    );
                     if let Some(pending) = route_policy_pending.as_ref() {
-                        pending.commit_manifest_now(manifest).map_err(V3RelayCoreError::Target)?;
+                        pending
+                            .commit_manifest_now(manifest)
+                            .map_err(V3RelayCoreError::Target)?;
                     }
                     observability.provider_failure_events = std::mem::take(failure_events);
-                    return Ok(C::assemble_json_output(client_response, trace, observability,
+                    return Ok(C::assemble_json_output(
+                        client_response,
+                        trace,
+                        observability,
                         V3RelayProviderSnapshots {
                             provider_request: Some(provider_request_snapshot),
                             provider_response: Some(provider_response_snapshot),
-                        }));
+                        },
+                    ));
                 }
                 let projected_sse = match C::project_sse(
                     &request_id,

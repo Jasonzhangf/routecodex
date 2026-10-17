@@ -485,14 +485,23 @@ async fn assert_configured_auth_wire(auth_kind: Option<routecodex_v3_config::V3P
         headers.contains("x-opencode-request: msg_test\r\n"),
         "{headers}"
     );
-    if matches!(auth_kind, Some(routecodex_v3_config::V3ProviderAuthType::ApiKey)) {
+    if matches!(
+        auth_kind,
+        Some(routecodex_v3_config::V3ProviderAuthType::ApiKey)
+    ) {
         assert_eq!(headers.matches("authorization:").count(), 0, "{headers}");
         assert_eq!(headers.matches("x-goog-api-key:").count(), 1, "{headers}");
-        assert!(headers.contains("x-goog-api-key: test-account-secret\r\n"), "{headers}");
+        assert!(
+            headers.contains("x-goog-api-key: test-account-secret\r\n"),
+            "{headers}"
+        );
     } else {
         assert_eq!(headers.matches("authorization:").count(), 1, "{headers}");
         assert_eq!(headers.matches("x-goog-api-key:").count(), 0, "{headers}");
-        assert!(headers.contains("authorization: bearer test-account-secret\r\n"), "{headers}");
+        assert!(
+            headers.contains("authorization: bearer test-account-secret\r\n"),
+            "{headers}"
+        );
     }
     assert_eq!(serde_json::from_slice::<Value>(&wire_body).unwrap(), body);
 }

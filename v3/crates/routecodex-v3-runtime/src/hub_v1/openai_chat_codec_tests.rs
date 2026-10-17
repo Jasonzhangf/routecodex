@@ -17,14 +17,34 @@ fn anthropic_text_delta_without_block_start_preserves_public_stream() {
     let mut transducer = V3OpenAiChatAnthropicSseTransducer::new(false);
     let mut chunks = Vec::new();
     for event in events {
-        chunks.extend(transducer.push_event(event).expect("parseable text stream must project"));
+        chunks.extend(
+            transducer
+                .push_event(event)
+                .expect("parseable text stream must project"),
+        );
     }
-    transducer.finish().expect("provider terminal must remain complete");
-    let text: String = chunks.iter().filter_map(|chunk| chunk.pointer("/choices/0/delta/content").and_then(Value::as_str)).collect();
+    transducer
+        .finish()
+        .expect("provider terminal must remain complete");
+    let text: String = chunks
+        .iter()
+        .filter_map(|chunk| {
+            chunk
+                .pointer("/choices/0/delta/content")
+                .and_then(Value::as_str)
+        })
+        .collect();
     assert_eq!(text, "ok");
-    assert!(chunks.iter().any(|chunk| chunk.pointer("/choices/0/finish_reason") == Some(&json!("stop"))));
-    assert!(chunks.iter().all(|chunk| chunk.pointer("/choices/0/delta/tool_calls").is_none()));
-    let usage = chunks.iter().find_map(|chunk| chunk.get("usage")).expect("terminal usage");
+    assert!(chunks
+        .iter()
+        .any(|chunk| chunk.pointer("/choices/0/finish_reason") == Some(&json!("stop"))));
+    assert!(chunks
+        .iter()
+        .all(|chunk| chunk.pointer("/choices/0/delta/tool_calls").is_none()));
+    let usage = chunks
+        .iter()
+        .find_map(|chunk| chunk.get("usage"))
+        .expect("terminal usage");
     assert_eq!(usage["prompt_tokens"], 7);
     assert_eq!(usage["completion_tokens"], 2);
     assert_eq!(usage["total_tokens"], 9);

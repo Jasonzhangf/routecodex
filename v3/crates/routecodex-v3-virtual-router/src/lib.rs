@@ -900,8 +900,13 @@ fn semantic_target_key(target: &V3RoutePoolTargetManifest) -> String {
 fn protocol_from_endpoint(endpoint: &str) -> String {
     let endpoint = endpoint.trim();
     if endpoint.starts_with("/v1beta/models/")
-        && ["/generateContent", ":generateContent", ":streamGenerateContent"]
-            .iter().any(|action| endpoint.ends_with(action))
+        && [
+            "/generateContent",
+            ":generateContent",
+            ":streamGenerateContent",
+        ]
+        .iter()
+        .any(|action| endpoint.ends_with(action))
     {
         return "gemini".to_string();
     }

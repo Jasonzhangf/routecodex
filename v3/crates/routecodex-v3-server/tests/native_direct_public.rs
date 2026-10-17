@@ -286,10 +286,15 @@ async fn anthropic_default_direct_recovers_native_http_and_sse_errors_then_prese
         let capture = recv_capture(&mut captures_rx).await;
         let completed = capture.provider == "anthropic-success";
         recovery_captures.push(capture);
-        if completed { break; }
+        if completed {
+            break;
+        }
     }
     let http_capture = recovery_captures.first().unwrap();
-    let sse_capture = recovery_captures.iter().find(|capture| capture.provider == "anthropic-sse-error").unwrap();
+    let sse_capture = recovery_captures
+        .iter()
+        .find(|capture| capture.provider == "anthropic-sse-error")
+        .unwrap();
     let success_capture = recovery_captures.last().unwrap();
     assert_eq!(http_capture.provider, "anthropic-http-error");
     assert_eq!(sse_capture.provider, "anthropic-sse-error");

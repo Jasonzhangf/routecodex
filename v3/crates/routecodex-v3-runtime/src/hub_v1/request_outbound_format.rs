@@ -990,10 +990,17 @@ fn take_responses_request_chat_extension(
         .cloned()
         .ok_or_else(|| "MalformedOutboundField path=$.routecodex_chat_extension".to_string())?;
     let responses_request = extension.remove("responses_request");
-    if let Some(records) = extension.get_mut("gemini_native_fields").and_then(Value::as_array_mut) {
+    if let Some(records) = extension
+        .get_mut("gemini_native_fields")
+        .and_then(Value::as_array_mut)
+    {
         records.retain_mut(|record| {
-            if record.get("kind").and_then(Value::as_str) != Some("request") { return true; }
-            let Some(fields) = record.get_mut("fields").and_then(Value::as_object_mut) else { return true; };
+            if record.get("kind").and_then(Value::as_str) != Some("request") {
+                return true;
+            }
+            let Some(fields) = record.get_mut("fields").and_then(Value::as_object_mut) else {
+                return true;
+            };
             if let Some(tools) = fields.get_mut("tools").and_then(Value::as_array_mut) {
                 tools.retain(|association| {
                     let Some(association) = association.as_object() else {
@@ -1014,9 +1021,7 @@ fn take_responses_request_chat_extension(
                     let no_tool_residual = association
                         .get("tool_fields")
                         .and_then(Value::as_object)
-                        .is_some_and(|tool| {
-                            tool.keys().all(|key| key == "functionDeclarations")
-                        });
+                        .is_some_and(|tool| tool.keys().all(|key| key == "functionDeclarations"));
                     let known_association_fields = association.keys().all(|key| {
                         matches!(
                             key.as_str(),
@@ -1041,7 +1046,11 @@ fn take_responses_request_chat_extension(
             }
             // The canonical scalar fields already carry the mapped generation
             // leaves. This empty native container adds no target field.
-            if fields.get("generationConfig").and_then(Value::as_object).is_some_and(Map::is_empty) {
+            if fields
+                .get("generationConfig")
+                .and_then(Value::as_object)
+                .is_some_and(Map::is_empty)
+            {
                 fields.remove("generationConfig");
             }
             if let Some(stream) = fields.remove("stream") {
@@ -1049,7 +1058,9 @@ fn take_responses_request_chat_extension(
             }
             !fields.is_empty()
         });
-        if records.is_empty() { extension.remove("gemini_native_fields"); }
+        if records.is_empty() {
+            extension.remove("gemini_native_fields");
+        }
     }
     if !extension.is_empty() {
         row.insert("routecodex_chat_extension".into(), Value::Object(extension));
@@ -1451,14 +1462,29 @@ fn normalize_openai_chat_messages_payload(
             }
         }
     }
-    let synthesized_tool_text = messages.iter().map(|message| {
-        message.pointer("/routecodex_chat_extension/gemini_native_fields")
-            .and_then(Value::as_array).into_iter().flatten()
-            .flat_map(|record| record.get("bindings").and_then(Value::as_array).into_iter().flatten())
-            .any(|binding| binding.get("encoding").and_then(Value::as_str) == Some("json_text")
-                && binding.get("source_path") == Some(&json!(["functionResponse", "response"]))
-                && binding.get("canonical_path") == Some(&json!(["content", "0", "text"])))
-    }).collect::<Vec<_>>();
+    let synthesized_tool_text = messages
+        .iter()
+        .map(|message| {
+            message
+                .pointer("/routecodex_chat_extension/gemini_native_fields")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .flat_map(|record| {
+                    record
+                        .get("bindings")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                })
+                .any(|binding| {
+                    binding.get("encoding").and_then(Value::as_str) == Some("json_text")
+                        && binding.get("source_path")
+                            == Some(&json!(["functionResponse", "response"]))
+                        && binding.get("canonical_path") == Some(&json!(["content", "0", "text"]))
+                })
+        })
+        .collect::<Vec<_>>();
     for message in messages.iter_mut() {
         let Some(message_row) = message.as_object_mut() else {
             continue;
@@ -1491,19 +1517,26 @@ fn normalize_openai_chat_messages_payload(
     // complete consecutive tool-result group.
     let mut projected_messages = Vec::with_capacity(messages.len());
     let mut images = Vec::new();
-    for (mut message, synthesized_tool_text) in std::mem::take(messages).into_iter().zip(synthesized_tool_text) {
+    for (mut message, synthesized_tool_text) in std::mem::take(messages)
+        .into_iter()
+        .zip(synthesized_tool_text)
+    {
         if message.get("role").and_then(Value::as_str) == Some("tool") {
             if let Some(content) = message.get_mut("content") {
                 if let Some(parts) = content.as_array_mut() {
                     parts.retain(|part| {
-                        if matches!(part.get("type").and_then(Value::as_str), Some("image_url" | "file")) {
+                        if matches!(
+                            part.get("type").and_then(Value::as_str),
+                            Some("image_url" | "file")
+                        ) {
                             images.push(part.clone());
                             false
                         } else {
                             true
                         }
                     });
-                    if synthesized_tool_text && parts.len() == 1
+                    if synthesized_tool_text
+                        && parts.len() == 1
                         && parts[0].as_object().is_some_and(|part| part.len() == 2)
                         && parts[0].get("type").and_then(Value::as_str) == Some("text")
                     {

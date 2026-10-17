@@ -232,9 +232,13 @@ fn responses_structured_or_absent_text_is_not_replaced_with_empty_text() {
     ]);
     let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
         "input":[{"type":"message","role":"user","content":source}]
-    })).unwrap();
+    }))
+    .unwrap();
     let parts = &request["messages"][0]["content"];
-    assert_eq!(parts[0]["text"], serde_json::to_string(&source[0]["text"]).unwrap());
+    assert_eq!(
+        parts[0]["text"],
+        serde_json::to_string(&source[0]["text"]).unwrap()
+    );
     assert_eq!(parts[0]["tag"], "structured");
     assert!(parts[1].get("text").is_none());
     assert_eq!(parts[1]["tag"], "absent");
@@ -260,10 +264,7 @@ fn responses_tool_only_function_call_omits_synthetic_empty_content() {
         assistant.get("content").is_none(),
         "newly synthesized tool-only assistant must omit empty content: {request}"
     );
-    assert_eq!(
-        assistant["tool_calls"][0]["id"],
-        json!("call_tool_only")
-    );
+    assert_eq!(assistant["tool_calls"][0]["id"], json!("call_tool_only"));
     assert_eq!(
         assistant["tool_calls"][0]["function"]["name"],
         json!("codex_tui__send_message_to_thread")

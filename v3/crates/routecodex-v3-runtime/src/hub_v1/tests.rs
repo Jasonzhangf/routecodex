@@ -571,7 +571,10 @@ fn responses_inbound_preserves_reasoning_summary_and_tool_context_without_encryp
         .expect("OpenAI Chat request messages");
     assert_eq!(messages.len(), 3);
     assert_eq!(messages[0]["role"], "user");
-    assert_eq!(messages[0]["content"], json!([{"type":"text","text":"inspect the cwd"}]));
+    assert_eq!(
+        messages[0]["content"],
+        json!([{"type":"text","text":"inspect the cwd"}])
+    );
     assert_eq!(messages[1]["role"], "assistant");
     assert_eq!(
         messages[1]["reasoning_content"],

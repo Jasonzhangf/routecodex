@@ -1431,8 +1431,10 @@ fn compiles_hub_v1_declarations_without_request_branch_decisions() {
         "/v1beta/models/model:unknownAction",
         "/v1beta/models/model",
     ] {
-        assert!(hub.entry_protocol_binding_for_endpoint(endpoint).is_none(),
-            "an unregistered action must not enter the Gemini owner: {endpoint}");
+        assert!(
+            hub.entry_protocol_binding_for_endpoint(endpoint).is_none(),
+            "an unregistered action must not enter the Gemini owner: {endpoint}"
+        );
     }
     assert!(hub
         .entry_protocol_binding_for_endpoint("/v1/unknown")

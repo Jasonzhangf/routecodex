@@ -11,8 +11,7 @@
 
 use crate::hub_v1::{
     V3HubEntryProtocol, V3HubProviderWireProtocol, V3RuntimeObservability,
-    V3RuntimeProviderFailureObservation,
-    V3RuntimeStreamObservation,
+    V3RuntimeProviderFailureObservation, V3RuntimeStreamObservation,
 };
 use crate::provider_failure_runtime_policy::{
     project_v3_client_disconnect, provider_runtime_failure_stage,

@@ -1123,11 +1123,15 @@ impl ProviderResponsesTransport {
                 provider_id.clone(),
                 cancellation,
             );
-            return Ok(
-                V3ProviderResp14Raw::from_sse(request_id, provider_id, status, headers, stream)
-                    .with_compatibility_profile(compatibility_profile)
-                    .with_sse_first_frame_timeout_ms(sse_first_frame_timeout_ms),
-            );
+            return Ok(V3ProviderResp14Raw::from_sse(
+                request_id,
+                provider_id,
+                status,
+                headers,
+                stream,
+            )
+            .with_compatibility_profile(compatibility_profile)
+            .with_sse_first_frame_timeout_ms(sse_first_frame_timeout_ms));
         }
 
         Err(V3ProviderError::UnexpectedContentType {

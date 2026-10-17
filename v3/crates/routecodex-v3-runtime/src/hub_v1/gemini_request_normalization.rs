@@ -36,7 +36,10 @@ pub fn build_v3_chat_canonical_request_from_gemini_payload(
 
     let mut messages: Vec<Value> = Vec::new();
     if let Some(system_instruction) = root.get("systemInstruction") {
-        if let (Some(content), Some(parts)) = (system_instruction.as_object(), system_instruction.get("parts").and_then(Value::as_array)) {
+        if let (Some(content), Some(parts)) = (
+            system_instruction.as_object(),
+            system_instruction.get("parts").and_then(Value::as_array),
+        ) {
             append_gemini_content_turn(&mut messages, 0, content, "system", parts)?;
         } else if let Some(text) = gemini_system_instruction_text(system_instruction)? {
             messages.push(json!({"role":"system","content":text}));
@@ -46,7 +49,10 @@ pub fn build_v3_chat_canonical_request_from_gemini_payload(
         let content = content.as_object().ok_or_else(|| {
             "Gemini content must be an object before Chat canonicalization".to_string()
         })?;
-        let raw_role = content.get("role").and_then(Value::as_str).unwrap_or("user");
+        let raw_role = content
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or("user");
         let hub_role = gemini_chat_role(raw_role)?;
         let parts = content
             .get("parts")
@@ -63,9 +69,14 @@ pub fn build_v3_chat_canonical_request_from_gemini_payload(
     let mut request = Map::new();
     let mut root_residual = root.clone();
     root_residual.remove("contents");
-    if let Some(instruction) = root_residual.get_mut("systemInstruction").and_then(Value::as_object_mut) {
+    if let Some(instruction) = root_residual
+        .get_mut("systemInstruction")
+        .and_then(Value::as_object_mut)
+    {
         instruction.remove("parts");
-        if instruction.is_empty() { root_residual.remove("systemInstruction"); }
+        if instruction.is_empty() {
+            root_residual.remove("systemInstruction");
+        }
     } else {
         root_residual.remove("systemInstruction");
     }
@@ -129,7 +140,9 @@ pub fn build_v3_chat_canonical_request_from_gemini_payload(
         request_fields.insert("toolConfig".to_string(), tool_config);
     }
     if request.contains_key("generation")
-        || generation_mapped.iter().any(|key| request.contains_key(*key))
+        || generation_mapped
+            .iter()
+            .any(|key| request.contains_key(*key))
     {
         request_fields.insert(
             "generationConfig".to_string(),
@@ -153,7 +166,11 @@ pub fn build_v3_chat_canonical_request_from_gemini_payload(
 
 /// 查 role_map 的 gemini 列，得到 canonical hub role。表是映射真源。
 fn gemini_chat_role(raw_role: &str) -> Result<&'static str, String> {
-    let role = if raw_role.is_empty() { "user" } else { raw_role };
+    let role = if raw_role.is_empty() {
+        "user"
+    } else {
+        raw_role
+    };
     table_map_value(
         V3TableKind::Role,
         V3_GEMINI_PROTOCOL,
@@ -375,7 +392,14 @@ fn append_gemini_content_turn(
         messages.push(Value::Object(message));
     }
     for message in &mut tool_messages {
-        attach_native_record(message, native_container_record(content_index, role_present, gemini_content_siblings(content)));
+        attach_native_record(
+            message,
+            native_container_record(
+                content_index,
+                role_present,
+                gemini_content_siblings(content),
+            ),
+        );
     }
     messages.extend(tool_messages);
     Ok(())
@@ -430,8 +454,10 @@ fn gemini_content_part(
             .ok_or_else(|| "Gemini inlineData must be an object".to_string())?;
         if gemini_registered_part_hub("inlineData")?.is_some() {
             if let Some(media) = gemini_inline_data_as_image_url(inline_data) {
-                let residual =
-                    residual_part(part, &[&["inlineData", "mimeType"], &["inlineData", "data"]]);
+                let residual = residual_part(
+                    part,
+                    &[&["inlineData", "mimeType"], &["inlineData", "data"]],
+                );
                 let mut canonical = media;
                 attach_native_record(
                     &mut canonical,
@@ -458,8 +484,10 @@ fn gemini_content_part(
                 return Ok((vec![canonical], Vec::new()));
             }
             if let Some(file) = gemini_inline_data_as_file(inline_data) {
-                let residual =
-                    residual_part(part, &[&["inlineData", "mimeType"], &["inlineData", "data"]]);
+                let residual = residual_part(
+                    part,
+                    &[&["inlineData", "mimeType"], &["inlineData", "data"]],
+                );
                 let mut canonical = file;
                 attach_native_record(
                     &mut canonical,
@@ -501,7 +529,8 @@ fn gemini_content_part(
             .as_object()
             .ok_or_else(|| "Gemini fileData must be an object".to_string())?;
         if let Some(media) = gemini_file_data_as_image_url(file_data) {
-            let residual = residual_part(part, &[&["fileData", "mimeType"], &["fileData", "fileUri"]]);
+            let residual =
+                residual_part(part, &[&["fileData", "mimeType"], &["fileData", "fileUri"]]);
             let mut canonical = media;
             attach_native_record(
                 &mut canonical,
@@ -510,7 +539,11 @@ fn gemini_content_part(
                     Some(part_index),
                     nested_part_index,
                     vec![
-                        native_binding(&["fileData", "mimeType"], &["image_url", "url"], "file_uri"),
+                        native_binding(
+                            &["fileData", "mimeType"],
+                            &["image_url", "url"],
+                            "file_uri",
+                        ),
                         native_binding(&["fileData", "fileUri"], &["image_url", "url"], "file_uri"),
                     ],
                     Vec::new(),
@@ -726,12 +759,8 @@ fn build_gemini_function_response_message(
             let nested_part = nested_part.as_object().ok_or_else(|| {
                 "Gemini functionResponse.parts item must be an object".to_string()
             })?;
-            let (canonical, mut opaque_records) = gemini_content_part(
-                content_index,
-                part_index,
-                Some(nested_index),
-                nested_part,
-            )?;
+            let (canonical, mut opaque_records) =
+                gemini_content_part(content_index, part_index, Some(nested_index), nested_part)?;
             parts.extend(canonical);
             records.append(&mut opaque_records);
         }
@@ -867,9 +896,7 @@ fn build_gemini_canonical_tools_with_bindings(
             residual.remove("name");
             residual.remove("description");
             residual.remove("parameters");
-            let mut bindings = vec![
-                native_binding(&["name"], &["function", "name"], "identity"),
-            ];
+            let mut bindings = vec![native_binding(&["name"], &["function", "name"], "identity")];
             if function.contains_key("description") {
                 bindings.push(native_binding(
                     &["description"],

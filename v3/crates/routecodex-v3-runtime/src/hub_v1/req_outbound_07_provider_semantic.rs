@@ -36,6 +36,11 @@ impl V3HubReqOutbound07ProviderSemantic {
     }
 
     pub(crate) fn transport_intent(&self) -> super::V3HubTransportIntent {
-        self.previous.previous.previous.previous.previous.transport_intent
+        self.previous
+            .previous
+            .previous
+            .previous
+            .previous
+            .transport_intent
     }
 }
