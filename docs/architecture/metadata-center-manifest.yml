@@ -229,4 +229,3 @@ verification:
     - npm run verify:function-map-compile-gate
     - npm run verify:architecture-mainline-call-map
     - npm run verify:architecture-wiki-sync
-    - npm run verify:v3-server-tool-center-audit

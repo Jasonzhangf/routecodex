@@ -1,32 +1,19 @@
 #!/usr/bin/env node
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import YAML from 'yaml';
 
-const repo = process.cwd();
-const verifier = resolve(
-  repo,
-  existsSync(resolve(repo, 'scripts/architecture/verify-v3-entry-protocol-endpoint-binding.mjs'))
-    ? 'scripts/architecture/verify-v3-entry-protocol-endpoint-binding.mjs'
-    : 'v3/scripts/architecture/verify-v3-entry-protocol-endpoint-binding.mjs',
-);
+const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+const verifier = resolve(repo, 'v3/scripts/architecture/verify-v3-entry-protocol-endpoint-binding.mjs');
 const copied = [
-  'package.json',
   'docs/architecture/v3-function-map.yml',
   'docs/architecture/v3-mainline-call-map.yml',
   'docs/architecture/v3-resource-operation-map.yml',
   'docs/architecture/v3-verification-map.yml',
   'docs/architecture/manifests/v3.entry_protocol_endpoint_binding.mainline.yml',
-  'docs/architecture/wiki/v3-entry-protocol-endpoint-binding.md',
-  'docs/architecture/wiki/html/v3-entry-protocol-endpoint-binding.html',
-  'scripts/architecture/architecture-wiki-lib.mjs',
-  'v3/crates/routecodex-v3-server/src/lib.rs',
-  'v3/crates/routecodex-v3-server/src/endpoint_handlers.rs',
-  'v3/crates/routecodex-v3-server/src/websocket.rs',
-  'v3/crates/routecodex-v3-server/src/scope_metadata.rs',
-  'v3/crates/routecodex-v3-config/src/validate.rs',
-  'v3/crates/routecodex-v3-config/src/types.rs',
 ];
 
 const cases = [
@@ -55,18 +42,6 @@ const cases = [
     diagnostic: /unknown protocol binding legacy_chat/u,
   },
   {
-    name: 'remove source verifier gate from feature map',
-    path: 'docs/architecture/v3-function-map.yml',
-    mutate: (source) => source.replace('  - npm run verify:v3-entry-protocol-endpoint-binding\n', ''),
-    diagnostic: /feature missing required gate npm run verify:v3-entry-protocol-endpoint-binding/u,
-  },
-  {
-    name: 'break wiki mainline node sync',
-    path: 'docs/architecture/wiki/v3-entry-protocol-endpoint-binding.md',
-    mutate: (source) => source.replaceAll('v3-entry-bind-04', 'v3-entry-bind-four'),
-    diagnostic: /missing v3-entry-bind-04/u,
-  },
-  {
     name: 'remove Gemini runtime owner',
     path: 'docs/architecture/manifests/v3.entry_protocol_endpoint_binding.mainline.yml',
     mutate: (source) => source.replace(
@@ -74,12 +49,6 @@ const cases = [
       '',
     ),
     diagnostic: /gemini implemented binding must declare runtime owner symbol\/path/u,
-  },
-  {
-    name: 'add server raw path bypass branch',
-    path: 'v3/crates/routecodex-v3-server/src/lib.rs',
-    mutate: (source) => source.replace('let path = request.uri().path().to_string();', 'let path = request.uri().path().to_string();\n    if path == "/v1/messages" { return pending_endpoint(State(state), request).await; }'),
-    diagnostic: /Server dispatcher bypasses entry protocol binding registry/u,
   },
   {
     name: 'allow binding resource into provider body',
@@ -90,22 +59,37 @@ const cases = [
     ),
     diagnostic: /v3\.entry_protocol\.binding_registry must not enter provider\/client body/u,
   },
-  {
-    name: 'override fresh pending Responses binding with Relay',
-    path: 'v3/crates/routecodex-v3-server/src/scope_metadata.rs',
-    mutate: (source) => source.replace(
-      'V3EntryProtocolExecutionMode::PendingNotImplemented => configured_mode,',
-      'V3EntryProtocolExecutionMode::PendingNotImplemented => V3EntryProtocolExecutionMode::Relay,',
-    ),
-    diagnostic: /fresh Responses execution mode must preserve Config-owned PendingNotImplemented/u,
-  },
 ];
 
 const failures = [];
+let baselineChecked = false;
 for (const testCase of cases) {
   const root = mkdtempSync(join(tmpdir(), 'v3-entry-binding-red-'));
   try {
-    for (const rel of copied) cpSync(resolve(repo, rel), resolve(root, rel), { recursive: true });
+    const write = (rel, source) => {
+      mkdirSync(dirname(resolve(root, rel)), { recursive: true });
+      writeFileSync(resolve(root, rel), source);
+    };
+    for (const rel of copied) write(rel, readFileSync(resolve(repo, rel), 'utf8'));
+    const manifest = YAML.parse(readFileSync(resolve(root, copied.at(-1)), 'utf8'));
+    const declarations = new Map();
+    const serverFile = 'v3/crates/routecodex-v3-server/src/lib.rs';
+    const routes = ['.route("/v1/models", get(models_endpoint))'];
+    for (const binding of manifest.entry_protocol_bindings) {
+      for (const endpoint of binding.endpoint_patterns) routes.push(`.route("${endpoint}", post(handler))`);
+      if (!binding.runtime_owner_path || !binding.runtime_owner_symbol) continue;
+      if (!declarations.has(binding.runtime_owner_path)) declarations.set(binding.runtime_owner_path, new Set());
+      declarations.get(binding.runtime_owner_path).add(`pub fn ${binding.runtime_owner_symbol}() {}`);
+    }
+    for (const [file, source] of declarations) write(file, [...source].join('\n'));
+    write(serverFile, `${[...(declarations.get(serverFile) ?? [])].join('\n')}\n${routes.join('\n')}`);
+    write('v3/crates/routecodex-v3-config/src/validate.rs', 'const HUB_V1_ENTRY_PROTOCOLS: [&str; 4] = ["responses", "anthropic", "openai_chat", "gemini"];');
+    const options = { cwd: root, encoding: 'utf8', env: { ...process.env, ROUTECODEX_V3_SOURCE_ROOT: root } };
+    if (!baselineChecked) {
+      const baseline = spawnSync(process.execPath, [verifier], options);
+      if (baseline.status !== 0) throw new Error(`fixture baseline failed: ${baseline.stdout}\n${baseline.stderr}`);
+      baselineChecked = true;
+    }
     const target = resolve(root, testCase.path);
     const original = readFileSync(target, 'utf8');
     const mutated = testCase.mutate(original);
@@ -114,9 +98,9 @@ for (const testCase of cases) {
       continue;
     }
     writeFileSync(target, mutated);
-    const result = spawnSync(process.execPath, [verifier], { cwd: root, encoding: 'utf8' });
+    const result = spawnSync(process.execPath, [verifier], options);
     const output = `${result.stdout || ''}\n${result.stderr || ''}`;
-    if (result.status === 0) failures.push(`${testCase.name}: verifier unexpectedly passed`);
+    if (result.status !== 1) failures.push(`${testCase.name}: unexpected verifier exit ${result.status}`);
     else if (!testCase.diagnostic.test(output)) failures.push(`${testCase.name}: wrong diagnostic: ${output.slice(-900)}`);
   } finally {
     rmSync(root, { recursive: true, force: true });

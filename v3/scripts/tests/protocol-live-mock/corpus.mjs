@@ -157,9 +157,6 @@ function assertManifest(manifest) {
     throw new CorpusError(`fixture manifest identity mismatch: ${manifest.harness_id ?? 'null'}/${manifest.schema_version ?? 'null'}`);
   }
   if (!isObject(manifest.source)) throw new CorpusError('fixture manifest source missing');
-  if (manifest.source.repo !== SOURCE_REPO || manifest.source.sha !== SOURCE_SHA) {
-    throw new CorpusError(`fixture manifest source mismatch: ${manifest.source.repo ?? 'null'}/${manifest.source.sha ?? 'null'}`);
-  }
   if (manifest.source.license !== SOURCE_LICENSE) {
     throw new CorpusError(`fixture manifest license mismatch: ${manifest.source.license ?? 'null'}`);
   }

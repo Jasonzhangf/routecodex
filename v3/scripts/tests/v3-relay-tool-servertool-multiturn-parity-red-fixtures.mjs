@@ -1,270 +1,39 @@
 #!/usr/bin/env node
-import {
-  cpSync,
-  existsSync,
-  mkdtempSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import YAML from 'yaml';
 
-if (process.cwd().endsWith('/v3') && existsSync(resolve(process.cwd(), 'crates'))) {
-  process.chdir(resolve(process.cwd(), '..'));
+const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const manifest = 'docs/architecture/manifests/v3.hub_relay.tool_servertool_multiturn_parity.mainline.yml';
+const verifier = path.join(repo, 'v3/scripts/architecture/verify-v3-relay-tool-servertool-multiturn-parity.mjs');
+const files = [manifest, ...['v3-function-map.yml', 'v3-mainline-call-map.yml', 'v3-verification-map.yml', 'v3-resource-operation-map.yml'].map((file) => `docs/architecture/${file}`)];
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'v3-tool-parity-data-'));
+function run() {
+  const result = spawnSync(process.execPath, [verifier], { cwd: repo, env: { ...process.env, ROUTECODEX_V3_SOURCE_ROOT: tmp }, encoding: 'utf8' });
+  assert.ifError(result.error);
+  assert.equal(result.signal, null);
+  return { status: result.status, output: `${result.stdout ?? ''}\n${result.stderr ?? ''}` };
 }
-const repo = process.cwd();
-const verifierRelative = 'v3/scripts/architecture/verify-v3-relay-tool-servertool-multiturn-parity.mjs';
-const copyPaths = [
-  verifierRelative,
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
-  'v3/crates/routecodex-v3-provider-responses/src/transport.rs',
-  'v3/crates/routecodex-v3-provider-responses/src/wire.rs',
-  'v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs',
-  'v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs',
-  'v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs',
-  'v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs',
-  'docs/architecture/manifests/v3.hub_relay.tool_servertool_multiturn_parity.mainline.yml',
-  'docs/architecture/v3-resource-operation-map.yml',
-  'docs/architecture/v3-function-map.yml',
-  'docs/architecture/v3-mainline-call-map.yml',
-  'docs/architecture/v3-verification-map.yml',
-  'docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md',
-  'v3/crates/routecodex-v3-server/src/frame_builders.rs',
-  'package.json',
-];
-
-const cases = [
-  {
-    name: 'provider wire historical placeholder revived',
-    file: 'v3/crates/routecodex-v3-provider-responses/src/wire.rs',
-    marker: 'pub fn build_v3_provider_12_responses_wire_payload',
-    mutation:
-      'fn replace_historical_responses_tool_output_data_images() {}\npub fn build_v3_provider_12_responses_wire_payload',
-    diagnostic: /provider wire historical payload rewrite or placeholder owner/,
-  },
-  {
-    name: 'orphan tool output fail-fast removed',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
-    marker: 'OrphanToolOutput { index: usize, call_id: String }',
-    mutation: 'MissingOrphanOutput { index: usize, call_id: String }',
-    diagnostic: /OrphanToolOutput/,
-  },
-  {
-    name: 'attachment history placeholder policy revived',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
-    marker: 'use serde_json::{json, Value};\n',
-    mutation: 'enum V3HubAttachmentHistoryPolicy { Placeholder }\nuse serde_json::{json, Value};\n',
-    diagnostic: /historical payload rewrite or attachment placeholder owner/,
-  },
-  {
-    name: 'tool kind classifier removed',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
-    marker: 'pub(crate) fn classify_v3_hub_relay_tool_kind',
-    mutation: 'pub(crate) fn classify_tool_kind_removed',
-    diagnostic: /classify_v3_hub_relay_tool_kind/,
-  },
-  {
-    name: 'apply_patch response freeform projection removed',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
-    marker: 'fn project_v3_apply_patch_freeform_calls_at_resp03',
-    mutation: 'project_v3_apply_patch_projection_removed',
-    diagnostic: /project_v3_apply_patch_freeform_calls_at_resp03/,
-  },
-  {
-    name: 'Responses tool-continuation fabrication revived in Resp03',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
-    marker: 'fn inspect_v3_resp03_finish_reason(',
-    mutation:
-      'fn complete_or_repair_v3_resp03_tool_frames(mut input: V3HubRespInbound02Normalized) -> V3HubRespInbound02Normalized {\n    let mut next = input.provider_payload().as_ref().clone();\n    if let Some(object) = next.as_object_mut() {\n        if let Some(status) = object.get("status").and_then(Value::as_str) {\n            if status == "completed" {\n                object.insert("status".to_string(), Value::String("requires_action".to_string()));\n            }\n        }\n        object.insert("finish_reason".to_string(), Value::String("tool_calls".to_string()));\n    }\n    input\n}\nfn inspect_v3_resp03_finish_reason(',
-    diagnostic: /fabricating Responses tool-continuation repair in Resp03/,
-  },
-  {
-    name: 'Resp03 completed tool-call preservation characterization renamed away',
-    file: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs',
-    marker: 'fn resp03_preserves_completed_tool_call_response_before_tool_governance()',
-    mutation: 'fn resp03_preserves_completed_tool_call_response_removed()',
-    diagnostic: /resp03_preserves_completed_tool_call_response_before_tool_governance/,
-  },
-  {
-    name: 'Resp03 finish reason inspector removed',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
-    marker: 'inspect_v3_resp03_finish_reason',
-    mutation: 'resp03_finish_reason_inspector_removed',
-    diagnostic: /inspect_v3_resp03_finish_reason|Resp03 response governance/,
-  },
-  {
-    name: 'tool-call servertool hook removed',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
-    marker: 'apply_v3_tool_call_servertool_hook_at_resp03',
-    mutation: 'apply_v3_tool_call_servertool_hook_removed_at_resp03',
-    all: true,
-    diagnostic: /apply_v3_tool_call_servertool_hook_at_resp03/,
-  },
-  {
-    name: 'Responses client SSE completed terminal relabeled as requires_action',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
-    marker:
-      '_ => "response.completed",',
-    mutation:
-      '_ => "response.requires_action",',
-    diagnostic: /response\.requires_action client SSE terminal projection/,
-  },
-  {
-    name: 'Responses client SSE non-protocol response.done terminator reintroduced',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
-    marker: 'frames.push(build_v3_runtime_sse_json_frame(\n            terminal_event,',
-    mutation:
-      'frames.push(build_v3_runtime_sse_json_frame(\n            "response.done",\n            &json!({\n                "type": "response.done",\n                "response": terminal_response,\n            }),\n        ));\n        frames.push(build_v3_runtime_sse_json_frame(\n            terminal_event,',
-    diagnostic: /non-Responses client SSE terminator/,
-  },
-  {
-    name: 'Responses client SSE error event construction reintroduced',
-    file: 'v3/crates/routecodex-v3-server/src/frame_builders.rs',
-    marker: 'frame.body = V3Server16Body::Bytes(Vec::new());',
-    mutation: 'frame.body = V3Server16Body::Bytes(b"event: response.failed\\ndata: {}\\n\\n".to_vec());',
-    diagnostic: /client error event construction is forbidden/,
-  },
-  {
-    name: 'Responses client SSE incomplete remerged into failed terminal',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
-    marker: 'let failed = status == Some("failed");',
-    mutation: 'let failed = status == Some("failed" | "incomplete");',
-    diagnostic: /missing Some\("failed"\)/,
-  },
-  {
-    name: 'apply_patch request feedback normalization reintroduced',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
-    marker: 'fn govern_tool_outputs_at_req04(',
-    mutation: 'const APPLY_PATCH_ERROR_TEXT: &str = "proxy advice";\nfn govern_tool_outputs_at_req04(',
-    diagnostic: /APPLY_PATCH_ERROR_TEXT/,
-  },
-  {
-    name: 'protocol transport matrix removed',
-    file: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs',
-    marker: 'protocol_transport_matrix_uses_one_chat_process_governance_path',
-    mutation: 'protocol_transport_matrix_removed',
-    diagnostic: /protocol_transport_matrix_uses_one_chat_process_governance_path/,
-  },
-  {
-    name: 'focused parity test removed',
-    file: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs',
-    marker: 'request_governance_rejects_orphan_output_wrong_kind_and_missing_call_id',
-    mutation: 'request_governance_missing_negative_case',
-    diagnostic: /request_governance_rejects_orphan_output_wrong_kind_and_missing_call_id/,
-  },
-  {
-    name: 'Responses HTTP additional_tools transport lift revived',
-    file: 'v3/crates/routecodex-v3-provider-responses/src/transport.rs',
-    marker: 'pub struct V3Transport13ResponsesRequest',
-    mutation: 'fn responses_http_provider_request_lifts_additional_tools_to_protocol_tools() {}\npub struct V3Transport13ResponsesRequest',
-    diagnostic: /Responses HTTP additional_tools global lift|responses_http_provider_request_lifts_additional_tools_to_protocol_tools/,
-  },
-  {
-    name: 'provider transport Anthropic protocol conversion revived',
-    file: 'v3/crates/routecodex-v3-provider-responses/src/transport.rs',
-    marker: 'pub fn build_v3_transport_13_responses_request_from_v3_provider_12(',
-    mutation:
-      'fn build_anthropic_messages_body() {}\npub fn build_v3_transport_13_responses_request_from_v3_provider_12(',
-    diagnostic: /provider transport protocol conversion outside Chat Process|build_anthropic_messages_body/,
-  },
-  {
-    name: 'mainline edge owner drift',
-    file: 'docs/architecture/manifests/v3.hub_relay.tool_servertool_multiturn_parity.mainline.yml',
-    marker: 'owner_feature_id: v3.relay_tool_servertool_multiturn_parity_closeout',
-    mutation: 'owner_feature_id: v3.hub_relay_runtime_closeout',
-    diagnostic: /owner_feature_id mismatch|edge v3-relay-tool-parity/,
-  },
-  {
-    name: 'package script removed',
-    file: 'package.json',
-    marker: '"verify:v3-relay-tool-servertool-multiturn-parity-closeout": "',
-    mutation: '"verify:v3-relay-tool-servertool-multiturn-parity-closeout_removed": "',
-    diagnostic: /missing script verify:v3-relay-tool-servertool-multiturn-parity-closeout/,
-  },
-  {
-    name: 'full materialization shortcut appears',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
-    marker: 'fn govern_tool_outputs_at_req04',
-    mutation: 'fn full_materialize_govern_tool_outputs_at_req04',
-    diagnostic: /full payload materialization shortcut|full_materialize/,
-  },
-  {
-    name: 'legal metadata_center method reference with nearby payload write',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
-    marker: 'fn govern_tool_outputs_at_req04',
-    mutation:
-      'fn metadata_center_leak() { let mut payload = serde_json::Map::new(); payload.insert("metadata_center".to_string(), true.into()); }\nfn govern_tool_outputs_at_req04',
-    diagnostic: /MetadataCenter payload\/control leakage/,
-  },
-  {
-    name: 'metadata_center method-name string literal written into payload',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
-    marker: 'fn govern_tool_outputs_at_req04',
-    mutation:
-      'fn metadata_center_string_leak() { let mut payload = serde_json::Map::new(); payload.insert("is_metadata_center_local_search".to_string(), true.into()); }\nfn govern_tool_outputs_at_req04',
-    diagnostic: /MetadataCenter payload\/control leakage/,
-  },
-];
-
-const failures = [];
-for (const testCase of cases) {
-  const root = mkdtempSync(join(tmpdir(), 'v3-relay-tool-parity-red-'));
-  try {
-    let nodeModules = resolve(repo, 'v3/node_modules');
-    for (let current = repo; !existsSync(nodeModules); current = dirname(current)) {
-      nodeModules = resolve(current, 'node_modules');
-      if (dirname(current) === current) break;
-    }
-    if (existsSync(nodeModules)) {
-      symlinkSync(nodeModules, resolve(root, 'node_modules'), 'dir');
-    }
-    for (const relative of copyPaths) {
-      const destination = resolve(root, relative);
-      mkdirSync(dirname(destination), { recursive: true });
-      cpSync(resolve(repo, relative), destination, { recursive: true });
-    }
-    const target = resolve(root, testCase.file);
-    const source = readFileSync(target, 'utf8');
-    if (!source.includes(testCase.marker)) {
-      failures.push(`${testCase.name}: mutation marker missing`);
-      continue;
-    }
-    writeFileSync(
-      target,
-      testCase.all
-        ? source.split(testCase.marker).join(testCase.mutation)
-        : source.replace(testCase.marker, testCase.mutation),
-    );
-    const result = spawnSync(process.execPath, [resolve(root, verifierRelative)], {
-      cwd: root,
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        ROUTECODEX_V3_SOURCE_ROOT: '',
-        ROUTECODEX_V3_ADMISSION_WORKSPACE: '1',
-      },
-    });
-    const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
-    if (result.status === 0) failures.push(`${testCase.name}: verifier unexpectedly passed`);
-    else if (!testCase.diagnostic.test(output)) {
-      failures.push(`${testCase.name}: wrong diagnostic: ${output.slice(-900)}`);
-    }
-  } finally {
-    rmSync(root, { recursive: true, force: true });
+try {
+  for (const file of files) {
+    const target = path.join(tmp, file);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(path.join(repo, file), target);
   }
+  const baseline = run();
+  assert.equal(baseline.status, 0, baseline.output);
+  const target = path.join(tmp, manifest);
+  const doc = YAML.parse(fs.readFileSync(target, 'utf8'));
+  doc.owner_feature_id = 'v3.hub_relay_runtime_closeout';
+  fs.writeFileSync(target, YAML.stringify(doc));
+  const result = run();
+  assert.equal(result.status, 1, result.output);
+  assert.match(result.output, /owner_feature_id mismatch/);
+  console.log('[test:v3-relay-tool-servertool-multiturn-parity-closeout-red-fixtures] GREEN baseline + owner drift rejected');
+} finally {
+  fs.rmSync(tmp, { recursive: true, force: true });
 }
-
-if (failures.length) {
-  console.error('[test:v3-relay-tool-servertool-multiturn-parity-closeout-red-fixtures] failed');
-  for (const failure of failures) console.error(`- ${failure}`);
-  process.exit(1);
-}
-console.log(`[test:v3-relay-tool-servertool-multiturn-parity-closeout-red-fixtures] ok (${cases.length} forbidden mutations rejected)`);

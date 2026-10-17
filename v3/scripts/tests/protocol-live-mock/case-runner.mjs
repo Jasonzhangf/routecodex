@@ -9,7 +9,6 @@
 //
 // Import-safe: no listeners, no CLI, no I/O at import time.
 
-import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -294,7 +293,6 @@ export async function runCase({
         path: sent.request.path,
         headers: sent.requestHeaders,
         body_bytes: Buffer.byteLength(sent.requestBody, 'utf8'),
-        body_sha256: sha256Text(sent.requestBody),
       },
       client: {
         status: sent.raw.status ?? null,
@@ -438,10 +436,6 @@ function bodyByteLength(raw) {
   if (raw?.bodyBytes && typeof raw.bodyBytes.length === 'number') return raw.bodyBytes.length;
   if (typeof raw?.bodyBytesBase64 === 'string') return Math.floor(raw.bodyBytesBase64.length * 3 / 4);
   return Buffer.byteLength(bodyTextOf(raw), 'utf8');
-}
-
-function sha256Text(textValue) {
-  return createHash('sha256').update(String(textValue)).digest('hex');
 }
 
 function sumField(entries, key) {

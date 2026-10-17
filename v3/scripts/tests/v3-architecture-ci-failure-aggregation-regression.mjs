@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -16,6 +16,7 @@ const stepsEnd = gateSource.indexOf('\n\nconst failures', stepsStart);
 assert(stepsStart >= 0 && stepsEnd > stepsStart, 'controlled fixture must locate STEPS');
 
 const controlledSteps = `const STEPS = [
+  ['fixture-large-success', 'successful controlled step with verbose output'],
   ['fixture-first-failure', 'first independent controlled failure'],
   ['fixture-second-failure', 'second independent controlled failure'],
   ['fixture-after-failures', 'independent step after failures'],
@@ -28,6 +29,7 @@ try {
     JSON.stringify({
       type: 'module',
       scripts: {
+        'fixture-large-success': "node -e \"process.stdout.write('LARGE_STDOUT_START\\n' + 's'.repeat(1024 * 1024 + 1) + '\\nLARGE_STDOUT_END\\n'); process.stderr.write('LARGE_STDERR_START\\n' + 'e'.repeat(1024 * 1024 + 1) + '\\nLARGE_STDERR_END\\n')\"",
         'fixture-first-failure': "node -e \"console.error('FIRST_CONTROLLED_FAILURE'); process.exit(11)\"",
         'fixture-second-failure': "node -e \"console.error('SECOND_CONTROLLED_FAILURE'); process.exit(12)\"",
         'fixture-after-failures': "node -e \"console.log('AFTER_CONTROLLED_FAILURES')\"",
@@ -39,18 +41,27 @@ try {
     gateSource.slice(0, stepsStart) + controlledSteps + gateSource.slice(stepsEnd),
   );
 
+  const outputPath = join(fixtureRoot, 'regression-output.log');
+  const outputFd = openSync(outputPath, 'w');
   const result = spawnSync(process.execPath, [join(fixtureRoot, 'verify-v3-architecture-ci.mjs')], {
     cwd: fixtureRoot,
-    encoding: 'utf8',
+    stdio: ['ignore', outputFd, outputFd],
   });
-  const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+  closeSync(outputFd);
+  const output = readFileSync(outputPath, 'utf8');
   assert.notEqual(result.status, 0, 'two controlled failures must fail the umbrella');
+  assert.match(output, /PASS fixture-large-success/);
+  assert.doesNotMatch(output, /FAIL fixture-large-success/);
+  assert.match(output, /LARGE_STDOUT_START/);
+  assert.match(output, /LARGE_STDOUT_END/);
+  assert.match(output, /LARGE_STDERR_START/);
+  assert.match(output, /LARGE_STDERR_END/);
   assert.match(output, /FIRST_CONTROLLED_FAILURE/);
   assert.match(output, /SECOND_CONTROLLED_FAILURE/);
   assert.match(output, /AFTER_CONTROLLED_FAILURES/);
   assert.match(output, /FAILED at fixture-first-failure \(2 sub-failure total in run\)/);
   assert.match(output, /failed sub-gates: fixture-first-failure, fixture-second-failure/);
-  assert.match(output, /passed sub-gates: 1\/3/);
+  assert.match(output, /passed sub-gates: 2\/4/);
   assert.ok(
     output.indexOf('fixture-first-failure') < output.indexOf('fixture-second-failure'),
     'failures must retain STEPS order',

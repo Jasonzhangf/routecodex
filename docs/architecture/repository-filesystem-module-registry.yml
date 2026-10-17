@@ -167,7 +167,6 @@ modules:
   - v3/crates/routecodex-v3-runtime/src/selected_provider_model_binding.rs
   allowed_paths:
   - v3/.appsdk/**
-  - config/v3-file-size-policy.json
   - docs/architecture/manifests/v3.stage_protocol_shape_contract.yml
   - docs/architecture/v3-architecture-audit-locks.yml
   - docs/architecture/wiki/v3-mainline-caller-flow.md

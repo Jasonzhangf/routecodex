@@ -345,17 +345,6 @@ export const MANUAL_WIKI_PAGES = [
     path: `${WIKI_ROOT}/v3-mainline-skeleton-sop.md`,
     title: '# V3 Mainline Skeleton SOP',
     minMermaidBlocks: 0,
-    requiredTokens: [
-      '## Locked Scope',
-      '## Debug Entry SOP',
-      '## Locked Contract',
-      '## Required Gates',
-      '## Change Rule',
-      'audited locked by Jason',
-      'v3.hub_pipeline.v1.request',
-      'v3.hub_pipeline.v1.response',
-      'v3.debug_error_foundation.mainline',
-    ],
   },
   {
     path: `${WIKI_ROOT}/v3-req04-tool-governance-review.md`,

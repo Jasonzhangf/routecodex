@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 const repoRoot = process.cwd();
 const verifier = resolve(
   repoRoot,
-  'scripts/architecture/verify-v3-anthropic-relay-protocol-hooks.mjs',
+  'v3/scripts/architecture/verify-v3-anthropic-relay-protocol-hooks.mjs',
 );
 const source = 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_hooks.rs';
 const tests = 'v3/crates/routecodex-v3-runtime/tests/hub_anthropic_relay_protocol_hooks.rs';

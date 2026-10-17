@@ -38,18 +38,17 @@
 <body data-review-surface="v3-mainline-skeleton-sop">
   <main>
     <header class="hero">
-      <span class="eyebrow">locked SOP review · generated dedicated surface</span>
+      <span class="eyebrow">mainline skeleton SOP review · generated dedicated surface</span>
       <h1>V3 Mainline Skeleton SOP Review</h1>
-      <p>这个页面是主骨架 SOP 的专用 review surface，不允许退回通用 Markdown HTML。它用同一套可视标准展示 request / response / error / SSE edge 边界、锁定链 fingerprint 和变更授权规则。</p>
+      <p>这个页面是主骨架 SOP 的专用 review surface，不允许退回通用 Markdown HTML。它用同一套可视标准展示 request / response / error / SSE edge 边界和骨架链 owner 拓扑。</p>
       <div class="meta-row">
         <span class="meta-pill">Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-skeleton-sop.md</code></span>
         <span class="meta-pill">Review source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
-        <span class="meta-pill">Lock source: <code>docs/architecture/v3-architecture-audit-locks.yml</code></span>
       </div>
     </header>
 
     <section class="panel">
-      <h2>Separated locked skeleton diagrams</h2>
+      <h2>Separated skeleton diagrams</h2>
       <div class="flow-stack">
         <section><h3>Request skeleton</h3><div class="flow-box"><pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 105, &quot;nodeSpacing&quot;: 65}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;20px&quot;}} }%%
 flowchart TD
@@ -145,13 +144,13 @@ flowchart TD
 
     <section class="panel">
       <h2>rccv3 live closeout SOP</h2>
-      <div class="callout"><strong>Main/runtime before review.</strong> Author tests, public-entry E2E and applicable CI PASS → merge/push validated content to main → rebuild/install from main → managed restart → health, real-entry replay and sample audit → complete independent Codex and AGY reviews → defect/resource closeout. Review pending does not delay main rebuild/restart, but keeps the defect open. Bind reviews to exact candidate/main content; repair blocking findings and use traceable revert/rebuild/restart/replay for confirmed delivered regressions. Repository checks and Git protection remain enforced.</div>
+      <div class="callout"><strong>One milestone review before integration.</strong> Complete affected author tests and public-entry acceptance, or a real tooling consumer. Complete applicable runtime acceptance, then one independent overall milestone review and applicable CI before merge/push to main. Complete applicable post-merge acceptance and resource cleanup. Reuse unchanged evidence. Explain expected interruption before a formal rccv3 restart (or rcc restart); separate approval is not required. Execute it once per new build and investigate failure before retrying. Start/stop, including all arguments and aliases, still require explicit human approval. Tooling-only changes do not require restart. Repository checks and Git protection remain enforced.</div>
       <table>
         <thead><tr><th>Step</th><th>Required evidence</th></tr></thead>
         <tbody>
-          <tr><td>Build/install</td><td><code>npm run install:v3</code> from delivered main and matching candidate, installed and loaded binary hashes.</td></tr>
+          <tr><td>Build/install</td><td><code>npm run install:v3</code> from delivered main.</td></tr>
           <tr><td>Config/restart</td><td>Read the selected active config, otherwise <code>~/.rcc/config.toml</code>; run <code>rccv3 config check -c &lt;active-config&gt;</code>, then <code>rccv3 restart -c &lt;active-config&gt;</code>. Require exit zero and running state.</td></tr>
-          <tr><td>Runtime identity</td><td><code>rccv3 --version</code>, loaded binary identity and health for every listener declared by the active config.</td></tr>
+          <tr><td>Runtime identity</td><td><code>rccv3 --version</code> and health for every listener declared by the active config.</td></tr>
           <tr><td>Behavior</td><td>Provider-request dry-run, live JSON/SSE probe, and exact old-sample replay when a saved failing sample exists.</td></tr>
         </tbody>
       </table>
@@ -163,18 +162,8 @@ flowchart TD
     </section>
 
     <section class="panel">
-      <h2>Locked chain fingerprints</h2>
-      <table><thead><tr><th>Chain</th><th>Lock status</th><th>Edges</th><th>Owner</th><th>Fingerprint</th></tr></thead><tbody><tr><td><code>v3.config.compile</code></td><td><span class="status">audited_locked</span></td><td>4</td><td><code>v3.config_interpreter_contract</code></td><td><code>sha256:59948789e48ff5c7cdb3e…</code></td></tr><tr><td><code>v3.config.compact_hub_v1_defaults</code></td><td><span class="status">audited_locked</span></td><td>4</td><td><code>v3.config_interpreter_contract</code></td><td><code>sha256:2bb01d432d2a3acf3ebdf…</code></td></tr><tr><td><code>v3.entry_protocol_endpoint_binding.mainline</code></td><td><span class="status">audited_locked</span></td><td>4</td><td><code>v3.entry_protocol_endpoint_binding</code></td><td><code>sha256:15ecb6de58935a4c1d3bf…</code></td></tr><tr><td><code>v3.server.startup</code></td><td><span class="status">audited_locked</span></td><td>9</td><td><code>v3.foundation_p0_p2</code></td><td><code>sha256:e09b3524db5510c71781b…</code></td></tr><tr><td><code>v3.responses_direct.required_mainline</code></td><td><span class="status">audited_locked</span></td><td>17</td><td><code>v3.responses_direct_mvp_architecture</code></td><td><code>sha256:31869eb07abff120397b2…</code></td></tr><tr><td><code>v3.hub_pipeline.v1.request</code></td><td><span class="status">audited_locked</span></td><td>8</td><td><code>v3.hub_pipeline_static_skeleton</code></td><td><code>sha256:066f368a851c78f829302…</code></td></tr><tr><td><code>v3.hub_pipeline.v1.response</code></td><td><span class="status">audited_locked</span></td><td>5</td><td><code>v3.hub_pipeline_static_skeleton</code></td><td><code>sha256:1899934ce325350d557e6…</code></td></tr><tr><td><code>v3.debug_error_foundation.mainline</code></td><td><span class="status">audited_locked</span></td><td>22</td><td><code>v3.debug_error_foundation</code></td><td><code>sha256:c520e6d65c78c6dea0d8f…</code></td></tr><tr><td><code>v3.sse.transport_boundary</code></td><td><span class="status">audited_locked</span></td><td>4</td><td><code>v3.sse_transport_core_independent</code></td><td><code>sha256:c93ca1386d58b91b17f73…</code></td></tr></tbody></table>
-    </section>
-
-    <section class="panel">
-      <h2>Change authorization contract</h2>
-      <div class="callout"><strong>Locked chain edge/resource/caller/callee/fingerprint changes require Jason manual authorization.</strong> The authorization record must include authorization id, item id, approved_by Jason, before/after fingerprints, and reason/scope.</div>
-    </section>
-
-    <section class="panel">
       <h2>Canonical sources</h2>
-      <ul><li><code>docs/architecture/wiki/v3-mainline-skeleton-sop.md</code></li><li><code>docs/architecture/wiki/html/v3-mainline-caller-flow.html</code></li><li><code>docs/architecture/v3-mainline-call-map.yml</code></li><li><code>docs/architecture/v3-resource-operation-map.yml</code></li><li><code>docs/architecture/v3-architecture-audit-locks.yml</code></li><li><code>docs/architecture/v3-function-map.yml</code></li><li><code>docs/architecture/v3-verification-map.yml</code></li></ul>
+      <ul><li><code>docs/architecture/wiki/v3-mainline-skeleton-sop.md</code></li><li><code>docs/architecture/wiki/html/v3-mainline-caller-flow.html</code></li><li><code>docs/architecture/v3-mainline-call-map.yml</code></li><li><code>docs/architecture/v3-resource-operation-map.yml</code></li><li><code>docs/architecture/v3-function-map.yml</code></li><li><code>docs/architecture/v3-verification-map.yml</code></li></ul>
     </section>
   </main>
 </body>

@@ -1,28 +1,151 @@
 #!/usr/bin/env node
-import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+// Red fixture for verify-v3-module-boundaries.mjs.
+//
+// Every case runs the real verifier against minimal declared data: a small
+// crate file set, the real function maps, a minimal runtime module registry and
+// a minimal build module registry, plus minimal Cargo manifests for the
+// declared dependency contracts. No case copies the v3/ crate source tree.
+//
+// The cases below mutate declared ownership data. Source-text, symbol-spelling
+// and private-implementation mutation cases were retired with the source-lock
+// ablation and are intentionally absent.
+
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const v3Root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const repoRoot = resolve(v3Root, '..');
 const verifier = resolve(v3Root, 'scripts/architecture/verify-v3-module-boundaries.mjs');
+
+const crateSourceFiles = [
+  'v3/crates/routecodex-v3-runtime/src/lib.rs',
+  'v3/crates/routecodex-v3-target/src/lib.rs',
+  'v3/crates/routecodex-v3-virtual-router/src/lib.rs',
+];
+
+// Minimal runtime registry: every staged crate file stays owned exactly once.
+const runtimeRegistry = `version: 1
+status: active
+source_root: v3/crates
+modules:
+  - module_id: v3.runtime
+    owner_feature_id: v3.hub_pipeline_static_skeleton
+    owned_paths:
+      - v3/crates/routecodex-v3-runtime/**
+  - module_id: v3.target
+    owner_feature_id: v3.virtual_router_target_interpreter
+    owned_paths:
+      - v3/crates/routecodex-v3-target/**
+  - module_id: v3.virtual_router
+    owner_feature_id: v3.virtual_router_target_interpreter
+    owned_paths:
+      - v3/crates/routecodex-v3-virtual-router/**
+  - module_id: v3.cli
+    owner_feature_id: v3.managed_server_lifecycle
+    owned_paths:
+      - v3/crates/routecodex-v3-cli/**
+  - module_id: v3.server
+    owner_feature_id: v3.managed_server_lifecycle
+    owned_paths:
+      - v3/crates/routecodex-v3-server/**
+`;
+
+// Minimal build registry: it owns build tooling paths and references exactly one
+// runtime module for each referenced crate path.
+const buildRegistry = `version: 1
+status: active
+modules:
+  - module_id: v3.build_tooling
+    owner_feature_id: v3.build_test_artifact_budget
+    owned_paths:
+      - v3/Cargo.toml
+    referenced_paths:
+      - v3/crates/routecodex-v3-runtime/**
+      - v3/crates/routecodex-v3-target/**
+`;
+
+const cargoManifests = {
+  'v3/crates/routecodex-v3-runtime/Cargo.toml': `[package]
+name = "routecodex-v3-runtime"
+version = "0.1.0"
+
+[dependencies]
+routecodex-v3-provider-responses = { path = "../routecodex-v3-provider-responses" }
+`,
+  'v3/crates/routecodex-v3-target/Cargo.toml': `[package]
+name = "routecodex-v3-target"
+version = "0.1.0"
+
+[dependencies]
+routecodex-v3-config = { path = "../routecodex-v3-config" }
+`,
+  'v3/crates/routecodex-v3-server/Cargo.toml': `[package]
+name = "routecodex-v3-server"
+version = "0.1.0"
+
+[dependencies]
+axum.workspace = true
+routecodex-v3-cli = { path = "../routecodex-v3-cli" }
+routecodex-v3-runtime = { path = "../routecodex-v3-runtime" }
+
+[dev-dependencies]
+reqwest.workspace = true
+`,
+  'v3/crates/routecodex-v3-cli/Cargo.toml': `[package]
+name = "routecodex-v3-cli"
+version = "0.1.0"
+
+[dependencies]
+clap.workspace = true
+routecodex-v3-config = { path = "../routecodex-v3-config" }
+routecodex-v3-server = { path = "../routecodex-v3-server" }
+
+[[bin]]
+name = "rccv3"
+path = "src/main.rs"
+`,
+  'v3/crates/routecodex-v3-virtual-router/Cargo.toml': `[package]
+name = "routecodex-v3-virtual-router"
+version = "0.1.0"
+
+[dependencies]
+routecodex-v3-route-classifier = { path = "../routecodex-v3-route-classifier" }
+routecodex-v3-config = { path = "../routecodex-v3-config" }
+thiserror.workspace = true
+`,
+};
+
+const declaredInputs = [
+  ['docs/architecture/v3-runtime-module-registry.yml', runtimeRegistry],
+  ['docs/architecture/v3-build-tool-module-registry.yml', buildRegistry],
+  ...Object.entries(cargoManifests),
+];
+
+// Runtime crate source stays irrelevant to this gate; only membership matters.
+const stagedRust = 'pub fn declared_module_boundary_source() {}\n';
+
+// Feature binding stays bound to the real declared function maps.
+const declaredFunctionMaps = [
+  'v3-function-map.yml',
+  'function-map.yml',
+];
+
 const fixtures = [
   {
     name: 'runtime source loses its module owner',
     file: 'docs/architecture/v3-runtime-module-registry.yml',
-    transform: (source) => source.replace(
-      '      - v3/crates/routecodex-v3-runtime/**\n',
-      '',
-    ),
-    diagnostic: /source must have exactly one module owner: v3\/crates\/routecodex-v3-runtime/,
+    transform: (source) => source.replace('      - v3/crates/routecodex-v3-runtime/**\n', ''),
+    diagnostic: /source must have exactly one module owner: v3\/crates\/routecodex-v3-runtime.*owners=none/,
   },
   {
     name: 'target source gains a duplicate module owner',
     file: 'docs/architecture/v3-runtime-module-registry.yml',
     transform: (source) => source.replace(
-      '\nresponsibility_contracts:',
-      '\n  - module_id: v3.target_duplicate\n    owner_feature_id: v3.virtual_router_target_interpreter\n    owned_paths:\n      - v3/crates/routecodex-v3-target/**\n\nresponsibility_contracts:',
+      '  - module_id: v3.virtual_router',
+      '  - module_id: v3.target_duplicate\n    owner_feature_id: v3.virtual_router_target_interpreter\n    owned_paths:\n      - v3/crates/routecodex-v3-target/**\n  - module_id: v3.virtual_router',
     ),
     diagnostic: /source must have exactly one module owner: v3\/crates\/routecodex-v3-target.*v3\.target,v3\.target_duplicate/,
   },
@@ -30,245 +153,133 @@ const fixtures = [
     name: 'build registry claims runtime source ownership',
     file: 'docs/architecture/v3-build-tool-module-registry.yml',
     transform: (source) => source.replace(
-      '      - v3/build-contracts\n    referenced_paths:',
-      '      - v3/build-contracts\n      - v3/crates/provider-compat-core\n    referenced_paths:',
+      '    owned_paths:\n      - v3/Cargo.toml\n',
+      '    owned_paths:\n      - v3/Cargo.toml\n      - v3/crates/routecodex-v3-target/**\n',
     ),
-    diagnostic: /source ownership overlaps build\/runtime registries: v3\/crates\/provider-compat-core owners=v3-independent-build-domain,v3\.provider_compat_core/,
+    diagnostic: /source ownership overlaps build\/runtime registries: v3\/crates\/routecodex-v3-target.*owners=v3\.build_tooling,v3\.target/,
+  },
+  {
+    name: 'build reference resolves to no runtime module owner',
+    file: 'docs/architecture/v3-build-tool-module-registry.yml',
+    transform: (source) => source.replace(
+      '      - v3/crates/routecodex-v3-target/**\n',
+      '      - v3/crates/routecodex-v3-undeclared-crate/**\n',
+    ),
+    diagnostic: /build reference must resolve to exactly one runtime module owner: v3\/crates\/routecodex-v3-undeclared-crate.*owners=none/,
+  },
+  {
+    name: 'build reference resolves to multiple runtime module owners',
+    file: 'docs/architecture/v3-build-tool-module-registry.yml',
+    transform: (source) => source.replace(
+      '      - v3/crates/routecodex-v3-runtime/**\n',
+      '      - v3/crates/**\n',
+    ),
+    diagnostic: /build reference must resolve to exactly one runtime module owner: v3\/crates.*owners=v3\.runtime,v3\.target,v3\.virtual_router/,
   },
   {
     name: 'module owner feature is undeclared',
     file: 'docs/architecture/v3-runtime-module-registry.yml',
-    transform: (source) => source.replace(
-      '    owner_feature_id: v3.hub_pipeline_static_skeleton\n',
-      '    owner_feature_id: v3.undeclared_feature\n',
-    ),
+    transform: (source) => source.replace('    owner_feature_id: v3.hub_pipeline_static_skeleton\n', '    owner_feature_id: v3.undeclared_feature\n'),
     diagnostic: /owner_feature_id does not resolve to a declared feature: v3\.undeclared_feature/,
   },
   {
-    name: 'provider transport outside provider owner',
-    file: 'v3/crates/routecodex-v3-server/src/lib.rs',
-    mutation: '\nfn forbidden_transport_owner() { let _ = reqwest::Client::new(); }\n',
-    diagnostic: /provider transport outside provider crate/,
+    name: 'module entry drops owned paths',
+    file: 'docs/architecture/v3-runtime-module-registry.yml',
+    transform: (source) => source.replace('  - module_id: v3.virtual_router\n    owner_feature_id: v3.virtual_router_target_interpreter\n    owned_paths:\n      - v3/crates/routecodex-v3-virtual-router/**\n', '  - module_id: v3.virtual_router\n    owner_feature_id: v3.virtual_router_target_interpreter\n'),
+    diagnostic: /module v3\.virtual_router requires owned_paths/,
   },
   {
-    name: 'server imports provider health store',
-    file: 'v3/crates/routecodex-v3-server/src/lib.rs',
-    mutation: '\nuse routecodex_v3_provider_responses::V3ProviderHealthStore;\n',
-    diagnostic: /Provider health store must remain opaque outside Provider and its Runtime boundary/,
+    name: 'undeclared crate source is still unowned',
+    insertFile: 'v3/crates/routecodex-v3-undeclared/src/lib.rs',
+    diagnostic: /source must have exactly one module owner: v3\/crates\/routecodex-v3-undeclared.*owners=none/,
   },
   {
-    name: 'duplicate request node owner',
-    file: 'v3/crates/routecodex-v3-server/src/lib.rs',
-    mutation: '\npub struct V3Server03HttpRequestRaw;\n',
-    diagnostic: /duplicate V3 Server03 request node/,
-  },
-  {
-    name: 'server route shortcut',
-    file: 'v3/crates/routecodex-v3-server/src/lib.rs',
-    mutation: '\nfn forbidden_route_shortcut() { hit_opaque_target_plan_once(); }\n',
-    diagnostic: /Server cannot select routes or interpret targets/,
-  },
-  {
-    name: 'virtual router expands target internals',
-    file: 'v3/crates/routecodex-v3-virtual-router/src/lib.rs',
-    mutation: '\nfn forbidden_target_expansion(manifest: &V3Config05ManifestPublished) { let _ = &manifest.forwarders; }\n',
-    diagnostic: /Virtual Router must return an opaque target and cannot interpret Target or Provider internals/,
-  },
-  {
-    name: 'virtual router reads provider availability',
-    file: 'v3/crates/routecodex-v3-virtual-router/src/lib.rs',
+    name: 'server production dependencies include provider crate',
+    file: 'v3/crates/routecodex-v3-server/Cargo.toml',
     transform: (source) => source.replace(
-      '#[cfg(test)]',
-      'use routecodex_v3_provider_responses::V3ProviderAvailabilityReader;\n\n#[cfg(test)]',
+      'routecodex-v3-runtime = { path = "../routecodex-v3-runtime" }\n',
+      'routecodex-v3-runtime = { path = "../routecodex-v3-runtime" }\nroutecodex-v3-provider-responses = { path = "../routecodex-v3-provider-responses" }\n',
     ),
-    diagnostic: /Virtual Router cannot depend on Provider health or availability/,
+    diagnostic: /server crate production dependencies must not include provider crate/,
   },
   {
-    name: 'target re-enters virtual router',
-    file: 'v3/crates/routecodex-v3-target/src/lib.rs',
-    mutation: '\nfn forbidden_router_reentry(router: V3VirtualRouter, plan: routecodex_v3_virtual_router::V3Router06RoutePoolResolved) { let _ = router.hit_opaque_target_plan_once(plan, 0); }\n',
-    diagnostic: /Target production source cannot re-enter Virtual Router/,
-  },
-  {
-    name: 'target drops responses process',
-    file: 'v3/crates/routecodex-v3-target/src/lib.rs',
-    transform: (source) => source
-      .replace('    pub responses_process: Option<String>,\n', '')
-      .replace(/                responses_process: provider[\s\S]*?                responses_transport:/, '                responses_transport:'),
-    diagnostic: /Target candidate must carry provider\.responses\.process/,
-  },
-  {
-    name: 'execution decision ignores responses process chat',
-    file: 'v3/crates/routecodex-v3-runtime/src/nodes.rs',
-    transform: (source) => source.replace(/\.responses_process/g, '.provider_type'),
-    diagnostic: /V3Execution11ProtocolDecision must route selected responses provider process=chat to HubRelay/,
-  },
-  {
-    name: 'execution decision forces responses process chat to direct',
-    file: 'v3/crates/routecodex-v3-runtime/src/nodes.rs',
+    name: 'cli dependencies include provider crate',
+    file: 'v3/crates/routecodex-v3-cli/Cargo.toml',
     transform: (source) => source.replace(
-      '        V3Execution11ProtocolDecisionMode::HubRelay\n    } else if entry_protocol == selected_provider_protocol {',
-      '        V3Execution11ProtocolDecisionMode::SameProtocolDirect\n    } else if entry_protocol == selected_provider_protocol {',
+      'routecodex-v3-server = { path = "../routecodex-v3-server" }\n',
+      'routecodex-v3-server = { path = "../routecodex-v3-server" }\nroutecodex-v3-provider-responses = { path = "../routecodex-v3-provider-responses" }\n',
     ),
-    diagnostic: /V3Execution11ProtocolDecision must route selected responses provider process=chat to HubRelay/,
+    diagnostic: /CLI must not depend on provider transport directly/,
   },
   {
-    name: 'runtime reconstructs control from client payload metadata',
-    file: 'v3/crates/routecodex-v3-runtime/src/nodes.rs',
-    mutation: '\nfn forbidden_payload_control(body: &serde_json::Value) { let _ = body.pointer("/metadata/runtime_control"); }\n',
-    diagnostic: /cannot derive routing or MetadataCenter control from client payload metadata/,
-  },
-  {
-    name: 'route classifier payload metadata carrier returns',
-    file: 'v3/crates/routecodex-v3-runtime/src/nodes.rs',
-    mutation: '\nstruct V3RouteClassifierMetadata;\n',
-    diagnostic: /cannot derive routing or MetadataCenter control from client payload metadata/,
-  },
-  {
-    name: 'server reconstructs admission control scope from client payload metadata',
-    file: 'v3/crates/routecodex-v3-server/src/lib.rs',
-    mutation: '\nfn extract_responses_client_scope(payload: &serde_json::Value) { let _ = payload.get("client_metadata"); }\n',
-    diagnostic: /Server cannot rebuild continuation or admission control scope from client payload metadata/,
-  },
-  {
-    name: 'server reconstructs provider health control from client payload metadata',
-    file: 'v3/crates/routecodex-v3-server/src/lib.rs',
+    name: 'virtual router dependencies include provider crate',
+    file: 'v3/crates/routecodex-v3-virtual-router/Cargo.toml',
     transform: (source) => source.replace(
-      '    V3ProviderFailureSessionScope::new(&server.id, &server.routing_group, &session_id)',
-      '    let _ = serde_json::Value::Null.get("metadata");\n    V3ProviderFailureSessionScope::new(&server.id, &server.routing_group, &session_id)',
+      'routecodex-v3-config = { path = "../routecodex-v3-config" }\n',
+      'routecodex-v3-config = { path = "../routecodex-v3-config" }\nroutecodex-v3-provider-responses = { path = "../routecodex-v3-provider-responses" }\n',
     ),
-    diagnostic: /Server cannot rebuild provider-health control scope from client payload metadata/,
-  },
-  {
-    name: 'req04 reconstructs chat from stored responses input',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs',
-    mutation: '\nfn forbidden_req04_rebuild(restored: &serde_json::Value) { let _ = restored.get("input"); }\n',
-    diagnostic: /Req04 cannot rebuild Chat semantics from a stored non-Chat continuation payload/,
-  },
-  {
-    name: 'response control enters chat payload',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
-    mutation: '\nconst FORBIDDEN_CONTROL_PAYLOAD_KEY: &str = "continuation_response_id";\n',
-    diagnostic: /Resp03 continuation control identity cannot be embedded in Chat canonical payload/,
-  },
-  {
-    name: 'provider identity special case',
-    file: 'v3/crates/routecodex-v3-provider-responses/src/wire.rs',
-    mutation: '\nfn forbidden_provider_case(provider_id: &str) -> bool { provider_id == "cc" }\n',
-    diagnostic: /generic Responses Provider contains deployment provider identity branch/,
-  },
-  {
-    name: 'obsolete provider prototype node',
-    file: 'v3/crates/routecodex-v3-provider-responses/src/wire.rs',
-    mutation: '\ntype ForbiddenOldProviderNode = V3Provider07ResponsesWirePayload;\n',
-    diagnostic: /obsolete Provider prototype node name is forbidden/,
-  },
-  {
-    name: 'provider imports target interpreter',
-    file: 'v3/crates/routecodex-v3-provider-responses/src/wire.rs',
-    mutation: '\nuse routecodex_v3_target::V3TargetInterpreter;\n',
-    diagnostic: /generic Responses Provider cannot import or interpret Router\/Target\/Forwarder resources/,
-  },
-  {
-    name: 'repair or fallback semantics',
-    file: 'v3/crates/routecodex-v3-runtime/src/lib.rs',
-    mutation: '\nfn forbidden_response_repair() {}\n',
-    diagnostic: /forbidden V3 MVP lifecycle\/fallback wording/,
-  },
-  {
-    name: 'production violation after cfg test module remains visible',
-    file: 'v3/crates/routecodex-v3-runtime/src/nodes.rs',
-    transform: (source) => source + '\nfn forbidden_response_repair_after_cfg_test_module() {}\n',
-    diagnostic: /forbidden V3 MVP lifecycle\/fallback wording in source: .*routecodex-v3-runtime\/src\/nodes\.rs/,
-  },
-  {
-    name: 'undeclared Resp03 repair helper stays forbidden',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
-    mutation: '\nfn complete_or_repair_v3_resp03_history_frames() {}\n',
-    diagnostic: /forbidden V3 MVP lifecycle\/fallback wording/,
-  },
-  {
-    name: 'debug owns business topology',
-    file: 'v3/crates/routecodex-v3-debug/src/lib.rs',
-    mutation: '\nconst FORBIDDEN_DEBUG_TOPOLOGY: &str = "V3ResponsesDirect11Policy";\n',
-    diagnostic: /Debug cannot own or hard-code the Responses Direct business lifecycle topology/,
-  },
-  {
-    name: 'server bypasses Server16 builder',
-    file: 'v3/crates/routecodex-v3-server/src/lib.rs',
-    mutation: '\nfn responses_direct_output_response_forbidden(_: V3Resp15ClientPayload) {}\n',
-    diagnostic: /unique V3Resp15 -> V3Server16 builder/,
-  },
-  {
-    name: 'dry run sends provider network',
-    file: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs',
-    transform: (source) => source.replace('"provider_network_send": false,', '"provider_network_send": true,'),
-    diagnostic: /P6 Dry Run must execute the Provider pipeline and stop only the Provider network-send effect/,
-  },
-  {
-    name: 'synthetic malformed JSON payload',
-    file: 'v3/crates/routecodex-v3-server/src/lib.rs',
-    mutation: '\nfn forbidden_synthetic_payload() { let _ = serde_json::json!({"raw_body_bytes": 1}); }\n',
-    diagnostic: /cannot synthesize business payload/,
-  },
-  {
-    name: 'broad business endpoint method handler',
-    file: 'v3/crates/routecodex-v3-server/src/lib.rs',
-    mutation: '\nfn forbidden_any_route() { let _ = Router::new().route("/v1/responses", any(pending_endpoint)); }\n',
-    diagnostic: /broad any handler is forbidden/,
-  },
-  {
-    name: 'listener task spawned before aggregate bind preflight',
-    file: 'v3/crates/routecodex-v3-server/src/lib.rs',
-    transform: (source) => source.replace(
-      'bound.push((server, listener, bound_addr));',
-      'tokio::spawn(async {});\n        bound.push((server, listener, bound_addr));',
-    ),
-    diagnostic: /bind the complete enabled listener set before spawning/,
+    diagnostic: /virtual router cannot depend on provider transport, health or availability/,
   },
 ];
 
 const failures = [];
-for (const fixture of fixtures) {
-  const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-source-red-'));
+
+function stageDeclaredInput(root, { mutate = null } = {}) {
+  for (const [relativePath, content] of declaredInputs) {
+    const target = join(root, relativePath);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, mutate ? mutate(relativePath, content) : content);
+  }
+  for (const name of declaredFunctionMaps) {
+    copyFileSync(resolve(repoRoot, `docs/architecture/${name}`), join(root, `docs/architecture/${name}`));
+  }
+  for (const relativePath of crateSourceFiles) {
+    const target = join(root, relativePath);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, stagedRust);
+  }
+}
+
+function runVerifier(root) {
+  return spawnSync(process.execPath, [verifier], {
+    cwd: root,
+    env: { ...process.env, ROUTECODEX_V3_SOURCE_ROOT: root },
+    encoding: 'utf8',
+  });
+}
+
+// Baseline: the minimal declared inputs must be GREEN before any mutation.
+{
+  const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-module-boundary-'));
   try {
-    cpSync(v3Root, join(root, 'v3'), {
-      recursive: true,
-      filter: (source) => {
-        const relativeSource = source.slice(v3Root.length).replaceAll('\\', '/');
-        return !relativeSource.startsWith('/target/')
-          && !relativeSource.startsWith('/build-control/');
-      },
-    });
-    mkdirSync(join(root, 'docs/architecture'), { recursive: true });
-    for (const name of [
-      'v3-build-tool-module-registry.yml',
-      'v3-runtime-module-registry.yml',
-      'v3-function-map.yml',
-      'function-map.yml',
-    ]) {
-      copyFileSync(
-        resolve(v3Root, `../docs/architecture/${name}`),
-        join(root, `docs/architecture/${name}`),
-      );
+    stageDeclaredInput(root);
+    const result = runVerifier(root);
+    const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+    if (result.status !== 0) {
+      failures.push(`baseline: gate unexpectedly failed: ${output.slice(-2000)}`);
     }
-    const target = join(root, fixture.file);
-    const source = readFileSync(target, 'utf8');
-    const testModule = source.indexOf('#[cfg(test)]');
-    const mutated = fixture.transform
-      ? fixture.transform(source)
-      : testModule === -1
-        ? source + fixture.mutation
-        : source.slice(0, testModule) + fixture.mutation + source.slice(testModule);
-    writeFileSync(target, mutated);
-    const result = spawnSync(process.execPath, [verifier], {
-      cwd: root,
-      env: { ...process.env, ROUTECODEX_V3_SOURCE_ROOT: root },
-      encoding: 'utf8',
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+for (const fixture of fixtures) {
+  const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-module-boundary-'));
+  try {
+    stageDeclaredInput(root, {
+      mutate: (relativePath, content) => fixture.transform && relativePath === fixture.file
+        ? fixture.transform(content)
+        : content,
     });
+    if (fixture.insertFile) {
+      const target = join(root, fixture.insertFile);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, stagedRust);
+    }
+    const result = runVerifier(root);
     const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
     if (result.status === 0) failures.push(`${fixture.name}: gate unexpectedly passed`);
-    else if (!fixture.diagnostic.test(output)) failures.push(`${fixture.name}: wrong diagnostic: ${output.slice(-500)}`);
+    else if (!fixture.diagnostic.test(output)) failures.push(`${fixture.name}: wrong diagnostic: ${output.slice(-1000)}`);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -279,4 +290,4 @@ if (failures.length) {
   for (const failure of failures) console.error(`- ${failure}`);
   process.exit(1);
 }
-console.log(`[test:v3-source-gate-red-fixtures] ok (${fixtures.length} forbidden mutations rejected)`);
+console.log(`[test:v3-source-gate-red-fixtures] ok (${declaredInputs.length + crateSourceFiles.length} declared inputs staged, baseline GREEN, ${fixtures.length} ownership/dependency mutations rejected)`);

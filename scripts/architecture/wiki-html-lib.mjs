@@ -2,8 +2,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { GENERATED_WIKI_PAGES, MANUAL_WIKI_PAGES, WIKI_ROOT } from './architecture-wiki-lib.mjs';
 import {
-  loadV3ArchitectureAuditLocks,
-  loadV3MainlineCallMap,
   renderV3MainlineCallerFlowHtml,
   V3_CALLER_FLOW_PATH,
   V3_MAINLINE_SKELETON_SOP_PATH,
@@ -27,7 +25,7 @@ const V3_PROTOCOL_NORMALIZATION_TOOL_GOVERNANCE_BOUNDARY_PATH = 'docs/architectu
 const V3_DEDICATED_REVIEW_SURFACES = new Map([
   [V3_CONFIG_COMPACT_HUB_V1_DEFAULTS_SOP_PATH, {
     id: 'v3-config-compact-hub-v1-defaults-sop',
-    eyebrow: 'config compiler review · audited lock',
+    eyebrow: 'config compiler review',
     title: 'V3 Compact Hub V1 Defaults SOP Review',
     summary: 'Locks compact user authoring to one Rust config compiler path. Fixed Hub endpoint, hook, resource, and execution declarations are derived before Manifest publication and cannot be rebuilt by Runtime, Server, Provider, Virtual Router, Target, or Compat.',
     requestTitle: 'Compact authoring compile flow',
@@ -53,7 +51,7 @@ const V3_DEDICATED_REVIEW_SURFACES = new Map([
       ['v3.config.hub_pipeline_declarations', 'routecodex-v3-config', 'Closed fixed Hub V1 endpoints, hooks, resources, and execution declarations.'],
       ['v3.config.published_manifest', 'routecodex-v3-config', 'Only runtime/server configuration truth.'],
     ],
-    checklist: ['Compact TOML compiles to the closed deterministic Manifest', 'V2 compat uses the same default owner', 'No default writer exists outside routecodex-v3-config', 'Locked fingerprint changes require Jason manual authorization'],
+    checklist: ['Compact TOML compiles to the closed deterministic Manifest', 'Configured entry protocols use the same V3 config owner', 'No default writer exists outside routecodex-v3-config'],
   }],
   [V3_ENTRY_PROTOCOL_ENDPOINT_BINDING_PATH, {
     id: 'v3-entry-protocol-endpoint-binding',
@@ -326,13 +324,11 @@ function renderMarkdown(markdown) {
 const V3_SOP_REVIEW_MARKERS = [
   'data-review-surface="v3-mainline-skeleton-sop"',
   'V3 Mainline Skeleton SOP Review',
-  'Separated locked skeleton diagrams',
+  'Separated skeleton diagrams',
   'Request skeleton',
   'Response skeleton',
   'Error resources',
   'SSE Edge SOP',
-  'Locked chain fingerprints',
-  'Change authorization contract',
   'Canonical sources',
   'Request node logic',
   'Response node logic',
@@ -570,29 +566,12 @@ export function auditV3DedicatedReviewSurfacesHtml(expectedOutputs) {
   return failures;
 }
 
-function renderV3MainlineSkeletonSopHtml(root) {
-  const map = loadV3MainlineCallMap(root);
-  const locks = loadV3ArchitectureAuditLocks(root);
-  const chains = map?.chains ?? [];
-  const locksByChain = new Map((locks?.locked_items ?? []).map((item) => [item.chain_id, item]));
-  const required = locks?.policy?.required_locked_chains ?? [];
-  const lockRows = required.map((chainId) => {
-    const chain = chains.find((item) => item.chain_id === chainId);
-    const lock = locksByChain.get(chainId);
-    return [
-      `<code>${escapeHtml(chainId)}</code>`,
-      `<span class="status">${escapeHtml(lock?.status ?? 'missing')}</span>`,
-      String(chain?.edges?.length ?? 0),
-      `<code>${escapeHtml(chain?.owner_feature_id ?? '<missing>')}</code>`,
-      `<code>${escapeHtml((lock?.fingerprint ?? '<missing>').slice(0, 28))}…</code>`,
-    ];
-  });
+function renderV3MainlineSkeletonSopHtml() {
   const canonical = [
     V3_MAINLINE_SKELETON_SOP_PATH,
     'docs/architecture/wiki/html/v3-mainline-caller-flow.html',
     'docs/architecture/v3-mainline-call-map.yml',
     'docs/architecture/v3-resource-operation-map.yml',
-    'docs/architecture/v3-architecture-audit-locks.yml',
     'docs/architecture/v3-function-map.yml',
     'docs/architecture/v3-verification-map.yml',
   ];
@@ -636,18 +615,17 @@ function renderV3MainlineSkeletonSopHtml(root) {
 <body data-review-surface="v3-mainline-skeleton-sop">
   <main>
     <header class="hero">
-      <span class="eyebrow">locked SOP review · generated dedicated surface</span>
+      <span class="eyebrow">mainline skeleton SOP review · generated dedicated surface</span>
       <h1>V3 Mainline Skeleton SOP Review</h1>
-      <p>这个页面是主骨架 SOP 的专用 review surface，不允许退回通用 Markdown HTML。它用同一套可视标准展示 request / response / error / SSE edge 边界、锁定链 fingerprint 和变更授权规则。</p>
+      <p>这个页面是主骨架 SOP 的专用 review surface，不允许退回通用 Markdown HTML。它用同一套可视标准展示 request / response / error / SSE edge 边界和骨架链 owner 拓扑。</p>
       <div class="meta-row">
         <span class="meta-pill">Canonical Markdown source: <code>${escapeHtml(V3_MAINLINE_SKELETON_SOP_PATH)}</code></span>
         <span class="meta-pill">Review source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
-        <span class="meta-pill">Lock source: <code>docs/architecture/v3-architecture-audit-locks.yml</code></span>
       </div>
     </header>
 
     <section class="panel">
-      <h2>Separated locked skeleton diagrams</h2>
+      <h2>Separated skeleton diagrams</h2>
       <div class="flow-stack">
         <section><h3>Request skeleton</h3><div class="flow-box"><pre class="mermaid">${escapeHtml(v3SopMermaid('request'))}</pre></div></section>
         <section><h3>Response skeleton</h3><div class="flow-box"><pre class="mermaid">${escapeHtml(v3SopMermaid('response'))}</pre></div></section>
@@ -692,13 +670,13 @@ function renderV3MainlineSkeletonSopHtml(root) {
 
     <section class="panel">
       <h2>rccv3 live closeout SOP</h2>
-      <div class="callout"><strong>Main/runtime before review.</strong> Author tests, public-entry E2E and applicable CI PASS → merge/push validated content to main → rebuild/install from main → managed restart → health, real-entry replay and sample audit → complete independent Codex and AGY reviews → defect/resource closeout. Review pending does not delay main rebuild/restart, but keeps the defect open. Bind reviews to exact candidate/main content; repair blocking findings and use traceable revert/rebuild/restart/replay for confirmed delivered regressions. Repository checks and Git protection remain enforced.</div>
+      <div class="callout"><strong>One milestone review before integration.</strong> Complete affected author tests and public-entry acceptance, or a real tooling consumer. Complete applicable runtime acceptance, then one independent overall milestone review and applicable CI before merge/push to main. Complete applicable post-merge acceptance and resource cleanup. Reuse unchanged evidence. Explain expected interruption before a formal rccv3 restart (or rcc restart); separate approval is not required. Execute it once per new build and investigate failure before retrying. Start/stop, including all arguments and aliases, still require explicit human approval. Tooling-only changes do not require restart. Repository checks and Git protection remain enforced.</div>
       <table>
         <thead><tr><th>Step</th><th>Required evidence</th></tr></thead>
         <tbody>
-          <tr><td>Build/install</td><td><code>npm run install:v3</code> from delivered main and matching candidate, installed and loaded binary hashes.</td></tr>
+          <tr><td>Build/install</td><td><code>npm run install:v3</code> from delivered main.</td></tr>
           <tr><td>Config/restart</td><td>Read the selected active config, otherwise <code>~/.rcc/config.toml</code>; run <code>rccv3 config check -c &lt;active-config&gt;</code>, then <code>rccv3 restart -c &lt;active-config&gt;</code>. Require exit zero and running state.</td></tr>
-          <tr><td>Runtime identity</td><td><code>rccv3 --version</code>, loaded binary identity and health for every listener declared by the active config.</td></tr>
+          <tr><td>Runtime identity</td><td><code>rccv3 --version</code> and health for every listener declared by the active config.</td></tr>
           <tr><td>Behavior</td><td>Provider-request dry-run, live JSON/SSE probe, and exact old-sample replay when a saved failing sample exists.</td></tr>
         </tbody>
       </table>
@@ -707,16 +685,6 @@ function renderV3MainlineSkeletonSopHtml(root) {
     <section class="panel">
       <h2>SSE Edge SOP</h2>
       <div class="callout"><strong>SSE is transport only.</strong> It owns bytes, UTF-8/frame parsing, frame limits, backpressure/EOF/drop/error closeout, and opaque frame re-encoding only. It must not parse event/data JSON, required_action, terminal status, tool calls, continuation, servertool, routing, retry, or error-policy semantics.</div>
-    </section>
-
-    <section class="panel">
-      <h2>Locked chain fingerprints</h2>
-      ${v3SopHtmlTable(['Chain', 'Lock status', 'Edges', 'Owner', 'Fingerprint'], lockRows)}
-    </section>
-
-    <section class="panel">
-      <h2>Change authorization contract</h2>
-      <div class="callout"><strong>Locked chain edge/resource/caller/callee/fingerprint changes require Jason manual authorization.</strong> The authorization record must include authorization id, item id, approved_by Jason, before/after fingerprints, and reason/scope.</div>
     </section>
 
     <section class="panel">
@@ -734,10 +702,10 @@ export function auditV3MainlineSkeletonSopHtmlText(htmlText, relPath = V3_MAINLI
     if (!htmlText.includes(token)) failures.push(`${relPath}: generated SOP HTML missing review-surface token ${token}`);
   }
   if (htmlText.includes('<section class="frame">') || htmlText.includes('<article>\n        <h1>')) {
-    failures.push(`${relPath}: V3 locked SOP must use dedicated review renderer, not generic markdown renderer`);
+    failures.push(`${relPath}: V3 mainline skeleton SOP must use dedicated review renderer, not generic markdown renderer`);
   }
   const mermaidCount = (htmlText.match(/<pre class="mermaid">/g) ?? []).length;
-  if (mermaidCount < 2) failures.push(`${relPath}: V3 locked SOP HTML must contain separate request and response Mermaid diagrams`);
+  if (mermaidCount < 2) failures.push(`${relPath}: V3 mainline skeleton SOP HTML must contain separate request and response Mermaid diagrams`);
   return failures;
 }
 
@@ -891,7 +859,7 @@ export function renderArchitectureWikiHtmlPages(root) {
       continue;
     }
     if (markdownPath === V3_MAINLINE_SKELETON_SOP_PATH) {
-      outputs.set(htmlPathForMarkdown(markdownPath), renderV3MainlineSkeletonSopHtml(root));
+      outputs.set(htmlPathForMarkdown(markdownPath), renderV3MainlineSkeletonSopHtml());
       continue;
     }
     const markdown = readText(root, markdownPath);

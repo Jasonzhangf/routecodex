@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 
 const HARNESS_ID = 'v3.anthropic_relay_controlled_replay';
@@ -43,10 +43,11 @@ const FORBIDDEN_FIELDS = new Set([
 ]);
 
 const args = parseArgs(process.argv.slice(2));
-const fixtureRoot = resolve(args['fixture-root'] ?? 'v3/fixtures/anthropic-relay-controlled-upstream');
+const fixtureRoot = args['fixture-root']
+  ? resolve(args['fixture-root'])
+  : resolve(dirname(fileURLToPath(import.meta.url)), '../../fixtures/anthropic-relay-controlled-upstream');
 const evidencePath = args.evidence ? resolve(args.evidence) : null;
 const fixtures = loadFixtures(fixtureRoot);
-const fixtureDigest = digest(fixtures.map(({ relative, value }) => ({ relative, value })));
 const driver = process.env.V3_ANTHROPIC_RELAY_DRIVER;
 
 if (!driver) {
@@ -54,7 +55,6 @@ if (!driver) {
     schema_version: 1,
     harness_id: HARNESS_ID,
     status: 'wiring_missing',
-    fixture_digest: fixtureDigest,
     cases: fixtures.map(({ value }) => ({
       case_id: value.case_id,
       status: 'not_run',
@@ -69,7 +69,7 @@ if (!driver) {
   process.exit(1);
 }
 
-const result = await runWithDriver(driver, fixtures, fixtureDigest);
+const result = await runWithDriver(driver, fixtures);
 emitEvidence(evidencePath, result);
 if (result.status !== 'passed') {
   console.error(result.diagnostic);
@@ -77,7 +77,7 @@ if (result.status !== 'passed') {
 }
 console.log(`[v3-anthropic-relay-controlled-replay] passed (${result.cases.length} cases)`);
 
-async function runWithDriver(driverPath, loaded, digestValue) {
+async function runWithDriver(driverPath, loaded) {
   const captures = new Map();
   const fixtureById = new Map(loaded.map(({ value }) => [value.case_id, value]));
   let activeFixtureId = null;
@@ -157,7 +157,6 @@ async function runWithDriver(driverPath, loaded, digestValue) {
     schema_version: 1,
     harness_id: HARNESS_ID,
     status: failed.length ? 'failed' : 'passed',
-    fixture_digest: digestValue,
     cases: results,
     missing_adjacent_edges: [],
     diagnostic: failed.length ? `controlled replay failed: ${failed.map((item) => item.case_id).join(', ')}` : 'all controlled replay cases passed',
@@ -236,7 +235,6 @@ function canonical(value) {
   if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]));
   return value;
 }
-function digest(value) { return createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex'); }
 function deepEqual(left, right) { return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right)); }
 function orderedSubsequence(required, actual) {
   if (!Array.isArray(actual)) return false;

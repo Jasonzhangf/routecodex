@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
@@ -95,7 +94,6 @@ export async function generateRccConfig(options = {}) {
       model: candidate.model,
       wire_model: candidate.wireModel,
       token: candidate.token,
-      sha256: createHash('sha256').update(text).digest('hex'),
     };
   });
   if (providerFiles.length !== plan.candidates.length) {
@@ -148,7 +146,6 @@ tiers = ${renderDefaultTier(plan.candidates)}
       model: file.model,
       wire_model: file.wire_model,
       provider_path: file.path,
-      provider_sha256: file.sha256,
       auth_token: file.token,
       authorization: `Bearer ${file.token}`,
       declared: true,
@@ -186,7 +183,6 @@ tiers = ${renderDefaultTier(plan.candidates)}
     mode_receipt: writtenMode ? {
       field: `servers.${serverId}.execution.allowed_modes`,
       allowed_modes: [writtenMode],
-      config_sha256: createHash('sha256').update(writtenConfig).digest('hex'),
     } : null,
     provider_id: primary.provider_id,
     model: primary.model,

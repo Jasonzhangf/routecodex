@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const repoRoot = process.cwd();
-const verifier = resolve(repoRoot, 'scripts/architecture/verify-v3-h2-equivalence-harness.mjs');
+const verifier = resolve(repoRoot, 'v3/scripts/architecture/verify-v3-h2-equivalence-harness.mjs');
 const fixtures = [
   {
     name: 'CLI entry replaced by library server',

@@ -27,7 +27,7 @@ Every L2 run must satisfy all items below before editing:
 
 ### `release_install_sync`
 
-Purpose: prove source, package metadata, release snapshot, installed shims, and
+Purpose: prove source, package metadata, distributed package, installed shims, and
 live runtime version all describe the same build before any release completion
 claim.
 
@@ -36,7 +36,7 @@ claim.
 | Owner | `scripts/install-release.sh`, `v3/package.json`, `v3/package-lock.json`, and the V3 install/pack entrypoints. |
 | Feature map | Build wiring gate plus affected runtime lifecycle feature if start/restart behavior changes. |
 | Mainline | `runtime.lifecycle.mainline` only when install adoption writes stop-intent or starts/restarts a managed process. |
-| Whitebox | `npm run verify:v3-build-admission-lockstep`; V3 package/lock version sync; focused test for any touched script/helper. |
+| Whitebox | V3 package/lock version sync when package metadata changes; focused behavior test for any touched script/helper. |
 | Blackbox | `npm run install:release` with explicit `ROUTECODEX_INSTALL_VERIFY_PORT=<port>`; `npm --prefix v3 run pack:npm`; installed V3 CLI version and `/health.version === v3/package.json.version` on every configured listener affected by restart. |
 | Quality | Prove build/pack scripts do not mutate global install; no repo path leaks in packed packages; no symlinked `rcc-llmswitch-core`; no stale live version accepted. |
 | Evidence | run log must include source version, CLI versions, install/current release path, health version per port, and live probe command/result. |
@@ -52,7 +52,7 @@ stale pid files or broad process kill commands.
 | Owner | `runtime.lifecycle.pid_cache`, `runtime.lifecycle.stop_intent`, or `runtime.lifecycle.instance_registry`. |
 | Mainline | `runtime.lifecycle.mainline` edges `rtl-01`, `rtl-03`, `rtl-04`, `rtl-07`, `rtl-08`, `rtl-09`, `rtl-10`, `rtl-11`, `rtl-12` as applicable. |
 | Whitebox | `npm run verify:runtime-lifecycle-pid-rebase`; focused Jest for touched owner: `tests/utils/server-runtime-pid.spec.ts`, `tests/utils/daemon-stop-intent.spec.ts`, `tests/utils/runtime-instance-registry.spec.ts`, `tests/cli/start-command.spec.ts`, `tests/cli/stop-command.spec.ts`, `tests/cli/restart-command.spec.ts`. |
-| Blackbox | Managed `rcc start --snap`, `rcc stop --port <port>`, or `rcc restart --port <port>` only with explicit human approval; then `/health`, expected port-group behavior, and process lifecycle log evidence. Explicit `rcc start --restart --port <port>` is a guard/fail-fast test when a runtime already exists, not a stop/restart blackbox. |
+| Blackbox | Managed start/stop (all arguments and compatibility aliases) require explicit human approval. Formal `rccv3 restart --port <port>` (or `rcc restart`) requires advance notice of expected interruption, without separate approval. Execute one formal restart per new build; investigate failure before any retry. Then check `/health`, expected port-group behavior, and process lifecycle logs. Explicit `rcc start --restart --port <port>` is a guard/fail-fast test when a runtime already exists, not a restart replacement. |
 | Quality | No `pkill`, `killall`, `kill $(...)`, `xargs kill`, broad checkout/reset, stale pid truth, root `server-*.pid`, root `daemon-stop-*.json`, or top-level host reuse for explicit multi-port targets. |
 | Evidence | run log must include command, target port(s), expected and observed port group, health result, relevant `~/.rcc/logs/process-lifecycle.jsonl` summary, whether pids were only hints, and restart console lifecycle lines when restart is the action: command/version/config, target/control instance, listeners, control acceptance, status transitions, completed state, server version/binary/address, final status JSON. |
 | Escalate | Any focused lifecycle Jest failure, port conflict, unmanaged listener, group expansion ambiguity, host/probe mismatch, or no checker. |

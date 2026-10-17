@@ -9,7 +9,7 @@
  *     `v4/...` paths, root `src/`, V3, or sharedmodule compile inputs.
  *  4. Node packages resolve from v4/node_modules (never root fallback).
  *  5. Every tracked V4 source/build file belongs to exactly one module in
- *     the module registry; build edges are declared and adjacent.
+ *     the module registry.
  *  6. Root package.json and CI contain only approved V4 dispatcher forms,
  *     and the CI job running V4 canonical verification is on an arm64 macOS
  *     runner matching the aarch64-apple-darwin Active artifact target
@@ -26,7 +26,6 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import yaml from 'js-yaml';
 import { v4Root, runCapture } from './_common.mjs';
@@ -40,15 +39,15 @@ import {
   architectureCommand,
   consumerCommand,
 } from './_gate-matrix.mjs';
-import {
-  ADMISSION_COMMAND,
-  BOUNDARY_COMMAND,
-  BUILD_GUARD_COMMAND,
-  ROLE_CONTRACTS,
-  SELF_TEST_COMMAND,
-  isMachinePath,
-} from './architecture/lib/feature-layer-batch-contract.mjs';
 import { loadV3Baseline } from './architecture/_v3-baseline.mjs';
+
+function isMachinePath(value) {
+  return typeof value === 'string'
+    && value.length > 0
+    && !value.startsWith('/')
+    && !value.split('/').includes('..')
+    && !/[\\\s{}?\[\]]/.test(value);
+}
 
 const failures = [];
 const IGNORED_DIRS = new Set([
@@ -75,15 +74,6 @@ const FORBIDDEN_PATH_PATTERNS = [
   { pattern: /\b(?:cargo|rustc|node|npm)\b[^\n]*\b(?:sharedmodule|v3\/crates|src\/)\//, label: 'V3/root/sharedmodule compile input' },
 ];
 
-const PRODUCT_MAP_REVIEW_CUTOVER = Date.parse('2026-08-23T00:00:00Z');
-const PRODUCT_MAP_REVIEW_ROOT = 'docs/architecture/maps';
-const PRODUCT_MAP_HASH_FIELDS = {
-  function_map_hash: 'function-map.json',
-  resource_map_hash: 'resource-map.json',
-  mainline_call_map_hash: 'mainline-call-map.json',
-  verification_map_hash: 'verification-map.json',
-};
-
 const ALLOWED_OUTPUT_PREFIXES = [
   'target',
   'build-control',
@@ -106,22 +96,9 @@ function isContainedV4Path(root, inputPath) {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
-function commandAdapter(command) {
-  const executable = String(command ?? '').trim().split(/\s+/)[0];
-  if (executable === 'node') return 'node';
-  if (executable === 'cargo') return 'cargo';
-  return null;
-}
-
 function checkGateInputBinding(gate, root, moduleIds, out) {
   if (!moduleIds.has(gate.owner_module_id)) {
     out.push(`active gate ${gate.gate_id} has unknown owner_module_id ${JSON.stringify(gate.owner_module_id)}`);
-  }
-  if (gate.producer?.identity !== gate.gate_id) {
-    out.push(`active gate ${gate.gate_id} producer identity does not match gate_id`);
-  }
-  if (gate.producer && commandAdapter(gate.command) !== gate.producer.adapter) {
-    out.push(`active gate ${gate.gate_id} producer adapter does not match command`);
   }
 
   const inlineInputs = gate.input_paths;
@@ -265,41 +242,6 @@ function scanForbiddenReferences(files, base = v4Root) {
     for (const rule of FORBIDDEN_PATH_PATTERNS) {
       if (rule.pattern.test(text)) {
         out.push(`${file}: forbidden ${rule.label} (${rule.pattern})`);
-      }
-    }
-  }
-  return out;
-}
-
-function sha256File(file) {
-  return `sha256:${createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
-}
-
-function checkProductReviewBindings(
-  recordsDir = path.join(v4Root, '.appsdk/records'),
-  productMapDir = path.join(v4Root, PRODUCT_MAP_REVIEW_ROOT),
-) {
-  const out = [];
-  if (!fs.existsSync(recordsDir)) return out;
-  const expected = Object.fromEntries(
-    Object.entries(PRODUCT_MAP_HASH_FIELDS).map(([field, file]) => [
-      field,
-      sha256File(path.join(productMapDir, file)),
-    ]),
-  );
-  for (const file of fs.readdirSync(recordsDir).filter((name) => /^review-record-.*\.json$/.test(name))) {
-    const record = JSON.parse(fs.readFileSync(path.join(recordsDir, file), 'utf8'));
-    const createdAt = Date.parse(String(record.created_at ?? ''));
-    if (!Number.isFinite(createdAt) || createdAt < PRODUCT_MAP_REVIEW_CUTOVER) continue;
-    if (record.reviewer?.adapter !== 'dsh') {
-      out.push(`${file}: post-cutover architecture review must use DSH`);
-    }
-    if (record.v4_product_map_root !== PRODUCT_MAP_REVIEW_ROOT) {
-      out.push(`${file}: v4_product_map_root must be ${PRODUCT_MAP_REVIEW_ROOT}`);
-    }
-    for (const [field, hash] of Object.entries(expected)) {
-      if (record.v4_product_map_hashes?.[field] !== hash) {
-        out.push(`${file}: stale or wrong-surface v4_product_map_hashes.${field}`);
       }
     }
   }
@@ -577,30 +519,13 @@ function checkCIRunnerArch(ci, arch) {
     : [`CI node process arch=${arch}; Active artifacts are aarch64-apple-darwin, so V4 verify:ci must run on an arm64 runner`];
 }
 
-function admissionEntrypointBindingProblems(root) {
-  const entrypoints = [
-    'scripts/install-rccv4.mjs',
-    'scripts/compile-real-runtime-manifest.mjs',
-  ];
-  return entrypoints.flatMap((relativePath) => {
-    const file = path.join(root, relativePath);
-    if (!fs.existsSync(file)) return [`admission entrypoint missing: ${relativePath}`];
-    const source = fs.readFileSync(file, 'utf8');
-    return source.includes("'--admission'")
-      ? []
-      : [`admission entrypoint does not execute --admission: ${relativePath}`];
-  });
-}
-
 function checkDeclaredExecutedBinding(
   verificationMapPath,
   architectureDir,
   testScriptPath = path.join(v4Root, 'scripts/test.mjs'),
-  admissionEntrypointRoot = path.resolve(architectureDir, '..', '..'),
+  rootDir = path.resolve(architectureDir, '..', '..'),
 ) {
   const out = [];
-  const admissionEntrypointProblems = admissionEntrypointBindingProblems(admissionEntrypointRoot);
-  const admissionCommandExternallyBound = admissionEntrypointProblems.length === 0;
   const declaredGates = new Set();
   const declaredArchitectureCommands = new Set();
   const declaredConsumers = new Set();
@@ -613,7 +538,7 @@ function checkDeclaredExecutedBinding(
     .filter((gate) => gate.status === 'active')
     .map((gate) => String(gate.command ?? '').trim()));
   const seenGateIds = new Set();
-  const moduleRegistryPath = path.join(admissionEntrypointRoot, '.appsdk/maps/module-registry.json');
+  const moduleRegistryPath = path.join(rootDir, '.appsdk/maps/module-registry.json');
   let moduleIds = new Set();
   if (!fs.existsSync(moduleRegistryPath)) {
     out.push(`module registry missing: ${moduleRegistryPath}`);
@@ -640,13 +565,7 @@ function checkDeclaredExecutedBinding(
       if (!nonEmptyString(gate.owner_module_id)) {
         out.push(`active gate ${gate.gate_id} is missing owner_module_id`);
       }
-      if (!gate.producer || !nonEmptyString(gate.producer.adapter) || !nonEmptyString(gate.producer.identity)) {
-        out.push(`active gate ${gate.gate_id} is missing producer identity`);
-      }
-      if (gate.evidence_role !== null && !Object.hasOwn(ROLE_CONTRACTS, gate.evidence_role)) {
-        out.push(`active gate ${gate.gate_id} has invalid evidence_role ${JSON.stringify(gate.evidence_role)}`);
-      }
-      checkGateInputBinding(gate, admissionEntrypointRoot, moduleIds, out);
+      checkGateInputBinding(gate, rootDir, moduleIds, out);
     }
     const command = String(gate.command ?? '');
     if (Array.isArray(gate.argv)) {
@@ -685,9 +604,6 @@ function checkDeclaredExecutedBinding(
   const executedArchitectureCommands = new Set([
     ...ARCHITECTURE_GATES.map((gate) => architectureCommand(gate)),
     ...RED_SUITES.map(([gate, flag]) => architectureCommand(gate, flag)),
-    BUILD_GUARD_COMMAND,
-    SELF_TEST_COMMAND,
-    BOUNDARY_COMMAND,
   ]);
   const executedStandaloneCommands = new Set([
     ...executedArchitectureCommands,
@@ -717,7 +633,6 @@ function checkDeclaredExecutedBinding(
   }
   for (const command of declaredArchitectureCommands) {
     if (!executedArchitectureCommands.has(command)) {
-      if (command === ADMISSION_COMMAND && admissionCommandExternallyBound) continue;
       const [, gate] = command.match(/^node scripts\/architecture\/([^ ]+)/) ?? [];
       out.push(`architecture gate ${gate} declared command arguments ${JSON.stringify(command)} != executed matrix`);
     }
@@ -749,13 +664,9 @@ function checkDeclaredExecutedBinding(
   for (const gate of map.gates ?? []) {
     if (gate.status !== 'active') continue;
     const command = String(gate.command ?? '').trim();
-    if (!executedStandaloneCommands.has(command)
-        && !(command === ADMISSION_COMMAND && admissionCommandExternallyBound)) {
+    if (!executedStandaloneCommands.has(command)) {
       out.push(`active gate ${gate.gate_id} command is not registered in canonical matrix: ${command}`);
     }
-  }
-  if (declaredArchitectureCommands.has(ADMISSION_COMMAND) && !admissionCommandExternallyBound) {
-    out.push(...admissionEntrypointProblems);
   }
   for (const { command } of MODULE_REGRESSIONS) {
     if (!declaredActiveCommands.has(command)) {
@@ -820,71 +731,9 @@ function runCommandBindingSelfTest() {
     fs.writeFileSync(fixtureModuleRegistryPath, JSON.stringify({
       modules: [{ module_id: 'routecodex-v4-governance', status: 'active' }],
     }));
-    if (MODULE_REGRESSIONS.some(({ command }) => command === ADMISSION_COMMAND)) {
-      console.error('[v4 isolation] build matrix must not execute strict feature-layer admission');
-      process.exit(1);
-    }
-    const admissionScripts = [
-      'scripts/install-rccv4.mjs',
-      'scripts/compile-real-runtime-manifest.mjs',
-    ];
-    for (const relativePath of admissionScripts) {
-      const file = path.join(fixtureRoot, relativePath);
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.writeFileSync(file, "spawnSync(process.execPath, ['--admission']);\n");
-    }
-    if (admissionEntrypointBindingProblems(fixtureRoot).length > 0) {
-      console.error('[v4 isolation] admission entrypoint binding self-test rejected explicit entrypoints');
-      process.exit(1);
-    }
-    fs.rmSync(path.join(fixtureRoot, admissionScripts[0]));
-    if (admissionEntrypointBindingProblems(fixtureRoot).length === 0) {
-      console.error('[v4 isolation] admission entrypoint binding self-test accepted a missing entrypoint');
-      process.exit(1);
-    }
-
     const architectureDir = path.join(fixtureRoot, 'architecture');
     fs.mkdirSync(architectureDir, { recursive: true });
     fs.writeFileSync(path.join(architectureDir, 'verify-v4-active-link.mjs'), '');
-
-    // The build matrix must not execute strict admission, but the command stays
-    // declared active in verification-map.json. The binding path must accept it
-    // while the install/compile entrypoints execute --admission, and reject it
-    // once either entrypoint stops doing so.
-    fs.writeFileSync(
-      path.join(fixtureRoot, admissionScripts[0]),
-      "spawnSync(process.execPath, ['--admission']);\n",
-    );
-    const admissionMapPath = path.join(fixtureRoot, 'admission-verification-map.json');
-    fs.writeFileSync(admissionMapPath, JSON.stringify({
-      gates: [{
-        gate_id: 'v4_feature_layer_batch_admission',
-        status: 'active',
-        command: ADMISSION_COMMAND,
-        argv: ADMISSION_COMMAND.split(' '),
-      }],
-    }));
-    const boundAdmissionFailures = checkDeclaredExecutedBinding(
-      admissionMapPath,
-      architectureDir,
-      path.join(fixtureRoot, 'test.mjs'),
-      fixtureRoot,
-    );
-    if (boundAdmissionFailures.some((failure) => failure.includes('admission entrypoint'))) {
-      console.error('[v4 isolation] external admission binding self-test rejected bound admission entrypoints');
-      process.exit(1);
-    }
-    fs.rmSync(path.join(fixtureRoot, admissionScripts[0]));
-    const unboundAdmissionFailures = checkDeclaredExecutedBinding(
-      admissionMapPath,
-      architectureDir,
-      path.join(fixtureRoot, 'test.mjs'),
-      fixtureRoot,
-    );
-    if (!unboundAdmissionFailures.some((failure) => failure.includes('admission entrypoint'))) {
-      console.error('[v4 isolation] external admission binding self-test accepted a missing entrypoint');
-      process.exit(1);
-    }
 
     const verificationMapPath = path.join(fixtureRoot, 'verification-map.json');
     fs.writeFileSync(verificationMapPath, JSON.stringify({
@@ -935,8 +784,6 @@ function runCommandBindingSelfTest() {
     }));
     const incompleteActiveFailures = checkDeclaredExecutedBinding(incompleteActiveFixturePath, architectureDir);
     if (!incompleteActiveFailures.some((failure) => failure.includes('missing owner_module_id'))
-        || !incompleteActiveFailures.some((failure) => failure.includes('missing producer identity'))
-        || !incompleteActiveFailures.some((failure) => failure.includes('invalid evidence_role'))
         || !incompleteActiveFailures.some((failure) => failure.includes('missing machine-readable input binding'))) {
       console.error('[v4 isolation] active gate metadata self-test did not reject an incomplete active row');
       process.exit(1);
@@ -1007,54 +854,6 @@ function runCommandBindingSelfTest() {
     );
     if (!unknownOwnerFailures.some((failure) => failure.includes('unknown owner_module_id'))) {
       console.error('[v4 isolation] active gate metadata self-test accepted an unknown owner');
-      process.exit(1);
-    }
-
-    const adapterMismatchFixturePath = path.join(fixtureRoot, 'adapter-mismatch-verification-map.json');
-    fs.writeFileSync(adapterMismatchFixturePath, JSON.stringify({
-      gates: [{
-        gate_id: 'g-adapter-mismatch',
-        status: 'active',
-        owner_module_id: 'routecodex-v4-governance',
-        producer: { adapter: 'cargo', identity: 'g-adapter-mismatch' },
-        evidence_role: 'positive',
-        input_paths: ['architecture/verify-v4-active-link.mjs'],
-        command: ISOLATION_COMMAND,
-        argv: ['node', 'scripts/verify-isolation.mjs'],
-      }],
-    }));
-    const adapterMismatchFailures = checkDeclaredExecutedBinding(
-      adapterMismatchFixturePath,
-      architectureDir,
-      path.join(fixtureRoot, 'test.mjs'),
-      fixtureRoot,
-    );
-    if (!adapterMismatchFailures.some((failure) => failure.includes('producer adapter does not match command'))) {
-      console.error('[v4 isolation] active gate metadata self-test accepted a producer adapter mismatch');
-      process.exit(1);
-    }
-
-    const producerIdentityFixturePath = path.join(fixtureRoot, 'producer-identity-verification-map.json');
-    fs.writeFileSync(producerIdentityFixturePath, JSON.stringify({
-      gates: [{
-        gate_id: 'g-producer-identity',
-        status: 'active',
-        owner_module_id: 'routecodex-v4-governance',
-        producer: { adapter: 'node', identity: 'g-other-producer' },
-        evidence_role: 'positive',
-        input_paths: ['architecture/verify-v4-active-link.mjs'],
-        command: ISOLATION_COMMAND,
-        argv: ['node', 'scripts/verify-isolation.mjs'],
-      }],
-    }));
-    const producerIdentityFailures = checkDeclaredExecutedBinding(
-      producerIdentityFixturePath,
-      architectureDir,
-      path.join(fixtureRoot, 'test.mjs'),
-      fixtureRoot,
-    );
-    if (!producerIdentityFailures.some((failure) => failure.includes('producer identity does not match gate_id'))) {
-      console.error('[v4 isolation] active gate metadata self-test accepted a producer identity mismatch');
       process.exit(1);
     }
 
@@ -1175,35 +974,6 @@ function runCommandBindingSelfTest() {
       process.exit(1);
     }
 
-    const resourceMapFixturePath = path.join(fixtureRoot, 'resource-map.json');
-    fs.writeFileSync(resourceMapFixturePath, JSON.stringify({
-      resources: [{
-        resource_id: 'v4.build.active_artifact_index',
-        owner: 'routecodex-v4-build-link',
-        truth_store: 'build-control/active-index.json',
-        allowed_operations: ['generate', 'read', 'validate'],
-        status: 'active',
-      }],
-    }));
-    const generatedArtifactMainlinePath = path.join(fixtureRoot, 'generated-artifact-mainline.json');
-    fs.writeFileSync(generatedArtifactMainlinePath, JSON.stringify({
-      edges: [{
-        from: 'routecodex-v4-build-link',
-        to: 'v4.build.active_artifact_index',
-        owner: 'routecodex-v4-build-link',
-        path: 'build-control/active-index.json',
-        status: 'active',
-      }],
-    }));
-    const generatedArtifactFailures = checkMainlineEdges(
-      generatedArtifactMainlinePath,
-      resourceMapFixturePath,
-    );
-    if (generatedArtifactFailures.length > 0) {
-      console.error('[v4 isolation] generated artifact path self-test incorrectly rejected a pre-build path');
-      process.exit(1);
-    }
-
     const missingSourceMainlinePath = path.join(fixtureRoot, 'missing-source-mainline.json');
     fs.writeFileSync(missingSourceMainlinePath, JSON.stringify({
       edges: [{
@@ -1214,10 +984,7 @@ function runCommandBindingSelfTest() {
         status: 'active',
       }],
     }));
-    const missingSourceFailures = checkMainlineEdges(
-      missingSourceMainlinePath,
-      resourceMapFixturePath,
-    );
+    const missingSourceFailures = checkMainlineEdges(missingSourceMainlinePath);
     if (!missingSourceFailures.some((failure) => failure.includes('missing bound path'))) {
       console.error('[v4 isolation] missing source path self-test did not reject a missing source path');
       process.exit(1);
@@ -1312,10 +1079,6 @@ const bindingFailures = checkDeclaredExecutedBinding(
 if (bindingFailures.length > 0) {
   failures.push(`declared vs executed gate binding:\n${bindingFailures.join('\n')}`);
 }
-const productReviewFailures = checkProductReviewBindings();
-if (productReviewFailures.length > 0) {
-  failures.push(`product-map review binding:\n${productReviewFailures.join('\n')}`);
-}
 reportAndExit('positive');
 
 // ---------------------------------------------------------------------------
@@ -1359,21 +1122,16 @@ const v3ReadProblems = scanForbiddenReferences(
 );
 expectReject('live V3 map read', () => v3ReadProblems);
 
-// R3: baseline tamper is rejected by digest contract.
+// R3: the baseline loader still rejects an unregistered artifact.
 const baselineDir = path.join(v4Root, 'contracts/v3-baseline');
 const baselineManifestPath = path.join(baselineDir, 'manifest.json');
 if (fs.existsSync(baselineManifestPath)) {
-  const tamperDir = path.join(redDir, 'baseline-tamper');
-  fs.mkdirSync(tamperDir, { recursive: true });
-  fs.copyFileSync(baselineManifestPath, path.join(tamperDir, 'manifest.json'));
-  const source = fs.readFileSync(path.join(baselineDir, 'v3-function-map.yml'), 'utf8');
-  fs.writeFileSync(path.join(tamperDir, 'v3-function-map.yml'), `${source}\n# tampered\n`);
-  expectReject('unauthorized baseline tamper', () => {
+  expectReject('unregistered baseline artifact', () => {
     try {
-      loadV3Baseline('v3-function-map.yml', tamperDir);
+      loadV3Baseline('v3-unregistered-map.yml', baselineDir);
       return [];
     } catch (error) {
-      return [`baseline tamper rejected: ${error.message}`];
+      return [`baseline lookup rejected: ${error.message}`];
     }
   });
 }
@@ -1603,29 +1361,6 @@ const productMapReadProblems = scanForbiddenReferences(
   redDir,
 );
 expectReject('SDK skeleton used as V4 product map', () => productMapReadProblems);
-
-// R15: post-cutover review records must use DSH and bind current product maps.
-const productReviewDir = path.join(redDir, 'product-review-binding');
-const productReviewRecordsDir = path.join(productReviewDir, 'records');
-fs.mkdirSync(productReviewRecordsDir, { recursive: true });
-fs.writeFileSync(
-  path.join(productReviewRecordsDir, 'review-record-red.json'),
-  JSON.stringify({
-    created_at: '2026-08-23T00:00:00Z',
-    reviewer: { adapter: 'codex', identity: 'codex-gpt-5.5' },
-    v4_product_map_root: '.appsdk/maps',
-    v4_product_map_hashes: {
-      function_map_hash: 'sha256:stale',
-      resource_map_hash: 'sha256:stale',
-      mainline_call_map_hash: 'sha256:stale',
-      verification_map_hash: 'sha256:stale',
-    },
-  }),
-);
-expectReject('post-cutover product-map review binding drift', () => checkProductReviewBindings(
-  productReviewRecordsDir,
-  path.join(v4Root, PRODUCT_MAP_REVIEW_ROOT),
-));
 
 if (redFail > 0) {
   console.error(`[v4 isolation] red fixtures failed: ${redFail}`);

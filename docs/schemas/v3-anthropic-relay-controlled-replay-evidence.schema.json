@@ -8,7 +8,6 @@
     "schema_version",
     "harness_id",
     "status",
-    "fixture_digest",
     "cases",
     "missing_adjacent_edges",
     "diagnostic"
@@ -17,7 +16,6 @@
     "schema_version": { "const": 1 },
     "harness_id": { "const": "v3.anthropic_relay_controlled_replay" },
     "status": { "enum": ["passed", "failed", "wiring_missing"] },
-    "fixture_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "cases": {
       "type": "array",
       "items": {

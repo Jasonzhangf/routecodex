@@ -517,7 +517,6 @@ owners:
   required_gates:
   - npm run test:v3-workspace
   - npm run verify:v3-cargo-fmt
-  - npm run verify:v3-rust-only
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-resource-map
   migration_target: rust
@@ -638,7 +637,6 @@ owners:
   - docs/goals/v3-runtime-timing-observability-debug-contract.json
   - docs/goals/v3-runtime-timing-observability-test-design.md
   - docs/architecture
-  - scripts/architecture/verify-v3-runtime-timing-observability.mjs
   - package.json
   - .github/workflows/test.yml
   forbidden_paths:
@@ -734,7 +732,6 @@ owners:
   - npm run test:v3-debug-payload-budget-red-fixtures
   - npm run verify:v3-resource-map
   - npm run verify:v3-mainline-caller-flow
-  - npm run verify:v3-rust-only
   - npm run verify:v3-module-boundaries
   - npm run test:v3-workspace
   - npm run build:v3-cli

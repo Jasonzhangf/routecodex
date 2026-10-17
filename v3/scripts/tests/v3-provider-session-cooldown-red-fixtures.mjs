@@ -1,428 +1,55 @@
 #!/usr/bin/env node
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import YAML from 'yaml';
 
-import {
-  cpSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
-
-const v3Root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const repo = resolve(v3Root, "..");
-const verifier = resolve(
-  v3Root,
-  "scripts/architecture/verify-v3-provider-session-cooldown.mjs",
-);
-const copied = [
-  "v3/crates/routecodex-v3-error/src/lib.rs",
-  "v3/crates/routecodex-v3-provider-responses/src/health.rs",
-  "v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs",
-  "v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs",
-  "v3/crates/routecodex-v3-runtime/src/nodes.rs",
-  "v3/crates/routecodex-v3-runtime/src/kernel.rs",
-  "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs",
-  "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs",
-  "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs",
-  "v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs",
-  "v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs",
-  "v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs",
-  "v3/crates/routecodex-v3-server/src/lib.rs",
-  "v3/crates/routecodex-v3-server/src/tests/mod.rs",
-  "docs/architecture/v3-function-map.yml",
-  "docs/architecture/v3-mainline-call-map.yml",
-  "docs/architecture/v3-resource-operation-map.yml",
-  "docs/architecture/v3-verification-map.yml",
-  "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs",
-  "package.json",
-  "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs",
-  "v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs",
-  "v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs",
-  "v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_sidecar.rs",
-  "v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs",
-  "v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs",
-  "v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs",
-  "v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs",
-  "v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs",
-  "v3/crates/routecodex-v3-server/src/executors.rs",
-  "v3/crates/routecodex-v3-server/src/scope_metadata.rs",
-];
-
+const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const verifier = path.join(repo, 'v3/scripts/architecture/verify-v3-provider-session-cooldown.mjs');
+const files = { resources: 'v3-resource-operation-map.yml', functions: 'v3-function-map.yml', mainline: 'v3-mainline-call-map.yml' };
+const inputs = Object.fromEntries(Object.entries(files).map(([key, file]) => [key, YAML.parse(fs.readFileSync(path.join(repo, 'docs/architecture', file), 'utf8'))]));
+const resource = (d, id) => d.resources.resources.find((row) => row.resource_id === id);
+const feature = (d) => d.functions.features.find((row) => row.feature_id === 'v3.debug_error_foundation');
+const edge = (d, id) => d.mainline.chains.find((row) => row.chain_id === 'v3.debug_error_foundation.mainline').edges.find((row) => row.step_id === id);
 const cases = [
-
-  {
-    name: "Validated HTTP input drops typed session control-header reader",
-    path: "docs/architecture/v3-resource-operation-map.yml",
-    mutate: (source) =>
-      source.replace(
-        ", build_v3_provider_failure_session_scope_for_request",
-        "",
-      ),
-    diagnostic: /Validated HTTP input must allow only the Server scope builder/u,
-  },
-
-  {
-    name: "Resource map removes typed failure session scope resource",
-    path: "docs/architecture/v3-resource-operation-map.yml",
-    mutate: (source) =>
-      source.replace(
-        "resource_id: v3.provider.failure_session_scope",
-        "resource_id: v3.provider.failure_session_scope_removed",
-      ),
-    diagnostic: /missing v3\.provider\.failure_session_scope resource/u,
-  },
-  {
-    name: "Resource map lets Provider Health write failure session scope",
-    path: "docs/architecture/v3-resource-operation-map.yml",
-    mutate: (source) =>
-      source.replace(
-        "allowed_writers: [V3ProviderFailureSessionScope::new]",
-        "allowed_writers: [V3ProviderHealthStore::record_provider_failure_in_session]",
-      ),
-    diagnostic: /failure session scope writer must be only|failure session scope must not be written/u,
-  },
-  {
-    name: "Mainline v3-de-18 falsely points scope builder at Provider Health mutation",
-    path: "docs/architecture/v3-mainline-call-map.yml",
-    mutate: (source) =>
-      source.replace(
-        "to_node: V3ProviderFailureSessionScope",
-        "to_node: V3ProviderHealthStateMutated",
-      ),
-    diagnostic: /v3-de-18 must produce the typed provider failure session scope node|v3-de-18 must not claim Provider Health/u,
-  },
-  {
-    name: "Mainline v3-de-18 falsely produces provider health state",
-    path: "docs/architecture/v3-mainline-call-map.yml",
-    mutate: (source) =>
-      source.replaceAll(
-        "v3.provider.failure_session_scope",
-        "v3.provider.health_state",
-      ),
-    diagnostic: /v3-de-18 must produce provider failure session scope|v3-de-18 must not claim Provider Health/u,
-  },
-  {
-    name: "Resource map reverts health identity to provider-global",
-    path: "docs/architecture/v3-resource-operation-map.yml",
-    mutate: (source) =>
-      source.replace(
-        "identity: [serverId, routingGroup, sessionId, providerRuntimeIdentity]",
-        "identity: [providerId, authAlias, modelId, reason, untilMs]",
-      ),
-    diagnostic: /Resource map must bind provider health state identity/u,
-  },
-  {
-    name: "Resource map grants Runtime wrapper provider health write ownership",
-    path: "docs/architecture/v3-resource-operation-map.yml",
-    mutate: (source) =>
-      source.replace(
-        /allowed_writers: \[V3ProviderHealthStore::record_provider_failure_in_session[^\n]*\]/u,
-        "allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_failure_record, V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session]",
-      ),
-    diagnostic: /Resource map provider health writers must name only session-scoped|Resource map must not register Runtime wrappers/u,
-  },
-  {
-    name: "Function map retains removed provider-global health symbol",
-    path: "docs/architecture/v3-function-map.yml",
-    mutate: (source) =>
-      source.replace(
-        "V3ProviderHealthStore::record_provider_failure_in_session",
-        "V3ProviderHealthStore::record_provider_failure",
-      ),
-    diagnostic: /Function map must list current session-scoped|Function map must not retain removed/u,
-  },
-  {
-    name: "Mainline map points direct failure edge to removed provider-global API",
-    path: "docs/architecture/v3-mainline-call-map.yml",
-    mutate: (source) =>
-      source.replaceAll(
-        "callee_symbol: V3ProviderHealthStore::record_provider_failure_in_session",
-        "callee_symbol: V3ProviderHealthStore::record_provider_failure",
-      ),
-    diagnostic: /Mainline map v3-de-14 must bind|Mainline map must not point/u,
-  },
-  {
-    name: "Error05 witness drops session scope",
-    path: copied[0],
-    mutate: (source) =>
-      source.replace(
-        "    failure_session_scope: V3ProviderFailureSessionScope,",
-        "    failure_session_scope_removed: V3ProviderFailureSessionScope,",
-      ),
-    diagnostic: /Error05 recovery witness must carry/u,
-  },
-  {
-    name: "Error05 constructor restores legacy non-session arguments",
-    path: copied[0],
-    mutate: (source) =>
-      source.replace(
-        "        failure_session_scope: V3ProviderFailureSessionScope,",
-        "        server_id: impl Into<String>,",
-      ),
-    diagnostic: /Error05 witness constructor must require/u,
-  },
-  {
-    name: "Health session key drops routing group",
-    path: copied[1],
-    mutate: (source) =>
-      source.replace(
-        "struct V3ProviderFailureSessionKey {\n    server_id: String,\n    routing_group: String,",
-        "struct V3ProviderFailureSessionKey {\n    server_id: String,\n    routing_group_removed: String,",
-      ),
-    diagnostic: /Provider Health must key failure-derived state/u,
-  },
-  {
-    name: "Runtime rescue drops single-flight health probe owner",
-    path: "v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs",
-    mutate: (source) =>
-      source.replaceAll(
-        "acquire_provider_cooldown_rescue_probe",
-        "rescue_without_atomic_owner",
-      ),
-    diagnostic: /Runtime rescue owner must require a successful provider probe/u,
-  },
-  {
-    name: "ActionGate key drops session",
-    path: copied[2],
-    mutate: (source) =>
-      source.replace(
-        "pub struct V3ProviderActionGateKey {\n    pub provider_scope: V3ProviderActionProviderScope,\n    pub session_id: String,",
-        "pub struct V3ProviderActionGateKey {\n    pub provider_scope: V3ProviderActionProviderScope,\n    pub session_id_removed: String,",
-      ),
-    diagnostic: /Provider ActionGate key must include session_id/u,
-  },
-  {
-    name: "ActionGate constructor drops typed session",
-    path: copied[2],
-    mutate: (source) =>
-      source.replace(
-        "        failure_session_scope: &V3ProviderFailureSessionScope,",
-        "        server_id: impl Into<String>,",
-      ),
-    diagnostic: /Provider ActionGate provider scope constructor must require/u,
-  },
-  {
-    name: "Direct raw request drops typed scope",
-    path: copied[4],
-    mutate: (source) =>
-      source.replace(
-        "    pub failure_session_scope: V3ProviderFailureSessionScope,",
-        "    pub failure_session_scope_removed: V3ProviderFailureSessionScope,",
-      ),
-    diagnostic: /Direct raw request must carry/u,
-  },
-  {
-    name: "Responses Relay drops typed scope",
-    path: copied[20],
-    mutate: (source) =>
-      source.replace(
-        "    pub failure_session_scope: V3ProviderFailureSessionScope,",
-        "    pub failure_session_scope_removed: V3ProviderFailureSessionScope,",
-      ),
-    diagnostic: /Responses Relay must carry/u,
-  },
-  {
-    name: "Server stops constructing validated scope",
-    path: copied[12],
-    mutate: (source) =>
-      source.replaceAll("V3ProviderFailureSessionScope::new(", "legacy_session_scope("),
-    diagnostic: /Server\/ReqInbound must construct/u,
-  },
-  {
-    name: "Server drops typed RouteCodex session-header behavior test",
-    path: copied[13],
-    mutate: (source) =>
-      source.replace(
-        "fn provider_failure_scope_uses_existing_session_header()",
-        "fn provider_failure_scope_uses_generic_client_header()",
-      ),
-    diagnostic: /Server must lock the existing request session header/u,
-  },
-  {
-    name: "Server drops headerless request-local scope test",
-    path: copied[13],
-    mutate: (source) =>
-      source.replace(
-        "fn provider_failure_scope_never_rejects_missing_session_identity()",
-        "fn provider_failure_scope_drops_headerless_request_scope()",
-      ),
-    diagnostic: /Server must isolate headerless requests with their existing internal request id/u,
-  },
-  {
-    name: "Server drops headerless provider-send blackbox",
-    path: copied[18],
-    mutate: (source) =>
-      source.replace(
-        "async fn responses_direct_without_failure_session_header_reaches_provider()",
-        "async fn responses_direct_without_failure_session_header_stops_before_provider()",
-      ),
-    diagnostic: /Server blackbox must prove a missing client session header does not block provider send/u,
-  },
-  {
-    name: "Session cooldown gate restores broad provider integration binary execution",
-    path: copied[19],
-    mutate: (source) =>
-      source.replace(
-        "-p routecodex-v3-provider-responses --lib health::tests",
-        "-p routecodex-v3-provider-responses health::tests",
-      ),
-    diagnostic: /Provider session cooldown gate must avoid unrelated integration binaries/u,
-  },
-  {
-    name: "Runtime drops session-bound availability",
-    path: copied[3],
-    mutate: (source) =>
-      source.replaceAll("session_bound_availability", "global_availability"),
-    diagnostic: /Runtime policy must construct session-bound availability/u,
-  },
-  {
-    name: "Server restores request-id failure-scope fallback",
-    path: copied[12],
-    mutate: (source) =>
-      source.replace(
-        "let (session_id, _) = responses_control_scope_headers(headers, None)?;",
-        "let session_id = Some(request_id.to_string());",
-      ),
-    diagnostic: /must not derive control identity from request identity/u,
-  },
-  {
-    name: "Direct SSE drops original typed session scope",
-    path: copied[7],
-    mutate: (source) =>
-      source.replace(
-        "    failure_session_scope: &V3ProviderFailureSessionScope,",
-        "    failure_session_scope_removed: &V3ProviderFailureSessionScope,",
-      ),
-    diagnostic: /Direct SSE projection must receive/u,
-  },
-  {
-    name: "Cooldown rescue drops successful provider probe requirement",
-    path: "v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs",
-    mutate: (source) =>
-      source.replace(
-        "probe_v3_provider_global_target(target).await",
-        "Ok(())",
-      ),
-    diagnostic: /Runtime rescue owner must require a successful provider probe/u,
-  },
-  {
-    name: "Web-search dry-run enables provider rescue probe",
-    path: "v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_sidecar.rs",
-    mutate: (source) =>
-      source.replace(
-        "ControlRequest::ExecuteWebSearch",
-        "ControlRequest::ExecuteLocalWebSearch",
-      ),
-    diagnostic: /Web-search state machine must bind execution to the typed hooks-sidecar owner/u,
-  },
-  {
-    name: "Anthropic request dry-run enables provider rescue probe",
-    path: "v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs",
-    mutate: (source) =>
-      source.replace(
-        "V3RelayProviderFailureRetryPolicy::from_manifest(manifest),\n        false,\n    )",
-        "V3RelayProviderFailureRetryPolicy::from_manifest(manifest),\n        true,\n    )",
-      ),
-    diagnostic: /Anthropic request dry-run must pass the rescue-probe-disabled gate/u,
-  },
-  {
-    name: "Unseeded Relay adapter enables rescue probes",
-    path: "v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs",
-    mutate: (source) => source.replace(
-      "            input,\n            allow_exhaustion_rescue_probe,\n            preferred_selected,",
-      "            input,\n            true,\n            preferred_selected,",
-    ),
-    diagnostic: /Unseeded Relay entry must preserve the rescue-probe mode/u,
-  },
-  {
-    name: "Captured-plan Relay adapter enables rescue probes",
-    path: "v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs",
-    mutate: (source) => source.replace(
-      "        input.deterministic_sample,\n        allow_exhaustion_rescue_probe,\n        preferred_selected,",
-      "        input.deterministic_sample,\n        true,\n        preferred_selected,",
-    ),
-    diagnostic: /Captured-plan Relay entry must preserve the rescue-probe mode/u,
-  },
-  {
-    name: "Shared rescue owner ignores dry-run gate",
-    path: "v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs",
-    mutate: (source) =>
-      source.replace(
-        "if !allow_exhaustion_rescue_probe {",
-        "if false {",
-      ),
-    diagnostic: /Shared rescue owner must terminate dry-run exhaustion/u,
-  },
-  {
-    name: "Direct dry-run enables provider rescue probe",
-    path: "v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs",
-    mutate: (source) =>
-      source.replace(
-        ".with_exhaustion_rescue_probe_disabled();",
-        ";",
-      ),
-    diagnostic: /Direct provider-request dry-run must disable rescue probes/u,
-  },
-  {
-    name: "Live Chat Direct disables provider rescue probe",
-    path: "v3/crates/routecodex-v3-server/src/executors.rs",
-    mutate: (source) =>
-      source.replace(
-        "            now_epoch_ms,\n            true,\n            Some(&provider_failure_event_sink),",
-        "            now_epoch_ms,\n            false,\n            Some(&provider_failure_event_sink),",
-      ),
-    diagnostic: /Live Chat Direct must explicitly enable exhaustion rescue probes/u,
-  },
+  ['HTTP control reader removed', (d) => { const r = resource(d, 'v3.server.validated_http_input'); r.allowed_readers = r.allowed_readers.filter((v) => v !== 'build_v3_provider_failure_session_scope_for_request'); }, /Validated HTTP input must bind/],
+  ['scope resource removed', (d) => { resource(d, 'v3.provider.failure_session_scope').resource_id = 'removed'; }, /missing v3\.provider\.failure_session_scope resource/],
+  ['Health writes Error scope', (d) => { resource(d, 'v3.provider.failure_session_scope').allowed_writers = ['V3ProviderHealthStore::record_provider_failure_in_session']; }, /scope writer must be only/],
+  ['scope builder targets Health', (d) => { edge(d, 'v3-de-18').to_node = 'V3ProviderHealthStateMutated'; }, /v3-de-18 must produce typed scope/],
+  ['scope builder produces Health', (d) => { edge(d, 'v3-de-18').resource_flow.produces = ['v3.provider.health_state']; }, /v3-de-18 must produce and write|must not claim provider health/],
+  ['Health identity loses scope', (d) => { resource(d, 'v3.provider.health_state').identity = ['providerId', 'authAlias', 'modelId']; }, /bind provider health state identity/],
+  ['Runtime owns Health writes', (d) => { resource(d, 'v3.provider.health_state').allowed_writers.push('V3ProviderFailureRuntimeHealth::record_provider_failure_record'); }, /Runtime wrappers must not own/],
+  ['function binds removed global mutation', (d) => { const f = feature(d); f.entry_symbols = f.entry_symbols.map((v) => v === 'V3ProviderHealthStore::record_provider_failure_in_session' ? 'V3ProviderHealthStore::record_provider_failure' : v); }, /Function owner must bind scoped|Function owner must not retain/],
+  ['failure edge calls global mutation', (d) => { edge(d, 'v3-de-14').callee_symbol = 'V3ProviderHealthStore::record_provider_failure'; }, /v3-de-14 must bind scoped health/],
 ];
-
-function runVerifier(root) {
-  const result = spawnSync(process.execPath, [verifier], {
-    cwd: repo,
-    env: { ...process.env, V3_PROVIDER_SESSION_COOLDOWN_ROOT: root },
-    encoding: "utf8",
-  });
-  if (result.error) throw result.error;
-  if (result.signal) throw new Error(`verifier terminated by ${result.signal}`);
-  return { status: result.status, output: `${result.stdout}\n${result.stderr}` };
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'v3-cooldown-data-'));
+function write(doc) {
+  const dir = path.join(tmp, 'docs/architecture');
+  fs.mkdirSync(dir, { recursive: true });
+  for (const [key, file] of Object.entries(files)) fs.writeFileSync(path.join(dir, file), YAML.stringify(doc[key]));
 }
-
-let rejected = 0;
-for (const testCase of cases) {
-  const root = mkdtempSync(join(tmpdir(), "v3-provider-session-cooldown-"));
-  try {
-    for (const relativePath of copied) {
-      const destination = join(root, relativePath);
-      const source = relativePath === "package.json"
-        ? join(v3Root, relativePath)
-        : join(repo, relativePath);
-      cpSync(source, destination, { recursive: true });
-    }
-    const target = join(root, testCase.path);
-    const original = readFileSync(target, "utf8");
-    const baseline = runVerifier(root);
-    if (testCase.diagnostic.test(baseline.output)) {
-      throw new Error(`${testCase.name}: expected diagnostic already exists before mutation\n${baseline.output}`);
-    }
-    const mutated = testCase.mutate(original);
-    if (mutated === original) {
-      throw new Error(`${testCase.name}: mutation did not change source`);
-    }
-    writeFileSync(target, mutated);
-    const result = runVerifier(root);
-    const output = result.output;
-    if (result.status === 0 || !testCase.diagnostic.test(output)) {
-      throw new Error(
-        `${testCase.name}: verifier did not reject mutation with expected diagnostic\n${output}`,
-      );
-    }
-    rejected += 1;
-  } finally {
-    rmSync(root, { recursive: true, force: true });
+function run() {
+  const r = spawnSync(process.execPath, [verifier], { cwd: repo, env: { ...process.env, V3_PROVIDER_SESSION_COOLDOWN_ROOT: tmp }, encoding: 'utf8' });
+  assert.ifError(r.error);
+  assert.equal(r.signal, null);
+  return { status: r.status, output: `${r.stdout ?? ''}\n${r.stderr ?? ''}` };
+}
+try {
+  write(inputs);
+  const baseline = run();
+  assert.equal(baseline.status, 0, baseline.output);
+  for (const [name, mutate, diagnostic] of cases) {
+    const doc = structuredClone(inputs);
+    mutate(doc);
+    write(doc);
+    const result = run();
+    assert.equal(result.status, 1, `${name}: ${result.output}`);
+    assert.match(result.output, diagnostic, name);
   }
+  console.log(`V3 provider session cooldown GREEN baseline + ${cases.length} data mutations rejected.`);
+} finally {
+  fs.rmSync(tmp, { recursive: true, force: true });
 }
-
-console.log(`V3 provider session cooldown red fixtures passed (${rejected}/${cases.length}).`);

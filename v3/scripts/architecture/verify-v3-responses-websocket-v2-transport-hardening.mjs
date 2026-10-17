@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -16,28 +16,10 @@ const packagePath = 'v3/package.json';
 
 const installedV3Root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const explicitSourceRoot = String(process.env.ROUTECODEX_V3_SOURCE_ROOT ?? '').trim();
-const explicitRootIsV3Root = explicitSourceRoot
-  && existsSync(resolve(explicitSourceRoot, 'crates'))
-  && existsSync(resolve(explicitSourceRoot, 'package.json'));
-const runningFromV3Root = !explicitSourceRoot
-  && existsSync(resolve(process.cwd(), 'crates'))
-  && existsSync(resolve(process.cwd(), 'package.json'));
 const architectureRoot = explicitSourceRoot
-  ? explicitRootIsV3Root
-    ? resolve(explicitSourceRoot, '..')
-    : resolve(explicitSourceRoot)
-  : process.env.ROUTECODEX_V3_ADMISSION_WORKSPACE === '1'
-    ? resolve(process.cwd())
-    : runningFromV3Root
-      ? resolve(process.cwd(), '..')
-      : resolve(installedV3Root, 'build-contracts', 'architecture-admission', 'repo');
-const v3Root = explicitRootIsV3Root
   ? resolve(explicitSourceRoot)
-  : explicitSourceRoot || process.env.ROUTECODEX_V3_ADMISSION_WORKSPACE === '1'
-    ? resolve(architectureRoot, 'v3')
-    : runningFromV3Root
-      ? resolve(process.cwd())
-      : installedV3Root;
+  : resolve(installedV3Root, '..');
+const v3Root = resolve(architectureRoot, 'v3');
 const resolveFile = (path) => path.startsWith('v3/')
   ? resolve(v3Root, path.slice(3))
   : resolve(architectureRoot, path);
