@@ -993,7 +993,13 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                             project_v3_anthropic_client_response_for_provider(
                                 finalized,
                                 provider_wire_protocol,
-                                V3HubTransportIntent::Sse,
+                                // The upstream body is SSE because the provider
+                                // forced it, not because the client asked for a
+                                // stream. Project the client payload with the
+                                // client's real transport intent so a
+                                // non-streaming client receives one JSON
+                                // message instead of an SSE event envelope.
+                                transport_intent,
                             )
                             .map_err(V3AnthropicRelayRuntimeError::from)
                         },

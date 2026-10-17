@@ -176,7 +176,7 @@
     "test:v3-workspace": "npm run verify:v3-console-request-count-visibility && npm run verify:v3-responses-session-admission && node scripts/run-v3-cargo-test.mjs --workspace -- --nocapture",
     "test:v3-p5-router-target": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-virtual-router -p routecodex-v3-target -- --nocapture",
     "test:v3-provider-responses": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test general_provider -- --nocapture",
-    "test:v3-opencode-zen-provider-headers": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses configured_provider_headers -- --nocapture && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime openai_chat_transport_carries_provider_headers -- --nocapture",
+    "test:v3-opencode-zen-provider-headers": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses configured_provider_headers -- --nocapture && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime openai_chat_transport_carries_provider_headers -- --nocapture && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime opencode_zen_chat_transport -- --nocapture",
     "test:v3-opencode-zen-tcm-bridge-blackbox": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test opencode_zen_tcm_bridge_blackbox -- --nocapture",
     "test:v3-provider-header-auth-validation": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config configured_authorization_header_is_rejected -- --nocapture",
     "test:v3-provider-sse-header-timeout": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses responses_http_transport_uses_sse_first_frame_timeout_for_header_wait -- --nocapture",
