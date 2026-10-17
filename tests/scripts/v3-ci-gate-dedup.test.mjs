@@ -22,6 +22,13 @@ const modeBWebSearchFixtures = [
 ];
 const magpieMockCiReferences = ['magpie', 'MAGPIE_SOURCE_ROOT', 'protocol-live-mock'];
 
+test('V3 CI runs the public request independence regression after admission removal', () => {
+  assert.doesNotMatch(workflow, /test:v3-responses-session-admission/);
+  assert.match(workflow, /run: npm run test:v3-http-request-isolation/);
+  assert.match(rootPackage.scripts['test:v3-http-request-isolation'], /test:v3-http-request-isolation/);
+  assert.match(v3Package.scripts['test:v3-http-request-isolation'], /--test multi_listener_server responses_same_/);
+});
+
 const namedGates = {
   'file-size': {
     positive: 'verify:v3-file-size',
