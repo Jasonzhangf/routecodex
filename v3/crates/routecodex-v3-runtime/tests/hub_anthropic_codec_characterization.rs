@@ -139,6 +139,63 @@ fn anthropic_image_url_does_not_map_to_inline_media_data() {
 }
 
 #[test]
+fn anthropic_image_siblings_survive_as_responses_input_image() {
+    let semantic = encode_v3_anthropic_request_as_responses_semantic(json!({
+        "model":"claude-sonnet",
+        "messages":[{
+            "role":"user",
+            "content":[{
+                "type":"image",
+                "source":{"type":"url","url":"https://example.test/image.png"},
+                "future_sibling":{"keep":true}
+            }]
+        }]
+    }))
+    .expect("Anthropic image siblings must normalize to Responses input_image");
+
+    assert_eq!(
+        semantic["input"][0]["content"][0],
+        json!({
+            "type":"input_image",
+            "image_url":"https://example.test/image.png",
+            "future_sibling":{"keep":true}
+        })
+    );
+}
+
+#[test]
+fn anthropic_duplicate_image_urls_keep_their_occurrence_siblings() {
+    let semantic = encode_v3_anthropic_request_as_responses_semantic(json!({
+        "model":"claude-sonnet",
+        "messages":[{
+            "role":"user",
+            "content":[
+                {
+                    "type":"image",
+                    "source":{"type":"url","url":"https://example.test/image.png"},
+                    "future_sibling":{"occurrence":"first"}
+                },
+                {
+                    "type":"image",
+                    "source":{"type":"url","url":"https://example.test/image.png"},
+                    "future_sibling":{"occurrence":"second"}
+                }
+            ]
+        }]
+    }))
+    .expect("Duplicate Anthropic image URLs must normalize independently");
+
+    assert_eq!(
+        semantic["input"][0]["content"][0]["future_sibling"],
+        json!({"occurrence":"first"})
+    );
+    assert_eq!(
+        semantic["input"][0]["content"][1]["future_sibling"],
+        json!({"occurrence":"second"})
+    );
+}
+
+#[test]
 fn anthropic_image_base64_data_does_not_map_to_chat_media_mime_type() {
     let semantics = collect_v3_anthropic_request_shape_branch_semantics(
         &anthropic_image_shape_request(),
