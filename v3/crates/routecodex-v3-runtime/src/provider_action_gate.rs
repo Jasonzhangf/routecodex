@@ -105,15 +105,16 @@ impl V3ProviderActionGateKey {
 
 impl PartialEq for V3ProviderActionGateKey {
     fn eq(&self, other: &Self) -> bool {
-        self.provider_scope == other.provider_scope
-            && self.normalized_error_family == other.normalized_error_family
+        self.provider_scope.server_id == other.provider_scope.server_id
+            && self.provider_scope.provider_runtime_identity
+            == other.provider_scope.provider_runtime_identity
     }
 }
 
 impl Hash for V3ProviderActionGateKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.provider_scope.hash(state);
-        self.normalized_error_family.hash(state);
+        self.provider_scope.server_id.hash(state);
+        self.provider_scope.provider_runtime_identity.hash(state);
     }
 }
 
@@ -311,6 +312,24 @@ impl V3ProviderActionGate {
         ticket: &V3ProviderActionRecoveryTicket,
         action_scope: V3ProviderActionProviderScope,
     ) -> Result<V3ProviderActionRecoveryTransition, String> {
+        if ticket.key.provider_scope.server_id != action_scope.server_id
+            || ticket.key.provider_scope.provider_runtime_identity
+            != action_scope.provider_runtime_identity
+        {
+            let admission = self
+                .wait_for_exact_provider_action(&action_scope)
+                .await?
+                .unwrap_or(V3ProviderActionAdmission {
+                    generation: 0,
+                    mode: V3ProviderActionGateMode::Isolated,
+                    minimum_delay_ms: 0,
+                    released_by_success: false,
+                    reevaluate_after_terminal: false,
+                    refreshed_recovery_witness: None,
+                    permit: None,
+                });
+            return Ok(V3ProviderActionRecoveryTransition::Admitted(admission));
+        }
         {
             let states = self.lock_states()?;
             let Some(current_generation) = states.get(ticket.key()).map(|state| state.generation)
@@ -346,6 +365,22 @@ impl V3ProviderActionGate {
             .await
     }
 
+    pub(crate) fn active_recovery_witness(
+        &self,
+        provider_scope: &V3ProviderActionProviderScope,
+    ) -> Result<Option<V3Error05RecoveryAdmissionWitness>, String> {
+        self.lock_states()?
+            .iter()
+            .find(|(key, state)| {
+                state.consecutive_failures > 0
+                    && key.provider_scope.server_id == provider_scope.server_id
+                    && key.provider_scope.provider_runtime_identity
+                    == provider_scope.provider_runtime_identity
+            })
+            .map(|(key, state)| key.recovery_witness(state.generation))
+            .transpose()
+    }
+
     pub async fn wait_for_exact_provider_action(
         &self,
         provider_scope: &V3ProviderActionProviderScope,
@@ -357,7 +392,7 @@ impl V3ProviderActionGate {
     async fn wait_for_matching_provider_action(
         &self,
         provider_scope: &V3ProviderActionProviderScope,
-        exact_provider: bool,
+        _exact_provider: bool,
     ) -> Result<Option<V3ProviderActionAdmission>, String> {
         let key = {
             let mut states = self.lock_states()?;
@@ -366,11 +401,8 @@ impl V3ProviderActionGate {
                 .iter()
                 .filter(|(key, _)| {
                     key.provider_scope.server_id == provider_scope.server_id
-                        && key.provider_scope.routing_group == provider_scope.routing_group
-                        && key.provider_scope.session_id == provider_scope.session_id
-                        && (!exact_provider
-                            || key.provider_scope.provider_runtime_identity
-                                == provider_scope.provider_runtime_identity)
+                        && key.provider_scope.provider_runtime_identity
+                        == provider_scope.provider_runtime_identity
                 })
                 .max_by_key(|(_, state)| state.next_admission_at)
                 .map(|(key, _)| key.clone())
@@ -399,7 +431,7 @@ impl V3ProviderActionGate {
                 state.generation = state.generation.saturating_add(1);
                 state.mode = V3ProviderActionGateMode::Sustained;
                 state.consecutive_failures = 0;
-                state.next_admission_at = now + Duration::from_millis(sustained_delay_ms());
+                state.next_admission_at = now;
                 state.admitted_generation = None;
                 state.admitted_action_scope = None;
                 state.success_transition_generation = Some(state.generation);
@@ -422,17 +454,17 @@ impl V3ProviderActionGate {
         provider_scope: &V3ProviderActionProviderScope,
     ) -> Result<(), String> {
         let now = Instant::now();
-        let (removed, sibling_notifications) = {
+        let removed = {
             let mut states = self.lock_states()?;
             let keys = states
                 .iter()
-                .filter_map(|(key, state)| {
-                    (key.provider_scope == *provider_scope
-                        || state.admitted_action_scope.as_ref() == Some(provider_scope))
-                    .then_some(key.clone())
+                .filter_map(|(key, _state)| {
+                    (key.provider_scope.server_id == provider_scope.server_id
+                        && key.provider_scope.provider_runtime_identity
+                        == provider_scope.provider_runtime_identity)
+                        .then_some(key.clone())
                 })
                 .collect::<Vec<_>>();
-            let has_matching_action = !keys.is_empty();
             let mut removed = Vec::new();
             for key in keys {
                 let retain_for_waiters = states
@@ -445,7 +477,7 @@ impl V3ProviderActionGate {
                     state.generation = state.generation.saturating_add(1);
                     state.mode = V3ProviderActionGateMode::Sustained;
                     state.consecutive_failures = 0;
-                    state.next_admission_at = now + Duration::from_millis(sustained_delay_ms());
+                    state.next_admission_at = now;
                     state.admitted_generation = None;
                     state.admitted_action_scope = None;
                     state.success_transition_generation = Some(state.generation);
@@ -456,30 +488,12 @@ impl V3ProviderActionGate {
                     removed.push(state);
                 }
             }
-            let sibling_notifications = if has_matching_action {
-                states
-                    .iter()
-                    .filter(|(key, _)| {
-                        key.provider_scope.server_id == provider_scope.server_id
-                            && key.provider_scope.routing_group == provider_scope.routing_group
-                            && key.provider_scope.session_id == provider_scope.session_id
-                    })
-                    .map(|(_, state)| (state.change_tx.clone(), state.generation))
-                    .collect()
-            } else {
-                Vec::new()
-            };
-            (removed, sibling_notifications)
+            removed
         };
         for state in removed {
             let _ = state
                 .change_tx
                 .send_replace(state.generation.saturating_add(1));
-        }
-        // Admission is serialized across a session group. A success that frees
-        // one lane must wake recovery waiters parked on its sibling lanes.
-        for (change_tx, generation) in sibling_notifications {
-            let _ = change_tx.send_replace(generation);
         }
         Ok(())
     }
@@ -504,13 +518,10 @@ impl V3ProviderActionGate {
         if state.admitted_generation != Some(generation) {
             return Ok(false);
         }
-        let server_id = key.provider_scope.server_id.clone();
-        let routing_group = key.provider_scope.routing_group.clone();
-        for (active_key, state) in states.iter_mut().filter(|(active_key, _)| {
-            active_key.provider_scope.server_id == server_id
-                && active_key.provider_scope.routing_group == routing_group
-                && active_key.provider_scope.session_id == key.provider_scope.session_id
-        }) {
+        for (active_key, state) in states
+            .iter_mut()
+            .filter(|(active_key, _)| *active_key == key)
+        {
             if active_key == key
                 && state.generation != generation
                 && state.terminal_transition_generation == Some(state.generation)
@@ -523,8 +534,7 @@ impl V3ProviderActionGate {
                 continue;
             }
             state.generation = state.generation.saturating_add(1);
-            state.mode = V3ProviderActionGateMode::Sustained;
-            state.next_admission_at = now + Duration::from_millis(sustained_delay_ms());
+            state.next_admission_at = state.next_admission_at.max(now);
             state.admitted_generation = None;
             state.admitted_action_scope = None;
             state.success_transition_generation = None;
@@ -575,14 +585,10 @@ impl V3ProviderActionGate {
         {
             return Ok(false);
         }
-        let server_id = key.provider_scope.server_id.clone();
-        let routing_group = key.provider_scope.routing_group.clone();
-        let session_id = key.provider_scope.session_id.clone();
-        for (active_key, state) in states.iter_mut().filter(|(key, _)| {
-            key.provider_scope.server_id == server_id
-                && key.provider_scope.routing_group == routing_group
-                && key.provider_scope.session_id == session_id
-        }) {
+        for (active_key, state) in states
+            .iter_mut()
+            .filter(|(active_key, _)| *active_key == key)
+        {
             let preserve_exact_key_permit =
                 !require_admission && *active_key == *key && state.admitted_generation.is_some();
             if !require_admission
@@ -592,8 +598,7 @@ impl V3ProviderActionGate {
                 continue;
             }
             state.generation = state.generation.saturating_add(1);
-            state.mode = V3ProviderActionGateMode::Sustained;
-            state.next_admission_at = now + Duration::from_millis(sustained_delay_ms());
+            state.next_admission_at = state.next_admission_at.max(now);
             if !preserve_exact_key_permit {
                 state.admitted_generation = None;
                 state.admitted_action_scope = None;
@@ -643,59 +648,20 @@ impl V3ProviderActionGate {
         if consumed_success_transition {
             states.remove(key);
         }
-        let active_sibling_lane_generation = states
-            .iter()
-            .filter(|(active_key, _)| {
-                *active_key != key
-                    && active_key.provider_scope.server_id == key.provider_scope.server_id
-                    && active_key.provider_scope.routing_group == key.provider_scope.routing_group
-                    && active_key.provider_scope.session_id == key.provider_scope.session_id
-            })
-            .map(|(_, state)| state.generation)
-            .max();
-        let active_admission_owned = states.iter().any(|(active_key, state)| {
-            active_key.provider_scope.server_id == key.provider_scope.server_id
-                && active_key.provider_scope.routing_group == key.provider_scope.routing_group
-                && active_key.provider_scope.session_id == key.provider_scope.session_id
-                && state.admitted_generation.is_some()
-        });
-        if active_sibling_lane_generation.is_some() {
-            for (_active_key, state) in states.iter_mut().filter(|(active_key, _)| {
-                *active_key != key
-                    && active_key.provider_scope.server_id == key.provider_scope.server_id
-                    && active_key.provider_scope.routing_group == key.provider_scope.routing_group
-                    && active_key.provider_scope.session_id == key.provider_scope.session_id
-            }) {
-                state.mode = V3ProviderActionGateMode::Sustained;
-                state.minimum_delay_ms = state
-                    .minimum_delay_ms
-                    .max(sustained_delay_ms())
-                    .max(configured_minimum_delay_ms);
-                state.next_admission_at = now + Duration::from_millis(state.minimum_delay_ms);
-                state.success_transition_generation = None;
-                state.terminal_transition_generation = None;
-                state.updated_at = now;
-                let _ = state.change_tx.send(state.generation);
-            }
-        }
         let state = match states.get_mut(key) {
             Some(state) => {
-                if !active_admission_owned {
+                if state.admitted_generation.is_none() {
                     state.generation = state.generation.saturating_add(1);
-                    state.admitted_generation = None;
                     state.admitted_action_scope = None;
                 }
                 state.consecutive_failures = state.consecutive_failures.saturating_add(1);
-                state.mode = if active_sibling_lane_generation.is_some() || active_admission_owned {
-                    V3ProviderActionGateMode::Sustained
-                } else {
-                    match state.consecutive_failures {
-                        1 => V3ProviderActionGateMode::Isolated,
-                        2 => V3ProviderActionGateMode::Medium,
-                        _ => V3ProviderActionGateMode::Sustained,
-                    }
+                state.mode = match state.consecutive_failures {
+                    1 => V3ProviderActionGateMode::Isolated,
+                    2 => V3ProviderActionGateMode::Medium,
+                    _ => V3ProviderActionGateMode::Sustained,
                 };
-                state.minimum_delay_ms = mode_delay_ms(state.mode).max(configured_minimum_delay_ms);
+                state.minimum_delay_ms =
+                    cyclic_delay_ms(state.consecutive_failures).max(configured_minimum_delay_ms);
                 state.next_admission_at = now + Duration::from_millis(state.minimum_delay_ms);
                 state.success_transition_generation = None;
                 state.terminal_transition_generation = None;
@@ -705,17 +671,9 @@ impl V3ProviderActionGate {
             }
             None => {
                 let (change_tx, _change_rx) = watch::channel(1);
-                let generation = match (active_sibling_lane_generation, active_admission_owned) {
-                    (Some(generation), true) => generation,
-                    (Some(generation), false) => generation.saturating_add(1),
-                    (None, _) => 1,
-                };
-                let mode = if active_sibling_lane_generation.is_some() || active_admission_owned {
-                    V3ProviderActionGateMode::Sustained
-                } else {
-                    V3ProviderActionGateMode::Isolated
-                };
-                let minimum_delay_ms = mode_delay_ms(mode).max(configured_minimum_delay_ms);
+                let generation = 1;
+                let mode = V3ProviderActionGateMode::Isolated;
+                let minimum_delay_ms = cyclic_delay_ms(1).max(configured_minimum_delay_ms);
                 states.insert(
                     key.clone(),
                     V3ProviderActionGateState {
@@ -754,7 +712,6 @@ impl V3ProviderActionGate {
         admit_action: bool,
         expected_generation: Option<u64>,
     ) -> Result<V3ProviderActionWaiter, String> {
-        let now = Instant::now();
         let (change_rx, registered_generation, ticket) = {
             let mut states = self.lock_states()?;
             let state = states
@@ -763,13 +720,6 @@ impl V3ProviderActionGate {
             let ticket = state.next_waiter_ticket;
             state.next_waiter_ticket = state.next_waiter_ticket.saturating_add(1);
             state.waiter_queue.push_back(ticket);
-            if state.waiter_queue.len() > 1 && state.mode == V3ProviderActionGateMode::Isolated {
-                state.mode = V3ProviderActionGateMode::Sustained;
-                state.minimum_delay_ms = state.minimum_delay_ms.max(sustained_delay_ms());
-                state.next_admission_at = now + Duration::from_millis(state.minimum_delay_ms);
-                state.updated_at = now;
-                let _ = state.change_tx.send(state.generation);
-            }
             (state.change_tx.subscribe(), state.generation, ticket)
         };
         Ok(V3ProviderActionWaiter {
@@ -834,12 +784,9 @@ impl V3ProviderActionWaiter {
         loop {
             let wait = {
                 let mut states = self.gate.lock_states()?;
-                let group_has_active_admission = states.iter().any(|(key, state)| {
-                    key.provider_scope.server_id == self.key.provider_scope.server_id
-                        && key.provider_scope.routing_group == self.key.provider_scope.routing_group
-                        && key.provider_scope.session_id == self.key.provider_scope.session_id
-                        && state.admitted_generation.is_some()
-                });
+                let group_has_active_admission = states
+                    .iter()
+                    .any(|(key, state)| *key == self.key && state.admitted_generation.is_some());
                 let Some(state) = states.get_mut(&self.key) else {
                     self.registered = false;
                     return Err(
@@ -871,9 +818,7 @@ impl V3ProviderActionWaiter {
                     self.registered = false;
                     return Ok(transition);
                 }
-                if state.success_transition_generation == Some(state.generation)
-                    && self.registered_generation < state.generation
-                {
+                if state.success_transition_generation == Some(state.generation) {
                     let admission = V3ProviderActionAdmission {
                         generation: state.generation,
                         mode: state.mode,
@@ -916,8 +861,6 @@ impl V3ProviderActionWaiter {
                     if self.admit_action {
                         state.admitted_generation = Some(admission_generation);
                         state.admitted_action_scope = Some(self.action_scope.clone());
-                        state.mode = V3ProviderActionGateMode::Sustained;
-                        state.next_admission_at = now + Duration::from_millis(sustained_delay_ms());
                     }
                     state.updated_at = now;
                     let admission = V3ProviderActionAdmission {
@@ -937,29 +880,11 @@ impl V3ProviderActionWaiter {
                     unregister_waiter(state, self.ticket);
                     let _ = state.change_tx.send(state.generation);
                     self.registered = false;
-                    Some((
-                        admission,
-                        self.key.provider_scope.server_id.clone(),
-                        self.key.provider_scope.routing_group.clone(),
-                    ))
+                    Some(admission)
                 } else {
                     None
                 };
-                if let Some((admission, server_id, routing_group)) = admission {
-                    for (sibling_key, sibling) in states.iter_mut().filter(|(sibling_key, _)| {
-                        **sibling_key != self.key
-                            && sibling_key.provider_scope.server_id == server_id
-                            && sibling_key.provider_scope.routing_group == routing_group
-                            && sibling_key.provider_scope.session_id
-                                == self.key.provider_scope.session_id
-                    }) {
-                        let _ = sibling_key;
-                        sibling.mode = V3ProviderActionGateMode::Sustained;
-                        sibling.next_admission_at =
-                            now + Duration::from_millis(sustained_delay_ms());
-                        sibling.updated_at = now;
-                        let _ = sibling.change_tx.send(sibling.generation);
-                    }
+                if let Some(admission) = admission {
                     return Ok(V3ProviderActionRecoveryTransition::Admitted(admission));
                 }
                 states.get(&self.key).and_then(|state| {
@@ -1022,17 +947,8 @@ fn unregister_waiter(state: &mut V3ProviderActionGateState, ticket: u64) {
     let _ = state.change_tx.send(state.generation);
 }
 
-fn sustained_delay_ms() -> u64 {
-    provider_action_defaults().action_sustained_delay_ms
-}
-
-fn mode_delay_ms(mode: V3ProviderActionGateMode) -> u64 {
-    let defaults = provider_action_defaults();
-    match mode {
-        V3ProviderActionGateMode::Isolated => defaults.action_isolated_delay_ms,
-        V3ProviderActionGateMode::Medium => defaults.action_medium_delay_ms,
-        V3ProviderActionGateMode::Sustained => defaults.action_sustained_delay_ms,
-    }
+fn cyclic_delay_ms(failures: u64) -> u64 {
+    [1_000, 3_000, 5_000, 16_000, 30_000][((failures - 1) % 5) as usize]
 }
 
 fn prune_idle_states(states: &mut HashMap<V3ProviderActionGateKey, V3ProviderActionGateState>) {
@@ -1058,7 +974,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn provider_success_wakes_same_session_sibling_recovery_waiter() {
+    async fn unrelated_provider_never_waits_for_failed_or_active_sibling() {
         let session = V3ProviderFailureSessionScope::new("server", "routing", "session")
             .expect("valid provider failure scope");
         let gate = V3ProviderActionGate::default();
@@ -1115,25 +1031,59 @@ mod tests {
                 .wait_for_recovery_witness(&recovery, selected_provider_scope)
                 .await
         });
-        tokio::task::yield_now().await;
-        assert!(
-            !waiter.is_finished(),
-            "sibling admission must block the recovery waiter"
-        );
-
-        gate.record_provider_success(&active_key.provider_scope)
-            .expect("sibling provider success is recorded");
         let transition = tokio::time::timeout(Duration::from_secs(1), &mut waiter).await;
         if transition.is_err() {
             waiter.abort();
         }
         let transition = transition
-            .expect("provider success must wake a recovery waiter blocked by its sibling lane")
+            .expect("unrelated provider must proceed while sibling still owns its permit")
             .expect("recovery waiter task must complete")
             .expect("recovery wait must not fail");
         assert!(
             matches!(transition, V3ProviderActionRecoveryTransition::Admitted(_)),
-            "recovery lane must admit after the sibling provider succeeds"
+            "healthy selected provider must proceed immediately"
+        );
+    }
+
+    #[test]
+    fn cyclic_backoff_is_shared_by_identity_and_reset_by_real_success() {
+        let scope = V3ProviderFailureSessionScope::new("server", "group", "one").unwrap();
+        let other =
+            V3ProviderFailureSessionScope::new("server", "other-group", "two").unwrap();
+        let key =
+            V3ProviderActionGateKey::new(&scope, "provider[interface].key.model", "eof").unwrap();
+        let same =
+            V3ProviderActionGateKey::new(&other, "provider[interface].key.model", "http").unwrap();
+        let gate = V3ProviderActionGate::default();
+        for (index, delay) in [1000, 3000, 5000, 16000, 30000, 1000, 3000]
+            .into_iter()
+            .enumerate()
+        {
+            let current = if index % 2 == 0 { &key } else { &same };
+            assert_eq!(
+                gate.record_failure(current).unwrap().minimum_delay_ms,
+                delay
+            );
+        }
+        for identity in [
+            "other[interface].key.model",
+            "provider[interface].other.model",
+            "provider[interface].key.other",
+        ] {
+            let unrelated = V3ProviderActionGateKey::new(&scope, identity, "eof").unwrap();
+            assert_eq!(
+                gate.record_failure(&unrelated).unwrap().minimum_delay_ms,
+                1000
+            );
+        }
+        gate.record_provider_success(&same.provider_scope).unwrap();
+        assert_eq!(gate.record_failure(&key).unwrap().minimum_delay_ms, 1000);
+        assert_eq!(
+            V3ProviderActionGate::default()
+                .record_failure(&key)
+                .unwrap()
+                .minimum_delay_ms,
+            1000
         );
     }
 }

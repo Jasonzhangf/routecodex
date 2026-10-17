@@ -26,6 +26,20 @@ fn configured_backoff_is_a_minimum_for_provider_action_admission() {
     assert_eq!(recorded.minimum_delay_ms, 7_000);
 }
 
+#[test]
+fn fresh_process_resets_shared_backoff() {
+    let gate = V3ProviderActionGate::process_shared();
+    let scope = scoped_key("restart", "restart", "restart-provider:key:model", "eof");
+    assert_eq!(gate.record_failure(&scope).unwrap().minimum_delay_ms, 1000);
+    if std::env::var_os("RCC_BACKOFF_FRESH_PROCESS_TEST").is_some() { return; }
+    assert_eq!(gate.record_failure(&scope).unwrap().minimum_delay_ms, 3000);
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "fresh_process_resets_shared_backoff", "--nocapture"])
+        .env("RCC_BACKOFF_FRESH_PROCESS_TEST", "1").status().unwrap();
+    assert!(status.success(), "fresh process inherited previous backoff");
+    gate.record_success(&scope).unwrap();
+}
+
 fn session_scope(server_id: &str, routing_group: &str) -> V3ProviderFailureSessionScope {
     V3ProviderFailureSessionScope::new(
         server_id,
@@ -237,7 +251,7 @@ async fn success_after_terminal_admission_invalidates_atomic_commit() {
 }
 
 #[tokio::test]
-async fn overlapping_waiter_promotes_scope_to_five_seconds_and_one_admission() {
+async fn overlapping_waiter_preserves_failure_delay_and_single_admission() {
     let gate = V3ProviderActionGate::default();
     let scope = key("provider_transport");
     let started = Instant::now();
@@ -258,10 +272,10 @@ async fn overlapping_waiter_promotes_scope_to_five_seconds_and_one_admission() {
         result = &mut first => (result.expect("first waiter task").expect("first sustained admission"), true),
         result = &mut second => (result.expect("second waiter task").expect("second sustained admission"), false),
     };
-    assert_eq!(admission.mode, V3ProviderActionGateMode::Sustained);
+    assert_eq!(admission.mode, V3ProviderActionGateMode::Isolated);
     assert!(
-        started.elapsed() >= Duration::from_millis(V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS),
-        "overlapping provider actions were admitted before the five-second floor"
+        started.elapsed() >= Duration::from_millis(1000) && started.elapsed() < Duration::from_millis(2000),
+        "queueing must not promote the failure delay"
     );
     assert!(
         if first_won {
@@ -289,7 +303,7 @@ async fn overlapping_waiter_promotes_scope_to_five_seconds_and_one_admission() {
 }
 
 #[tokio::test]
-async fn scopes_are_isolated_and_success_does_not_reset_other_error_family() {
+async fn success_resets_all_error_families_for_same_identity() {
     let gate = V3ProviderActionGate::default();
     let transport = key("provider_transport");
     let malformed = key("provider_malformed_sse");
@@ -313,19 +327,13 @@ async fn scopes_are_isolated_and_success_does_not_reset_other_error_family() {
         .expect("transport waiter task")
         .expect("transport waiter release");
     assert!(released.released_by_success);
-    assert!(
-        !malformed_waiter.is_finished(),
-        "success for one error family reset a distinct scoped gate"
-    );
-
-    malformed_waiter.abort();
-    let _ = malformed_waiter.await;
-    tokio::time::sleep(Duration::from_millis(10)).await;
+    assert!(malformed_waiter.await.unwrap().unwrap().released_by_success,
+        "real success must reset every error family for the same identity");
     assert_eq!(gate.active_waiters(&malformed).expect("waiter count"), 0);
 }
 
 #[tokio::test]
-async fn reselected_provider_action_consumes_failed_scope_gate_and_success_releases_waiters() {
+async fn healthy_reselected_provider_bypasses_failed_identity_gate() {
     let gate = V3ProviderActionGate::default();
     let failed = key("provider_http_500");
     let started = Instant::now();
@@ -334,12 +342,11 @@ async fn reselected_provider_action_consumes_failed_scope_gate_and_success_relea
     let admission = gate
         .wait_for_provider_action(&provider_scope("provider-b:key-b:model-b"))
         .await
-        .expect("wait for reselected action")
-        .expect("active routing-group gate");
-    assert_eq!(admission.mode, V3ProviderActionGateMode::Isolated);
+        .expect("check reselected identity");
+    assert!(admission.is_none());
     assert!(
-        started.elapsed() >= Duration::from_millis(V3_PROVIDER_ACTION_ISOLATED_DELAY_MS),
-        "reselected provider action bypassed the failed provider gate"
+        started.elapsed() < Duration::from_millis(500),
+        "healthy reselected identity must not wait for failed identity"
     );
 
     let blocked = {
@@ -357,6 +364,8 @@ async fn reselected_provider_action_consumes_failed_scope_gate_and_success_relea
 
     gate.record_provider_success(&provider_scope("provider-b:key-b:model-b"))
         .expect("reselected provider success reset");
+    assert!(!blocked.is_finished(), "B success must not reset failed A");
+    gate.record_provider_success(&provider_scope("provider-a:key-a:model-a")).unwrap();
     let released = blocked
         .await
         .expect("blocked waiter task")
@@ -364,17 +373,7 @@ async fn reselected_provider_action_consumes_failed_scope_gate_and_success_relea
         .expect("released admission");
     assert!(released.released_by_success);
 
-    let next_started = Instant::now();
-    let next = gate
-        .wait_for_provider_action(&provider_scope("provider-a:key-a:model-a"))
-        .await
-        .expect("next action wait")
-        .expect("retained sustained lane");
-    assert_eq!(next.mode, V3ProviderActionGateMode::Sustained);
-    assert!(
-        next_started.elapsed() >= Duration::from_millis(V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS),
-        "provider success with queued requests must not broadcast stale actions"
-    );
+    assert_eq!(gate.record_failure(&failed).unwrap().minimum_delay_ms, 1000);
     gate.record_provider_success(&provider_scope("provider-a:key-a:model-a"))
         .expect("retained lane cleanup");
 }
@@ -473,7 +472,7 @@ async fn consecutive_failures_extend_the_active_deadline() {
 }
 
 #[test]
-fn consecutive_failures_follow_one_three_five_and_success_resets() {
+fn consecutive_failures_follow_cyclic_ladder_and_success_resets() {
     let gate = V3ProviderActionGate::default();
     let scope = key("provider_http_500");
 
@@ -496,7 +495,7 @@ fn consecutive_failures_follow_one_three_five_and_success_resets() {
     assert_eq!(fourth.mode, V3ProviderActionGateMode::Sustained);
     assert_eq!(
         fourth.minimum_delay_ms,
-        V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS
+        16_000
     );
 
     gate.record_success(&scope)
@@ -510,7 +509,7 @@ fn consecutive_failures_follow_one_three_five_and_success_resets() {
 }
 
 #[tokio::test]
-async fn exact_gate_keys_isolate_server_group_provider_and_error_family_state() {
+async fn exact_identity_isolates_listeners_and_shares_group_and_error_family() {
     let gate = V3ProviderActionGate::default();
     let base = key("provider_transport");
     let other_server = scoped_key(
@@ -558,13 +557,10 @@ async fn exact_gate_keys_isolate_server_group_provider_and_error_family_state() 
 
     tokio::time::sleep(Duration::from_millis(25)).await;
     gate.record_success(&base).expect("reset base key");
-    assert_eq!(gate.active_waiters(&base).expect("base waiter count"), 0);
-    for waiter in &waiters {
-        assert!(
-            !waiter.is_finished(),
-            "resetting one exact gate key released a distinct scope"
-        );
-    }
+    assert_ne!(base, other_server);
+    assert_eq!(base, other_group);
+    assert_eq!(base, other_family);
+    assert_ne!(base, other_provider);
 
     for scope in [other_server, other_group, other_provider, other_family] {
         gate.record_success(&scope).expect("reset distinct key");
@@ -639,7 +635,7 @@ async fn terminal_transition_wakes_old_waiter_for_reselection_then_serializes_ne
         result = &mut first => (result.expect("first action task").expect("first action admission"), true),
         result = &mut second => (result.expect("second action task").expect("second action admission"), false),
     };
-    assert_eq!(admitted.mode, V3ProviderActionGateMode::Sustained);
+    assert_eq!(admitted.mode, V3ProviderActionGateMode::Isolated);
     assert!(if first_won {
         !second.is_finished()
     } else {
@@ -671,19 +667,18 @@ async fn terminal_transition_wakes_old_waiter_for_reselection_then_serializes_ne
         .await
         .expect("next generation admission");
     assert_eq!(next.generation, admitted.generation + 1);
-    assert_eq!(next.mode, V3ProviderActionGateMode::Sustained);
+    assert_eq!(next.mode, V3ProviderActionGateMode::Isolated);
     assert!(!next.reevaluate_after_terminal);
     assert!(
-        next_generation_started.elapsed()
-            >= Duration::from_millis(V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS),
-        "terminal transition admitted the next provider action before five seconds"
+        next_generation_started.elapsed() < Duration::from_millis(500),
+        "terminal bookkeeping must not add a second backoff"
     );
 
     gate.record_success(&scope).expect("terminal test cleanup");
 }
 
 #[tokio::test]
-async fn changing_provider_and_error_family_cannot_restart_an_active_lane_at_one_second() {
+async fn changing_provider_keeps_independent_first_failure_delay() {
     let gate = V3ProviderActionGate::default();
     let first = scoped_key(
         "storm-server",
@@ -703,15 +698,16 @@ async fn changing_provider_and_error_family_cannot_restart_an_active_lane_at_one
     let recorded = gate
         .record_failure(&changed)
         .expect("changed provider/family failure");
-    assert_eq!(recorded.mode, V3ProviderActionGateMode::Sustained);
+    assert_eq!(recorded.mode, V3ProviderActionGateMode::Isolated);
     let admission = gate
         .wait_for_active_failure(changed.clone())
         .await
         .expect("changed failure admission");
-    assert_eq!(admission.mode, V3ProviderActionGateMode::Sustained);
+    assert_eq!(admission.mode, V3ProviderActionGateMode::Isolated);
     assert!(
-        changed_at.elapsed() >= Duration::from_millis(V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS),
-        "changing provider or error family restarted an active storm lane at one second"
+        changed_at.elapsed() >= Duration::from_millis(1000)
+            && changed_at.elapsed() < Duration::from_millis(2000),
+        "different identity must use its independent first failure delay"
     );
 
     gate.record_provider_success(&scoped_provider_scope(
@@ -723,7 +719,7 @@ async fn changing_provider_and_error_family_cannot_restart_an_active_lane_at_one
 }
 
 #[tokio::test]
-async fn changed_provider_lanes_admit_one_action_per_routing_group_interval() {
+async fn different_provider_lanes_admit_independently() {
     let gate = V3ProviderActionGate::default();
     let first = scoped_key(
         "server-serial",
@@ -745,7 +741,7 @@ async fn changed_provider_lanes_admit_one_action_per_routing_group_interval() {
         .wait_for_active_failure(first)
         .await
         .expect("first group admission");
-    assert_eq!(first_admission.mode, V3ProviderActionGateMode::Sustained);
+    assert_eq!(first_admission.mode, V3ProviderActionGateMode::Isolated);
 
     let second_started = Instant::now();
     drop(first_admission);
@@ -753,15 +749,15 @@ async fn changed_provider_lanes_admit_one_action_per_routing_group_interval() {
         .wait_for_active_failure(second)
         .await
         .expect("second group admission");
-    assert_eq!(second_admission.mode, V3ProviderActionGateMode::Sustained);
+    assert_eq!(second_admission.mode, V3ProviderActionGateMode::Isolated);
     assert!(
-        second_started.elapsed() >= Duration::from_millis(V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS),
-        "provider/error-family change admitted a second routing-group action without five seconds"
+        second_started.elapsed() < Duration::from_millis(500),
+        "first identity permit release must not extend second identity delay"
     );
 }
 
 #[tokio::test]
-async fn admitted_action_failure_advances_the_group_before_reselecting() {
+async fn admitted_identity_failure_advances_its_own_gate() {
     let gate = V3ProviderActionGate::default();
     let terminal = scoped_key(
         "server-outcome",
@@ -794,7 +790,7 @@ async fn admitted_action_failure_advances_the_group_before_reselecting() {
     .await
     .expect("stale admitted generation blocked the reselected provider")
     .expect("reselected provider admission");
-    assert_eq!(reselected.mode, V3ProviderActionGateMode::Sustained);
+    assert_eq!(reselected.mode, V3ProviderActionGateMode::Medium);
 }
 
 #[tokio::test]
@@ -811,13 +807,13 @@ async fn admitted_action_requires_explicit_drop_before_replacement_generation() 
     let competing_scope = scoped_key(
         "server-a",
         "group-a",
-        "provider-b:key-b:model-b",
+        "provider-a:key-a:model-a",
         "provider_http_503",
     );
     let competing_failure = gate
         .record_failure(&competing_scope)
         .expect("record concurrent provider failure");
-    assert_eq!(competing_failure.mode, V3ProviderActionGateMode::Sustained);
+    assert_eq!(competing_failure.mode, V3ProviderActionGateMode::Medium);
 
     let mut next = {
         let gate = gate.clone();
@@ -844,10 +840,10 @@ async fn admitted_action_requires_explicit_drop_before_replacement_generation() 
     .expect("replacement provider action task")
     .expect("replacement provider action admission");
 
-    assert_eq!(next.mode, V3ProviderActionGateMode::Sustained);
+    assert_eq!(next.mode, V3ProviderActionGateMode::Medium);
     assert!(
-        next_started.elapsed() >= Duration::from_millis(V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS),
-        "explicit abandon did not enforce a full five-second sustained floor"
+        next_started.elapsed() < Duration::from_millis(500),
+        "permit drop must not invent another failure delay"
     );
 }
 
@@ -896,12 +892,12 @@ async fn fifo_waiter_cancellation_removes_only_its_ticket() {
     .expect("third waiter remained blocked after the first permit was dropped")
     .expect("third waiter task")
     .expect("third waiter admission");
-    assert_eq!(third_admission.mode, V3ProviderActionGateMode::Sustained);
+    assert_eq!(third_admission.mode, V3ProviderActionGateMode::Isolated);
     assert_eq!(gate.active_waiters(&scope).expect("waiter count"), 0);
 }
 
 #[tokio::test]
-async fn recovery_ticket_consumes_its_exact_failure_key_not_the_latest_group_lane() {
+async fn reselected_healthy_provider_does_not_consume_failed_ticket() {
     let gate = V3ProviderActionGate::default();
     let failed_a = scoped_key(
         "ticket-server",
@@ -928,7 +924,7 @@ async fn recovery_ticket_consumes_its_exact_failure_key_not_the_latest_group_lan
     let V3ProviderActionRecoveryTransition::Admitted(admission) = transition else {
         panic!("unrelated provider/error-family lane replaced the exact recovery ticket");
     };
-    assert_eq!(admission.generation, ticket_a.generation());
+    assert_eq!(admission.minimum_delay_ms, 0, "healthy C never consumes A's gate");
 
     drop(admission);
     gate.record_success(&failed_b)
@@ -952,7 +948,7 @@ async fn consumed_recovery_lane_releases_ticket_for_reevaluation() {
     gate.record_success(&failed).expect("provider success");
 
     let transition = gate
-        .wait_for_recovery_ticket(&ticket, provider_scope("provider-b:key:model"))
+        .wait_for_recovery_ticket(&ticket, failed.provider_scope.clone())
         .await
         .expect("consumed lane is a re-evaluation");
     assert!(matches!(
@@ -980,7 +976,7 @@ async fn superseded_same_key_generation_returns_typed_transition() {
     let action_scope = scoped_provider_scope(
         "superseded-server",
         "superseded-group",
-        "provider-b:key:model",
+        "provider-a:key:model",
     );
     let transition = gate
         .wait_for_recovery_ticket(&first_ticket, action_scope)
@@ -997,7 +993,7 @@ async fn superseded_same_key_generation_returns_typed_transition() {
 }
 
 #[tokio::test]
-async fn success_released_recovery_reenters_the_retained_five_second_generation() {
+async fn success_released_recovery_reenters_without_delay() {
     let gate = V3ProviderActionGate::default();
     let failed = scoped_key(
         "success-release-server",
@@ -1010,7 +1006,7 @@ async fn success_released_recovery_reenters_the_retained_five_second_generation(
     let action_scope = scoped_provider_scope(
         "success-release-server",
         "success-release-group",
-        "provider-b:key:model",
+        "provider-a:key:model",
     );
 
     let pending = {
@@ -1042,8 +1038,9 @@ async fn success_released_recovery_reenters_the_retained_five_second_generation(
         panic!("retained recovery generation must admit exactly one provider action");
     };
     assert_eq!(admission.mode, V3ProviderActionGateMode::Sustained);
+    assert!(admission.released_by_success, "real success must release recovery waiters without owning another send permit");
     assert!(
-        sustained_started.elapsed() >= Duration::from_millis(V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS),
-        "provider success released a queued recovery directly into transport"
+        sustained_started.elapsed() < Duration::from_millis(500),
+        "real success must clear the identity delay immediately"
     );
 }

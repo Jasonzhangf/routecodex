@@ -351,6 +351,17 @@ pub(super) fn parse_v3_runtime_sse_frame_fields(
         ));
     }
     let Some(data) = object.normalized_data_json() else {
+        // Some gateways append a JSON error object directly to an SSE body.
+        // Preserve its typed cause instead of discarding it as an unknown SSE
+        // field and later misreporting the missing protocol terminal.
+        let wire = routecodex_v3_sse::build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(frame);
+        if let Ok(payload) = serde_json::from_slice::<Value>(wire.as_bytes()) {
+            if payload.get("type").and_then(Value::as_str) == Some("error") {
+                if let Some(error) = extract_v3_provider_event_error(&payload) {
+                    return Err(error);
+                }
+            }
+        }
         return Ok(None);
     };
     let data = data.trim();

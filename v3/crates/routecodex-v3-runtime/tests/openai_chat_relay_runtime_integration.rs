@@ -1304,8 +1304,8 @@ async fn provider_http_failure_reselects_next_candidate_before_client_projection
         [primary.as_str(), secondary.as_str()]
     );
     assert!(
-        started.elapsed() >= Duration::from_millis(1_000),
-        "the first provider failure must block the reselected provider action for at least one second"
+        started.elapsed() < Duration::from_millis(800),
+        "healthy reselected provider must not wait for failed provider backoff"
     );
     assert_eq!(output.status, 200);
     assert!(output.node_trace.contains(&"V3TargetLocalReselected"));

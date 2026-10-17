@@ -414,7 +414,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             drop(provider_action_permit.take());
             provider_action_permit_target = None;
         }
-        attempt_budget.set_transport_attempt_limit(selected.candidate_count);
         trace.push("V3Target10ConcreteProviderSelected");
         if let Some(sink) = route_selection_event_sink.as_ref() {
             let transport_label = if standardized
@@ -438,12 +437,18 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             observability.attempts = Some(total_attempts(&accumulator, send_attempts));
             sink(&observability);
         }
+        if pending_provider_action_recovery.is_none() && provider_action_permit.is_none() {
+            pending_provider_action_recovery = match provider_health.recovery_for_selected_provider(&direct_failure_session_scope, &selected) {
+                Ok(witness) => witness,
+                Err(error) => return error_output(runtime_source("V3ProviderActionGateAdmission", error), trace, &hook_registry),
+            };
+        }
         if pending_provider_action_recovery.is_some() {
             drop(selected_admission.take());
         }
         if let Some(recovery) = pending_provider_action_recovery.take() {
             match provider_health
-                .wait_for_error05_recovery(&recovery, &selected)
+                .wait_for_error05_recovery(&recovery, &selected, attempt_budget.residence_deadline())
                 .await
             {
                 Ok(V3ProviderActionRecoveryTransition::Admitted(mut admission)) => {
@@ -538,6 +543,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     expanded: expanded.as_ref(),
                     provider_pinned: false,
                     now_epoch_ms,
+                    attempt_budget: &attempt_budget,
                 },
                 &selected,
                 source,
@@ -580,11 +586,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 }
                 V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
                     retry_selected = policy_result.retry_selected.map(|selected| *selected);
-                    if policy_result.retryable_transient {
-                        // 瞬态失败重试同一 provider：不经过 provider action
-                        // gate（无 lane 可等），立即重发。
-                        continue;
-                    }
                     pending_provider_action_recovery = Some(recovery.clone());
                     continue;
                 }
@@ -867,6 +868,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         expanded: expanded.as_ref(),
                         provider_pinned: false,
                         now_epoch_ms,
+                        attempt_budget: &attempt_budget,
                     },
                     &policy.target,
                     source,
@@ -906,11 +908,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     }
                     V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
                         retry_selected = policy_result.retry_selected.map(|selected| *selected);
-                        if policy_result.retryable_transient {
-                            // 瞬态失败重试同一 provider：不经过 provider action
-                            // gate（无 health 记录可等），立即重发。
-                            continue;
-                        }
                         pending_provider_action_recovery = Some(recovery.clone());
                         continue;
                     }
@@ -1039,6 +1036,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         expanded: expanded.as_ref(),
                         provider_pinned: false,
                         now_epoch_ms,
+                        attempt_budget: &attempt_budget,
                     },
                     &policy.target,
                     source,
@@ -1082,11 +1080,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     }
                     V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
                         retry_selected = policy_result.retry_selected.map(|selected| *selected);
-                        if policy_result.retryable_transient {
-                            // 瞬态失败重试同一 provider：不经过 provider action
-                            // gate（无 health 记录可等），立即重发。
-                            continue;
-                        }
                         pending_provider_action_recovery = Some(recovery.clone());
                         continue;
                     }
@@ -1330,6 +1323,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                     expanded: expanded.as_ref(),
                                     provider_pinned: false,
                                     now_epoch_ms,
+                                    attempt_budget: &attempt_budget,
                                 },
                                 &policy.target,
                                 source,
@@ -1345,7 +1339,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                 Ok(result) => result,
                                 Err(source) => return error_output(source, trace, &hook_registry),
                             };
-                            policy_result.exhaust_if_residence_expired(&attempt_budget);
                             if let Some(event) = policy_result.event.clone() {
                                 provider_failure_events.push(event.clone());
                                 publish_v3_direct_provider_failure_event(
@@ -1369,9 +1362,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                 V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
                                     retry_selected =
                                         policy_result.retry_selected.map(|selected| *selected);
-                                    if !policy_result.retryable_transient {
-                                        pending_provider_action_recovery = Some(recovery.clone());
-                                    }
+                                    pending_provider_action_recovery = Some(recovery.clone());
                                     continue;
                                 }
                                 V3Error05ExecutionAction::ProjectTerminal => {

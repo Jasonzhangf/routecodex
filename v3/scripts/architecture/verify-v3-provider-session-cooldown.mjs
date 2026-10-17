@@ -200,8 +200,8 @@ requireMatch(
 );
 requireMatch(
   source.resourceMap,
-  /resource_id:\s*v3\.provider\.health_state[\s\S]*identity:\s*\[serverId,\s*routingGroup,\s*sessionId,\s*providerRuntimeIdentity\]/u,
-  "Resource map must bind provider health state identity to server+routing_group+session+runtime identity",
+  /resource_id:\s*v3\.provider\.health_state[\s\S]*identity:\s*\[listenerPort,\s*serverId,\s*routingGroup,\s*sessionId,\s*providerRuntimeIdentity\]/u,
+  "Resource map must bind provider health state identity to listener port+server+routing_group+session+runtime identity",
 );
 requireMatch(
   source.resourceMap,
@@ -516,10 +516,14 @@ forbidMatch(
   "Headerless failure-scope isolation must not synthesize headers or rebuild control from payload",
 );
 requireMatch(
-  `${source.kernel}\n${source.directSse}\n${source.responses}\n${source.openaiChat}\n${source.anthropic}\n${source.gemini}`,
-  /record_post_commit_provider_stream_failure_from_source(?:_for_interface)?\([\s\S]*failure_session_scope/u,
-  "post-commit failure handling must receive the same typed session scope",
+  source.policy,
+  /record_candidate_failure\(\s*&context\.failure_session_scope/u,
+  "shared candidate failure handling must receive the typed failure session scope",
 );
+for (const [name, text] of [["Chat", source.openaiChat], ["Gemini", source.gemini]]) {
+  forbidMatch(text, /record_post_commit_provider_stream_failure_from_source(?:_for_interface)?\(/u,
+    `${name} buffered codec must not bypass shared last-routable health policy`);
+}
 requireMatch(
   source.policy,
   /session_bound_availability|availability_for_session/u,

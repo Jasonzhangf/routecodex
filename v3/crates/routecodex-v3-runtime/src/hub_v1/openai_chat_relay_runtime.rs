@@ -558,26 +558,13 @@ pub(crate) struct V3OpenAiChatSseProviderOutcome {
 }
 
 impl V3OpenAiChatSseProviderOutcome {
-    async fn record_failure(&mut self, reason: &str) -> Result<(), String> {
+    async fn record_failure(&mut self, _reason: &str) -> Result<(), String> {
         if self.recorded {
             return Ok(());
         }
         drop(self._provider_action_permit.take());
-        let source = build_v3_error_01_source_raised(
-            V3ErrorSourceKind::ProviderFailure,
-            "V3ProviderResp14Raw",
-            "provider_response_sse_stream",
-            reason,
-        );
-        self.provider_health
-            .record_post_commit_provider_stream_failure_from_source_for_interface(
-                &self.failure_session_scope,
-                &self.provider_id,
-                &self.interface_id,
-                Some(&self.auth_alias),
-                Some(&self.model_id),
-                &source,
-            )?;
+        // The runtime buffers this stream and sends its typed failure through
+        // the shared candidate policy. The codec must not mutate health first.
         self.recorded = true;
         Ok(())
     }
