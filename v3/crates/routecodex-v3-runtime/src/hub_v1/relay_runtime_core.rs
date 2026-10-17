@@ -18,9 +18,9 @@ use crate::nodes::{V3AttemptStoreError, V3CommittedClientSseBuilder};
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key;
 use crate::provider_failure_runtime_policy::{
-    admit_v3_selected_target_after_recovery, v3_relay_provider_policy_now_epoch_ms,
-    v3_relay_provider_target_selection_sample, V3AdmitAfterRecovery,
-    V3ProviderFailureRuntimeHealth, V3RelayProviderAdmittedTargetResolution,
+    admit_v3_selected_target_after_recovery, expand_v3_relay_target_candidates_from_opaque_hit,
+    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
+    V3AdmitAfterRecovery, V3ProviderFailureRuntimeHealth, V3RelayProviderAdmittedTargetResolution,
     V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyState,
     V3RelayProviderFailureRetryPolicy, V3RelayProviderTargetResolutionInput,
     V3RuntimeProviderAdmission,
@@ -338,11 +338,6 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
     fn model_from_endpoint_path(endpoint_path: &str) -> Result<String, V3RelayCoreError>;
     /// 校验客户端输入 payload。
     fn validate_client_payload(payload: &Value) -> Result<(), V3RelayCoreError>;
-    /// 构建 VR 路由 payload（注入 requested model；Arc 形态与 req05 payload 一致）。
-    fn routing_payload(
-        standardized: &std::sync::Arc<Value>,
-        requested_model: &str,
-    ) -> Result<std::sync::Arc<Value>, V3RelayCoreError>;
     /// JSON 响应投影（resp01 -> 02 -> 03 -> 04 -> 05 -> 06）。
     /// `retain_response_cipher`：请求侧 VR 路由决策算好的"保留响应密文"标记（仅 gpt
     /// 单 provider 候选时为 true），响应侧 Resp03 只消费该结果。
@@ -455,9 +450,6 @@ where
     // 只写入 typed observability，不进入 payload。
     let (runtime_timing, mut failed_candidates, mut retry_selected) =
         relay_handoff_entry_state(initial_handoff.as_ref());
-    let route_policy_pending = initial_handoff
-        .as_ref()
-        .and_then(|handoff| handoff.route_policy_pending.clone());
     let transport_intent = if payload.get("stream").and_then(Value::as_bool) == Some(true)
         || (C::ENTRY_PROTOCOL == V3HubEntryProtocol::Gemini
             && endpoint_path.ends_with(":streamGenerateContent"))
@@ -487,8 +479,51 @@ where
         manifest, server_id, request_id, raw,
     );
     C::validate_client_payload(&req01.payload.0)?;
-    let req02 = C::req_inbound_02(req01)?;
+    let mut req02 = C::req_inbound_02(req01)?;
     trace.push("V3HubReqInbound02Normalized");
+    let deterministic_sample = v3_relay_provider_target_selection_sample(request_id);
+    let resolve_mode = match initial_handoff.as_ref() {
+        Some(handoff) => crate::operation_runner::V3ResolveTargetExecutionMode::CapturedHandoff {
+            opaque_hit: handoff.expanded.route.clone(),
+            route_policy_pending: handoff.route_policy_pending.clone(),
+            route_policy_scope: handoff.route_policy_scope.clone(),
+        },
+        None => crate::operation_runner::V3ResolveTargetExecutionMode::RelayFresh {
+            manifest: std::sync::Arc::new(manifest.clone()),
+            server_id: server_id.to_string(),
+            entry_kind: C::ENTRY_KIND.to_string(),
+            endpoint_path: endpoint_path.to_string(),
+            requested_model: (C::ENTRY_PROTOCOL == V3HubEntryProtocol::Gemini)
+                .then_some(requested_model),
+            deterministic_sample,
+        },
+    };
+    let (target_resolved_request, resolved_target) =
+        crate::operation_runner::run_v3_resolve_target_operator(
+            (*req02.previous.payload.0).clone(),
+            resolve_mode,
+        )
+        .map_err(|error| match error {
+            crate::operation_runner::V3ResolveTargetOperatorError::Typed(source) => {
+                V3RelayCoreError::Target(format!("{}: {}", source.code, source.message))
+            }
+            crate::operation_runner::V3ResolveTargetOperatorError::Runner(error) => {
+                V3RelayCoreError::Target(error.to_string())
+            }
+        })?;
+    req02.previous.payload.0 = std::sync::Arc::new(target_resolved_request);
+    let route_policy_pending = resolved_target.route_policy_pending;
+    let retained_expanded = match initial_handoff.as_ref() {
+        Some(handoff) => handoff.expanded.clone(),
+        None => expand_v3_relay_target_candidates_from_opaque_hit(
+            manifest,
+            resolved_target.opaque_hit,
+            deterministic_sample,
+        )
+        .map_err(|source| {
+            V3RelayCoreError::Target(format!("{}: {}", source.code, source.message))
+        })?,
+    };
     let request_outcome = compile_v3_hub_relay_request_hooks()
         .run_from_normalized(req02, &request_hook_profile)
         .map_err(|error| V3RelayCoreError::Target(error.to_string()))?;
@@ -504,11 +539,6 @@ where
     let req05 =
         build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(req04, execution_mode);
     trace.push("V3HubReqExecution05Planned");
-    let routing_payload = C::routing_payload(
-        &req05.previous.previous.previous.payload.0,
-        &requested_model,
-    )?;
-    let routing_payload_ref: &Value = routing_payload.as_ref();
     let mut pending_provider_action_recovery = None;
     let mut provider_action_permit: Option<V3ProviderActionPermit> = None;
     let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> = None;
@@ -517,10 +547,9 @@ where
     let request_execution_control =
         relay_request_execution_control(manifest, server_id, initial_handoff.as_ref())?;
     let attempt_budget = request_execution_control.attempt_budget();
-    let deterministic_sample = v3_relay_provider_target_selection_sample(request_id);
     let failure_context = V3RelayProviderFailurePolicyContext {
         manifest,
-        captured_target_09: initial_handoff.as_ref().map(|handoff| &handoff.expanded),
+        captured_target_09: Some(&retained_expanded),
         failure_session_scope: failure_session_scope.clone(),
         provider_health: &provider_health,
         retry_policy,
@@ -538,7 +567,7 @@ where
                 failure_session_scope: &failure_session_scope,
                 entry_kind: C::ENTRY_KIND,
                 endpoint_path,
-                body: routing_payload_ref,
+                body: &req05.previous.previous.previous.payload.0,
                 request_local_excluded_candidates: &failed_candidates,
                 provider_health: &provider_health,
                 now_ms: v3_relay_provider_policy_now_epoch_ms()
@@ -549,7 +578,7 @@ where
                 target_resolution_input,
                 allow_exhaustion_rescue_probe,
                 preferred_selected,
-                initial_handoff.as_ref(),
+                Some(&retained_expanded),
             )
             .await;
             match target_resolution {

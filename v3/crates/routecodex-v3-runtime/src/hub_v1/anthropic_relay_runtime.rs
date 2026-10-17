@@ -591,7 +591,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 target_resolution_input,
                 allow_exhaustion_rescue_probe,
                 preferred_selected,
-                initial_handoff.as_ref(),
+                initial_handoff.as_ref().map(|handoff| &handoff.expanded),
             )
             .await;
             match target_resolution {

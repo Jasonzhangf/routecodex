@@ -241,9 +241,6 @@ fn routing_view_with_requested_model<'a>(
     let Some(requested_model) = requested_model else {
         return std::borrow::Cow::Borrowed(input);
     };
-    if input.get("model").is_some() {
-        return std::borrow::Cow::Borrowed(input);
-    }
     let mut routing_view = input.clone();
     routing_view["model"] = Value::String(requested_model.to_string());
     std::borrow::Cow::Owned(routing_view)

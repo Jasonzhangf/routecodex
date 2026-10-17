@@ -305,13 +305,6 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
             .map_err(|error| V3RelayCoreError::Target(error.to_string()))
     }
 
-    fn routing_payload(
-        standardized: &std::sync::Arc<Value>,
-        requested_model: &str,
-    ) -> Result<std::sync::Arc<Value>, V3RelayCoreError> {
-        Ok(gemini_routing_payload(standardized, requested_model))
-    }
-
     fn project_json_response(
         request_id: &str,
         _session_id: &str,
@@ -925,18 +918,4 @@ pub(crate) fn gemini_model_from_endpoint_path(
         .filter(|value| !value.is_empty() && !value.contains('/') && !value.contains(':'))
         .ok_or_else(|| V3GeminiRelayRuntimeError::EndpointPath(endpoint_path.to_string()))?;
     Ok(model.to_string())
-}
-
-fn gemini_routing_payload(
-    body: &std::sync::Arc<Value>,
-    requested_model: &str,
-) -> std::sync::Arc<Value> {
-    let mut routing_body = std::sync::Arc::clone(body);
-    if let Some(object) = Arc::make_mut(&mut routing_body).as_object_mut() {
-        object.insert(
-            "model".to_string(),
-            Value::String(requested_model.to_string()),
-        );
-    }
-    routing_body
 }

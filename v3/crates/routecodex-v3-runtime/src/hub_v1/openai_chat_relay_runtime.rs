@@ -1374,14 +1374,6 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             .map_err(|error| V3RelayCoreError::Target(error.to_string()))
     }
 
-    fn routing_payload(
-        standardized: &std::sync::Arc<Value>,
-        _requested_model: &str,
-    ) -> Result<std::sync::Arc<Value>, V3RelayCoreError> {
-        // openai_chat 的 VR body 就是 canonical payload 本身（无 model 注入）。
-        Ok(std::sync::Arc::clone(standardized))
-    }
-
     fn project_json_response(
         request_id: &str,
         session_id: &str,

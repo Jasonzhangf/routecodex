@@ -225,8 +225,7 @@ async fn run_openai_chat_same_protocol_field_parity_request_response_matrix() {
         "openai_chat provider wire preserves the client history verbatim"
     );
     assert_eq!(
-        captured["tools"],
-        payload["tools"],
+        captured["tools"], payload["tools"],
         "already projected standard Chat tools must reach transport without a second wire rewrite"
     );
     assert_eq!(captured["tool_choice"], payload["tool_choice"]);

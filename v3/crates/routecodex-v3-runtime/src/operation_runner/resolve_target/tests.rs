@@ -1,7 +1,5 @@
 use super::*;
-use routecodex_v3_config::{
-    compile_v3_config_05_manifest, parse_v3_config_02_authoring,
-};
+use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use serde_json::json;
 
 fn manifest(scope: &str) -> V3Config05ManifestPublished {
@@ -143,11 +141,9 @@ fn relay_fresh_uses_sdk_input_for_resolution_and_preserves_complete_value() {
     let matched = body("client-responses");
     let unmatched = body("unmatched-model");
 
-    let (matched_output, matched_side) = run_v3_resolve_target_operator(
-        matched.clone(),
-        relay_mode(Arc::clone(&manifest), scope),
-    )
-    .expect("matched SDK request must resolve");
+    let (matched_output, matched_side) =
+        run_v3_resolve_target_operator(matched.clone(), relay_mode(Arc::clone(&manifest), scope))
+            .expect("matched SDK request must resolve");
     let (unmatched_output, unmatched_side) =
         run_v3_resolve_target_operator(unmatched.clone(), relay_mode(manifest, scope))
             .expect("unmatched SDK request must resolve");
@@ -156,7 +152,10 @@ fn relay_fresh_uses_sdk_input_for_resolution_and_preserves_complete_value() {
     assert_eq!(unmatched_output, unmatched);
     assert_eq!(matched_side.opaque_hit.pool_id, "client_responses");
     assert_eq!(unmatched_side.opaque_hit.pool_id, "default");
-    assert_ne!(matched_side.opaque_hit.pool_id, unmatched_side.opaque_hit.pool_id);
+    assert_ne!(
+        matched_side.opaque_hit.pool_id,
+        unmatched_side.opaque_hit.pool_id
+    );
 }
 
 #[test]
@@ -314,4 +313,21 @@ fn direct_compaction_purpose_routes_without_compact_endpoint_or_payload_marker()
     assert_eq!(output, request);
     assert_eq!(side.opaque_hit.pool_id, "compact");
     assert_eq!(side.opaque_hit.request_client_model, None);
+}
+
+#[test]
+fn endpoint_model_controls_routing_without_rewriting_body_model() {
+    let scope = "resolve_target_endpoint_model";
+    let request = body("unmatched-body-model");
+    let mut mode = relay_mode(Arc::new(manifest(scope)), scope);
+    let V3ResolveTargetExecutionMode::RelayFresh {
+        requested_model, ..
+    } = &mut mode
+    else {
+        unreachable!();
+    };
+    *requested_model = Some("client-responses".into());
+    let (output, side) = run_v3_resolve_target_operator(request.clone(), mode).unwrap();
+    assert_eq!(output, request);
+    assert_eq!(side.opaque_hit.pool_id, "client_responses");
 }

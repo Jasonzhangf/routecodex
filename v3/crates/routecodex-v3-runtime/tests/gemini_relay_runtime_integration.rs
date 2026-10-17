@@ -220,6 +220,110 @@ async fn json_runtime_executes_one_hub_lifecycle_and_preserves_gemini_semantics(
 }
 
 #[tokio::test]
+async fn relay_routes_before_tool_schema_inflation_and_preserves_gemini_url_model() {
+    use routecodex_v3_runtime::{
+        build_v3_hub_req_inbound_01_client_raw, build_v3_router_request_facts_for_entry,
+        compile_v3_hub_relay_request_hooks, V3HubEntryProtocol, V3HubInvocationSource,
+        V3HubServertoolRequestProfile, V3HubTransportIntent,
+    };
+    let scope = "gemini_pre_govern_route";
+    let payload = json!({
+        "contents":[{"role":"user","parts":[{"text":"look up this value"}]}],
+        "tools":[{"functionDeclarations":[{
+            "name":"lookup", "parameters":{"type":"object","properties":{"q":{"type":"string"}}}
+        }]}]
+    });
+    let raw = || {
+        build_v3_hub_req_inbound_01_client_raw(
+            payload.clone(),
+            V3HubEntryProtocol::Gemini,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        )
+    };
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let normalized = hooks
+        .run(raw(), &V3HubServertoolRequestProfile::disabled())
+        .unwrap();
+    let governed = hooks
+        .run(
+            raw(),
+            &V3HubServertoolRequestProfile::enabled(["servertool.request"])
+                .with_tool_thinking_enabled(true),
+        )
+        .unwrap();
+    let routing_tokens = |request: &Value| {
+        let mut view = request.clone();
+        view["model"] = json!("gemini-wire");
+        build_v3_router_request_facts_for_entry(&view, "gemini", None).input_tokens
+    };
+    let normalized_tokens = routing_tokens(normalized.payload());
+    let governed_tokens = routing_tokens(governed.payload());
+    assert!(governed_tokens > normalized_tokens + 1,
+        "fixture must cross a real routing token boundary: {normalized_tokens} -> {governed_tokens}");
+    let threshold = normalized_tokens + (governed_tokens - normalized_tokens) / 2;
+    let mut manifest = manifest_for_action_gate_scope(scope);
+    manifest
+        .servers
+        .get_mut(scope)
+        .unwrap()
+        .features
+        .insert("tool_thinking".into(), true);
+    let group = manifest.route_groups.get_mut(scope).unwrap();
+    let mut longcontext = group.pools["gemini_client"].clone();
+    longcontext.id = "longcontext".into();
+    let matcher = longcontext.match_rule.as_mut().unwrap();
+    matcher.precedence = 1;
+    matcher.min_input_tokens = Some(threshold);
+    matcher.models = vec!["gemini-wire".into()];
+    group.pools.remove("gemini_client");
+    group.pools.insert("longcontext".into(), longcontext);
+    let transport = JsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    let output = execute_v3_gemini_relay_runtime(
+        &manifest,
+        V3GeminiRelayRuntimeInput {
+            server_id: scope.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                scope,
+                scope,
+                "pre-govern-route",
+            )
+            .unwrap(),
+            request_id: "gemini-pre-govern-route".into(),
+            endpoint_path: "/v1beta/models/gemini-wire:generateContent".into(),
+            payload,
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+    assert_eq!(output.status, 200);
+    assert_eq!(
+        output.observability.as_ref().unwrap().pool_id.as_deref(),
+        Some("default")
+    );
+    let captured = transport.captured_body.lock().unwrap();
+    let captured = captured.as_ref().unwrap();
+    assert!(
+        captured.get("model").is_none(),
+        "URL model must stay out of business payload"
+    );
+    assert!(
+        captured
+            .pointer("/tools/0/functionDeclarations/0/parameters/properties/reason")
+            .is_some(),
+        "provider must still receive governed tool schema: {captured}"
+    );
+    assert_eq!(
+        transport.captured_url.lock().unwrap().as_deref(),
+        Some(format!("http://{scope}.invalid/v1beta/models/gemini-wire:generateContent").as_str())
+    );
+}
+
+#[tokio::test]
 async fn json_function_call_governance_preserves_gemini_name_mapping() {
     let transport = StaticJsonTransport {
         provider_body: json!({

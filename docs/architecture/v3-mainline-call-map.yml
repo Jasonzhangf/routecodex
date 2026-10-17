@@ -9674,6 +9674,15 @@ chains:
         count: 3
         nodes: [resolve_target, plan_execution, govern_chat_request]
         rule: existing Hub owners remain execution truth; no whole-graph or fixed-order claim
+      partial_target_resolution:
+        caller_symbol: execute_v3_relay_runtime_core
+        caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+        consumer_symbol: run_v3_resolve_target_operator
+        consumer_file: v3/crates/routecodex-v3-runtime/src/operation_runner/resolve_target.rs
+        caller_scope: Chat and Gemini Relay only; Anthropic, Responses, and Direct remain pending
+        order: normalized SDK Value -> resolve_target SDK Value and typed opaque hit -> existing Target expansion -> request governance
+        recovery: retained expanded target is consumed on retries without Router reclassification
+        boundary: plan_execution SDK and admission-before-governance remain pending
       direct_hooks: remain owned by Direct; this binding does not migrate Native Direct
   edges:
   - step_id: v3-op-runner-req-01
@@ -9710,6 +9719,20 @@ chains:
       - v3.operation_runner.request_inverse_context
       - v3.operation_runner.metadata_center_control
       side_channel_writes: [v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing]
+  - step_id: v3-op-runner-req-shared-resolve-01
+    from_node: V3RelayRuntimeCore
+    to_node: V3OperationRunnerResolveTarget
+    caller_symbol: execute_v3_relay_runtime_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+    callee_symbol: run_v3_resolve_target_operator
+    callee_file: v3/crates/routecodex-v3-runtime/src/operation_runner/resolve_target.rs
+    status: runtime_bound
+    owner_feature_id: v3.unified_operation_runner_design
+    resource_flow:
+      consumes: [v3.request.normal_payload, v3.config.published_manifest]
+      produces: [v3.request.normal_payload, v3.route.opaque_target]
+      side_channel_reads: [v3.execution.target_plan]
+      side_channel_writes: []
   - step_id: v3-op-runner-req-03
     from_node: V3OperationRunnerResolveTarget
     to_node: V3OperationRunnerPlanExecution

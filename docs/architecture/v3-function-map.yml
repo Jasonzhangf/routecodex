@@ -6380,6 +6380,7 @@ features:
   - v3-op-runner-req-06
   - v3-op-runner-req-07
   - v3-op-runner-req-08
+  - v3-op-runner-req-shared-resolve-01
   - v3-op-runner-resp-01
   - v3-op-runner-resp-02
   - v3-op-runner-resp-03
@@ -6430,6 +6431,7 @@ features:
   - normalize_v3_operation_runner_request_losslessly
   - project_v3_operation_runner_standard_provider_request
   - run_v3_single_node_operator
+  - run_v3_resolve_target_operator
   - build_provider_req_compat_06_from_v3_hub_req_outbound_07
   - build_v3_provider_req_outbound_08_wire_from_compat_06
   - build_v3_provider_req_outbound_09_transport_from_wire
