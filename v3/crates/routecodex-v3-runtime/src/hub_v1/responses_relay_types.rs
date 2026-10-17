@@ -295,6 +295,7 @@ impl V3ProviderFailureDirective {
 }
 
 pub(crate) struct V3ResponsesRelayProviderRetryState<'state> {
+    pub(crate) attempt_budget: &'state crate::nodes::V3AttemptBudget,
     pub(crate) last_external_http: &'state mut Option<routecodex_v3_error::V3ExternalHttpWitness>,
     pub(crate) failed_candidates: &'state mut BTreeSet<String>,
     pub(crate) same_candidate_retries: &'state mut BTreeMap<String, usize>,

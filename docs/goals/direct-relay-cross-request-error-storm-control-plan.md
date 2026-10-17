@@ -1,5 +1,11 @@
 # Direct / Relay cross-request provider error storm control plan
 
+Status: historical design record. The group/session sustained-delay design below
+is superseded by the user's 2026-10-16 identity-only cyclic recovery requirements
+in `.appsdk/requirements.json` (`routecodex-last-routable-provider-protection` v1).
+Current ownership and acceptance are in `docs/architecture/wiki/v3-provider-action-gate.md`.
+The V2 references below describe retired history and authorize no implementation.
+
 ## 1. Goal and acceptance contract
 
 Unify Direct, Relay, and Responses continuation provider-failure handling behind one

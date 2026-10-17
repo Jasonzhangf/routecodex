@@ -20,6 +20,15 @@ use crate::provider_failure_runtime_policy::{
     V3RelayProviderFailurePolicyState,
 };
 use futures_util::StreamExt;
+
+pub(crate) enum V3RelayAttemptCollectFailure {
+    EmptyProviderAttempt,
+    ProviderResponseBody(String),
+    ProviderTransport(String),
+    LocalStore(crate::nodes::V3AttemptStoreError),
+    Observation(String),
+}
+
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness,
@@ -282,6 +291,7 @@ pub fn provider_target(
 /// （retry_selected / pending_recovery 已更新，主循环 continue）。
 pub async fn handle_provider_failure(
     context: &V3RelayProviderFailurePolicyContext<'_>,
+    attempt_budget: &crate::nodes::V3AttemptBudget,
     selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     mut failure: V3RelayProviderFailure,
     state: &mut V3RelayProviderFailurePolicyState<'_>,
@@ -304,28 +314,15 @@ pub async fn handle_provider_failure(
     )
     .await
     .map_err(|error| error.to_string())?;
+    result.enforce_retry_budget(attempt_budget, state.last_external_http.clone());
     result.event.provider_status = failure.provider_status;
     provider_failure_events
         .push(build_v3_runtime_provider_failure_observation_from_policy_event(&result.event));
     match result.decision.action {
-        V3Error05ExecutionAction::WaitThenReselect { recovery } => {
+        V3Error05ExecutionAction::WaitThenReselect { recovery }
+        | V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
             *retry_selected = result.retry_selected.map(|selected| *selected);
-            if result.event.wait_ms.is_some() {
-                *pending_recovery = Some(recovery);
-            } else {
-                *pending_recovery = None;
-            }
-            Ok(None)
-        }
-        V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
-            *retry_selected = result.retry_selected.map(|selected| *selected);
-            // 瞬态重试（request-local recovery witness，wait_ms=None）不经过
-            // provider action gate：无 health 记录/lane 可等，立即重发。
-            if result.event.wait_ms.is_some() {
-                *pending_recovery = Some(recovery);
-            } else {
-                *pending_recovery = None;
-            }
+            *pending_recovery = Some(recovery);
             Ok(None)
         }
         V3Error05ExecutionAction::ProjectTerminal => {

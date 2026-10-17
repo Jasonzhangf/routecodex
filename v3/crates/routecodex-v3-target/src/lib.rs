@@ -72,7 +72,6 @@ pub struct V3Target10ConcreteProviderSelected {
     pub candidate_count: usize,
     pub unavailable_candidates: Vec<String>,
     pub attempts: usize,
-    pub default_floor_protected: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -538,7 +537,6 @@ impl V3TargetInterpreter {
             candidate_count,
             unavailable_candidates: unavailable,
             attempts: index + 1,
-            default_floor_protected: false,
         })
     }
 

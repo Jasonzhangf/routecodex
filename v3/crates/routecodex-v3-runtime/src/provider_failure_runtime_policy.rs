@@ -9,9 +9,10 @@ use routecodex_v3_error::{
     build_v3_provider_failure_action_from_v3_error_02,
     build_v3_provider_global_error_fingerprint_from_classified,
     build_v3_provider_global_failure_policy, is_v3_provider_pool_exhausted, V3Error01SourceRaised,
-    V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected,
-    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
-    V3ExternalErrorKind, V3ExternalErrorLink, V3ProviderFailureSessionScope, V3ProviderHealthScope,
+    V3Error05ExecutionAction, V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness,
+    V3Error06ClientProjected, V3ErrorActionScope, V3ErrorHandlingCenter,
+    V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
+    V3ProviderFailureSessionScope, V3ProviderHealthScope,
 };
 use routecodex_v3_provider_responses::{
     V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader, V3ProviderError,
@@ -206,9 +207,8 @@ impl Default for V3RelayProviderFailureRetryPolicy {
 
 impl V3RelayProviderFailureRetryPolicy {
     pub(crate) fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
-        // Every provider failure changes the candidate. RetrySame is retained
-        // only as a config compatibility enum and never grants production
-        // same-candidate retries.
+        // Legacy retry policy declarations do not own the request attempt cap.
+        // The typed attempt-store budget bounds last-routable recovery.
         let _ = manifest;
         Self {
             same_candidate_retries: 0,
@@ -242,6 +242,49 @@ pub(crate) struct V3RelayProviderFailurePolicyResult {
     pub(crate) terminal_projection: Option<V3Error06ClientProjected>,
     pub(crate) terminal_disposition: Option<routecodex_v3_error::V3ProviderTerminalDisposition>,
     pub(crate) event: V3RelayProviderFailurePolicyEvent,
+}
+
+impl V3RelayProviderFailurePolicyResult {
+    pub(crate) fn enforce_retry_budget(
+        &mut self,
+        budget: &crate::nodes::V3AttemptBudget,
+        last_external_http: Option<routecodex_v3_error::V3ExternalHttpWitness>,
+    ) {
+        let delay_ms = if matches!(
+            self.decision.action,
+            V3Error05ExecutionAction::WaitThenRetrySame { .. }
+        ) {
+            self.event.wait_ms.unwrap_or(0)
+        } else {
+            0
+        };
+        if self.decision.action.is_terminal() || budget.can_retry_after_ms(delay_ms) {
+            return;
+        }
+        let exhaustion = routecodex_v3_error::build_v3_error_04_target_exhaustion_decision_with_provider_availability(
+            self.decision.exhaustion.local_action.clone(), 0, false, false,
+        );
+        self.decision = routecodex_v3_error::build_v3_error_05_execution_decision_from_v3_error_04(
+            exhaustion, None,
+        );
+        self.terminal_projection = Some(V3ErrorHandlingCenter::project_terminal(
+            self.decision.clone(),
+        ));
+        self.terminal_disposition =
+            self.decision
+                .clone()
+                .try_into_terminal()
+                .ok()
+                .map(|terminal| {
+                    V3ErrorHandlingCenter::provider_terminal_disposition(
+                        terminal,
+                        last_external_http,
+                    )
+                });
+        self.retry_selected = None;
+        self.event.action = "terminal_retry_budget_exhausted".to_string();
+        self.event.next_provider_key = None;
+    }
 }
 
 pub(crate) struct V3RelayProviderFailurePolicyContext<'ctx> {
@@ -394,8 +437,8 @@ impl V3ProviderSchedulingReader for V3SessionGlobalSchedulingReader<'_> {
 pub struct V3ProviderFailureRuntimeHealth {
     store: V3ProviderHealthStore,
     action_gate: V3ProviderActionGate,
-    default_same_provider_retries: usize,
     probe_owner: std::sync::Arc<std::sync::Mutex<Option<V3ManagedProbeSender>>>,
+    transition_lock: std::sync::Arc<std::sync::Mutex<()>>,
 }
 
 impl V3ProviderSchedulingReader for V3ProviderFailureRuntimeHealth {
@@ -507,7 +550,7 @@ impl From<V3ProviderHealthStore> for V3ProviderFailureRuntimeHealth {
             store,
             probe_owner: Default::default(),
             action_gate: V3ProviderActionGate::process_shared(),
-            default_same_provider_retries: 0,
+            transition_lock: Default::default(),
         }
     }
 }
@@ -542,32 +585,36 @@ impl V3ProviderAvailabilityReader for V3ProviderFailureRuntimeHealth {
     }
 }
 
+fn expand_captured_provider_failure_target(
+    context: &V3RelayProviderFailurePolicyContext<'_>,
+    selected: &V3Target10ConcreteProviderSelected,
+) -> Result<V3Target09CandidateSetExpanded, V3Error01SourceRaised> {
+    match context.captured_target_09 {
+        Some(expanded) => Ok(expanded.clone()),
+        None => expand_v3_relay_target_plan_for_selected(
+            context.manifest,
+            selected,
+            context.deterministic_sample,
+        )
+        .map_err(|error| {
+            target_resolution_source(
+                "V3Target09CandidateSetExpanded",
+                "captured_target_plan_expansion_failed",
+                error,
+            )
+        }),
+    }
+}
+
 async fn reselect_from_captured_target_plan(
     context: &V3RelayProviderFailurePolicyContext<'_>,
     selected: &V3Target10ConcreteProviderSelected,
     request_local_excluded_candidates: &BTreeSet<String>,
     now_ms: u64,
 ) -> V3RelayProviderTargetResolution {
-    let expanded = match context.captured_target_09 {
-        Some(expanded) => expanded.clone(),
-        None => {
-            let target = V3TargetInterpreter::default();
-            let classified = target.classify_kind(selected.route.clone());
-            match target.expand_candidates(
-                context.manifest,
-                classified,
-                context.deterministic_sample,
-            ) {
-                Ok(expanded) => expanded,
-                Err(error) => {
-                    return V3RelayProviderTargetResolution::Failed(target_resolution_source(
-                        "V3Target09CandidateSetExpanded",
-                        "captured_target_plan_expansion_failed",
-                        error,
-                    ));
-                }
-            }
-        }
+    let expanded = match expand_captured_provider_failure_target(context, selected) {
+        Ok(expanded) => expanded,
+        Err(source) => return V3RelayProviderTargetResolution::Failed(source),
     };
     match select_v3_expanded_target_with_exhaustion_rescue(
         context.manifest,
@@ -615,10 +662,6 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         error_type.as_deref(),
         &message,
     );
-    // Request-local provider failure exclusion is monotonic. Record it before
-    // health/policy or target-resolution work so every exit path forbids the
-    // failed provider:key:model from being sent again.
-    state.failed_candidates.insert(candidate_key.clone());
     let matched_policy = matched_policy_directive.or_else(|| {
         find_matching_provider_error_policy(
             context.manifest,
@@ -637,36 +680,89 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     // failure action builder classifies them as recoverable, so they enter
     // the shared rolling score/cooldown path instead of a synthetic local
     // record.
-    let health_record = if is_request_local_compat_failure {
-        V3ProviderFailureRecord {
-            scope_label: candidate_key.clone(),
-            provider_key: candidate_key.clone(),
-            state: "request_local_provider_compat".to_string(),
-            failure_count: 0,
-            cooldown_until_ms: None,
-            reason: reason.map(str::to_string),
-        }
-    } else {
-        context
+    let captured_target = expand_captured_provider_failure_target(context, &selected)
+        .map_err(|source| source.message)?;
+    let (last_routable, health_record) = context.provider_health.record_candidate_failure(
+        &context.failure_session_scope,
+        &selected,
+        &captured_target.candidates,
+        state.failed_candidates,
+        v3_relay_provider_policy_now_epoch_ms()?,
+        reason,
+        || {
+            if is_request_local_compat_failure {
+                Ok(V3ProviderFailureRecord {
+                    scope_label: candidate_key.clone(),
+                    provider_key: candidate_key.clone(),
+                    state: "request_local_provider_compat".to_string(),
+                    failure_count: 0,
+                    cooldown_until_ms: None,
+                    reason: reason.map(str::to_string),
+                })
+            } else {
+                context
+                    .provider_health
+                    .record_provider_failure_record_with_policy_for_interface(
+                        matched_policy,
+                        context.manifest,
+                        &context.failure_session_scope,
+                        &selected.candidate.provider_id,
+                        &selected.candidate.interface_id,
+                        Some(&selected.candidate.provider_type),
+                        Some(&selected.candidate.auth_alias),
+                        Some(&selected.candidate.model_id),
+                        reason,
+                        source_stage,
+                        status,
+                        error_type.as_deref(),
+                        &message,
+                        v3_relay_provider_policy_now_epoch_ms()?,
+                    )
+                    .map_err(|error| error.to_string())
+            }
+        },
+    )?;
+    if last_routable {
+        let recovery = context
             .provider_health
-            .record_provider_failure_record_with_policy_for_interface(
-                matched_policy,
-                context.manifest,
+            .record_provider_action_failure_in_scope_for_interface(
                 &context.failure_session_scope,
                 &selected.candidate.provider_id,
                 &selected.candidate.interface_id,
-                Some(&selected.candidate.provider_type),
                 Some(&selected.candidate.auth_alias),
                 Some(&selected.candidate.model_id),
-                reason,
-                source_stage,
+                error_type.as_deref().unwrap_or("provider_failure"),
+            )?;
+        let decision = build_v3_relay_provider_error_05_decision(
+            &selected,
+            attempt_source.clone(),
+            status,
+            0,
+            false,
+            true,
+            Some(recovery.recovery_witness()?),
+        );
+        let event =
+            build_v3_relay_provider_failure_policy_event(V3RelayProviderFailurePolicyEventInput {
+                candidate: selected.candidate.clone(),
                 status,
-                error_type.as_deref(),
-                &message,
-                v3_relay_provider_policy_now_epoch_ms()?,
-            )
-            .map_err(|error| error.to_string())?
-    };
+                error_type,
+                message,
+                health_record,
+                action: "retry_last_routable",
+                next_provider_key: Some(candidate_key),
+                wait_ms: Some(recovery.minimum_delay_ms),
+                diagnostic_source: attempt_source,
+            });
+        return Ok(V3RelayProviderFailurePolicyResult {
+            terminal_projection: None,
+            terminal_disposition: None,
+            decision,
+            retry_selected: Some(Box::new(selected)),
+            event,
+        });
+    }
+    state.failed_candidates.insert(candidate_key.clone());
     let retries_done = state
         .same_candidate_retries
         .get(&candidate_key)
@@ -691,83 +787,80 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                     "provider failure reselection returned an already failed candidate: {alternative_key}"
                 ));
             }
-            if !alternative.default_floor_protected {
-                let request_local_recovery = || {
-                    V3Error05RecoveryAdmissionWitness::new(
-                        context.failure_session_scope.clone(),
-                        candidate_key.clone(),
-                        error_type
-                            .as_deref()
-                            .unwrap_or("provider_request_compat_error"),
-                        1,
-                    )
-                };
-                let recovery = if is_request_local_compat_failure {
-                    None
+            let request_local_recovery = || {
+                V3Error05RecoveryAdmissionWitness::new(
+                    context.failure_session_scope.clone(),
+                    candidate_key.clone(),
+                    error_type
+                        .as_deref()
+                        .unwrap_or("provider_request_compat_error"),
+                    1,
+                )
+            };
+            let recovery = if is_request_local_compat_failure {
+                None
+            } else {
+                let configured_backoff_ms =
+                    configured_retry_backoff_ms(matched_policy, retries_done);
+                Some(if configured_backoff_ms == 0 {
+                    context
+                        .provider_health
+                        .record_provider_action_failure_in_scope_for_interface(
+                            &context.failure_session_scope,
+                            &selected.candidate.provider_id,
+                            &selected.candidate.interface_id,
+                            Some(&selected.candidate.auth_alias),
+                            Some(&selected.candidate.model_id),
+                            error_type.as_deref().unwrap_or("provider_failure"),
+                        )?
                 } else {
-                    let configured_backoff_ms =
-                        configured_retry_backoff_ms(matched_policy, retries_done);
-                    Some(if configured_backoff_ms == 0 {
-                        context
-                            .provider_health
-                            .record_provider_action_failure_in_scope_for_interface(
-                                &context.failure_session_scope,
-                                &selected.candidate.provider_id,
-                                &selected.candidate.interface_id,
-                                Some(&selected.candidate.auth_alias),
-                                Some(&selected.candidate.model_id),
-                                error_type.as_deref().unwrap_or("provider_failure"),
-                            )?
-                    } else {
-                        context
-                            .provider_health
-                            .record_provider_action_failure_in_scope_with_minimum_delay_for_interface(
-                                &context.failure_session_scope,
-                                &selected.candidate.provider_id,
-                                &selected.candidate.interface_id,
-                                Some(&selected.candidate.auth_alias),
-                                Some(&selected.candidate.model_id),
-                                error_type.as_deref().unwrap_or("provider_failure"),
-                                configured_backoff_ms,
-                            )?
-                    })
-                };
-                let decision = build_v3_relay_provider_error_05_decision(
-                    &selected,
-                    attempt_source.clone(),
-                    status,
-                    usize::from(!alternative.candidate.default_pool_member),
-                    alternative.candidate.default_pool_member,
-                    false,
-                    if let Some(record) = recovery.as_ref() {
-                        Some(record.recovery_witness()?)
-                    } else {
-                        Some(request_local_recovery()?)
+                    context
+                        .provider_health
+                        .record_provider_action_failure_in_scope_with_minimum_delay_for_interface(
+                            &context.failure_session_scope,
+                            &selected.candidate.provider_id,
+                            &selected.candidate.interface_id,
+                            Some(&selected.candidate.auth_alias),
+                            Some(&selected.candidate.model_id),
+                            error_type.as_deref().unwrap_or("provider_failure"),
+                            configured_backoff_ms,
+                        )?
+                })
+            };
+            let decision = build_v3_relay_provider_error_05_decision(
+                &selected,
+                attempt_source.clone(),
+                status,
+                usize::from(!alternative.candidate.default_pool_member),
+                alternative.candidate.default_pool_member,
+                false,
+                if let Some(record) = recovery.as_ref() {
+                    Some(record.recovery_witness()?)
+                } else {
+                    Some(request_local_recovery()?)
+                },
+            );
+            state.failed_candidates.insert(candidate_key);
+            state.trace.push("V3TargetLocalReselected");
+            return Ok(V3RelayProviderFailurePolicyResult {
+                terminal_projection: terminal_projection_for(&decision, matched_policy),
+                terminal_disposition: terminal_disposition_for(&decision, state),
+                decision,
+                retry_selected: Some(Box::new(alternative)),
+                event: build_v3_relay_provider_failure_policy_event(
+                    V3RelayProviderFailurePolicyEventInput {
+                        candidate: selected.candidate,
+                        status,
+                        error_type,
+                        message,
+                        health_record,
+                        action: "switch_provider",
+                        next_provider_key: Some(alternative_key),
+                        wait_ms: recovery.as_ref().map(|record| record.minimum_delay_ms),
+                        diagnostic_source: attempt_source.clone(),
                     },
-                );
-                state.failed_candidates.insert(candidate_key);
-                state.trace.push("V3TargetLocalReselected");
-                return Ok(V3RelayProviderFailurePolicyResult {
-                    terminal_projection: terminal_projection_for(&decision, matched_policy),
-                    terminal_disposition: terminal_disposition_for(&decision, state),
-                    decision,
-                    retry_selected: Some(Box::new(alternative)),
-                    event: build_v3_relay_provider_failure_policy_event(
-                        V3RelayProviderFailurePolicyEventInput {
-                            candidate: selected.candidate,
-                            status,
-                            error_type,
-                            message,
-                            health_record,
-                            action: "switch_provider",
-                            next_provider_key: Some(alternative_key),
-                            wait_ms: recovery.as_ref().map(|record| record.minimum_delay_ms),
-                            diagnostic_source: attempt_source.clone(),
-                        },
-                    ),
-                });
-            }
-            true
+                ),
+            });
         }
         V3RelayProviderTargetResolution::Exhausted {
             attempted_candidates: _,

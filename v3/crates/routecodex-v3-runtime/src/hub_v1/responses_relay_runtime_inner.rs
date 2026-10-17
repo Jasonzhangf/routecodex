@@ -233,7 +233,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
             drop(_provider_action_permit.take());
             provider_action_permit_target = None;
         }
-        attempt_budget.set_transport_attempt_limit(selected.candidate_count);
         let protocol_decision =
             handle_error_before_resp03!(
                 crate::nodes::build_v3_execution_11_protocol_decision_from_v3_target_10(
@@ -345,6 +344,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         selected,
                         failure,
                         &mut V3ResponsesRelayProviderRetryState {
+                            attempt_budget: &attempt_budget,
                             failed_candidates: &mut failed_candidates,
                             same_candidate_retries: &mut same_candidate_retries,
                             retry_selected: &mut retry_selected,
@@ -415,9 +415,14 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
             handle_provider_request_failure!(error);
         }
         trace.push("V3ProviderReqOutbound09TransportRequest");
+        if pending_provider_action_recovery.is_none() && _provider_action_permit.is_none() {
+            pending_provider_action_recovery = provider_health
+                .recovery_for_selected_provider(&input.failure_session_scope, &selected)
+                .map_err(V3ResponsesRelayRuntimeError::ProviderHealth)?;
+        }
         if let Some(recovery) = pending_provider_action_recovery.take() {
             match handle_error_before_resp03!(provider_health
-                .wait_for_error05_recovery(&recovery, &selected)
+                .wait_for_error05_recovery(&recovery, &selected, attempt_budget.residence_deadline())
                 .await
                 .map_err(V3ResponsesRelayRuntimeError::ProviderHealth))
             {
@@ -512,6 +517,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         selected,
                         failure,
                         &mut V3ResponsesRelayProviderRetryState {
+                            attempt_budget: &attempt_budget,
                             failed_candidates: &mut failed_candidates,
                             same_candidate_retries: &mut same_candidate_retries,
                             retry_selected: &mut retry_selected,
@@ -551,6 +557,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         selected,
                         failure,
                         &mut V3ResponsesRelayProviderRetryState {
+                            attempt_budget: &attempt_budget,
                             failed_candidates: &mut failed_candidates,
                             same_candidate_retries: &mut same_candidate_retries,
                             retry_selected: &mut retry_selected,
@@ -607,6 +614,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                 selected,
                                 failure,
                                 &mut V3ResponsesRelayProviderRetryState {
+                                    attempt_budget: &attempt_budget,
                                     failed_candidates: &mut failed_candidates,
                                     same_candidate_retries: &mut same_candidate_retries,
                                     retry_selected: &mut retry_selected,
@@ -671,6 +679,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             selected,
                             failure,
                             &mut V3ResponsesRelayProviderRetryState {
+                                attempt_budget: &attempt_budget,
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
                                 retry_selected: &mut retry_selected,
@@ -745,6 +754,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                     selected,
                                     failure,
                                     &mut V3ResponsesRelayProviderRetryState {
+                                        attempt_budget: &attempt_budget,
                                         failed_candidates: &mut failed_candidates,
                                         same_candidate_retries: &mut same_candidate_retries,
                                         retry_selected: &mut retry_selected,
@@ -925,6 +935,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                 selected,
                                 failure.clone(),
                                 &mut V3ResponsesRelayProviderRetryState {
+                                    attempt_budget: &attempt_budget,
                                     failed_candidates: &mut failed_candidates,
                                     same_candidate_retries: &mut same_candidate_retries,
                                     retry_selected: &mut retry_selected,
@@ -1032,6 +1043,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                     selected,
                                     failure,
                                     &mut V3ResponsesRelayProviderRetryState {
+                                        attempt_budget: &attempt_budget,
                                         failed_candidates: &mut failed_candidates,
                                         same_candidate_retries: &mut same_candidate_retries,
                                         retry_selected: &mut retry_selected,

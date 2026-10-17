@@ -613,6 +613,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             ($stage:expr, $kind:expr, $error:expr) => {{
                 let terminal_failure = handle_provider_failure(
                     &failure_context,
+                    &attempt_budget,
                     selected,
                     provider_request_failure($stage, $kind, $error),
                     &mut V3RelayProviderFailurePolicyState {
@@ -719,9 +720,14 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         };
         trace.push("V3ProviderReqOutbound09TransportRequest");
         let provider_request_snapshot = transport_request.provider_request_projection();
+        if pending_provider_action_recovery.is_none() && _provider_action_permit.is_none() {
+            pending_provider_action_recovery = provider_health
+                .recovery_for_selected_provider(&input.failure_session_scope, &selected)
+                .map_err(V3AnthropicRelayRuntimeError::Target)?;
+        }
         if let Some(recovery) = pending_provider_action_recovery.take() {
             match provider_health
-                .wait_for_error05_recovery(&recovery, &selected)
+                .wait_for_error05_recovery(&recovery, &selected, attempt_budget.residence_deadline())
                 .await
                 .map_err(V3AnthropicRelayRuntimeError::Target)?
             {
@@ -813,6 +819,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 drop(_provider_action_permit.take());
                 if let Some(failure) = handle_provider_failure(
                     &failure_context,
+                    &attempt_budget,
                     selected,
                     failure,
                     &mut V3RelayProviderFailurePolicyState {
@@ -842,6 +849,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 drop(_provider_action_permit.take());
                 if let Some(failure) = handle_provider_failure(
                     &failure_context,
+                    &attempt_budget,
                     selected,
                     failure,
                     &mut V3RelayProviderFailurePolicyState {
@@ -902,6 +910,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         drop(_provider_action_permit.take());
                         let terminal_failure = handle_provider_failure(
                             &failure_context,
+                            &attempt_budget,
                             selected,
                             failure.clone(),
                             &mut V3RelayProviderFailurePolicyState {
@@ -1008,6 +1017,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                             drop(_provider_action_permit.take());
                             if let Some(failure) = handle_provider_failure(
                                 &failure_context,
+                                &attempt_budget,
                                 selected,
                                 failure,
                                 &mut V3RelayProviderFailurePolicyState {
@@ -1097,6 +1107,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         drop(_provider_action_permit.take());
                         if let Some(failure) = handle_provider_failure(
                             &failure_context,
+                            &attempt_budget,
                             selected,
                             failure,
                             &mut V3RelayProviderFailurePolicyState {
@@ -1135,6 +1146,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                                 drop(_provider_action_permit.take());
                                 if let Some(failure) = handle_provider_failure(
                                     &failure_context,
+                                    &attempt_budget,
                                     selected,
                                     failure,
                                     &mut V3RelayProviderFailurePolicyState {
@@ -1239,6 +1251,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                             drop(_provider_action_permit.take());
                             if let Some(failure) = handle_provider_failure(
                                 &failure_context,
+                                &attempt_budget,
                                 selected,
                                 failure,
                                 &mut V3RelayProviderFailurePolicyState {

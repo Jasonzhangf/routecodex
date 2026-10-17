@@ -57,8 +57,8 @@
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": ["v3.error.chain", "route.retry_exclusion_set"],
-        "writes": ["v3.error.chain", "route.retry_exclusion_set"]
+        "reads": ["v3.error.chain", "route.retry_exclusion_set", "v3.provider.health_state"],
+        "writes": ["v3.error.chain", "route.retry_exclusion_set", "v3.provider.health_state"]
       }
     },
     {
@@ -71,8 +71,8 @@
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": ["v3.error.chain", "v3.error.execution_decision"],
-        "writes": ["v3.error.chain", "v3.error.execution_decision"]
+        "reads": ["v3.error.chain", "v3.error.execution_decision", "v3.error.provider_action_gate"],
+        "writes": ["v3.error.chain", "v3.error.execution_decision", "v3.error.provider_action_gate"]
       }
     },
     {

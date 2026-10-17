@@ -123,14 +123,42 @@ chains:
       side_channel_writes: []
 - chain_id: v3.provider_global_cooldown_persistence
   owner_feature_id: v3.provider_global_cooldown_persistence
-  summary: Provider cooldown state is loaded before listeners bind, persisted on provider health mutation, and probed once after ready before re-admission.
+  summary: Each listener owns independent provider cooldown storage and probe registration; aggregate startup never hydrates one port from another port's state.
   edges:
+  - step_id: v3-provider-listener-health-01
+    from_node: V3ServerStartup01ListenerSetPreflight
+    to_node: V3ProviderHealthStore
+    caller_symbol: spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: V3ResponsesRelayProviderHealthHandle::from_manifest_for_listener
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_cooldown_persistence
+    resource_flow:
+      consumes: [v3.config.published_manifest]
+      produces: [v3.provider.global_cooldown_persistence]
+      side_channel_reads: [v3.config.published_manifest]
+      side_channel_writes: []
+  - step_id: v3-provider-listener-health-02
+    from_node: V3Config05ManifestPublished
+    to_node: V3ProviderHealthStore
+    caller_symbol: V3ResponsesRelayProviderHealthHandle::from_manifest_for_listener
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+    callee_symbol: V3ProviderFailureRuntimeHealth::from_manifest_for_listener
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_cooldown_persistence
+    resource_flow:
+      consumes: [v3.config.published_manifest]
+      produces: [v3.provider.global_cooldown_persistence]
+      side_channel_reads: [v3.config.published_manifest]
+      side_channel_writes: []
   - step_id: v3-provider-global-cooldown-01
     from_node: V3Config05ManifestPublished
     to_node: V3ProviderHealthStore
-    caller_symbol: V3ProviderFailureRuntimeHealth::from_manifest
-    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-    callee_symbol: V3ProviderHealthStore::from_manifest
+    caller_symbol: V3ProviderFailureRuntimeHealth::from_manifest_for_listener
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
+    callee_symbol: V3ProviderHealthStore::from_manifest_for_listener
     callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
     status: as_is_bound
     owner_feature_id: v3.provider_global_cooldown_persistence
@@ -7518,7 +7546,7 @@ chains:
     - step_id: v3-provider-action-gate-36
       from_node: V3ProviderActionFailureObserved
       to_node: V3ProviderActionFailureRecorded
-      caller_symbol: run_v3_direct_provider_failure_policy
+      caller_symbol: run_v3_direct_provider_failure_policy_inner
       caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
       callee_symbol: record_v3_direct_provider_failure_record
       callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
@@ -7598,9 +7626,9 @@ chains:
     - step_id: v3-provider-action-gate-40
       from_node: V3ProviderActionPermitAbandoned
       to_node: V3ProviderActionFailureRecorded
-      caller_symbol: V3OpenAiChatSseProviderOutcome::record_failure
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
-      callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
+      caller_symbol: handle_provider_failure
+      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
+      callee_symbol: run_v3_relay_provider_failure_policy
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
@@ -7678,9 +7706,9 @@ chains:
     - step_id: v3-provider-action-gate-44
       from_node: V3ProviderActionPermitAbandoned
       to_node: V3ProviderActionFailureRecorded
-      caller_symbol: V3GeminiSseProviderOutcome::record_failure
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
-      callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
+      caller_symbol: run_v3_relay_provider_failure_policy
+      caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+      callee_symbol: V3ProviderFailureRuntimeHealth::record_candidate_failure
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate

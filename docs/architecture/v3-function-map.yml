@@ -124,6 +124,9 @@ features:
   resource_bindings:
   - v3.provider.global_cooldown_persistence
   entry_symbols:
+  - V3ProviderHealthStore::from_manifest_for_listener
+  - V3ProviderFailureRuntimeHealth::from_manifest_for_listener
+  - V3ResponsesRelayProviderHealthHandle::from_manifest_for_listener
   - V3ProviderCooldownCoordinator::load
   - V3ProviderCooldownCoordinator::record_failure
   - V3ProviderCooldownCoordinator::acquire_startup_probe
@@ -139,6 +142,8 @@ features:
   - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
   - v3/crates/routecodex-v3-server/tests/multi_listener_server/issue127_disabled_health.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - docs/architecture
   required_gates:

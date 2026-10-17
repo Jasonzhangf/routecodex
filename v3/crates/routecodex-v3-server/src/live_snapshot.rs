@@ -994,6 +994,29 @@ pub(crate) fn persist_v3_responses_relay_terminal_error_evidence(
     raw_request_payload: &Value,
     output: &V3ResponsesRelayRuntimeOutput,
 ) -> Option<Response<Body>> {
+    // A terminal disposition returns before normal relay closeout. Flush the
+    // existing request-scoped recorder here, including consumed provider SSE
+    // frames, rather than losing it when the client transport is closed.
+    if v3_output_has_terminal_client_error(output.status) {
+        if let Some(snapshots) = output.provider_snapshots.as_ref() {
+            for (file, payload) in [
+                ("provider-request.json", snapshots.provider_request.as_ref()),
+                ("provider-response.json", snapshots.provider_response.as_ref()),
+            ] {
+                if let Some(payload) = payload {
+                    if let Err(error) = persist_v3_error_evidence_payload(
+                        state, entry_protocol, endpoint, request_id, file,
+                        &state.debug.project_payload_verbatim(payload.clone()),
+                        Some(output.status),
+                    ) {
+                        return Some(foundation_output_response(project_v3_debug_failure(
+                            "V3DebugProviderResponseCaptured", V3DebugError::Sink(error),
+                        )));
+                    }
+                }
+            }
+        }
+    }
     persist_v3_terminal_error_evidence_pair(
         state,
         entry_protocol,

@@ -253,7 +253,7 @@ pub struct V3ServerAggregateHandle {
     probe_lifecycle: aggregate_probe_lifecycle::AggregateProbeLifecycle,
     request_activity_gate: Arc<V3ServerRequestActivityGate>,
     front_transport_broker: V3FrontTransportBroker,
-    provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
+    provider_health: Vec<Arc<V3ResponsesRelayProviderHealthHandle>>,
     observability_writers: Vec<V3WebuiObservability>,
     codex_sample_persist_worker: Option<routecodex_v3_debug::V3CodexSamplePersistHandle>,
 }
@@ -381,8 +381,10 @@ impl V3ServerAggregateHandle {
     }
 
     fn flush_runtime_persistence(&self) {
-        if let Err(error) = self.provider_health.flush_persistence() {
-            eprintln!("V3 provider health persistence flush failed: {error}");
+        for health in &self.provider_health {
+            if let Err(error) = health.flush_persistence() {
+                eprintln!("V3 provider health persistence flush failed: {error}");
+            }
         }
         for observability in &self.observability_writers {
             if let Err(error) = observability.flush_persistence() {
@@ -516,9 +518,8 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
     let responses_relay_server_tool_state = Arc::new(
         V3ResponsesRelayServerToolState::default().with_hooks_sidecar_socket(hooks_sidecar_socket),
     );
-    let provider_health = Arc::new(V3ResponsesRelayProviderHealthHandle::from_manifest(
-        &manifest,
-    ));
+    let mut provider_health = Vec::new();
+    let mut probe_health = Vec::new();
     let codex_sample_store = Arc::new(routecodex_v3_debug::V3CodexSampleStore::new(
         manifest.debug.codex_samples,
         routecodex_v3_debug::V3_CODEX_SAMPLE_REQUEST_RETENTION,
@@ -607,6 +608,14 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
             admin_state.spawn_background();
             routecodex_v3_admin::router((*admin_state).clone())
         } else {
+            let mut scoped = (*manifest).clone();
+            scoped.servers.retain(|id, _| id == &server_id);
+            let scoped = Arc::new(scoped);
+            let health = Arc::new(V3ResponsesRelayProviderHealthHandle::from_manifest_for_listener(
+                &scoped, server.port,
+            ));
+            provider_health.push(Arc::clone(&health));
+            probe_health.push((scoped, Arc::clone(&health)));
             let config_path = canonical_admin_config_path.as_ref().ok_or_else(|| {
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
@@ -632,7 +641,7 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
                 codex_sample_store: codex_sample_store.clone(),
                 responses_direct_server_tool_state: responses_direct_server_tool_state.clone(),
                 responses_relay_server_tool_state: responses_relay_server_tool_state.clone(),
-                provider_health: provider_health.clone(),
+                provider_health: health,
                 realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
                 request_activity_gate: Arc::clone(&request_activity_gate),
                 front_transport_broker: front_transport_broker.clone(),
@@ -714,8 +723,7 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
         emit_v3_startup_console_line(&listeners);
     }
     let probe_lifecycle = aggregate_probe_lifecycle::AggregateProbeLifecycle::start(
-        Arc::clone(&manifest),
-        Arc::clone(&provider_health),
+        probe_health,
     )
     .map_err(std::io::Error::other)?;
     Ok(V3ServerAggregateHandle {

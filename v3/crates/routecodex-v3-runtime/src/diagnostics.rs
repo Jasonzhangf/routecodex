@@ -138,7 +138,6 @@ pub fn project_v3_virtual_router_dry_run<R: V3ProviderAvailabilityReader>(
                 "unavailableCandidates": selected.unavailable_candidates,
                 "attempts": selected.attempts,
                 "defaultFloorSelection": selected.route.pool_id == "default",
-                "defaultFloorProtected": selected.default_floor_protected,
                 "reasoning": reasoning,
                 "target": {
                     "providerId": selected.candidate.provider_id,

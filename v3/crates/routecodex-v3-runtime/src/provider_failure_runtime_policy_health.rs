@@ -1,14 +1,20 @@
 impl V3ProviderFailureRuntimeHealth {
+    pub(crate) fn from_manifest_for_listener(manifest: &V3Config05ManifestPublished, port: u16) -> Self {
+        Self {
+            store: V3ProviderHealthStore::from_manifest_for_listener(manifest, port),
+            action_gate: V3ProviderActionGate::default(),
+            probe_owner: Default::default(),
+            transition_lock: Default::default(),
+        }
+    }
+
     pub fn from_manifest_for_tests(manifest: &V3Config05ManifestPublished) -> Self {
         let store = V3ProviderHealthStore::from_manifest_without_persistence(manifest);
         Self {
             store,
             action_gate: V3ProviderActionGate::process_shared(),
             probe_owner: Default::default(),
-            default_same_provider_retries: V3RelayProviderFailureRetryPolicy::from_manifest(
-                manifest,
-            )
-            .same_candidate_retries,
+            transition_lock: Default::default(),
         }
     }
 
@@ -18,10 +24,7 @@ impl V3ProviderFailureRuntimeHealth {
             store,
             action_gate: V3ProviderActionGate::default(),
             probe_owner: Default::default(),
-            default_same_provider_retries: V3RelayProviderFailureRetryPolicy::from_manifest(
-                manifest,
-            )
-            .same_candidate_retries,
+            transition_lock: Default::default(),
         }
     }
 
@@ -37,10 +40,56 @@ impl V3ProviderFailureRuntimeHealth {
             store,
             action_gate: V3ProviderActionGate::process_shared(),
             probe_owner: Default::default(),
-            default_same_provider_retries: V3RelayProviderFailureRetryPolicy::from_manifest(
-                manifest,
+            transition_lock: Default::default(),
+        }
+    }
+
+    /// Serialize the last-routable decision with the corresponding health write.
+    /// Both execution modes must use this boundary before excluding a candidate.
+    pub(crate) fn record_candidate_failure(
+        &self,
+        scope: &V3ProviderFailureSessionScope,
+        selected: &V3Target10ConcreteProviderSelected,
+        candidates: &[routecodex_v3_target::V3TargetCandidate],
+        excluded: &std::collections::BTreeSet<String>,
+        now_ms: u64,
+        reason: Option<&str>,
+        record: impl FnOnce() -> Result<V3ProviderFailureRecord, String>,
+    ) -> Result<(bool, V3ProviderFailureRecord), String> {
+        let _transition = self
+            .transition_lock
+            .lock()
+            .map_err(|_| "provider health transition lock poisoned".to_string())?;
+        let current = v3_relay_provider_candidate_key(&selected.candidate);
+        let has_alternative = candidates.iter().any(|candidate| {
+            let key = v3_relay_provider_candidate_key(candidate);
+            key != current
+                && !excluded.contains(&key)
+                && self
+                    .store
+                    .availability_for_session_for_interface(
+                        scope,
+                        &candidate.provider_id,
+                        &candidate.interface_id,
+                        Some(&candidate.auth_alias),
+                        Some(&candidate.model_id),
+                        now_ms,
+                    )
+                    .available
+        });
+        if has_alternative {
+            record().map(|record| (false, record))
+        } else {
+            self.record_provider_failure_in_session_without_health_cooldown_for_interface(
+                scope,
+                &selected.candidate.provider_id,
+                &selected.candidate.interface_id,
+                Some(&selected.candidate.auth_alias),
+                Some(&selected.candidate.model_id),
+                reason,
+                now_ms,
             )
-            .same_candidate_retries,
+            .map(|record| (true, record))
         }
     }
 
@@ -181,10 +230,6 @@ impl V3ProviderFailureRuntimeHealth {
         } else {
             Err(probe_errors.join("; "))
         }
-    }
-
-    pub(crate) fn default_same_provider_retries(&self) -> usize {
-        self.default_same_provider_retries
     }
 
     pub(crate) fn record_provider_failure_record(
@@ -897,6 +942,7 @@ impl V3ProviderFailureRuntimeHealth {
         &self,
         witness: &V3Error05RecoveryAdmissionWitness,
         selected: &V3Target10ConcreteProviderSelected,
+        deadline: std::time::Instant,
     ) -> Result<V3ProviderActionRecoveryTransition, String> {
         let provider_scope = V3ProviderActionProviderScope::new(
             witness.failure_session_scope(),
@@ -907,9 +953,27 @@ impl V3ProviderFailureRuntimeHealth {
                 Some(&selected.candidate.model_id),
             ),
         )?;
+        tokio::time::timeout_at(
+            deadline.into(),
+            self.action_gate
+                .wait_for_recovery_witness(witness, provider_scope),
+        )
+        .await
+        .map_err(|_| {
+            "request residence deadline exceeded while waiting for provider recovery".to_string()
+        })?
+    }
+
+    pub(crate) fn recovery_for_selected_provider(
+        &self,
+        scope: &V3ProviderFailureSessionScope,
+        selected: &V3Target10ConcreteProviderSelected,
+    ) -> Result<Option<V3Error05RecoveryAdmissionWitness>, String> {
         self.action_gate
-            .wait_for_recovery_witness(witness, provider_scope)
-            .await
+            .active_recovery_witness(&V3ProviderActionProviderScope::new(
+                scope,
+                v3_relay_provider_candidate_key(&selected.candidate),
+            )?)
     }
 
     pub(crate) async fn wait_for_exact_selected_provider_action(

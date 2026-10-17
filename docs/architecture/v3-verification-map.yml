@@ -3054,6 +3054,9 @@ features:
   - Terminal provider HTTP errors reach the public `/v1/responses` failure boundary without waiting for provider action admission.
   required_gates:
   - npm run test:v3-provider-action-gate
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test provider_last_routable -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test provider_action_gate_session_isolation_contract -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --lib listener_persistence_does_not_restore_another_ports_cooldown -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test provider_action_gate_contract isolated_terminal_projection_commits_without_waiting_for_provider_action_admission -- --exact --nocapture
   - npm run verify:v3-provider-action-gate
   - npm run test:v3-provider-action-gate-red-fixtures

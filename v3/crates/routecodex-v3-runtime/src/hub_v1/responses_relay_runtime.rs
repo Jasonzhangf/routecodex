@@ -66,6 +66,12 @@ pub struct V3ResponsesRelayProviderHealthHandle {
 }
 
 impl V3ResponsesRelayProviderHealthHandle {
+    pub fn from_manifest_for_listener(manifest: &V3Config05ManifestPublished, port: u16) -> Self {
+        Self {
+            runtime_health: V3ProviderFailureRuntimeHealth::from_manifest_for_listener(manifest, port),
+        }
+    }
+
     pub fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
         Self {
             runtime_health: V3ProviderFailureRuntimeHealth::from_manifest(manifest),
@@ -209,9 +215,11 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_se
         initial_relay_seeds,
     ))
     .await?;
+    let failed_attempt = output.terminal_disposition.is_some()
+        || output.observability.as_ref().is_some_and(|value| !value.provider_failure_events.is_empty());
     output.provider_snapshots = Some(snapshots.into_payload(
-        provider_snapshots.provider_request,
-        provider_snapshots.provider_response,
+        provider_snapshots.provider_request || failed_attempt,
+        provider_snapshots.provider_response || failed_attempt,
     ));
     Ok(output)
 }
@@ -284,7 +292,7 @@ async fn handle_v3_responses_relay_provider_failure(
     if failure.terminal_projection.is_some() {
         return Ok(Some(failure));
     }
-    let result = run_v3_relay_provider_failure_policy(
+    let mut result = run_v3_relay_provider_failure_policy(
         context,
         selected,
         failure.source_stage,
@@ -306,6 +314,7 @@ async fn handle_v3_responses_relay_provider_failure(
     )
     .await
     .map_err(V3ResponsesRelayRuntimeError::ProviderHealth)?;
+    result.enforce_retry_budget(state.attempt_budget, state.last_external_http.clone());
     // Carry the real upstream HTTP status (if any) into the policy event so the
     // failure observation can separate it from the client projection status.
     let mut policy_event = result.event.clone();
@@ -319,24 +328,10 @@ async fn handle_v3_responses_relay_provider_failure(
     }
     failure = attach_v3_provider_failure_events_to_failure(failure, state.provider_failure_events);
     match result.decision.action {
-        V3Error05ExecutionAction::WaitThenReselect { recovery } => {
+        V3Error05ExecutionAction::WaitThenReselect { recovery }
+        | V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
             *state.retry_selected = result.retry_selected.map(|selected| *selected);
-            if result.event.wait_ms.is_some() {
-                *state.pending_recovery = Some(recovery);
-            } else {
-                *state.pending_recovery = None;
-            }
-            Ok(None)
-        }
-        V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
-            *state.retry_selected = result.retry_selected.map(|selected| *selected);
-            // 瞬态重试（request-local recovery witness，wait_ms=None）不经过
-            // provider action gate：无 health 记录可等，立即重发。
-            if result.event.wait_ms.is_some() {
-                *state.pending_recovery = Some(recovery);
-            } else {
-                *state.pending_recovery = None;
-            }
+            *state.pending_recovery = Some(recovery);
             Ok(None)
         }
         V3Error05ExecutionAction::ProjectTerminal => {
