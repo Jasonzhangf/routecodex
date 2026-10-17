@@ -6,7 +6,7 @@
     "method": "POST",
     "path": "/v1/chat/completions",
     "headers": {"content-type": "application/json"},
-    "body": {"model": "mock.anthropic-model", "messages": [{"role": "user", "content": "hello"}], "stream": true}
+    "body": {"model": "mock.anthropic-model", "messages": [{"role": "user", "content": "hello"}], "stream": true, "stream_options": {"include_usage": true}}
   },
   "expected_provider": {
     "paths": ["/v1/messages"],
@@ -40,7 +40,7 @@
     "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
     "files": ["internal/gateway/claude_chat_usage_test.go"],
     "tests": ["internal/gateway/claude_chat_usage_test.go::TestClaudeChatCacheWrites"],
-    "adaptation": "Fixed Anthropic message_start/message_delta usage; expected cache-preservation arithmetic is independently checked."
+    "adaptation": "Fixed Anthropic message_start/message_delta usage; expected cache-preservation arithmetic is independently checked. The client_request.body now explicitly sets stream_options.include_usage=true so the five usage oracles are a legal Chat SSE requirement; the four provider SSE events and the five numeric oracles are unchanged."
   },
   "contract_differences": []
 }

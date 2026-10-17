@@ -435,7 +435,7 @@ features:
   - Fresh Responses orchestration may wrap implemented Direct or Relay bindings with the Relay shell, but Config-owned PendingNotImplemented remains pending for HTTP and WebSocket and cannot enter provider
     execution.
   - Server route table config allowed protocols manifest endpoint declarations runtime dispatch must stay consistent.
-  - Gemini relay implementation must be explicit and bound to v3.gemini_relay_runtime_integration.
+  - Gemini Direct is the default binding and explicit Relay remains available through its separately bound runtime owner.
   - No unbound endpoint can fall through to generic foundation pending.
   - Server must not duplicate the protocol registry or bypass binding with raw path dispatch.
   - Protocol binding must not depend on provider runtime state metadata debug side-channel or request payload.
@@ -1876,6 +1876,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_codex_integer_values.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_codex_integer_values_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_extra_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_responses_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_terminal_semantics.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
@@ -1924,6 +1925,7 @@ features:
     token fields, and projects Responses reasoning config to `reasoning_effort` while rejecting non-standard client_metadata and the raw Responses `reasoning` object from provider wire.
   - OpenAI Chat provider response to Responses projection preserves model, created timestamp, reasoning, text, tool calls, finish_reason, and usage fields.
   - Responses provider JSON and SSE tool calls restore namespace and name only from the current request's declared provider-name identity map, preserving call_id and the complete arguments through matching function_call_output follow-up.
+  - Responses JSON client projection consumes the final governed Resp03 payload and applies the same completed-response output-item projection as SSE: legacy output_text items become assistant messages with the complete item retained as content, structured text is serialized losslessly, missing text remains absent, and non-legacy items retain their complete value and order.
   - Anthropic Messages request to Responses provider semantic preserves system, image/text blocks, tool_use/tool_result, tool schema, tool_choice, metadata, sampling, top_k, token, stop, stream, and thinking
     fields.
   - Anthropic request thinking.type, thinking.budget_tokens, and thinking.display decode into separate registered Chat fields; no raw thinking object crosses Chat Process and none is compressed to effort.
@@ -2044,6 +2046,7 @@ features:
   required_gates:
   - npm run render:v3-protocol-semantic-field-matrix
   - npm run test:v3-protocol-conversion-field-parity
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib responses_relay_json_projects_legacy_output_text_items_without_losing_fields
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test namespace_cross_protocol_public -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test namespace_native_discovery_public -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test gemini_sse_attempt_public -- --nocapture
@@ -2096,7 +2099,7 @@ features:
   - Server SSE uses Body::from_stream and delivers first frame before controlled terminal delay
   - Server 429 response exposes Error01-06 and does not wrap success
   - rejected metadata_center request produces zero upstream captures
-  - Config binding marks gemini relay implemented with Gemini runtime owner
+  - Config binding marks gemini Direct implemented with the Gemini Direct Server owner
   - Virtual Router recognizes dynamic /v1beta/models/:model/generateContent as gemini entry protocol
   required_gates:
   - npm run test:v3-gemini-relay-runtime-integration
@@ -2132,7 +2135,7 @@ features:
   - omitted server endpoints default to responses, anthropic, gemini, and openai_chat
   - endpoint_patterns missing or duplicated fail
   - duplicate protocol binding and unknown protocol fail
-  - gemini must be relay implemented with explicit Gemini runtime owner
+  - gemini must be Direct implemented by default with explicit Gemini Direct Server owner, while explicit Relay remains supported
   - implemented direct or relay bindings must declare runtime owner symbol and path
   required_blackbox:
   - none; this slice is config contract only and does not claim live runtime behavior

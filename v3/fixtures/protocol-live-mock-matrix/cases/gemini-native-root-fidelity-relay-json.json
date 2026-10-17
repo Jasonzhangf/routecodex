@@ -1,0 +1,210 @@
+{
+  "schema_version": 1,
+  "case_id": "gemini-native-root-fidelity-relay-json",
+  "cell": {"entry_protocol": "gemini", "provider_protocol": "gemini", "transport": "json", "mode": "relay"},
+  "client_request": {
+    "method": "POST",
+    "path": "/v1beta/models/gemini-client/generateContent",
+    "headers": {"content-type": "application/json"},
+    "body": {
+      "cachedContent": "caches/current-edit-8a508d3",
+      "safetySettings": [
+        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"}
+      ],
+      "systemInstruction": {"parts": [{"text": "ab"}, {"text": "c"}]},
+      "contents": [{"role": "user", "parts": [{"text": "use echo once"}]}],
+      "tools": [{"functionDeclarations": [
+        {"name": "echo", "description": "Return the provided text unchanged.", "parameters": {"type": "object", "properties": {"message": {"type": "string"}}, "required": ["message"]}},
+        {"name": "other", "description": "Declared but not selected.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
+        {"name": "third", "description": "Declared but not selected.", "parameters": {"type": "object", "properties": {"value": {"type": "integer"}}, "required": ["value"]}}
+      ]}],
+      "toolConfig": {"functionCallingConfig": {"mode": "ANY", "allowedFunctionNames": ["echo", "other"]}}
+    }
+  },
+  "expected_provider": {
+    "paths": ["/v1beta/models/gemini-wire:generateContent"],
+    "method": "POST",
+    "auth_required": true,
+    "body_must_not": ["routecodex_internal", "metadata_center", "debug_snapshot", "gemini_native_fields", "routecodex_chat_extension", "messages", "tool_choice", "provider_protocol", "selected_target"],
+    "exact": {
+      "cachedContent": "caches/current-edit-8a508d3",
+      "safetySettings": [
+        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"}
+      ],
+      "systemInstruction": {"parts": [{"text": "ab"}, {"text": "c"}]},
+      "contents": [{"role": "user", "parts": [{"text": "use echo once"}]}],
+      "tools": [{"functionDeclarations": [
+        {"name": "echo", "description": "Return the provided text unchanged.", "parameters": {"type": "object", "properties": {"message": {"type": "string"}}, "required": ["message"]}},
+        {"name": "other", "description": "Declared but not selected.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
+        {"name": "third", "description": "Declared but not selected.", "parameters": {"type": "object", "properties": {"value": {"type": "integer"}}, "required": ["value"]}}
+      ]}],
+      "toolConfig": {"functionCallingConfig": {"mode": "ANY", "allowedFunctionNames": ["echo", "other"]}}
+    }
+  },
+  "upstream_response": {
+    "protocol": "gemini",
+    "mode": "json",
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "candidates": [{
+        "index": 0,
+        "finishReason": "STOP",
+        "content": {"role": "model", "parts": [{
+          "functionCall": {"name": "echo", "args": {"message": "native-tool-result"}},
+          "thoughtSignature": "native-call-signature"
+        }]}
+      }],
+      "usageMetadata": {"promptTokenCount": 3, "candidatesTokenCount": 2, "totalTokenCount": 5}
+    }
+  },
+  "expected_client": {
+    "transport": "complete",
+    "status": 200,
+    "body_must": {
+      "candidates.0.content.parts.0.functionCall.name": "echo",
+      "candidates.0.content.parts.0.functionCall.args.message": "native-tool-result",
+      "candidates.0.content.parts.0.thoughtSignature": "native-call-signature",
+      "candidates.0.finishReason": "STOP"
+    },
+    "body_must_not": ["provider_error", "internal_error", "routecodex_internal", "metadata_center", "gemini_native_fields", "routecodex_chat_extension"],
+    "semantic_terminal_required": true
+  },
+  "assertions": {"provider_attempt_count": 1, "probe_attempts_may_occur": true, "no_control_leakage": true},
+  "runtime_setup": {
+    "provider_id": "mock-gemini",
+    "model": "gemini-client",
+    "wire_model": "gemini-wire",
+    "candidate_ids": ["mock-gemini/gemini-client"]
+  },
+  "source": {
+    "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
+    "files": ["internal/gateway/gemini_function_parts_test.go"],
+    "tests": ["internal/gateway/gemini_function_parts_test.go::TestGeminiFunctionResponseImageReachesUpstream"],
+    "adaptation": "Borrows only the native Gemini request/function-call shape from Magpie. The root cachedContent/safetySettings, ordered systemInstruction parts, multi-name ANY selection, and Relay fidelity expectations are independent RCC requirements for issue 8a508d3, not Magpie golden output."
+  },
+  "contract_differences": [
+    {
+      "source_behavior": "Magpie's same-protocol Gemini path is not the Relay consumer under test and does not carry these root/system/selection residuals.",
+      "rcc_requirement": "A same-protocol Gemini Relay must preserve the full root cachedContent/safetySettings, the exact systemInstruction part boundaries, the complete declared tool set, and the complete current allowed-name selection on the first provider attempt."
+    }
+  ],
+  "turns": [
+    {
+      "turn_id": "native-call",
+      "purpose": "The provider returns the allowed echo functionCall with complete args and its signature, and no fabricated call id.",
+      "expected_client_must": {
+        "candidates.0.content.parts.0.functionCall.name": "echo",
+        "candidates.0.content.parts.0.functionCall.args.message": "native-tool-result",
+        "candidates.0.content.parts.0.thoughtSignature": "native-call-signature",
+        "candidates.0.finishReason": "STOP"
+      }
+    },
+    {
+      "turn_id": "native-followup",
+      "purpose": "The client submits the actual echo stdout plus the paired native model history; the provider must see the complete preserved root/system/selection and history on the second business attempt.",
+      "client_request": {
+        "method": "POST",
+        "path": "/v1beta/models/gemini-client/generateContent",
+        "headers": {"content-type": "application/json"},
+        "body": {
+          "cachedContent": "caches/current-edit-8a508d3",
+          "safetySettings": [
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"}
+          ],
+          "systemInstruction": {"parts": [{"text": "ab"}, {"text": "c"}]},
+          "contents": [
+            {"role": "user", "parts": [{"text": "use echo once"}]},
+            {"role": "model", "parts": [{
+              "functionCall": {"name": "echo", "args": {"message": "native-tool-result"}},
+              "thoughtSignature": "native-call-signature"
+            }]},
+            {"parts": [{"functionResponse": {
+              "name": "echo",
+              "response": {"output": "native-tool-result\n", "exitCode": 0},
+              "parts": [
+                {"text": "attachment note", "thoughtSignature": "attachment-signature"},
+                {"inlineData": {"mimeType": "image/png", "data": "UE5H"}}
+              ]
+            }}]}
+          ],
+          "tools": [{"functionDeclarations": [
+            {"name": "echo", "description": "Return the provided text unchanged.", "parameters": {"type": "object", "properties": {"message": {"type": "string"}}, "required": ["message"]}},
+            {"name": "other", "description": "Declared but not selected.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
+            {"name": "third", "description": "Declared but not selected.", "parameters": {"type": "object", "properties": {"value": {"type": "integer"}}, "required": ["value"]}}
+          ]}],
+          "toolConfig": {"functionCallingConfig": {"mode": "ANY", "allowedFunctionNames": ["echo", "other"]}}
+        }
+      },
+      "expected_provider_exact": {
+        "cachedContent": "caches/current-edit-8a508d3",
+        "safetySettings": [
+          {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+          {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"}
+        ],
+        "systemInstruction": {"parts": [{"text": "ab"}, {"text": "c"}]},
+        "contents": [
+          {"role": "user", "parts": [{"text": "use echo once"}]},
+          {"role": "model", "parts": [{
+            "functionCall": {"name": "echo", "args": {"message": "native-tool-result"}},
+            "thoughtSignature": "native-call-signature"
+          }]},
+          {"parts": [{"functionResponse": {
+            "name": "echo",
+            "response": {"output": "native-tool-result\n", "exitCode": 0},
+            "parts": [
+              {"text": "attachment note", "thoughtSignature": "attachment-signature"},
+              {"inlineData": {"mimeType": "image/png", "data": "UE5H"}}
+            ]
+          }}]}
+        ],
+        "tools": [{"functionDeclarations": [
+          {"name": "echo", "description": "Return the provided text unchanged.", "parameters": {"type": "object", "properties": {"message": {"type": "string"}}, "required": ["message"]}},
+          {"name": "other", "description": "Declared but not selected.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
+          {"name": "third", "description": "Declared but not selected.", "parameters": {"type": "object", "properties": {"value": {"type": "integer"}}, "required": ["value"]}}
+        ]}],
+        "toolConfig": {"functionCallingConfig": {"mode": "ANY", "allowedFunctionNames": ["echo", "other"]}}
+      },
+      "upstream_response": {
+        "protocol": "gemini",
+        "mode": "json",
+        "status": 200,
+        "content_type": "application/json",
+        "body": {
+          "candidates": [{
+            "index": 0,
+            "finishReason": "STOP",
+            "content": {"role": "model", "parts": [{"text": "done"}]}
+          }],
+          "usageMetadata": {"promptTokenCount": 7, "candidatesTokenCount": 2, "totalTokenCount": 9}
+        }
+      },
+      "expected_client_contract": {
+        "transport": "complete",
+        "status": 200,
+        "body_must_not": ["provider_error", "internal_error", "routecodex_internal", "metadata_center", "gemini_native_fields", "routecodex_chat_extension"],
+        "semantic_terminal_required": true
+      },
+      "expected_client_must": {
+        "candidates.0.content.parts.0.text": "done",
+        "candidates.0.finishReason": "STOP",
+        "usageMetadata.totalTokenCount": 9
+      }
+    }
+  ],
+  "tool_followup": {
+    "consumer": "echo-line-result",
+    "side_effect": "none",
+    "input": {"message": "native-tool-result"},
+    "expected_output": {
+      "output": "native-tool-result\n",
+      "exitCode": 0
+    },
+    "assert_no_synthesized_tool_result": true,
+    "assert_declared_tool_binding_only": true,
+    "assert_tool_executed_once": true
+  }
+}

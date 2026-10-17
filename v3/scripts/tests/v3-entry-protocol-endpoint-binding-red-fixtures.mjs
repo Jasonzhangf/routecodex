@@ -20,7 +20,7 @@ const cases = [
   {
     name: 'delete Gemini binding',
     path: 'docs/architecture/manifests/v3.entry_protocol_endpoint_binding.mainline.yml',
-    mutate: (source) => source.replace(/\n  - entry_protocol: gemini[\s\S]*?forbidden_fallback_behavior: "Gemini endpoint must not fall through to generic foundation pending\."\n/u, '\n'),
+    mutate: (source) => source.replace(/\n  - entry_protocol: gemini[\s\S]*?forbidden_fallback_behavior: "Gemini endpoint must use its declared Direct or Relay runtime owner and must not fall through to another protocol's runtime or pending runtime\."\n/u, '\n'),
     diagnostic: /missing required protocol binding gemini/u,
   },
   {
@@ -42,10 +42,10 @@ const cases = [
     diagnostic: /unknown protocol binding legacy_chat/u,
   },
   {
-    name: 'remove Gemini runtime owner',
+    name: 'remove Gemini Direct runtime owner',
     path: 'docs/architecture/manifests/v3.entry_protocol_endpoint_binding.mainline.yml',
     mutate: (source) => source.replace(
-      '    runtime_owner_symbol: execute_v3_gemini_relay_runtime_with_default_transport\n',
+      '    runtime_owner_symbol: execute_v3_gemini_direct_server_outcome\n',
       '',
     ),
     diagnostic: /gemini implemented binding must declare runtime owner symbol\/path/u,

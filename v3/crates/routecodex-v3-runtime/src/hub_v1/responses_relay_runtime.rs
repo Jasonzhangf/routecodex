@@ -94,6 +94,7 @@ impl V3ResponsesRelayProviderHealthHandle {
         self.runtime_health.store().persistence_alarm()
     }
 }
+pub(super) use responses_openai_chat_conversion::build_v3_responses_provider_response_from_openai_chat_payload;
 pub(crate) use responses_openai_chat_conversion::build_v3_responses_reasoning_item_from_openai_chat_message;
 use responses_openai_chat_conversion::*;
 use responses_relay_dry_run::*;
@@ -1014,18 +1015,23 @@ fn append_v3_responses_client_function_call_progress_frames(
     Ok(())
 }
 
-fn project_v3_responses_client_event_output_item_done_item(item: &Value) -> Value {
+pub(super) fn project_v3_responses_client_event_output_item_done_item(item: &Value) -> Value {
     if item.get("type").and_then(Value::as_str) != Some("output_text") {
         return item.clone();
     }
-    let text = item.get("text").and_then(Value::as_str).unwrap_or_default();
+    let mut content_part = item.clone();
+    if let Some(text) = content_part.get_mut("text") {
+        if !text.is_string() {
+            *text = Value::String(text.to_string());
+        }
+    }
+    if let Some(object) = content_part.as_object_mut() {
+        object.remove("id");
+    }
     let mut projected = json!({
         "type": "message",
         "role": "assistant",
-        "content": [{
-            "type": "output_text",
-            "text": text,
-        }],
+        "content": [content_part],
     });
     if let Some(id) = item.get("id").cloned() {
         projected["id"] = id;
@@ -1060,7 +1066,7 @@ fn build_v3_responses_client_progress_response(response: &Value, response_id: &s
 /// SSE 事件级 completed/done 内嵌 response 的 item 表示投影：与
 /// `output_item.done` 事件保持一致（output_text -> message 包裹），
 /// 避免同一 SSE 流内同一 output 条目出现两种 client 语义。
-fn project_v3_responses_client_completed_response(response: &Value) -> Value {
+pub(super) fn project_v3_responses_client_completed_response(response: &Value) -> Value {
     let mut projected = response.clone();
     if let Some(output) = projected.get_mut("output").and_then(Value::as_array_mut) {
         for item in output.iter_mut() {

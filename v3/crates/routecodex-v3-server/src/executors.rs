@@ -463,6 +463,325 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
     )
 }
 
+pub(crate) async fn execute_v3_anthropic_direct_server_outcome(
+    state: &Arc<V3ListenerState>,
+    front_connection_identity: Option<V3FrontConnectionIdentity>,
+    method: String,
+    path: String,
+    request_id: String,
+    execution_id: String,
+    payload: Value,
+    failure_session_scope: V3ProviderFailureSessionScope,
+    request_headers: &HeaderMap,
+    request_identity: &V3AllocatedRequestIdentity,
+    started_at: Instant,
+    request_purpose: V3RequestPurpose,
+) -> Response<Body> {
+    let requested_stream = v3_entry_request_wants_sse(request_headers, &payload);
+    let client_headers = match collect_anthropic_relay_client_headers(request_headers) {
+        Ok(headers) => headers,
+        Err(error) => {
+            return error_output_response_for_server(
+                &state.server,
+                &path,
+                &request_id,
+                project_v3_server_runtime_failure(
+                    "V3Server03HttpRequestRaw",
+                    "anthropic_client_headers_invalid",
+                    error,
+                    598,
+                ),
+            )
+        }
+    };
+    let console_context = build_v3_console_emission_context(
+        state,
+        "anthropic",
+        &path,
+        request_identity,
+        request_headers,
+        &payload,
+    );
+    let failure_sink = build_v3_provider_failure_event_sink(&console_context);
+    let selection_sink = build_v3_route_selection_event_sink(&console_context);
+    let raw = build_v3_server_03_http_request_raw_with_purpose_and_scope(
+        state.server.id.clone(),
+        failure_session_scope.clone(),
+        request_id.clone(),
+        execution_id,
+        method,
+        path.clone(),
+        request_purpose,
+        Some(state.server.port),
+        Some(request_identity.pipeline_id.clone()),
+        payload.clone(),
+    );
+    let now_epoch_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0);
+    let output = routecodex_v3_runtime::execute_v3_direct_runtime_kernel_core::<
+        routecodex_v3_runtime::V3AnthropicDirectCodec,
+        _,
+    >(
+        client_headers.clone(),
+        &state.manifest,
+        raw,
+        routecodex_v3_runtime::default_responses_transport(),
+        state.provider_health.runtime_health(),
+        now_epoch_ms,
+        true,
+        Some(&failure_sink),
+        Some(&selection_sink),
+    )
+    .await;
+    if let Some(handoff) = output.protocol_relay_handoff {
+        let relay_output = match routecodex_v3_runtime::execute_v3_anthropic_relay_runtime_with_default_transport_client_headers_provider_health_and_handoff(
+            &state.manifest,
+            V3AnthropicRelayRuntimeInput {
+                server_id: state.server.id.clone(), failure_session_scope,
+                request_id: request_id.clone(), payload,
+                toolreason_observation_session_id: None,
+            },
+            client_headers, state.provider_health.runtime_health(), handoff,
+        ).await {
+            Ok(output) => output,
+            Err(error) => project_v3_anthropic_relay_runtime_failure(error),
+        };
+        if let Some(disposition) = relay_output.terminal_disposition.clone() {
+            return provider_terminal_response(
+                state,
+                front_connection_identity,
+                disposition,
+                requested_stream,
+                V3ProviderTerminalEvidence {
+                    entry_protocol: "anthropic",
+                    endpoint: &path,
+                    request_id: &request_id,
+                },
+            );
+        }
+        if let Some(observability) = relay_output.observability.as_ref() {
+            emit_v3_observability_console_lines(
+                &console_context,
+                relay_output.status,
+                &relay_output.node_trace,
+                observability,
+                started_at,
+                true,
+            );
+        }
+        return anthropic_relay_output_response(relay_output, requested_stream);
+    }
+    persist_v3_chat_failure_evidence_sources(
+        state,
+        "anthropic",
+        &path,
+        &request_id,
+        output
+            .observability
+            .as_ref()
+            .map(|observation| observation.provider_failure_events.as_slice())
+            .unwrap_or(&[]),
+        output.diagnostic_source.as_ref(),
+    );
+    if let Some(disposition) = output.terminal_disposition {
+        return provider_terminal_response(
+            state,
+            front_connection_identity,
+            disposition,
+            requested_stream,
+            V3ProviderTerminalEvidence {
+                entry_protocol: "anthropic",
+                endpoint: &path,
+                request_id: &request_id,
+            },
+        );
+    }
+    let mut frame = build_v3_server_16_http_frame_from_v3_resp_15(
+        output.client_payload,
+        output.node_trace,
+        output.error_chain,
+    );
+    frame.observability = output.observability;
+    frame.stream_observation = output.stream_observation;
+    let finalizer = emit_v3_direct_frame_console_lines(&console_context, &frame, started_at);
+    let frame = project_v3_protocol_stream_error_frame_if_requested(
+        frame,
+        requested_stream,
+        V3SseClientProtocol::Anthropic,
+    );
+    responses_direct_output_response_with_console_for_protocol(
+        frame,
+        finalizer,
+        Some(Duration::from_millis(state.server.http_sse_keepalive_ms)),
+        V3SseClientProtocol::Anthropic,
+    )
+}
+
+pub(crate) async fn execute_v3_gemini_direct_server_outcome(
+    state: &Arc<V3ListenerState>,
+    front_connection_identity: Option<V3FrontConnectionIdentity>,
+    method: String,
+    path: String,
+    request_id: String,
+    execution_id: String,
+    payload: Value,
+    failure_session_scope: V3ProviderFailureSessionScope,
+    request_headers: &HeaderMap,
+    request_identity: &V3AllocatedRequestIdentity,
+    started_at: Instant,
+    request_purpose: V3RequestPurpose,
+) -> Response<Body> {
+    let requested_stream = v3_entry_request_wants_sse(request_headers, &payload)
+        || path
+            .split('?')
+            .next()
+            .unwrap_or(&path)
+            .ends_with(":streamGenerateContent");
+    let console_context = build_v3_console_emission_context(
+        state,
+        "gemini",
+        &path,
+        request_identity,
+        request_headers,
+        &payload,
+    );
+    let failure_sink = build_v3_provider_failure_event_sink(&console_context);
+    let selection_sink = build_v3_route_selection_event_sink(&console_context);
+    let raw = build_v3_server_03_http_request_raw_with_purpose_and_scope(
+        state.server.id.clone(),
+        failure_session_scope.clone(),
+        request_id.clone(),
+        execution_id,
+        method,
+        path.clone(),
+        request_purpose,
+        Some(state.server.port),
+        Some(request_identity.pipeline_id.clone()),
+        payload.clone(),
+    );
+    let now_epoch_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0);
+    let output = routecodex_v3_runtime::execute_v3_direct_runtime_kernel_core::<
+        routecodex_v3_runtime::V3GeminiDirectCodec,
+        _,
+    >(
+        (),
+        &state.manifest,
+        raw,
+        routecodex_v3_runtime::default_responses_transport(),
+        state.provider_health.runtime_health(),
+        now_epoch_ms,
+        true,
+        Some(&failure_sink),
+        Some(&selection_sink),
+    )
+    .await;
+    if let Some(handoff) = output.protocol_relay_handoff {
+        let relay_output = match routecodex_v3_runtime::execute_v3_gemini_relay_runtime_with_default_transport_provider_health_and_handoff(
+            &state.manifest,
+            V3GeminiRelayRuntimeInput {
+                server_id: state.server.id.clone(), failure_session_scope,
+                request_id: request_id.clone(), endpoint_path: path.clone(), payload,
+            },
+            state.provider_health.runtime_health(), handoff,
+        ).await {
+            Ok(output) => output,
+            Err(error) => project_v3_gemini_relay_runtime_failure(error),
+        };
+        if let Some(disposition) = relay_output.terminal_disposition.clone() {
+            return provider_terminal_response(
+                state,
+                front_connection_identity,
+                disposition,
+                requested_stream,
+                V3ProviderTerminalEvidence {
+                    entry_protocol: "gemini",
+                    endpoint: &path,
+                    request_id: &request_id,
+                },
+            );
+        }
+        let finalizer = match (
+            relay_output.stream_observation.clone(),
+            relay_output.observability.clone(),
+        ) {
+            (Some(stream_observation), Some(observability)) => Some(V3SseConsoleFinalizer {
+                context: console_context.clone(),
+                status: relay_output.status,
+                node_trace: relay_output.node_trace.clone(),
+                observability,
+                stream_observation,
+                started_at,
+            }),
+            _ => None,
+        };
+        if let Some(observability) = relay_output.observability.as_ref() {
+            emit_v3_observability_console_lines(
+                &console_context,
+                relay_output.status,
+                &relay_output.node_trace,
+                observability,
+                started_at,
+                relay_output.stream_observation.is_none(),
+            );
+        }
+        return gemini_relay_output_response(
+            relay_output,
+            finalizer,
+            Duration::from_millis(state.server.http_sse_keepalive_ms),
+            requested_stream,
+        );
+    }
+    persist_v3_chat_failure_evidence_sources(
+        state,
+        "gemini",
+        &path,
+        &request_id,
+        output
+            .observability
+            .as_ref()
+            .map(|observation| observation.provider_failure_events.as_slice())
+            .unwrap_or(&[]),
+        output.diagnostic_source.as_ref(),
+    );
+    if let Some(disposition) = output.terminal_disposition {
+        return provider_terminal_response(
+            state,
+            front_connection_identity,
+            disposition,
+            requested_stream,
+            V3ProviderTerminalEvidence {
+                entry_protocol: "gemini",
+                endpoint: &path,
+                request_id: &request_id,
+            },
+        );
+    }
+    let mut frame = build_v3_server_16_http_frame_from_v3_resp_15(
+        output.client_payload,
+        output.node_trace,
+        output.error_chain,
+    );
+    frame.observability = output.observability;
+    frame.stream_observation = output.stream_observation;
+    let finalizer = emit_v3_direct_frame_console_lines(&console_context, &frame, started_at);
+    let frame = project_v3_protocol_stream_error_frame_if_requested(
+        frame,
+        requested_stream,
+        V3SseClientProtocol::Gemini,
+    );
+    responses_direct_output_response_with_console_for_protocol(
+        frame,
+        finalizer,
+        Some(Duration::from_millis(state.server.http_sse_keepalive_ms)),
+        V3SseClientProtocol::Gemini,
+    )
+}
+
 pub(crate) fn gemini_relay_output_response(
     output: V3GeminiRelayRuntimeOutput,
     stream_console_finalizer: Option<V3SseConsoleFinalizer>,

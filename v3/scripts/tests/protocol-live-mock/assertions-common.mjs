@@ -121,21 +121,33 @@ export function forbiddenHits(payload, rawText, entry) {
 
 export function findControlLeakage(value) {
   const hits = new Set();
-  const visit = (node) => {
+  const scanString = (node, canonicalPath) => {
+    if (CONTROL_MARKERS.includes(node)) hits.add(node);
+    for (const match of node.matchAll(/routecodex_[a-z0-9_]+/gi)) {
+      if (canonicalPath && match[0] === 'routecodex_chat_extension') continue;
+      hits.add(match[0]);
+    }
+  };
+  const visit = (node, context = null) => {
     if (typeof node === 'string') {
-      if (CONTROL_MARKERS.includes(node)) hits.add(node);
-      const match = node.match(CONTROL_VALUE_PATTERN);
-      if (match) hits.add(match[0]);
+      scanString(node, context === 'canonical_path');
       return;
     }
     if (Array.isArray(node)) {
-      node.forEach(visit);
+      node.forEach((child) => visit(child, context === 'opaque_records' ? 'opaque_record' : null));
       return;
     }
     if (node && typeof node === 'object') {
       for (const [key, child] of Object.entries(node)) {
+        if (key === 'routecodex_chat_extension' && child && typeof child === 'object') {
+          visit(child, 'business_extension');
+          continue;
+        }
         if (CONTROL_MARKERS.includes(key) || CONTROL_KEY_PATTERN.test(key)) hits.add(key);
-        visit(child);
+        const childContext = context === 'business_extension' && key === 'chat_extension_opaque_record'
+          ? 'opaque_records'
+          : context === 'opaque_record' && key === 'canonical_path' ? 'canonical_path' : null;
+        visit(child, childContext);
       }
     }
   };

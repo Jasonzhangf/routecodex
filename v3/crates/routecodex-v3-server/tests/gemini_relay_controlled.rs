@@ -22,6 +22,7 @@ static TEST_LOCK: Mutex<()> = Mutex::const_new(());
 #[derive(Debug)]
 struct ProviderCapture {
     authorization: Option<String>,
+    api_key: Option<String>,
     body: Value,
 }
 
@@ -52,6 +53,10 @@ async fn controlled_gemini_upstream(
         .send(ProviderCapture {
             authorization: headers
                 .get("authorization")
+                .and_then(|value| value.to_str().ok())
+                .map(ToOwned::to_owned),
+            api_key: headers
+                .get("x-goog-api-key")
                 .and_then(|value| value.to_str().ok())
                 .map(ToOwned::to_owned),
             body: body.clone(),
@@ -177,10 +182,8 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
     );
     assert_eq!(json_body["usageMetadata"]["totalTokenCount"], 5);
     let json_capture = captures_rx.recv().await.unwrap();
-    assert_eq!(
-        json_capture.authorization.as_deref(),
-        Some("Bearer controlled-secret")
-    );
+    assert_eq!(json_capture.api_key.as_deref(), Some("controlled-secret"));
+    assert!(json_capture.authorization.is_none());
     assert_eq!(json_capture.body["contents"][0]["parts"][0]["text"], "json");
     assert!(json_capture.body.get("metadata_center").is_none());
 

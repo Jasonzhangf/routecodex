@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "case_id": "gemini-zero-thinking-to-anthropic-json",
+  "cell": {"entry_protocol": "gemini", "provider_protocol": "anthropic", "transport": "json", "mode": "relay"},
+  "client_request": {
+    "method": "POST",
+    "path": "/v1beta/models/mock.anthropic-model:generateContent",
+    "headers": {"content-type": "application/json"},
+    "body": {
+      "contents": [{"role": "user", "parts": [{"text": "zero thinking control"}]}],
+      "generationConfig": {"maxOutputTokens": 8192, "thinkingConfig": {"thinkingBudget": 0}},
+      "stream": false
+    }
+  },
+  "expected_provider": {
+    "paths": ["/v1/messages"],
+    "method": "POST",
+    "auth_required": true,
+    "body_must": {
+      "model": "anthropic-model",
+      "max_tokens": 8192,
+      "messages.0.role": "user",
+      "messages.0.content.0.text": "zero thinking control",
+      "thinking": {"type": "disabled"}
+    },
+    "body_must_not": ["reasoning_budget_tokens", "reasoning_thinking_mode", "reasoning_include_thoughts", "generationConfig", "routecodex_internal", "metadata_center"],
+    "exact": null
+  },
+  "upstream_response": {
+    "protocol": "anthropic",
+    "mode": "json",
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "id": "msg_zero_thinking_disabled",
+      "type": "message",
+      "role": "assistant",
+      "model": "anthropic-model",
+      "content": [{"type": "text", "text": "zero-thinking-ok"}],
+      "stop_reason": "end_turn",
+      "usage": {"input_tokens": 3, "output_tokens": 2}
+    }
+  },
+  "expected_client": {
+    "transport": "complete",
+    "status": 200,
+    "body_must": {"candidates.0.content.parts.0.text": "zero-thinking-ok", "candidates.0.finishReason": "STOP"},
+    "body_must_not": ["provider_error", "internal_error", "routecodex_internal", "metadata_center"],
+    "semantic_terminal_required": true
+  },
+  "assertions": {"provider_attempt_count": 1, "probe_attempts_may_occur": true, "no_control_leakage": true},
+  "source": {
+    "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
+    "files": [],
+    "tests": [],
+    "adaptation": "Independent RCC public-entry regression for issue 383b135. The expected Anthropic thinking block is written as a literal disabled oracle and the client must still receive a real terminal result."
+  },
+  "contract_differences": [
+    {
+      "source_behavior": "The Gemini entry supplies an explicit thinkingBudget of 0 with a compatible output limit.",
+      "rcc_requirement": "Anthropic must receive thinking.type=disabled with no budget_tokens; a zero budget is not an enabled budget and must not reject before dispatch."
+    }
+  ]
+}

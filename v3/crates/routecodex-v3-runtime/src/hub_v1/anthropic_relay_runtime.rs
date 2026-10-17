@@ -19,6 +19,7 @@ use routecodex_v3_error::{
     V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
     V3ProviderFailureSessionScope, V3_ERROR_CHAIN_NODE_IDS,
 };
+use routecodex_v3_provider_responses::V3ResponsesStreamIntent;
 use routecodex_v3_provider_responses::{
     build_v3_anthropic_provider_request_header, build_v3_provider_12_responses_wire_payload,
     build_v3_transport_13_responses_http_request_from_v3_provider_12,
@@ -148,6 +149,36 @@ pub async fn execute_v3_anthropic_relay_runtime_with_default_transport_client_he
     .await
 }
 
+pub async fn execute_v3_anthropic_relay_runtime_with_default_transport_client_headers_provider_health_and_handoff(
+    manifest: &V3Config05ManifestPublished,
+    input: V3AnthropicRelayRuntimeInput,
+    client_headers: Vec<V3AnthropicRelayClientHeader>,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    handoff: crate::V3ResponsesProtocolRelayHandoff,
+) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError> {
+    let route_policy_pending = handoff.route_policy_pending.clone();
+    let output = execute_v3_anthropic_relay_runtime_inner(
+        manifest,
+        input,
+        crate::default_responses_transport(),
+        client_headers,
+        V3HubRelayResponseHookProfile::empty(),
+        provider_health,
+        V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
+        true,
+        Some(handoff),
+    )
+    .await?;
+    if output.status < 400 && output.terminal_disposition.is_none() {
+        if let Some(pending) = route_policy_pending {
+            pending
+                .commit_manifest_now(manifest)
+                .map_err(V3AnthropicRelayRuntimeError::Target)?;
+        }
+    }
+    Ok(output)
+}
+
 pub async fn execute_v3_anthropic_relay_dry_run_runtime(
     manifest: &V3Config05ManifestPublished,
     input: V3AnthropicRelayRuntimeInput,
@@ -184,6 +215,7 @@ pub async fn execute_v3_anthropic_relay_dry_run_runtime_with_client_headers(
         V3ProviderFailureRuntimeHealth::from_manifest(manifest),
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         false,
+        None,
     )
     .await
     {
@@ -270,6 +302,7 @@ pub async fn execute_v3_anthropic_relay_response_dry_run_runtime(
         V3ProviderFailureRuntimeHealth::from_manifest(manifest),
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         false,
+        None,
     )
     .await
     {
@@ -378,6 +411,7 @@ pub async fn execute_v3_anthropic_relay_runtime_with_client_headers_provider_hea
         provider_health,
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         true,
+        None,
     )
     .await
 }
@@ -402,6 +436,7 @@ where
         V3ProviderFailureRuntimeHealth::from_manifest(manifest),
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         true,
+        None,
     )
     .await
 }
@@ -415,12 +450,15 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3RelayProviderFailureRetryPolicy,
     allow_exhaustion_rescue_probe: bool,
+    initial_handoff: Option<crate::V3ResponsesProtocolRelayHandoff>,
 ) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError> {
-    let request_execution_control =
-        crate::nodes::V3RequestExecutionControl::from_manifest(manifest, &input.server_id)
+    let request_execution_control = match initial_handoff.as_ref() {
+        Some(handoff) => handoff.request_execution_control.clone(),
+        None => crate::nodes::V3RequestExecutionControl::from_manifest(manifest, &input.server_id)
             .map_err(|error| {
                 V3AnthropicRelayRuntimeError::ExecutionControlRequest(error.to_string())
-            })?;
+            })?,
+    };
     let attempt_budget = request_execution_control.attempt_budget();
     response_hook_profile =
         response_hook_profile.with_toolreason_observation_request_id(input.request_id.clone());
@@ -511,18 +549,21 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     );
     trace.push("V3HubReqExecution05Planned");
     let route_facts_body = req05.previous.previous.previous.payload.0.clone();
-    let mut failed_candidates = BTreeSet::new();
-    let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
+    let (runtime_timing, mut failed_candidates, mut retry_selected) =
+        super::relay_runtime_shared::relay_handoff_entry_state(initial_handoff.as_ref());
     let mut pending_provider_action_recovery = None;
     let mut _provider_action_permit: Option<V3ProviderActionPermit> = None;
     let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> = None;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut last_external_http = None;
-    let mut provider_failure_events: Vec<V3RuntimeProviderFailureObservation> = Vec::new();
+    let mut provider_failure_events: Vec<V3RuntimeProviderFailureObservation> = initial_handoff
+        .as_ref()
+        .map(|handoff| handoff.provider_failure_events.clone())
+        .unwrap_or_default();
     let deterministic_sample = v3_relay_provider_target_selection_sample(&input.request_id);
     let failure_context = V3RelayProviderFailurePolicyContext {
         manifest,
-        captured_target_09: None,
+        captured_target_09: initial_handoff.as_ref().map(|handoff| &handoff.expanded),
         failure_session_scope: input.failure_session_scope.clone(),
         provider_health: &provider_health,
         retry_policy,
@@ -530,7 +571,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     };
     // 统一 relay timing（与 relay_runtime_core 同语义）：只写入 typed
     // observability，不进入 payload。
-    let runtime_timing = crate::runtime_timing::V3RuntimeTimingState::start();
     loop {
         let preferred_selected = retry_selected.take();
         let (selected, mut selected_admission) = {
@@ -547,10 +587,11 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     .map_err(V3AnthropicRelayRuntimeError::Target)?,
                 deterministic_sample,
             };
-            let target_resolution = resolve_v3_relay_target_outcome_with_admission_rescue(
+            let target_resolution = super::relay_runtime_shared::resolve_v3_relay_entry_target(
                 target_resolution_input,
                 allow_exhaustion_rescue_probe,
                 preferred_selected,
+                initial_handoff.as_ref(),
             )
             .await;
             match target_resolution {
@@ -715,13 +756,39 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     ),
                 }
             }
-            other => handle_provider_request_failure!(
-                "V3ProviderReqOutbound09TransportRequest",
-                "provider_transport_request_error",
-                format!("Anthropic Relay does not support provider transport protocol {other:?}")
-            ),
+            V3HubProviderWireProtocol::Gemini => {
+                let wire = wire.with_stream_intent(match transport_intent {
+                    V3HubTransportIntent::Json => V3ResponsesStreamIntent::Json,
+                    V3HubTransportIntent::Sse => V3ResponsesStreamIntent::Sse,
+                });
+                match build_v3_provider_transport_request_for_protocol(
+                    V3HubProviderWireProtocol::Gemini,
+                    wire,
+                ) {
+                    Ok(request) => request,
+                    Err(error) => handle_provider_request_failure!(
+                        "V3ProviderReqOutbound09TransportRequest",
+                        "provider_transport_request_error",
+                        error
+                    ),
+                }
+            }
         };
         trace.push("V3ProviderReqOutbound09TransportRequest");
+        let transport_request =
+            match super::relay_runtime_shared::bind_v3_selected_business_auth_kind(
+                manifest,
+                &selected.candidate,
+                provider_wire_protocol,
+                transport_request,
+            ) {
+                Ok(request) => request,
+                Err(error) => handle_provider_request_failure!(
+                    "V3ProviderReqOutbound09TransportRequest",
+                    "provider_transport_request_error",
+                    error
+                ),
+            };
         let provider_request_snapshot = transport_request.provider_request_projection();
         if pending_provider_action_recovery.is_some() {
             drop(selected_admission.take());
@@ -987,6 +1054,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 let (client_response, servertool_followup_required, stream_observation) =
                     match closeout_anthropic_relay_sse_response(
                         resp01,
+                        &input.request_id,
                         &response_hook_profile,
                         trace.as_mut(),
                         |finalized| {
@@ -1214,6 +1282,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 let (client_response, servertool_followup_required, stream_observation) =
                     match closeout_anthropic_relay_response(
                         resp01,
+                        &input.request_id,
                         &response_hook_profile,
                         trace.as_mut(),
                         |finalized| {

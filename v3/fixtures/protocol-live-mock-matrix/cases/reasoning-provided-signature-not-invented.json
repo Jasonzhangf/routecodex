@@ -22,7 +22,7 @@
     "method": "POST",
     "auth_required": true,
     "body_must": {"contents.1.parts.0.functionCall.id": "function-call-7"},
-    "body_must_not": ["contents.1.parts.0.functionCall.thoughtSignature", "routecodex_internal", "metadata_center", "debug_snapshot"],
+    "body_must_not": ["contents.1.parts.0.thoughtSignature", "contents.1.parts.0.functionCall.thoughtSignature", "routecodex_internal", "metadata_center", "debug_snapshot"],
     "exact": null
   },
   "upstream_response": {
@@ -44,7 +44,7 @@
     "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
     "files": ["internal/gateway/gemini_signature_test.go"],
     "tests": ["internal/gateway/gemini_signature_test.go::TestGeminiCallsWithoutSignature"],
-    "adaptation": "A missing signature must stay absent. The negative assertion is the red fixture for guessed signatures."
+    "adaptation": "A missing signature must stay absent on both Part.thoughtSignature and functionCall.thoughtSignature. The negative assertion is the red fixture for guessed signatures."
   },
   "contract_differences": [
     {"source_behavior": "Magpie may fill in the documented placeholder for a missing signature.", "rcc_requirement": "Do not invent a signature; preserve the provided state exactly."}

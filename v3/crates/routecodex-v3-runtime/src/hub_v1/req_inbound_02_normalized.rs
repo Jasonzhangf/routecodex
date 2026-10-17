@@ -121,6 +121,26 @@ pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
             memory_raw_capture_guidance_injected: false,
         });
     }
+    if input.entry_protocol == V3HubEntryProtocol::Gemini {
+        // Gemini 客户端请求经相邻 production codec 无损归一化为 canonical Chat +
+        // 已登记扩展。归一化后 standard outbound 直接消费 `messages`，不再需要
+        // Gemini→X 成对 converter；工具历史交给既有 Chat Process 治理。
+        let source_payload = std::mem::replace(&mut input.payload.0, Arc::new(Value::Null));
+        let source_payload = Arc::try_unwrap(source_payload).unwrap_or_else(|arc| (*arc).clone());
+        let mut canonical =
+            super::gemini_request_normalization::build_v3_chat_canonical_request_from_gemini_payload(
+                &source_payload,
+            )
+            .map_err(|error| format!("Gemini inbound Chat canonicalization failed: {error}"))?;
+        normalize_v3_history_image_placeholders(&mut canonical);
+        input.payload.0 = Arc::new(canonical);
+        return Ok(V3HubReqInbound02Normalized {
+            previous: input,
+            semantic_protocol: V3HubRequestSemanticProtocol::Chat,
+            canonicalized_from_responses: true,
+            memory_raw_capture_guidance_injected: false,
+        });
+    }
     if let Some(payload) = Arc::get_mut(&mut input.payload.0) {
         normalize_v3_history_image_placeholders(payload);
     } else {

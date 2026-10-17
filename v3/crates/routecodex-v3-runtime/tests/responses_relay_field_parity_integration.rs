@@ -713,7 +713,7 @@ async fn responses_openai_chat_field_parity_web_search_call_history_projects_too
     );
     assert_eq!(
         messages.last().unwrap(),
-        &serde_json::json!({"role":"user","content":"继续"})
+        &serde_json::json!({"role":"user","content":[{"type":"text","text":"继续"}]})
     );
     assert!(result.error_chain.is_none());
 }

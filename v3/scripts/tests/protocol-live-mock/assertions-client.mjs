@@ -1,7 +1,7 @@
 // Client transport and business-receipt assertions for the
 // `v3.protocol_live_mock_matrix` harness. This module is import-safe: it has no
 // side effects, listeners, or I/O, and never mutates the actual or expected
-// objects it is given. It depends only on the shared pure value helpers.
+// objects it is given. It uses the shared pure value and SSE parsing helpers.
 //
 // The integration owner wires the sibling protocol module through the optional
 // `deps` argument:
@@ -14,7 +14,6 @@
 // back to substring scanning to prove an SSE terminal or body expectation.
 
 import {
-  CONTROL_VALUE_PATTERN,
   dedupe,
   deepEqual,
   findControlLeakage,
@@ -24,6 +23,7 @@ import {
   parseJsonText,
   resolvePath,
 } from './assertions-common.mjs';
+import { parseSse } from './protocol-semantics.mjs';
 
 /**
  * Assert the raw client result for one turn.
@@ -63,6 +63,13 @@ export function assertClientResult(clientResult, expected, entryProtocol, deps =
     if (hasBytes) diagnostics.push('expected closed transport but received response body bytes');
     if (hasBody) diagnostics.push('expected closed transport but received a parsed response body');
     if (hasObservation) diagnostics.push('expected closed transport but received a parsed observation');
+    // A product-side socket close and a client-side abort both surface as
+    // `closed`. Only the product close is acceptable when the case expects a
+    // closed transport, so a client timeout/abort/overrun must not pass as one.
+    const errorCode = result.error_detail?.code ?? result.error_code;
+    if (['ETIMEDOUT', 'ABORT_ERR', 'RESPONSE_TOO_LARGE'].includes(errorCode)) {
+      diagnostics.push(`expected product socket close but the test client stopped: ${errorCode}`);
+    }
     return { ok: diagnostics.length === 0, diagnostics: dedupe(diagnostics) };
   }
 
@@ -114,14 +121,10 @@ export function assertClientResult(clientResult, expected, entryProtocol, deps =
   }
 
   if (expected?.no_control_leakage !== false) {
-    for (const root of roots) {
+    for (const root of clientControlRoots(roots, bodyText, contentType)) {
       for (const marker of findControlLeakage(root)) {
         diagnostics.push(`client payload leaks control marker ${marker}`);
       }
-    }
-    if (hasBytes) {
-      const match = bodyText.match(CONTROL_VALUE_PATTERN);
-      if (match) diagnostics.push(`client payload leaks control marker ${match[0]}`);
     }
   }
 
@@ -152,6 +155,22 @@ function completeReceiptDiagnostics(result) {
     diagnostics.push('client transport closed before completion');
   }
   return diagnostics;
+}
+
+// Interpret the actual wire representation once. Supplied observations cannot
+// suppress checks on received bytes. A business object resembling an SSE frame
+// remains an ordinary object; only frames parsed here omit duplicate raw_data.
+function clientControlRoots(roots, bodyText, contentType) {
+  if (bodyText.length === 0) return roots;
+  try {
+    return [JSON.parse(bodyText)];
+  } catch {
+    if (contentType.toLowerCase().includes('text/event-stream')) {
+      const frames = parseSse(bodyText);
+      if (frames.length > 0) return frames.flatMap((frame) => [frame.event, frame.data]);
+    }
+    return [bodyText];
+  }
 }
 
 function collectObservationRoots(result, entryProtocol, deps, contentType) {

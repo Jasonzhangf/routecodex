@@ -918,7 +918,8 @@ features:
   - current_turn_invalid_png_data_image_is_rejected_before_provider_transport
   - direct_runtime_rejects_invalid_current_data_image_before_provider_send
   - general_provider::sse_request_accepts_json_provider_response_as_json_raw_body
-  - general_provider::json_request_rejects_sse_provider_response_without_switching_response_kind
+  - general_provider::json_request_accepts_sse_provider_response_as_sse_raw_body
+  - general_provider::unknown_provider_content_type_stays_typed_for_json_and_sse_intents
   - compile_v3_config_05_manifest
   allowed_paths:
   - v3/crates/routecodex-v3-provider-responses
@@ -2009,6 +2010,8 @@ features:
   - characterize_v3_openai_chat_hub_response_semantic_to_client_projection
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/usage_normalization.rs
   - v3/crates/routecodex-v3-runtime/tests/hub_openai_chat_codec_characterization.rs
   - scripts/architecture/verify-v3-openai-chat-codec-characterization.mjs
   - scripts/tests/v3-openai-chat-codec-characterization-red-fixtures.mjs
@@ -2621,6 +2624,8 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_codex_integer_values.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_codex_integer_values_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_extra_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_openai_chat_content_part.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs

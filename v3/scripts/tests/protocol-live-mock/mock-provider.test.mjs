@@ -61,6 +61,77 @@ function postJson(url, body, extraHeaders = {}) {
   return request(url, { method: 'POST', headers: { 'content-type': 'application/json', ...extraHeaders }, body });
 }
 
+test('request shape guard rejects before the scripted business response', async () => {
+  const mock = await startMockProvider({
+    validateRequest(capture) {
+      if (capture.body?.retain !== true) {
+        throw new MockProviderError('mock_missing_retained_field', 'retain must reach the provider');
+      }
+    },
+  });
+  try {
+    mock.setActiveCase(fixture());
+    const rejected = await postJson(`${mock.url}/v1/chat/completions`, {});
+    assert.equal(rejected.status, 400);
+    assert.equal(rejected.json.error, 'mock_missing_retained_field');
+    const accepted = await postJson(`${mock.url}/v1/chat/completions`, { retain: true });
+    assert.equal(accepted.status, 200);
+    assert.deepEqual(accepted.json, { ok: true });
+    assert.equal(mock.getCaptures()[0].response_script.status, 400);
+    assert.equal(mock.getCaptures()[1].response_script.status, 200);
+  } finally {
+    await mock.close();
+  }
+});
+
+// Path smoke observation only. The client closes its own connection after it
+// sees the required bytes; this does not report a completed business response.
+function observeScriptPrefix(url, body, expectedPrefix, timeoutMs = 2000) {
+  return new Promise((resolve, reject) => {
+    const expected = Buffer.from(expectedPrefix);
+    const chunks = [];
+    let response;
+    let settled = false;
+    const finish = (error, result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      if (error) reject(error);
+      else resolve(result);
+      response?.destroy();
+      req.destroy();
+    };
+    const req = http.request(url, { method: 'POST', headers: { 'content-type': 'application/json' } }, (res) => {
+      response = res;
+      res.on('data', (chunk) => {
+        chunks.push(chunk);
+        const bytes = Buffer.concat(chunks);
+        const compared = Math.min(bytes.length, expected.length);
+        if (!bytes.subarray(0, compared).equals(expected.subarray(0, compared))) {
+          finish(new Error('mock prefix differs from the scripted prefix'));
+        } else if (bytes.length >= expected.length) {
+          finish(null, { status: res.statusCode, headers: res.headers, bytes, prefixObserved: true, ended: false });
+        }
+      });
+      for (const event of ['end', 'aborted', 'close']) {
+        res.on(event, () => finish(new Error(`mock response ${event} before the required prefix`)));
+      }
+      res.on('error', (error) => finish(error));
+    });
+    const deadline = setTimeout(() => finish(new Error('mock prefix observation deadline expired')), timeoutMs);
+    req.on('error', (error) => finish(error));
+    req.end(JSON.stringify(body));
+  });
+}
+
+function firstRawFrame(script) {
+  const raw = script.sse_events?.[0]?.raw;
+  assert.equal(typeof raw, 'string', 'hold-open path smoke requires its actual raw prefix');
+  const boundary = raw.indexOf('\n\n');
+  assert.ok(boundary >= 0, 'hold-open script must contain a complete initial SSE frame');
+  return raw.slice(0, boundary + 2);
+}
+
 test('openai_chat JSON captures the exact raw request and returns the scripted body', async (t) => {
   const server = await startMockProvider();
   t.after(() => server.close());
@@ -348,14 +419,44 @@ test('every real corpus provider path is served by the mock', async (t) => {
     const corpusCase = readCase(caseId);
     server.setActiveCase(corpusCase);
     const providerPath = corpusCase.expected_provider.paths[0];
-    const result = await postJson(`${server.url}${providerPath}`, { smoke: caseId });
+    const script = corpusCase.upstream_response;
+    const heldOpen = script.fault === 'hold-open';
+    const result = heldOpen
+      ? await observeScriptPrefix(`${server.url}${providerPath}`, { smoke: caseId }, firstRawFrame(script))
+      : await postJson(`${server.url}${providerPath}`, { smoke: caseId });
     assert.ok(result.status >= 200 && result.status < 600, `${caseId} got status ${result.status} for ${providerPath}`);
+    if (heldOpen) {
+      assert.equal(result.status, script.status);
+      assert.equal(result.headers['content-type'], script.content_type);
+      assert.equal(result.prefixObserved, true);
+      assert.equal(result.ended, false, 'prefix observation is not a completed response');
+    }
     assert.ok(
       !result.json?.error || typeof result.json.error !== 'string' || !result.json.error.startsWith('mock_'),
       `${caseId} returned a facility error: ${result.bodyText}`,
     );
-    assert.equal(server.getCaptures(caseId).length, 1);
+    const captures = server.getCaptures(caseId);
+    assert.equal(captures.length, 1);
+    const expectedUrl = new URL(providerPath, server.url);
+    assert.equal(captures[0].method, 'POST');
+    assert.equal(captures[0].path, expectedUrl.pathname);
+    assert.equal(captures[0].query, expectedUrl.search);
   }
+});
+
+test('prefix observation closes its own held-open connection and never accepts a missing prefix', { timeout: 4000 }, async (t) => {
+  const server = await startMockProvider();
+  t.after(() => server.close());
+  const corpusCase = readCase('gemini-json-sse-budget-before-terminal');
+  const prefix = firstRawFrame(corpusCase.upstream_response);
+  server.setActiveCase(corpusCase);
+  const url = `${server.url}${corpusCase.expected_provider.paths[0]}`;
+  const observed = await observeScriptPrefix(url, { smoke: corpusCase.case_id }, prefix);
+  assert.equal(observed.status, 200);
+  assert.equal(observed.prefixObserved, true);
+  assert.equal(observed.ended, false);
+  await assert.rejects(observeScriptPrefix(url, { smoke: corpusCase.case_id }, `${corpusCase.upstream_response.sse_events[0].raw}missing-frame`, 50), /deadline expired/);
+  assert.equal(server.getCaptures(corpusCase.case_id).length, 2);
 });
 
 function sleep(ms) {

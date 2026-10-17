@@ -176,7 +176,10 @@ fn responses_explicit_assistant_message_then_function_call_coalesces_same_turn()
         "same-turn assistant text and tool_calls must coalesce: {request}"
     );
     assert_eq!(messages[0]["role"], json!("assistant"));
-    assert_eq!(messages[0]["content"], json!("turn one"));
+    assert_eq!(
+        messages[0]["content"],
+        json!([{"type": "text", "text": "turn one"}])
+    );
     assert_eq!(
         messages[0]["tool_calls"][0]["id"],
         json!("call_z"),
@@ -211,8 +214,14 @@ fn responses_two_nonempty_assistant_messages_keep_history_boundaries() {
         2,
         "two non-empty assistant messages are independent history, must not coalesce: {request}"
     );
-    assert_eq!(messages[0]["content"], json!("turn one"));
-    assert_eq!(messages[1]["content"], json!("turn two"));
+    assert_eq!(
+        messages[0]["content"],
+        json!([{"type": "text", "text": "turn one"}])
+    );
+    assert_eq!(
+        messages[1]["content"],
+        json!([{"type": "text", "text": "turn two"}])
+    );
 }
 
 #[test]
@@ -263,7 +272,10 @@ fn responses_assistant_message_reasoning_function_call_coalesces_single_turn() {
     assert_eq!(messages[0]["role"], json!("assistant"));
     assert_eq!(
         messages[0]["content"],
-        json!("These three untracked entries aren't code — they're local tool artifacts:")
+        json!([{
+            "type": "text",
+            "text": "These three untracked entries aren't code — they're local tool artifacts:"
+        }])
     );
     assert_eq!(messages[0]["reasoning_content"], json!("Need to inspect."));
     assert_eq!(
@@ -315,7 +327,10 @@ fn responses_encrypted_only_reasoning_item_keeps_empty_reasoning_content() {
         json!(""),
         "encrypted-only reasoning must keep empty reasoning_content on the assistant turn"
     );
-    assert_eq!(messages[0]["content"], json!("previous answer"));
+    assert_eq!(
+        messages[0]["content"],
+        json!([{"type": "text", "text": "previous answer"}])
+    );
     assert_eq!(messages[1]["role"], json!("user"));
 }
 

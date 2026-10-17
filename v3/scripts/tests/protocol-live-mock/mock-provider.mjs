@@ -34,6 +34,8 @@ export class MockProviderError extends Error {
 // options.isProbe   optional ({method,path,query,headers,body,rawBody,phase,caseId,turn}) => boolean
 //                   narrow explicit probe classifier; replaces the default
 //                   catalog/health GET classification when provided
+// options.validateRequest optional (capture, fixture, turn) => void; a rejection
+//                   is returned before the scripted business response is sent
 export async function startMockProvider(options = {}) {
   const host = options.host ?? '127.0.0.1';
   const state = {
@@ -171,6 +173,18 @@ async function handleRequest(request, response, options, state) {
   capture.attempt_repeated = repeated;
   capture.response_script = cloneValue(script);
   state.captures.push(capture);
+
+  if (typeof options.validateRequest === 'function') {
+    try {
+      await options.validateRequest(capture, state.fixture, state.turn);
+    } catch (error) {
+      capture.response_script = {
+        mode: 'request_rejected',
+        status: error instanceof MockProviderError ? error.statusCode : 500,
+      };
+      throw error;
+    }
+  }
 
   await sendScript(script, response);
 }

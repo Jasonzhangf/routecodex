@@ -1,3 +1,4 @@
+use super::relay_runtime_shared::bind_v3_selected_business_auth_kind;
 use super::responses_relay_failures::V3_RELAY_TRANSPORT_HANG_REASON;
 use super::web_search_hop::store_v3_responses_relay_web_search_state;
 use super::web_search_sidecar::execute_web_search_through_hooks_sidecar;
@@ -417,6 +418,17 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     handle_provider_request_failure!(V3ResponsesRelayRuntimeError::Target(error));
                 }
             };
+        let transport_request = match bind_v3_selected_business_auth_kind(
+            manifest,
+            &selected.candidate,
+            provider_wire_protocol,
+            transport_request,
+        ) {
+            Ok(transport_request) => transport_request,
+            Err(error) => {
+                handle_provider_request_failure!(V3ResponsesRelayRuntimeError::Target(error));
+            }
+        };
         if let Err(error) = validate_v3_responses_relay_provider_request_transport_intent(
             provider_request_transport_intent,
             transport_request.stream_intent(),

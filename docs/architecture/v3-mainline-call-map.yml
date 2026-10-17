@@ -1827,9 +1827,9 @@ chains:
   - step_id: v3-entry-bind-04
     from_node: V3EntryBind03ServerEnablementChecked
     to_node: V3EntryBind04ExecutionBindingProjected
-    caller_symbol: pending_endpoint
+    caller_symbol: pending_endpoint_after_responses_admission_inner
     caller_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
-    callee_symbol: execute_v3_gemini_generate_content_request
+    callee_symbol: execute_v3_gemini_direct_server_outcome
     callee_file: v3/crates/routecodex-v3-server/src/executors.rs
     owner_feature_id: v3.entry_protocol_endpoint_binding
     binding_kind: review_gate_source_binding
@@ -5175,6 +5175,25 @@ chains:
       - v3.hub.provider_wire_payload
       side_channel_reads:
       - v3.protocol_conversion.field_parity_contract
+      side_channel_writes: []
+  - step_id: v3-protocol-field-parity-responses-client-project-01
+    from_node: V3HubRespChatProcess03Governed
+    to_node: V3HubRespOutbound05ClientSemantic
+    caller_symbol: run_json_response_hooks
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
+    callee_symbol: project_v3_responses_client_completed_response
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+    status: anchored
+    binding_kind: adjacent_protocol_codec_helper
+    owner_feature_id: v3.protocol_conversion_field_parity
+    semantic_contract:
+      - JSON client projection consumes only the final governed Resp03 payload after provider-private and standard namespace inverse restoration.
+      - Legacy top-level output_text items project to standard assistant message content; the complete item remains the content part, a string text stays unchanged, structured text serializes completely, and missing text stays absent.
+      - Non-legacy output items preserve their complete value and order; the projection invents no terminal, usage, role, identity, or business content.
+    resource_flow:
+      consumes: [v3.hub.response_semantic]
+      produces: [v3.response.client_payload]
+      side_channel_reads: [v3.protocol_conversion.field_parity_contract]
       side_channel_writes: []
   - step_id: v3-protocol-field-parity-responses-chat-resp-01
     from_node: V3ProviderRespInbound01Raw

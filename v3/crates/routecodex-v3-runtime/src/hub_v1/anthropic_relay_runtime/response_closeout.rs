@@ -2,6 +2,7 @@ use super::*;
 
 pub(super) async fn closeout_anthropic_relay_sse_response<F>(
     resp01: V3ProviderRespInbound01Raw,
+    request_id: &str,
     response_hook_profile: &V3HubRelayResponseHookProfile,
     trace: &mut Vec<&'static str>,
     project_client_response: F,
@@ -17,6 +18,7 @@ where
     trace.push("V3HubRespInbound02Normalized");
     closeout_anthropic_relay_normalized_response(
         resp02,
+        request_id,
         response_hook_profile,
         trace,
         project_client_response,
@@ -25,6 +27,7 @@ where
 
 pub(super) fn closeout_anthropic_relay_response<F>(
     resp01: V3ProviderRespInbound01Raw,
+    request_id: &str,
     response_hook_profile: &V3HubRelayResponseHookProfile,
     trace: &mut Vec<&'static str>,
     project_client_response: F,
@@ -39,6 +42,7 @@ where
     trace.push("V3HubRespInbound02Normalized");
     closeout_anthropic_relay_normalized_response(
         resp02,
+        request_id,
         response_hook_profile,
         trace,
         project_client_response,
@@ -46,7 +50,8 @@ where
 }
 
 fn closeout_anthropic_relay_normalized_response<F>(
-    resp02: V3HubRespInbound02Normalized,
+    mut resp02: V3HubRespInbound02Normalized,
+    request_id: &str,
     response_hook_profile: &V3HubRelayResponseHookProfile,
     trace: &mut Vec<&'static str>,
     project_client_response: F,
@@ -63,6 +68,11 @@ where
         &resp02_payload,
     ) {
         return Err(V3AnthropicRelayRuntimeError::ProviderResponseEmpty);
+    }
+    if resp02.provider_raw().provider_protocol == V3HubProviderWireProtocol::Gemini {
+        resp02
+            .normalize_gemini_business_response(request_id)
+            .map_err(V3AnthropicRelayRuntimeError::ExecutionControlResponse)?;
     }
     let stream_observation = V3RuntimeStreamObservation::default();
     crate::hub_v1::record_v3_toolreason_observation_at_resp03(

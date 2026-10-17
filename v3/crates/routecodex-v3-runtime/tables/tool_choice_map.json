@@ -1,12 +1,12 @@
 {
   "table_id": "tool_choice_map",
   "kind": "protocol_value_map",
-  "protocols": ["responses", "anthropic"],
-  "description": "tool_choice 类型双向映射。数据来源：responses_to_anthropic.rs:997-1047 (responses_tool_choice_as_anthropic_tool_choice)、anthropic_codec_tool_projection.rs:23-33。hub 轴为 canonical tool_choice 语义；responses 'function'/'tool'/'custom' 入站均归一化为 hub 'tool'（拆行表达，各自唯一）；出站 hub 'tool' -> responses 'function'（代码实际产出）。对象变换（name 提取、disable_parallel_tool_use 透传）由 transform 兜底。",
+  "protocols": ["responses", "anthropic", "gemini"],
+  "description": "tool_choice 类型双向映射。数据来源：responses_to_anthropic.rs:997-1047 (responses_tool_choice_as_anthropic_tool_choice)、anthropic_codec_tool_projection.rs:23-33。hub 轴为 canonical tool_choice 语义；responses 'function'/'tool'/'custom' 入站均归一化为 hub 'tool'（拆行表达，各自唯一）；出站 hub 'tool' -> responses 'function'（代码实际产出）。对象变换（name 提取、disable_parallel_tool_use 透传）由 transform 兜底。Gemini toolConfig.functionCallingConfig.mode 登记 auto/none/required -> AUTO/NONE/ANY；hub 'tool'（指定函数）在 Gemini 需 mode=ANY 叠加 allowedFunctionNames 容器变换，未注册 transform，故不登记 gemini 列。",
   "values": [
-    { "hub": "auto", "responses": "auto", "anthropic": "auto" },
-    { "hub": "none", "responses": "none", "anthropic": "none" },
-    { "hub": "required", "responses": "required", "anthropic": "any" },
+    { "hub": "auto", "responses": "auto", "anthropic": "auto", "gemini": "AUTO" },
+    { "hub": "none", "responses": "none", "anthropic": "none", "gemini": "NONE" },
+    { "hub": "required", "responses": "required", "anthropic": "any", "gemini": "ANY" },
     { "hub": "tool", "responses": "function", "anthropic": "tool" },
     { "hub": "tool", "direction": "inbound", "responses": "tool" },
     { "hub": "tool", "direction": "inbound", "responses": "custom" }
