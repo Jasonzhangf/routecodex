@@ -261,7 +261,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     let req04 = request_outcome.into_governed();
     let mut req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
         req04,
-        V3HubExecutionMode::Relay,
+        initial_plan.execution_mode,
     );
     trace.push("V3HubReqExecution05Planned");
     let mut pending_provider_action_recovery = None;

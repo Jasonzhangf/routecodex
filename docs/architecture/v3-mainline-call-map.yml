@@ -8069,8 +8069,8 @@ chains:
     to_node: V3Target10ConcreteProviderSelected
     caller_symbol: execute_v3_relay_runtime_core
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
-    callee_symbol: resolve_v3_relay_target_outcome_with_admission_rescue
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
+    callee_symbol: run_v3_plan_execution_operator_with_probes
+    callee_file: v3/crates/routecodex-v3-runtime/src/operation_runner/plan_execution.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
@@ -8088,8 +8088,8 @@ chains:
     to_node: V3Target10ConcreteProviderSelected
     caller_symbol: execute_v3_responses_relay_runtime_inner
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
-    callee_symbol: resolve_v3_relay_target_outcome_with_admission_rescue
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
+    callee_symbol: run_v3_plan_execution_operator_with_probes
+    callee_file: v3/crates/routecodex-v3-runtime/src/operation_runner/plan_execution.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
@@ -8106,8 +8106,8 @@ chains:
     to_node: V3Target10ConcreteProviderSelected
     caller_symbol: execute_v3_anthropic_relay_runtime_inner
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-    callee_symbol: resolve_v3_relay_target_outcome_with_admission_rescue
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
+    callee_symbol: run_v3_plan_execution_operator_with_probes
+    callee_file: v3/crates/routecodex-v3-runtime/src/operation_runner/plan_execution.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
@@ -9679,11 +9679,11 @@ chains:
         caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
         consumer_symbol: run_v3_resolve_target_operator
         consumer_file: v3/crates/routecodex-v3-runtime/src/operation_runner/resolve_target.rs
-        caller_scope: Chat, Gemini, and Anthropic Relay; Responses and Direct remain pending
+        caller_scope: Chat, Gemini, Anthropic, and Responses Relay plus generic and Responses Direct kernels
         order: normalized SDK Value -> resolve_target SDK Value and typed opaque hit -> plan_execution SDK expansion and admission -> request governance
         recovery: retained expanded target is consumed on retries without Router reclassification
-        boundary: Responses and Direct target planning remain pending
-      direct_hooks: remain owned by Direct; this binding does not migrate Native Direct
+        boundary: Server synchronous protocol preplanning and Responses Relay protocol-mode handoff decision remain pending
+      direct_hooks: remain owned by Direct; kernel routing and admission use SDK operators while hooks retain payload ownership
   edges:
   - step_id: v3-op-runner-req-01
     from_node: V3OperationRunnerCaptureClientJson
