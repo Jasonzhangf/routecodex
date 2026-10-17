@@ -226,8 +226,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:b12cfdff2984e340a209fbd0e1961496adb181724f3b7ea643768c0705c55f6c
-    last_manual_authorization_id: auth-20261016-fa22072-anthropic-client-intent-projection
+    fingerprint: sha256:9e0294fa40434c42c06bc91367404f3582a0bd39d50dfd46d2ef9822ae776cd9
+    last_manual_authorization_id: auth-20261017-fa22072-anthropic-call-anchor
   - item_id: chain:v3.responses.websocket_v2.transport_hardening
     chain_id: v3.responses.websocket_v2.transport_hardening
     status: audited_locked
@@ -1363,6 +1363,13 @@ manual_authorizations:
     reason: "Jason approved completing this review-4 remediation and the streaming delivery, and the review-4 P2 finding requires the Responses Relay transport-intent guard to be bound in the existing chain, so this scoped refresh appends the single edge v3-responses-relay-transport-intent-guard-01. It binds execute_v3_responses_relay_runtime_inner to validate_v3_responses_relay_provider_request_transport_intent and records that a declared profile forcing upstream SSE retargets the expected provider transport intent to Sse while every other profile keeps the client intent. Owner v3.hub_relay_runtime_closeout, the existing 14 adjacent closeout edges and all other edges, resources and policy are unchanged. Only this caller binding, fingerprint and authorization record are covered; no unrelated approval is claimed. Authorization recorded at the stated time, not the user-message timestamp. Tests, independent review and CI remain required. No install, restart, shutdown or production configuration writes."
     fingerprint_before: sha256:a17caf420809f314d8e038f2882e9a5cbb06e8ca2b464bb4a0b406b51da1dbfb
     fingerprint_after: sha256:9442f3c2daa89dbc23f76e1be42583d8b237aab7bd86f1610be90150a95e3587
+  - authorization_id: auth-20261017-fa22072-anthropic-call-anchor
+    item_id: chain:v3.anthropic_relay.controlled_runtime
+    approved_by: Jason
+    approved_at: '2026-10-17T03:00:26Z'
+    reason: "Jason approved the review-5 remediation. The prior lock bound v3-anthropic-relay-client-intent-projection-01 to closeout_anthropic_relay_sse_response, which only forwards a generic project_client_response callback and never reads the client transport intent. The real call is the projection closure defined inside execute_v3_anthropic_relay_runtime_inner, which captures the client's real transport intent before it invokes project_v3_anthropic_client_response_for_provider. This scoped refresh rebinds only that one caller anchor and its binding_kind and records the closure-forwarding relation in the semantic contract; the SSE response branch, the callee, owner v3.anthropic_relay_runtime_integration and every other edge and resource are unchanged. Runtime code is unchanged because it already passes the real client intent. Authorization recorded at the stated time, not the user-message timestamp. Source and mapped verification only; tests, independent review and CI remain required. No install, restart, shutdown or production configuration writes."
+    fingerprint_before: sha256:b12cfdff2984e340a209fbd0e1961496adb181724f3b7ea643768c0705c55f6c
+    fingerprint_after: sha256:9e0294fa40434c42c06bc91367404f3582a0bd39d50dfd46d2ef9822ae776cd9
   - authorization_id: auth-20261015-fa22072-direct-raw-wire-evidence
     item_id: chain:v3.error.raw_wire_evidence
     approved_by: Jason

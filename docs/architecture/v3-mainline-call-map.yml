@@ -3982,15 +3982,15 @@ chains:
   - step_id: v3-anthropic-relay-client-intent-projection-01
     from_node: V3HubRespChatProcess03Governed
     to_node: V3HubRespOutbound05ClientSemantic
-    caller_symbol: closeout_anthropic_relay_sse_response
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime/response_closeout.rs
+    caller_symbol: execute_v3_anthropic_relay_runtime_inner
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
     callee_symbol: project_v3_anthropic_client_response_for_provider
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
     status: anchored
-    binding_kind: adjacent_response_codec_helper
+    binding_kind: relay_closeout_projection_closure
     owner_feature_id: v3.anthropic_relay_runtime_integration
     semantic_contract:
-      - The Anthropic SSE response branch projects the finalized client semantic with the client's real transport intent, so a non-streaming Messages client receives one JSON message instead of an SSE envelope.
+      - In the Anthropic SSE response branch, execute_v3_anthropic_relay_runtime_inner passes project_v3_anthropic_client_response_for_provider as the closeout projection closure, and that closure captures the client's real transport intent. The upstream body is SSE only because the provider forced it, so a non-streaming Messages client receives one JSON message instead of an SSE envelope. closeout_anthropic_relay_sse_response only forwards this closure to closeout_anthropic_relay_normalized_response; it never reads the transport intent.
     resource_flow:
       consumes:
       - v3.hub.response_semantic
