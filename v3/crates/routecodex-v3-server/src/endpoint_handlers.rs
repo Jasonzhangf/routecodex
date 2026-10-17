@@ -5,6 +5,44 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+fn persist_responses_direct_frame_error_evidence(
+    state: &V3ListenerState,
+    entry_protocol: &str,
+    path: &str,
+    request_id: &str,
+    request_payload: &Value,
+    frame: &V3Server16HttpFrame,
+) {
+    if frame.status < 400 && frame.error_chain.is_empty() {
+        return;
+    }
+    let status = (frame.status >= 400).then_some(frame.status);
+    let _ = persist_v3_error_evidence_payload(
+        state,
+        entry_protocol,
+        path,
+        request_id,
+        "request.json",
+        &state
+            .debug
+            .project_payload_verbatim(request_payload.clone()),
+        status,
+    );
+    let _ = persist_v3_error_evidence_payload(
+        state, entry_protocol, path, request_id, "error.json",
+        &state.debug.project_payload_verbatim(json!({
+            "object": "routecodex.v3.error_evidence",
+            "stage": "error",
+            "status": frame.status,
+            "request_id": request_id,
+            "endpoint": path,
+            "node_trace": frame.node_trace.clone(),
+            "error_chain": frame.error_chain.clone(),
+            "observability": frame.observability.as_ref().map(project_v3_runtime_observability_debug),
+        })), status,
+    );
+}
+
 pub(crate) fn pending_endpoint_after_responses_admission(
     state: Arc<V3ListenerState>,
     front_connection_identity: Option<V3FrontConnectionIdentity>,
@@ -939,108 +977,33 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         // errors can flush the original wire evidence even when normal debug
         // snapshot stages are disabled. Successful requests still persist only
         // explicitly enabled intermediate stages.
-        let capture_provider_request = true;
-        let capture_provider_response = true;
-        let mut output = if capture_provider_request || capture_provider_response {
-            match responses_protocol_plan.as_ref() {
-                Some(plan) => match execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
-                    &state.manifest,
-                    runtime_input,
-                    &state.provider_health,
-                    &state.responses_relay_server_tool_state,
-                    server_tool_scope.clone(),
-                    V3ResponsesRelayProviderSnapshotCapture::new(
-                        capture_provider_request,
-                        capture_provider_response,
-                    ),
-                    Some(provider_failure_event_sink.clone()),
-                    Some(route_selection_event_sink.clone()),
-                    Some(plan.decision.target.clone()),
-                    Some(plan.expanded.clone()),
-                    BTreeSet::new(),
-                    plan.relay_runtime_seeds(),
-                )
-                .await
-                {
-                    Ok(mut output) => {
-                        prepend_v3_protocol_plan_trace_to_responses_relay_output(
-                            &mut output,
-                            &plan.node_trace,
-                        );
-                        output
-                    }
-                    Err(error) => project_v3_responses_relay_runtime_failure(error, None),
-                },
-                None => match execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
-                    &state.manifest,
-                    runtime_input,
-                    &state.provider_health,
-                    &state.responses_relay_server_tool_state,
-                    server_tool_scope.clone(),
-                    V3ResponsesRelayProviderSnapshotCapture::new(
-                        capture_provider_request,
-                        capture_provider_response,
-                    ),
-                    Some(provider_failure_event_sink.clone()),
-                    Some(route_selection_event_sink.clone()),
-                    None,
-                    None,
-                    BTreeSet::new(),
-                    V3ResponsesRelayRuntimeSeeds::default(),
-                )
-                .await
-                {
-                    Ok(output) => output,
-                    Err(error) => project_v3_responses_relay_runtime_failure(error, None),
-                },
+        let plan = responses_protocol_plan.as_ref();
+        let mut output = match execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
+            &state.manifest,
+            runtime_input,
+            &state.provider_health,
+            &state.responses_relay_server_tool_state,
+            server_tool_scope.clone(),
+            V3ResponsesRelayProviderSnapshotCapture::new(true, true),
+            Some(provider_failure_event_sink.clone()),
+            Some(route_selection_event_sink.clone()),
+            plan.map(|plan| plan.decision.target.clone()),
+            plan.map(|plan| plan.expanded.clone()),
+            BTreeSet::new(),
+            plan.map_or_else(V3ResponsesRelayRuntimeSeeds::default, |plan| plan.relay_runtime_seeds()),
+        )
+        .await
+        {
+            Ok(mut output) => {
+                if let Some(plan) = plan {
+                    prepend_v3_protocol_plan_trace_to_responses_relay_output(
+                        &mut output,
+                        &plan.node_trace,
+                    );
+                }
+                output
             }
-        } else {
-            match responses_protocol_plan.as_ref() {
-                Some(plan) => match execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
-                    &state.manifest,
-                    runtime_input,
-                    &state.provider_health,
-                    &state.responses_relay_server_tool_state,
-                    server_tool_scope.clone(),
-                    V3ResponsesRelayProviderSnapshotCapture::new(false, false),
-                    Some(provider_failure_event_sink.clone()),
-                    Some(route_selection_event_sink.clone()),
-                    Some(plan.decision.target.clone()),
-                    Some(plan.expanded.clone()),
-                    BTreeSet::new(),
-                    plan.relay_runtime_seeds(),
-                )
-                .await
-                {
-                    Ok(mut output) => {
-                        prepend_v3_protocol_plan_trace_to_responses_relay_output(
-                            &mut output,
-                            &plan.node_trace,
-                        );
-                        output
-                    }
-                    Err(error) => project_v3_responses_relay_runtime_failure(error, None),
-                },
-                None => match execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
-                    &state.manifest,
-                    runtime_input,
-                    &state.provider_health,
-                    &state.responses_relay_server_tool_state,
-                    server_tool_scope,
-                    V3ResponsesRelayProviderSnapshotCapture::new(false, false),
-                    Some(provider_failure_event_sink.clone()),
-                    Some(route_selection_event_sink.clone()),
-                    None,
-                    None,
-                    BTreeSet::new(),
-                    V3ResponsesRelayRuntimeSeeds::default(),
-                )
-                .await
-                {
-                    Ok(output) => output,
-                    Err(error) => project_v3_responses_relay_runtime_failure(error, None),
-                },
-            }
+            Err(error) => project_v3_responses_relay_runtime_failure(error, None),
         };
         if let Some(disposition) = output.terminal_disposition.take() {
             // A provider terminal disposition ends the client transport without
@@ -1126,39 +1089,14 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     );
                     // Recovered provider failures are not terminal client errors; only the
                     // Error06/status truth may create error.json after a successful handoff.
-                    if frame.status >= 400 || !frame.error_chain.is_empty() {
-                        let _ = persist_v3_error_evidence_payload(
-                            &state,
-                            &entry_protocol,
-                            &path,
-                            &request_id,
-                            "request.json",
-                            &state
-                                .debug
-                                .project_payload_verbatim(handoff.request_payload.clone()),
-                            (frame.status >= 400).then_some(frame.status),
-                        );
-                        let _ = persist_v3_error_evidence_payload(
-                            &state,
-                            &entry_protocol,
-                            &path,
-                            &request_id,
-                            "error.json",
-                            &state
-                                .debug
-                                .project_payload_verbatim(json!({
-                                    "object": "routecodex.v3.error_evidence",
-                                    "stage": "error",
-                                    "status": frame.status,
-                                    "request_id": request_id,
-                                    "endpoint": path,
-                                    "node_trace": frame.node_trace.clone(),
-                                    "error_chain": frame.error_chain.clone(),
-                                    "observability": frame.observability.as_ref().map(project_v3_runtime_observability_debug),
-                                })),
-                            (frame.status >= 400).then_some(frame.status),
-                        );
-                    }
+                    persist_responses_direct_frame_error_evidence(
+                        &state,
+                        &entry_protocol,
+                        &path,
+                        &request_id,
+                        &handoff.request_payload,
+                        &frame,
+                    );
                     if let Some(response) = capture_v3_responses_direct_response(
                         &state,
                         &entry_protocol,
@@ -1309,39 +1247,14 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             V3ResponsesDirectServerOutcome::DirectFrame(mut frame) => {
                 // Recovered provider attempts are observability events, not a terminal
                 // client error. Only status/Error06 truth creates error.json.
-                if frame.status >= 400 || !frame.error_chain.is_empty() {
-                    let _ = persist_v3_error_evidence_payload(
-                        &state,
-                        &entry_protocol,
-                        &path,
-                        &request_id,
-                        "request.json",
-                        &state
-                            .debug
-                            .project_payload_verbatim(raw_request_payload.clone()),
-                        (frame.status >= 400).then_some(frame.status),
-                    );
-                    let _ = persist_v3_error_evidence_payload(
-                        &state,
-                        &entry_protocol,
-                        &path,
-                        &request_id,
-                        "error.json",
-                        &state
-                            .debug
-                            .project_payload_verbatim(json!({
-                                "object": "routecodex.v3.error_evidence",
-                                "stage": "error",
-                                "status": frame.status,
-                                "request_id": request_id,
-                                "endpoint": path,
-                                "node_trace": frame.node_trace.clone(),
-                                "error_chain": frame.error_chain.clone(),
-                                "observability": frame.observability.as_ref().map(project_v3_runtime_observability_debug),
-                            })),
-                        (frame.status >= 400).then_some(frame.status),
-                    );
-                }
+                persist_responses_direct_frame_error_evidence(
+                    &state,
+                    &entry_protocol,
+                    &path,
+                    &request_id,
+                    &raw_request_payload,
+                    &frame,
+                );
                 if let Some(response) = capture_v3_responses_direct_response(
                     &state,
                     &entry_protocol,

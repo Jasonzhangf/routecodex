@@ -6755,7 +6755,7 @@ chains:
   - step_id: v3-runtime-timing-14
     from_node: V3RuntimeTimingProtocolHandoff
     to_node: V3RuntimeTimingExternalAttempt
-    caller_symbol: execute_responses_direct_server_outcome
+    caller_symbol: execute_responses_direct_server_outcome_inner
     caller_file: v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
     callee_symbol: execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
@@ -9290,7 +9290,7 @@ chains:
   - step_id: v3-direct-sse-accept-skeleton-intent-02
     from_node: V3DirectSseAccept02RuntimeWorker
     to_node: V3DirectSseAccept02RuntimeWorker
-    caller_symbol: execute_responses_direct_server_outcome
+    caller_symbol: execute_responses_direct_server_outcome_inner
     caller_file: v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
     callee_symbol: v3_request_wants_sse
     callee_file: v3/crates/routecodex-v3-server/src/lib.rs

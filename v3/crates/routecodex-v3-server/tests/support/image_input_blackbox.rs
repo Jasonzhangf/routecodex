@@ -472,8 +472,9 @@ async fn run_case_shape(
                 .unwrap();
             if image_only {
                 assert_eq!(
-                    messages[first]["content"], "",
-                    "image-only tool results must keep a representable empty text result"
+                    messages[first]["content"],
+                    json!([]),
+                    "image-only tool results must keep the projected empty content-part array"
                 );
             }
             assert_eq!(messages[first + 1]["tool_call_id"], "call_text", "all parallel tool results must precede the adjacent image user message: {wire_text}");
