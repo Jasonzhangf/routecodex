@@ -1282,12 +1282,16 @@ const requestCaptureNormalizeMapEdge = (requestChain?.edges ?? []).find(
 if (!requestCaptureNormalizeMapEdge) {
   failures.push('v3-mainline-call-map.yml: v3.operation_runner.dagpipe.request missing capture_client_json -> normalize_request_losslessly caller edge');
 } else {
-  if (requestCaptureNormalizeMapEdge.status !== 'binding_pending') {
-    failures.push('v3-mainline-call-map.yml: v3-op-runner-req-01 must preserve status binding_pending');
-  }
-  for (const field of ['caller_symbol', 'caller_file', 'callee_symbol', 'callee_file']) {
-    if (requestCaptureNormalizeMapEdge[field] !== 'pending') {
-      failures.push(`v3-mainline-call-map.yml: v3-op-runner-req-01 must keep ${field} pending, not fake source binding`);
+  const normalizationBinding = {
+    status: 'runtime_bound',
+    caller_symbol: 'V3HubRelayRequestHooks::run',
+    caller_file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
+    callee_symbol: 'build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01',
+    callee_file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs',
+  };
+  for (const [field, expected] of Object.entries(normalizationBinding)) {
+    if (requestCaptureNormalizeMapEdge[field] !== expected) {
+      failures.push(`v3-mainline-call-map.yml: v3-op-runner-req-01 ${field} must bind the existing lossless normalization caller`);
     }
   }
 }

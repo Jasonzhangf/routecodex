@@ -3904,10 +3904,10 @@ features:
     merge: supervisor_owned
 
 - feature_id: v3.unified_operation_runner_design
-  status: node01_capture_runtime_candidate_full_runner_pending
+  status: candidate_behavior_9_of_20_not_reviewed_installed_merged_or_production
   change_risk: high
   owner_kind: design_architecture
-  owner_scope: Unified operation runner DAGpipe design, lifecycle manifest, exact ErrorErr01-06 binding, typed owner/release table, and first runtime slice. This candidate delivers only Node 01 capture_client_json; later operation nodes remain pending.
+  owner_scope: Unified operation runner DAGpipe design, lifecycle manifest, exact ErrorErr01-06 binding, typed owner/release table, and canonical single-node SDK execution. Candidate M2 binds nine of twenty operation nodes through Registry, compile, and Runtime.run. The bound nodes are capture_client_json, normalize_request_losslessly, project_standard_provider_request, adjust_provider_private_request, encode_provider_wire, construct_transport_request, adjust_provider_private_response, normalize_provider_response, and govern_chat_response. Eleven nodes remain pending, including target resolution, execution planning, request governance, response inverse projection, client frame, and Error01-06. Existing Hub owners remain execution truth for pending nodes. This is candidate behavior only, not whole-graph, fixed-order, Native Direct, review, install, merge, or production completion.
   owner_modules:
   - routecodex-v3-runtime
   - routecodex-v3-config
@@ -3953,11 +3953,20 @@ features:
   - the first node is compiled and run by pipeline_runtime from the deterministic SESE slice derived from the canonical request graph; the selected node keeps its canonical operator/version/schema/effects, and the slice exits at client-json
   - RuntimeRequestGraphEntry owns slice derivation, pipeline_runtime::compile, and Runtime::run; there is no direct Operator call path
   - Direct-to-Relay handoff reuses the in-flight captured value and existing request_execution_control; it does not re-enter Server ingress or recapture
-  - the first node does not claim one existing shared normalize_request_losslessly caller: Direct keeps its current V3Server03HttpRequestRaw/C::build_standardized owner, Relay keeps its protocol Req02 owner
+  - the candidate binds normalize_request_losslessly through V3HubRelayRequestHooks::run and build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01; Direct retains V3Server03HttpRequestRaw/C::build_standardized and does not claim the Relay binding
+  - the candidate binds request transforms through run_v3_single_node_operator, which selects the canonical graph node, creates an SDK Registry, calls pipeline_runtime::compile, and executes Runtime::run
+  - the real request callers bind adjust_provider_private_request, encode_provider_wire, and construct_transport_request from execute_v3_relay_runtime_core, construct_responses_relay_transport_request, and execute_v3_anthropic_relay_runtime_inner
+  - the Responses request helper is synchronous so SDK execution does not enlarge the async transport poll frame
+  - the real response callers bind adjust_provider_private_response, normalize_provider_response, and govern_chat_response through build_provider_resp_compat_02_from_v3_provider_resp_inbound_01, build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request_and_request_id, and V3HubRelayResponseHookRegistry::govern
+  - request and response operator instance fields carry typed context outside business JSON; declared side outputs are consumed, and original typed errors remain errors
+  - the nine bound candidate nodes are request capture_client_json, normalize_request_losslessly, project_standard_provider_request, adjust_provider_private_request, encode_provider_wire, construct_transport_request; and response adjust_provider_private_response, normalize_provider_response, govern_chat_response
+  - the eleven pending nodes are request resolve_target, plan_execution, govern_chat_request; response inverse_project_client_response, frame_committed_client_response; and error_err01_source_raised through error_err06_client_projected
+  - pending nodes retain their existing Hub owners; R02 image residual composition passed the combined matrix, and Direct hooks remain owned by Direct
+  - candidate behavior is 9 of 20, not whole-graph execution, fixed target order, Native Direct migration, production, review, install, or merge
   - every inbound direction_bindings source names a path in that protocol's raw source inventory; outbound Chat sources are not constrained to wire inventory paths
   - Responses request.input[].type is read per input array item, and the selected request branch remains paired with that same request's typed inverse provenance for the response projection
   - the target request design assigns historical image placeholders to Chat Process request governance after lossless normalization, retaining current-turn images and stable historical placeholders for tool-only replay
-  - currently unsupported Anthropic/Gemini Direct modes remain unsupported after the capture-node delivery
+  - this SDK migration leaves Anthropic/Gemini Direct behavior with its existing owners
   negative_assertions:
   - a protocol profile cannot authorize a field path absent from the source inventory
   - an inbound direction binding cannot source a path absent from that protocol's source inventory
@@ -3974,6 +3983,7 @@ features:
   - capture_client_json reads or writes neither v3.operation_runner.metadata_center_control nor v3.operation_runner.request_origin_kind
   - missing capture_client_json@1 registration is rejected by DAGpipe compile and enters the typed ErrorErr01 path
   - RuntimeRequestFinalizer consumes/releases no request_origin_kind storage; request_origin_kind has no MetadataCenter slot and no cross-invocation storage to clean
+  - topology edge v3-op-runner-req-02b remains binding_pending because no direct adjacent caller/callee binding is proven
   evidence_sources:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
@@ -3994,10 +4004,71 @@ features:
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml
   - docs/architecture/dagpipe/v3.operation_runner.request.graph.json
+  - docs/architecture/dagpipe/README.md
+  - docs/design/v3-unified-operation-runner-design.md
+  behavior_evidence:
+  - case: affected_runtime_library
+    source: /Volumes/Intel/playground/routecodex/.worker-runs/magpie-node-flow-20261012/m2-real-wire-callers-lib.log
+    result: 1301 passed; 0 failed; 1 ignored
+    reuse: recorded M2 candidate run; not rerun in the maps-only worktree
+  - case: affected_integration_suites
+    source: /Volumes/Intel/playground/routecodex/.worker-runs/magpie-node-flow-20261012/m2-combined-affected-six.log
+    result: 18 + 4 + 14 + 29 + 12 + 46 passed; 0 failed
+    reuse: recorded M2 candidate run; not rerun in the maps-only worktree
+  - case: public_protocol_live_mock_matrix
+    source: /Volumes/Intel/playground/routecodex/.worker-runs/magpie-node-flow-20261012/live-self-contained58-m2-stack-fixed-20261017/baseline-report.json
+    result: 58 passed; 0 failed; 0 not_run; 0 skipped; 0 infra_failure; failed 0; product_failures 0; runner_failures 0; cleanup.complete=true
+    reuse: recorded M2 candidate run; not rerun in the maps-only worktree
+  - case: namespace_and_tool_followup
+    fixtures: [namespace-custom-complete-args, namespace-local-client-mock-execution, tool-followup-responses-to-chat]
+    expects: actual SDK body changed; namespace/custom identity retained; actual first provider attempt and client tool follow-up
+    matrix: v3/scripts/tests/v3-protocol-live-mock-matrix.mjs
+    manifest: v3/fixtures/protocol-live-mock-matrix/manifest.json
+  - case: provider_failure_and_stream_cut
+    fixtures: [provider-error-exhaustion, provider-fault-stream-cut]
+    expects: provider failure stays in the typed Error chain and is not returned as business success
+    matrix: v3/scripts/tests/v3-protocol-live-mock-matrix.mjs
+    manifest: v3/fixtures/protocol-live-mock-matrix/manifest.json
+  candidate_test_bindings:
+  - node: adjust_provider_private_request
+    tests:
+    - provider_req_compat_06_provider_compat::tests::private_request_operator_preserves_original_typed_error
+    - provider_req_compat_06_provider_compat::tests::custom_tool_function_binding_is_retained_from_private_request_operator
+  - node: encode_provider_wire
+    tests:
+    - provider_req_outbound_08_wire_payload::tests::sdk_wire_preserves_body_model_namespace_custom_binding_and_stream
+    - provider_req_outbound_08_wire_payload::tests::r08_fallible_builder_consumes_sdk_body_and_rejects_target_drift
+    - provider_req_outbound_08_wire_payload::tests::r08_invalid_stream_flag_is_typed_failure_without_wire_side_output
+  - node: construct_transport_request
+    tests:
+    - provider_req_outbound_09_transport_request::tests::construct_transport_request_consumes_sdk_input_not_captured_wire_body
+    - provider_req_outbound_09_transport_request::tests::construct_transport_request_requires_typed_wire_side_output
+  - node: adjust_provider_private_response
+    tests:
+    - provider_resp_compat_02_provider_compat::tests::canonical_adjust_node_executes_the_real_custom_tool_response_compat
+    - provider_resp_compat_02_provider_compat::tests::canonical_adjust_node_preserves_typed_compat_failure_classification
+  - node: normalize_provider_response
+    tests:
+    - resp_inbound_02_normalized::tests::canonical_normalize_node_projects_anthropic_json_with_the_request_context
+    - resp_inbound_02_normalized::tests::canonical_normalize_node_executes_gemini_business_normalization_once
+  - node: govern_chat_response
+    tests:
+    - resp_chat_process_03_governed::canonical_govern_registry_tests::canonical_registry_govern_returns_transformation_and_typed_side_outputs
+    - resp_chat_process_03_governed::canonical_govern_registry_tests::canonical_registry_govern_preserves_the_original_typed_error
+    - resp_chat_process_03_governed::canonical_govern_registry_tests::canonical_govern_operator_consumes_sdk_input_not_captured_payload
+    - resp_chat_process_03_governed::canonical_govern_registry_tests::canonical_govern_operator_uses_sdk_output_as_business_payload
   required_gates:
   - npm run verify:v3-operation-runner-dagpipe
   - npm run test:v3-operation-runner-red-fixtures
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime operation_runner --lib
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime provider_req_compat_06_provider_compat --lib
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime provider_req_outbound_08_wire_payload --lib
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime provider_req_outbound_09_transport_request --lib
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime provider_resp_compat_02_provider_compat --lib
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime resp_inbound_02_normalized --lib
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime resp_chat_process_03_governed --lib
+  - npm run run:v3-protocol-live-mock-matrix
+  - npm run test:v3-protocol-live-mock-matrix-selftest
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server p6_responses_endpoint_uses_runtime_provider_path_and_projects_json
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_direct_last_default_projects_after_provider_failure
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server openai_chat_http_entry_completes_responses_tool_round_trip
@@ -4009,8 +4080,11 @@ features:
   completion_boundary:
     source_controlled: required
     mapped_gates: required
-    runtime: required_for_node01_capture_client_json_slice
-    remaining_operation_nodes: pending
+    runtime: candidate_evidence_reused_for_9_of_20
+    review: pending
+    install: not_run
+    merge: not_run
+    remaining_operation_nodes: 11_pending
 - feature_id: v3.anthropic_control_text_resp03
   status: source_gate_verified
   change_risk: high

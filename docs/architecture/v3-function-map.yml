@@ -6346,10 +6346,10 @@ features:
   - git diff --check
 
 - feature_id: v3.unified_operation_runner_design
-  status: node01_capture_runtime_candidate_full_runner_pending
+  status: candidate_behavior_9_of_20_not_reviewed_installed_merged_or_production
   change_risk: high
   owner_kind: design_architecture
-  owner_scope: Unified operation runner DAGpipe design, lifecycle manifest, exact ErrorErr01-06 binding, typed owner/release table, RuntimeRequestGraphEntry owner for invocation origin, and first runtime slice. The current runtime candidate implements only Node 01 capture_client_json; later nodes remain pending. The first slice owns one Runtime capture operation; Server HTTP and Responses WebSocket are caller/forwarding boundaries only.
+  owner_scope: Unified operation runner DAGpipe design, lifecycle manifest, exact ErrorErr01-06 binding, typed owner/release table, and canonical single-node SDK execution. Candidate M2 binds nine of twenty operation nodes through Registry, compile, and Runtime.run. The bound nodes are capture_client_json, normalize_request_losslessly, project_standard_provider_request, adjust_provider_private_request, encode_provider_wire, construct_transport_request, adjust_provider_private_response, normalize_provider_response, and govern_chat_response. Eleven nodes remain pending, including target resolution, execution planning, request governance, response inverse projection, client frame, and Error01-06. Existing Hub owners remain execution truth for pending nodes. This is candidate behavior only, not whole-graph, fixed-order, Native Direct, review, install, merge, or production completion.
   owner_crate: routecodex-v3-runtime
   owner_file: docs/design/v3-unified-operation-runner-design.md
   resource_bindings:
@@ -6389,6 +6389,36 @@ features:
   - v3-op-runner-err-03
   - v3-op-runner-err-04
   - v3-op-runner-err-05
+  candidate_stage_bindings:
+    state: candidate_behavior_9_of_20_not_reviewed_installed_merged_or_production
+    request:
+    - capture_client_json
+    - normalize_request_losslessly
+    - project_standard_provider_request
+    - adjust_provider_private_request
+    - encode_provider_wire
+    - construct_transport_request
+    response:
+    - adjust_provider_private_response
+    - normalize_provider_response
+    - govern_chat_response
+    pending:
+    - resolve_target
+    - plan_execution
+    - govern_chat_request
+    - inverse_project_client_response
+    - frame_committed_client_response
+    - error_err01_source_raised
+    - error_err02_host_captured
+    - error_err03_runtime_classified
+    - error_err04_router_policy_applied
+    - error_err05_execution_decision
+    - error_err06_client_projected
+    pending_count: 11
+    request_pending_count: 3
+    response_pending_count: 2
+    error_pending_count: 6
+    boundary: pending nodes retain existing Hub/Direct owners; R02 image residual composition passed the combined matrix; Direct hooks are not migrated
   entry_symbols:
   - RuntimeRequestGraphEntry
   - pending_endpoint_after_responses_admission_inner
@@ -6399,6 +6429,13 @@ features:
   - plan_v3_operation_runner_execution
   - normalize_v3_operation_runner_request_losslessly
   - project_v3_operation_runner_standard_provider_request
+  - run_v3_single_node_operator
+  - build_provider_req_compat_06_from_v3_hub_req_outbound_07
+  - build_v3_provider_req_outbound_08_wire_from_compat_06
+  - build_v3_provider_req_outbound_09_transport_from_wire
+  - build_provider_resp_compat_02_from_v3_provider_resp_inbound_01
+  - build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request_and_request_id
+  - govern_v3_hub_relay_response_via_operator
   - govern_v3_operation_runner_chat_response
   - inverse_project_v3_operation_runner_client_response
   allowed_paths:

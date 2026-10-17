@@ -2,11 +2,11 @@
 
 Model-client delivery follows AGENTS.md's mandatory all-entry no-client-error contract and [the client transport design](../goals/provider-terminal-no-502-dag-20260930.md). Legacy symbols containing `ClientProjected`, `client_projection_candidate`, or `terminal_client_error` name internal resources/decisions only; they never authorize an HTTP error, error payload/event, or fabricated success. This target design supersedes their former client-error semantics; current code has not completed that cutover.
 
-> Contract for the complete target graphs. In the current production baseline, only the
-> `capture_client_json` SESE slice is compiled and run by the DAGpipe Runtime entry. The complete
-> request, response, and error graphs, their later Operators, and field-profile execution are not
-> claimed as runtime cutovers. Existing Hub v1 owners and maps remain the execution truth for every
-> operation after capture until its own node delivery.
+> Contract for the complete target graphs. Separately from the current production baseline, the M2 candidate
+> compiles and runs nine of twenty operation nodes as canonical single-node SDK executions. The
+> complete request, response, and error graphs, their eleven remaining Operators, and field-profile
+> execution are not claimed as runtime cutovers. Existing Hub v1 owners and maps remain the
+> execution truth for every pending node.
 
 ## Scope
 
@@ -136,10 +136,11 @@ response, or error source. `dagpipe graph validate` proves static topology only.
 ## Node ownership matrix
 
 Every node in the three design graphs has one owner, one typed input/output ARC pair, and one
-resource family. Caller/callee binding is `runtime_bound` only for `capture_client_json` and its
-listed Server callers; all later node bindings remain pending. The runtime tables and existing H1
-owners remain the production baseline for those later nodes; they are not the design's field
-mapping truth.
+resource family. The actual caller/callee bindings for the M2 candidate are the
+`candidate_stage_bindings` tables in the request and response chains of
+[`v3-mainline-call-map.yml`](../architecture/v3-mainline-call-map.yml). They bind nine nodes; the
+other eleven node bindings remain pending. The runtime tables and existing H1 owners remain the
+production baseline for the pending nodes; they are not the design's field mapping truth.
 
 ### Request graph `v3.operation_runner.request@1`
 
@@ -542,15 +543,16 @@ supported; no local continuation is introduced.
 
 | Node family | Current production caller/callee | Current runtime implementation | Design owner | Physical ablation | Verification evidence |
 | --- | --- | --- | --- | --- | --- |
-| Request capture/normalize | HTTP: `pending_endpoint_after_responses_admission_inner`; WebSocket: `handle_responses_websocket_message_with_mode`; Direct then uses `V3Server03HttpRequestRaw`/`C::build_standardized`, while Relay builds protocol-specific Req01/Req02 | `capture_client_json` is compiled/run through the DAGpipe slice before dispatch; Direct and Relay normalization remain in their existing owners | `routecodex-v3-runtime` fixed runner | capture node is bound; remove mode-specific normalization only at node 2's later cutover | design graph + ingress/consumer binding table; same-entry tool and payload black-box replay |
+| Request capture/normalize | HTTP: `pending_endpoint_after_responses_admission_inner`; WebSocket: `handle_responses_websocket_message_with_mode`; Relay: `V3HubRelayRequestHooks::run`; Direct retains `V3Server03HttpRequestRaw`/`C::build_standardized` | `capture_client_json` and `normalize_request_losslessly` are compiled/run through canonical single-node SDK execution; Direct normalization remains in its existing owner | `routecodex-v3-runtime` fixed runner | remove remaining mode-specific normalization only at Direct's later cutover | actual binding table in `v3-mainline-call-map.yml`; same-entry tool and payload black-box replay |
 | Target/execution/request projection | `execute_v3_direct_runtime_kernel_core` and `execute_v3_relay_runtime_core` | current Direct/Relay loops | `routecodex-v3-runtime` | remove old decision-after-ChatProcess order | design graph + this matrix |
 | Response normalize/govern/project | old Direct/Relay response loops | current codecs and hooks | `routecodex-v3-runtime` | remove second response exit | design graph + this matrix |
 | Error | existing `error.mainline.yml` callers | ErrorErr01-06 chain | `error.pipeline_contract` / `error.client_projection` | none; retain chain | `error.mainline.yml` + error graph |
 
-The `capture_client_json` slice is `runtime_bound`; all other graph-node bindings are
-`binding_pending` until their own runtime candidates register and run them through the DAGpipe SDK.
-This does not claim that the production Server, Direct, or Relay execution loops after capture have
-been replaced by the complete request, response, or error graph.
+The M2 candidate binds nine nodes through canonical single-node SDK execution; the other eleven
+graph-node bindings are `binding_pending`. This does not claim that the production Server, Direct,
+or Relay execution loops have been replaced by the complete request, response, or error graph. The
+actual binding list and caller/callee evidence stay in the mainline map's
+`candidate_stage_bindings` tables; this design does not keep a second inventory.
 
 ## Runner foundation and per-node delivery
 
@@ -682,9 +684,10 @@ independently.
 ## Evidence boundary
 
 - Graph topology: `dagpipe graph validate` only proves static DAG shape.
-- Operator admission: `capture_client_json@1` is compiled and run through the derived slice;
-  later Operators still require their own project `pipeline_runtime::compile()` evidence.
-- Runtime behavior: Server dispatch and existing Direct/Relay loops remain execution truth after
-  capture; the complete request, response, and error graph bindings remain pending.
+- Operator admission: the nine candidate Operators are compiled and run through canonical
+  single-node SDK execution; the remaining eleven still require their own project
+  `pipeline_runtime::compile()` evidence.
+- Runtime behavior: Server dispatch and existing Direct/Relay loops remain execution truth for
+  pending nodes; the complete request, response, and error graph bindings remain pending.
 - Field coverage: semantic matrix statuses remain unchanged; partial/declared rows are not relabeled
   as covered.
