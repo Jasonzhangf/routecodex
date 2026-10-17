@@ -10,6 +10,42 @@ use crate::provider_failure_runtime_policy::{
 use futures_util::StreamExt;
 use serde_json::{json, Value};
 
+fn construct_responses_relay_transport_request(
+    req_compat: ProviderReqCompat06ProviderCompat,
+    request_id: &str,
+    target: routecodex_v3_provider_responses::V3ResponsesProviderTarget,
+    provider_protocol: V3HubProviderWireProtocol,
+    transport_intent: V3HubTransportIntent,
+) -> Result<
+    routecodex_v3_provider_responses::V3Transport13ResponsesHttpRequest,
+    V3ResponsesRelayRuntimeError,
+> {
+    let stream_intent = (provider_protocol == V3HubProviderWireProtocol::Gemini).then_some(
+        match transport_intent {
+            V3HubTransportIntent::Json => {
+                routecodex_v3_provider_responses::V3ResponsesStreamIntent::Json
+            }
+            V3HubTransportIntent::Sse => {
+                routecodex_v3_provider_responses::V3ResponsesStreamIntent::Sse
+            }
+        },
+    );
+    let (req08, _) = build_v3_provider_req_outbound_08_wire_from_compat_06(
+        req_compat,
+        request_id,
+        target,
+        stream_intent,
+    )
+    .map_err(|error| match error {
+        V3ProviderReqOutbound08Error::Provider(error) => {
+            V3ResponsesRelayRuntimeError::Provider(error)
+        }
+        error => V3ResponsesRelayRuntimeError::Target(error.to_string()),
+    })?;
+    build_v3_provider_req_outbound_09_transport_from_wire(req08, Vec::new())
+        .map_err(V3ResponsesRelayRuntimeError::Target)
+}
+
 pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
     manifest: &V3Config05ManifestPublished,
     mut input: V3ResponsesRelayRuntimeInput,
@@ -396,36 +432,19 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         trace.push("V3HubReqTarget06Resolved");
         trace.push("V3HubReqOutbound07ProviderSemantic");
         trace.push("ProviderReqCompat06ProviderCompat");
-        let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
-        let _req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
-        let provider_semantic = _req09.into_provider_semantic_payload();
-        let wire = match routecodex_v3_provider_responses::wire::build_v3_provider_12_responses_wire_payload_with_registry(
+        let transport_request = match construct_responses_relay_transport_request(
+            req_compat,
             &input.request_id,
             target,
-            provider_semantic,
-            namespace_registry.clone(),
+            provider_wire_protocol,
+            provider_request_transport_intent,
         ) {
-            Ok(wire) => {
-                let wire = wire.with_custom_tool_function_binding(custom_tool_function_binding.clone());
-                if provider_wire_protocol == V3HubProviderWireProtocol::Gemini {
-                    wire.with_stream_intent(match provider_request_transport_intent {
-                        V3HubTransportIntent::Json => routecodex_v3_provider_responses::V3ResponsesStreamIntent::Json,
-                        V3HubTransportIntent::Sse => routecodex_v3_provider_responses::V3ResponsesStreamIntent::Sse,
-                    })
-                } else { wire }
-            }
+            Ok(request) => request,
             Err(error) => {
-                handle_provider_request_failure!(V3ResponsesRelayRuntimeError::Provider(error));
+                handle_provider_request_failure!(error);
             }
         };
         trace.push("V3ProviderReqOutbound08WirePayload");
-        let transport_request =
-            match build_v3_provider_transport_request_for_protocol(provider_wire_protocol, wire) {
-                Ok(transport_request) => transport_request,
-                Err(error) => {
-                    handle_provider_request_failure!(V3ResponsesRelayRuntimeError::Target(error));
-                }
-            };
         let transport_request = match bind_v3_selected_business_auth_kind(
             manifest,
             &selected.candidate,

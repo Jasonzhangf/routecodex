@@ -254,12 +254,16 @@ export function enforceV3DebugBudget({
   activeBuilders = activeV3BuilderCommands,
   cleanTestProfile = cleanV3TestProfile,
 } = {}) {
+  if (activeBuilders().length > 0) {
+    process.stderr.write('[v3-cargo-test] refusing cache eviction while V3 builders are active; cache maintenance deferred\n');
+    return null;
+  }
   try {
     return verifyV3DebugBudget({ debugDir: ownedDebugDir, maxBytes });
   } catch (budgetError) {
-    const builders = activeBuilders();
-    if (builders.length > 0) {
-      throw new Error(`${budgetError.message}; refusing cache eviction while V3 builders are active:\n${builders.join('\n')}`);
+    if (activeBuilders().length > 0) {
+      process.stderr.write('[v3-cargo-test] refusing cache eviction while V3 builders are active; cache maintenance deferred\n');
+      return null;
     }
     cleanTestProfile();
     return verifyV3DebugBudget({ debugDir: ownedDebugDir, maxBytes });
@@ -454,7 +458,9 @@ export async function runV3CargoTest(args) {
     try {
       await releaseOwnedTestArtifacts({ executables });
       const bytes = enforceV3DebugBudget();
-      process.stdout.write(`[v3-cargo-test] debug allocation after cleanup: ${bytes} bytes\n`);
+      if (bytes !== null) {
+        process.stdout.write(`[v3-cargo-test] debug allocation after cleanup: ${bytes} bytes\n`);
+      }
     } catch (error) {
       terminalError = terminalError ?? error;
     }

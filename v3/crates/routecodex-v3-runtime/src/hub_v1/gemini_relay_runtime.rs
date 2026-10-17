@@ -312,37 +312,6 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
         Ok(gemini_routing_payload(standardized, requested_model))
     }
 
-    fn build_transport_request(
-        request_id: &str,
-        target: V3ResponsesProviderTarget,
-        transport_intent: V3HubTransportIntent,
-        body: Value,
-        _provider_header_overrides: Vec<V3ProviderRequestHeader>,
-    ) -> Result<V3Transport13ResponsesHttpRequest, V3RelayCoreError> {
-        let protocol = super::provider_compat_shared::provider_wire_protocol_for_provider_type(
-            &target.provider_id,
-            &target.provider_type,
-        )
-        .map_err(V3RelayCoreError::Target)?;
-        let wire = routecodex_v3_provider_responses::build_v3_provider_12_responses_wire_payload(
-            request_id, target, body,
-        )
-        .map_err(|error| V3RelayCoreError::Target(error.to_string()))?;
-        let stream_intent = match transport_intent {
-            V3HubTransportIntent::Json => {
-                routecodex_v3_provider_responses::V3ResponsesStreamIntent::Json
-            }
-            V3HubTransportIntent::Sse => {
-                routecodex_v3_provider_responses::V3ResponsesStreamIntent::Sse
-            }
-        };
-        let wire = wire.with_stream_intent(stream_intent);
-        super::provider_compat_shared::build_v3_provider_transport_request_for_protocol(
-            protocol, wire,
-        )
-        .map_err(V3RelayCoreError::Target)
-    }
-
     fn project_json_response(
         request_id: &str,
         _session_id: &str,
@@ -644,13 +613,8 @@ fn project_json_response_with_source(
     );
     trace.push("V3ProviderRespInbound01Raw");
     let hooks = compile_v3_hub_relay_response_hooks();
-    let mut resp02 = hooks.normalize(resp01)?;
+    let mut resp02 = hooks.normalize_with_context(resp01, None, request_id)?;
     match provider_protocol {
-        V3HubProviderWireProtocol::Gemini => {
-            if let Some(request_id) = request_id {
-                resp02.normalize_gemini_business_response(request_id)?;
-            }
-        }
         V3HubProviderWireProtocol::OpenAiChat => {
             let canonical = super::responses_relay_runtime::build_v3_responses_provider_response_from_openai_chat_payload(
                 resp02.provider_payload(), chat_request,

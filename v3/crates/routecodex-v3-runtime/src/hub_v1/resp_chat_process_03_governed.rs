@@ -1029,6 +1029,8 @@ pub enum V3HubRelayResponseError {
 pub struct V3HubRelayResponseHookRegistry {
     normalize: fn(
         V3ProviderRespInbound01Raw,
+        Option<&Value>,
+        Option<&str>,
     ) -> Result<V3HubRespInbound02Normalized, V3HubRelayResponseError>,
     govern: fn(
         V3HubRespInbound02Normalized,
@@ -1042,7 +1044,16 @@ impl V3HubRelayResponseHookRegistry {
         &self,
         input: V3ProviderRespInbound01Raw,
     ) -> Result<V3HubRespInbound02Normalized, V3HubRelayResponseError> {
-        (self.normalize)(input)
+        self.normalize_with_context(input, None, None)
+    }
+
+    pub(crate) fn normalize_with_context(
+        &self,
+        input: V3ProviderRespInbound01Raw,
+        chat_request: Option<&Value>,
+        request_id: Option<&str>,
+    ) -> Result<V3HubRespInbound02Normalized, V3HubRelayResponseError> {
+        (self.normalize)(input, chat_request, request_id)
     }
 
     pub fn govern(
@@ -1068,6 +1079,8 @@ pub fn compile_v3_hub_relay_response_hooks() -> V3HubRelayResponseHookRegistry {
 
 fn normalize_v3_hub_relay_response(
     input: V3ProviderRespInbound01Raw,
+    chat_request: Option<&Value>,
+    request_id: Option<&str>,
 ) -> Result<V3HubRespInbound02Normalized, V3HubRelayResponseError> {
     if input.execution != V3HubExecutionMode::Relay {
         return Err(V3HubRelayResponseError::ExecutionModeNotRelay);
@@ -1085,8 +1098,12 @@ fn normalize_v3_hub_relay_response(
             }
         })?;
     Ok(
-        build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(compat)
-            .map_err(|error| V3HubRelayResponseError::ProviderCompatFailed { reason: error })?,
+        build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request_and_request_id(
+            compat,
+            chat_request,
+            request_id,
+        )
+        .map_err(|error| V3HubRelayResponseError::ProviderCompatFailed { reason: error })?,
     )
 }
 

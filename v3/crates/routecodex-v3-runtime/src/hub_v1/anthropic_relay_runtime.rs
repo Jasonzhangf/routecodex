@@ -713,15 +713,18 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             }
         };
         trace.push("ProviderReqCompat06ProviderCompat");
-        let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
-        let req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
-        let provider_semantic = req09.into_provider_semantic_payload();
-        let wire = match build_v3_provider_12_responses_wire_payload(
+        let stream_intent = (provider_wire_protocol == V3HubProviderWireProtocol::Gemini)
+            .then_some(match transport_intent {
+                V3HubTransportIntent::Json => V3ResponsesStreamIntent::Json,
+                V3HubTransportIntent::Sse => V3ResponsesStreamIntent::Sse,
+            });
+        let (req08, _) = match build_v3_provider_req_outbound_08_wire_from_compat_06(
+            req_compat,
             &input.request_id,
             target,
-            provider_semantic,
+            stream_intent,
         ) {
-            Ok(wire) => wire,
+            Ok(encoded) => encoded,
             Err(error) => handle_provider_request_failure!(
                 "V3ProviderReqOutbound08WirePayload",
                 "provider_request_wire_error",
@@ -729,60 +732,16 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             ),
         };
         trace.push("V3ProviderReqOutbound08WirePayload");
-        let transport_request = match provider_wire_protocol {
-            V3HubProviderWireProtocol::Responses => {
-                match build_v3_transport_13_responses_http_request_from_v3_provider_12(wire) {
-                    Ok(request) => request,
-                    Err(error) => handle_provider_request_failure!(
-                        "V3ProviderReqOutbound09TransportRequest",
-                        "provider_transport_request_error",
-                        error
-                    ),
-                }
-            }
-            V3HubProviderWireProtocol::Anthropic => {
-                match build_v3_anthropic_messages_transport_request_from_v3_provider_08_with_provider_headers(
-                    wire,
-                    provider_header_overrides.clone(),
-                ) {
-                    Ok(request) => request,
-                    Err(error) => handle_provider_request_failure!(
-                        "V3ProviderReqOutbound09TransportRequest",
-                        "provider_transport_request_error",
-                        error
-                    ),
-                }
-            }
-            V3HubProviderWireProtocol::OpenAiChat => {
-                match build_v3_provider_transport_request_for_protocol(
-                    V3HubProviderWireProtocol::OpenAiChat,
-                    wire,
-                ) {
-                    Ok(request) => request,
-                    Err(error) => handle_provider_request_failure!(
-                        "V3ProviderReqOutbound09TransportRequest",
-                        "provider_transport_request_error",
-                        error
-                    ),
-                }
-            }
-            V3HubProviderWireProtocol::Gemini => {
-                let wire = wire.with_stream_intent(match transport_intent {
-                    V3HubTransportIntent::Json => V3ResponsesStreamIntent::Json,
-                    V3HubTransportIntent::Sse => V3ResponsesStreamIntent::Sse,
-                });
-                match build_v3_provider_transport_request_for_protocol(
-                    V3HubProviderWireProtocol::Gemini,
-                    wire,
-                ) {
-                    Ok(request) => request,
-                    Err(error) => handle_provider_request_failure!(
-                        "V3ProviderReqOutbound09TransportRequest",
-                        "provider_transport_request_error",
-                        error
-                    ),
-                }
-            }
+        let transport_request = match build_v3_provider_req_outbound_09_transport_from_wire(
+            req08,
+            provider_header_overrides.clone(),
+        ) {
+            Ok(request) => request,
+            Err(error) => handle_provider_request_failure!(
+                "V3ProviderReqOutbound09TransportRequest",
+                "provider_transport_request_error",
+                error
+            ),
         };
         trace.push("V3ProviderReqOutbound09TransportRequest");
         let transport_request =

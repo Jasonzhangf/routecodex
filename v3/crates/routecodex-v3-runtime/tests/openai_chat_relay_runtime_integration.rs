@@ -226,12 +226,8 @@ async fn run_openai_chat_same_protocol_field_parity_request_response_matrix() {
     );
     assert_eq!(
         captured["tools"],
-        json!([{
-            "type": "function",
-            "name": "lookup",
-            "function": {"name": "lookup", "parameters": {"type": "object"}}
-        }]),
-        "openai_chat provider wire normalizes tools to dual-field shape (top-level name + nested function)"
+        payload["tools"],
+        "already projected standard Chat tools must reach transport without a second wire rewrite"
     );
     assert_eq!(captured["tool_choice"], payload["tool_choice"]);
     assert_eq!(

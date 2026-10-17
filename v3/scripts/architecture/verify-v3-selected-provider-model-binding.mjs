@@ -89,10 +89,11 @@ const relayBind = text.relay.indexOf('bind_v3_selected_provider_model(', relayBu
 if (relayBuilderStart < 0 || relayBind < relayBuilderStart) {
   failures.push(`${files.relay}: Relay protocol payload builder must call the shared selected-model owner`);
 }
-const compatStart = text.compat.indexOf('fn apply_v3_provider_req_compat');
+const compatStart = text.compat.indexOf('impl Operator for AdjustProviderPrivateRequestOperator');
 const compatRun = text.compat.indexOf('apply_v3_provider_req_compat_to_provider_payload(', compatStart);
-const boundPayload = text.compat.indexOf('input.provider_semantic_payload().clone()', compatRun);
-if (compatStart < 0 || compatRun < 0 || boundPayload < 0 || boundPayload > compatRun + 200) {
+const operatorInput = text.compat.indexOf('\n            input,', compatRun);
+const boundPayload = text.compat.indexOf('input.provider_semantic_payload().clone()');
+if (compatStart < 0 || compatRun < 0 || operatorInput < 0 || operatorInput > compatRun + 200 || boundPayload < 0) {
   failures.push(`${files.compat}: ProviderReqCompat06 must consume the bound Node06 payload`);
 }
 

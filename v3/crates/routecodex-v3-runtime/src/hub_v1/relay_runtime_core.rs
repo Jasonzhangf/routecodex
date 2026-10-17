@@ -343,15 +343,6 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
         standardized: &std::sync::Arc<Value>,
         requested_model: &str,
     ) -> Result<std::sync::Arc<Value>, V3RelayCoreError>;
-    /// 构建 provider transport request（协议 wire 差异；provider_header_overrides
-    /// 为入口携带的 provider 请求头覆盖，anthropic 用，其余协议传空）。
-    fn build_transport_request(
-        request_id: &str,
-        target: V3ResponsesProviderTarget,
-        transport_intent: V3HubTransportIntent,
-        body: Value,
-        provider_header_overrides: Vec<V3ProviderRequestHeader>,
-    ) -> Result<V3Transport13ResponsesHttpRequest, V3RelayCoreError>;
     /// JSON 响应投影（resp01 -> 02 -> 03 -> 04 -> 05 -> 06）。
     /// `retain_response_cipher`：请求侧 VR 路由决策算好的"保留响应密文"标记（仅 gpt
     /// 单 provider 候选时为 true），响应侧 Resp03 只消费该结果。
@@ -703,15 +694,31 @@ where
             ),
         };
         trace.push("ProviderReqCompat06ProviderCompat");
-        let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
-        let req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
-        let provider_semantic = req09.into_provider_semantic_payload();
-        trace.push("V3ProviderReqOutbound08WirePayload");
-        let transport_request = match C::build_transport_request(
+        let stream_intent = (provider_wire_protocol == V3HubProviderWireProtocol::Gemini)
+            .then_some(match transport_intent {
+                V3HubTransportIntent::Json => {
+                    routecodex_v3_provider_responses::V3ResponsesStreamIntent::Json
+                }
+                V3HubTransportIntent::Sse => {
+                    routecodex_v3_provider_responses::V3ResponsesStreamIntent::Sse
+                }
+            });
+        let (req08, _) = match build_v3_provider_req_outbound_08_wire_from_compat_06(
+            req_compat,
             request_id,
             target,
-            transport_intent,
-            provider_semantic,
+            stream_intent,
+        ) {
+            Ok(encoded) => encoded,
+            Err(error) => handle_provider_request_failure!(
+                "V3ProviderReqOutbound08WirePayload",
+                "provider_request_wire_error",
+                error
+            ),
+        };
+        trace.push("V3ProviderReqOutbound08WirePayload");
+        let transport_request = match build_v3_provider_req_outbound_09_transport_from_wire(
+            req08,
             provider_header_overrides.clone(),
         ) {
             Ok(request) => request,

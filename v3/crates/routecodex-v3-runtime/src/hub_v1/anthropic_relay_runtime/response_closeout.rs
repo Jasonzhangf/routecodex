@@ -13,7 +13,12 @@ where
     trace.push("V3ProviderRespInbound01Raw");
     let compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01_sse(resp01).await?;
     trace.push("ProviderRespCompat02ProviderCompat");
-    let resp02 = build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(compat)
+    let resp02 =
+        build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request_and_request_id(
+            compat,
+            None,
+            Some(request_id),
+        )
         .map_err(|error| V3AnthropicRelayRuntimeError::Target(error))?;
     trace.push("V3HubRespInbound02Normalized");
     closeout_anthropic_relay_normalized_response(
@@ -37,7 +42,7 @@ where
 {
     trace.push("V3ProviderRespInbound01Raw");
     let hooks = compile_v3_hub_relay_response_hooks();
-    let resp02 = hooks.normalize(resp01)?;
+    let resp02 = hooks.normalize_with_context(resp01, None, Some(request_id))?;
     trace.push("ProviderRespCompat02ProviderCompat");
     trace.push("V3HubRespInbound02Normalized");
     closeout_anthropic_relay_normalized_response(
@@ -50,7 +55,7 @@ where
 }
 
 fn closeout_anthropic_relay_normalized_response<F>(
-    mut resp02: V3HubRespInbound02Normalized,
+    resp02: V3HubRespInbound02Normalized,
     request_id: &str,
     response_hook_profile: &V3HubRelayResponseHookProfile,
     trace: &mut Vec<&'static str>,
@@ -64,15 +69,10 @@ where
     // Mode B hosted web_search 透传分支需要未剥离的 web_search tool_use）。
     let resp02_payload = resp02.provider_raw().payload.0.clone();
     if !crate::hub_v1::v3_provider_json_attempt_has_deliverable_business_content(
-        resp02.provider_raw().provider_protocol,
+        resp02.semantic_protocol(),
         &resp02_payload,
     ) {
         return Err(V3AnthropicRelayRuntimeError::ProviderResponseEmpty);
-    }
-    if resp02.provider_raw().provider_protocol == V3HubProviderWireProtocol::Gemini {
-        resp02
-            .normalize_gemini_business_response(request_id)
-            .map_err(V3AnthropicRelayRuntimeError::ExecutionControlResponse)?;
     }
     let stream_observation = V3RuntimeStreamObservation::default();
     crate::hub_v1::record_v3_toolreason_observation_at_resp03(

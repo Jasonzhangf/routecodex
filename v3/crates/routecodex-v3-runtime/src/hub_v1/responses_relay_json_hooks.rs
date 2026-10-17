@@ -68,12 +68,7 @@ pub(crate) fn run_json_response_hooks(
     );
     trace.push("V3ProviderRespInbound01Raw");
     let hooks = compile_v3_hub_relay_response_hooks();
-    let mut resp02 = hooks.normalize(resp01)?;
-    if input.provider_protocol == V3HubProviderWireProtocol::Gemini {
-        resp02
-            .normalize_gemini_business_response(input.request_id)
-            .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
-    }
+    let mut resp02 = hooks.normalize_with_context(resp01, None, Some(input.request_id))?;
     trace.push("ProviderRespCompat02ProviderCompat");
     if input.provider_protocol == V3HubProviderWireProtocol::OpenAiChat {
         let converted = build_v3_responses_provider_response_from_openai_chat_payload(
