@@ -634,13 +634,16 @@ fn project_json_response_with_source(
     trace.push("V3HubRespChatProcess03Governed");
     let (resp03, _, _) = resp03.into_parts();
     let resp05 = if request_id.is_some() {
-        let client = super::gemini_responses_codec::project_responses_to_gemini_client(
-            resp03.provider_payload(),
-            provider_protocol,
-        )?;
-        build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload(
-            resp03, client,
+        try_build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_projector(
+            resp03,
+            move |payload| {
+                super::gemini_responses_codec::project_responses_to_gemini_client(
+                    &payload,
+                    provider_protocol,
+                )
+            },
         )
+        .map_err(|error| V3GeminiRelayRuntimeError::Target(error.to_string()))?
     } else {
         build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03(resp03)
     };
