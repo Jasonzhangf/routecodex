@@ -266,7 +266,7 @@
   </tr>
 <tr>
     <td><span class="badge extension_declared">extension_declared</span></td>
-    <td><code>226</code></td>
+    <td><code>227</code></td>
     <td>The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed.</td>
   </tr>
 <tr>
@@ -308,7 +308,7 @@
 <tr>
     <td><code>gap.runtime_extension_declared</code></td>
     <td><span class="badge runtime_closeout">runtime_closeout</span></td>
-    <td><ul class="field-list"><li><code>extension_declared</code></li></ul><div>count: <code>226</code></div></td>
+    <td><ul class="field-list"><li><code>extension_declared</code></li></ul><div>count: <code>227</code></div></td>
     <td>Long-tail semantics now have protocol-neutral OpenAI Chat extension fields and owners, but no runtime conversion completion claim.</td>
     <td><code>v3 protocol codec owner selected per field family</code><br><span class="badge needs_runtime_goal">needs_runtime_goal</span><br><span class="muted">Add red fixture, implement adjacent codec/Chat Process owner, add source/blackbox/live evidence before changing status to covered or partial.</span></td>
   </tr>
@@ -3411,8 +3411,8 @@
       <p>这一张是主审计表：每行以 OpenAI Chat 字段为主键。若是 OpenAI Chat 原生字段，主键必须和 OpenAI Chat source inventory 完全同名；若 OpenAI Chat 没有该语义，主键才是新增 extension 字段。表中逐字段列出 semantic id、request/response direction、Responses / OpenAI Chat / Anthropic / Gemini 等价字段，以及 owner、current_impl、gap。没有等价语义会明确显示 <code>—</code>，方便审计是否还有超集外语义。</p>
       <div class="grid">
     <article class="card"><h3>Contract</h3><div class="source-meta"><div>Chat Process protocol is OpenAI Chat plus extension fields. The canonical semantic id is the same string as fields[].extended_openai_chat_field. OpenAI Chat native request/response fields keep their exact OpenAI Chat field paths, including [] item notation; only semantics absent from OpenAI Chat receive protocol-neutral top-level request./response./edge. extension fields. Every source protocol field is mapped exactly once or explicitly classified as edge_only / unsupported_blocked. Runtime does not read this audit artifact.</div><div>base protocol: <code>openai_chat</code></div></div></article>
-    <article class="card"><h3>Coverage</h3><div class="source-meta"><div>OpenAI Chat superset rows: <code>270</code></div><div>native OpenAI Chat exact-name rows: <code>86</code></div><div>added extension rows: <code>183</code></div><div>source fields: <ul class="field-list"><li><code>responses=114</code></li><li><code>openai_chat=86</code></li><li><code>anthropic=82</code></li><li><code>gemini=121</code></li></ul></div></div></article>
-    <article class="card"><h3>Mapping status</h3><div class="source-meta"><div><span class="badge mapped">mapped</span> <code>82</code></div><div><span class="badge extension_added">extension_added</span> <code>183</code></div><div><span class="badge edge_only">edge_only</span> <code>5</code></div></div></article>
+    <article class="card"><h3>Coverage</h3><div class="source-meta"><div>OpenAI Chat superset rows: <code>271</code></div><div>native OpenAI Chat exact-name rows: <code>86</code></div><div>added extension rows: <code>184</code></div><div>source fields: <ul class="field-list"><li><code>responses=114</code></li><li><code>openai_chat=86</code></li><li><code>anthropic=82</code></li><li><code>gemini=121</code></li></ul></div></div></article>
+    <article class="card"><h3>Mapping status</h3><div class="source-meta"><div><span class="badge mapped">mapped</span> <code>82</code></div><div><span class="badge extension_added">extension_added</span> <code>184</code></div><div><span class="badge edge_only">edge_only</span> <code>5</code></div></div></article>
   </div><div class="table-wrap"><table>
     <thead><tr><th>OpenAI Chat field (native or extension)</th><th>canonical semantic id</th><th>direction / status</th><th>Responses equivalent fields</th><th>OpenAI Chat native / extended fields</th><th>Anthropic equivalent fields</th><th>Gemini equivalent fields</th><th>owner / current_impl / gap</th></tr></thead>
     <tbody><tr>
@@ -4544,6 +4544,16 @@
     <td><span class="muted">— no Anthropic equivalent</span></td>
     <td><ul class="field-list"><li><code>request.contents[].parts[].thoughtSignature</code></li></ul></td>
     <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">runtime mapping partial or extension-only gap</span><details><summary>extension <code>thought_signature</code></summary><div>owner: <code>chat.extensions.gemini.thought_signature</code></div><div><span class="badge extension_declared">extension_declared</span></div></details></td>
+  </tr>
+<tr>
+    <td class="standard-cell"><code>request.messages.parts_items.gemini_native_fields</code><br><span class="muted">added Chat extension field</span></td>
+    <td class="standard-cell"><code>request.messages.parts_items.gemini_native_fields</code></td>
+    <td><span class="badge request">request</span><br><span class="badge extension_added">extension_added</span></td>
+    <td><span class="muted">— no Responses equivalent</span></td>
+    <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
+    <td><span class="muted">— no Anthropic equivalent</span></td>
+    <td><span class="muted">— no Gemini equivalent</span></td>
+    <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Gemini request inbound residual carrier implemented; Gemini projector (T1) inverse still pending</span></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>request.messages.parts_items.tool_call.args</code><br><span class="muted">added Chat extension field</span></td>

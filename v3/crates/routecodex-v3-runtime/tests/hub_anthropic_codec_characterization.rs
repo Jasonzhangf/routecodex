@@ -1,7 +1,7 @@
 #![allow(clippy::bool_comparison)]
 
 use routecodex_v3_runtime::{
-    characterize_v3_anthropic_client_input_to_hub_semantic,
+    build_v3_hub_req_inbound_01_client_raw, characterize_v3_anthropic_client_input_to_hub_semantic,
     characterize_v3_anthropic_hub_response_semantic_to_client_projection,
     characterize_v3_anthropic_hub_semantic_to_provider_wire,
     characterize_v3_anthropic_provider_raw_to_hub_response_semantic,
@@ -10,11 +10,27 @@ use routecodex_v3_runtime::{
     encode_v3_responses_semantic_as_anthropic_request,
     project_v3_anthropic_message_as_responses_response,
     project_v3_anthropic_message_as_responses_response_with_context,
-    project_v3_responses_json_as_anthropic_message, V3AnthropicChatShapeBranchSemantic,
-    V3AnthropicCodecError, V3AnthropicCodecStage, V3AnthropicResponsesProjectionContext,
-    V3HubEntryProtocol, V3HubProviderWireProtocol, V3HubTransportIntent,
+    project_v3_responses_json_as_anthropic_message, run_v3_anthropic_relay_runtime_req_inbound,
+    V3AnthropicChatShapeBranchSemantic, V3AnthropicCodecError, V3AnthropicCodecStage,
+    V3AnthropicResponsesProjectionContext, V3HubEntryProtocol, V3HubInvocationSource,
+    V3HubProviderWireProtocol, V3HubTransportIntent,
 };
 use serde_json::json;
+
+#[test]
+fn anthropic_message_source_scalar_and_array_keep_their_shapes() {
+    let scalar = encode_v3_anthropic_request_as_responses_semantic(json!({
+        "messages":[{"role":"user","content":"hello"}]
+    }))
+    .unwrap();
+    assert_eq!(scalar["input"][0]["content"], "hello");
+    let array = encode_v3_anthropic_request_as_responses_semantic(json!({
+        "messages":[{"role":"user","content":[{"type":"text","text":"one"},{"type":"text","text":"two","cache_control":{"type":"ephemeral"}}]}]
+    })).unwrap();
+    assert!(array["input"][0]["content"].is_array());
+    assert_eq!(array["input"][0]["content"][0]["text"], "one");
+    assert_eq!(array["input"][0]["content"][1]["text"], "two");
+}
 
 #[test]
 fn request_characterization_preserves_anthropic_json_tool_result_and_reasoning_shape() {
@@ -2852,5 +2868,103 @@ fn anthropic_native_tool_use_remains_projectable_tool_reason_source() {
     assert_eq!(
         client["content"][0]["input"]["reason"],
         "执行 ping 命令进行探测"
+    );
+}
+
+#[test]
+fn anthropic_tool_use_thought_signature_reaches_chat_consumer_verbatim() {
+    let signature = "opaque/anthropic/signature/+==";
+    let request = json!({
+        "model":"claude-sonnet",
+        "messages":[{
+            "role":"assistant",
+            "content":[{
+                "type":"tool_use",
+                "id":"toolu_signed",
+                "name":"lookup",
+                "input":{"q":"x"},
+                "thought_signature":signature
+            }]
+        }]
+    });
+
+    let semantic = encode_v3_anthropic_request_as_responses_semantic(request.clone())
+        .expect("signed tool_use");
+    assert_eq!(
+        semantic["input"][0]["thought_signature"],
+        json!(signature),
+        "the function_call constructor must preserve the provided signature: {semantic}"
+    );
+
+    let normalized =
+        run_v3_anthropic_relay_runtime_req_inbound(build_v3_hub_req_inbound_01_client_raw(
+            request,
+            V3HubEntryProtocol::Anthropic,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        ))
+        .expect("Anthropic tool_use must reach the Chat consumer");
+    let call = normalized.payload()["messages"]
+        .as_array()
+        .and_then(|messages| {
+            messages
+                .iter()
+                .find(|message| message["role"] == "assistant")
+        })
+        .and_then(|message| message["tool_calls"].as_array())
+        .and_then(|calls| calls.iter().find(|call| call["id"] == "toolu_signed"))
+        .expect("signed tool call in Chat canonical payload");
+    assert_eq!(
+        call["thought_signature"],
+        json!(signature),
+        "the existing Chat consumer must receive the exact signature: {}",
+        normalized.payload()
+    );
+}
+
+#[test]
+fn anthropic_tool_use_without_thought_signature_does_not_synthesize_one() {
+    let request = json!({
+        "model":"claude-sonnet",
+        "messages":[{
+            "role":"assistant",
+            "content":[{
+                "type":"tool_use",
+                "id":"toolu_unsigned",
+                "name":"lookup",
+                "input":{"q":"x"}
+            }]
+        }]
+    });
+
+    let semantic = encode_v3_anthropic_request_as_responses_semantic(request.clone())
+        .expect("unsigned tool_use");
+    assert!(
+        semantic["input"][0].get("thought_signature").is_none(),
+        "the function_call constructor must not invent a signature: {semantic}"
+    );
+
+    let normalized =
+        run_v3_anthropic_relay_runtime_req_inbound(build_v3_hub_req_inbound_01_client_raw(
+            request,
+            V3HubEntryProtocol::Anthropic,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        ))
+        .expect("unsigned Anthropic tool_use must reach the Chat consumer");
+    let call = normalized.payload()["messages"]
+        .as_array()
+        .and_then(|messages| {
+            messages
+                .iter()
+                .find(|message| message["role"] == "assistant")
+        })
+        .and_then(|message| message["tool_calls"].as_array())
+        .and_then(|calls| calls.iter().find(|call| call["id"] == "toolu_unsigned"))
+        .expect("unsigned tool call in Chat canonical payload");
+    assert!(
+        call.get("thought_signature").is_none(),
+        "the Chat consumer must not synthesize a signature: {}",
+        normalized.payload()
     );
 }

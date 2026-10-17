@@ -469,11 +469,14 @@ async fn anthropic_responses_field_parity_request_matrix() {
 }
 
 #[tokio::test]
-async fn anthropic_structured_system_extension_is_not_silently_flattened_for_responses() {
-    let scope = "anthropic_structured_system_unmapped";
+async fn anthropic_structured_system_extension_preserves_blocks_for_responses() {
+    let scope = "anthropic_structured_system_preserved";
     let transport = MatrixJsonTransport {
         captured: Mutex::new(None),
-        response: json!({"id":"unused","status":"completed","output":[]}),
+        response: json!({
+            "id":"resp-structured-system", "status":"completed", "model":"responses-wire-model",
+            "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ack"}]}]
+        }),
     };
     let output = execute_v3_anthropic_relay_runtime(
         &manifest(scope),
@@ -504,23 +507,30 @@ async fn anthropic_structured_system_extension_is_not_silently_flattened_for_res
     .await
     .unwrap();
 
-    assert_eq!(output.status, 598, "runtime output: {output:?}");
-    assert!(transport.captured.lock().unwrap().is_none());
+    assert_eq!(output.status, 200, "runtime output: {output:?}");
+    assert!(output.error_chain.is_none(), "{output:?}");
+    assert_eq!(output.client_response["content"][0]["text"], "ack");
+    let body = transport
+        .captured
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("provider request must be sent");
+    assert_eq!(body["input"][0]["role"], "system");
     assert_eq!(
-        output.client_response["error"]["code"],
-        "provider_request_payload_invalid"
+        body["input"][0]["content"],
+        json!([{
+            "type":"input_text", "text":"cache this system block"
+        }])
     );
-    assert!(
-        output.client_response["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("UnmappedOutboundFields")),
-        "structured Anthropic system semantics must fail explicitly when Responses has no exact field: {output:?}"
-    );
+    assert_eq!(body["routecodex_chat_extension"]["anthropic_request"]["system"], json!([{
+        "type":"text", "cache_control":{"type":"ephemeral"}
+    }]), "mapped text belongs to governed instructions; native residuals retain their source block association");
     assert!(output
         .node_trace
         .contains(&"ProviderReqCompat06ProviderCompat"));
     assert!(!output.node_trace.contains(&"V3TargetPolicyRetriedSame"));
-    assert!(!output
+    assert!(output
         .node_trace
         .contains(&"V3ProviderReqOutbound09TransportRequest"));
 }

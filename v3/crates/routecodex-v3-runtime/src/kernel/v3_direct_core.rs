@@ -427,6 +427,33 @@ where
                 )
             }
         };
+        let provider_protocol = match crate::hub_v1::provider_wire_protocol_for_selected_candidate(
+            &selected.candidate,
+        ) {
+            Ok(protocol) => protocol,
+            Err(error) => {
+                return error_output(
+                    runtime_source("V3Transport13ResponsesHttpRequest", error),
+                    trace,
+                    &crate::hooks::register_responses_direct_hooks(),
+                )
+            }
+        };
+        let transport_request = match crate::hub_v1::bind_v3_selected_business_auth_kind(
+            manifest,
+            &selected.candidate,
+            provider_protocol,
+            transport_request,
+        ) {
+            Ok(request) => request,
+            Err(error) => {
+                return error_output(
+                    runtime_source("V3Transport13ResponsesHttpRequest", error),
+                    trace,
+                    &crate::hooks::register_responses_direct_hooks(),
+                )
+            }
+        };
         let handoff_scope = match C::provider_transport_handoff_scope(&standardized) {
             Ok(scope) => scope,
             Err(error) => {

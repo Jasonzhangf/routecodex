@@ -6,7 +6,43 @@ pub(super) enum V3ResponsesDirectServerOutcome {
     ProviderTerminal(routecodex_v3_error::V3ProviderTerminalDisposition),
 }
 
-pub(super) async fn execute_responses_direct_server_outcome(
+pub(super) fn execute_responses_direct_server_outcome<'a>(
+    state: &'a V3ListenerState,
+    request_headers: &'a HeaderMap,
+    method: String,
+    path: String,
+    request_id: String,
+    pipeline_id: Option<String>,
+    execution_id: String,
+    payload: serde_json::Value,
+    responses_protocol_plan: Option<&'a V3ResponsesProtocolExecutionPlan>,
+    observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
+    request_execution_control: Option<V3RequestExecutionControl>,
+    provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
+    route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
+    request_purpose: V3RequestPurpose,
+) -> std::pin::Pin<Box<impl std::future::Future<Output = V3ResponsesDirectServerOutcome> + Send + 'a>>
+{
+    // Construct this future outside the shared protocol-dispatch poll frame.
+    Box::pin(execute_responses_direct_server_outcome_inner(
+        state,
+        request_headers,
+        method,
+        path,
+        request_id,
+        pipeline_id,
+        execution_id,
+        payload,
+        responses_protocol_plan,
+        observability_accumulator,
+        request_execution_control,
+        provider_failure_event_sink,
+        route_selection_event_sink,
+        request_purpose,
+    ))
+}
+
+async fn execute_responses_direct_server_outcome_inner(
     state: &V3ListenerState,
     request_headers: &HeaderMap,
     method: String,

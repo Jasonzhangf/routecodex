@@ -30,7 +30,7 @@ export function describeTurns(fixture) {
       turn_id: turn?.turn_id ?? null,
       request: isFirst ? (turn?.client_request ?? fixture.client_request) : turn?.client_request ?? null,
       providerExpected: turn?.expected_provider_exact
-        ? { ...(fixture.expected_provider ?? {}), exact: turn.expected_provider_exact }
+        ? { ...laterTurnProviderShape(fixture.expected_provider ?? {}), exact: turn.expected_provider_exact }
         : (isFirst ? fixture.expected_provider : null),
       clientExpected: describeClientExpected(fixture, turn, isFirst),
       upstream: isFirst
@@ -42,6 +42,16 @@ export function describeTurns(fixture) {
     });
   }
   return turns;
+}
+
+// A later turn's `expected_provider_exact` is the complete intended provider
+// body for that turn. Inherit only the stable non-body assertions (method,
+// paths, auth, forbidden keys); the first-turn `body_must` subset describes the
+// first turn and would contradict the later turn's exact body.
+function laterTurnProviderShape(provider) {
+  const stable = { ...provider };
+  delete stable.body_must;
+  return stable;
 }
 
 function describeClientExpected(fixture, turn, isFirst) {

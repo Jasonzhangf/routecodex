@@ -92,6 +92,216 @@ fn responses_input_image_url_maps_to_openai_chat_image_url_url() {
         "OpenAI Chat provider wire must not emit bare string image_url: {request}"
     );
 }
+
+#[test]
+fn responses_text_array_preserves_multiple_empty_and_sibling_fields() {
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": "alpha",
+                    "annotations": [{
+                        "type": "url_citation",
+                        "start_index": 0,
+                        "end_index": 5,
+                        "url": "https://example.com/alpha"
+                    }],
+                    "future_sibling": {"keep": true}
+                },
+                {"type": "input_text", "text": ""},
+                {
+                    "type": "output_text",
+                    "text": "omega",
+                    "annotations": []
+                }
+            ]
+        }]
+    }))
+    .expect("text arrays must preserve source part boundaries and sibling data");
+
+    let content = request["messages"][0]["content"]
+        .as_array()
+        .unwrap_or_else(|| panic!("text array must stay an array: {request}"));
+    assert_eq!(
+        content,
+        &vec![
+            json!({
+                "type": "text",
+                "text": "alpha",
+                "annotations": [{
+                    "type": "url_citation",
+                    "start_index": 0,
+                    "end_index": 5,
+                    "url": "https://example.com/alpha"
+                }],
+                "future_sibling": {"keep": true}
+            }),
+            json!({"type": "text", "text": ""}),
+            json!({"type": "text", "text": "omega", "annotations": []})
+        ]
+    );
+}
+
+#[test]
+fn responses_scalar_input_content_stays_scalar() {
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": "hello"
+    }))
+    .expect("scalar Responses input must canonicalize");
+
+    assert_eq!(request["messages"][0]["content"], json!("hello"));
+}
+
+#[test]
+fn responses_singleton_text_array_stays_array() {
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "hello"}]
+        }]
+    }))
+    .expect("singleton Responses text array must canonicalize");
+
+    assert_eq!(
+        request["messages"][0]["content"],
+        json!([{"type": "text", "text": "hello"}])
+    );
+}
+
+#[test]
+fn responses_mixed_text_image_preserves_text_siblings_and_order() {
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": "before",
+                    "annotations": [{"type": "custom_note", "value": "keep"}],
+                    "future_sibling": "keep"
+                },
+                {
+                    "type": "input_image",
+                    "image_url": "data:image/png;base64,AAAA",
+                    "detail": "high"
+                },
+                {"type": "input_text", "text": "after"}
+            ]
+        }]
+    }))
+    .expect("mixed Responses content must preserve text/image boundaries");
+
+    let content = request["messages"][0]["content"]
+        .as_array()
+        .unwrap_or_else(|| panic!("mixed content must stay an array: {request}"));
+    assert_eq!(
+        content,
+        &vec![
+            json!({
+                "type": "text",
+                "text": "before",
+                "annotations": [{"type": "custom_note", "value": "keep"}],
+                "future_sibling": "keep"
+            }),
+            json!({
+                "type": "image_url",
+                "image_url": {
+                    "url": "data:image/png;base64,AAAA",
+                    "detail": "high"
+                }
+            }),
+            json!({"type": "text", "text": "after"})
+        ]
+    );
+}
+
+#[test]
+fn responses_structured_or_absent_text_is_not_replaced_with_empty_text() {
+    let source = json!([
+        {"type":"input_text","text":{"nested":[1,true,null]},"tag":"structured"},
+        {"type":"input_text","tag":"absent"}
+    ]);
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "input":[{"type":"message","role":"user","content":source}]
+    }))
+    .unwrap();
+    let parts = &request["messages"][0]["content"];
+    assert_eq!(
+        parts[0]["text"],
+        serde_json::to_string(&source[0]["text"]).unwrap()
+    );
+    assert_eq!(parts[0]["tag"], "structured");
+    assert!(parts[1].get("text").is_none());
+    assert_eq!(parts[1]["tag"], "absent");
+}
+
+#[test]
+fn responses_tool_only_function_call_omits_synthetic_empty_content() {
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [{
+            "type": "function_call",
+            "call_id": "call_tool_only",
+            "namespace": "codex_tui",
+            "name": "send_message_to_thread",
+            "arguments": "{\"thread_id\":\"thread-1\",\"message\":\"hello\"}"
+        }]
+    }))
+    .expect("tool-only function_call must canonicalize");
+
+    let assistant = &request["messages"][0];
+    assert_eq!(assistant["role"], json!("assistant"));
+    assert!(
+        assistant.get("content").is_none(),
+        "newly synthesized tool-only assistant must omit empty content: {request}"
+    );
+    assert_eq!(assistant["tool_calls"][0]["id"], json!("call_tool_only"));
+    assert_eq!(
+        assistant["tool_calls"][0]["function"]["name"],
+        json!("codex_tui__send_message_to_thread")
+    );
+    assert_eq!(
+        assistant["tool_calls"][0]["function"]["arguments"],
+        json!("{\"thread_id\":\"thread-1\",\"message\":\"hello\"}")
+    );
+}
+
+#[test]
+fn responses_function_call_preserves_source_content_and_reasoning() {
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [{
+            "type": "function_call",
+            "call_id": "call_with_content",
+            "name": "lookup",
+            "arguments": "{\"q\":\"x\"}",
+            "content": [{"type": "output_text", "text": "source text"}],
+            "reasoning_content": "source reasoning"
+        }]
+    }))
+    .expect("source-provided function_call content must canonicalize");
+
+    let assistant = &request["messages"][0];
+    assert_eq!(
+        assistant["content"],
+        json!([{"type": "text", "text": "source text"}])
+    );
+    assert_eq!(assistant["reasoning_content"], json!("source reasoning"));
+    assert_eq!(
+        assistant["tool_calls"][0]["function"]["arguments"],
+        json!("{\"q\":\"x\"}")
+    );
+}
+
 #[test]
 fn responses_web_search_current_turn_item_projects_to_canonical_tools() {
     let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({
@@ -358,7 +568,10 @@ fn responses_web_search_call_projects_to_openai_chat_tool_pair_with_synthetic_id
     assert_eq!(result["type"], json!("web_search_call"));
     assert_eq!(result["status"], json!("failed"));
     assert_eq!(result["action"], arguments);
-    assert_eq!(messages[2], json!({"role": "user", "content": "继续"}));
+    assert_eq!(
+        messages[2],
+        json!({"role": "user", "content": [{"type": "text", "text": "继续"}]})
+    );
 }
 #[test]
 fn responses_tool_search_call_and_output_normalize_as_adjacent_chat_extensions() {
@@ -456,7 +669,10 @@ fn responses_tool_search_call_and_output_normalize_as_adjacent_chat_extensions()
             "responses_execution": "client"
         })
     );
-    assert_eq!(messages[2], json!({"role": "user", "content": "继续"}));
+    assert_eq!(
+        messages[2],
+        json!({"role": "user", "content": [{"type": "text", "text": "继续"}]})
+    );
     assert!(
         messages.iter().all(|message| {
             message.get("type").and_then(Value::as_str) != Some("tool_search_call")
@@ -811,6 +1027,6 @@ fn responses_system_message_between_pending_tool_call_and_result_defers_to_prese
     assert_eq!(messages[2]["role"], json!("system"));
     assert_eq!(
         messages[2]["content"],
-        json!("system after pending tool call")
+        json!([{"type": "text", "text": "system after pending tool call"}])
     );
 }

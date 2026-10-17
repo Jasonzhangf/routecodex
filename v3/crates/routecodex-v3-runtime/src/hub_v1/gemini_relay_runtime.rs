@@ -155,6 +155,23 @@ pub async fn execute_v3_gemini_relay_runtime_with_default_transport_provider_hea
     .await
 }
 
+pub async fn execute_v3_gemini_relay_runtime_with_default_transport_provider_health_and_handoff(
+    manifest: &V3Config05ManifestPublished,
+    input: V3GeminiRelayRuntimeInput,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    handoff: crate::V3ResponsesProtocolRelayHandoff,
+) -> Result<V3GeminiRelayRuntimeOutput, V3GeminiRelayRuntimeError> {
+    execute_v3_gemini_relay_runtime_inner(
+        manifest,
+        input,
+        &ReqwestResponsesTransport::default(),
+        provider_health,
+        V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
+        Some(handoff),
+    )
+    .await
+}
+
 pub async fn execute_v3_gemini_relay_runtime<T: ResponsesTransport>(
     manifest: &V3Config05ManifestPublished,
     input: V3GeminiRelayRuntimeInput,
@@ -181,6 +198,7 @@ pub async fn execute_v3_gemini_relay_runtime_with_provider_health<T: ResponsesTr
         transport,
         provider_health,
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
+        None,
     )
     .await
 }
@@ -191,12 +209,17 @@ async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(
     transport: &T,
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3RelayProviderFailureRetryPolicy,
+    mut initial_handoff: Option<crate::V3ResponsesProtocolRelayHandoff>,
 ) -> Result<V3GeminiRelayRuntimeOutput, V3GeminiRelayRuntimeError> {
     // 统一 relay 主循环骨架（大骨架）：生命周期与编排在 execute_v3_relay_runtime_core，
     // 协议差异收敛在 V3GeminiRelayCodec。
     let routing_group = server_routing_group(manifest, &input.server_id)
         .map_err(|error| V3GeminiRelayRuntimeError::Target(error.to_string()))?
         .to_string();
+    let mut failure_events = initial_handoff
+        .as_mut()
+        .map(|handoff| std::mem::take(&mut handoff.provider_failure_events))
+        .unwrap_or_default();
     execute_v3_relay_runtime_core::<V3GeminiRelayCodec, T>(
         manifest,
         &input.server_id,
@@ -210,8 +233,8 @@ async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(
         retry_policy,
         Vec::new(),
         true,
-        None,
-        &mut Vec::new(),
+        initial_handoff,
+        &mut failure_events,
     )
     .await
     .map_err(|error| match error {
@@ -239,12 +262,13 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
 
     const ENTRY_PROTOCOL: V3HubEntryProtocol = V3HubEntryProtocol::Gemini;
     const ENTRY_KIND: &'static str = "gemini";
-    const EXPECTED_PROVIDER_TYPE: Option<&'static str> = Some("Gemini");
+    const EXPECTED_PROVIDER_TYPE: Option<&'static str> = None;
 
     fn wire_protocol(
-        _selected: &routecodex_v3_target::V3TargetCandidate,
+        selected: &routecodex_v3_target::V3TargetCandidate,
     ) -> Result<V3HubProviderWireProtocol, V3RelayCoreError> {
-        Ok(V3HubProviderWireProtocol::Gemini)
+        super::provider_compat_shared::provider_wire_protocol_for_selected_candidate(selected)
+            .map_err(V3RelayCoreError::Target)
     }
 
     fn request_hook_profile(
@@ -295,16 +319,36 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
         body: Value,
         _provider_header_overrides: Vec<V3ProviderRequestHeader>,
     ) -> Result<V3Transport13ResponsesHttpRequest, V3RelayCoreError> {
-        build_v3_gemini_transport_09(request_id, target, transport_intent, body)
-            .map_err(|error| V3RelayCoreError::Target(error.to_string()))
+        let protocol = super::provider_compat_shared::provider_wire_protocol_for_provider_type(
+            &target.provider_id,
+            &target.provider_type,
+        )
+        .map_err(V3RelayCoreError::Target)?;
+        let wire = routecodex_v3_provider_responses::build_v3_provider_12_responses_wire_payload(
+            request_id, target, body,
+        )
+        .map_err(|error| V3RelayCoreError::Target(error.to_string()))?;
+        let stream_intent = match transport_intent {
+            V3HubTransportIntent::Json => {
+                routecodex_v3_provider_responses::V3ResponsesStreamIntent::Json
+            }
+            V3HubTransportIntent::Sse => {
+                routecodex_v3_provider_responses::V3ResponsesStreamIntent::Sse
+            }
+        };
+        let wire = wire.with_stream_intent(stream_intent);
+        super::provider_compat_shared::build_v3_provider_transport_request_for_protocol(
+            protocol, wire,
+        )
+        .map_err(V3RelayCoreError::Target)
     }
 
     fn project_json_response(
-        _request_id: &str,
+        request_id: &str,
         _session_id: &str,
         provider_value: Value,
-        _provider_wire_protocol: V3HubProviderWireProtocol,
-        _chat_request: &Value,
+        provider_wire_protocol: V3HubProviderWireProtocol,
+        chat_request: &Value,
         transport_intent: V3HubTransportIntent,
         trace: &mut Vec<&'static str>,
         compatibility_profile: Option<&str>,
@@ -314,8 +358,11 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
         tool_thinking_enabled: bool,
         _expected_model_id: &str,
     ) -> Result<Value, V3RelayCoreError> {
-        project_json_response(
+        project_json_response_with_source(
             provider_value,
+            Some(request_id),
+            provider_wire_protocol,
+            chat_request,
             transport_intent,
             trace,
             compatibility_profile,
@@ -348,9 +395,9 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
     }
 
     fn project_sse(
-        _request_id: &str,
+        request_id: &str,
         provider: V3ProviderSseStream,
-        _provider_wire_protocol: V3HubProviderWireProtocol,
+        provider_wire_protocol: V3HubProviderWireProtocol,
         compatibility_profile: Option<String>,
         _web_search_execution_mode: V3WebSearchExecutionMode,
         _web_search_state: Option<V3WebSearchCenterState>,
@@ -360,6 +407,36 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
         _client_include_usage: bool,
         outcome: V3GeminiSseProviderOutcome,
     ) -> Result<V3RelayProjectedSseStream, V3RelayCoreError> {
+        if provider_wire_protocol != V3HubProviderWireProtocol::Gemini {
+            let request_id = request_id.to_owned();
+            let mut outcome = outcome;
+            return Ok(Box::pin(futures_util::stream::once(async move {
+                let projected = async {
+                    let value = super::responses_relay_runtime::materialize_v3_provider_sse_as_canonical_response(
+                        provider_wire_protocol, provider,
+                    ).await.map_err(|error| error.to_string())?;
+                    let client = project_json_response_with_source(
+                        value, Some(&request_id), provider_wire_protocol, &Value::Null,
+                        V3HubTransportIntent::Sse, &mut Vec::new(),
+                        compatibility_profile.as_deref(), _retain_response_cipher, tool_thinking_enabled,
+                    ).map_err(|error| error.to_string())?;
+                    let mut frame = b"data: ".to_vec();
+                    serde_json::to_writer(&mut frame, &client).map_err(|error| error.to_string())?;
+                    frame.extend_from_slice(b"\n\n");
+                    Ok::<_, String>(frame)
+                }.await;
+                match projected {
+                    Ok(frame) => {
+                        outcome.record_success()?;
+                        Ok(frame)
+                    }
+                    Err(error) => {
+                        let recorded = outcome.record_failure(&error).await;
+                        Err(recorded.map(|_| error).unwrap_or_else(|error| error))
+                    }
+                }
+            })));
+        }
         Ok(project_sse_stream(
             provider,
             compatibility_profile,
@@ -530,15 +607,35 @@ fn project_json_response(
     retain_response_cipher: bool,
     tool_thinking_enabled: bool,
 ) -> Result<Value, V3GeminiRelayRuntimeError> {
-    validate_v3_gemini_provider_response_payload(
-        &provider_value,
+    project_json_response_with_source(
+        provider_value,
+        None,
         V3HubProviderWireProtocol::Gemini,
-    )?;
+        &Value::Null,
+        transport_intent,
+        trace,
+        compatibility_profile,
+        retain_response_cipher,
+        tool_thinking_enabled,
+    )
+}
+
+fn project_json_response_with_source(
+    provider_value: Value,
+    request_id: Option<&str>,
+    provider_protocol: V3HubProviderWireProtocol,
+    chat_request: &Value,
+    transport_intent: V3HubTransportIntent,
+    trace: &mut Vec<&'static str>,
+    compatibility_profile: Option<&str>,
+    retain_response_cipher: bool,
+    tool_thinking_enabled: bool,
+) -> Result<Value, V3GeminiRelayRuntimeError> {
     let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
         provider_value,
         V3ProviderRespInbound01RawContext::new(
             V3HubEntryProtocol::Gemini,
-            V3HubProviderWireProtocol::Gemini,
+            provider_protocol,
             V3HubExecutionMode::Relay,
             V3HubInvocationSource::Client,
             transport_intent,
@@ -547,7 +644,21 @@ fn project_json_response(
     );
     trace.push("V3ProviderRespInbound01Raw");
     let hooks = compile_v3_hub_relay_response_hooks();
-    let resp02 = hooks.normalize(resp01)?;
+    let mut resp02 = hooks.normalize(resp01)?;
+    match provider_protocol {
+        V3HubProviderWireProtocol::Gemini => {
+            if let Some(request_id) = request_id {
+                resp02.normalize_gemini_business_response(request_id)?;
+            }
+        }
+        V3HubProviderWireProtocol::OpenAiChat => {
+            let canonical = super::responses_relay_runtime::build_v3_responses_provider_response_from_openai_chat_payload(
+                resp02.provider_payload(), chat_request,
+            ).map_err(|error| V3GeminiRelayRuntimeError::Target(error.to_string()))?;
+            resp02.set_responses_semantic_payload(canonical);
+        }
+        _ => {}
+    }
     trace.push("ProviderRespCompat02ProviderCompat");
     trace.push("V3HubRespInbound02Normalized");
     let resp03 = hooks.govern(
@@ -558,7 +669,17 @@ fn project_json_response(
     )?;
     trace.push("V3HubRespChatProcess03Governed");
     let (resp03, _, _) = resp03.into_parts();
-    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03(resp03);
+    let resp05 = if request_id.is_some() {
+        let client = super::gemini_responses_codec::project_responses_to_gemini_client(
+            resp03.provider_payload(),
+            provider_protocol,
+        )?;
+        build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload(
+            resp03, client,
+        )
+    } else {
+        build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03(resp03)
+    };
     trace.push("V3HubRespOutbound05ClientSemantic");
     let client = resp05.client_payload().clone();
     let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
@@ -820,13 +941,21 @@ fn provider_failure_output(
     }
 }
 
-fn gemini_model_from_endpoint_path(
+pub(crate) fn gemini_model_from_endpoint_path(
     endpoint_path: &str,
 ) -> Result<String, V3GeminiRelayRuntimeError> {
     let model = endpoint_path
         .strip_prefix("/v1beta/models/")
-        .and_then(|value| value.strip_suffix("/generateContent"))
-        .filter(|value| !value.is_empty() && !value.contains('/'))
+        .and_then(|value| {
+            [
+                "/generateContent",
+                ":generateContent",
+                ":streamGenerateContent",
+            ]
+            .iter()
+            .find_map(|action| value.strip_suffix(action))
+        })
+        .filter(|value| !value.is_empty() && !value.contains('/') && !value.contains(':'))
         .ok_or_else(|| V3GeminiRelayRuntimeError::EndpointPath(endpoint_path.to_string()))?;
     Ok(model.to_string())
 }

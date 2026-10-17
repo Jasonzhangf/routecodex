@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "case_id": "media-gemini-function-response-image",
-  "cell": {"entry_protocol": "gemini", "provider_protocol": "openai_chat", "transport": "sse", "mode": "relay"},
+  "cell": {"entry_protocol": "gemini", "provider_protocol": "openai_chat", "transport": "json", "mode": "relay"},
   "client_request": {
     "method": "POST",
     "path": "/v1beta/models/mock.chat-model:generateContent",
@@ -21,12 +21,17 @@
     "auth_required": true,
     "body_must": {
       "model": "chat-model",
-      "messages.0.content": "用一句中文说出图中底部字幕和左上角水印",
+      "messages.0.content": [{"type": "text", "text": "用一句中文说出图中底部字幕和左上角水印"}],
+      "messages.1.tool_calls.0.id": "call_462432",
       "messages.1.tool_calls.0.function.name": "view_file",
       "messages.1.tool_calls.0.function.arguments": "{\"AbsolutePath\":\"/path/to/frame.jpg\",\"toolAction\":\"Viewing image file\",\"toolSummary\":\"View frame.jpg\"}",
       "messages.2.role": "tool",
       "messages.2.tool_call_id": "call_462432",
-      "messages.2.content.0.image_url.url": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8U"
+      "messages.2.content": "{\"output\":\"...The following is the entire, complete content of the requested file.\"}",
+      "messages.3.role": "user",
+      "messages.3.content": [
+        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8U"}}
+      ]
     },
     "body_must_not": ["routecodex_internal", "metadata_center", "debug_snapshot"],
     "exact": null
@@ -45,7 +50,7 @@
   "expected_client": {
     "transport": "complete",
     "status": 200,
-    "body_must": {"text": "OK", "finishReason": "STOP"},
+    "body_must": {"candidates.0.content.parts.0.text": "OK", "candidates.0.finishReason": "STOP"},
     "body_must_not": ["provider_error", "internal_error", "routecodex_internal", "metadata_center"],
     "semantic_terminal_required": true
   },

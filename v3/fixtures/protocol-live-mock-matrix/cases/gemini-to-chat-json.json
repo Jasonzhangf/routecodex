@@ -12,7 +12,7 @@
     "paths": ["/v1/chat/completions"],
     "method": "POST",
     "auth_required": true,
-    "body_must": {"model": "chat-model", "messages.0.role": "user", "messages.0.content": "hello"},
+    "body_must": {"model": "chat-model", "messages.0.role": "user", "messages.0.content": [{"type":"text","text":"hello"}]},
     "body_must_not": ["routecodex_internal", "metadata_center", "debug_snapshot"],
     "exact": null
   },

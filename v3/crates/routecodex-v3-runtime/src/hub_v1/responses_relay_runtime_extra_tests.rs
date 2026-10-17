@@ -7,6 +7,100 @@ mod notification_tests;
 mod internal_transport_tests;
 
 #[test]
+fn responses_relay_json_projects_legacy_output_text_items_without_losing_fields() {
+    let provider_response = json!({
+        "id": "resp_json_legacy_output_items",
+        "status": "completed",
+        "output": [
+            {
+                "type": "output_text",
+                "id": "legacy_structured_text",
+                "text": {"segments": ["alpha", 2, true, null]},
+                "annotations": [{
+                    "type": "url_citation",
+                    "url": "https://example.test/source",
+                    "start_index": 0,
+                    "end_index": 5
+                }],
+                "unknown_attr": {"nested": ["value", 7]}
+            },
+            {
+                "type": "output_text",
+                "id": "legacy_missing_text",
+                "annotations": [],
+                "unknown_attr": "keep-missing-text-absence"
+            },
+            {
+                "type": "message",
+                "id": "standard_message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "already standard"}],
+                "unknown_message_attr": {"kept": true}
+            },
+            {
+                "type": "function_call",
+                "id": "standard_tool",
+                "call_id": "call_standard_tool",
+                "name": "lookup",
+                "arguments": "{\"query\":\"unchanged\"}"
+            }
+        ]
+    });
+    let response = project_v3_responses_client_completed_response(&provider_response);
+
+    let output = response["output"]
+        .as_array()
+        .expect("client output must remain an array");
+    assert_eq!(output.len(), 4, "output item order must be preserved");
+
+    let structured = &output[0];
+    assert_eq!(structured["type"], "message");
+    assert_eq!(structured["role"], "assistant");
+    assert_eq!(structured["id"], "legacy_structured_text");
+    let structured_part = &structured["content"][0];
+    assert_eq!(structured_part["type"], "output_text");
+    assert_eq!(
+        structured_part["text"],
+        serde_json::to_string(&provider_response["output"][0]["text"]).unwrap()
+    );
+    assert_eq!(
+        structured_part["annotations"],
+        provider_response["output"][0]["annotations"]
+    );
+    assert_eq!(
+        structured_part["unknown_attr"],
+        provider_response["output"][0]["unknown_attr"]
+    );
+    assert!(
+        structured_part.get("id").is_none(),
+        "the legacy item id belongs on the message wrapper: {structured}"
+    );
+
+    let missing_text = &output[1];
+    assert_eq!(missing_text["type"], "message");
+    assert_eq!(missing_text["id"], "legacy_missing_text");
+    let missing_text_part = &missing_text["content"][0];
+    assert_eq!(missing_text_part["type"], "output_text");
+    assert!(
+        missing_text_part.get("text").is_none(),
+        "a missing provider text must stay absent instead of becoming an empty string"
+    );
+    assert_eq!(
+        missing_text_part["unknown_attr"],
+        "keep-missing-text-absence"
+    );
+
+    assert_eq!(
+        output[2], provider_response["output"][2],
+        "an existing standard message must pass through unchanged"
+    );
+    assert_eq!(
+        output[3], provider_response["output"][3],
+        "an existing tool item must pass through unchanged after the legacy items"
+    );
+}
+
+#[test]
 fn malformed_tool_output_missing_call_id_projects_client_400_not_598() {
     let payload = serde_json::json!({
         "input": [{"type": "function_call_output", "output": "tool result"}]

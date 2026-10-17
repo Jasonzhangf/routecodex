@@ -296,14 +296,11 @@ fn govern_protocol_tool_identity_at_req04(
             govern_openai_chat_tool_identity_at_req04(messages)?;
             Ok(true)
         }
-        V3HubEntryProtocol::Gemini => {
-            let Some(contents) = payload.get("contents").and_then(Value::as_array) else {
-                return Ok(false);
-            };
-            govern_gemini_tool_identity_at_req04(contents)?;
-            Ok(true)
-        }
-        V3HubEntryProtocol::Responses | V3HubEntryProtocol::Anthropic => Ok(false),
+        // Gemini 请求在 ReqInbound02 已归一化为 canonical Chat `messages`；其工具历史
+        // 由下方 canonical Chat 治理统一处理，不再对原始 `contents` 二次治理。
+        V3HubEntryProtocol::Gemini
+        | V3HubEntryProtocol::Responses
+        | V3HubEntryProtocol::Anthropic => Ok(false),
     }
 }
 
@@ -350,48 +347,6 @@ fn govern_openai_chat_tool_identity_at_req04(
                     index,
                     reason: "orphan tool_call_id",
                 });
-            }
-        }
-    }
-    Ok(())
-}
-
-fn govern_gemini_tool_identity_at_req04(contents: &[Value]) -> Result<(), V3HubRelayRequestError> {
-    let mut declared = BTreeSet::new();
-    for (index, content) in contents.iter().enumerate() {
-        let Some(parts) = content.get("parts").and_then(Value::as_array) else {
-            continue;
-        };
-        for part in parts {
-            if let Some(function_call) = part.get("functionCall") {
-                let name = function_call
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .filter(|name| !name.is_empty())
-                    .ok_or(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
-                        protocol: "gemini",
-                        index,
-                        reason: "functionCall.name is required",
-                    })?;
-                declared.insert(name.to_owned());
-            }
-            if let Some(function_response) = part.get("functionResponse") {
-                let name = function_response
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .filter(|name| !name.is_empty())
-                    .ok_or(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
-                        protocol: "gemini",
-                        index,
-                        reason: "functionResponse.name is required",
-                    })?;
-                if !declared.contains(name) {
-                    return Err(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
-                        protocol: "gemini",
-                        index,
-                        reason: "orphan functionResponse.name",
-                    });
-                }
             }
         }
     }
@@ -502,14 +457,25 @@ fn govern_chat_tool_outputs_at_req04(
             _ => continue,
         }
         output_count = output_count.saturating_add(1);
-        let call_id = message
+        let Some(call_id) = message
             .get("tool_call_id")
             .or_else(|| message.get("call_id"))
             .or_else(|| message.get("id"))
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
             .map(str::to_owned)
-            .ok_or(V3HubRelayRequestError::MalformedToolOutput { index })?;
+        else {
+            // 原生（Gemini）no-id tool receipt 没有可配对的 id，也不生成 id；它以
+            // `routecodex_chat_extension.gemini_native_fields` 的显式 source 关联
+            // 保留在 canonical 历史里。这里只计数，不按 canonical id 规则判 malformed。
+            if message
+                .pointer("/routecodex_chat_extension/gemini_native_fields")
+                .is_some()
+            {
+                continue;
+            }
+            return Err(V3HubRelayRequestError::MalformedToolOutput { index });
+        };
         let expected_kinds = expected_outputs.get(&call_id).ok_or_else(|| {
             V3HubRelayRequestError::OrphanToolOutput {
                 index,

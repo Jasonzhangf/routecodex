@@ -106,6 +106,84 @@ test('generateRccConfig writes a supported execution policy and receipts the wri
   }
 });
 
+test('generateRccConfig authors the declared runtime attempt_store policy', async () => {
+  const budgetCases = [
+    { attempt_max_bytes: 1024 },
+    { attempt_max_bytes: 16384, attempt_max_frames: 4 },
+  ];
+  for (const [index, attemptStore] of budgetCases.entries()) {
+    const workRoot = mkdtempSync(join(tmpdir(), `lifecycle-attempt-store-test-${index}-`));
+    const generated = await generateRccConfig({
+      mockPort: 12345, rccPort: 12346, adminPort: 12350 + index, providerProtocol: 'openai_chat',
+      mode: 'relay', workRoot,
+      runtimeSetup: {
+        provider_id: 'mock-openai_chat',
+        model: 'mock.chat-model',
+        wire_model: 'chat-model',
+        candidate_ids: ['mock-openai_chat/mock.chat-model'],
+        attempt_store: attemptStore,
+      },
+    });
+    try {
+      // The declared budget lands in the V3 owner's field, not a local echo.
+      assert.deepEqual(generated.attempt_store, attemptStore);
+      assert.equal(generated.attempt_store_receipt.configured, true);
+      assert.deepEqual(generated.attempt_store_receipt.policy, attemptStore);
+      assert.equal(
+        generated.attempt_store_receipt.config_section,
+        'servers.loopback.execution.attempt_store',
+      );
+      const actual = readFileSync(generated.path, 'utf8');
+      assert.match(actual, /\[servers\.loopback\.execution\]/u);
+      for (const [key, value] of Object.entries(attemptStore)) {
+        assert.ok(
+          actual.includes(`${key} = ${value}`),
+          `authored config must declare ${key} = ${value}`,
+        );
+      }
+    } finally {
+      generated.cleanup();
+      rmSync(workRoot, { recursive: true, force: true });
+    }
+  }
+});
+
+test('generateRccConfig rejects an unsupported or non-positive attempt_store field', async () => {
+  const workRoot = mkdtempSync(join(tmpdir(), 'lifecycle-attempt-store-reject-'));
+  try {
+    await assert.rejects(
+      generateRccConfig({
+        mockPort: 12345, rccPort: 12346, adminPort: 12360, providerProtocol: 'openai_chat',
+        workRoot,
+        runtimeSetup: {
+          provider_id: 'mock-openai_chat',
+          model: 'mock.chat-model',
+          wire_model: 'chat-model',
+          candidate_ids: ['mock-openai_chat/mock.chat-model'],
+          attempt_store: { attempt_max_bytes: 0 },
+        },
+      }),
+      /attempt_max_bytes must be a positive integer/u,
+    );
+    await assert.rejects(
+      generateRccConfig({
+        mockPort: 12345, rccPort: 12346, adminPort: 12361, providerProtocol: 'openai_chat',
+        workRoot,
+        runtimeSetup: {
+          provider_id: 'mock-openai_chat',
+          model: 'mock.chat-model',
+          wire_model: 'chat-model',
+          candidate_ids: ['mock-openai_chat/mock.chat-model'],
+          attempt_store: { attempt_max_bytez: 1024 },
+        },
+      }),
+      /attempt_max_bytez is not a supported field/u,
+    );
+  } finally {
+    rmSync(workRoot, { recursive: true, force: true });
+  }
+});
+
 test('generateRccConfig overrides an inherited 8777 admin bind with a task-owned port', async () => {
   const previous = process.env.ROUTECODEX_V3_ADMIN_BIND;
   process.env.ROUTECODEX_V3_ADMIN_BIND = '127.0.0.1:8777';

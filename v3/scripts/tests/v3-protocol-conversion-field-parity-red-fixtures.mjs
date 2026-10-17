@@ -103,7 +103,7 @@ const cases = [
   },
   {
     name: 'Audit truth status count drifts from matrix', file: matrix,
-    from: '    extension_declared: 226\n', to: '    extension_declared: 225\n',
+    from: '    extension_declared: 227\n', to: '    extension_declared: 226\n',
     diagnostic: /audited_status_counts\.extension_declared|must equal current_impl count/u,
   },
   {

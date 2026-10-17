@@ -350,3 +350,175 @@ fn project_anthropic_sse_as_openai_chat_stream(
         },
     ))
 }
+
+/// Gemini wire SSE -> native JSON -> governed OpenAI Chat JSON -> Chat SSE.
+///
+/// The full attempt stays buffered until materialization and projection finish.
+/// Provider outcome is recorded only after every normal frame is prepared, so a
+/// rejected or unprojectable attempt cannot become a provider success.
+fn project_gemini_sse_as_openai_chat_stream(
+    request_id: String,
+    session_id: String,
+    stream: routecodex_v3_provider_responses::V3ProviderSseStream,
+    compatibility_profile: Option<String>,
+    web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
+    web_search_center_state: Option<V3WebSearchCenterState>,
+    retain_response_cipher: bool,
+    tool_thinking_enabled: bool,
+    _stream_observation: V3RuntimeStreamObservation,
+    _client_include_usage: bool,
+    mut provider_outcome: V3OpenAiChatSseProviderOutcome,
+) -> V3RelayProjectedSseStream {
+    use futures_util::StreamExt;
+
+    Box::pin(
+        futures_util::stream::once(async move {
+            let native = match crate::hub_v1::responses_relay_runtime::materialize_v3_provider_sse_as_canonical_response(
+                V3HubProviderWireProtocol::Gemini,
+                stream,
+            )
+            .await
+            {
+                Ok(native) => native,
+                Err(error) => {
+                    let reason = error.to_string();
+                    let recorded = provider_outcome.record_failure(&reason).await;
+                    return Err(recorded.map(|_| reason).unwrap_or_else(|record| record));
+                }
+            };
+
+            let projected = match project_json_response(
+                Some(&request_id),
+                Some(&session_id),
+                native,
+                V3HubProviderWireProtocol::Gemini,
+                &Value::Null,
+                V3HubTransportIntent::Sse,
+                &mut Vec::new(),
+                compatibility_profile.as_deref(),
+                web_search_execution_mode,
+                web_search_center_state.as_ref(),
+                retain_response_cipher,
+                tool_thinking_enabled,
+                &provider_outcome.model_id,
+            ) {
+                Ok(projected) => projected,
+                Err(error) => {
+                    let reason = match error {
+                        V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected => {
+                            "ROUTECODEX_GOVERNANCE_REJECTED".to_string()
+                        }
+                        other => other.to_string(),
+                    };
+                    if reason.starts_with("ROUTECODEX_GOVERNANCE_REJECTED") {
+                        return Err(reason);
+                    }
+                    let recorded = provider_outcome.record_failure(&reason).await;
+                    return Err(recorded.map(|_| reason).unwrap_or_else(|record| record));
+                }
+            };
+
+            let Value::Object(mut chat) = projected else {
+                let reason = "projected OpenAI Chat response is not a JSON object".to_string();
+                let recorded = provider_outcome.record_failure(&reason).await;
+                return Err(recorded.map(|_| reason).unwrap_or_else(|record| record));
+            };
+
+            let choices = chat
+                .get("choices")
+                .and_then(Value::as_array)
+                .cloned()
+                .ok_or_else(|| "governed Chat response is missing choices".to_string())?;
+            let usage = chat.remove("usage");
+            chat.remove("choices");
+            chat.insert(
+                "object".to_string(),
+                Value::String("chat.completion.chunk".to_string()),
+            );
+
+            let mut frames = Vec::<Vec<u8>>::new();
+            let mut append_chunk = |chunk: &Value| -> Result<(), String> {
+                let encoded = serde_json::to_string(chunk).map_err(|error| error.to_string())?;
+                frames.push(format!("data: {encoded}\n\n").into_bytes());
+                Ok(())
+            };
+
+            for choice in choices.iter() {
+                let choice_object = choice.as_object()
+                    .ok_or_else(|| "governed Chat choice is not an object".to_string())?;
+
+                if let Some(message) = choice_object.get("message").cloned() {
+                    let mut delta = message;
+                    if let Some(delta_object) = delta.as_object_mut() {
+                        if let Some(tool_calls) = delta_object
+                            .get_mut("tool_calls")
+                            .and_then(Value::as_array_mut)
+                        {
+                            for (index, tool_call) in tool_calls.iter_mut().enumerate() {
+                                if let Some(tool_call_object) = tool_call.as_object_mut() {
+                                    tool_call_object.insert(
+                                        "index".to_string(),
+                                        Value::Number(index.into()),
+                                    );
+                                }
+                            }
+                        }
+                    }
+
+                    let mut chunk_choice = choice_object.clone();
+                    chunk_choice.remove("message");
+                    chunk_choice.remove("finish_reason");
+                    chunk_choice.insert("delta".to_string(), delta);
+
+                    let mut chunk = chat.clone();
+                    chunk.insert(
+                        "choices".to_string(),
+                        Value::Array(vec![Value::Object(chunk_choice)]),
+                    );
+                    if let Err(reason) = append_chunk(&Value::Object(chunk)) {
+                        let recorded = provider_outcome.record_failure(&reason).await;
+                        return Err(recorded.map(|_| reason).unwrap_or_else(|record| record));
+                    }
+                }
+
+                if let Some(finish_reason) = choice_object.get("finish_reason").cloned() {
+                    let mut terminal_choice = choice_object.clone();
+                    terminal_choice.remove("message");
+                    terminal_choice.insert("delta".to_string(), Value::Object(Default::default()));
+                    terminal_choice.insert("finish_reason".to_string(), finish_reason);
+
+                    let mut chunk = chat.clone();
+                    chunk.insert(
+                        "choices".to_string(),
+                        Value::Array(vec![Value::Object(terminal_choice)]),
+                    );
+                    if let Err(reason) = append_chunk(&Value::Object(chunk)) {
+                        let recorded = provider_outcome.record_failure(&reason).await;
+                        return Err(recorded.map(|_| reason).unwrap_or_else(|record| record));
+                    }
+                }
+            }
+
+            if let Some(usage) = usage {
+                    let mut chunk = chat.clone();
+                    chunk.insert("choices".to_string(), Value::Array(Vec::new()));
+                    chunk.insert("usage".to_string(), usage);
+                    if let Err(reason) = append_chunk(&Value::Object(chunk)) {
+                        let recorded = provider_outcome.record_failure(&reason).await;
+                        return Err(recorded.map(|_| reason).unwrap_or_else(|record| record));
+                    }
+            }
+
+            frames.push(b"data: [DONE]\n\n".to_vec());
+            provider_outcome.record_success()?;
+            Ok(frames)
+        })
+        .flat_map(|result: Result<Vec<Vec<u8>>, String>| {
+            let frames: Vec<Result<Vec<u8>, String>> = match result {
+                Ok(frames) => frames.into_iter().map(Ok).collect(),
+                Err(error) => vec![Err(error)],
+            };
+            futures_util::stream::iter(frames)
+        }),
+    )
+}

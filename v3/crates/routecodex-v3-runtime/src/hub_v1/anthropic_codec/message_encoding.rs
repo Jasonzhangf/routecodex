@@ -41,7 +41,7 @@ pub(super) fn encode_anthropic_messages_as_responses_semantic(
             Some(Value::String(text)) => {
                 encoded.push(json!({
                     "role":role,
-                    "content":[{"type":"input_text","text":text}]
+                    "content":text
                 }));
             }
             Some(Value::Array(parts)) => {
@@ -109,7 +109,11 @@ pub(super) fn encode_anthropic_messages_as_responses_semantic(
                                 }
                                 encoded.push(call);
                             } else {
-                                encoded.push(json!({"type":"function_call","call_id":part.get("id").cloned().unwrap_or(Value::Null),"name":part.get("name").cloned().unwrap_or(Value::Null),"arguments":serde_json::to_string(part.get("input").unwrap_or(&Value::Null)).map_err(|_| V3AnthropicCodecError::MalformedField { field: "tool_use input" })?}));
+                                let mut call = json!({"type":"function_call","call_id":part.get("id").cloned().unwrap_or(Value::Null),"name":part.get("name").cloned().unwrap_or(Value::Null),"arguments":serde_json::to_string(part.get("input").unwrap_or(&Value::Null)).map_err(|_| V3AnthropicCodecError::MalformedField { field: "tool_use input" })?});
+                                if let Some(signature) = part.get("thought_signature") {
+                                    call["thought_signature"] = signature.clone();
+                                }
+                                encoded.push(call);
                             }
                         }
                         Some("tool_result") => {
