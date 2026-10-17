@@ -1,5 +1,5 @@
 #[tokio::test]
-async fn unmatched_transient_error_releases_transient_admission_before_terminal_wait() {
+async fn unmatched_transient_last_candidate_recovery_is_admissible() {
     let scope = "unmatched_transient_terminal";
     let source = r#"
 version = 3
@@ -66,14 +66,28 @@ targets = [
     .await
     .expect("unmatched transient must project through the policy");
 
-    assert_eq!(result.event.action, "terminal_route_and_default_exhausted");
-    assert!(result.retry_selected.is_none());
+    assert_eq!(result.event.action, "retry_last_routable");
+    assert_eq!(result.event.wait_ms, Some(1_000));
     assert!(same_candidate_retries.is_empty());
-    let projection = result
-        .terminal_projection
-        .expect("unmatched transient exhaustion must be terminal");
-    assert_eq!(projection.status, 502);
-    assert_eq!(projection.body["error"]["code"], "network_error");
+    assert!(result.terminal_projection.is_none());
+    let V3Error05ExecutionAction::WaitThenRetrySame { recovery } = &result.decision.action else {
+        panic!("last candidate must retain its recovery witness");
+    };
+    let transition = health
+        .wait_for_error05_recovery(
+            recovery,
+            result
+                .retry_selected
+                .as_ref()
+                .expect("last candidate retained"),
+            std::time::Instant::now() + std::time::Duration::from_secs(3),
+        )
+        .await
+        .expect("unmatched transient recovery must remain admissible");
+    assert!(matches!(
+        transition,
+        crate::provider_action_gate::V3ProviderActionRecoveryTransition::Admitted(_)
+    ));
 }
 
 #[tokio::test]
@@ -145,7 +159,11 @@ async fn unmatched_transient_reselect_keeps_returned_recovery_witness_admissible
 
     let transition = tokio::time::timeout(
         Duration::from_secs(30),
-        health.wait_for_error05_recovery(recovery, reselected, std::time::Instant::now() + Duration::from_secs(30)),
+        health.wait_for_error05_recovery(
+            recovery,
+            reselected,
+            std::time::Instant::now() + Duration::from_secs(30),
+        ),
     )
     .await
     .expect("unmatched transient reselect must not hang on recovery admission")

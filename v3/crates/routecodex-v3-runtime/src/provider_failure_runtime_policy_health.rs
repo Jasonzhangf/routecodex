@@ -30,7 +30,7 @@ impl V3ProviderFailureRuntimeHealth {
 
     #[cfg(test)]
     pub(crate) fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
-        Self::from_manifest_for_tests(manifest)
+        Self::from_manifest_for_isolated_tests(manifest)
     }
 
     #[cfg(not(test))]

@@ -689,7 +689,7 @@ chains:
     owner_feature_id: v3.virtual_router_target_interpreter
     semantic_contract:
       - Relay failure handling expands only the captured route plan and reselects from Target09 without Router reentry.
-      - Error03 request-local exclusions prevent reuse of a failed provider candidate.
+      - Error03 excludes a failed identity only after selecting another eligible candidate; the last eligible identity remains routable for bounded cyclic recovery.
       - Reselection preserves the same Target09 context-admission truth and does not infer tokens from the prior provider error.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan]

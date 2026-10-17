@@ -192,21 +192,23 @@ async fn witness(startup: bool) {
             }
         }
     });
-    // No scheduler exists while the real business failures establish cooldown.
+    let now_ms = v3_relay_provider_policy_now_epoch_ms().unwrap();
+    // Cooldown is arranged directly on the typed health-store owner. Business requests
+    // stay free for the control-capacity controls this case actually measures, so no
+    // request occupies local capacity only to create the schedule.
     for id in ids.iter().filter(|id| !startup || *id == &ids[4]) {
-        let result = timeout(
-            Duration::from_secs(2),
-            business(
-                manifest.clone(),
-                health.clone(),
-                format!("{id}.recovery"),
-                "genuine failure",
-            ),
-        )
-        .await
-        .unwrap();
-        eprintln!("focused genuine failure result={result:?}");
-        assert!(result.error_chain.is_some());
+        health
+            .store
+            .record_provider_cooldown_failure_for_interface(
+                id,
+                "default",
+                Some("key"),
+                Some("recovery"),
+                "controlled cooldown scheduling",
+                now_ms,
+                5_000,
+            )
+            .expect("typed health store must accept controlled cooldown");
     }
     let deadlines: Vec<_> = ids
         .iter()
@@ -240,6 +242,21 @@ async fn witness(startup: bool) {
         .unwrap()
         .unwrap()
         .forget();
+    // Explicit probe-control leases pin the four identities that this witness
+    // exercises. They are separate from the business requests and are released
+    // before the final control-capacity assertions.
+    let mut control_leases = Vec::new();
+    for id in &ids[..4] {
+        let key = format!("{id}:key");
+        controller
+            .ensure_initial_budget(&key, 1)
+            .expect("control lease budget");
+        control_leases.push(
+            controller
+                .try_acquire_business(&key)
+                .expect("control lease acquisition"),
+        );
+    }
     for id in &ids[..4] {
         assert_eq!(
             controller.snapshot(&format!("{id}:key")).unwrap().in_flight,
@@ -386,6 +403,9 @@ async fn witness(startup: bool) {
             .unwrap()
             .error_chain
             .is_none());
+    }
+    for lease in control_leases {
+        controller.release(lease.into_permit()).unwrap();
     }
     for id in &ids {
         assert_eq!(

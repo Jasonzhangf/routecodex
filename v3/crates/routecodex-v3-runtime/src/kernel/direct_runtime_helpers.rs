@@ -277,9 +277,31 @@ async fn run_v3_direct_provider_failure_policy_inner<R: V3ProviderAvailabilityRe
                 .and_then(|error| error.code.as_deref()),
         );
     let failed_key = candidate_key(&selected.candidate);
-    let (last_routable, health_record) = context
-        .provider_health
-        .record_candidate_failure(
+    let record_failure = || {
+        if is_request_local_compat_failure {
+            Ok(V3ProviderFailureRecord {
+                scope_label: failed_key.clone(),
+                provider_key: failed_key.clone(),
+                state: "request_local_provider_compat".to_string(),
+                failure_count: 0,
+                cooldown_until_ms: None,
+                reason: (!source.message.trim().is_empty()).then(|| source.message.clone()),
+            })
+        } else {
+            record_v3_direct_provider_failure_record(
+                context.provider_health,
+                context.failure_session_scope,
+                selected,
+                &source,
+                context.now_epoch_ms,
+            )
+            .map_err(|error| error.message)
+        }
+    };
+    let (last_routable, health_record) = if is_request_local_compat_failure {
+        record_failure().map(|record| (false, record))
+    } else {
+        context.provider_health.record_candidate_failure(
             context.failure_session_scope,
             selected,
             if context.provider_pinned {
@@ -292,29 +314,10 @@ async fn run_v3_direct_provider_failure_policy_inner<R: V3ProviderAvailabilityRe
             state.failed_candidates,
             context.now_epoch_ms,
             Some(&source.message),
-            || {
-                if is_request_local_compat_failure {
-                    Ok(V3ProviderFailureRecord {
-                        scope_label: failed_key.clone(),
-                        provider_key: failed_key.clone(),
-                        state: "request_local_provider_compat".to_string(),
-                        failure_count: 0,
-                        cooldown_until_ms: None,
-                        reason: (!source.message.trim().is_empty()).then(|| source.message.clone()),
-                    })
-                } else {
-                    record_v3_direct_provider_failure_record(
-                        context.provider_health,
-                        context.failure_session_scope,
-                        selected,
-                        &source,
-                        context.now_epoch_ms,
-                    )
-                    .map_err(|error| error.message)
-                }
-            },
+            record_failure,
         )
-        .map_err(|error| runtime_source("V3ProviderHealthStateMutated", error))?;
+    }
+    .map_err(|error| runtime_source("V3ProviderHealthStateMutated", error))?;
     let expanded_candidates = match (context.expanded, context.provider_pinned) {
         (Some(expanded), _) => Some(&expanded.candidates),
         (None, true) => None,

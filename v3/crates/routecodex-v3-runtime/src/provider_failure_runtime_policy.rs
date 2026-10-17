@@ -608,14 +608,10 @@ fn expand_captured_provider_failure_target(
 
 async fn reselect_from_captured_target_plan(
     context: &V3RelayProviderFailurePolicyContext<'_>,
-    selected: &V3Target10ConcreteProviderSelected,
+    expanded: V3Target09CandidateSetExpanded,
     request_local_excluded_candidates: &BTreeSet<String>,
     now_ms: u64,
 ) -> V3RelayProviderTargetResolution {
-    let expanded = match expand_captured_provider_failure_target(context, selected) {
-        Ok(expanded) => expanded,
-        Err(source) => return V3RelayProviderTargetResolution::Failed(source),
-    };
     match select_v3_expanded_target_with_exhaustion_rescue(
         context.manifest,
         expanded,
@@ -680,48 +676,53 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     // failure action builder classifies them as recoverable, so they enter
     // the shared rolling score/cooldown path instead of a synthetic local
     // record.
-    let captured_target = expand_captured_provider_failure_target(context, &selected)
-        .map_err(|source| source.message)?;
-    let (last_routable, health_record) = context.provider_health.record_candidate_failure(
-        &context.failure_session_scope,
-        &selected,
-        &captured_target.candidates,
-        state.failed_candidates,
-        v3_relay_provider_policy_now_epoch_ms()?,
-        reason,
-        || {
-            if is_request_local_compat_failure {
-                Ok(V3ProviderFailureRecord {
-                    scope_label: candidate_key.clone(),
-                    provider_key: candidate_key.clone(),
-                    state: "request_local_provider_compat".to_string(),
-                    failure_count: 0,
-                    cooldown_until_ms: None,
-                    reason: reason.map(str::to_string),
-                })
-            } else {
-                context
-                    .provider_health
-                    .record_provider_failure_record_with_policy_for_interface(
-                        matched_policy,
-                        context.manifest,
-                        &context.failure_session_scope,
-                        &selected.candidate.provider_id,
-                        &selected.candidate.interface_id,
-                        Some(&selected.candidate.provider_type),
-                        Some(&selected.candidate.auth_alias),
-                        Some(&selected.candidate.model_id),
-                        reason,
-                        source_stage,
-                        status,
-                        error_type.as_deref(),
-                        &message,
-                        v3_relay_provider_policy_now_epoch_ms()?,
-                    )
-                    .map_err(|error| error.to_string())
-            }
-        },
-    )?;
+    let captured_target = expand_captured_provider_failure_target(context, &selected);
+    let record_failure = || {
+        if is_request_local_compat_failure {
+            Ok(V3ProviderFailureRecord {
+                scope_label: candidate_key.clone(),
+                provider_key: candidate_key.clone(),
+                state: "request_local_provider_compat".to_string(),
+                failure_count: 0,
+                cooldown_until_ms: None,
+                reason: reason.map(str::to_string),
+            })
+        } else {
+            context
+                .provider_health
+                .record_provider_failure_record_with_policy_for_interface(
+                    matched_policy,
+                    context.manifest,
+                    &context.failure_session_scope,
+                    &selected.candidate.provider_id,
+                    &selected.candidate.interface_id,
+                    Some(&selected.candidate.provider_type),
+                    Some(&selected.candidate.auth_alias),
+                    Some(&selected.candidate.model_id),
+                    reason,
+                    source_stage,
+                    status,
+                    error_type.as_deref(),
+                    &message,
+                    v3_relay_provider_policy_now_epoch_ms()?,
+                )
+                .map_err(|error| error.to_string())
+        }
+    };
+    let (last_routable, health_record) = match captured_target.as_ref() {
+        Ok(expanded) if !is_request_local_compat_failure => {
+            context.provider_health.record_candidate_failure(
+                &context.failure_session_scope,
+                &selected,
+                &expanded.candidates,
+                state.failed_candidates,
+                v3_relay_provider_policy_now_epoch_ms()?,
+                reason,
+                record_failure,
+            )?
+        }
+        _ => (false, record_failure()?),
+    };
     if last_routable {
         let recovery = context
             .provider_health
@@ -770,13 +771,18 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         .unwrap_or(0);
     let mut excluded_with_failed = state.failed_candidates.clone();
     excluded_with_failed.insert(candidate_key.clone());
-    let resolution = reselect_from_captured_target_plan(
-        context,
-        &selected,
-        &excluded_with_failed,
-        v3_relay_provider_policy_now_epoch_ms()?,
-    )
-    .await;
+    let resolution = match captured_target {
+        Ok(expanded) => {
+            reselect_from_captured_target_plan(
+                context,
+                expanded,
+                &excluded_with_failed,
+                v3_relay_provider_policy_now_epoch_ms()?,
+            )
+            .await
+        }
+        Err(source) => V3RelayProviderTargetResolution::Failed(source),
+    };
     let route_resolution_proved_no_alternative = match resolution {
         V3RelayProviderTargetResolution::Selected(alternative) => {
             let alternative_key = v3_relay_provider_candidate_key(&alternative.candidate);
