@@ -92,6 +92,42 @@ fn responses_input_image_url_maps_to_openai_chat_image_url_url() {
         "OpenAI Chat provider wire must not emit bare string image_url: {request}"
     );
 }
+
+#[test]
+fn responses_image_codec_preserves_future_siblings_for_duplicate_urls() {
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_image",
+                    "image_url": "data:image/png;base64,AAAA",
+                    "future_sibling": {"occurrence": 1}
+                },
+                {
+                    "type": "input_image",
+                    "image_url": "data:image/png;base64,AAAA",
+                    "future_sibling": {"occurrence": 2}
+                }
+            ]
+        }]
+    }))
+    .expect("Responses image siblings must project through the exported codec boundary");
+
+    let content = request["messages"][0]["content"]
+        .as_array()
+        .expect("projected image content");
+    assert_eq!(content.len(), 2);
+    assert_eq!(
+        content[0]["image_url"]["url"],
+        content[1]["image_url"]["url"]
+    );
+    assert_eq!(content[0]["future_sibling"], json!({"occurrence": 1}));
+    assert_eq!(content[1]["future_sibling"], json!({"occurrence": 2}));
+}
+
 #[test]
 fn responses_web_search_current_turn_item_projects_to_canonical_tools() {
     let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({

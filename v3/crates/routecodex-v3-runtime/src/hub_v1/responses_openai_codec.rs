@@ -1274,8 +1274,44 @@ fn read_v3_trimmed_owned(text: &str) -> Option<String> {
 }
 
 fn convert_v3_responses_image_part_to_openai_chat_part(part: &Map<String, Value>) -> Value {
-    let image_url = responses_image_url(part).unwrap_or_else(|| json!({"url":null}));
-    json!({"type":"image_url","image_url":image_url})
+    let image_url = responses_image_url(part);
+    let source_key = image_url.as_ref().and_then(|_| {
+        ["image_url", "url", "file_url", "data"]
+            .into_iter()
+            .find(|key| part.contains_key(*key))
+    });
+    let mut converted = part.clone();
+    converted.insert("type".to_string(), Value::String("image_url".to_string()));
+    if let Some(source_key) = source_key {
+        if source_key != "image_url" {
+            converted.remove(source_key);
+        }
+        if source_key == "data"
+            && part
+                .get("data")
+                .and_then(Value::as_str)
+                .is_some_and(|data| !data.starts_with("data:image/"))
+        {
+            if let Some(media_type_key) = ["media_type", "mime_type"]
+                .into_iter()
+                .find(|key| part.contains_key(*key))
+            {
+                converted.remove(media_type_key);
+            }
+        }
+        let nested_detail_already_present = part
+            .get(source_key)
+            .and_then(Value::as_object)
+            .is_some_and(|source| source.contains_key("detail"));
+        if !nested_detail_already_present {
+            converted.remove("detail");
+        }
+    }
+    converted.insert(
+        "image_url".to_string(),
+        image_url.unwrap_or_else(|| json!({"url":null})),
+    );
+    Value::Object(converted)
 }
 
 fn v3_openai_chat_wire_role(role: &str) -> &str {
