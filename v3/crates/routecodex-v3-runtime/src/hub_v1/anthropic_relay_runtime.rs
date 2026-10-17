@@ -690,6 +690,16 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         };
         let req07 =
             build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_wire_protocol);
+        let req07 = match req07 {
+            Ok(req07) => req07,
+            Err(error) => {
+                trace.push("V3HubReqOutbound07ProviderSemantic");
+                return Ok(project_v3_anthropic_relay_runtime_failure_with_trace(
+                    V3AnthropicRelayRuntimeError::ProviderCompat(error),
+                    trace,
+                ));
+            }
+        };
         trace.push("V3HubReqOutbound07ProviderSemantic");
         let target = provider_target(manifest, req07.selected_target(), None)?;
         let req_compat = match build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07) {

@@ -327,8 +327,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         );
         let req07 =
             build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_wire_protocol);
-        let target =
-            handle_error_before_resp03!(provider_target(manifest, req07.selected_target()));
         let mut selected_observability =
             build_v3_relay_observability_from_selected(&selected, client_response_transport_intent);
         selected_observability.attempts = Some(
@@ -374,6 +372,16 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 continue;
             }};
         }
+        let req07 = match req07 {
+            Ok(req07) => req07,
+            Err(error) => {
+                handle_provider_request_failure!(V3ResponsesRelayRuntimeError::ProviderCompat(
+                    error
+                ));
+            }
+        };
+        let target =
+            handle_error_before_resp03!(provider_target(manifest, req07.selected_target()));
         let req_compat = match build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07) {
             Ok(projected) => record_projected_drops(&projection_drop_context, projected),
             Err(error) => {

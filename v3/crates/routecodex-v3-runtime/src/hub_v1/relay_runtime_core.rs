@@ -655,9 +655,6 @@ where
         trace.push("V3HubReqTarget06Resolved");
         let req07 =
             build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_wire_protocol);
-        trace.push("V3HubReqOutbound07ProviderSemantic");
-        let target = provider_target(manifest, req07.selected_target(), C::EXPECTED_PROVIDER_TYPE)
-            .map_err(V3RelayCoreError::Target)?;
         macro_rules! handle_provider_request_failure {
             ($stage:expr, $kind:expr, $error:expr) => {{
                 let terminal_failure = handle_provider_failure(
@@ -686,6 +683,17 @@ where
                 continue;
             }};
         }
+        let req07 = match req07 {
+            Ok(req07) => req07,
+            Err(error) => handle_provider_request_failure!(
+                "V3HubReqOutbound07ProviderSemantic",
+                "provider_request_projection_error",
+                error
+            ),
+        };
+        trace.push("V3HubReqOutbound07ProviderSemantic");
+        let target = provider_target(manifest, req07.selected_target(), C::EXPECTED_PROVIDER_TYPE)
+            .map_err(V3RelayCoreError::Target)?;
         let req_compat = match build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07) {
             Ok(projected) => record_projected_drops(&drop_ctx, projected),
             Err(error) => handle_provider_request_failure!(
