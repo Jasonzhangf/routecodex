@@ -12,7 +12,6 @@ const root = resolve(process.argv[2] ?? '.');
 const appsdk = process.env.APPSDK_BIN ?? 'appsdk';
 const failures = [];
 const deliveryGaps = [];
-const projects = new Map();
 
 function runAppsdk(args) {
   return spawnSync(appsdk, args, {
@@ -40,27 +39,6 @@ function requireVersion(relativePath, actual) {
   }
 }
 
-function readFrozenModuleIds(project, relativePath) {
-  if (!project || !Array.isArray(project.modules)) {
-    failures.push(`${relativePath}: expected modules array`);
-    return [];
-  }
-
-  const frozenModules = project.modules.filter(
-    (module) => module?.stage === 'frozen',
-  );
-  const invalidModule = frozenModules.find(
-    (module) =>
-      typeof module.module_id !== 'string' || module.module_id.length === 0,
-  );
-  if (invalidModule) {
-    failures.push(`${relativePath}: frozen module is missing module_id`);
-    return [];
-  }
-
-  return frozenModules.map((module) => module.module_id);
-}
-
 function emitProcessOutput(result) {
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
@@ -86,7 +64,6 @@ for (const projectRoot of PROJECT_ROOTS) {
   const resources = readJson(`${prefix}.appsdk/sdk-resources.json`);
 
   if (project) {
-    projects.set(projectRoot, project);
     if (project.sdk?.name !== 'appsdk') {
       failures.push(
         `${prefix}.appsdk/project.json: expected sdk.name=appsdk, got ${JSON.stringify(project.sdk?.name)}`,
