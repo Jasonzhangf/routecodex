@@ -945,6 +945,10 @@ fn merge_logprobs_value(existing: &mut Value, incoming: &Value) {
     let existing = existing.as_object_mut().expect("object checked");
     for (name, value) in incoming {
         match existing.get_mut(name) {
+            // A later chunk can repeat a field with an explicit null while the
+            // other fields still carry accumulated tokens. A null observation
+            // must never erase a value that was already received.
+            Some(slot) if value.is_null() && !slot.is_null() => {}
             Some(slot) if slot.is_null() => *slot = value.clone(),
             Some(Value::Array(slot)) if value.is_array() => {
                 slot.extend(value.as_array().expect("array checked").iter().cloned());

@@ -235,14 +235,17 @@ async fn provider(State(peer): State<Peer>, Json(body): Json<Value>) -> Response
             let mut first = first;
             first["system_fingerprint"] = json!("fp_peer");
             first["service_tier"] = json!("tier-a");
-            first["choices"][0]["logprobs"] = json!({"content":[{"token":"a","logprob":-1.0}]});
+            first["choices"][0]["logprobs"] =
+                json!({"content":[{"token":"a","logprob":-1.0}],"refusal":null});
             first["choices"][0]["delta"]["mirror"] = json!("kept");
+            let middle = json!({"id":"chatcmpl-peer","object":"chat.completion.chunk","created":0,"model":body["model"],"choices":[{"index":0,"delta":{},"logprobs":{"content":[{"token":"b","logprob":-2.0}],"refusal":null},"finish_reason":null}]});
             let mut last = last;
             last["service_tier"] = json!("tier-a");
-            last["choices"][0]["logprobs"] = json!({"content":[{"token":"b","logprob":-2.0}]});
+            last["choices"][0]["logprobs"] =
+                json!({"content":null,"refusal":[{"token":"c","logprob":-3.0}]});
             return (
                 [("content-type", "text/event-stream")],
-                format!("data: {first}\n\ndata: {last}\n\ndata: [DONE]\n\n"),
+                format!("data: {first}\n\ndata: {middle}\n\ndata: {last}\n\ndata: [DONE]\n\n"),
             )
                 .into_response();
         }
@@ -817,6 +820,10 @@ async fn zen_tcm_forced_sse_collapse_keeps_chat_extensions_for_json_client() {
     assert_eq!(
         chat["choices"][0]["logprobs"]["content"][1]["token"], "b",
         "cross-chunk logprobs must be merged in stream order: {chat}"
+    );
+    assert_eq!(
+        chat["choices"][0]["logprobs"]["refusal"][0]["token"], "c",
+        "a later logprobs field must survive a null observation of another field: {chat}"
     );
     assert_eq!(
         chat["choices"][0]["message"]["mirror"], "kept",

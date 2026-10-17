@@ -127,4 +127,29 @@ mod tests {
             "unconsumed delta extensions must stay on the message object"
         );
     }
+
+    #[tokio::test]
+    async fn collapses_chat_client_sse_replay_keeps_logprobs_when_a_field_is_null() {
+        let stream = sealed_replay(&[
+            "data: {\"id\":\"chatcmpl_x\",\"object\":\"chat.completion.chunk\",\"created\":7,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"logprobs\":{\"content\":[{\"token\":\"a\",\"logprob\":-1.0}],\"refusal\":null},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"chatcmpl_x\",\"object\":\"chat.completion.chunk\",\"created\":7,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"FREE_OK\"},\"logprobs\":{\"content\":[{\"token\":\"b\",\"logprob\":-2.0}],\"refusal\":null},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"chatcmpl_x\",\"object\":\"chat.completion.chunk\",\"created\":7,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"logprobs\":{\"content\":null,\"refusal\":[{\"token\":\"c\",\"logprob\":-3.0}]},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":3,\"total_tokens\":6}}\n\n",
+            "data: [DONE]\n\n",
+        ]);
+        let completion = collapse_direct_client_sse_to_json(stream)
+            .await
+            .expect("collapse chat client replay");
+        assert_eq!(
+            completion["choices"][0]["logprobs"]["content"][0]["token"],
+            "a"
+        );
+        assert_eq!(
+            completion["choices"][0]["logprobs"]["content"][1]["token"], "b",
+            "a later null field must not erase earlier logprobs: {completion}"
+        );
+        assert_eq!(
+            completion["choices"][0]["logprobs"]["refusal"][0]["token"], "c",
+            "a later non-null field must still accumulate after a null observation: {completion}"
+        );
+    }
 }
