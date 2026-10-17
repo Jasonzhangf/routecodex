@@ -25,6 +25,7 @@ use std::sync::{Arc, Mutex};
 const OPERATOR_NAME: &str = "routecodex.v3.operation.plan_execution";
 const OPERATOR_VERSION: &str = "1";
 
+#[derive(Clone)]
 pub(crate) enum V3PlanExecutionTargetSource {
     OpaqueHit(V3Router07OpaqueTargetHitOnce),
     Expanded(V3Target09CandidateSetExpanded),
@@ -37,7 +38,7 @@ pub(crate) enum V3PlanExecutionModePolicy {
     },
     DirectEntry {
         entry_protocol: V3HubEntryProtocol,
-        allowed_modes: Vec<V3HubExecutionMode>,
+        allowed_modes: Vec<String>,
     },
 }
 
@@ -47,6 +48,7 @@ pub(crate) struct V3PlanExecutionCompleted {
     pub(crate) admission: crate::provider_failure_runtime_policy::V3RuntimeProviderAdmission,
     pub(crate) request_local_excluded_candidates: BTreeSet<String>,
     pub(crate) execution_mode: V3HubExecutionMode,
+    pub(crate) protocol_decision: crate::nodes::V3Execution11ProtocolDecision,
 }
 
 pub(crate) enum V3PlanExecutionStop {
@@ -163,16 +165,7 @@ impl PlanExecutionOperator {
             V3PlanExecutionModePolicy::DirectEntry {
                 entry_protocol,
                 allowed_modes,
-            } => {
-                let allowed_modes = allowed_modes
-                    .iter()
-                    .map(|mode| match mode {
-                        V3HubExecutionMode::Direct => "direct".to_string(),
-                        V3HubExecutionMode::Relay => "relay".to_string(),
-                    })
-                    .collect();
-                (*entry_protocol, allowed_modes)
-            }
+            } => (*entry_protocol, allowed_modes.clone()),
         };
         let entry_protocol = match entry_protocol {
             V3HubEntryProtocol::Responses => "responses",
@@ -353,7 +346,7 @@ pub(crate) fn run_v3_plan_execution_operator(
             execution_planned_request,
             plan: V3PlanExecutionCompleted {
                 expanded,
-                selected: decision.target,
+                selected: decision.target.clone(),
                 admission,
                 request_local_excluded_candidates,
                 execution_mode: match decision.mode {
@@ -362,6 +355,7 @@ pub(crate) fn run_v3_plan_execution_operator(
                     }
                     V3Execution11ProtocolDecisionMode::HubRelay => V3HubExecutionMode::Relay,
                 },
+                protocol_decision: decision,
             },
         },
         PlanExecutionOperatorOutput::Exhausted {
@@ -635,7 +629,7 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             None,
             V3PlanExecutionModePolicy::DirectEntry {
                 entry_protocol: V3HubEntryProtocol::Responses,
-                allowed_modes: vec![V3HubExecutionMode::Direct, V3HubExecutionMode::Relay],
+                allowed_modes: vec!["direct".to_string(), "relay".to_string()],
             },
             false,
             false,
@@ -1069,7 +1063,7 @@ targets = [
                 None,
                 V3PlanExecutionModePolicy::DirectEntry {
                     entry_protocol: V3HubEntryProtocol::Responses,
-                    allowed_modes: vec![V3HubExecutionMode::Direct, V3HubExecutionMode::Relay],
+                    allowed_modes: vec!["direct".to_string(), "relay".to_string()],
                 },
             )
             .await

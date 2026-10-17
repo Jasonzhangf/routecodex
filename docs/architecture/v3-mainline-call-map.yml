@@ -8032,8 +8032,8 @@ chains:
     to_node: V3Target10ConcreteProviderSelected
     caller_symbol: execute_v3_direct_runtime_kernel_core_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
-    callee_symbol: select_v3_expanded_target_with_admission_rescue
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
+    callee_symbol: run_v3_plan_execution_operator_with_probes
+    callee_file: v3/crates/routecodex-v3-runtime/src/operation_runner/plan_execution.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
@@ -8051,8 +8051,8 @@ chains:
     to_node: V3Target10ConcreteProviderSelected
     caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-    callee_symbol: select_v3_expanded_target_with_admission_rescue
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
+    callee_symbol: run_v3_plan_execution_operator_with_probes
+    callee_file: v3/crates/routecodex-v3-runtime/src/operation_runner/plan_execution.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:

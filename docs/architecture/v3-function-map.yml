@@ -6346,10 +6346,10 @@ features:
   - git diff --check
 
 - feature_id: v3.unified_operation_runner_design
-  status: candidate_behavior_9_of_20_not_reviewed_installed_merged_or_production
+  status: candidate_behavior_11_of_20_not_reviewed_installed_merged_or_production
   change_risk: high
   owner_kind: design_architecture
-  owner_scope: Unified operation runner DAGpipe design, lifecycle manifest, exact ErrorErr01-06 binding, typed owner/release table, and canonical single-node SDK execution. Candidate M2 binds nine of twenty operation nodes through Registry, compile, and Runtime.run. The bound nodes are capture_client_json, normalize_request_losslessly, project_standard_provider_request, adjust_provider_private_request, encode_provider_wire, construct_transport_request, adjust_provider_private_response, normalize_provider_response, and govern_chat_response. Eleven nodes remain pending, including target resolution, execution planning, request governance, response inverse projection, client frame, and Error01-06. Existing Hub owners remain execution truth for pending nodes. This is candidate behavior only, not whole-graph, fixed-order, Native Direct, review, install, merge, or production completion.
+  owner_scope: Unified operation runner DAGpipe design, lifecycle manifest, ErrorErr01-06 binding, typed owner table, and canonical single-node SDK execution. Candidate M2 accepts eleven of twenty nodes through Registry, compile, and Runtime.run: capture_client_json, normalize_request_losslessly, govern_chat_request, project_standard_provider_request, adjust_provider_private_request, encode_provider_wire, construct_transport_request, adjust_provider_private_response, normalize_provider_response, govern_chat_response, and Responses client framing. Target resolution and execution planning have partial Relay and Direct caller bindings; response inverse projection retains a hosted-branch handoff gap. Error01-06 are not runtime-bound. Existing owners remain execution truth for pending paths. Candidate acceptance does not establish whole-graph, review, install, main merge, or production completion.
   owner_crate: routecodex-v3-runtime
   owner_file: docs/design/v3-unified-operation-runner-design.md
   resource_bindings:
