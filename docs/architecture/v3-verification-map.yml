@@ -1419,7 +1419,7 @@ features:
   - npm run test:v3-provider-health-contract
   - npm run test:v3-foundation-runtime-contract
   - npm run test:v3-server-debug-error-blackbox
-  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test e041a3b_response_timeout --test fa22072_error_decoupling -- --test-threads=1
+  - npm run test:v3-direct-terminal-diagnostics
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-rust-only
   - npm run verify:v3-module-boundaries

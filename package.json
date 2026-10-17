@@ -220,6 +220,7 @@
     "test:v3-vr-full-function-cli": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test vr_full_function_controlled_replay -- --nocapture",
     "test:v3-foundation-runtime-contract": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime foundation --lib -- --nocapture",
     "test:v3-server-debug-error-blackbox": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server -- --nocapture",
+    "test:v3-direct-terminal-diagnostics": "CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test e041a3b_response_timeout --test fa22072_error_decoupling -- --test-threads=1",
     "test:v3-workspace": "npm run verify:v3-file-size && npm run verify:v3-console-request-count-visibility && npm run verify:v3-runtime-timing-observability && node v3/scripts/run-v3-cargo-test.mjs +stable --workspace -- --nocapture",
     "verify:direct-semantic-classification-design": "node scripts/architecture/verify-direct-semantic-classification-design.mjs",
     "verify:server-function-map-boundary": "node scripts/architecture/verify-server-function-map-boundary.mjs",
