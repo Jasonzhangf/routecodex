@@ -341,7 +341,7 @@ fn test_front_socket(write_tx: mpsc::Sender<V3FrontWriteCommand>) -> V3StableFro
 
 #[tokio::test]
 async fn front_flush_snapshot_does_not_release_a_later_body_eof_or_http_tail() {
-    use crate::session_admission::V3ServerRequestActivityGate;
+    use crate::request_activity::V3ServerRequestActivityGate;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let peer = tokio::spawn(TcpStream::connect(address));

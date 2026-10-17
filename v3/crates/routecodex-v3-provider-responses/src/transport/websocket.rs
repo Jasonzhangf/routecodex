@@ -46,8 +46,6 @@ pub(super) async fn acquire_connection_slot(
     let request_id = request_id.clone();
     let provider_id = provider_id.clone();
     let cancellation = cancellation.clone();
-    // Only an actual session wait releases an already granted capacity lease.
-    request.release_pre_acquired_admission();
     let lock = session.lock_owned();
     match cancellation.clone() {
         Some(cancellation) => {
@@ -63,42 +61,6 @@ pub(super) async fn acquire_connection_slot(
         None => Ok(Some(lock.await)),
     }
     .map_err(mark_failed)
-}
-
-pub(super) async fn acquire_admission_and_connection_slot(
-    sessions: &Arc<Mutex<BTreeMap<String, SharedResponsesWebSocket>>>,
-    request: &mut V3Transport13ResponsesRequest,
-    handoff: &crate::transport_handoff::V3ProviderTransportAttemptBroker,
-    attempt_key: Option<&crate::transport_handoff::V3ProviderTransportAttemptKey>,
-    controller: V3AdaptiveConcurrencyController,
-    provider_key: String,
-) -> Result<
-    (
-        V3AdaptiveConcurrencyPermitGuard,
-        bool,
-        Option<OwnedMutexGuard<Option<ResponsesWebSocket>>>,
-    ),
-    V3ProviderError,
-> {
-    let connection_slot = acquire_connection_slot(sessions, request, handoff, attempt_key).await?;
-    let admission = super::take_or_acquire_provider_admission(
-        request.pre_acquired_admission.take(),
-        controller.clone(),
-        provider_key.clone(),
-    );
-    if admission.is_err() {
-        if let Some(attempt_key) = attempt_key {
-            let _ = handoff.transition(attempt_key, V3ProviderTransportAttemptState::Failed);
-        }
-    }
-    let lease = admission.map_err(|error| {
-        super::provider_admission_error(error, request.request_id(), request.provider_id())
-    })?;
-    let was_probe = lease.is_probe();
-    let permit_guard =
-        V3AdaptiveConcurrencyPermitGuard::new(controller.clone(), lease.into_permit());
-
-    Ok((permit_guard, was_probe, connection_slot))
 }
 
 fn websocket_session_key(

@@ -158,7 +158,7 @@ pub(crate) async fn probe_v3_provider_global_target_impl(
         .try_acquire(&provider_key, now_ms)
         .ok_or(V3ProviderHealthProbeFailure::ConcurrencyBusy)?;
     ReqwestResponsesTransport::default()
-        .send_probe(request.with_pre_acquired_admission(admission))
+        .send_probe(request.with_pre_acquired_probe(admission))
         .await
         .map_err(provider_probe_error)
 }

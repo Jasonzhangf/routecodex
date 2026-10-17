@@ -1,7 +1,3 @@
-use crate::adaptive_concurrency::{
-    V3AdaptiveConcurrencyController, V3AdaptiveConcurrencyLease, V3AdaptiveConcurrencyPermitGuard,
-    V3AdaptiveConcurrencyProbeResult,
-};
 use crate::provider_auth::{
     discovery_models_url, extract_discovered_models, resolve_secret, V3DiscoveredModel,
 };
@@ -11,9 +7,6 @@ use crate::shared::{
     validated_sse_stream,
 };
 pub use crate::transport_admission::build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency;
-use crate::transport_admission::{
-    provider_admission_error, take_or_acquire_provider_admission, V3PreAcquiredProviderAdmission,
-};
 use crate::transport_handoff::V3ProviderTransportAttemptState;
 use crate::wire::{
     V3Provider12ResponsesWirePayload, V3ProviderAuthHandle, V3ResponsesStreamIntent,
@@ -162,12 +155,29 @@ pub struct V3Transport13ResponsesRequest {
     _sealed: (),
     pub(crate) kind: V3Transport13ResponsesRequestKind,
     handoff_scope: Option<crate::transport_handoff::V3ProviderTransportHandoffScope>,
-    pre_acquired_admission: V3PreAcquiredProviderAdmission,
+    pre_acquired_probe: V3PreAcquiredProviderAdmission,
 }
 
 pub type V3Transport13ResponsesHttpRequest = V3Transport13ResponsesRequest;
 
 impl V3Transport13ResponsesRequest {
+    pub fn with_pre_acquired_probe(mut self, probe: V3AdaptiveConcurrencyLease) -> Self {
+        self.pre_acquired_probe.set(probe);
+        self
+    }
+
+    fn initial_concurrency_budget(&self) -> u32 {
+        match &self.kind {
+            V3Transport13ResponsesRequestKind::Http {
+                initial_concurrency_budget,
+                ..
+            }
+            | V3Transport13ResponsesRequestKind::WebSocketV2 {
+                initial_concurrency_budget,
+                ..
+            } => *initial_concurrency_budget,
+        }
+    }
     pub fn with_handoff_scope(
         mut self,
         scope: crate::transport_handoff::V3ProviderTransportHandoffScope,
@@ -181,15 +191,6 @@ impl V3Transport13ResponsesRequest {
         }
         self.handoff_scope = Some(scope);
         Ok(self)
-    }
-
-    pub fn with_pre_acquired_admission(mut self, admission: V3AdaptiveConcurrencyLease) -> Self {
-        self.pre_acquired_admission.set(admission);
-        self
-    }
-
-    pub fn release_pre_acquired_admission(&mut self) {
-        self.pre_acquired_admission.release();
     }
 
     pub fn transport_kind(&self) -> crate::transport_handoff::V3ProviderTransportKind {
@@ -233,19 +234,6 @@ impl V3Transport13ResponsesRequest {
         match &self.kind {
             V3Transport13ResponsesRequestKind::Http { provider_id, .. }
             | V3Transport13ResponsesRequestKind::WebSocketV2 { provider_id, .. } => provider_id,
-        }
-    }
-
-    fn initial_concurrency_budget(&self) -> u32 {
-        match &self.kind {
-            V3Transport13ResponsesRequestKind::Http {
-                initial_concurrency_budget,
-                ..
-            }
-            | V3Transport13ResponsesRequestKind::WebSocketV2 {
-                initial_concurrency_budget,
-                ..
-            } => *initial_concurrency_budget,
         }
     }
 
@@ -425,7 +413,7 @@ pub(crate) fn v3_transport_13_request(
         _sealed: (),
         kind,
         handoff_scope: None,
-        pre_acquired_admission: V3PreAcquiredProviderAdmission::empty(),
+        pre_acquired_probe: V3PreAcquiredProviderAdmission::empty(),
     }
 }
 
@@ -732,7 +720,6 @@ impl ResponsesTransport for ProviderResponsesTransport {
         &self,
         mut request: V3Transport13ResponsesRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-        let provider_key = request.provider_key();
         let request_id = request.request_id().to_string();
         let provider_id = request.provider_id().to_string();
         let attempt_key = request
@@ -754,32 +741,13 @@ impl ResponsesTransport for ProviderResponsesTransport {
                     })
             })
             .transpose()?;
-        let controller = V3AdaptiveConcurrencyController::process_shared();
-        if let Err(reason) =
-            controller.ensure_initial_budget(&provider_key, request.initial_concurrency_budget())
-        {
-            if let Some(attempt_key) = &attempt_key {
-                let _ = self
-                    .handoff
-                    .transition(attempt_key, V3ProviderTransportAttemptState::Failed);
-            }
-            return Err(V3ProviderError::InternalTransport {
-                request_id: request_id.clone(),
-                provider_id: provider_id.clone(),
-                lane: V3ProviderInternalTransportLane::Request,
-                reason,
-            });
-        }
-        let (permit_guard, was_probe, websocket_connection) =
-            websocket::acquire_admission_and_connection_slot(
-                &self.websocket_sessions,
-                &mut request,
-                &self.handoff,
-                attempt_key.as_ref(),
-                controller.clone(),
-                provider_key.clone(),
-            )
-            .await?;
+        let websocket_connection = websocket::acquire_connection_slot(
+            &self.websocket_sessions,
+            &mut request,
+            &self.handoff,
+            attempt_key.as_ref(),
+        )
+        .await?;
         let result = match request.kind {
             V3Transport13ResponsesRequestKind::Http {
                 request_id,
@@ -831,16 +799,14 @@ impl ResponsesTransport for ProviderResponsesTransport {
                     auth,
                     stream_intent,
                     event,
-                    websocket_connection.expect(
-                        "WebSocket connection slot is re-acquired after provider admission",
-                    ),
+                    websocket_connection
+                        .expect("WebSocket requests acquire their connection before sending"),
                     cancellation,
                     compatibility_profile,
                 )
                 .await
             }
         };
-        let now_ms = current_epoch_ms();
         match result {
             Ok(raw) => {
                 if raw.body_kind() == crate::raw_response::V3ProviderResponseBodyKind::Sse {
@@ -854,17 +820,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                                 reason,
                             })?;
                     }
-                    let permit_guard = if was_probe {
-                        permit_guard.with_probe_result(V3AdaptiveConcurrencyProbeResult::Accepted)
-                    } else {
-                        permit_guard
-                    };
-                    return Ok(hold_sse_lease(
-                        raw,
-                        permit_guard,
-                        self.handoff.clone(),
-                        attempt_key,
-                    ));
+                    return Ok(hold_sse_lease(raw, None, self.handoff.clone(), attempt_key));
                 } else {
                     if let Some(attempt_key) = &attempt_key {
                         self.handoff
@@ -875,14 +831,6 @@ impl ResponsesTransport for ProviderResponsesTransport {
                                 lane: V3ProviderInternalTransportLane::Response,
                                 reason,
                             })?;
-                    }
-                    if was_probe {
-                        drop(
-                            permit_guard
-                                .with_probe_result(V3AdaptiveConcurrencyProbeResult::Accepted),
-                        );
-                    } else {
-                        drop(permit_guard);
                     }
                 }
                 Ok(raw)
@@ -898,26 +846,6 @@ impl ResponsesTransport for ProviderResponsesTransport {
                             reason,
                         })?;
                 }
-                if is_rate_limited(&error) {
-                    if was_probe {
-                        drop(
-                            permit_guard
-                                .with_probe_result(V3AdaptiveConcurrencyProbeResult::RateLimited),
-                        );
-                    } else {
-                        controller
-                            .observe_rate_limit(&provider_key, now_ms)
-                            .map_err(|reason| V3ProviderError::InternalTransport {
-                                request_id: request_id.clone(),
-                                provider_id: provider_id.clone(),
-                                lane: V3ProviderInternalTransportLane::Response,
-                                reason,
-                            })?;
-                        drop(permit_guard);
-                    }
-                } else {
-                    drop(permit_guard);
-                }
                 Err(error)
             }
         }
@@ -926,7 +854,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
 
 fn hold_sse_lease(
     raw: V3ProviderResp14Raw,
-    guard: V3AdaptiveConcurrencyPermitGuard,
+    guard: Option<V3AdaptiveConcurrencyPermitGuard>,
     handoff: crate::transport_handoff::V3ProviderTransportAttemptBroker,
     attempt_key: Option<crate::transport_handoff::V3ProviderTransportAttemptKey>,
 ) -> V3ProviderResp14Raw {
@@ -937,7 +865,7 @@ fn hold_sse_lease(
         unreachable!("SSE lease must only wrap an SSE response");
     };
     let stream = Box::pin(stream::unfold(
-        (stream, Some(guard), 0_u64, false),
+        (stream, guard, 0_u64, false),
         move |(mut stream, mut guard, provider_sequence, terminal)| {
             let handoff = handoff.clone();
             let attempt_key = attempt_key.clone();
@@ -1543,3 +1471,10 @@ pub async fn discover_v3_provider_models(
 
 #[cfg(test)]
 mod tests;
+use crate::adaptive_concurrency::{
+    V3AdaptiveConcurrencyController, V3AdaptiveConcurrencyLease, V3AdaptiveConcurrencyPermitGuard,
+    V3AdaptiveConcurrencyProbeResult,
+};
+use crate::transport_admission::{
+    provider_admission_error, take_or_acquire_provider_admission, V3PreAcquiredProviderAdmission,
+};

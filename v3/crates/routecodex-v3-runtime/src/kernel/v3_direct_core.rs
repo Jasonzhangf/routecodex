@@ -240,10 +240,8 @@ where
     let allowed_modes =
         direct_runtime_allowed_execution_modes(manifest, C::server_id(&standardized));
     loop {
-        let (selected, mut selected_admission): (
-            routecodex_v3_target::V3Target10ConcreteProviderSelected,
-            Option<V3RuntimeProviderAdmission>,
-        ) = match select_v3_expanded_target_with_admission_rescue(
+        let selected: routecodex_v3_target::V3Target10ConcreteProviderSelected =
+            match select_v3_expanded_target_with_rescue(
             manifest,
             expanded.clone(),
             &direct_failure_session_scope,
@@ -256,17 +254,15 @@ where
         )
         .await
         {
-            V3AdmittedTargetSelectionAfterRescue::Selected(value) => {
-                (value.selected, Some(value.admission))
-            }
-            V3AdmittedTargetSelectionAfterRescue::Failed(source) => {
+            V3TargetSelectionAfterRescue::Selected(selected) => selected,
+            V3TargetSelectionAfterRescue::Failed(source) => {
                 return error_output(
                     source,
                     trace,
                     &crate::hooks::register_responses_direct_hooks(),
                 );
             }
-            V3AdmittedTargetSelectionAfterRescue::Exhausted(error) => {
+            V3TargetSelectionAfterRescue::Exhausted(error) => {
                 // 可观测性：exhausted 时带全部候选明细（provider:alias:model:
                 // 原因），否则 console 只有 "N candidates unavailable" 无法诊断
                 // 哪个候选因何被冷却/排除。
@@ -449,9 +445,6 @@ where
         };
         trace.push("V3Transport13ResponsesHttpRequest");
         provider_request_snapshot = Some(transport_request.provider_request_projection());
-        if pending_provider_action_recovery.is_some() {
-            drop(selected_admission.take());
-        }
         if let Some(recovery) = pending_provider_action_recovery.take() {
             match provider_health
                 .wait_for_error05_recovery(&recovery, &selected)
@@ -460,23 +453,6 @@ where
                 Ok(V3ProviderActionRecoveryTransition::Admitted(mut admission)) => {
                     provider_action_permit = admission.take_permit();
                     provider_action_permit_target = Some(selected.candidate.clone());
-                    selected_admission = match admit_v3_selected_target_after_recovery(&selected) {
-                        V3AdmitAfterRecovery::Admitted(admission) => Some(admission),
-                        V3AdmitAfterRecovery::Busy => {
-                            failed_candidates
-                                .insert(v3_relay_provider_candidate_key(&selected.candidate));
-                            drop(provider_action_permit.take());
-                            provider_action_permit_target = None;
-                            continue;
-                        }
-                        V3AdmitAfterRecovery::Failed(reason) => {
-                            return error_output(
-                                runtime_source("V3Target10ConcreteProviderSelected", reason),
-                                trace,
-                                &crate::hooks::register_responses_direct_hooks(),
-                            )
-                        }
-                    };
                     trace.push("V3ProviderActionGateAdmission");
                 }
                 Ok(V3ProviderActionRecoveryTransition::Superseded(ticket)) => {
@@ -555,27 +531,8 @@ where
                 &crate::hooks::register_responses_direct_hooks(),
             );
         }
-        let transport_request = match selected_admission.take() {
-            Some(admission) => {
-                transport_request.with_pre_acquired_admission(admission.into_lease())
-            }
-            None => transport_request,
-        };
         let provider_raw = match transport.send(transport_request).await {
             Ok(raw) => raw,
-            Err(V3ProviderError::ConcurrencyBusy { .. }) => {
-                if let Err(error) = runtime_timing.finish_external() {
-                    return error_output(
-                        runtime_source("V3RuntimeTimingExternal", error),
-                        trace,
-                        &crate::hooks::register_responses_direct_hooks(),
-                    );
-                }
-                failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
-                drop(provider_action_permit.take());
-                provider_action_permit_target = None;
-                continue;
-            }
             Err(error) => {
                 if let Some(witness) =
                     crate::hub_v1::external_http_witness_from_provider_error(&error)

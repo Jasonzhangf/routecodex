@@ -73,7 +73,7 @@ fn probe_sse_fixture(
         stream,
     );
     (
-        hold_sse_lease(raw, guard, broker.clone(), Some(key.clone())),
+        hold_sse_lease(raw, Some(guard), broker.clone(), Some(key.clone())),
         controller,
         broker,
         key,
@@ -93,7 +93,7 @@ fn assert_probe_sse_accepted(controller: &V3AdaptiveConcurrencyController) {
 }
 
 #[test]
-fn dropping_request_with_pre_acquired_admission_releases_provider_capacity() {
+fn dropping_request_with_pre_acquired_probe_releases_control_capacity() {
     let provider_id = "drop-pre-acquired-provider";
     let auth_alias = "key1";
     let provider_key = format!("{provider_id}:{auth_alias}");
@@ -121,7 +121,7 @@ fn dropping_request_with_pre_acquired_admission_releases_provider_capacity() {
             None,
         )
         .unwrap()
-        .with_pre_acquired_admission(lease);
+        .with_pre_acquired_probe(lease);
 
     drop(request);
     assert_eq!(
@@ -132,7 +132,7 @@ fn dropping_request_with_pre_acquired_admission_releases_provider_capacity() {
 }
 
 #[test]
-fn dropping_request_releases_pre_acquired_admission_through_its_controller() {
+fn dropping_request_releases_pre_acquired_probe_through_its_controller() {
     let provider_id = "drop-local-controller-provider";
     let auth_alias = "key1";
     let provider_key = format!("{provider_id}:{auth_alias}");
@@ -159,7 +159,7 @@ fn dropping_request_releases_pre_acquired_admission_through_its_controller() {
             None,
         )
         .unwrap()
-        .with_pre_acquired_admission(lease);
+        .with_pre_acquired_probe(lease);
 
     drop(request);
     assert_eq!(
@@ -251,16 +251,25 @@ fn responses_http_target() -> V3ResponsesProviderTarget {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn saturated_provider_admission_without_preacquired_lease_does_not_wait() {
+async fn occupied_probe_capacity_does_not_reject_http_business_transport() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
+    let upstream = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut request = [0; 8192];
+        assert!(socket.read(&mut request).await.unwrap() > 0);
+        let body = br#"{"id":"capacity-independent","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"CAPACITY_INDEPENDENT"}]}]}"#;
+        socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).as_bytes()).await.unwrap();
+        socket.write_all(body).await.unwrap();
+    });
 
     let provider_key = "admission-no-wait-provider:key1";
     let controller = V3AdaptiveConcurrencyController::process_shared();
     controller.ensure_initial_budget(provider_key, 1).unwrap();
     let held = controller
-        .try_acquire_business(provider_key)
-        .expect("the configured provider budget must be occupied");
+        .try_acquire(provider_key, 0)
+        .expect("probe control capacity must be occupied");
 
     let mut target = responses_http_target();
     target.provider_id = "admission-no-wait-provider".into();
@@ -275,25 +284,19 @@ async fn saturated_provider_admission_without_preacquired_lease_does_not_wait() 
     )
     .unwrap();
     let request = build_v3_transport_13_responses_request_from_v3_provider_12(wire).unwrap();
-    let started = std::time::Instant::now();
     let result = tokio::time::timeout(
-        Duration::from_millis(500),
+        Duration::from_secs(2),
         ProviderResponsesTransport::default().send(request),
     )
     .await
-    .expect("full concurrency must return immediately");
-    assert!(matches!(
-        result,
-        Err(V3ProviderError::ConcurrencyBusy { .. })
-    ));
-    assert!(started.elapsed() < Duration::from_millis(500));
-    assert!(
-        tokio::time::timeout(Duration::from_millis(50), listener.accept())
-            .await
-            .is_err(),
-        "a full provider must not receive an upstream request"
+    .expect("business request must complete without releasing probe capacity")
+    .unwrap();
+    let body: Value = serde_json::from_slice(&result.into_body_bytes().await.unwrap()).unwrap();
+    assert_eq!(
+        body["output"][0]["content"][0]["text"],
+        "CAPACITY_INDEPENDENT"
     );
-
+    upstream.await.unwrap();
     controller.release(held.into_permit()).unwrap();
 }
 

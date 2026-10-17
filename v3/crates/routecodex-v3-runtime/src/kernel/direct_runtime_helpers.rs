@@ -9,42 +9,6 @@ fn v3_direct_retired_continuation_error(body: &Value) -> Option<V3Error01SourceR
         })
 }
 
-fn v3_direct_admit_pinned_target(
-    selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
-    last_external_http: &Option<V3ExternalHttpWitness>,
-    trace: &[&'static str],
-    hook_registry: &V3HookRegistry,
-) -> Result<
-    (
-        routecodex_v3_target::V3Target10ConcreteProviderSelected,
-        Option<V3RuntimeProviderAdmission>,
-    ),
-    V3ResponsesDirectRuntimeOutput,
-> {
-    match try_admit_v3_selected_target(&selected) {
-        Ok(Some(admission)) => Ok((selected, Some(admission))),
-        Ok(None) => Err(
-            direct_runtime_helpers_stream::target_exhausted_output_with_observability(
-                build_v3_error_01_source_raised(
-                    V3ErrorSourceKind::TargetPoolExhausted,
-                    "V3Target10ConcreteProviderSelected",
-                    "provider_concurrency_busy",
-                    "pinned provider concurrency is full",
-                ),
-                last_external_http.clone(),
-                trace.to_vec(),
-                hook_registry,
-                None,
-            ),
-        ),
-        Err(reason) => Err(error_output(
-            runtime_source("V3Target10ConcreteProviderSelected", reason),
-            trace.to_vec(),
-            hook_registry,
-        )),
-    }
-}
-
 fn v3_direct_selected_available_for_send(
     selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
     expanded: Option<&routecodex_v3_target::V3Target09CandidateSetExpanded>,

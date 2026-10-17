@@ -1,4 +1,5 @@
 use super::*;
+use routecodex_v3_provider_responses::adaptive_concurrency::V3AdaptiveConcurrencyController;
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
@@ -7,7 +8,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot, Notify};
 
 #[tokio::test]
-async fn busy_preferred_candidate_preserves_cooled_peer_recovery() {
+async fn occupied_control_capacity_preserves_healthy_preferred_candidate() {
     let server_id = "busy_preferred_cooled_peer_recovery";
     let first_id = "busy_preferred_cooled_peer_first";
     let second_id = "busy_preferred_cooled_peer_second";
@@ -66,11 +67,10 @@ async fn busy_preferred_candidate_preserves_cooled_peer_recovery() {
     let first_key = format!("{first_id}:key1");
     controller.ensure_initial_budget(&first_key, 1).unwrap();
     let held = controller.try_acquire_business(&first_key).unwrap();
-    let probe_server = tokio::spawn(serve_one_responses_probe(listener));
 
     let selection = tokio::time::timeout(
         Duration::from_secs(2),
-        select_v3_expanded_target_with_admission_rescue(
+        select_v3_expanded_target_with_rescue(
             &manifest,
             expanded,
             &scope,
@@ -83,20 +83,18 @@ async fn busy_preferred_candidate_preserves_cooled_peer_recovery() {
         ),
     )
     .await
-    .expect("a busy candidate must not disable peer recovery");
+    .expect("control capacity must not block a healthy business target");
     controller.release(held.into_permit()).unwrap();
-    let V3AdmittedTargetSelectionAfterRescue::Selected(selected) = selection else {
-        probe_server.abort();
-        panic!("a recoverable cooled peer must be probed instead of reporting an empty pool");
+    let V3TargetSelectionAfterRescue::Selected(selected) = selection else {
+        panic!("the healthy preferred provider must remain selectable");
     };
-    assert_eq!(selected.selected.candidate.provider_id, second_id);
+    assert_eq!(selected.candidate.provider_id, first_id);
     assert!(
         health
             .availability(first_id, Some("key1"), Some("gpt-test"), now_ms)
             .available
     );
     assert_eq!(controller.snapshot(&first_key).unwrap().in_flight, 0);
-    probe_server.await.unwrap();
     std::env::remove_var("V3_BUSY_PREFERRED_COOLED_PEER_KEY");
 }
 
@@ -1441,7 +1439,7 @@ async fn later_tier_selection_does_not_wait_for_probe_transport_admission() {
 }
 
 #[tokio::test]
-async fn busy_preferred_candidate_reselects_later_tier_without_capacity_wait() {
+async fn occupied_control_capacity_does_not_reselect_healthy_preferred_tier() {
     let server_id = "pinned_busy_candidate_reselect";
     let first_provider = "pinned_busy_first";
     let mut manifest =
@@ -1523,7 +1521,7 @@ async fn busy_preferred_candidate_reselects_later_tier_without_capacity_wait() {
 
     let selected = tokio::time::timeout(
         std::time::Duration::from_millis(500),
-        select_v3_expanded_target_with_admission_rescue(
+        select_v3_expanded_target_with_rescue(
             &manifest,
             expanded,
             &scope,
@@ -1537,10 +1535,10 @@ async fn busy_preferred_candidate_reselects_later_tier_without_capacity_wait() {
     )
     .await
     .expect("busy preferred admission must not wait for capacity");
-    let V3AdmittedTargetSelectionAfterRescue::Selected(selected) = selected else {
-        panic!("a full preferred provider must select the available later tier");
+    let V3TargetSelectionAfterRescue::Selected(selected) = selected else {
+        panic!("the healthy preferred provider must remain selectable");
     };
-    assert_eq!(selected.selected.candidate.provider_id, "second");
+    assert_eq!(selected.candidate.provider_id, first_provider);
     assert_eq!(controller.snapshot(&first_key).unwrap().in_flight, 1);
     assert!(
         health

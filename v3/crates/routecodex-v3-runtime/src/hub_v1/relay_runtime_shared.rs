@@ -926,15 +926,14 @@ pub(crate) async fn resolve_v3_relay_entry_target(
     allow_exhaustion_rescue_probe: bool,
     preferred_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
     handoff: Option<&crate::V3ResponsesProtocolRelayHandoff>,
-) -> crate::provider_failure_runtime_policy::V3RelayProviderAdmittedTargetResolution {
+) -> crate::provider_failure_runtime_policy::V3RelayProviderTargetResolution {
     use crate::provider_failure_runtime_policy::{
-        resolve_v3_relay_target_outcome_with_admission_rescue,
-        select_v3_expanded_target_with_admission_rescue, V3AdmittedTargetSelectionAfterRescue,
-        V3RelayProviderAdmittedTargetResolution,
+        resolve_v3_relay_target_outcome_with_rescue, select_v3_expanded_target_with_rescue,
+        V3RelayProviderTargetResolution, V3TargetSelectionAfterRescue,
     };
 
     let Some(handoff) = handoff else {
-        return resolve_v3_relay_target_outcome_with_admission_rescue(
+        return resolve_v3_relay_target_outcome_with_rescue(
             input,
             allow_exhaustion_rescue_probe,
             preferred_selected,
@@ -942,7 +941,7 @@ pub(crate) async fn resolve_v3_relay_entry_target(
         .await;
     };
 
-    match select_v3_expanded_target_with_admission_rescue(
+    match select_v3_expanded_target_with_rescue(
         input.manifest,
         handoff.expanded.clone(),
         input.failure_session_scope,
@@ -955,16 +954,16 @@ pub(crate) async fn resolve_v3_relay_entry_target(
     )
     .await
     {
-        V3AdmittedTargetSelectionAfterRescue::Selected(selected) => {
-            V3RelayProviderAdmittedTargetResolution::Selected(selected)
+        V3TargetSelectionAfterRescue::Selected(selected) => {
+            V3RelayProviderTargetResolution::Selected(selected)
         }
-        V3AdmittedTargetSelectionAfterRescue::Exhausted(exhausted) => {
-            V3RelayProviderAdmittedTargetResolution::Exhausted {
+        V3TargetSelectionAfterRescue::Exhausted(exhausted) => {
+            V3RelayProviderTargetResolution::Exhausted {
                 attempted_candidates: exhausted.attempted_candidates,
             }
         }
-        V3AdmittedTargetSelectionAfterRescue::Failed(source) => {
-            V3RelayProviderAdmittedTargetResolution::Failed(source)
+        V3TargetSelectionAfterRescue::Failed(source) => {
+            V3RelayProviderTargetResolution::Failed(source)
         }
     }
 }

@@ -13,12 +13,9 @@ use crate::hub_v1::{
 };
 use crate::nodes::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
-use crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key;
 use crate::provider_failure_runtime_policy::{
-    admit_v3_selected_target_after_recovery, select_v3_expanded_target_with_admission_rescue,
-    select_v3_target_with_session_then_global, try_admit_v3_selected_target, V3AdmitAfterRecovery,
-    V3AdmittedTargetSelectionAfterRescue, V3ProviderFailureRuntimeHealth,
-    V3RuntimeProviderAdmission,
+    select_v3_expanded_target_with_rescue, select_v3_target_with_session_then_global,
+    V3ProviderFailureRuntimeHealth, V3TargetSelectionAfterRescue,
 };
 use crate::runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingState};
 use crate::shared::V3ProviderAttemptBody;
@@ -321,10 +318,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> = None;
     let allowed_modes = direct_runtime_allowed_execution_modes(manifest, &standardized.server_id);
     loop {
-        let (selected, mut selected_admission): (
-            routecodex_v3_target::V3Target10ConcreteProviderSelected,
-            Option<V3RuntimeProviderAdmission>,
-        ) = {
+        let selected: routecodex_v3_target::V3Target10ConcreteProviderSelected = {
             let pinned = pinned_selected.take();
             let preferred = pinned
                 .as_ref()
@@ -332,7 +326,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 .or_else(|| initial_selected_target.take())
                 .or_else(|| retry_selected.take());
             if let Some(captured_expanded) = expanded.as_ref() {
-                match Box::pin(select_v3_expanded_target_with_admission_rescue(
+                match Box::pin(select_v3_expanded_target_with_rescue(
                     manifest,
                     captured_expanded.clone(),
                     &direct_failure_session_scope,
@@ -345,13 +339,11 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 ))
                 .await
                 {
-                    V3AdmittedTargetSelectionAfterRescue::Selected(value) => {
-                        (value.selected, Some(value.admission))
-                    }
-                    V3AdmittedTargetSelectionAfterRescue::Failed(source) => {
+                    V3TargetSelectionAfterRescue::Selected(selected) => selected,
+                    V3TargetSelectionAfterRescue::Failed(source) => {
                         return error_output(source, trace, &hook_registry);
                     }
-                    V3AdmittedTargetSelectionAfterRescue::Exhausted(error) => {
+                    V3TargetSelectionAfterRescue::Exhausted(error) => {
                         let detail = if error.attempted_candidates.is_empty() {
                             "no candidates".to_string()
                         } else {
@@ -383,15 +375,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     }
                 }
             } else if let Some(selected) = preferred {
-                match v3_direct_admit_pinned_target(
-                    selected,
-                    &last_external_http,
-                    &trace,
-                    &hook_registry,
-                ) {
-                    Ok(value) => value,
-                    Err(output) => return output,
-                }
+                selected
             } else {
                 return error_output(
                     runtime_source(
@@ -438,9 +422,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             observability.attempts = Some(total_attempts(&accumulator, send_attempts));
             sink(&observability);
         }
-        if pending_provider_action_recovery.is_some() {
-            drop(selected_admission.take());
-        }
         if let Some(recovery) = pending_provider_action_recovery.take() {
             match provider_health
                 .wait_for_error05_recovery(&recovery, &selected)
@@ -449,23 +430,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 Ok(V3ProviderActionRecoveryTransition::Admitted(mut admission)) => {
                     provider_action_permit = admission.take_permit();
                     provider_action_permit_target = Some(selected.candidate.clone());
-                    selected_admission = match admit_v3_selected_target_after_recovery(&selected) {
-                        V3AdmitAfterRecovery::Admitted(admission) => Some(admission),
-                        V3AdmitAfterRecovery::Busy => {
-                            failed_candidates
-                                .insert(v3_relay_provider_candidate_key(&selected.candidate));
-                            drop(provider_action_permit.take());
-                            provider_action_permit_target = None;
-                            continue;
-                        }
-                        V3AdmitAfterRecovery::Failed(reason) => {
-                            return error_output(
-                                runtime_source("V3Target10ConcreteProviderSelected", reason),
-                                trace,
-                                &hook_registry,
-                            )
-                        }
-                    };
                     trace.push("V3ProviderActionGateAdmission");
                 }
                 Ok(V3ProviderActionRecoveryTransition::Superseded(ticket)) => {
@@ -763,12 +727,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 )
             }
         };
-        let transport_request = match selected_admission.take() {
-            Some(admission) => {
-                transport_request.with_pre_acquired_admission(admission.into_lease())
-            }
-            None => transport_request,
-        };
         trace.push("V3Transport13ResponsesHttpRequest");
         provider_request_snapshot = Some(transport_request.provider_request_projection());
 
@@ -808,19 +766,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             })
         }) {
             Ok(raw) => raw,
-            Err(V3ProviderError::ConcurrencyBusy { .. }) => {
-                if let Err(error) = runtime_timing.finish_external() {
-                    return error_output(
-                        runtime_source("V3RuntimeTimingExternal", error),
-                        trace,
-                        &hook_registry,
-                    );
-                }
-                failed_candidates.insert(v3_relay_provider_candidate_key(&policy.target.candidate));
-                drop(provider_action_permit.take());
-                provider_action_permit_target = None;
-                continue;
-            }
             Err(error) => {
                 if let Some(witness) =
                     crate::hub_v1::external_http_witness_from_provider_error(&error)

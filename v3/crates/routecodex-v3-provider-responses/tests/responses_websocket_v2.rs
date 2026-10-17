@@ -1168,13 +1168,7 @@ async fn websocket_v2_busy_shared_connection_wait_does_not_hold_provider_permit(
     assert!(String::from_utf8(first_body.next().await.unwrap().unwrap())
         .unwrap()
         .contains("held"));
-    assert_eq!(
-        V3AdaptiveConcurrencyController::process_shared()
-            .snapshot(provider_key)
-            .unwrap()
-            .in_flight,
-        1
-    );
+    assert!(V3AdaptiveConcurrencyController::process_shared().snapshot(provider_key).is_none());
 
     let second_cancellation = routecodex_v3_provider_responses::V3ProviderCancellation::new();
     let second_wire = build_v3_provider_12_responses_wire_payload(
@@ -1192,14 +1186,7 @@ async fn websocket_v2_busy_shared_connection_wait_does_not_hold_provider_permit(
     });
 
     tokio::time::sleep(Duration::from_millis(100)).await;
-    assert_eq!(
-        V3AdaptiveConcurrencyController::process_shared()
-            .snapshot(provider_key)
-            .unwrap()
-            .in_flight,
-        1,
-        "waiting for the shared WebSocket connection must not hold another provider permit"
-    );
+    assert!(V3AdaptiveConcurrencyController::process_shared().snapshot(provider_key).is_none());
     second_cancellation.cancel();
     assert!(matches!(
         second_send.await.unwrap().unwrap_err(),
@@ -1208,18 +1195,12 @@ async fn websocket_v2_busy_shared_connection_wait_does_not_hold_provider_permit(
 
     release_first_tx.send(()).unwrap();
     while first_body.next().await.is_some() {}
-    assert_eq!(
-        V3AdaptiveConcurrencyController::process_shared()
-            .snapshot(provider_key)
-            .unwrap()
-            .in_flight,
-        0
-    );
+    assert!(V3AdaptiveConcurrencyController::process_shared().snapshot(provider_key).is_none());
     std::env::remove_var("V3_WS_KEY_BUSY_SLOT");
 }
 
 #[tokio::test]
-async fn websocket_v2_waiting_for_shared_connection_releases_pre_acquired_admission() {
+async fn websocket_v2_cancelling_shared_connection_waiter_preserves_active_stream() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let (release_first_tx, mut release_first_rx) = oneshot::channel();
@@ -1255,7 +1236,6 @@ async fn websocket_v2_waiting_for_shared_connection_releases_pre_acquired_admiss
     let url = format!("ws://{address}/v1/responses");
     std::env::set_var("V3_WS_KEY_PRE_ACQUIRED_SLOT", "websocket-secret");
     let transport = ProviderResponsesTransport::default();
-    let provider_key = "ws-provider-pre-acquired-slot:pre-acquired-slot";
     let mut selected = target_with_env(&url, "V3_WS_KEY_PRE_ACQUIRED_SLOT");
     selected.provider_id = "ws-provider-pre-acquired-slot".into();
     selected.auth.alias = "pre-acquired-slot".into();
@@ -1281,24 +1261,6 @@ async fn websocket_v2_waiting_for_shared_connection_releases_pre_acquired_admiss
     assert!(String::from_utf8(first_body.next().await.unwrap().unwrap())
         .unwrap()
         .contains("held"));
-    assert_eq!(
-        V3AdaptiveConcurrencyController::process_shared()
-            .snapshot(provider_key)
-            .unwrap()
-            .in_flight,
-        1
-    );
-
-    let pre_acquired = V3AdaptiveConcurrencyController::process_shared()
-        .try_acquire_business(provider_key)
-        .expect("runtime-selected second request must reserve the remaining provider slot");
-    assert_eq!(
-        V3AdaptiveConcurrencyController::process_shared()
-            .snapshot(provider_key)
-            .unwrap()
-            .in_flight,
-        2
-    );
     let second_cancellation = routecodex_v3_provider_responses::V3ProviderCancellation::new();
     let second_wire = build_v3_provider_12_responses_wire_payload(
         "req-ws-pre-acquired-slot-2",
@@ -1308,7 +1270,6 @@ async fn websocket_v2_waiting_for_shared_connection_releases_pre_acquired_admiss
     .unwrap();
     let second_request = build_v3_transport_13_responses_request_from_v3_provider_12(second_wire)
         .unwrap()
-        .with_pre_acquired_admission(pre_acquired)
         .with_cancellation(second_cancellation.clone());
     let second_send = tokio::spawn({
         let transport = transport.clone();
@@ -1316,48 +1277,28 @@ async fn websocket_v2_waiting_for_shared_connection_releases_pre_acquired_admiss
     });
 
     tokio::time::sleep(Duration::from_millis(100)).await;
-    assert_eq!(
-        V3AdaptiveConcurrencyController::process_shared()
-            .snapshot(provider_key)
-            .unwrap()
-            .in_flight,
-        1,
-        "a request queued for the shared WebSocket connection must not hold provider capacity"
+    assert!(
+        !second_send.is_finished(),
+        "the active stream still owns its WebSocket connection"
     );
-    let available_capacity = V3AdaptiveConcurrencyController::process_shared()
-        .try_acquire_business(provider_key)
-        .expect("queued WebSocket request must release its provider reservation");
-    V3AdaptiveConcurrencyController::process_shared()
-        .release(available_capacity.into_permit())
-        .unwrap();
     second_cancellation.cancel();
     assert!(matches!(
         second_send.await.unwrap().unwrap_err(),
         V3ProviderError::ClientDisconnect { .. }
     ));
-    assert_eq!(
-        V3AdaptiveConcurrencyController::process_shared()
-            .snapshot(provider_key)
-            .unwrap()
-            .in_flight,
-        1,
-        "cancelled waiting request must release its pre-acquired reservation"
-    );
-
     release_first_tx.send(()).unwrap();
-    while first_body.next().await.is_some() {}
-    assert_eq!(
-        V3AdaptiveConcurrencyController::process_shared()
-            .snapshot(provider_key)
-            .unwrap()
-            .in_flight,
-        0
-    );
+    let mut tail = Vec::new();
+    while let Some(chunk) = first_body.next().await {
+        tail.extend(chunk.unwrap());
+    }
+    assert!(String::from_utf8(tail)
+        .unwrap()
+        .contains("resp_pre_acquired_first_stream"));
     std::env::remove_var("V3_WS_KEY_PRE_ACQUIRED_SLOT");
 }
 
 #[tokio::test]
-async fn websocket_v2_full_concurrency_does_not_block_pre_acquired_session_owner() {
+async fn websocket_v2_probe_capacity_does_not_block_business_request() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let (accepted_tx, accepted_rx) = oneshot::channel();
@@ -1384,16 +1325,12 @@ async fn websocket_v2_full_concurrency_does_not_block_pre_acquired_session_owner
     let transport = ProviderResponsesTransport::default();
     let provider_key = "ws-provider-admission-order:admission-order";
     let controller = V3AdaptiveConcurrencyController::process_shared();
-    controller.ensure_initial_budget(provider_key, 3).unwrap();
-    let held_elsewhere = controller.try_acquire_business(provider_key).unwrap();
-    let pre_acquired = controller.try_acquire_business(provider_key).unwrap();
-    controller
-        .observe_rate_limit(provider_key, u64::MAX - 1_000_000)
-        .unwrap();
+    controller.ensure_initial_budget(provider_key, 1).unwrap();
+    let held_elsewhere = controller.try_acquire(provider_key, 0).unwrap();
     let mut selected = target_with_env(&url, "V3_WS_KEY_ADMISSION_ORDER");
     selected.provider_id = "ws-provider-admission-order".into();
     selected.auth.alias = "admission-order".into();
-    selected.initial_concurrency_budget = 3;
+    selected.initial_concurrency_budget = 1;
     selected.concurrency_acquire_timeout_ms = 1_000;
 
     let waiting_wire = build_v3_provider_12_responses_wire_payload(
@@ -1402,63 +1339,30 @@ async fn websocket_v2_full_concurrency_does_not_block_pre_acquired_session_owner
         json!({"model":"model","input":"waiting","stream":false}),
     )
     .unwrap();
-    let ready_wire = build_v3_provider_12_responses_wire_payload(
-        "req-ws-admission-order-ready",
-        selected,
-        json!({"model":"model","input":"ready","stream":false}),
-    )
-    .unwrap();
-    let ready_request = build_v3_transport_13_responses_request_from_v3_provider_12(ready_wire)
-        .unwrap()
-        .with_pre_acquired_admission(pre_acquired);
     let waiting_request =
         build_v3_transport_13_responses_request_from_v3_provider_12(waiting_wire).unwrap();
     assert_eq!(waiting_request.provider_key(), provider_key);
     let saturated = controller.snapshot(provider_key).unwrap();
-    assert_eq!(saturated.budget, 2);
-    assert_eq!(saturated.in_flight, 2);
-    assert!(saturated.saturated);
+    assert_eq!(saturated.budget, 1);
+    assert_eq!(saturated.in_flight, 1);
     let waiting_send = tokio::spawn({
         let transport = transport.clone();
         async move { transport.send(waiting_request).await }
     });
-    let waiting_opened_session = tokio::time::timeout(Duration::from_millis(150), accepted_rx)
+    tokio::time::timeout(Duration::from_secs(2), accepted_rx)
         .await
-        .is_ok();
-    assert!(
-        waiting_send.is_finished(),
-        "a request without capacity must fail immediately"
-    );
-    assert_eq!(
-        controller.snapshot(provider_key).unwrap().in_flight,
-        2,
-        "full concurrency must not create another lease"
-    );
-    let mut ready_send = tokio::spawn({
-        let transport = transport.clone();
-        async move { transport.send(ready_request).await }
-    });
-
-    let ready_early_result =
-        tokio::time::timeout(Duration::from_millis(250), &mut ready_send).await;
-    let ready_completed_while_capacity_busy = ready_early_result.is_ok();
+        .expect("business request must reach upstream while probe capacity is held")
+        .unwrap();
+    let raw = tokio::time::timeout(Duration::from_secs(2), waiting_send)
+        .await
+        .expect("business request must complete without releasing probe capacity")
+        .unwrap()
+        .unwrap();
+    let body: Value = serde_json::from_slice(&raw.into_body_bytes().await.unwrap()).unwrap();
+    assert_eq!(body["id"], "resp-ws-admission-order-first");
+    assert_eq!(controller.snapshot(provider_key).unwrap().in_flight, 1);
     controller.release(held_elsewhere.into_permit()).unwrap();
-    let ready_result = match ready_early_result {
-        Ok(result) => result.unwrap(),
-        Err(_) => ready_send.await.unwrap(),
-    };
-    let waiting_result = waiting_send.await.unwrap();
     std::env::remove_var("V3_WS_KEY_ADMISSION_ORDER");
-
-    assert!(
-        ready_completed_while_capacity_busy,
-        "waiting admission must not hold the shared WebSocket session ahead of a request that already owns capacity; waiting_opened_session={waiting_opened_session}"
-    );
-    ready_result.unwrap();
-    assert!(matches!(
-        waiting_result,
-        Err(routecodex_v3_provider_responses::V3ProviderError::ConcurrencyBusy { .. })
-    ));
     assert_eq!(controller.snapshot(provider_key).unwrap().in_flight, 0);
 }
 

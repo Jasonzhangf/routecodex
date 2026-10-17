@@ -584,14 +584,6 @@ impl V3ProviderFailureRuntimeHealth {
                 now_ms,
             )?;
         }
-        // A completed business 2xx is the recovery counterpart of an observed
-        // 429: it restores one unit of adaptive concurrency budget and clears
-        // the saturation window for the same provider/auth identity.
-        if let Some(auth_alias) = auth_alias {
-            V3AdaptiveConcurrencyController::process_shared()
-                .observe_business_success(&v3_provider_concurrency_key_parts(provider_id, auth_alias))
-                .map_err(|error| error.to_string())?;
-        }
         self.action_gate
             .record_provider_success(&V3ProviderActionProviderScope::new(
                 failure_session_scope,

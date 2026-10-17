@@ -888,7 +888,7 @@ chains:
     caller_symbol: V3ServerAggregateHandle::prepare_exec_attempt
     caller_file: v3/crates/routecodex-v3-server/src/lib.rs
     callee_symbol: V3ServerRequestActivityGate::begin_maintenance
-    callee_file: v3/crates/routecodex-v3-server/src/session_admission.rs
+    callee_file: v3/crates/routecodex-v3-server/src/request_activity.rs
     status: anchored
     owner_feature_id: v3.managed_server_lifecycle
     resource_flow:
@@ -4352,7 +4352,7 @@ chains:
     to_node: V3Target10ConcreteProviderSelected
     caller_symbol: resolve_v3_relay_entry_target
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
-    callee_symbol: select_v3_expanded_target_with_admission_rescue
+    callee_symbol: select_v3_expanded_target_with_rescue
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
     status: anchored
     owner_feature_id: v3.relay_runtime_shared
@@ -6753,45 +6753,30 @@ chains:
       side_channel_reads:
       - v3.runtime.responses_timing_observability
       side_channel_writes: []
-- chain_id: v3.responses_session_admission
-  owner_feature_id: v3.responses_session_inflight_admission
-  summary: The listener-local HTTP boundary admits one active Responses request per explicit session or conversation, waits on overlap before Runtime/provider send, and holds the exact permit until the client response body reaches EOF, errors, or is dropped.
-  manifest: docs/architecture/manifests/v3.responses_session_admission.mainline.yml
+- chain_id: v3.http_request_isolation
+  owner_feature_id: v3.http_request_isolation
+  summary: Each parsed HTTP request independently enters Runtime without a session or conversation serialization gate.
+  manifest: docs/architecture/manifests/v3.http_request_isolation.mainline.yml
   entry_contract:
     node: V3Server03HttpRequestRaw
-    owner_doc: docs/architecture/wiki/v3-responses-session-admission.md
+    owner_doc: docs/architecture/wiki/v3-http-request-isolation.md
   edges:
-  - step_id: v3-responses-admission-01
+  - step_id: v3-http-request-independent-01
     from_node: V3Server03HttpRequestRaw
-    to_node: V3Server03ResponsesSessionAdmissionBlock
-    caller_symbol: admit_v3_responses_session_after_json_parse
+    to_node: V3HubReqInbound01ClientRaw
+    caller_symbol: pending_model_request
     caller_file: v3/crates/routecodex-v3-server/src/lib.rs
-    callee_symbol: V3ResponsesSessionAdmissionGate::admit
-    callee_file: v3/crates/routecodex-v3-server/src/session_admission.rs
+    callee_symbol: pending_endpoint_after_responses_admission
+    callee_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
     status: anchored
-    owner_feature_id: v3.responses_session_inflight_admission
+    owner_feature_id: v3.http_request_isolation
     semantic_contract:
-      - The caller awaits the listener-local predicate after canonical JSON parsing and before Runtime or provider transport.
-      - A matching explicit session or conversation remains inside this edge until the exact active permit drops; no client error is projected.
+      - Session and conversation headers do not create a serialization lock or queue.
+      - Each request owns its own execution, cancellation and response body.
     resource_flow:
       consumes: [v3.server.validated_http_input]
-      produces: [v3.server.responses_session_admission]
-      side_channel_reads: []
-      side_channel_writes: [v3.server.responses_session_admission]
-  - step_id: v3-responses-admission-release-03
-    from_node: V3Server03ResponsesSessionAdmissionBlock
-    to_node: V3ServerRespOutbound06ClientFrame
-    caller_symbol: pending_endpoint
-    caller_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
-    callee_symbol: hold_response_body_admission_permit
-    callee_file: v3/crates/routecodex-v3-server/src/session_admission.rs
-    status: anchored
-    edge_kind: side_channel_lifetime_boundary
-    owner_feature_id: v3.responses_session_inflight_admission
-    resource_flow:
-      consumes: [v3.server.responses_session_admission, v3.response.client_payload]
       produces: []
-      side_channel_reads: [v3.server.responses_session_admission]
+      side_channel_reads: []
       side_channel_writes: []
 
 - chain_id: v3.sse.http_keepalive_boundary
@@ -6856,7 +6841,7 @@ chains:
     from_node: V3ServerRespOutbound06ClientFrame
     to_node: V3FrontClientBodyEofHeld
     caller_symbol: hold_response_body_request_activity_permit
-    caller_file: v3/crates/routecodex-v3-server/src/session_admission.rs
+    caller_file: v3/crates/routecodex-v3-server/src/request_activity.rs
     callee_symbol: V3StableFrontSocket::hold_activity_until_flush
     callee_file: v3/crates/routecodex-v3-server/src/restart_handoff.rs
     status: anchored
@@ -8005,7 +7990,7 @@ chains:
       side_channel_writes: []
 - chain_id: v3.provider_admission_rescue_entrypoints
   owner_feature_id: v3.provider_global_subscription_probe
-  summary: Direct and Relay use one pre-transport selection boundary with atomic provider+authAlias capacity admission; full candidates are skipped request-locally without waiting, health mutation or Router reentry.
+  summary: Direct and Relay select healthy targets with cooldown rescue; in-flight business requests never exclude candidates.
   exhaustion_contract: a cooldown-only request receives one rescue pass and captured-target reselection, then internal exhaustion when no candidate is available; independent scheduled health recovery does not retain the exhausted request
   edges:
   - step_id: v3-rd-target-select-direct-admission-rescue
@@ -8013,105 +7998,103 @@ chains:
     to_node: V3Target10ConcreteProviderSelected
     caller_symbol: execute_v3_direct_runtime_kernel_core_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
-    callee_symbol: select_v3_expanded_target_with_admission_rescue
+    callee_symbol: select_v3_expanded_target_with_rescue
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
-      - Direct runtime selects from the captured Target09 candidate set through the admission-aware rescue wrapper before provider transport.
-      - Direct atomically admits provider+authAlias capacity and immediately selects the next eligible candidate when full.
+      - Direct runtime selects from the captured Target09 candidate set through the shared cooldown rescue wrapper before provider transport.
+      - Direct dispatches the healthy selected provider independently of other in-flight requests.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
-      - All-full candidates exhaust immediately without a provider send or health mutation; concurrency never waits or enters Error recovery admission.
+      - Only real health exclusions and request-local failures can exhaust candidates; local capacity cannot cause exhaustion.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
-      produces: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
-      side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability, v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
+      produces: [v3.target.concrete_provider]
+      side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
+      side_channel_writes: [v3.target.concrete_provider]
   - step_id: v3-rd-target-select-responses-direct-admission-rescue
     from_node: V3Target09CandidateSetExpanded
     to_node: V3Target10ConcreteProviderSelected
     caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-    callee_symbol: select_v3_expanded_target_with_admission_rescue
+    callee_symbol: select_v3_expanded_target_with_rescue
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
-      - Responses Direct runtime uses the same admission-aware selection wrapper for initial selection and request-local reselection.
-      - Responses Direct immediately skips full provider+authAlias candidates and exhausts an all-full target without waiting or mutating health.
-      - The acquired provider admission lease is consumed by Provider transport or released by Runtime if selection does not reach transport.
+      - Responses Direct uses the same cooldown rescue wrapper for initial selection and request-local reselection.
+      - Other in-flight business requests cannot exclude a healthy provider or exhaust this target.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
-      produces: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
-      side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability, v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
+      produces: [v3.target.concrete_provider]
+      side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
+      side_channel_writes: [v3.target.concrete_provider]
   - step_id: v3-rd-target-select-relay-core-admission-rescue
     from_node: V3Target09CandidateSetExpanded
     to_node: V3Target10ConcreteProviderSelected
     caller_symbol: execute_v3_relay_runtime_core
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
-    callee_symbol: resolve_v3_relay_target_outcome_with_admission_rescue
+    callee_symbol: resolve_v3_relay_target_outcome_with_rescue
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
-      - Generic Relay runtime resolves Target09 through the admission-aware relay wrapper before provider transport.
-      - Relay uses the same atomic capacity admission, immediately skipping full candidates without waiting or changing health.
+      - Generic Relay runtime resolves Target09 through the shared cooldown rescue wrapper before provider transport.
+      - Relay dispatches healthy candidates independently of other in-flight business requests.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
       - Concurrency state cannot exhaust Relay selection; only an actual typed provider failure such as HTTP 429 enters Error recovery and may select a later candidate.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
-      produces: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
-      side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability, v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
+      produces: [v3.target.concrete_provider]
+      side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
+      side_channel_writes: [v3.target.concrete_provider]
   - step_id: v3-rd-target-select-responses-relay-admission-rescue
     from_node: V3Target09CandidateSetExpanded
     to_node: V3Target10ConcreteProviderSelected
     caller_symbol: execute_v3_responses_relay_runtime_inner
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
-    callee_symbol: resolve_v3_relay_target_outcome_with_admission_rescue
+    callee_symbol: resolve_v3_relay_target_outcome_with_rescue
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
-      - Responses Relay runtime uses the admission-aware relay wrapper for selected Target10 resolution after its route facts are captured.
-      - Full candidates are excluded only for this request and immediately reselected inside Target; capacity does not mutate failure policy or cooldown state.
-      - The selected admission lease is handed to Relay Provider transport exactly once; otherwise Runtime releases it before terminal projection.
+      - Responses Relay resolves Target10 through the cooldown rescue wrapper after route facts are captured.
+      - Other business requests cannot exclude a healthy target or require a transport admission lease.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
-      produces: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
-      side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability, v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
+      produces: [v3.target.concrete_provider]
+      side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
+      side_channel_writes: [v3.target.concrete_provider]
   - step_id: v3-rd-target-select-anthropic-relay-admission-rescue
     from_node: V3Target09CandidateSetExpanded
     to_node: V3Target10ConcreteProviderSelected
     caller_symbol: execute_v3_anthropic_relay_runtime_inner
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-    callee_symbol: resolve_v3_relay_target_outcome_with_admission_rescue
+    callee_symbol: resolve_v3_relay_target_outcome_with_rescue
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
-      - Anthropic Relay resolves Target09 through admission-aware selection before Provider transport.
-      - Anthropic Relay uses shared admission to switch immediately from full providers to the next eligible candidate.
+      - Anthropic Relay resolves Target09 through cooldown rescue before Provider transport.
+      - Local in-flight capacity cannot switch or exclude the healthy selected provider.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
       - Concurrency state cannot exhaust Anthropic Relay selection; only an actual typed provider failure such as HTTP 429 may enter Error recovery and select a later candidate.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
-      produces: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
-      side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability, v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
+      produces: [v3.target.concrete_provider]
+      side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
+      side_channel_writes: [v3.target.concrete_provider]
 
 - chain_id: v3-provider-admission-lease-lifecycle
   owner_feature_id: v3.provider_global_subscription_probe
-  summary: Runtime acquires one provider+authAlias capacity lease before transport and hands it to Provider; WebSocketV2 releases that lease before waiting for a shared session slot and reacquires it only after slot ownership, every path releases owned resources through RAII, and a completed business success restores one unit of the exact provider+authAlias adaptive budget.
+  summary: Only health probes own bounded control capacity. Business requests never acquire or wait for these leases.
   edges:
   - step_id: v3-provider-admission-lease-acquire
-    from_node: V3Target10ConcreteProviderSelected
-    to_node: V3RuntimeProviderAdmission
-    caller_symbol: select_v3_expanded_target_with_admission_rescue
-    caller_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
-    callee_symbol: V3AdaptiveConcurrencyController::try_acquire_business
+    from_node: V3ProviderHealthProbePermit
+    to_node: V3PreAcquiredProviderAdmission
+    caller_symbol: probe_v3_provider_global_target_impl
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
+    callee_symbol: V3AdaptiveConcurrencyController::try_acquire
     callee_file: v3/crates/routecodex-v3-provider-responses/src/adaptive_concurrency.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
@@ -8120,108 +8103,23 @@ chains:
       produces: [v3.provider.adaptive_concurrency_admission]
       side_channel_reads: [v3.provider.responses_transport_capability, v3.provider.adaptive_concurrency_admission]
       side_channel_writes: [v3.provider.adaptive_concurrency_admission]
-  - step_id: v3-provider-admission-lease-direct-handoff
-    from_node: V3RuntimeProviderAdmission
-    to_node: V3PreAcquiredProviderAdmission
-    caller_symbol: execute_v3_direct_runtime_kernel_core_resident
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
-    callee_symbol: V3Transport13ResponsesRequest::with_pre_acquired_admission
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/transport.rs
-    status: anchored
-    owner_feature_id: v3.provider_global_subscription_probe
-    resource_flow:
-      consumes: [v3.provider.adaptive_concurrency_admission, v3.provider.transport_request]
-      produces: [v3.provider.transport_request]
-      side_channel_reads: [v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.provider.adaptive_concurrency_admission]
-  - step_id: v3-provider-admission-lease-responses-direct-handoff
-    from_node: V3RuntimeProviderAdmission
-    to_node: V3PreAcquiredProviderAdmission
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-    callee_symbol: V3Transport13ResponsesRequest::with_pre_acquired_admission
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/transport.rs
-    status: anchored
-    owner_feature_id: v3.provider_global_subscription_probe
-    resource_flow:
-      consumes: [v3.provider.adaptive_concurrency_admission, v3.provider.transport_request]
-      produces: [v3.provider.transport_request]
-      side_channel_reads: [v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.provider.adaptive_concurrency_admission]
-  - step_id: v3-provider-admission-lease-relay-handoff
-    from_node: V3RuntimeProviderAdmission
-    to_node: V3PreAcquiredProviderAdmission
-    caller_symbol: execute_v3_relay_runtime_core
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
-    callee_symbol: V3Transport13ResponsesRequest::with_pre_acquired_admission
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/transport.rs
-    status: anchored
-    owner_feature_id: v3.provider_global_subscription_probe
-    resource_flow:
-      consumes: [v3.provider.adaptive_concurrency_admission, v3.provider.transport_request]
-      produces: [v3.provider.transport_request]
-      side_channel_reads: [v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.provider.adaptive_concurrency_admission]
-  - step_id: v3-provider-admission-lease-responses-relay-handoff
-    from_node: V3RuntimeProviderAdmission
-    to_node: V3PreAcquiredProviderAdmission
-    caller_symbol: execute_v3_responses_relay_runtime_inner
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
-    callee_symbol: V3Transport13ResponsesRequest::with_pre_acquired_admission
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/transport.rs
-    status: anchored
-    owner_feature_id: v3.provider_global_subscription_probe
-    resource_flow:
-      consumes: [v3.provider.adaptive_concurrency_admission, v3.provider.transport_request]
-      produces: [v3.provider.transport_request]
-      side_channel_reads: [v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.provider.adaptive_concurrency_admission]
   - step_id: v3-provider-admission-lease-websocket-v2-slot-order
-    from_node: V3PreAcquiredProviderAdmission
+    from_node: V3ProviderResponsesTransportSend
     to_node: V3ProviderResponsesWebSocketSessionSlot
     caller_symbol: V3ProviderResponsesTransport::send
     caller_file: v3/crates/routecodex-v3-provider-responses/src/transport.rs
-    callee_symbol: acquire_admission_and_connection_slot
+    callee_symbol: acquire_connection_slot
     callee_file: v3/crates/routecodex-v3-provider-responses/src/transport/websocket.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
-      - WebSocketV2 preserves a granted lease when the session slot is immediately available and releases it before an actual slot wait.
-      - After a slot wait, transport immediately reacquires provider admission; a losing capacity race releases the slot and returns typed ConcurrencyBusy for Runtime reselect.
-      - Cancellation or admission failure releases the resources already owned by this request and cannot retain a provider lease while waiting for another request's WebSocket session.
+      - WebSocketV2 serializes execution only on its real shared connection, without business capacity admission or readmission.
+      - Cancelling a waiter does not cancel the active connection owner.
     resource_flow:
-      consumes: [v3.provider.adaptive_concurrency_admission, v3.provider.responses_websocket_connection]
-      produces: [v3.provider.adaptive_concurrency_admission, v3.provider.responses_websocket_connection]
-      side_channel_reads: [v3.provider.adaptive_concurrency_admission, v3.provider.responses_websocket_connection]
-      side_channel_writes: [v3.provider.adaptive_concurrency_admission, v3.provider.responses_websocket_connection]
-  - step_id: v3-provider-admission-lease-anthropic-relay-handoff
-    from_node: V3RuntimeProviderAdmission
-    to_node: V3PreAcquiredProviderAdmission
-    caller_symbol: execute_v3_anthropic_relay_runtime_inner
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-    callee_symbol: V3Transport13ResponsesRequest::with_pre_acquired_admission
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/transport.rs
-    status: anchored
-    owner_feature_id: v3.provider_global_subscription_probe
-    resource_flow:
-      consumes: [v3.provider.adaptive_concurrency_admission, v3.provider.transport_request]
-      produces: [v3.provider.transport_request]
-      side_channel_reads: [v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.provider.adaptive_concurrency_admission]
-  - step_id: v3-provider-admission-lease-runtime-early-release
-    from_node: V3RuntimeProviderAdmission
-    to_node: V3AdaptiveConcurrencyPermitReleased
-    caller_symbol: V3RuntimeProviderAdmission::drop
-    caller_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
-    callee_symbol: V3AdaptiveConcurrencyController::release
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/adaptive_concurrency.rs
-    status: anchored
-    owner_feature_id: v3.provider_global_subscription_probe
-    resource_flow:
-      consumes: [v3.provider.adaptive_concurrency_admission]
-      produces: [v3.provider.adaptive_concurrency_admission]
-      side_channel_reads: [v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.provider.adaptive_concurrency_admission]
+      consumes: [v3.provider.responses_websocket_connection]
+      produces: [v3.provider.responses_websocket_connection]
+      side_channel_reads: [v3.provider.responses_websocket_connection]
+      side_channel_writes: [v3.provider.responses_websocket_connection]
   - step_id: v3-provider-admission-lease-request-drop-release
     from_node: V3PreAcquiredProviderAdmission
     to_node: V3AdaptiveConcurrencyPermitReleased
@@ -8246,27 +8144,9 @@ chains:
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
-      - Non-streaming response completion, transport failure, or cancellation drops the Provider permit guard.
-      - Streaming responses retain the guard until stream EOF or drop, then release the exact selected provider+authAlias lease.
+      - Health probe completion, failure or cancellation releases only its control capacity guard.
     resource_flow:
       consumes: [v3.provider.adaptive_concurrency_admission, v3.response.provider_raw]
-      produces: [v3.provider.adaptive_concurrency_admission]
-      side_channel_reads: [v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.provider.adaptive_concurrency_admission]
-  - step_id: v3-provider-admission-budget-recover-business-success
-    from_node: V3ProviderHealthStateMutated
-    to_node: V3AdaptiveConcurrencyController
-    caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope_for_interface
-    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
-    callee_symbol: V3AdaptiveConcurrencyController::observe_business_success
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/adaptive_concurrency.rs
-    status: anchored
-    owner_feature_id: v3.provider_global_subscription_probe
-    semantic_contract:
-      - A completed business 2xx restores one unit of the exact provider+authAlias adaptive budget and clears its saturation and next-probe deadline.
-      - Recovery is a no-op for an unknown provider+authAlias identity and does not mutate provider health or cooldown policy.
-    resource_flow:
-      consumes: [v3.provider.adaptive_concurrency_admission]
       produces: [v3.provider.adaptive_concurrency_admission]
       side_channel_reads: [v3.provider.adaptive_concurrency_admission]
       side_channel_writes: [v3.provider.adaptive_concurrency_admission]
@@ -9189,7 +9069,7 @@ chains:
     caller_symbol: V3ServerAggregateHandle::prepare_for_exec
     caller_file: v3/crates/routecodex-v3-server/src/lib.rs
     callee_symbol: V3ServerRequestActivityGate::begin_maintenance
-    callee_file: v3/crates/routecodex-v3-server/src/session_admission.rs
+    callee_file: v3/crates/routecodex-v3-server/src/request_activity.rs
     status: binding_pending
     owner_feature_id: v3.runtime_restart_handoff_skeleton
     resource_flow:

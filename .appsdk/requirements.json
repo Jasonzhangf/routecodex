@@ -242,9 +242,63 @@
         "version": 1
       },
       "version": 9
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "不存在这个问题,http请求天然隔离。对,移除这个错误的设计,这是过度保护,消融掉。",
+          "role": "user",
+          "source": "Codex conversation 01a14462-5b07-7260-bd85-cb46f0e7be34, direct correction 2026-10-16"
+        },
+        "base_version": 0,
+        "operation": "create",
+        "project_id": "routecodex",
+        "request_id": "req-20261016-dba8ff9-http-request-isolation",
+        "requirement_id": "routecodex-http-request-independence",
+        "text": "每个HTTP请求独立执行。RouteCodex不得按session_id或conversation_id串行化独立请求，须删除Responses同会话准入锁、等待通知、token/permit状态、body持锁包装和对应接线。相同session或conversation的请求A等待上游时，请求B仍须独立进入provider并完成；取消或失败A不得取消、延迟或阻止B。保留真实业务payload与header语义，不把session元数据变成排队许可。不同端口采用同一请求独立语义。更改图、gate和旧测试使之验证并发而非保留排队后补心跳。重启维护协调和Front响应EOF资源职责独立，不在本次消融中顺带删除或放宽。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "不存在这个问题,http请求天然隔离。对,移除这个错误的设计,这是过度保护,消融掉。",
+          "role": "user",
+          "source": "Codex conversation 01a14462-5b07-7260-bd85-cb46f0e7be34, direct correction 2026-10-16"
+        },
+        "requirement_id": "routecodex-http-request-independence",
+        "status": "active",
+        "text": "每个HTTP请求独立执行。RouteCodex不得按session_id或conversation_id串行化独立请求，须删除Responses同会话准入锁、等待通知、token/permit状态、body持锁包装和对应接线。相同session或conversation的请求A等待上游时，请求B仍须独立进入provider并完成；取消或失败A不得取消、延迟或阻止B。保留真实业务payload与header语义，不把session元数据变成排队许可。不同端口采用同一请求独立语义。更改图、gate和旧测试使之验证并发而非保留排队后补心跳。重启维护协调和Front响应EOF资源职责独立，不在本次消融中顺带删除或放宽。",
+        "version": 1
+      },
+      "version": 10
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "现在不存在业务许可,有什么不许可的情况? 不存在这个问题,http请求天然隔离。对,移除这个错误的设计,这是过度保护,消融掉。",
+          "role": "user",
+          "source": "Codex conversation 01a14462-5b07-7260-bd85-cb46f0e7be34, direct correction 2026-10-16"
+        },
+        "base_version": 1,
+        "operation": "replace",
+        "project_id": "routecodex",
+        "request_id": "req-20261016-dba8ff9-http-capacity-ablation",
+        "requirement_id": "routecodex-http-request-independence",
+        "text": "每个HTTP请求独立执行。RouteCodex不得按session_id或conversation_id串行化独立请求，须删除Responses同会话准入锁、等待通知、token/permit状态、body持锁包装和对应接线。相同session或conversation的请求A等待上游时，请求B仍须独立进入provider并完成；取消或失败A不得取消、延迟或阻止B。Runtime与Provider transport不得以其他请求占用的本地并发容量作为业务准入或候选排除条件；跨端口请求总数超过原本地容量时，所有可路由请求仍独立进入上游，不得本地排空唯一候选。删除对应业务许可与Busy拒绝路径，不提高阈值或伪造许可。保留真实业务payload与header语义，不把session元数据变成排队许可。不同端口采用同一请求独立语义。更改图、gate和旧测试使之验证并发而非保留排队后补心跳。真实上游失败的健康状态、Error链、重试与恢复策略不因此放宽。重启维护协调和Front响应EOF资源职责独立，不在本次消融中顺带删除或放宽。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "现在不存在业务许可,有什么不许可的情况? 不存在这个问题,http请求天然隔离。对,移除这个错误的设计,这是过度保护,消融掉。",
+          "role": "user",
+          "source": "Codex conversation 01a14462-5b07-7260-bd85-cb46f0e7be34, direct correction 2026-10-16"
+        },
+        "requirement_id": "routecodex-http-request-independence",
+        "status": "active",
+        "text": "每个HTTP请求独立执行。RouteCodex不得按session_id或conversation_id串行化独立请求，须删除Responses同会话准入锁、等待通知、token/permit状态、body持锁包装和对应接线。相同session或conversation的请求A等待上游时，请求B仍须独立进入provider并完成；取消或失败A不得取消、延迟或阻止B。Runtime与Provider transport不得以其他请求占用的本地并发容量作为业务准入或候选排除条件；跨端口请求总数超过原本地容量时，所有可路由请求仍独立进入上游，不得本地排空唯一候选。删除对应业务许可与Busy拒绝路径，不提高阈值或伪造许可。保留真实业务payload与header语义，不把session元数据变成排队许可。不同端口采用同一请求独立语义。更改图、gate和旧测试使之验证并发而非保留排队后补心跳。真实上游失败的健康状态、Error链、重试与恢复策略不因此放宽。重启维护协调和Front响应EOF资源职责独立，不在本次消融中顺带删除或放宽。",
+        "version": 2
+      },
+      "version": 11
     }
   ],
   "project_id": "routecodex",
   "schema_version": 1,
-  "version": 9
+  "version": 11
 }

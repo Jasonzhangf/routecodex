@@ -12,12 +12,12 @@ mod live_snapshot;
 mod live_snapshot_projections;
 mod metadata_center;
 mod models_catalog;
+mod request_activity;
 mod request_id;
 mod responses_direct_server_outcome;
 mod restart_closeout;
 mod restart_handoff;
 mod scope_metadata;
-mod session_admission;
 mod websocket;
 mod webui_observability;
 mod webui_observability_endpoints;
@@ -64,6 +64,10 @@ use debug_runtime_degradation::build_v3_debug_runtime_degrading_optional_log_sin
 use futures_util::{stream, StreamExt};
 use libc::EINTR;
 use listener_accept::{run_v3_listener_accept_loop, V3ListenerAcceptState};
+use request_activity::{
+    hold_response_body_request_activity_permit, V3ServerMaintenanceGuard,
+    V3ServerRequestActivityGate,
+};
 use responses_direct_server_outcome::{
     execute_responses_direct_server_outcome, V3ResponsesDirectServerOutcome,
 };
@@ -137,12 +141,6 @@ use routecodex_v3_sse::{
     SseTransportLimits,
 };
 use serde_json::{json, Map, Value};
-use session_admission::{
-    hold_response_body_admission_permit, hold_response_body_request_activity_permit,
-    V3ResponsesSessionAdmissionError, V3ResponsesSessionAdmissionGate,
-    V3ResponsesSessionAdmissionPermit, V3ResponsesSessionAdmissionScope, V3ServerMaintenanceGuard,
-    V3ServerRequestActivityGate,
-};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fmt;
@@ -195,7 +193,6 @@ struct V3ListenerState {
     responses_relay_server_tool_state: Arc<V3ResponsesRelayServerToolState>,
     provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
     realtime_cooled_provider_keys: Arc<Mutex<BTreeMap<String, u64>>>,
-    responses_session_admission: Arc<V3ResponsesSessionAdmissionGate>,
     request_activity_gate: Arc<V3ServerRequestActivityGate>,
     front_transport_broker: V3FrontTransportBroker,
     webui_observability: V3WebuiObservability,
@@ -637,7 +634,6 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
                 responses_relay_server_tool_state: responses_relay_server_tool_state.clone(),
                 provider_health: provider_health.clone(),
                 realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
-                responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
                 request_activity_gate: Arc::clone(&request_activity_gate),
                 front_transport_broker: front_transport_broker.clone(),
                 webui_observability,
@@ -981,72 +977,6 @@ fn current_epoch_ms() -> u64 {
         .unwrap_or(0)
 }
 
-async fn admit_v3_responses_session_after_json_parse(
-    state: &Arc<V3ListenerState>,
-    path: &str,
-    request_headers: &HeaderMap,
-    payload: &Value,
-) -> Result<Option<V3ResponsesSessionAdmissionPermit>, Response<Body>> {
-    let (session_id, conversation_id) =
-        match responses_control_scope_headers(request_headers, Some(payload)) {
-            Ok(scope) => scope,
-            Err(message) => {
-                let request_id = match allocate_v3_console_request_id(state, path, Some(payload)) {
-                    Ok(request_id) => request_id,
-                    Err(response) => return Err(*response),
-                };
-                return Err(
-                    error_output_response_for_responses_request_with_project_path(
-                        &state.server,
-                        path,
-                        &request_id,
-                        project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
-                        request_headers,
-                        Some(payload),
-                        resolve_v3_console_project_path(request_headers, payload).as_deref(),
-                    ),
-                );
-            }
-        };
-    let permit = match state
-        .responses_session_admission
-        .admit(V3ResponsesSessionAdmissionScope {
-            endpoint: path.to_string(),
-            session_id,
-            conversation_id,
-        })
-        .await
-    {
-        Ok(permit) => permit,
-        Err(error @ V3ResponsesSessionAdmissionError::TokenSpaceExhausted) => {
-            // The gate cannot hand out a unique admission token any more. The
-            // failure belongs to this request only: every later request gets
-            // its own attempt instead of inheriting a poisoned hot path.
-            let request_id = match allocate_v3_console_request_id(state, path, Some(payload)) {
-                Ok(request_id) => request_id,
-                Err(response) => return Err(*response),
-            };
-            return Err(
-                error_output_response_for_responses_request_with_project_path(
-                    &state.server,
-                    path,
-                    &request_id,
-                    project_v3_server_runtime_failure(
-                        "V3ServerResponsesSessionAdmission",
-                        "responses_session_admission_unavailable",
-                        error.to_string(),
-                        598,
-                    ),
-                    request_headers,
-                    Some(payload),
-                    resolve_v3_console_project_path(request_headers, payload).as_deref(),
-                ),
-            );
-        }
-    };
-    Ok(permit)
-}
-
 async fn pending_endpoint(
     State(state): State<Arc<V3ListenerState>>,
     request: Request,
@@ -1198,16 +1128,6 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
             );
         }
     };
-    let admission_permit = if entry_protocol == "responses" {
-        match admit_v3_responses_session_after_json_parse(&state, &path, &request_headers, &payload)
-            .await
-        {
-            Ok(permit) => permit,
-            Err(response) => return response,
-        }
-    } else {
-        None
-    };
     let request_activity_permit = state.request_activity_gate.admit().await;
     // The Runtime owns full-attempt buffering, so no provider payload byte is
     // projected before the runtime outcome exists. The Server owns the client
@@ -1249,12 +1169,7 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
         }
         None => runtime_outcome.await,
     };
-    let response =
-        hold_response_body_request_activity_permit(response, request_activity_permit, front_socket);
-    match admission_permit {
-        Some(permit) => hold_response_body_admission_permit(response, permit),
-        None => response,
-    }
+    hold_response_body_request_activity_permit(response, request_activity_permit, front_socket)
 }
 
 /// v3.protocol.pending_projection：尚未实现协议绑定的客户端响应统一由
