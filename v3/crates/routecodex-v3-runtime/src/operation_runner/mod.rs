@@ -9,8 +9,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 mod operators;
+mod single_node;
 use operators::CaptureClientJsonOperator;
 use operators::ProjectStandardProviderRequestOperator;
+pub(crate) use single_node::{run_v3_single_node_operator, V3OperationGraph};
 
 const REQUEST_GRAPH_JSON: &str =
     include_str!("../../../../../docs/architecture/dagpipe/v3.operation_runner.request.graph.json");
