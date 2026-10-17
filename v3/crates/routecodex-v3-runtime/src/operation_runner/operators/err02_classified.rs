@@ -14,55 +14,42 @@ const OPERATOR_NAME: &str = "routecodex.v3.error.err02_classified";
 const OPERATOR_VERSION: &str = "1";
 const NODE_ID: &str = "error_err02_classified";
 
-type Err02Output = (V3Error02Classified, Value);
-
 pub(crate) struct Err02ClassifiedOperator {
     source: Arc<Mutex<Option<V3Error01SourceRaised>>>,
-    provider_global_cooldown_ms: Option<u64>,
-    provider_global_semantic_signature: Option<String>,
-    side_output: Arc<Mutex<Option<Result<Err02Output, String>>>>,
+    provider_global_policy: Option<(Option<u64>, String)>,
+    side_output: Arc<Mutex<Option<Result<V3Error02Classified, String>>>>,
 }
 
 impl Err02ClassifiedOperator {
     fn new(
         source: V3Error01SourceRaised,
-        provider_global_cooldown_ms: Option<u64>,
-        provider_global_semantic_signature: Option<String>,
-        side_output: Arc<Mutex<Option<Result<Err02Output, String>>>>,
+        provider_global_policy: Option<(Option<u64>, String)>,
+        side_output: Arc<Mutex<Option<Result<V3Error02Classified, String>>>>,
     ) -> Self {
         Self {
             source: Arc::new(Mutex::new(Some(source))),
-            provider_global_cooldown_ms,
-            provider_global_semantic_signature,
+            provider_global_policy,
             side_output,
         }
     }
 
-    fn classify(&self) -> Result<Err02Output, String> {
+    fn classify(&self) -> Result<V3Error02Classified, String> {
         let source = self
             .source
             .lock()
             .map_err(|_| "Err02 typed source holder is poisoned".to_string())?
             .take()
             .ok_or_else(|| "Err02 typed source was already consumed".to_string())?;
-        let classified = match self.provider_global_semantic_signature.as_ref() {
-            Some(semantic_signature) => {
+        Ok(match &self.provider_global_policy {
+            Some((cooldown_ms, semantic_signature)) => {
                 build_v3_error_02_classified_from_v3_error_01_with_provider_global_policy(
                     source,
-                    self.provider_global_cooldown_ms,
+                    *cooldown_ms,
                     semantic_signature.clone(),
                 )
             }
-            None if self.provider_global_cooldown_ms.is_some() => {
-                return Err(
-                    "Err02 provider global cooldown requires a semantic signature".to_string(),
-                )
-            }
             None => build_v3_error_02_classified_from_v3_error_01(source),
-        };
-        let payload = serde_json::to_value(&classified)
-            .map_err(|error| format!("serialize Err02 classified: {error}"))?;
-        Ok((classified, payload))
+        })
     }
 }
 
@@ -84,15 +71,16 @@ impl Operator for Err02ClassifiedOperator {
     }
 
     fn execute(&self, _input: Value, _: &OperatorContext) -> Result<Value, String> {
-        let classified = self.classify();
-        let output = match &classified {
-            Ok((_, payload)) => Ok(payload.clone()),
+        let typed = self.classify();
+        let output = match &typed {
+            Ok(classified) => serde_json::to_value(classified)
+                .map_err(|error| format!("serialize Err02 classified: {error}")),
             Err(error) => Err(error.clone()),
         };
         *self
             .side_output
             .lock()
-            .map_err(|_| "Err02 side-output holder is poisoned".to_string())? = Some(classified);
+            .map_err(|_| "Err02 side-output holder is poisoned".to_string())? = Some(typed);
         output
     }
 }
@@ -100,34 +88,26 @@ impl Operator for Err02ClassifiedOperator {
 pub(crate) fn run_v3_err02_classified_operator(
     source_projection: Value,
     source: V3Error01SourceRaised,
-    provider_global_cooldown_ms: Option<u64>,
-    provider_global_semantic_signature: Option<String>,
+    provider_global_policy: Option<(Option<u64>, String)>,
 ) -> Result<(Value, V3Error02Classified), OperationRunnerError> {
     let side_output = Arc::new(Mutex::new(None));
-    let operator = Err02ClassifiedOperator::new(
-        source,
-        provider_global_cooldown_ms,
-        provider_global_semantic_signature,
-        Arc::clone(&side_output),
-    );
-    let runner_result = run_v3_single_node_operator(
+    let operator =
+        Err02ClassifiedOperator::new(source, provider_global_policy, Arc::clone(&side_output));
+    let payload = run_v3_single_node_operator(
         V3OperationGraph::Error,
         NODE_ID,
         source_projection,
         operator,
-    );
+    )?;
     let typed_output = side_output
         .lock()
         .map_err(|_| OperationRunnerError::new("Err02 side-output holder is poisoned"))?
-        .take();
-    match (runner_result, typed_output) {
-        (_, Some(Err(error))) => Err(OperationRunnerError::new(error)),
-        (Err(error), _) => Err(error),
-        (Ok(_), Some(Ok((classified, payload)))) => Ok((payload, classified)),
-        (Ok(_), None) => Err(OperationRunnerError::new(
-            "Err02 completed without typed classified output",
-        )),
-    }
+        .take()
+        .ok_or_else(|| {
+            OperationRunnerError::new("Err02 completed without typed classified output")
+        })?;
+    let typed_output = typed_output.map_err(OperationRunnerError::new)?;
+    Ok((payload, typed_output))
 }
 
 #[cfg(test)]
@@ -139,7 +119,6 @@ mod tests {
     use routecodex_v3_error::{
         V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink, V3InternalErrorCode,
     };
-    use serde_json::json;
 
     #[test]
     fn provider_classification_preserves_original_chain_and_global_policy() {
@@ -152,7 +131,6 @@ mod tests {
             message: Some("retry later".to_string()),
         };
         let (source_projection, source) = run_v3_err01_source_raised_operator(
-            json!({"raw_status": 429}),
             V3ErrorSourceKind::ProviderFailure,
             "V3ProviderResp14Raw",
             "provider_http_429",
@@ -161,16 +139,23 @@ mod tests {
         )
         .expect("Err01 must produce the provider source");
         let (payload, classified) = run_v3_err02_classified_operator(
-            source_projection.clone(),
-            source.clone(),
-            Some(5_000),
-            Some("recoverable_upstream:429".to_string()),
+            source_projection,
+            source,
+            Some((Some(5_000), "recoverable_upstream:429".to_string())),
         )
         .expect("Err02 must execute the global policy builder");
 
-        assert_eq!(payload, serde_json::to_value(&classified).unwrap());
-        assert_eq!(payload["source"], source_projection);
-        assert_eq!(classified.source, source);
+        assert_eq!(payload["source"]["source_kind"], "provider_failure");
+        assert_eq!(payload["source"]["external_error"]["status"], 429);
+        assert_eq!(classified.source.code, "provider_http_429");
+        assert_eq!(
+            classified
+                .source
+                .external_error
+                .as_ref()
+                .and_then(|external| external.status),
+            Some(429)
+        );
         assert_eq!(classified.class, "provider_failure");
         assert_eq!(
             classified.terminal_state,
@@ -191,7 +176,6 @@ mod tests {
     #[test]
     fn non_provider_classification_is_distinct_and_retains_internal_source() {
         let (source_projection, source) = run_v3_err01_source_raised_operator(
-            json!({"raw_stage": "wire"}),
             V3ErrorSourceKind::RuntimeFailure,
             "V3Provider12ResponsesWirePayload",
             "provider_wire_projection_failed",
@@ -200,12 +184,14 @@ mod tests {
         )
         .expect("Err01 must produce the runtime source");
         let (payload, classified) =
-            run_v3_err02_classified_operator(source_projection.clone(), source.clone(), None, None)
+            run_v3_err02_classified_operator(source_projection, source, None)
                 .expect("Err02 must execute the base classification builder");
 
-        assert_eq!(payload, serde_json::to_value(&classified).unwrap());
-        assert_eq!(payload["source"], source_projection);
-        assert_eq!(classified.source, source);
+        assert_eq!(payload["source"]["source_kind"], "runtime_failure");
+        assert_eq!(
+            payload["source"]["internal_error"]["internal_code"],
+            "500-150"
+        );
         assert_eq!(classified.class, "runtime_failure");
         assert_eq!(classified.terminal_state, "already_terminal");
         assert_ne!(classified.class, "provider_failure");
@@ -221,5 +207,34 @@ mod tests {
         assert!(classified.provider_global_semantic_signature.is_none());
         assert!(payload.get("provider_global_cooldown_ms").is_none());
         assert!(payload.get("provider_global_semantic_signature").is_none());
+    }
+
+    #[test]
+    fn provider_global_policy_keeps_optional_cooldown_without_admission_checks() {
+        let (source_projection, source) = run_v3_err01_source_raised_operator(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderResp14Raw",
+            "provider_http_503",
+            "upstream unavailable",
+            V3Err01SourceInput::Plain,
+        )
+        .expect("Err01 must produce the provider source");
+        let (payload, classified) = run_v3_err02_classified_operator(
+            source_projection,
+            source,
+            Some((None, "recoverable_upstream:503".to_string())),
+        )
+        .expect("optional provider global cooldown must use the actual policy builder");
+
+        assert!(classified.provider_global_cooldown_ms.is_none());
+        assert_eq!(
+            classified.provider_global_semantic_signature.as_deref(),
+            Some("recoverable_upstream:503")
+        );
+        assert!(payload.get("provider_global_cooldown_ms").is_none());
+        assert_eq!(
+            payload["provider_global_semantic_signature"],
+            "recoverable_upstream:503"
+        );
     }
 }

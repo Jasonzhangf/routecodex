@@ -4,9 +4,11 @@ use crate::operation_runner::{
 use pipeline_runtime::{Operator, OperatorContext, ValueType};
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
-    build_v3_error_01_source_raised_internal, V3Error01SourceRaised, V3ErrorSourceKind,
-    V3ExternalErrorLink, V3InternalErrorCode,
+    build_v3_error_01_source_raised_internal, build_v3_internal_error_envelope,
+    V3Error01SourceRaised, V3ErrorSourceKind, V3ExternalErrorLink, V3InternalErrorCode,
+    V3InternalErrorEnvelope,
 };
+use serde::Serialize;
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
 
@@ -20,7 +22,46 @@ pub(crate) enum V3Err01SourceInput {
     External(V3ExternalErrorLink),
 }
 
-type Err01Output = (V3Error01SourceRaised, Value);
+#[derive(Serialize)]
+struct Err01SourceFailureProjection<'a> {
+    source_kind: &'a V3ErrorSourceKind,
+    source_stage: &'static str,
+    code: &'a str,
+    message: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    internal_error: Option<V3InternalErrorEnvelope>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    external_error: Option<&'a V3ExternalErrorLink>,
+}
+
+fn source_failure_projection(
+    source_kind: &V3ErrorSourceKind,
+    source_stage: &'static str,
+    code: &str,
+    message: &str,
+    source_input: &V3Err01SourceInput,
+) -> Result<Value, String> {
+    let (internal_error, external_error) = match source_input {
+        V3Err01SourceInput::Plain => (None, None),
+        V3Err01SourceInput::Internal(internal_code) => (
+            Some(build_v3_internal_error_envelope(
+                *internal_code,
+                source_stage,
+            )),
+            None,
+        ),
+        V3Err01SourceInput::External(external_error) => (None, Some(external_error)),
+    };
+    serde_json::to_value(Err01SourceFailureProjection {
+        source_kind,
+        source_stage,
+        code,
+        message,
+        internal_error,
+        external_error,
+    })
+    .map_err(|error| format!("serialize Err01 source failure projection: {error}"))
+}
 
 pub(crate) struct Err01SourceRaisedOperator {
     source_kind: V3ErrorSourceKind,
@@ -28,7 +69,7 @@ pub(crate) struct Err01SourceRaisedOperator {
     code: String,
     message: String,
     source_input: V3Err01SourceInput,
-    side_output: Arc<Mutex<Option<Result<Err01Output, String>>>>,
+    side_output: Arc<Mutex<Option<Result<V3Error01SourceRaised, String>>>>,
 }
 
 impl Err01SourceRaisedOperator {
@@ -38,7 +79,7 @@ impl Err01SourceRaisedOperator {
         code: impl Into<String>,
         message: impl Into<String>,
         source_input: V3Err01SourceInput,
-        side_output: Arc<Mutex<Option<Result<Err01Output, String>>>>,
+        side_output: Arc<Mutex<Option<Result<V3Error01SourceRaised, String>>>>,
     ) -> Self {
         Self {
             source_kind,
@@ -50,36 +91,33 @@ impl Err01SourceRaisedOperator {
         }
     }
 
-    fn raise(&self) -> Result<Err01Output, String> {
-        let source = match &self.source_input {
-            V3Err01SourceInput::Plain => build_v3_error_01_source_raised(
+    fn raise(&self) -> Result<V3Error01SourceRaised, String> {
+        match &self.source_input {
+            V3Err01SourceInput::Plain => Ok(build_v3_error_01_source_raised(
                 self.source_kind.clone(),
                 self.source_stage,
                 self.code.clone(),
                 self.message.clone(),
-            ),
+            )),
             V3Err01SourceInput::Internal(internal_code) => {
-                build_v3_error_01_source_raised_internal(
+                Ok(build_v3_error_01_source_raised_internal(
                     self.source_kind.clone(),
                     self.source_stage,
                     self.code.clone(),
                     self.message.clone(),
                     *internal_code,
-                )
+                ))
             }
             V3Err01SourceInput::External(external_error) => {
-                build_v3_error_01_source_raised_external(
+                Ok(build_v3_error_01_source_raised_external(
                     self.source_kind.clone(),
                     self.source_stage,
                     self.code.clone(),
                     self.message.clone(),
                     external_error.clone(),
-                )
+                ))
             }
-        };
-        let payload = serde_json::to_value(&source)
-            .map_err(|error| format!("serialize Err01 source raised: {error}"))?;
-        Ok((source, payload))
+        }
     }
 }
 
@@ -101,27 +139,32 @@ impl Operator for Err01SourceRaisedOperator {
     }
 
     fn execute(&self, _input: Value, _: &OperatorContext) -> Result<Value, String> {
-        let raised = self.raise();
-        let output = match &raised {
-            Ok((_, payload)) => Ok(payload.clone()),
+        let typed = self.raise();
+        let output = match &typed {
+            Ok(source) => serde_json::to_value(source)
+                .map_err(|error| format!("serialize Err01 source raised: {error}")),
             Err(error) => Err(error.clone()),
         };
         *self
             .side_output
             .lock()
-            .map_err(|_| "Err01 side-output holder is poisoned".to_string())? = Some(raised);
+            .map_err(|_| "Err01 side-output holder is poisoned".to_string())? = Some(typed);
         output
     }
 }
 
 pub(crate) fn run_v3_err01_source_raised_operator(
-    source_failure: Value,
     source_kind: V3ErrorSourceKind,
     source_stage: &'static str,
     code: impl Into<String>,
     message: impl Into<String>,
     source_input: V3Err01SourceInput,
 ) -> Result<(Value, V3Error01SourceRaised), OperationRunnerError> {
+    let code = code.into();
+    let message = message.into();
+    let source_failure =
+        source_failure_projection(&source_kind, source_stage, &code, &message, &source_input)
+            .map_err(OperationRunnerError::new)?;
     let side_output = Arc::new(Mutex::new(None));
     let operator = Err01SourceRaisedOperator::new(
         source_kind,
@@ -131,36 +174,26 @@ pub(crate) fn run_v3_err01_source_raised_operator(
         source_input,
         Arc::clone(&side_output),
     );
-    let runner_result =
+    let payload =
         run_v3_single_node_operator(V3OperationGraph::Error, NODE_ID, source_failure, operator);
+    let payload = payload?;
     let typed_output = side_output
         .lock()
         .map_err(|_| OperationRunnerError::new("Err01 side-output holder is poisoned"))?
-        .take();
-    match (runner_result, typed_output) {
-        (_, Some(Err(error))) => Err(OperationRunnerError::new(error)),
-        (Err(error), _) => Err(error),
-        (Ok(_), Some(Ok((source, payload)))) => Ok((payload, source)),
-        (Ok(_), None) => Err(OperationRunnerError::new(
-            "Err01 completed without typed source output",
-        )),
-    }
+        .take()
+        .ok_or_else(|| OperationRunnerError::new("Err01 completed without typed source output"))?;
+    let typed_output = typed_output.map_err(OperationRunnerError::new)?;
+    Ok((payload, typed_output))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use routecodex_v3_error::{V3ExternalErrorKind, V3InternalErrorLane};
-    use serde_json::json;
 
     #[test]
     fn plain_source_raising_uses_raw_parameters_at_canonical_sdk_entry() {
-        let source_failure = json!({
-            "provider": "upstream-a",
-            "request_id": "req-raw-01"
-        });
         let (payload, source) = run_v3_err01_source_raised_operator(
-            source_failure,
             V3ErrorSourceKind::ProviderFailure,
             "V3ProviderResp14Raw",
             "provider_http_502",
@@ -169,7 +202,12 @@ mod tests {
         )
         .expect("plain Err01 must execute through the canonical Error graph");
 
-        assert_eq!(payload, serde_json::to_value(&source).unwrap());
+        assert_eq!(payload["source_kind"], "provider_failure");
+        assert_eq!(payload["source_stage"], "V3ProviderResp14Raw");
+        assert_eq!(payload["code"], "provider_http_502");
+        assert_eq!(payload["message"], "upstream returned a bad gateway");
+        assert!(payload.get("internal_error").is_none());
+        assert!(payload.get("external_error").is_none());
         assert_eq!(source.source_kind, V3ErrorSourceKind::ProviderFailure);
         assert_eq!(source.source_stage, "V3ProviderResp14Raw");
         assert_eq!(source.code, "provider_http_502");
@@ -189,7 +227,6 @@ mod tests {
             message: Some("retry later".to_string()),
         };
         let (payload, source) = run_v3_err01_source_raised_operator(
-            json!({"raw_status": 429}),
             V3ErrorSourceKind::ProviderFailure,
             "V3ProviderResp14Raw",
             "provider_http_429",
@@ -199,7 +236,6 @@ mod tests {
         .expect("external Err01 must execute through the canonical Error graph");
 
         assert_eq!(source.external_error, Some(external_error));
-        assert_eq!(payload, serde_json::to_value(&source).unwrap());
         assert_eq!(payload["external_error"]["status"], 429);
         assert_eq!(
             payload["external_error"]["upstream_request_id"],
@@ -210,7 +246,6 @@ mod tests {
     #[test]
     fn internal_source_raising_preserves_existing_internal_envelope() {
         let (payload, source) = run_v3_err01_source_raised_operator(
-            json!({"raw_stage": "wire"}),
             V3ErrorSourceKind::RuntimeFailure,
             "V3Provider12ResponsesWirePayload",
             "provider_wire_projection_failed",
@@ -227,14 +262,12 @@ mod tests {
         assert_eq!(internal.lane, V3InternalErrorLane::Request);
         assert_eq!(internal.node_id, "V3Provider12ResponsesWirePayload");
         assert_eq!(internal.stage, "V3Provider12ResponsesWirePayload");
-        assert_eq!(payload, serde_json::to_value(&source).unwrap());
         assert_eq!(payload["internal_error"]["internal_code"], "500-150");
     }
 
     #[test]
     fn raw_source_parameters_change_actual_sdk_output() {
         let (first_payload, first_source) = run_v3_err01_source_raised_operator(
-            json!({"raw_failure": "same input"}),
             V3ErrorSourceKind::InvalidRequest,
             "V3Server03HttpRequestRaw",
             "malformed_json",
@@ -243,7 +276,6 @@ mod tests {
         )
         .unwrap();
         let (second_payload, second_source) = run_v3_err01_source_raised_operator(
-            json!({"raw_failure": "same input"}),
             V3ErrorSourceKind::PendingEndpoint,
             "V3Server03HttpRequestRaw",
             "endpoint_not_enabled",
@@ -253,10 +285,11 @@ mod tests {
         .unwrap();
 
         assert_ne!(first_payload, second_payload);
-        assert_eq!(first_payload, serde_json::to_value(&first_source).unwrap());
+        assert_eq!(first_source.code, "malformed_json");
+        assert_eq!(first_payload["message"], "first detail");
         assert_eq!(
-            second_payload,
-            serde_json::to_value(&second_source).unwrap()
+            second_source.source_kind,
+            V3ErrorSourceKind::PendingEndpoint
         );
         assert_eq!(second_payload["source_kind"], "pending_endpoint");
         assert_eq!(second_payload["code"], "endpoint_not_enabled");
