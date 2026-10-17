@@ -4,7 +4,7 @@ use crate::operation_runner::{
 };
 use pipeline_runtime::{Operator, OperatorContext, ValueType};
 use serde_json::Value;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 const OPERATOR_NAME: &str = "routecodex.v3.operation.inverse_project_client_response";
 const OPERATOR_VERSION: &str = "1";
@@ -17,12 +17,12 @@ pub struct V3HubRespOutbound05ClientSemantic {
 }
 
 struct InverseProjectClientResponseOperator<F> {
-    projector: F,
+    projector: Mutex<Option<F>>,
 }
 
 impl<F> Operator for InverseProjectClientResponseOperator<F>
 where
-    F: Fn(Value) -> Result<Value, String> + Send + Sync,
+    F: FnOnce(Value) -> Result<Value, String> + Send,
 {
     fn name(&self) -> &'static str {
         OPERATOR_NAME
@@ -41,7 +41,13 @@ where
     }
 
     fn execute(&self, payload: Value, _: &OperatorContext) -> Result<Value, String> {
-        (self.projector)(payload)
+        let projector = self
+            .projector
+            .lock()
+            .map_err(|_| "inverse projector holder is poisoned".to_string())?
+            .take()
+            .ok_or_else(|| "inverse projector was already consumed".to_string())?;
+        projector(payload)
     }
 }
 
@@ -68,13 +74,15 @@ pub(crate) fn try_build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03
     projector: F,
 ) -> Result<V3HubRespOutbound05ClientSemantic, OperationRunnerError>
 where
-    F: Fn(Value) -> Result<Value, String> + Send + Sync + 'static,
+    F: FnOnce(Value) -> Result<Value, String> + Send + 'static,
 {
     let client_payload = run_v3_single_node_operator(
         V3OperationGraph::Response,
         INVERSE_PROJECT_CLIENT_RESPONSE_NODE_ID,
         input.provider_payload().clone(),
-        InverseProjectClientResponseOperator { projector },
+        InverseProjectClientResponseOperator {
+            projector: Mutex::new(Some(projector)),
+        },
     )?;
     Ok(V3HubRespOutbound05ClientSemantic {
         previous: input,

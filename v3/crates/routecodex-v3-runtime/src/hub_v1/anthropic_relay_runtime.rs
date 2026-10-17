@@ -1026,7 +1026,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         &input.request_id,
                         &response_hook_profile,
                         trace.as_mut(),
-                        |finalized| {
+                        move |finalized| {
                             project_v3_anthropic_client_response_for_provider(
                                 finalized,
                                 provider_wire_protocol,
@@ -1254,7 +1254,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         &input.request_id,
                         &response_hook_profile,
                         trace.as_mut(),
-                        |finalized| {
+                        move |finalized| {
                             if provider_wire_protocol == V3HubProviderWireProtocol::OpenAiChat {
                                 project_v3_anthropic_client_response_for_provider(
                                     finalized,
