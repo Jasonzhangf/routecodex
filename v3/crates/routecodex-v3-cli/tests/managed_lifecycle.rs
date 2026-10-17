@@ -36,6 +36,9 @@ mod hooks_target_restart;
 #[path = "managed_lifecycle/fa22072_probe_rollback.rs"]
 mod fa22072_probe_rollback;
 
+#[path = "managed_lifecycle/status_reconciliation.rs"]
+mod status_reconciliation;
+
 struct P0ManagedProcess {
     pid: u32,
 }
