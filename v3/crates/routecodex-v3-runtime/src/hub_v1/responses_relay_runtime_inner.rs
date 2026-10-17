@@ -175,6 +175,19 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     let mut failed_candidates = initial_request_local_excluded_candidates;
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
     let mut initial_selected_target = initial_selected_target;
+    macro_rules! handle_error_before_resp03 {
+        ($expr:expr) => {
+            match $expr {
+                Ok(value) => value,
+                Err(error) => {
+                    return Err(error.into());
+                }
+            }
+        };
+    }
+    let allowed_execution_modes = handle_error_before_resp03!(
+        allowed_execution_modes_for_relay_server(manifest, &input.server_id,)
+    );
     let (execution_planned_request, initial_plan) =
         match run_v3_plan_execution_operator_with_probes(
             target_resolved_request,
@@ -190,8 +203,9 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
             retry_selected
                 .take()
                 .or_else(|| initial_selected_target.take()),
-            V3PlanExecutionModePolicy::RelayOnly {
+            V3PlanExecutionModePolicy::DirectEntry {
                 entry_protocol: V3HubEntryProtocol::Responses,
+                allowed_modes: allowed_execution_modes.clone(),
             },
         )
         .await
@@ -226,9 +240,14 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 ));
             }
         };
+    let initial_execution_mode = initial_plan.execution_mode;
     let retained_expanded = initial_plan.expanded;
     failed_candidates.extend(initial_plan.request_local_excluded_candidates);
-    let mut initial_admitted = Some((initial_plan.selected, initial_plan.admission));
+    let mut initial_admitted = Some((
+        initial_plan.selected,
+        initial_plan.admission,
+        initial_plan.protocol_decision,
+    ));
     let mut req02 = req02;
     req02.previous.payload.0 = std::sync::Arc::new(execution_planned_request);
     let request_outcome = {
@@ -240,16 +259,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         server_tool_state.as_ref(),
         request_web_search_state.as_ref(),
     )?;
-    macro_rules! handle_error_before_resp03 {
-        ($expr:expr) => {
-            match $expr {
-                Ok(value) => value,
-                Err(error) => {
-                    return Err(error.into());
-                }
-            }
-        };
-    }
     let provider_semantic_body = std::sync::Arc::clone(request_outcome.payload_arc());
     let anthropic_response_projection_context =
         V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&provider_semantic_body)
@@ -261,7 +270,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     let req04 = request_outcome.into_governed();
     let mut req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
         req04,
-        initial_plan.execution_mode,
+        initial_execution_mode,
     );
     trace.push("V3HubReqExecution05Planned");
     let mut pending_provider_action_recovery = None;
@@ -277,9 +286,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     };
     let attempt_budget = request_execution_control.attempt_budget();
     let mut provider_send_attempts = attempt_budget.transport_attempts();
-    let allowed_execution_modes = handle_error_before_resp03!(
-        allowed_execution_modes_for_relay_server(manifest, &input.server_id,)
-    );
     let shared_retry_policy = retry_policy.as_shared_policy();
     let provider_failure_health = provider_health.clone();
     let failure_context = V3RelayProviderFailurePolicyContext {
@@ -291,11 +297,12 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         deterministic_sample,
     };
     loop {
-        let (selected, mut selected_admission): (
+        let (selected, mut selected_admission, protocol_decision): (
             routecodex_v3_target::V3Target10ConcreteProviderSelected,
             Option<V3RuntimeProviderAdmission>,
-        ) = if let Some((selected, admission)) = initial_admitted.take() {
-            (selected, Some(admission))
+            crate::nodes::V3Execution11ProtocolDecision,
+        ) = if let Some((selected, admission, protocol_decision)) = initial_admitted.take() {
+            (selected, Some(admission), protocol_decision)
         } else {
             let preferred_selected = retry_selected.take();
             match run_v3_plan_execution_operator_with_probes(
@@ -310,8 +317,9 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 deterministic_sample,
                 allow_exhaustion_rescue_probe,
                 preferred_selected,
-                V3PlanExecutionModePolicy::RelayOnly {
+                V3PlanExecutionModePolicy::DirectEntry {
                     entry_protocol: V3HubEntryProtocol::Responses,
+                    allowed_modes: allowed_execution_modes.clone(),
                 },
             )
             .await
@@ -320,7 +328,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     req05.previous.previous.previous.payload.0 =
                         std::sync::Arc::new(execution_planned_request);
                     failed_candidates.extend(plan.request_local_excluded_candidates);
-                    (plan.selected, Some(plan.admission))
+                    (plan.selected, Some(plan.admission), plan.protocol_decision)
                 }
                 Err(V3PlanExecutionStop::Failed(source)) => {
                     return Err(V3ResponsesRelayRuntimeError::Target(format!(
@@ -367,17 +375,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
             provider_action_permit_target = None;
         }
         attempt_budget.set_transport_attempt_limit(selected.candidate_count);
-        let protocol_decision =
-            handle_error_before_resp03!(
-                crate::nodes::build_v3_execution_11_protocol_decision_from_v3_target_10(
-                    selected.clone(),
-                    "responses",
-                    &allowed_execution_modes,
-                )
-                .map_err(|source| V3ResponsesRelayRuntimeError::ExecutionControl(
-                    format!("{}: {}", source.code, source.message)
-                ))
-            );
         if matches!(
             protocol_decision.mode,
             crate::nodes::V3Execution11ProtocolDecisionMode::SameProtocolDirect
