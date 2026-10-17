@@ -136,7 +136,7 @@ for (const [text, owner, phrases] of [
   [manifest, manifestPath, ['lifecycle_id: v3.gemini_relay.controlled_runtime', 'V3ServerRespOutbound06ClientFrame', 'v3-gemini-relay-15']],
   [wiki, wikiPath, ['Single lifecycle', 'Body::from_stream', 'Live Gemini provider compatibility', 'No fallback']],
   [wikiHtml, wikiHtmlPath, ['Canonical Markdown source:', 'V3 Gemini Relay Controlled Runtime', 'Body::from_stream', 'No fallback']],
-  [entryBindingManifest, entryBindingManifestPath, ['entry_protocol: gemini', 'execution_mode: relay', 'implementation_status: implemented', 'execute_v3_gemini_relay_runtime_with_default_transport']],
+  [entryBindingManifest, entryBindingManifestPath, ['entry_protocol: gemini', 'execution_mode: direct', 'implementation_status: implemented', 'execute_v3_gemini_direct_server_outcome']],
 ]) for (const phrase of phrases) requireText(text, owner, phrase);
 
 requireText(hub, hubPath, 'mod gemini_relay_runtime;');
