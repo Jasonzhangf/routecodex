@@ -303,7 +303,9 @@ features:
   - RouteCodex managed start/stop owns the installed hooks supervisor process without broad kill
   - lifecycle state, argv, log, and evidence contain no resolved secret
   - live managed 5555 restart with concurrent V2 health and real JSON/SSE Responses
+  - status_reconciliation integration suite (status_does_not_mask_corrupted_control_with_stale_stopped_record, status_does_not_mask_corrupted_control_across_same_config_digest_drift, status_reports_live_owner_across_executable_copy, status_reports_live_owner_across_same_config_digest_drift, status_skips_confirmed_dead_candidate_and_reports_later_live_candidate, status_does_not_adopt_foreign_config_with_same_ports) proves truthful read-only status without error masking across stale stopped records, corrupted control channels, copied executables, and config digest drift
   required_gates:
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test managed_lifecycle status_reconciliation:: -- --test-threads=1 --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test managed_restart_control_budget_blackbox -- --nocapture
   - npm run verify:v3-dagpipe-feature-graphs
   - npm run test:v3-managed-server-lifecycle

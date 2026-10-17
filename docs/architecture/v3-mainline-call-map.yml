@@ -1370,10 +1370,12 @@ chains:
       - v3.lifecycle.instance_declaration
       - v3.lifecycle.pid_cache
       - v3.lifecycle.control_channel
+      - v3.lifecycle.status_record
       produces: []
       side_channel_reads:
       - v3.lifecycle.pid_cache
       - v3.lifecycle.control_channel
+      - v3.lifecycle.status_record
       side_channel_writes: []
   - step_id: v3-life-05r
     from_node: V3Lifecycle06LiveControlled
