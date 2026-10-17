@@ -152,7 +152,10 @@ fn responses_req_inbound02_canonicalizes_payload_to_chat_and_preserves_tool_sear
     );
     assert_eq!(payload["messages"][0]["role"], "system");
     assert_eq!(payload["messages"][1]["role"], "user");
-    assert_eq!(payload["messages"][1]["content"], "search then answer");
+    assert_eq!(
+        payload["messages"][1]["content"],
+        json!([{"type":"text","text":"search then answer"}])
+    );
     assert!(
         serialized_contains_tool_type(payload, "tool_search"),
         "tool_search must survive inbound as a Chat canonical tool surface: {payload}"
