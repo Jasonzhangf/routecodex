@@ -124,6 +124,9 @@ features:
   resource_bindings:
   - v3.provider.global_cooldown_persistence
   entry_symbols:
+  - V3ProviderHealthStore::from_manifest_for_listener
+  - V3ProviderFailureRuntimeHealth::from_manifest_for_listener
+  - V3ResponsesRelayProviderHealthHandle::from_manifest_for_listener
   - V3ProviderCooldownCoordinator::load
   - V3ProviderCooldownCoordinator::record_failure
   - V3ProviderCooldownCoordinator::acquire_startup_probe
@@ -139,6 +142,8 @@ features:
   - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
   - v3/crates/routecodex-v3-server/tests/multi_listener_server/issue127_disabled_health.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - docs/architecture
   required_gates:
@@ -3066,6 +3071,8 @@ features:
   - v3/crates/routecodex-v3-server/src
   - v3/crates/routecodex-v3-runtime/src
   - v3/crates/routecodex-v3-provider-responses/src
+  - v3/crates/routecodex-v3-runtime/tests/anthropic_relay_mixed_pool_failover_integration.rs
+  - v3/crates/routecodex-v3-provider-responses/tests/responses_websocket_v2.rs
   - src
   - sharedmodule
   - ~/.rcc
@@ -4011,51 +4018,41 @@ features:
   - git diff --check
   runtime_status: source_active_live_verification_required
   design_status: request_field_projection_contract_active_runtime_conformance_pending
-- feature_id: v3.responses_session_inflight_admission
+- feature_id: v3.http_request_isolation
   owner_crate: routecodex-v3-server
   owner_files:
-  - v3/crates/routecodex-v3-server/src/session_admission.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
+  - v3/crates/routecodex-v3-provider-responses/src/transport.rs
   resource_bindings:
   - v3.server.validated_http_input
-  - v3.server.responses_session_admission
   mainline_bindings:
-  - v3-responses-admission-01
-  - v3-responses-admission-release-03
+  - v3-http-request-independent-01
   entry_symbols:
   - read_json_payload
-  - admit_v3_responses_session_after_json_parse
   - pending_endpoint_after_responses_admission
-  - responses_control_scope_headers
-  - V3ResponsesSessionAdmissionGate::admit
-  - hold_response_body_admission_permit
-  - <V3ResponsesSessionAdmissionPermit as Drop>::drop
   allowed_paths:
-  - v3/crates/routecodex-v3-server/src/session_admission.rs
+  - v3/crates/routecodex-v3-server/src/request_activity.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
-  - docs/architecture/manifests/v3.responses_session_admission.mainline.yml
-  - docs/architecture/wiki/v3-responses-session-admission.md
-  - scripts/architecture/verify-v3-responses-session-admission.mjs
+  - v3/crates/routecodex-v3-runtime/src
+  - v3/crates/routecodex-v3-provider-responses/src
+  - docs/architecture/manifests/v3.http_request_isolation.mainline.yml
+  - docs/architecture/wiki/v3-http-request-isolation.md
+  - docs/architecture/dagpipe/graphs/http-request-isolation.graph.json
   forbidden_paths:
-  - v3/crates/routecodex-v3-runtime
   - v3/crates/routecodex-v3-virtual-router
   - v3/crates/routecodex-v3-target
-  - v3/crates/routecodex-v3-provider-responses
   - sharedmodule
   - src
   required_gates:
-  - npm run verify:v3-responses-session-admission
-  - npm run test:v3-responses-session-admission
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib session_admission
-    -- --nocapture
+  - npm run test:v3-http-request-isolation
   - git diff --check
   semantic_contract:
-  - Same listener and explicit session or conversation contention waits inside the
-    listener-local gate until the exact response-body permit releases.
-  - Contention never enters Error01-06 and never projects request_in_flight or HTTP
-    409 to the client.
-  - Different scopes and different listener gate instances remain concurrent.
+  - Independent HTTP requests execute concurrently even with identical session or conversation headers.
+  - Completing or cancelling one request never owns another request's dispatch or response body.
+  - Server restart activity accounting remains independent of session metadata.
+  - Local in-flight provider capacity does not exclude a healthy target or reject an independent business request.
   runtime_status: source_pending_live_replay
 - feature_id: v3.sse_http_keepalive_boundary
   owner_crate: routecodex-v3-server
@@ -4082,7 +4079,6 @@ features:
   - docs/architecture/v3-verification-map.yml
   - docs/architecture/manifests/v3.sse.http_keepalive.mainline.yml
   - docs/architecture/wiki/v3-sse-http-keepalive.md
-  - docs/goals/v3-responses-session-admission-and-sse-keepalive-test-design.md
   forbidden_paths:
   - src/server/handlers
   - src/modules/llmswitch
@@ -4140,7 +4136,7 @@ features:
   - v3/crates/routecodex-v3-server/src/frame_builders.rs
   - v3/crates/routecodex-v3-server/src/restart_handoff.rs
   - v3/crates/routecodex-v3-server/src/restart_closeout.rs
-  - v3/crates/routecodex-v3-server/src/session_admission.rs
+  - v3/crates/routecodex-v3-server/src/request_activity.rs
   - v3/crates/routecodex-v3-server/tests/client_transport_boundary_controlled.rs
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
@@ -5060,10 +5056,8 @@ features:
   - V3ProviderFailureRuntimeHealth::run_exhaustion_rescue_probes
   - build_v3_provider_global_probe_target
   - select_v3_expanded_target_with_exhaustion_rescue
-  - select_v3_expanded_target_with_admission_rescue
-  - resolve_v3_relay_target_outcome_with_admission_rescue
-  - V3RuntimeProviderAdmission::into_lease
-  - V3RuntimeProviderAdmission::drop
+  - select_v3_expanded_target_with_rescue
+  - resolve_v3_relay_target_outcome_with_rescue
   - V3PreAcquiredProviderAdmission::release
   - V3AdaptiveConcurrencyPermitGuard::drop
   - V3ProviderResponsesTransport::send
@@ -5408,7 +5402,7 @@ features:
   - v3/vendor/hyper/src/proto/h1/conn.rs
   - v3/crates/routecodex-v3-server/src/restart_handoff/tests/restart_handoff_closeout.rs
   - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
-  - v3/crates/routecodex-v3-server/src/session_admission.rs
+  - v3/crates/routecodex-v3-server/src/request_activity.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
   - v3/crates/routecodex-v3-lifecycle/src/control_plane.rs
@@ -5448,7 +5442,7 @@ features:
   - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
   - v3/crates/routecodex-v3-server/src/restart_handoff/tests/restart_handoff_closeout.rs
   - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
-  - v3/crates/routecodex-v3-server/src/session_admission.rs
+  - v3/crates/routecodex-v3-server/src/request_activity.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
   - v3/crates/routecodex-v3-lifecycle/src/control_plane.rs

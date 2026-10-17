@@ -22,6 +22,13 @@ const modeBWebSearchFixtures = [
 ];
 const magpieMockCiReferences = ['magpie', 'MAGPIE_SOURCE_ROOT', 'protocol-live-mock'];
 
+test('V3 CI runs the public request independence regression after admission removal', () => {
+  assert.doesNotMatch(workflow, /test:v3-responses-session-admission/);
+  assert.match(workflow, /run: npm run test:v3-http-request-isolation/);
+  assert.match(rootPackage.scripts['test:v3-http-request-isolation'], /test:v3-http-request-isolation/);
+  assert.match(v3Package.scripts['test:v3-http-request-isolation'], /--test multi_listener_server responses_same_/);
+});
+
 const namedGates = {
   'file-size': {
     positive: 'verify:v3-file-size',
@@ -32,11 +39,6 @@ const namedGates = {
     positive: 'verify:v3-console-request-count-visibility',
     negative: 'test:v3-console-request-count-visibility-red-fixtures',
     negativePath: 'scripts/tests/v3-console-request-count-visibility-red-fixtures.mjs',
-  },
-  'responses-session-admission': {
-    positive: 'verify:v3-responses-session-admission',
-    negative: 'test:v3-responses-session-admission-red-fixtures',
-    negativePath: 'scripts/tests/v3-responses-session-admission-red-fixtures.mjs',
   },
 };
 
@@ -92,7 +94,6 @@ test('V3 CI keeps named gate wiring within canonical V3 verification', () => {
   assert.deepEqual(counts, {
     'file-size': { positive: 1, negative: 2 },
     'console-request-count': { positive: 1, negative: 1 },
-    'responses-session-admission': { positive: 1, negative: 1 },
   }, `unexpected V3 CI gate execution: ${JSON.stringify(counts)}`);
   assert.equal(transitiveGateCount('verify:v3-runtime-timing-observability'), 1);
   assert.match(architectureCi, /'verify:v3-architecture-docs'/);

@@ -101,13 +101,6 @@ fn temp_home(label: &str) -> PathBuf {
 mod test_ports;
 use test_ports::free_port;
 
-fn now_epoch_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64
-}
-
 /// A real upstream failure: HTTP 503 with a provider-shaped error body. It also
 /// echoes upstream request id headers so the row can be checked for real
 /// external evidence rather than a synthesised value.
@@ -158,6 +151,7 @@ endpoints = ["responses"]
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
+attempt_store = {{ request_max_attempts = 1 }}
 
 [admin_webui]
 enabled = true
@@ -262,7 +256,6 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
         .addr;
 
     let client = reqwest::Client::new();
-    let request_started_ms = now_epoch_ms();
     let response = client
         .post(format!("http://{server_addr}/v1/responses"))
         .json(&json!({
@@ -381,15 +374,11 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
     assert_eq!(observed["external_error_code"], "server_error");
     assert_eq!(observed["external_error_status"], 503);
     assert_eq!(observed["failure_count"], 1);
-    // HTTP 503 retains its declared first-failure threshold; only ordinary 429
-    // uses the three-consecutive-failure rule.
-    assert_eq!(observed["health_state"], "cooldown");
-    assert_eq!(observed["action"], "terminal_route_and_default_exhausted");
+    // A failed last candidate keeps routing eligibility and its own backoff.
+    assert_eq!(observed["health_state"], "healthy");
+    assert_eq!(observed["action"], "terminal_retry_budget_exhausted");
     assert_eq!(observed["attempt_index"], 1);
-    assert!(
-        observed["cooldown_until_ms"].as_u64().unwrap() > request_started_ms,
-        "the real HTTP 503 failure must schedule exact-identity recovery: {observed}"
-    );
+    assert_eq!(observed["wait_ms"], 1000);
     assert_eq!(
         detail["observed_error_source"],
         "error06_projection_not_exposed"
@@ -507,7 +496,7 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
         "the failure evidence must include error.json"
     );
 
-    // 7. The first HTTP 503 must cool its exact provider/model/key identity.
+    // 7. The last provider identity must not enter the cooldown pool.
     let (pool_status, pool) = get_json(
         &client,
         &format!("http://{admin_addr}/api/observability/cooldown-pool"),
@@ -517,14 +506,12 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
     let entries = pool["listeners"][0]["entries"]
         .as_array()
         .expect("cooldown pool entries");
-    let first_cooled = entries
-        .iter()
-        .find(|entry| entry["provider_id"] == "mock")
-        .unwrap_or_else(|| panic!("the first HTTP 503 must cool its exact identity: {pool}"));
-    assert_eq!(first_cooled["auth_alias"], "key");
-    assert_eq!(first_cooled["model_id"], "test");
+    assert!(
+        entries.is_empty(),
+        "last candidate must stay routable: {pool}"
+    );
 
-    // 8. A later business request cannot send another attempt to the cooled key.
+    // 8. A later request waits for this identity, then sends a real attempt.
     let response = client
         .post(format!("http://{server_addr}/v1/responses"))
         .json(&json!({
@@ -536,9 +523,9 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
         .await;
     assert!(
         response.is_err(),
-        "a cooled identity must not fabricate a client HTTP response"
+        "the failed retry must not fabricate a client HTTP response"
     );
-    assert_eq!(upstream_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(upstream_calls.load(Ordering::SeqCst), 2);
 
     let (pool_status, pool) = get_json(
         &client,
@@ -549,21 +536,10 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
     let entries = pool["listeners"][0]["entries"]
         .as_array()
         .expect("cooldown pool entries");
-    let cooled = entries
-        .iter()
-        .find(|entry| entry["provider_id"] == "mock")
-        .unwrap_or_else(|| {
-            panic!("provider mock must remain cooled after the blocked request: {pool}")
-        });
-    assert_eq!(cooled["auth_alias"], "key");
-    assert_eq!(cooled["model_id"], "test");
-    assert_eq!(cooled["state"], "blocked");
-    let pool_until_ms = cooled["until_ms"].as_u64().expect("until_ms");
     assert!(
-        pool_until_ms > request_started_ms,
-        "the pool must still be cooling: {pool_until_ms} vs {request_started_ms}"
+        entries.is_empty(),
+        "repeated failure must not cool the last identity: {pool}"
     );
-    assert!(cooled["remaining_ms"].as_i64().unwrap() > 0);
 
     // 9. Negative control: an unrelated request key is honestly absent.
     let (missing_status, missing) = get_json(
@@ -576,7 +552,7 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
 
     // Real captured values, so the evidence is inspectable without a debugger.
     eprintln!("[replay] request_key={request_key}");
-    eprintln!("[replay] client_status={client_status} upstream_calls=1");
+    eprintln!("[replay] client_status={client_status} upstream_calls=2");
     eprintln!("[replay] error_chain={chain}");
     eprintln!(
         "[replay] observed_error_source={} health_action={} error_class={}",
@@ -585,7 +561,7 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
     eprintln!("[replay] observed_error={observed}");
     eprintln!("[replay] raw_artifact_ref={artifact_ref}");
     eprintln!("[replay] artifacts={checked:?}");
-    eprintln!("[replay] cooldown_entry={cooled}");
+    eprintln!("[replay] last_identity_cooldown_entries={entries:?}");
 
     handle.shutdown().await;
     upstream_shutdown.send(()).unwrap();

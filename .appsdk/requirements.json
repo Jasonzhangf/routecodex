@@ -242,9 +242,117 @@
         "version": 1
       },
       "version": 9
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "不存在这个问题,http请求天然隔离。对,移除这个错误的设计,这是过度保护,消融掉。",
+          "role": "user",
+          "source": "Codex conversation 01a14462-5b07-7260-bd85-cb46f0e7be34, direct correction 2026-10-16"
+        },
+        "base_version": 0,
+        "operation": "create",
+        "project_id": "routecodex",
+        "request_id": "req-20261016-dba8ff9-http-request-isolation",
+        "requirement_id": "routecodex-http-request-independence",
+        "text": "每个HTTP请求独立执行。RouteCodex不得按session_id或conversation_id串行化独立请求，须删除Responses同会话准入锁、等待通知、token/permit状态、body持锁包装和对应接线。相同session或conversation的请求A等待上游时，请求B仍须独立进入provider并完成；取消或失败A不得取消、延迟或阻止B。保留真实业务payload与header语义，不把session元数据变成排队许可。不同端口采用同一请求独立语义。更改图、gate和旧测试使之验证并发而非保留排队后补心跳。重启维护协调和Front响应EOF资源职责独立，不在本次消融中顺带删除或放宽。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "不存在这个问题,http请求天然隔离。对,移除这个错误的设计,这是过度保护,消融掉。",
+          "role": "user",
+          "source": "Codex conversation 01a14462-5b07-7260-bd85-cb46f0e7be34, direct correction 2026-10-16"
+        },
+        "requirement_id": "routecodex-http-request-independence",
+        "status": "active",
+        "text": "每个HTTP请求独立执行。RouteCodex不得按session_id或conversation_id串行化独立请求，须删除Responses同会话准入锁、等待通知、token/permit状态、body持锁包装和对应接线。相同session或conversation的请求A等待上游时，请求B仍须独立进入provider并完成；取消或失败A不得取消、延迟或阻止B。保留真实业务payload与header语义，不把session元数据变成排队许可。不同端口采用同一请求独立语义。更改图、gate和旧测试使之验证并发而非保留排队后补心跳。重启维护协调和Front响应EOF资源职责独立，不在本次消融中顺带删除或放宽。",
+        "version": 1
+      },
+      "version": 10
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "现在不存在业务许可,有什么不许可的情况? 不存在这个问题,http请求天然隔离。对,移除这个错误的设计,这是过度保护,消融掉。",
+          "role": "user",
+          "source": "Codex conversation 01a14462-5b07-7260-bd85-cb46f0e7be34, direct correction 2026-10-16"
+        },
+        "base_version": 1,
+        "operation": "replace",
+        "project_id": "routecodex",
+        "request_id": "req-20261016-dba8ff9-http-capacity-ablation",
+        "requirement_id": "routecodex-http-request-independence",
+        "text": "每个HTTP请求独立执行。RouteCodex不得按session_id或conversation_id串行化独立请求，须删除Responses同会话准入锁、等待通知、token/permit状态、body持锁包装和对应接线。相同session或conversation的请求A等待上游时，请求B仍须独立进入provider并完成；取消或失败A不得取消、延迟或阻止B。Runtime与Provider transport不得以其他请求占用的本地并发容量作为业务准入或候选排除条件；跨端口请求总数超过原本地容量时，所有可路由请求仍独立进入上游，不得本地排空唯一候选。删除对应业务许可与Busy拒绝路径，不提高阈值或伪造许可。保留真实业务payload与header语义，不把session元数据变成排队许可。不同端口采用同一请求独立语义。更改图、gate和旧测试使之验证并发而非保留排队后补心跳。真实上游失败的健康状态、Error链、重试与恢复策略不因此放宽。重启维护协调和Front响应EOF资源职责独立，不在本次消融中顺带删除或放宽。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "现在不存在业务许可,有什么不许可的情况? 不存在这个问题,http请求天然隔离。对,移除这个错误的设计,这是过度保护,消融掉。",
+          "role": "user",
+          "source": "Codex conversation 01a14462-5b07-7260-bd85-cb46f0e7be34, direct correction 2026-10-16"
+        },
+        "requirement_id": "routecodex-http-request-independence",
+        "status": "active",
+        "text": "每个HTTP请求独立执行。RouteCodex不得按session_id或conversation_id串行化独立请求，须删除Responses同会话准入锁、等待通知、token/permit状态、body持锁包装和对应接线。相同session或conversation的请求A等待上游时，请求B仍须独立进入provider并完成；取消或失败A不得取消、延迟或阻止B。Runtime与Provider transport不得以其他请求占用的本地并发容量作为业务准入或候选排除条件；跨端口请求总数超过原本地容量时，所有可路由请求仍独立进入上游，不得本地排空唯一候选。删除对应业务许可与Busy拒绝路径，不提高阈值或伪造许可。保留真实业务payload与header语义，不把session元数据变成排队许可。不同端口采用同一请求独立语义。更改图、gate和旧测试使之验证并发而非保留排队后补心跳。真实上游失败的健康状态、Error链、重试与恢复策略不因此放宽。重启维护协调和Front响应EOF资源职责独立，不在本次消融中顺带删除或放宽。",
+        "version": 2
+      },
+      "version": 11
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "只有唯一一个provider不要冷却，最后一个provider有问题就是:1/3/5/16/30秒回退(循环)。客户端和provider确保去耦合。有provider切provider，没有provider，最后一个应该是阻塞回退重试。并且end没有stop起码可以报错重试。阻塞等待不持久化，重启清零。错误的时候，是该错误的provider进行回退阻塞等待，不是其他provider。判定应改为读健康状态里还剩几个可路由的成员。Relay和Direct共用。写进.appsdk/requirements.json。",
+          "role": "user",
+          "source": "Codex conversation 01a14462-5b07-7260-bd85-cb46f0e7be34, direct user requirements on 2026-10-16"
+        },
+        "base_version": 0,
+        "operation": "create",
+        "project_id": "routecodex",
+        "request_id": "req-20261016-d2d3be6-last-routable-protection",
+        "requirement_id": "routecodex-last-routable-provider-protection",
+        "text": "自动失败处理只影响完整的 interface/provider/model/key 身份。根据本请求冻结候选集合与当前健康状态原子判断可路由替代者；若有替代者，仅按既有策略排除和冷却实际失败身份，并立即选择替代者，只检查替代者自身的等待状态。最后一个当前可路由且符合请求资格的身份（包含多成员池其他成员已冷却的情况）不得进入自动 cooldown 或请求内排除，必须在保留真实 typed Error 原因后按1、3、5、16、30秒循环阻塞退避并重试该身份。缺失message_stop等未完成尝试必须内部记错、丢弃缓冲输出并完整重发请求；不得向客户端提交半截尝试、provider错误、错误状态或错误SSE、伪造成功或空完成。同一身份的退避跨请求和会话共享，其他provider、model、key独立；状态仅存进程内，完整进程重启清零，真实成功立即清除该身份退避。已有冷却成员保持原状态，不伪造探测或成功。Direct与Relay共用唯一健康判定和变更owner，删除default_floor_protected死机制。所有发送受声明尝试次数及驻留期限约束；不能开始的重试须保留原始错误并仅结束本请求传输。公共入口回归分别覆盖Direct和Relay的健康替代立即切换、多成员池最后身份不冷却且延迟重发、失败尝试不泄漏、原请求完整保留、实际工具执行与配对followup、预算及期限耗尽。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "只有唯一一个provider不要冷却，最后一个provider有问题就是:1/3/5/16/30秒回退(循环)。客户端和provider确保去耦合。有provider切provider，没有provider，最后一个应该是阻塞回退重试。并且end没有stop起码可以报错重试。阻塞等待不持久化，重启清零。错误的时候，是该错误的provider进行回退阻塞等待，不是其他provider。判定应改为读健康状态里还剩几个可路由的成员。Relay和Direct共用。写进.appsdk/requirements.json。",
+          "role": "user",
+          "source": "Codex conversation 01a14462-5b07-7260-bd85-cb46f0e7be34, direct user requirements on 2026-10-16"
+        },
+        "requirement_id": "routecodex-last-routable-provider-protection",
+        "status": "active",
+        "text": "自动失败处理只影响完整的 interface/provider/model/key 身份。根据本请求冻结候选集合与当前健康状态原子判断可路由替代者；若有替代者，仅按既有策略排除和冷却实际失败身份，并立即选择替代者，只检查替代者自身的等待状态。最后一个当前可路由且符合请求资格的身份（包含多成员池其他成员已冷却的情况）不得进入自动 cooldown 或请求内排除，必须在保留真实 typed Error 原因后按1、3、5、16、30秒循环阻塞退避并重试该身份。缺失message_stop等未完成尝试必须内部记错、丢弃缓冲输出并完整重发请求；不得向客户端提交半截尝试、provider错误、错误状态或错误SSE、伪造成功或空完成。同一身份的退避跨请求和会话共享，其他provider、model、key独立；状态仅存进程内，完整进程重启清零，真实成功立即清除该身份退避。已有冷却成员保持原状态，不伪造探测或成功。Direct与Relay共用唯一健康判定和变更owner，删除default_floor_protected死机制。所有发送受声明尝试次数及驻留期限约束；不能开始的重试须保留原始错误并仅结束本请求传输。公共入口回归分别覆盖Direct和Relay的健康替代立即切换、多成员池最后身份不冷却且延迟重发、失败尝试不泄漏、原请求完整保留、实际工具执行与配对followup、预算及期限耗尽。",
+        "version": 1
+      },
+      "version": 12
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "上游管不了，但是这里有两个问题：不同端口需要独立冷却并且唯一候选不可冷却",
+          "role": "user",
+          "source": "Codex conversation 01a14462-5b07-7260-bd85-cb46f0e7be34, user 2026-10-16"
+        },
+        "base_version": 0,
+        "operation": "create",
+        "project_id": "routecodex",
+        "request_id": "req-20261016-d2d3be6-port-isolation",
+        "requirement_id": "routecodex-provider-health-port-isolation",
+        "text": "不同监听端口的 provider 健康状态互相隔离。同一 provider/interface/model/key 在4444的失败计数、冷却、自动排除、退避和恢复探测不得改变或阻塞7777，反向同样成立。同一端口内按完整provider/interface/model/key独立，同端口跨会话共享既有退避。唯一候选或池内最后一个当前可路由候选不得进入自动冷却或自动排除；按已有最后候选循环退避契约保留并重试。Direct与Relay共享该端口内的唯一健康owner。持久化健康状态必须保留端口归属，不能在重启后跨端口恢复；退避等待仍只存内存、完整进程重启清零。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "上游管不了，但是这里有两个问题：不同端口需要独立冷却并且唯一候选不可冷却",
+          "role": "user",
+          "source": "Codex conversation 01a14462-5b07-7260-bd85-cb46f0e7be34, user 2026-10-16"
+        },
+        "requirement_id": "routecodex-provider-health-port-isolation",
+        "status": "active",
+        "text": "不同监听端口的 provider 健康状态互相隔离。同一 provider/interface/model/key 在4444的失败计数、冷却、自动排除、退避和恢复探测不得改变或阻塞7777，反向同样成立。同一端口内按完整provider/interface/model/key独立，同端口跨会话共享既有退避。唯一候选或池内最后一个当前可路由候选不得进入自动冷却或自动排除；按已有最后候选循环退避契约保留并重试。Direct与Relay共享该端口内的唯一健康owner。持久化健康状态必须保留端口归属，不能在重启后跨端口恢复；退避等待仍只存内存、完整进程重启清零。",
+        "version": 1
+      },
+      "version": 13
     }
   ],
   "project_id": "routecodex",
   "schema_version": 1,
-  "version": 9
+  "version": 13
 }

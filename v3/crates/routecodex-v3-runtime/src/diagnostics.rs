@@ -138,7 +138,6 @@ pub fn project_v3_virtual_router_dry_run<R: V3ProviderAvailabilityReader>(
                 "unavailableCandidates": selected.unavailable_candidates,
                 "attempts": selected.attempts,
                 "defaultFloorSelection": selected.route.pool_id == "default",
-                "defaultFloorProtected": selected.default_floor_protected,
                 "reasoning": reasoning,
                 "target": {
                     "providerId": selected.candidate.provider_id,
@@ -1011,7 +1010,11 @@ targets = [{ kind = "provider_model", provider = "test", model = "test", key = "
         );
         assert_eq!(output["decision"]["selectedPoolId"], "default");
         assert_eq!(output["decision"]["reasoning"], "default_floor");
-        assert_eq!(output["decision"]["defaultFloorProtected"], false);
+        assert!(
+            output["decision"]["defaultFloorProtected"].is_null(),
+            "retired default-floor protection field must stay removed: {}",
+            output["decision"]
+        );
         assert_eq!(output["decision"]["routeResult"]["poolId"], "default");
         assert_eq!(output["decision"]["routeResult"]["confidence"], 1.0);
         assert_eq!(output["decision"]["target"]["providerId"], "test");

@@ -382,8 +382,8 @@ async fn anthropic_relay_selected_anthropic_provider_uses_anthropic_messages_wir
         V3AnthropicRelayRuntimeInput {
             server_id: server_id.into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
+                server_id,
+                server_id,
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
@@ -461,8 +461,8 @@ async fn anthropic_relay_dynamic_claude_code_packet_reaches_anthropic_provider_r
         V3AnthropicRelayRuntimeInput {
             server_id: server_id.into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
+                server_id,
+                server_id,
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
@@ -581,8 +581,8 @@ async fn anthropic_relay_stream_request_projects_json_provider_body_as_sse_event
         V3AnthropicRelayRuntimeInput {
             server_id: server_id.into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
+                server_id,
+                server_id,
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
@@ -621,8 +621,8 @@ async fn anthropic_relay_anthropic_provider_sse_reaches_client_sse_events() {
         V3AnthropicRelayRuntimeInput {
             server_id: server_id.into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
+                server_id,
+                server_id,
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
@@ -664,8 +664,8 @@ async fn anthropic_relay_anthropic_provider_sse_eof_before_message_stop_fails() 
         V3AnthropicRelayRuntimeInput {
             server_id: server_id.into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
+                server_id,
+                server_id,
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
@@ -714,8 +714,8 @@ async fn anthropic_relay_anthropic_provider_sse_eof_reselects_next_candidate() {
         V3AnthropicRelayRuntimeInput {
             server_id: server_id.into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
+                server_id,
+                server_id,
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
@@ -779,8 +779,8 @@ async fn anthropic_relay_responses_provider_sse_eof_reselects_next_candidate() {
         V3AnthropicRelayRuntimeInput {
             server_id: server_id.into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
+                server_id,
+                server_id,
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
@@ -841,8 +841,8 @@ async fn anthropic_relay_anthropic_provider_tool_use_missing_name_fails_without_
         V3AnthropicRelayRuntimeInput {
             server_id: server_id.into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
+                server_id,
+                server_id,
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
@@ -943,8 +943,8 @@ async fn anthropic_relay_cyber_refusal_json_preserves_output_without_reselection
         V3AnthropicRelayRuntimeInput {
             server_id: server_id.into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
+                server_id,
+                server_id,
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),

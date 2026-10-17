@@ -174,6 +174,8 @@ port = {port}
 routing_group = "direct_step5"
 endpoints = ["openai_chat"]
 {execution}
+[servers.direct_step5.execution.attempt_store]
+request_max_attempts = 1
 [providers.lifeai]
 default_model = "step-5-preview"
 auth = {{ type = "api_key", entries = [{{ alias = "key1", env = "{KEY_ENV}" }}] }}

@@ -953,7 +953,7 @@ async fn captured_relay_protocol_admission_does_not_truncate_failure_reselection
 
     let resolution = reselect_from_captured_target_plan(
         &context,
-        &selected,
+        captured_target_09.clone(),
         &BTreeSet::from([selected_key.clone()]),
         1,
     )
@@ -1243,9 +1243,26 @@ message_mode = "code_only"
     .await
     .expect("429 must project through the policy");
 
-    let projection = result
-        .terminal_projection
-        .expect("default-floor exhausted 429 must be terminal");
+    assert_eq!(result.event.action, "retry_last_routable");
+    assert_eq!(result.event.wait_ms, Some(1_000));
+    assert!(result.terminal_projection.is_none());
+    let terminal = build_v3_relay_provider_error_05_decision(
+        result
+            .retry_selected
+            .as_ref()
+            .expect("last candidate retained"),
+        result.event.diagnostic_source.clone(),
+        429,
+        0,
+        false,
+        false,
+        None,
+    );
+    let projection = terminal_projection_for(
+        &terminal,
+        manifest.error.provider_error_action_policy.first(),
+    )
+    .expect("budget exhaustion must retain internal terminal semantics");
     assert_eq!(
         projection.status, 502,
         "terminal pool exhaustion must use the declared public network error"
@@ -1257,7 +1274,7 @@ message_mode = "code_only"
 }
 
 #[tokio::test]
-async fn matched_response_policy_identity_drives_retry_without_message_rematch() {
+async fn last_routable_schedule_overrides_captured_retry_same_policy() {
     let scope = "response_policy_identity";
     let source = r#"
 version = 3
@@ -1360,11 +1377,12 @@ targets = [
 
     assert_ne!(
         result.event.action, "policy_retry_same",
-        "configured RetrySame must not create a production same-candidate retry"
+        "configured RetrySame must not replace the last-routable schedule"
     );
-    assert_eq!(result.event.action, "terminal_route_and_default_exhausted");
-    assert!(result.retry_selected.is_none());
-    assert!(result.terminal_projection.is_some());
+    assert_eq!(result.event.action, "retry_last_routable");
+    assert_eq!(result.event.wait_ms, Some(1_000));
+    assert!(result.retry_selected.is_some());
+    assert!(result.terminal_projection.is_none());
     assert!(same_candidate_retries.is_empty());
 }
 

@@ -7,6 +7,7 @@
     { "id": "provider_interface", "status": "graph", "graph": "docs/architecture/dagpipe/graphs/provider-multi-interface-wiring.graph.json" }
   ],
   "extensions": [
+    { "id": "http-request-isolation", "status": "graph", "graph": "docs/architecture/dagpipe/graphs/http-request-isolation.graph.json" },
     { "id": "dsh-responses-function-call-terminal", "status": "graph", "graph": "docs/architecture/dagpipe/dsh-responses-function-call-terminal.graph.json" }
   ]
 }

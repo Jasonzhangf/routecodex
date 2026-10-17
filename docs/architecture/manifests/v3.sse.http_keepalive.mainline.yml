@@ -22,7 +22,6 @@ resource_reads:
     consumer: v3_io_sse_body
 canonical_docs:
   - docs/architecture/wiki/v3-sse-http-keepalive.md
-  - docs/goals/v3-responses-session-admission-and-sse-keepalive-test-design.md
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-verification-map.yml
 verification_gates:

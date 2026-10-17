@@ -341,7 +341,7 @@ edges:
     to: V3ProviderActionFailureRecorded
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: run_v3_direct_provider_failure_policy
+    caller_symbol: run_v3_direct_provider_failure_policy_inner
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
     callee_symbol: record_v3_direct_provider_failure_record
     callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
@@ -377,9 +377,9 @@ edges:
     to: V3ProviderActionFailureRecorded
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: V3OpenAiChatSseProviderOutcome::record_failure
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
+    caller_symbol: handle_provider_failure
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
+    callee_symbol: run_v3_relay_provider_failure_policy
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - step_id: v3-provider-action-gate-41
     from: V3ProviderActionPermitInFlight
@@ -413,9 +413,9 @@ edges:
     to: V3ProviderActionFailureRecorded
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: V3GeminiSseProviderOutcome::record_failure
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
+    caller_symbol: run_v3_relay_provider_failure_policy
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_candidate_failure
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - step_id: v3-provider-action-gate-45
     from: V3ProviderActionPermitInFlight

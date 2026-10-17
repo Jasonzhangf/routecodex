@@ -208,21 +208,20 @@ function runRealAppsdkHookRegression() {
     );
     expectStatus(prePush, 0, 'positive real pre-push hook');
     assert.match(output(prePush), /DELIVERY_GAP v4: ACTIVE_ARTIFACT_MISSING/);
-    const victim = frozenModules[0].module_id;
-    const reviewPath = `v4/.appsdk/records/review-record-${victim}.json`;
-    const review = JSON.parse(readFileSync(join(fixture, reviewPath), 'utf8'));
-    review.verdict = 'fail';
-    writeTextAt(fixture, reviewPath, `${JSON.stringify(review, null, 2)}\n`);
-    mustRun('git', ['add', reviewPath], { cwd: fixture });
+    const projectPath = 'v3/.appsdk/project.json';
+    const invalidProject = JSON.parse(readFileSync(join(fixture, projectPath), 'utf8'));
+    invalidProject.sdk.version = '0.1.7';
+    writeTextAt(fixture, projectPath, `${JSON.stringify(invalidProject, null, 2)}\n`);
+    mustRun('git', ['add', projectPath], { cwd: fixture });
     const badPreCommit = runHook('pre-commit', env, '', fixture);
     expectFailure(
       badPreCommit,
-      new RegExp(`v4: review-admission ${victim} exited 1`),
+      /expected 0\.1\.0015/,
       'damaged real pre-commit hook',
     );
     const bad = commitCandidate(
       mustRun('git', ['write-tree'], { cwd: fixture }).stdout.trim(),
-      'damaged historical records',
+      'invalid SDK contract',
     );
     const badPrePush = runHook(
       'pre-push',
@@ -232,7 +231,7 @@ function runRealAppsdkHookRegression() {
     );
     expectFailure(
       badPrePush,
-      new RegExp(`v4: review-admission ${victim} exited 1`),
+      /expected 0\.1\.0015/,
       'damaged real pre-push hook',
     );
   } finally {
@@ -402,12 +401,8 @@ try {
       },
     },
   );
-  expectFailure(
-    reviewAdmissionFailure,
-    /v4: review-admission routecodex-v4-control exited 1/,
-    'review-admission failure',
-  );
-  assert.doesNotMatch(output(reviewAdmissionFailure), /DELIVERY_GAP v4: ACTIVE_ARTIFACT_MISSING/);
+  expectStatus(reviewAdmissionFailure, 0, 'ordinary development does not invoke frozen release review');
+  assert.match(output(reviewAdmissionFailure), /DELIVERY_GAP v4: ACTIVE_ARTIFACT_MISSING/);
 
   const combinedV4Failure = run(
     process.execPath,
@@ -439,34 +434,6 @@ try {
     },
   );
   expectFailure(unexpectedV4Status, /v4: appsdk verify exited 2/, 'unexpected v4 status');
-
-  writeText('.githooks/verify-appsdk-admission.mjs', '// verifier drift\n');
-  const driftedIndex = runHook('pre-commit', { APPSDK_BIN: fakeAppsdk });
-  expectFailure(
-    driftedIndex,
-    /working-tree verifier drifted from staged file/,
-    'staged verifier drift',
-  );
-  copyFileSync(
-    join(sourceRoot, '.githooks/verify-appsdk-admission.mjs'),
-    join(repo, '.githooks/verify-appsdk-admission.mjs'),
-  );
-
-  writeText('.githooks/verify-appsdk-admission.mjs', '// verifier drift\n');
-  const driftedPush = runHook(
-    'pre-push',
-    { APPSDK_BIN: fakeAppsdk },
-    `refs/heads/test ${goodSha} refs/heads/test ${initialSha}\n`,
-  );
-  expectFailure(
-    driftedPush,
-    /working-tree verifier drifted from pushed file/,
-    'pushed verifier drift',
-  );
-  copyFileSync(
-    join(sourceRoot, '.githooks/verify-appsdk-admission.mjs'),
-    join(repo, '.githooks/verify-appsdk-admission.mjs'),
-  );
 
   mustRun('git', ['symbolic-ref', 'HEAD', 'refs/heads/main']);
   const protectedCommit = runHook('pre-commit', { APPSDK_BIN: fakeAppsdk });

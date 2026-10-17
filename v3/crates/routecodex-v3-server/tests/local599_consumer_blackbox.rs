@@ -383,6 +383,7 @@ endpoints = ["responses"]
 allowed_modes = ["relay"]
 allowed_invocation_sources = ["client"]
 allowed_transports = ["json", "sse"]
+attempt_store = {{ request_max_attempts = 1 }}
 [providers.{PROVIDER_ID}]
 type = "responses"
 base_url = "{base_url}"
@@ -396,7 +397,10 @@ capabilities = ["text", "tools"]
 supports_streaming = true
 [route_groups.local599-group.pools.default]
 selection = {{ strategy = "priority" }}
-targets = [{{ kind = "provider_model", provider = "{PROVIDER_ID}", model = "{MODEL_ID}", key = "key1", priority = 1 }}]
+targets = [
+  {{ kind = "provider_model", provider = "{PROVIDER_ID}", model = "{MODEL_ID}", key = "key1", priority = 2 }},
+  {{ kind = "provider_model", provider = "{PROVIDER_ID}", model = "{MODEL_ID}", key = "key2", priority = 1 }}
+]
 "#
     );
     compile_v3_config_05_manifest(
@@ -409,7 +413,7 @@ fn local599_input(request_id: &str) -> V3ResponsesRelayRuntimeInput {
     V3ResponsesRelayRuntimeInput {
         server_id: "a".to_string(),
         failure_session_scope: V3ProviderFailureSessionScope::new(
-            "local599-server",
+            "a",
             "local599-group",
             request_id,
         )

@@ -112,6 +112,7 @@ async fn start(process: &str, recovery: bool) -> Entry {
     } else {
         r#"[{kind="provider_model",provider="test",model="test",key="key",priority=1}]"#
     };
+    let request_max_attempts = if recovery { 2 } else { 1 };
     let source = format!(
         r#"
 version = 3
@@ -122,6 +123,8 @@ port = {port}
 routing_group = "default"
 endpoints = ["responses", "openai_chat", "anthropic", "gemini"]
 {execution}
+[servers.owned.execution.attempt_store]
+request_max_attempts = {request_max_attempts}
 [providers.test]
 type = "responses"
 base_url = "http://{upstream_addr}/v1"
@@ -135,6 +138,10 @@ capabilities = ["text","tools"]
 supports_streaming = true
 [providers.test.models.recover]
 wire_name = "wire-recover"
+capabilities = ["text","tools"]
+supports_streaming = true
+[providers.test.models.sibling]
+wire_name = "wire-owned"
 capabilities = ["text","tools"]
 supports_streaming = true
 [route_groups.default.pools.default]
@@ -425,7 +432,7 @@ async fn three_failed_requests_do_not_block_concurrent_or_same_identity_followup
             let response = client
                 .post(format!("{}/v1/responses", entry.base()))
                 .header("x-session-id", "owned-sibling")
-                .json(&json!({"model":"test.test","input":"concurrent sibling","stream":true}))
+                .json(&json!({"model":"test.sibling","input":"concurrent sibling","stream":true}))
                 .send()
                 .await
                 .unwrap();

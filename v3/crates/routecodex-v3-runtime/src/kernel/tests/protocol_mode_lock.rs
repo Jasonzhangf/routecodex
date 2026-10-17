@@ -85,6 +85,71 @@ impl ResponsesTransport for DirectProviderCompatTerminalTransport {
 }
 
 #[tokio::test]
+async fn sole_candidate_request_compat_error_does_not_delay_valid_followup() {
+    let group = "direct_compat_no_backoff";
+    let manifest = scoped_test_manifest(provider_compat_single_manifest(), group);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let raw = test_responses_raw(
+        group,
+        "compat-neutral",
+        "compat-neutral",
+        json!({"model":"client-model","input":"hello"}),
+    );
+    let plan = test_protocol_plan(&manifest, raw.clone(), health.clone(), 0);
+    let selected = &plan.decision.target;
+    let budget = crate::nodes::V3AttemptBudget::process_default();
+    let mut failed = BTreeSet::new();
+    let mut retries = BTreeMap::new();
+    let mut trace = Vec::new();
+    let result = run_v3_direct_provider_failure_policy(
+        &V3DirectProviderFailurePolicyContext {
+            failure_session_scope: &raw.failure_session_scope,
+            provider_health: &health,
+            run_error: crate::hooks::responses_direct_error_hook,
+            availability: &health,
+            expanded: None,
+            provider_pinned: true,
+            now_epoch_ms: 0,
+            attempt_budget: &budget,
+        },
+        selected,
+        build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ProviderFailure,
+            "ProviderReqCompat06ProviderCompat",
+            "provider_request_compat_error",
+            "unrepresentable request field",
+        ),
+        400,
+        &mut V3DirectProviderFailurePolicyState {
+            failed_candidates: &mut failed,
+            same_candidate_retries: &mut retries,
+            trace: &mut trace,
+        },
+    )
+    .await
+    .expect("request-local error must stay typed");
+    assert!(result.retry_selected.is_none());
+    let event = result.event.expect("compat diagnostic");
+    assert_eq!(event.health_state, "request_local_provider_compat");
+    assert_eq!(event.failure_count, 0);
+    assert_eq!(event.wait_ms, None);
+    assert!(health
+        .recovery_for_selected_provider(&raw.failure_session_scope, selected)
+        .unwrap()
+        .is_none());
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::new().with_provider_health(health),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &ProviderConcurrencyRecordingTransport::default(),
+    )
+    .await;
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
+    assert!(!output.node_trace.contains(&"V3ProviderActionGateAdmission"));
+}
+
+#[tokio::test]
 async fn direct_generic_provider_http_400_reselects_untried_sibling_model() {
     let routing_group = "direct_provider_compat_sibling";
     let manifest = scoped_test_manifest(provider_compat_sibling_manifest(), routing_group);
@@ -141,7 +206,16 @@ async fn direct_generic_provider_http_400_reselects_untried_sibling_model() {
 #[tokio::test]
 async fn direct_generic_provider_http_400_terminal_exhaustion_enters_provider_action_wait() {
     let routing_group = "direct_provider_compat_terminal";
-    let manifest = scoped_test_manifest(provider_compat_single_manifest(), routing_group);
+    let mut manifest = scoped_test_manifest(provider_compat_single_manifest(), routing_group);
+    manifest
+        .servers
+        .get_mut("test")
+        .unwrap()
+        .execution
+        .as_mut()
+        .unwrap()
+        .attempt_store
+        .request_max_attempts = 1;
     let raw = V3Server03HttpRequestRaw {
         request_purpose: V3RequestPurpose::Conversation,
         port: Some(7777),
@@ -179,15 +253,12 @@ async fn direct_generic_provider_http_400_terminal_exhaustion_enters_provider_ac
     assert_eq!(
         transport.sends.load(Ordering::SeqCst),
         1,
-        "generic provider HTTP 400 must not retry the same candidate: {output:?}"
+        "the declared one-attempt budget must terminate before retry: {output:?}"
     );
-    assert!(
-        output.node_trace.contains(&"V3Error06ClientProjected"),
-        "generic provider HTTP 400 exhaustion must project terminal: {output:?}"
-    );
-    assert!(
-        output.error_chain.is_some(),
-        "generic provider HTTP 400 exhaustion must produce a client error: {output:?}"
+    assert_eq!(
+        output.error_chain.as_deref(),
+        Some(V3_ERROR_CHAIN_NODE_IDS.as_slice()),
+        "budget exhaustion must retain the complete internal Error chain: {output:?}"
     );
     let observation = output
         .observability
@@ -238,7 +309,9 @@ async fn direct_reselect_can_handoff_to_relay_target_after_provider_failure() {
         plan.decision.mode,
         V3Execution11ProtocolDecisionMode::SameProtocolDirect
     );
-    assert!(plan.protocol_candidate_keys.contains("first:default:key:test"));
+    assert!(plan
+        .protocol_candidate_keys
+        .contains("first:default:key:test"));
     assert!(!plan.protocol_candidate_keys.contains("chat:key:test"));
 
     let output = execute_v3_responses_direct_runtime_kernel_core(

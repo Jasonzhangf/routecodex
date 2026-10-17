@@ -2252,17 +2252,27 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
 #[tokio::test]
 async fn responses_relay_default_floor_projects_error_after_single_failure() {
     let server_id = "responses_default_floor_success";
+    let mut manifest = responses_single_limited_manifest_for_scope(server_id);
+    manifest
+        .servers
+        .get_mut(server_id)
+        .unwrap()
+        .execution
+        .as_mut()
+        .unwrap()
+        .attempt_store
+        .request_max_attempts = 1;
     let transport = ResponsesDefaultFloorFailsThenSucceedsTransport {
         captures: Mutex::new(Vec::new()),
         fail_count: usize::MAX,
     };
     let output = execute_v3_responses_relay_runtime_with_retry_policy(
-        &responses_single_limited_manifest_for_scope(server_id),
+        &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: server_id.into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
+                server_id,
+                server_id,
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
@@ -2304,6 +2314,16 @@ async fn responses_relay_default_floor_projects_error_after_single_failure() {
 #[tokio::test]
 async fn responses_relay_default_floor_projects_error_without_retry_wait() {
     let server_id = "responses_default_floor_terminal";
+    let mut manifest = responses_single_limited_manifest_for_scope(server_id);
+    manifest
+        .servers
+        .get_mut(server_id)
+        .unwrap()
+        .execution
+        .as_mut()
+        .unwrap()
+        .attempt_store
+        .request_max_attempts = 1;
     let transport = ResponsesDefaultFloorFailsThenSucceedsTransport {
         captures: Mutex::new(Vec::new()),
         fail_count: usize::MAX,
@@ -2311,12 +2331,12 @@ async fn responses_relay_default_floor_projects_error_without_retry_wait() {
     let output = tokio::time::timeout(
         Duration::from_secs(14),
         execute_v3_responses_relay_runtime_with_retry_policy(
-            &responses_single_limited_manifest_for_scope(server_id),
+            &manifest,
             V3ResponsesRelayRuntimeInput {
                 server_id: server_id.into(),
                 failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                    "test-server",
-                    "test-group",
+                    server_id,
+                    server_id,
                     concat!(module_path!(), ":", line!()),
                 )
                 .expect("test provider failure session scope"),
@@ -2506,16 +2526,27 @@ async fn responses_relay_sse_body_read_error_is_not_projected_as_transport_malfo
 }
 
 #[tokio::test]
-async fn responses_relay_terminal_missing_fails_explicitly_but_fresh_request_bypasses_recovery() {
+async fn responses_relay_terminal_missing_keeps_last_identity_routable_with_backoff() {
     let server_id = "responses_terminal_missing_fresh_isolation";
-    let manifest = responses_single_limited_manifest_for_scope(server_id);
-    let failed = execute_v3_responses_relay_runtime_with_retry_policy(
+    let mut manifest = responses_single_limited_manifest_for_scope(server_id);
+    manifest
+        .servers
+        .get_mut(server_id)
+        .unwrap()
+        .execution
+        .as_mut()
+        .unwrap()
+        .attempt_store
+        .request_max_attempts = 1;
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let failed = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
         &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: server_id.into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
+                server_id,
+                server_id,
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
@@ -2527,6 +2558,7 @@ async fn responses_relay_terminal_missing_fails_explicitly_but_fresh_request_byp
             }),
         },
         &ResponsesSseTerminalMissingTransport,
+        &provider_health,
         V3ResponsesRelayRetryPolicy {
             same_candidate_retries: 0,
         },
@@ -2535,6 +2567,10 @@ async fn responses_relay_terminal_missing_fails_explicitly_but_fresh_request_byp
     .unwrap();
 
     assert_eq!(failed.status, 502);
+    assert_eq!(
+        failed.error_chain.as_ref().unwrap(),
+        &V3_ERROR_CHAIN_NODE_IDS
+    );
     let V3ResponsesRelayClientBody::Json(error_body) = failed.client_body else {
         panic!("terminal-missing provider stream must project an explicit JSON error")
     };
@@ -2542,6 +2578,17 @@ async fn responses_relay_terminal_missing_fails_explicitly_but_fresh_request_byp
         error_body,
         json!({"error":{"code":"network_error","message":"network error"}})
     );
+    assert!(
+        provider_health
+            .store()
+            .availability("limited", Some("key1"), Some("gpt-5.5"), u64::MAX)
+            .available
+    );
+    assert!(provider_health
+        .store()
+        .provider_cooldown_probe_keys_due(u64::MAX)
+        .unwrap()
+        .is_empty());
 
     let success_transport = SingleJsonCaptureTransport {
         captures: Mutex::new(Vec::new()),
@@ -2552,14 +2599,14 @@ async fn responses_relay_terminal_missing_fails_explicitly_but_fresh_request_byp
         }),
     };
     let fresh = tokio::time::timeout(
-        Duration::from_millis(500),
-        execute_v3_responses_relay_runtime_with_retry_policy(
+        Duration::from_secs(2),
+        execute_v3_responses_relay_runtime_with_health_and_retry_policy(
             &manifest,
             V3ResponsesRelayRuntimeInput {
                 server_id: server_id.into(),
                 failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                    "test-server",
-                    "test-group",
+                    server_id,
+                    server_id,
                     concat!(module_path!(), ":", line!()),
                 )
                 .expect("test provider failure session scope"),
@@ -2571,15 +2618,24 @@ async fn responses_relay_terminal_missing_fails_explicitly_but_fresh_request_byp
                 }),
             },
             &success_transport,
+            &provider_health,
             V3ResponsesRelayRetryPolicy {
                 same_candidate_retries: 0,
             },
         ),
     )
     .await
-    .expect("fresh Responses request consumed the prior terminal-missing recovery lane")
+    .expect("same identity must recover after its own one-second backoff")
     .unwrap();
     assert_eq!(fresh.status, 200);
+    assert!(fresh.node_trace.contains(&"V3ProviderActionGateAdmission"));
+    let V3ResponsesRelayClientBody::Json(body) = fresh.client_body else {
+        panic!("expected actual JSON business response");
+    };
+    assert_eq!(
+        body["output"][0]["content"][0]["text"],
+        "fresh request succeeded"
+    );
     assert_eq!(success_transport.captures.lock().unwrap().len(), 1);
 }
 
@@ -2805,7 +2861,16 @@ fn provider_key_failure_uses_aggressive_probe_ladder_and_recovers() {
 #[tokio::test]
 async fn provider_error_closeout_returns_terminal_exhaustion_instead_of_hanging() {
     let server_id = "provider_error_terminal_closeout";
-    let manifest = manifest_for_scope(server_id);
+    let mut manifest = manifest_for_scope(server_id);
+    manifest
+        .servers
+        .get_mut(server_id)
+        .unwrap()
+        .execution
+        .as_mut()
+        .unwrap()
+        .attempt_store
+        .request_max_attempts = 1;
     let provider_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let outcome = tokio::time::timeout(
@@ -2815,8 +2880,8 @@ async fn provider_error_closeout_returns_terminal_exhaustion_instead_of_hanging(
             V3AnthropicRelayRuntimeInput {
                 server_id: server_id.into(),
                 failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                    "test-server",
-                    "test-group",
+                    server_id,
+                    server_id,
                     concat!(module_path!(), ":", line!()),
                 )
                 .expect("test provider failure session scope"),

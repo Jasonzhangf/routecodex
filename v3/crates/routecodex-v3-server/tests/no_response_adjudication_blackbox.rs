@@ -2186,6 +2186,12 @@ async fn start_entry_configured(
         .as_ref()
         .map(|key| format!(", key = \"{key}\""))
         .unwrap_or_default();
+    // Terminal fixtures attempt each declared eligible key at most once.
+    let request_max_attempts = if pin_key.is_some() {
+        1
+    } else {
+        auth_entries.len()
+    };
     // Anthropic's transport appends /v1/messages; Responses and Chat append
     // their endpoint to an API base that already includes /v1.
     let provider_base_url = if kind == "anthropic" {
@@ -2203,6 +2209,8 @@ port = {port}
 routing_group = "default"
 endpoints = ["responses", "openai_chat", "anthropic", "gemini"]
 {execution}
+[servers.a.execution.attempt_store]
+request_max_attempts = {request_max_attempts}
 [providers.test]
 type = "{kind}"
 base_url = "{provider_base_url}"

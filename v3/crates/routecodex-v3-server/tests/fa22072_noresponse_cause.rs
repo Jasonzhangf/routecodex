@@ -230,6 +230,8 @@ port = {server_port}
 routing_group = "owned"
 endpoints = ["openai_chat"]
 {execution}
+[servers.owned.execution.attempt_store]
+request_max_attempts = 1
 [providers.test]
 type = "openai_chat"
 base_url = "http://127.0.0.1:{peer_port}/v1"

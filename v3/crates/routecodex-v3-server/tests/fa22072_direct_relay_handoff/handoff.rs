@@ -970,14 +970,17 @@ async fn fa22072_direct_relay_provider_model_pin_failure_does_not_admit_default_
         beta_captures.clone(),
         order.clone(),
     ));
-    let handle = spawn_v3_server_aggregate(handoff_manifest(
-        test_ports::free_port(),
-        alpha_port,
-        beta_port,
-        false,
-    ))
-    .await
-    .unwrap();
+    let mut manifest = handoff_manifest(test_ports::free_port(), alpha_port, beta_port, false);
+    manifest
+        .servers
+        .get_mut("direct_relay_handoff")
+        .unwrap()
+        .execution
+        .as_mut()
+        .unwrap()
+        .attempt_store
+        .request_max_attempts = 1;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let port = handle.listeners[0].addr.port();
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
@@ -1077,14 +1080,17 @@ async fn fa22072_direct_relay_default_pool_exhaustion_public_entry() {
             beta_captures.clone(),
             order.clone(),
         ));
-        let handle = spawn_v3_server_aggregate(handoff_manifest(
-            test_ports::free_port(),
-            alpha_port,
-            beta_port,
-            false,
-        ))
-        .await
-        .unwrap();
+        let mut manifest = handoff_manifest(test_ports::free_port(), alpha_port, beta_port, false);
+        manifest
+            .servers
+            .get_mut("direct_relay_handoff")
+            .unwrap()
+            .execution
+            .as_mut()
+            .unwrap()
+            .attempt_store
+            .request_max_attempts = 2;
+        let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
         let port = handle.listeners[0].addr.port();
         let marker = format!("OWNED_DIRECT_RELAY_EXHAUSTION_STREAM_{stream}");
         let raw = raw_post_chat(port, &chat_request(&marker, stream, "auto")).await;

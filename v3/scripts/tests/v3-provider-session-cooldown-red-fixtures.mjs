@@ -110,7 +110,7 @@ const cases = [
     path: "docs/architecture/v3-resource-operation-map.yml",
     mutate: (source) =>
       source.replace(
-        "identity: [serverId, routingGroup, sessionId, providerRuntimeIdentity]",
+        "identity: [listenerPort, serverId, routingGroup, sessionId, providerRuntimeIdentity]",
         "identity: [providerId, authAlias, modelId, reason, untilMs]",
       ),
     diagnostic: /Resource map must bind provider health state identity/u,

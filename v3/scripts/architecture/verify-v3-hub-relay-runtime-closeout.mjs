@@ -557,7 +557,7 @@ function requireOrderedSequence(text, owner, phrases) {
 function requireRelayRuntimeUsesSharedProviderFailurePolicy(text, owner, entryKind) {
   for (const phrase of [
     'run_v3_relay_provider_failure_policy(',
-    'resolve_v3_relay_target_outcome_with_admission_rescue(',
+    'resolve_v3_relay_target_outcome_with_rescue(',
     'V3RelayProviderFailurePolicyContext',
     'V3RelayProviderFailurePolicyState',
     'V3Error05ExecutionAction::WaitThenReselect',
@@ -577,7 +577,7 @@ function requireRelayRuntimeUsesSharedProviderFailurePolicy(text, owner, entryKi
   const handleStart = text.indexOf('async fn handle_provider_failure(');
   if (handleStart < 0) {
     requireOrderedSequence(text, owner, [
-      'let result = run_v3_relay_provider_failure_policy(',
+      'run_v3_relay_provider_failure_policy(',
       'V3Error05ExecutionAction::WaitThenReselect',
       'V3Error05ExecutionAction::ProjectTerminal',
     ]);
@@ -585,7 +585,7 @@ function requireRelayRuntimeUsesSharedProviderFailurePolicy(text, owner, entryKi
   }
   const handleSlice = text.slice(handleStart);
   requireOrderedSequence(handleSlice, `${owner}: handle_provider_failure`, [
-    'let result = run_v3_relay_provider_failure_policy(',
+    'run_v3_relay_provider_failure_policy(',
     'V3Error05ExecutionAction::WaitThenReselect',
     'V3Error05ExecutionAction::ProjectTerminal',
   ]);

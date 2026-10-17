@@ -1,0 +1,50 @@
+{
+  "id": "v3.http_request_isolation",
+  "version": "1",
+  "inputs": [{ "id": "parsed-http-request", "schema": "Object" }],
+  "output_contracts": [
+    { "id": "independent-request", "schema": "Object" },
+    { "id": "request-outcome", "schema": "Object" },
+    { "id": "released-request", "schema": "Object" }
+  ],
+  "nodes": [
+    {
+      "id": "建立独立请求执行上下文",
+      "operator": "routecodex.v3.server.capture_http_request",
+      "operator_version": "1",
+      "inputs": ["parsed-http-request"],
+      "output": { "id": "independent-request", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.config.published_manifest"], "writes": [] }
+    },
+    {
+      "id": "独立选择可路由目标并交付真实响应",
+      "operator": "routecodex.v3.server.execute_http_request",
+      "operator_version": "1",
+      "inputs": ["independent-request"],
+      "output": { "id": "request-outcome", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.response.client_payload"], "writes": [] }
+    },
+    {
+      "id": "完成或取消本请求并释放资源",
+      "operator": "routecodex.v3.server.release_http_request",
+      "operator_version": "1",
+      "inputs": ["request-outcome"],
+      "output": { "id": "released-request", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": [], "writes": ["v3.front.request_activity_gate"] }
+    }
+  ],
+  "edges": [
+    { "from": "建立独立请求执行上下文", "to": "独立选择可路由目标并交付真实响应", "arc_id": "independent-request" },
+    { "from": "独立选择可路由目标并交付真实响应", "to": "完成或取消本请求并释放资源", "arc_id": "request-outcome" }
+  ],
+  "outputs": ["released-request"]
+}

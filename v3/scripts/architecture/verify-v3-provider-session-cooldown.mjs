@@ -200,8 +200,8 @@ requireMatch(
 );
 requireMatch(
   source.resourceMap,
-  /resource_id:\s*v3\.provider\.health_state[\s\S]*identity:\s*\[serverId,\s*routingGroup,\s*sessionId,\s*providerRuntimeIdentity\]/u,
-  "Resource map must bind provider health state identity to server+routing_group+session+runtime identity",
+  /resource_id:\s*v3\.provider\.health_state[\s\S]*identity:\s*\[listenerPort,\s*serverId,\s*routingGroup,\s*sessionId,\s*providerRuntimeIdentity\]/u,
+  "Resource map must bind provider health state identity to listener port+server+routing_group+session+runtime identity",
 );
 requireMatch(
   source.resourceMap,
@@ -516,10 +516,14 @@ forbidMatch(
   "Headerless failure-scope isolation must not synthesize headers or rebuild control from payload",
 );
 requireMatch(
-  `${source.kernel}\n${source.directSse}\n${source.responses}\n${source.openaiChat}\n${source.anthropic}\n${source.gemini}`,
-  /record_post_commit_provider_stream_failure_from_source(?:_for_interface)?\([\s\S]*failure_session_scope/u,
-  "post-commit failure handling must receive the same typed session scope",
+  source.policy,
+  /record_candidate_failure\(\s*&context\.failure_session_scope/u,
+  "shared candidate failure handling must receive the typed failure session scope",
 );
+for (const [name, text] of [["Chat", source.openaiChat], ["Gemini", source.gemini]]) {
+  forbidMatch(text, /record_post_commit_provider_stream_failure_from_source(?:_for_interface)?\(/u,
+    `${name} buffered codec must not bypass shared last-routable health policy`);
+}
 requireMatch(
   source.policy,
   /session_bound_availability|availability_for_session/u,
@@ -562,7 +566,7 @@ requireMatch(
 );
 requireMatch(
   source.anthropic,
-  /async fn execute_v3_anthropic_relay_runtime_inner[\s\S]*allow_exhaustion_rescue_probe:\s*bool[\s\S]*resolve_v3_relay_target_outcome_with_admission_rescue\([\s\S]*allow_exhaustion_rescue_probe/u,
+  /async fn execute_v3_anthropic_relay_runtime_inner[\s\S]*allow_exhaustion_rescue_probe:\s*bool[\s\S]*resolve_v3_relay_target_outcome_with_rescue\([\s\S]*allow_exhaustion_rescue_probe/u,
   "Anthropic dry-run must disable provider rescue probes before target resolution",
 );
 requireMatch(
@@ -577,12 +581,12 @@ const relayEntryTarget = extractBracedBlock(
 );
 requireMatch(
   relayEntryTarget,
-  /resolve_v3_relay_target_outcome_with_admission_rescue\(\s*input,\s*allow_exhaustion_rescue_probe,\s*preferred_selected,/u,
+  /resolve_v3_relay_target_outcome_with_rescue\(\s*input,\s*allow_exhaustion_rescue_probe,\s*preferred_selected,/u,
   "Unseeded Relay entry must preserve the rescue-probe mode",
 );
 requireMatch(
   relayEntryTarget,
-  /select_v3_expanded_target_with_admission_rescue\([\s\S]*input\.deterministic_sample,\s*allow_exhaustion_rescue_probe,\s*preferred_selected,/u,
+  /select_v3_expanded_target_with_rescue\([\s\S]*input\.deterministic_sample,\s*allow_exhaustion_rescue_probe,\s*preferred_selected,/u,
   "Captured-plan Relay entry must preserve the rescue-probe mode",
 );
 requireMatch(
@@ -597,7 +601,7 @@ requireMatch(
 );
 requireMatch(
   `${source.kernel}\n${source.v3DirectCore}`,
-  /select_v3_expanded_target_with_admission_rescue\([\s\S]*allow_exhaustion_rescue_probe/u,
+  /select_v3_expanded_target_with_rescue\([\s\S]*allow_exhaustion_rescue_probe/u,
   "Every direct kernel must pass the explicit rescue-probe gate to the shared owner",
 );
 requireMatch(
@@ -617,7 +621,7 @@ forbidMatch(
 );
 requireMatch(
   source.kernel,
-  /select_v3_expanded_target_with_admission_rescue/u,
+  /select_v3_expanded_target_with_rescue/u,
   "Direct provider selection must consume the shared exhaustion rescue owner",
 );
 const directSseMarker = "pub(crate) async fn project_and_collect_direct_sse_attempt";
