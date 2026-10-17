@@ -472,7 +472,8 @@ async fn run_case_shape(
                 .unwrap();
             if image_only {
                 assert_eq!(
-                    messages[first]["content"], json!([]),
+                    messages[first]["content"],
+                    json!([]),
                     "image-only tool results must keep the projected empty content-part array"
                 );
             }
