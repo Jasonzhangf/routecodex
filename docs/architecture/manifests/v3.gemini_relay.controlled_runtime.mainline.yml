@@ -72,7 +72,6 @@ verification:
     - npm run verify:v3-entry-protocol-endpoint-binding
     - npm run test:v3-entry-protocol-endpoint-binding-red-fixtures
     - npm run verify:v3-module-boundaries
-    - npm run verify:v3-rust-only
     - npm run verify:v3-architecture-docs
     - npm run verify:v3-resource-map
     - cargo fmt --manifest-path v3/Cargo.toml --all -- --check

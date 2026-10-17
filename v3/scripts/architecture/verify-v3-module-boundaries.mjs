@@ -1,8 +1,20 @@
 #!/usr/bin/env node
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
+
+// Declared-data module boundary gate.
+//
+// This gate validates the declared ownership data for V3 runtime modules:
+// actual crate source membership, unique runtime-module ownership, declared
+// feature binding, build/runtime ownership separation, unique runtime owner for
+// each build reference, and crate dependency contracts read from real Cargo
+// manifests. It deliberately does not scan Rust source text for symbol
+// spelling, function names, call ordering or literal payload strings: those
+// locks asserted source shape rather than independently justified ownership or
+// dependency behavior and have been retired. Runtime behavior, security and
+// consumer guarantees remain owned by the Rust tests under v3/crates.
 
 const installedV3Root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const explicitSourceRoot = String(process.env.ROUTECODEX_V3_SOURCE_ROOT ?? '').trim();
@@ -39,113 +51,15 @@ function fail(message) {
   failures.push(message);
 }
 
-function stripRustCfgTestItems(source, sourcePath) {
-  let cursor = 0;
-  let output = '';
-  const marker = '#[cfg(test)]';
-  while (true) {
-    const attributeStart = source.indexOf(marker, cursor);
-    if (attributeStart < 0) {
-      output += source.slice(cursor);
-      return output;
-    }
-    output += source.slice(cursor, attributeStart);
-    const itemStart = attributeStart + marker.length;
-    const braceStart = source.indexOf('{', itemStart);
-    const semicolon = source.indexOf(';', itemStart);
-    if (semicolon >= 0 && (braceStart < 0 || semicolon < braceStart)) {
-      cursor = semicolon + 1;
-      continue;
-    }
-    if (braceStart < 0) {
-      fail(`cannot parse #[cfg(test)] item in ${sourcePath}`);
-      return output;
-    }
-    let depth = 0;
-    let index = braceStart;
-    let mode = 'code';
-    let blockCommentDepth = 0;
-    let rawHashes = 0;
-    while (index < source.length) {
-      const char = source[index];
-      const next = source[index + 1];
-      if (mode === 'line_comment') {
-        if (char === '\n') mode = 'code';
-        index += 1;
-        continue;
-      }
-      if (mode === 'block_comment') {
-        if (char === '/' && next === '*') {
-          blockCommentDepth += 1;
-          index += 2;
-        } else if (char === '*' && next === '/') {
-          blockCommentDepth -= 1;
-          index += 2;
-          if (blockCommentDepth === 0) mode = 'code';
-        } else {
-          index += 1;
-        }
-        continue;
-      }
-      if (mode === 'string') {
-        if (char === '\\') index += 2;
-        else {
-          if (char === '"') mode = 'code';
-          index += 1;
-        }
-        continue;
-      }
-      if (mode === 'raw_string') {
-        if (char === '"' && source.slice(index + 1, index + 1 + rawHashes) === '#'.repeat(rawHashes)) {
-          index += rawHashes + 1;
-          mode = 'code';
-        } else {
-          index += 1;
-        }
-        continue;
-      }
-      if (char === '/' && next === '/') {
-        mode = 'line_comment';
-        index += 2;
-        continue;
-      }
-      if (char === '/' && next === '*') {
-        mode = 'block_comment';
-        blockCommentDepth = 1;
-        index += 2;
-        continue;
-      }
-      if (char === '"') {
-        mode = 'string';
-        index += 1;
-        continue;
-      }
-      if (char === 'r' || (char === 'b' && next === 'r')) {
-        const rawStart = char === 'b' ? index + 2 : index + 1;
-        let quote = rawStart;
-        while (source[quote] === '#') quote += 1;
-        if (source[quote] === '"') {
-          rawHashes = quote - rawStart;
-          mode = 'raw_string';
-          index = quote + 1;
-          continue;
-        }
-      }
-      if (char === '{') depth += 1;
-      if (char === '}') {
-        depth -= 1;
-        if (depth === 0) {
-          cursor = index + 1;
-          break;
-        }
-      }
-      index += 1;
-    }
-    if (depth !== 0) {
-      fail(`unterminated #[cfg(test)] item in ${sourcePath}`);
-      return output;
-    }
+function readDeclaredYaml(declaredPath) {
+  let document;
+  try {
+    document = YAML.parse(readFileSync(resolveV3Path(declaredPath), 'utf8'));
+  } catch (error) {
+    fail(`${declaredPath}: declared YAML is not parseable: ${error.message}`);
+    return null;
   }
+  return document ?? null;
 }
 
 const all = files('v3/crates');
@@ -153,9 +67,13 @@ const read = (path) => readFileSync(resolveV3Path(path), 'utf8');
 const moduleRegistryPath = 'docs/architecture/v3-runtime-module-registry.yml';
 const buildModuleRegistryPath = 'docs/architecture/v3-build-tool-module-registry.yml';
 const functionMapPaths = ['docs/architecture/v3-function-map.yml', 'docs/architecture/function-map.yml'];
+
+// --- Declared feature binding -------------------------------------------
+
 const declaredFeatureIds = new Set();
 for (const functionMapPath of functionMapPaths) {
-  const functionMap = YAML.parse(read(functionMapPath));
+  const functionMap = readDeclaredYaml(functionMapPath);
+  if (functionMap === null) continue;
   const features = Array.isArray(functionMap)
     ? functionMap
     : Array.isArray(functionMap?.features)
@@ -173,11 +91,19 @@ for (const functionMapPath of functionMapPaths) {
     }
   }
 }
-const moduleRegistry = YAML.parse(read(moduleRegistryPath));
-if (moduleRegistry?.status !== 'active' || !Array.isArray(moduleRegistry.modules)) {
+
+// --- Runtime module registry --------------------------------------------
+
+const moduleRegistry = readDeclaredYaml(moduleRegistryPath);
+let runtimeOwners = [];
+if (moduleRegistry === null) {
+  fail(`${moduleRegistryPath} must contain an active modules array`);
+} else if (moduleRegistry?.status !== 'active' || !Array.isArray(moduleRegistry.modules)) {
   fail(`${moduleRegistryPath} must contain an active modules array`);
 } else {
   const modules = moduleRegistry.modules;
+  runtimeOwners = modules.flatMap((module) =>
+    (module.owned_paths ?? []).map((path) => ({ module_id: module.module_id, path })));
   for (const path of all) {
     const repoPath = `v3/${relative(v3Root, path).split('\\').join('/')}`;
     const owners = modules.filter((module) => Array.isArray(module.owned_paths)
@@ -202,8 +128,12 @@ if (moduleRegistry?.status !== 'active' || !Array.isArray(moduleRegistry.modules
   }
 }
 
-const buildModuleRegistry = YAML.parse(read(buildModuleRegistryPath));
-if (buildModuleRegistry?.status !== 'active' || !Array.isArray(buildModuleRegistry.modules)) {
+// --- Build / runtime ownership separation -------------------------------
+
+const buildModuleRegistry = readDeclaredYaml(buildModuleRegistryPath);
+if (buildModuleRegistry === null) {
+  fail(`${buildModuleRegistryPath} must contain an active modules array`);
+} else if (buildModuleRegistry?.status !== 'active' || !Array.isArray(buildModuleRegistry.modules)) {
   fail(`${buildModuleRegistryPath} must contain an active modules array`);
 } else if (Array.isArray(moduleRegistry?.modules)) {
   const pathRoot = (path) => path.endsWith('/**') ? path.slice(0, -3) : path;
@@ -214,8 +144,6 @@ if (buildModuleRegistry?.status !== 'active' || !Array.isArray(buildModuleRegist
       || leftRoot.startsWith(`${rightRoot}/`)
       || rightRoot.startsWith(`${leftRoot}/`);
   };
-  const runtimeOwners = moduleRegistry.modules.flatMap((module) =>
-    (module.owned_paths ?? []).map((path) => ({ module_id: module.module_id, path })));
   for (const module of buildModuleRegistry.modules) {
     for (const ownedPath of module.owned_paths ?? []) {
       for (const runtimeOwner of runtimeOwners) {
@@ -232,258 +160,76 @@ if (buildModuleRegistry?.status !== 'active' || !Array.isArray(buildModuleRegist
     }
   }
 }
-const isRustTestSource = (path) =>
-  path.includes('/tests/')
-  || path.endsWith('/tests.rs')
-  || path.endsWith('_tests.rs')
-  || path.includes('/src/tests/');
 
-for (const path of all) {
-  const text = read(path);
-  const productionText = stripRustCfgTestItems(text, path);
-  const semanticProductionText = productionText
-    .replace(/\.method_not_allowed_fallback\(method_not_allowed\)/g, '')
-    .replace(/\.fallback\(path_not_found\)/g, '')
-    .replace(/fallback-credit-2026-06-01/g, 'provider-credit-beta-2026-06-01');
-  const isTest = isRustTestSource(path);
-  const isRouteCodexV3Crate = path.includes('/crates/routecodex-v3-');
-  const isErrorOwner = path.includes('routecodex-v3-error/src/');
-  const isProviderOwner = path.includes('routecodex-v3-provider-responses/src/');
-  const isProviderHealthRuntimeBoundary =
-    path.endsWith('routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs')
-    || path.endsWith('routecodex-v3-runtime/src/provider_failure_runtime_policy.rs')
-    || path.endsWith('routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs');
-  const isProviderTransportSurface = path.endsWith('routecodex-v3-provider-responses/src/transport.rs')
-    || path.endsWith('routecodex-v3-provider-responses/src/transport_admission.rs')
-    || path.endsWith('routecodex-v3-provider-responses/src/shared.rs');
-  const isDebugSamplePersistence = path.endsWith('routecodex-v3-debug/src/sample_store.rs');
-  const isServerObservabilityPersistence = path.endsWith('routecodex-v3-server/src/webui_observability.rs');
-  if (/V3Provider07ResponsesWirePayload|V3Transport08ResponsesHttpRequest|V3ProviderResp09Raw|V3Resp10ClientPayload|build_v3_provider_07|build_v3_transport_08|V3Provider07|V3Transport08|V3ProviderResp09/.test(text)) {
-    fail('obsolete Provider prototype node name is forbidden in V3 source: ' + path);
+// --- Declared crate dependency contract --------------------------------
+
+// Each entry is an independently justified ownership boundary between the
+// crates named by the real Cargo manifests, read as structured data below.
+const declaredDependencyContracts = [
+  {
+    name: 'server production dependencies',
+    manifest: 'v3/crates/routecodex-v3-server/Cargo.toml',
+    section: 'dependencies',
+    forbiddenDependencies: ['routecodex-v3-provider-responses'],
+    diagnostic: 'server crate production dependencies must not include provider crate',
+  },
+  {
+    name: 'cli dependencies',
+    manifest: 'v3/crates/routecodex-v3-cli/Cargo.toml',
+    section: 'dependencies',
+    forbiddenDependencies: ['routecodex-v3-provider-responses'],
+    diagnostic: 'CLI must not depend on provider transport directly',
+  },
+  {
+    name: 'virtual router dependencies',
+    manifest: 'v3/crates/routecodex-v3-virtual-router/Cargo.toml',
+    section: 'dependencies',
+    forbiddenDependencies: ['routecodex-v3-provider-responses'],
+    diagnostic: 'virtual router cannot depend on provider transport, health or availability',
+  },
+];
+
+function declaredDependencyNames(section) {
+  const names = [];
+  for (const line of section.split('\n')) {
+    const declaration = /^\s*([A-Za-z0-9_.-]+)\s*=/.exec(line);
+    if (!declaration) continue;
+    const name = declaration[1].endsWith('.workspace')
+      ? declaration[1].slice(0, -'.workspace'.length)
+      : declaration[1];
+    names.push(name);
   }
-  if (!isTest && !path.includes('routecodex-v3-provider-responses') && !path.includes('routecodex-v3-admin') && /reqwest::Client|\.send\(\)/.test(text)) {
-    fail('provider transport outside provider crate: ' + path);
-  }
-  if (!isTest && isProviderOwner && !isProviderTransportSurface && /\breqwest::/.test(productionText)) {
-    fail('Reqwest usage in generic Responses Provider is restricted to transport/shared surfaces: ' + path);
-  }
-  if (!isTest && isProviderOwner
-      && /routecodex_v3_virtual_router|routecodex_v3_target|V3VirtualRouter|V3TargetInterpreter|route_groups|forwarders/i.test(productionText)) {
-    fail('generic Responses Provider cannot import or interpret Router/Target/Forwarder resources: ' + path);
-  }
-  if (!isTest && isProviderOwner
-      && /(?:api_key|secret|token|bearer)[a-z_]*\s*:\s*String/i.test(productionText)
-      && !/V3ProviderAuthSecretHandle|Environment\(String\)|TokenFile\(String\)/.test(productionText)) {
-    fail('wire/raw/error Provider DTOs must not store resolved secret values: ' + path);
-  }
-  const httpListenerText = productionText.replace(/std::net::TcpListener::bind/g, '');
-  if (!path.includes('routecodex-v3-server') && !path.includes('routecodex-v3-admin') && /axum::serve|TcpListener::bind/.test(httpListenerText) && !isTest) {
-    fail('HTTP listener outside server crate: ' + path);
-  }
-  if (!isTest && !path.includes('routecodex-v3-config') && !path.includes('routecodex-v3-admin')
-      && !isProviderOwner && !isDebugSamplePersistence && !isServerObservabilityPersistence
-      && /fs::read_to_string|std::fs::read_to_string|std::fs::read\(/.test(productionText)) {
-    fail('config authoring file IO outside config crate: ' + path);
-  }
-  if (!path.includes('routecodex-v3-runtime') && /pub async fn execute_v3_responses_direct_runtime_kernel/.test(text)) {
-    fail('full lifecycle executor outside runtime crate: ' + path);
-  }
-  if (!isTest && isRouteCodexV3Crate && /run_.*pipeline|dynamic.*hook|discover.*hook|fallback|sanitize|repair|raw replay|forced relay/i.test(semanticProductionText)) {
-    fail('forbidden V3 MVP lifecycle/fallback wording in source: ' + path);
-  }
-  if (!isTest && !isErrorOwner && /pub struct V3Error0[1-6]/.test(text)) {
-    fail('duplicate V3 Error node writer outside global Error owner: ' + path);
-  }
-  if (!isTest && !path.includes('routecodex-v3-runtime/src/') && /pub struct V3Server03HttpRequestRaw/.test(text)) {
-    fail('duplicate V3 Server03 request node outside Runtime contract owner: ' + path);
-  }
-  if (!isTest && !isProviderOwner
-      && /\.apply_error_action\(|\.update_quota_state\(|\.update_concurrency_state\(/.test(text)) {
-    fail('Provider health mutation surface outside Provider owner: ' + path);
-  }
-  if (!isTest && !isProviderOwner && !isProviderHealthRuntimeBoundary
-      && /V3ProviderHealthStore/.test(text)) {
-    fail('Provider health store must remain opaque outside Provider and its Runtime boundary: ' + path);
-  }
-  if (!isTest && isProviderOwner
-      && (/\b(?:cc|asxs)\b/.test(productionText)
-        || /provider_(?:id|family)\s*(?:==|!=)\s*"/i.test(productionText)
-        || /match\s+provider_(?:id|family)\b/i.test(productionText))) {
-    fail('generic Responses Provider contains deployment provider identity branch: ' + path);
-  }
+  return names;
 }
 
-const serverCargo = read('v3/crates/routecodex-v3-server/Cargo.toml');
-if (/routecodex-v3-provider-responses/.test(serverCargo.replace(/\[dev-dependencies\][\s\S]*/, ''))) {
-  fail('server crate production dependencies must not include provider crate');
-}
-
-const cliCargo = read('v3/crates/routecodex-v3-cli/Cargo.toml');
-if (/routecodex-v3-provider-responses/.test(cliCargo)) {
-  fail('CLI must not depend on provider transport directly');
-}
-
-const hookSource = read('v3/crates/routecodex-v3-runtime/src/hooks.rs');
-if (/serde_json::from_slice|default_tier|providers\.get/.test(hookSource)) {
-  fail('hook module contains shared route/response logic instead of orchestration');
-}
-
-const serverSource = files('v3/crates/routecodex-v3-server/src')
-  .filter((path) => !isRustTestSource(path))
-  .map((path) => stripRustCfgTestItems(read(path), path))
-  .join('\n');
-const serverLibSource = stripRustCfgTestItems(
-  read('v3/crates/routecodex-v3-server/src/lib.rs'),
-  'v3/crates/routecodex-v3-server/src/lib.rs',
-);
-if (/build_v3_error_0[1-6]|V3ErrorSourceKind|V3ErrorActionScope/.test(serverSource)) {
-  fail('Server must project Runtime output and cannot build or classify Error nodes');
-}
-if (/route_groups|resolve_default_pool|resolve_selection_plan|hit_opaque_target_once|hit_opaque_target_plan_once|expand_candidates|select_available/.test(serverSource)) {
-  fail('Server cannot select routes or interpret targets');
-}
-for (const [symbol, diagnostic] of [
-  ['extract_responses_client_scope', 'Server cannot rebuild continuation or admission control scope from client payload metadata'],
-  ['build_v3_provider_failure_session_scope_for_request', 'Server cannot rebuild provider-health control scope from client payload metadata'],
-]) {
-  const start = serverLibSource.indexOf(`fn ${symbol}(`);
-  const end = start < 0 ? -1 : serverLibSource.indexOf('\nfn ', start + 4);
-  const body = start >= 0 ? serverLibSource.slice(start, end > start ? end : undefined) : '';
-  if (/parse_codex_turn_metadata|TURN_METADATA_(?:SESSION|CONVERSATION)_PATHS|BODY_(?:SESSION|CONVERSATION)_PATHS|client_metadata|metadata/.test(body)) {
-    fail(diagnostic);
+function declaredSection(source, sectionName) {
+  const header = `[${sectionName}]`;
+  for (const line of source.split('\n')) {
+    if (line.trim() === header) {
+      const start = source.indexOf(line);
+      let end = source.indexOf('\n[', start + 1);
+      if (end < 0) end = source.length;
+      return source.slice(start + line.length, end);
+    }
   }
-}
-if (!/build_v3_server_16_http_frame_from_v3_resp_15/.test(serverSource)
-    || /fn\s+\w*responses_direct_output_response\w*\([^)]*V3Resp15ClientPayload/.test(serverSource)) {
-  fail('Server success response must enter the unique V3Resp15 -> V3Server16 builder before HTTP emission');
-}
-if (/unwrap_or\("application\/json"\)/.test(serverSource)) {
-  fail('Server cannot default a missing V3Resp15 content-type during Server16 framing');
-}
-if (/route\(\s*"\/v1\/(?:responses|messages|chat\/completions)"\s*,\s*any\(/.test(serverSource)) {
-  fail('business endpoints require explicit method dispatch; broad any handler is forbidden');
-}
-if (/raw_body_bytes|body_read_error|unwrap_or_else\([^)]*serde_json::from_slice/.test(serverSource)) {
-  fail('Server cannot synthesize business payload from malformed JSON or body read failure');
-}
-if (!/read_json_payload[\s\S]*Result<serde_json::Value,[\s\S]*V3Error06ClientProjected/.test(serverSource)
-    || !/V3HttpBoundaryErrorKind::MalformedJson/.test(serverSource)
-    || !/V3HttpBoundaryErrorKind::BodyTooLarge/.test(serverSource)) {
-  fail('Server HTTP body boundary must fail through typed Error projection before Runtime');
-}
-if (!/\.method_not_allowed_fallback\(method_not_allowed\)/.test(serverSource)
-    || !/\.fallback\(path_not_found\)/.test(serverSource)) {
-  fail('Server must explicitly project unsupported method and path errors');
-}
-const bindPush = serverLibSource.indexOf('bound.push((server, listener, bound_addr))');
-const spawnAggregateStart = serverLibSource.indexOf('pub async fn spawn_v3_server_aggregate(');
-const spawnAggregateEnd = serverLibSource.indexOf('\npub async fn serve_v3_server_aggregate_until_shutdown(', spawnAggregateStart);
-const spawnAggregateBody =
-  spawnAggregateStart >= 0 && spawnAggregateEnd > spawnAggregateStart
-    ? serverLibSource.slice(spawnAggregateStart, spawnAggregateEnd)
-    : '';
-const bindPushInAggregate = bindPush - spawnAggregateStart;
-const listenerSpawn = spawnAggregateBody.indexOf('tokio::spawn');
-if (bindPush === -1 || listenerSpawn === -1 || listenerSpawn < bindPushInAggregate) {
-  fail('Server must bind the complete enabled listener set before spawning any listener task');
+  return '';
 }
 
-const configTypes = read('v3/crates/routecodex-v3-config/src/types.rs');
-if (/pub provider_type: String[\s\S]{0,80}serde\(default/.test(configTypes)) {
-  fail('provider wire protocol cannot have an implicit Config default');
-}
-
-const debugSource = files('v3/crates/routecodex-v3-debug/src').map(read).join('\n');
-if (/V3Server03HttpRequestRaw|V3ResponsesDirect11Policy|V3Provider12ResponsesWirePayload|V3Resp15ClientPayload|V3Server16HttpFrame/.test(debugSource)) {
-  fail('Debug cannot own or hard-code the Responses Direct business lifecycle topology');
-}
-
-const errorSource = files('v3/crates/routecodex-v3-error/src').map(read).join('\n');
-if (/V3ProviderHealthStore|apply_error_action|update_quota_state|update_concurrency_state/.test(errorSource)) {
-  fail('Error owner must generate action plans and cannot mutate Provider health');
-}
-
-for (const crateName of ['routecodex-v3-virtual-router', 'routecodex-v3-target']) {
-  const crateRoot = `v3/crates/${crateName}`;
-  const resolvedCrateRoot = resolveV3Path(crateRoot);
-  if (!all.some((path) => path.startsWith(resolvedCrateRoot + '/'))) {
-    fail(`required V3 crate source missing: ${crateRoot}`);
+for (const contract of declaredDependencyContracts) {
+  let manifest;
+  try {
+    manifest = read(contract.manifest);
+  } catch (error) {
+    fail(`${contract.manifest}: declared Cargo manifest is not readable: ${error.message}`);
     continue;
   }
-  const source = files(crateRoot).map(read).join('\n');
-  if (/V3ProviderHealthStore|apply_error_action|update_quota_state|update_concurrency_state/.test(source)) {
-    fail(`${crateName} cannot import Provider health mutation APIs`);
+  const section = declaredSection(manifest, contract.section);
+  const dependencies = declaredDependencyNames(section);
+  for (const forbidden of contract.forbiddenDependencies) {
+    if (dependencies.includes(forbidden)) {
+      fail(`${contract.diagnostic}: ${contract.manifest} ${contract.section} declares ${forbidden}`);
+    }
   }
-  if (crateName.endsWith('-virtual-router') && /routecodex-v3-provider-responses|V3ProviderAvailabilityReader|V3ProviderAvailabilityProjection|V3ProviderHealth/.test(source)) {
-    fail('Virtual Router cannot depend on Provider health or availability');
-  }
-}
-
-const routerSource = files('v3/crates/routecodex-v3-virtual-router/src').map(read).join('\n');
-const routerProductionSource = routerSource.replace(/#\[cfg\(test\)\][\s\S]*/, '');
-if (/forwarders|providers|base_url|auth_alias|wire_model|Reqwest|Transport/.test(routerProductionSource)) {
-  fail('Virtual Router must return an opaque target and cannot interpret Target or Provider internals');
-}
-
-const targetSource = files('v3/crates/routecodex-v3-target/src').map(read).join('\n');
-if (/classify_request|resolve_default_pool|resolve_selection_plan|hit_opaque_target_once|hit_opaque_target_plan_once|V3VirtualRouter::/.test(targetSource.replace(/#\[cfg\(test\)\][\s\S]*/, ''))) {
-  fail('Target production source cannot re-enter Virtual Router');
-}
-if (!/pub responses_process: Option<String>/.test(targetSource)
-    || !/responses_process:\s*interface[\s\S]{0,160}\.responses[\s\S]{0,160}\.map\(\|responses\| responses\.process\.clone\(\)\)/.test(targetSource)) {
-  fail('Target candidate must carry provider.responses.process from config manifest into selected provider truth');
-}
-
-const runtimeNodesSource = read('v3/crates/routecodex-v3-runtime/src/nodes.rs');
-if (/V3RouteClassifierMetadata|route_classifier_metadata|\/metadata\/runtime_control|\/metadata\/hasImageAttachment/.test(runtimeNodesSource)) {
-  fail('V3 Runtime cannot derive routing or MetadataCenter control from client payload metadata');
-}
-const reqChatProcessSource = read('v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs');
-if (/responses_like_item_to_chat_message_at_req04|restored_context_messages_at_req04|\.get\("input"\)|\.get\("output"\)/.test(reqChatProcessSource)) {
-  fail('Req04 cannot rebuild Chat semantics from a stored non-Chat continuation payload');
-}
-const respChatProcessSource = read('v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs');
-if (/continuation_response_id/.test(respChatProcessSource)) {
-  fail('Resp03 continuation control identity cannot be embedded in Chat canonical payload');
-}
-if (!/responses_process_requires_relay/.test(runtimeNodesSource)
-    || !/selected[\s\S]{0,120}\.candidate[\s\S]{0,120}\.responses_process/.test(runtimeNodesSource)
-    || !/responses provider process=chat requires relay mode but relay is not allowed/.test(runtimeNodesSource)
-    || !/let mode = if responses_process_requires_relay[\s\S]{0,400}V3Execution11ProtocolDecisionMode::HubRelay[\s\S]{0,120}else if entry_protocol == selected_provider_protocol/.test(runtimeNodesSource)) {
-  fail('V3Execution11ProtocolDecision must route selected responses provider process=chat to HubRelay before SameProtocolDirect');
-}
-
-const foundationSource = read('v3/crates/routecodex-v3-runtime/src/foundation.rs');
-if (!/build_v3_req_04_standardized_responses_from_v3_server_03/.test(foundationSource)) {
-  fail('P5 Runtime must traverse Server03 -> Req04 before Virtual Router');
-}
-if (/execute_v3_p5_routing_runtime[\s\S]*run_provider_transport|execute_v3_p5_routing_runtime[\s\S]*\.send\(/.test(foundationSource)) {
-  fail('P5 runtime terminal path cannot send a Provider request');
-}
-if (/ResponsesTransport|execute_v3_responses_direct_runtime_kernel|\.send\(/.test(foundationSource)) {
-  fail('P3 Dry Run foundation cannot call Responses Provider transport or P6 Runtime kernel');
-}
-if (/execute_v3_foundation_dry_run_runtime/.test(foundationSource)) {
-  fail('dead foundation Dry Run lifecycle must not coexist with the Runtime-owned P6 Dry Run');
-}
-
-const runtimeDirectProtocolPlanSource = read(
-  'v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs',
-);
-const dryRunSource = runtimeDirectProtocolPlanSource.match(
-  /pub async fn execute_v3_responses_direct_dry_run_runtime[\s\S]*$/,
-)?.[0] ?? '';
-const dryRunUsesResponsesRuntimeKernel =
-  /execute_v3_responses_direct_runtime_kernel_with_transport_debug_core/.test(dryRunSource);
-if (!/V3DryRunNoNetworkTransport/.test(dryRunSource)
-    || !/"provider_pipeline_executed": true/.test(dryRunSource)
-    || !/"provider_network_send": false/.test(dryRunSource)
-    || !/"stopped_before_provider_send": true/.test(dryRunSource)
-    || /"provider_network_send": true/.test(dryRunSource)
-    || !dryRunUsesResponsesRuntimeKernel
-    || !/V3Transport13ResponsesHttpRequest/.test(dryRunSource)
-    || !/V3DryRunNoNetworkTerminalEffect/.test(dryRunSource)) {
-  fail('P6 Dry Run must execute the Provider pipeline and stop only the Provider network-send effect');
 }
 
 if (failures.length) {

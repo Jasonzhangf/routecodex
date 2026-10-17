@@ -57,18 +57,20 @@ export function collectV3BuildTestArtifactBudgetFailures(sources) {
 }
 
 export function readV3BuildTestArtifactBudgetSources(root) {
+  const repoRoot = resolve(root, '..');
   const read = (path) => readFileSync(resolve(root, path), 'utf8');
+  const readRepo = (path) => readFileSync(resolve(repoRoot, path), 'utf8');
   return {
     packageJson: read('package.json'),
     cargoManifest: read('Cargo.toml'),
     wrapper: read('scripts/run-v3-cargo-test.mjs'),
     runner: read('scripts/cargo-test-artifact-runner.mjs'),
-    moduleRegistry: read('build-contracts/architecture-admission/repo/docs/architecture/v3-build-tool-module-registry.yml'),
+    moduleRegistry: readRepo('docs/architecture/v3-build-tool-module-registry.yml'),
   };
 }
 
 function main() {
-  const root = resolve(process.argv[2] ?? '.');
+  const root = resolve(process.argv[2] ?? fileURLToPath(new URL('../..', import.meta.url)));
   let failures;
   try {
     failures = collectV3BuildTestArtifactBudgetFailures(readV3BuildTestArtifactBudgetSources(root));

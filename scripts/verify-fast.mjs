@@ -123,8 +123,6 @@ function classifyRootPackageScope(entries) {
   const v4Marker = /\bV4\b|(?:^|[\s"'`/:])v4(?:[-_/.:]|[\s"'`]|$)/u;
   const sharedRootV3Scripts = [
     'verify:fallback-hardcode',
-    'verify:file-line-limit',
-    'test:file-line-limit',
     'verify:no-fallback-all',
     'verify:architecture-fallback-denylist',
     'verify:internal-policy-hardcode',
@@ -169,7 +167,6 @@ function isV3RootScript(relative) {
     'scripts/architecture/audit-custom-payload-carrier-owner-queryability.mjs',
     'scripts/architecture/audit-function-map-canonical-builder-spread.mjs',
     'scripts/architecture/audit-resource-global-coverage.mjs',
-    'scripts/architecture/compile-v3-build-admission.mjs',
     'scripts/architecture/custom-payload-carrier-owner-queryability-lib.mjs',
     'scripts/architecture/generate-mainline-chain-manifests.mjs',
     'scripts/architecture/mainline-call-map-lib.mjs',
@@ -180,7 +177,6 @@ function isV3RootScript(relative) {
     'scripts/architecture/v3-mainline-caller-flow-lib.mjs',
     'scripts/architecture/v3-provider-compat-module-boundary-lib.mjs',
     'scripts/architecture/v3-req04-tool-governance-review-lib.mjs',
-    'scripts/architecture/v3-root-thin-dispatch-contract.mjs',
     'scripts/architecture/verify-architecture-fallback-denylist.mjs',
     'scripts/architecture/verify-architecture-mainline-call-map.mjs',
     'scripts/architecture/verify-architecture-mainline-manifest-sync.mjs',
@@ -188,27 +184,23 @@ function isV3RootScript(relative) {
     'scripts/architecture/verify-direct-semantic-classification-design.mjs',
     'scripts/architecture/verify-error-pipeline-contract.mjs',
     'scripts/architecture/verify-function-map-compile-gate.mjs',
-    'scripts/architecture/verify-install-release-contract.mjs',
     'scripts/architecture/verify-internal-error-numbering.mjs',
     'scripts/architecture/verify-internal-policy-hardcode.mjs',
     'scripts/architecture/verify-mainline-call-map-binding-state.mjs',
     'scripts/architecture/verify-no-fallback-diff.mjs',
     'scripts/architecture/verify-provider-response-errorerr-bypass-closeout.mjs',
     'scripts/architecture/verify-repository-filesystem-governance.mjs',
-    'scripts/architecture/verify-runtime-lifecycle-loop-gate-matrix.mjs',
     'scripts/architecture/verify-runtime-lifecycle-pid-rebase.mjs',
     'scripts/architecture/verify-runtime-responses-provider-compat.mjs',
     'scripts/architecture/verify-server-function-map-boundary.mjs',
     'scripts/architecture/verify-sse-architecture-boundary.mjs',
-    'scripts/architecture/verify-v3-dependency-projection.mjs',
     'scripts/architecture/verify-v3-provider-compat-module-boundary.mjs',
     'scripts/architecture/verify-v3-simplified-user-config.mjs',
     'scripts/architecture/wiki-html-lib.mjs',
   ]);
   return /^scripts\/(?:run-v3-|verify-v3-)/u.test(relative)
-    || /^(?:scripts\/verify-fast|scripts\/verify-servertool-rust-only)\.mjs$/u.test(relative)
+    || /^scripts\/verify-fast\.mjs$/u.test(relative)
     || v3ArchitectureScripts.has(relative)
-    || relative === 'scripts/ci/check-file-line-limit.mjs'
     || relative === 'scripts/ci/repo-sanity.mjs'
     || relative === 'scripts/ci/mempalace-scan-artifact-audit.mjs'
     || relative === 'scripts/tests/repository-filesystem-governance-red-fixtures.mjs'
@@ -223,7 +215,6 @@ function isV3RootScript(relative) {
 function isV3ArchitectureRootScript(relative) {
   return isV3RootScript(relative)
     && relative !== 'scripts/verify-fast.mjs'
-    && relative !== 'scripts/ci/check-file-line-limit.mjs'
     && relative !== 'scripts/ci/repo-sanity.mjs'
     && relative !== 'scripts/ci/mempalace-scan-artifact-audit.mjs';
 }

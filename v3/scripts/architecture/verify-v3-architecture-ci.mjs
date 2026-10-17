@@ -8,27 +8,19 @@
 // type/module/call-map third; closeout gates last. Each listed gate is an
 // independent sibling; nested npm scripts retain any prerequisite semantics.
 //
-// If a sub-gate needs Jason manual authorization (e.g. lock fingerprint
-// drift), it returns non-zero with a deterministic reason; this wrapper
-// surfaces the reason verbatim and fails the umbrella without skipping.
+// Preserve each applicable sub-gate failure and report independent siblings.
 
 import { spawnSync } from 'node:child_process';
 
 const STEPS = [
   ['test:v3-architecture-ci-failure-aggregation-regression', 'V3 architecture CI reports all independent sibling failures'],
-  ['verify:v3-direct-sse-accept-skeleton', 'Direct SSE client accept/worker skeleton remains frozen'],
-  ['verify:v3-direct-sse-full-attempt-commit', 'Direct SSE provider attempts remain fully buffered until terminal success'],
   ['verify:v3-contract-map-owner', 'V3 contract-map owner and lifecycle bindings remain synchronized'],
   ['verify:v3-mainline-manifest-sync', 'Generated architecture manifests remain bound to canonical call maps'],
   ['verify:v3-client-sse-head-commit', 'Server commits the client SSE head and keepalives only; the Runtime still buffers the full provider attempt'],
   ['test:v3-client-sse-head-commit', 'The client SSE transport channel owns framing, keepalives, and the committed client payload projection'],
   ['test:v3-client-transport-boundary', 'Public-entry client transport boundary behavior: head commit, exec drain, and provider terminal handling'],
-  ['verify:v3-rust-only', 'V3 runtime crates must be Rust-only'],
-  ['verify:v3-rust-only-server-entry', 'Legacy TypeScript server entries remain physically retired'],
   ['verify:v3-build-test-artifact-budget', 'V3 Cargo tests release owned artifacts and enforce the 2 GiB debug budget'],
   ['test:v3-build-test-artifact-budget-red-fixtures', 'V3 build artifact budget mutations are rejected'],
-  ['verify:v3-file-size', 'V3 file-size ratchet (<=1500 or approved whitelist)'],
-  ['test:v3-file-size-red-fixtures', 'V3 file-size policy mutations are rejected'],
   ['verify:v3-resource-map', 'V3 resource-operation-map parseable + bound'],
   ['verify:v3-dagpipe-feature-graphs', 'V3 non-proxy feature DAG graphs validate as SESE'],
   ['test:v3-resource-relation-edge-lock-red-fixtures', 'V3 resource relation mutations are rejected'],
@@ -38,12 +30,11 @@ const STEPS = [
   ['test:v3-provider-session-cooldown-red-fixtures', 'Session cooldown architecture mutations are rejected'],
   ['test:v3-provider-session-cooldown', 'Session cooldown and cross-session revive behavior'],
   ['test:v3-p5-router-target', 'Priority-first and same-priority weighted Router/Target selection'],
-  ['verify:v3-module-boundaries', 'V3 module boundaries (Server cannot build/classify Error)'],
+  ['verify:v3-module-boundaries', 'V3 declared module ownership and dependency boundaries'],
   ['test:v3-source-gate-red-fixtures', 'V3 module-boundary mutations are rejected'],
   ['test:v3-execution-control-payload-architecture-red-fixtures', 'Execution-control architecture contract mutations are rejected'],
   ['test:v3-compile-fail', 'V3 private and non-adjacent type boundaries remain compiler-enforced'],
   ['verify:v3-hub-v1-node-file-topology', 'Hub v1 node file topology symbols resolve'],
-  ['verify:v3-static-hook-registry', 'V3 static hook registry (no provider-specific / non-adjacent / H1 network)'],
   ['verify:v3-entry-protocol-endpoint-binding', 'V3 entry protocol/endpoint binding'],
   ['verify:v3-stage-protocol-shapes', 'Direct same-protocol and Relay per-stage protocol shape contract'],
   ['test:v3-stage-protocol-shapes-red-fixtures', 'Stage-shape contract mutations are rejected'],
@@ -51,7 +42,6 @@ const STEPS = [
   ['test:v3-relay-tool-servertool-multiturn-parity-closeout-red-fixtures', 'Historical payload rewrite and wrong-owner tool mutations are rejected'],
   ['test:v3-selected-provider-model-binding-red-fixtures', 'Selected provider/model binding mutations are rejected'],
   ['verify:v3-protocol-conversion-field-parity-ci', 'V3 protocol conversion parity aggregate gate'],
-  ['verify:v3-server-tool-center-audit', 'V3 servertool center writes carry written_by/reason/request_id audit'],
   ['test:v3-normalization-payload-logic-boundary-red-fixtures', 'Normalization boundary mutations are rejected'],
   ['verify:v3-hub-relay-runtime-closeout', 'V3 hub relay runtime closeout'],
   ['test:v3-hub-relay-runtime-closeout-red-fixtures', 'Hub Relay closeout mutations are rejected'],

@@ -38,7 +38,7 @@ cases:
     provider_model_scope: generic_responses_provider_models
     scenario_groups: [text, tool, image, error]
     owner_feature_id: v3.responses_direct_mvp
-    controlled_evidence: { status: controlled_verified, refs: [docs/goals/v3-responses-direct-mvp-implementation-plan.md, docs/architecture/wiki/v3-responses-direct-mainline.md], gates: [npm run test:v3-responses-direct-blackbox, npm run verify:v3-p6-freeze] }
+    controlled_evidence: { status: controlled_verified, refs: [docs/goals/v3-responses-direct-mvp-implementation-plan.md, docs/architecture/wiki/v3-responses-direct-mainline.md], gates: [npm run test:v3-responses-direct-blackbox] }
     live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/evidence.jsonl, .agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/logs/direct-fresh-live-20260716T122025Z/summary.json, .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json, MEMORY.md], blockers: [] }
     production: { status: ready, blockers: [] }
   - id: responses_direct_sse_http
@@ -48,7 +48,7 @@ cases:
     provider_model_scope: generic_responses_provider_models
     scenario_groups: [text, tool, image, error]
     owner_feature_id: v3.responses_direct_mvp
-    controlled_evidence: { status: controlled_verified, refs: [docs/goals/v3-responses-direct-mvp-test-design.md, docs/architecture/wiki/v3-responses-direct-mainline.md], gates: [npm run test:v3-responses-direct-blackbox, npm run verify:v3-p6-freeze] }
+    controlled_evidence: { status: controlled_verified, refs: [docs/goals/v3-responses-direct-mvp-test-design.md, docs/architecture/wiki/v3-responses-direct-mainline.md], gates: [npm run test:v3-responses-direct-blackbox] }
     live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/evidence.jsonl, .agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/logs/direct-fresh-live-20260716T122025Z/summary.json, .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json, MEMORY.md], blockers: [] }
     production: { status: ready, blockers: [] }
   - id: responses_direct_websocket_v2
@@ -282,7 +282,6 @@ verification_gates:
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
   - npm run verify:v3-cargo-fmt
   - npm run verify:v3-clippy
   - npm run test:v3-workspace

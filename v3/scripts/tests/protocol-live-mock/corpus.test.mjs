@@ -89,9 +89,41 @@ test('manifest identity and source mismatches are rejected', () => {
   const root = writeFixture({ 'valid-case': baseCase() }, { ...validManifest(['valid-case']), harness_id: 'other' });
   assert.throws(() => loadFixtures(root), /manifest identity mismatch/);
   rmSync(root, { recursive: true, force: true });
-  const sourceRoot = writeFixture({ 'valid-case': baseCase() }, { ...validManifest(['valid-case']), source: { repo: SOURCE_REPO, sha: 'deadbeef', license: SOURCE_LICENSE } });
-  assert.throws(() => loadFixtures(sourceRoot), /source mismatch/);
-  rmSync(sourceRoot, { recursive: true, force: true });
+});
+
+test('manifest source repo, sha, and license stay descriptive without an admission gate', () => {
+  // The declared source metadata is descriptive history. The loader must not
+  // reject a manifest whose declared source sha differs from the constant,
+  // because that would turn attribution into a fixed-SHA admission check.
+  const shifted = { repo: SOURCE_REPO, sha: 'a'.repeat(40), license: SOURCE_LICENSE };
+  const root = writeFixture({ 'valid-case': baseCase() }, { ...validManifest(['valid-case']), source: shifted });
+  try {
+    assert.doesNotThrow(() => loadFixtures(root));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+  const missingLicense = { repo: SOURCE_REPO, sha: SOURCE_SHA, license: 'GPL-3.0' };
+  const licenseRoot = writeFixture({ 'valid-case': baseCase() }, { ...validManifest(['valid-case']), source: missingLicense });
+  try {
+    assert.throws(() => loadFixtures(licenseRoot), /license mismatch/);
+  } finally {
+    rmSync(licenseRoot, { recursive: true, force: true });
+  }
+});
+
+test('case-level source sha stays descriptive and is not a fixed-SHA admission', () => {
+  // The per-case source.sha is historical attribution, so a different declared
+  // sha must not create a corpus finding; the required arrays are still checked.
+  const shifted = baseCase({ source: { sha: 'b'.repeat(40), files: [], tests: [] } });
+  withFixture({ 'valid-case': shifted }, validManifest(['valid-case']), (root) => {
+    assert.deepEqual(inspectCorpus(root).findings, []);
+  });
+  const missingArrays = baseCase({ source: { sha: 'c'.repeat(40) } });
+  withFixture({ 'valid-case': missingArrays }, validManifest(['valid-case']), (root) => {
+    const message = findingsOf(root);
+    assert.match(message, /source\.files must be an array/);
+    assert.match(message, /source\.tests must be an array/);
+  });
 });
 
 test('duplicate manifest case ids are rejected', () => {

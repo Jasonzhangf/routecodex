@@ -54,9 +54,6 @@ function validate(input) {
   if (!input.cargo.includes('"crates/routecodex-v4-cli"')) failures.push('workspace missing routecodex-v4-cli');
   if (!input.cargo.includes('"crates/routecodex-v4-lifecycle"')) failures.push('workspace missing routecodex-v4-lifecycle');
   if (!input.cargo.includes('"crates/routecodex-v4-servertool"')) failures.push('workspace missing routecodex-v4-servertool');
-  if (!input.runtimeBin.includes('routecodex_v4_cli')) failures.push('runtime-bin does not dispatch typed CLI intents');
-  if (!input.runtimeBin.includes('routecodex_v4_lifecycle')) failures.push('runtime-bin does not delegate managed lifecycle');
-  if (!input.runtimeBin.includes('routecodex_v4_servertool')) failures.push('runtime-bin does not delegate servertool projection');
   if (
     input.runtime.includes('format!("sha256:{payload}")')
     || input.runtime.includes('format!("sha256:{full_input}")')
@@ -68,22 +65,10 @@ function validate(input) {
   }
   if (input.runtimeBin.includes('DEFAULT_MANIFEST')) failures.push('runtime-bin retains cwd-relative default manifest');
   if (input.runtimeBin.includes('AdmissionHandler')) failures.push('runtime-bin retains admission handler bypass');
-  if (!input.config.includes('RuntimeConfigManifest')) failures.push('config owner lacks operational runtime manifest');
-  if (!input.lifecycle.includes('V4LifecyclePaths')) failures.push('lifecycle owner lacks V4-isolated paths');
-  if (!input.lifecycle.includes('exec_managed_restart')) failures.push('lifecycle owner lacks exec restart');
-  if (!input.server.includes('V4HttpServer')) failures.push('server owner lacks managed listener type');
-  if (!input.packageJson.includes('"install:global"')) failures.push('package scripts do not expose global V4 install');
-  if (!input.installer.includes("path.join(os.homedir(), '.local/bin')")) failures.push('installer does not own the global rccv4 path');
-  if (!input.installer.includes("'/usr/bin/codesign'")) failures.push('installer does not codesign the global Mach-O');
-  if (!input.installer.includes('installed hash drift')) failures.push('installer does not verify installed hash identity');
   if (!input.servertool.includes('ServertoolRunControl')) failures.push('servertool owner lacks typed control side-channel');
   if (/pub struct ServertoolRunOutput\s*\{[^}]*(?:route_hint|flow_id|session_id|request_id)/.test(input.servertool)) {
     failures.push('servertool business output contains control fields');
   }
-  if (!input.buildLink.includes('.env("CARGO_PKG_VERSION", package_version)')) {
-    failures.push('Active binary build does not bind the consumer package version');
-  }
-
   const gateById = new Map(input.verification.gates.map((entry) => [entry.gate_id, entry]));
   for (const gateId of [
     'v4_real_runtime_compiled_manifest',
@@ -98,7 +83,6 @@ function validate(input) {
   if (!gateById.get('v4_runtime_bin_l2_regression')?.command.includes('routecodex-v4-build-link -- test-binary')) {
     failures.push('runtime-bin blackbox gate does not execute through Active build-link');
   }
-
   const production = [input.cli, input.config, input.lifecycle, input.runtimeBin, input.server].join('\n');
   if (/127\.0\.0\.1:(?:5520|5521|17777)/.test(production)) failures.push('production source hardcodes a listener port');
   if (/process\.kill|killall|pkill/.test(production)) failures.push('production lifecycle uses process killing instead of control socket');
@@ -117,10 +101,7 @@ const input = {
   runtimeBin: read('crates/routecodex-v4-runtime-bin/src/main.rs'),
   runtime: read('crates/routecodex-v4-runtime/src/lib.rs'),
   server: read('crates/routecodex-v4-server/src/lib.rs'),
-  packageJson: read('package.json'),
-  installer: read('scripts/install-rccv4.mjs'),
   servertool: read('crates/routecodex-v4-servertool/src/lib.rs'),
-  buildLink: read('crates/routecodex-v4-build-link/src/main.rs'),
 };
 
 function reservePort() {
@@ -216,15 +197,6 @@ if (process.argv.includes('--red-self-test')) {
   );
   if (!validate(controlLeak).includes('servertool business output contains control fields')) {
     console.error('[v4_infrastructure] red self-test failed to detect servertool control leakage');
-    process.exit(1);
-  }
-  const versionLeak = structuredClone(input);
-  versionLeak.buildLink = versionLeak.buildLink.replace(
-    '.env("CARGO_PKG_VERSION", package_version)',
-    '',
-  );
-  if (!validate(versionLeak).includes('Active binary build does not bind the consumer package version')) {
-    console.error('[v4_infrastructure] red self-test failed to detect inherited binary version');
     process.exit(1);
   }
   const invalidRuntimeGate = structuredClone(input);

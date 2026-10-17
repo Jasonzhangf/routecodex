@@ -267,7 +267,6 @@ function normalizeRuntimeIdentity(value) {
     kind: stringValue(runtime.kind ?? runtime.identity_kind ?? runtime.runtime_kind) || 'unspecified',
     path: stringValue(runtime.path) || null,
     version: stringValue(runtime.version) || null,
-    sha256: stringValue(runtime.sha256 ?? runtime.hash) || null,
   };
 }
 
@@ -275,9 +274,7 @@ function normalizeSourceIdentity(report, cases) {
   const source = isPlainObject(report.source_identity) ? report.source_identity : isPlainObject(report.source) ? report.source : {};
   const firstSource = cases.find((entry) => isPlainObject(entry.source))?.source ?? {};
   return {
-    repo: stringValue(source.repo ?? firstSource.repo) || null,
-    sha: stringValue(source.sha ?? report.source_sha ?? report.sourceSha ?? firstSource.sha) || null,
-    fixture_sha: stringValue(report.fixture_source_sha ?? report.fixtureSourceSha ?? source.fixture_sha ?? firstSource.sha) || null,
+    repo: stringValue(source.repo ?? report.fixture_source?.repo ?? firstSource.repo) || null,
   };
 }
 

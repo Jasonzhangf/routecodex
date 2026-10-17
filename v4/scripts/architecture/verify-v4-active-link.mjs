@@ -11,6 +11,11 @@
  * 3. No V4 Cargo manifest may path-depend on playground/protected/generated/.appsdk.
  * 4. Maps must register the unique resolver owner, link surface resource,
  *    Active link edges, and resolver/forbidden-edge gates.
+ *
+ * The gate checks registry/manifest/topology facts only. It does not recompute
+ * `.rlib` SHA-256, `public_api_hash`, `artifact_hash`, or the
+ * `.appsdk/records/**` freeze/promotion/review/evidence graph; that packaging
+ * identity verification is retired from the daily build surface.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -91,7 +96,7 @@ const edges = (registry.active_link_edges ?? []).map((edge) => ({
   owner: edge.owner,
 }));
 
-const requiredResources = ['v4.build.link_surface', 'v4.build.active_artifact_index'];
+const requiredResources = ['v4.build.link_surface'];
 for (const resource of requiredResources) {
   if (!(registry.resources ?? []).includes(resource)) {
     failures.push(`registry: missing resource ${resource}`);

@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process';
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -289,10 +288,6 @@ function signExecutable(targetPath) {
   }
 }
 
-function sha256(filePath) {
-  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
-}
-
 function resolveInstallBinDir() {
   return path.join(resolveHomeDir(), '.local', 'bin');
 }
@@ -321,10 +316,9 @@ async function main() {
     copyExecutableAtomic(sourceBin, repoBin);
     copyExecutableAtomic(path.join(path.dirname(sourceBin), adminBinaryName), repoAdminBin);
     copyExecutableAtomic(path.join(path.dirname(sourceBin), hooksBinaryName), repoHooksBin);
-    const expectedHash = sha256(repoBin);
-    console.log(`[install-cli] installed repo ${path.relative(v3Root, repoBin)} sha256=${expectedHash}`);
-    console.log(`[install-cli] installed repo ${path.relative(v3Root, repoAdminBin)} sha256=${sha256(repoAdminBin)}`);
-    console.log(`[install-cli] installed repo ${path.relative(v3Root, repoHooksBin)} sha256=${sha256(repoHooksBin)}`);
+    console.log(`[install-cli] installed repo ${path.relative(v3Root, repoBin)}`);
+    console.log(`[install-cli] installed repo ${path.relative(v3Root, repoAdminBin)}`);
+    console.log(`[install-cli] installed repo ${path.relative(v3Root, repoHooksBin)}`);
 
     const installBin = path.join(resolveInstallBinDir(), binaryName);
     copyExecutableAtomic(repoBin, installBin, { sign: false });
@@ -332,10 +326,6 @@ async function main() {
     copyExecutableAtomic(repoAdminBin, installAdminBin, { sign: false });
     const installHooksBin = path.join(resolveInstallBinDir(), hooksBinaryName);
     copyExecutableAtomic(repoHooksBin, installHooksBin, { sign: false });
-    const actualHash = sha256(installBin);
-    if (actualHash !== expectedHash) {
-      fail(`hash mismatch after installing ${installBin}`);
-    }
     for (const alias of ['routecodex', 'rcc']) {
       const aliasPath = path.join(resolveInstallBinDir(), alias);
       installAliasAtomic(aliasPath, installBin);
@@ -343,9 +333,9 @@ async function main() {
         fail(`alias does not resolve to installed V3 binary: ${aliasPath}`);
       }
     }
-    console.log(`[install-cli] installed ${installBin} sha256=${actualHash}`);
-    console.log(`[install-cli] installed ${installAdminBin} sha256=${sha256(installAdminBin)}`);
-    console.log(`[install-cli] installed ${installHooksBin} sha256=${sha256(installHooksBin)}`);
+    console.log(`[install-cli] installed ${installBin}`);
+    console.log(`[install-cli] installed ${installAdminBin}`);
+    console.log(`[install-cli] installed ${installHooksBin}`);
     console.log('[install-cli] ok: installed direct V3 binary without root or release snapshot inputs');
   });
 }

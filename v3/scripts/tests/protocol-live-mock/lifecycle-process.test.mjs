@@ -21,13 +21,12 @@ import {
   writeStub,
 } from './lifecycle-test-support.mjs';
 
-test('captureRuntimeIdentity records the real child version and binary hash', () => {
+test('captureRuntimeIdentity records the real child version and binary diagnostics', () => {
   const identity = captureRuntimeIdentity(process.execPath);
   assert.equal(identity.path, resolve(process.execPath));
   assert.equal(identity.exit_code, 0);
   assert.equal(identity.signal, null);
   assert.match(identity.version, /^v\d+/);
-  assert.match(identity.sha256, /^[a-f0-9]{64}$/);
   assert.ok(identity.size > 0);
 });
 

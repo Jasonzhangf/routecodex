@@ -1059,7 +1059,7 @@ resources:
 - resource_id: v4.artifact.compiled_index
   axis: information
   verification_gate:
-  - v4_active_index_verify
+  - v4_config_l2_regression
   resource_kind: generated_artifact
   lifecycle: v4.config.compile
   owner_crate: routecodex-v4-config

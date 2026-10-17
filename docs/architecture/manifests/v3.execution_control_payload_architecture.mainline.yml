@@ -88,8 +88,10 @@ failure_attribution_contract:
     runtime_variant: ExecutionControlResponse
     source_kind: RuntimeFailure
     source_stage: V3ServerRespOutbound06ClientFrame
-    client_status: 599
-    client_code: responses_relay_response_execution_control_error
+    internal_status: 599
+    internal_code: responses_relay_response_execution_control_error
+    client_error_projection: forbidden
+    client_transport: terminate_request
     provider_response_classification: forbidden
     provider_health_mutation: forbidden
 success_receipt_contract:

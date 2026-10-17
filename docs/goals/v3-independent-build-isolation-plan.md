@@ -1,6 +1,6 @@
 # V3 Independent Build Isolation Plan
 
-Status: proposed execution design; implementation pending  
+Status: historical migration design. Current build-isolation behavior is defined by the active manifest and `v3-independent-build-isolation-test-design.md`; obsolete admission/hash steps below are retained only as migration history and are not daily requirements.
 Design ID: `V3-INDEPENDENT-BUILD-ISOLATION-20260816`  
 Owner feature: `v3.build.independent_domain`  
 Scope root: `v3/`

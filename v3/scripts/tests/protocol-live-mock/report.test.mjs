@@ -153,13 +153,12 @@ test('incomplete cleanup remains visible in the machine report and markdown', ()
   assert.match(markdown, /force_killed: `true`/);
 });
 
-test('render keeps original red diagnostics, identities, and stable evidence references', () => {
+test('render keeps original red diagnostics, descriptive source attribution, and stable evidence references', () => {
   const report = finalizeReport({
     status: 'baseline_completed_with_failures',
     evidence_root: '/persistent/evidence/run-1',
-    binary: { path: '/opt/rccv3', version: '0.90.4873', sha256: 'runtime-sha' },
-    source: { repo: 'https://github.com/yetone/magpie', sha: 'source-sha' },
-    fixture_digest: 'fixture-digest',
+    binary: { path: '/opt/rccv3', version: '0.90.4873' },
+    source_identity: { repo: 'https://github.com/yetone/magpie' },
     cleanup: { complete: true, exit_code: 0, signal: null },
     cases: [
       baseCase('openai_chat-to-openai_chat-json', 'openai_chat', 'openai_chat', 'json', 'direct', 'failed', {
@@ -171,8 +170,8 @@ test('render keeps original red diagnostics, identities, and stable evidence ref
   const markdown = renderMarkdown(report);
   assert.match(markdown, /client status 500 != 200/);
   assert.match(markdown, /\/opt\/rccv3/);
-  assert.match(markdown, /runtime-sha/);
-  assert.match(markdown, /source-sha/);
+  assert.match(markdown, /0\.90\.4873/);
+  assert.match(markdown, /yetone\/magpie/);
   assert.match(markdown, /captures\/openai_chat-to-openai_chat-json\.json/);
 });
 

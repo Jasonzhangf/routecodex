@@ -3,8 +3,6 @@
 //! Subcommands:
 //!   resolve         resolve one frozen Active artifact to its link surface
 //!   emit-link-flags print rustc --extern flags for a resolved artifact
-//!   gen-index       compile the deterministic Active index
-//!   verify-index    re-derive and compare the on-disk Active index
 //!   build-consumer  build a consumer lib via resolver-emitted rustc flags
 //!   test-consumer   build and run a consumer regression via rustc flags
 //!   build-binary    build a binary with Active and explicit source artifacts
@@ -17,7 +15,6 @@ use routecodex_v4_build_link::resolver::{
 use routecodex_v4_build_link::resolver::{emit_link_flags, host_triple, resolve};
 use routecodex_v4_build_link::ActiveArtifactResolution;
 use routecodex_v4_build_link::ActiveLinkError;
-use routecodex_v4_build_link::IndexBuilder;
 use std::collections::HashSet;
 use std::env;
 use std::fs;
@@ -67,19 +64,6 @@ fn root_from(args: &[String]) -> Result<PathBuf, String> {
     Ok(PathBuf::from(arg_value(args, "--root")?))
 }
 
-fn git_head(root: &Path) -> Result<String, ActiveLinkError> {
-    let output = Command::new("git")
-        .args(["-C", root.to_str().unwrap_or("."), "rev-parse", "HEAD"])
-        .output()
-        .map_err(|e| ActiveLinkError::ManifestInvalid(format!("git rev-parse HEAD: {e}")))?;
-    if !output.status.success() {
-        return Err(ActiveLinkError::ManifestInvalid(
-            "git rev-parse HEAD failed; pass --commit explicitly".into(),
-        ));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
 fn target_from(args: &[String]) -> Result<String, ActiveLinkError> {
     if let Some(index) = args.iter().position(|arg| arg == "--target") {
         args.get(index + 1)
@@ -91,22 +75,20 @@ fn target_from(args: &[String]) -> Result<String, ActiveLinkError> {
 }
 
 fn module_active_version(root: &Path, module_id: &str) -> Result<String, ActiveLinkError> {
-    let path = root
-        .join(".appsdk/records")
-        .join(format!("freeze-record-{module_id}.json"));
+    let path = root.join("active/lib").join(module_id).join("current.json");
     let text = fs::read_to_string(&path).map_err(|e| {
-        ActiveLinkError::StaleOrMissingRecord(format!("read {}: {e}", path.display()))
+        ActiveLinkError::ArtifactMissing(format!("read {}: {e}", path.display()))
     })?;
     let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
-        ActiveLinkError::StaleOrMissingRecord(format!("parse {}: {e}", path.display()))
+        ActiveLinkError::ManifestInvalid(format!("parse {}: {e}", path.display()))
     })?;
     value
-        .get("active_version")
+        .get("version")
         .and_then(serde_json::Value::as_str)
         .map(str::to_string)
         .ok_or_else(|| {
-            ActiveLinkError::StaleOrMissingRecord(format!(
-                "freeze record {module_id} missing active_version"
+            ActiveLinkError::ArtifactMissing(format!(
+                "Active current.json for {module_id} missing version"
             ))
         })
 }
@@ -590,7 +572,7 @@ fn test_consumer(
 
 fn run(args: &[String]) -> Result<(), ActiveLinkError> {
     let Some(command) = args.first() else {
-        eprintln!("usage: routecodex-v4-build-link <resolve|emit-link-flags|gen-index|verify-index|build-consumer|test-consumer|build-binary|test-binary> ...");
+        eprintln!("usage: routecodex-v4-build-link <resolve|emit-link-flags|build-consumer|test-consumer|build-binary|test-binary> ...");
         return Err(ActiveLinkError::IdentityMissing("no subcommand".into()));
     };
     match command.as_str() {
@@ -617,39 +599,6 @@ fn run(args: &[String]) -> Result<(), ActiveLinkError> {
             for flag in emit_link_flags(&resolution) {
                 println!("{flag}");
             }
-            Ok(())
-        }
-        "gen-index" => {
-            let root = root_from(args).map_err(ActiveLinkError::ManifestInvalid)?;
-            let commit = if let Some(index) = args.iter().position(|arg| arg == "--commit") {
-                args.get(index + 1).cloned().ok_or_else(|| {
-                    ActiveLinkError::ManifestInvalid("missing --commit value".into())
-                })?
-            } else {
-                git_head(&root)?
-            };
-            let manifest = IndexBuilder::build(&root, &commit)?;
-            let output = IndexBuilder::write(&root, &manifest)?;
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&manifest).map_err(|e| {
-                    ActiveLinkError::ManifestInvalid(format!("serialize index: {e}"))
-                })?
-            );
-            println!("index written: {}", output.display());
-            Ok(())
-        }
-        "verify-index" => {
-            let root = root_from(args).map_err(ActiveLinkError::ManifestInvalid)?;
-            let commit = if let Some(index) = args.iter().position(|arg| arg == "--commit") {
-                args.get(index + 1).cloned().ok_or_else(|| {
-                    ActiveLinkError::ManifestInvalid("missing --commit value".into())
-                })?
-            } else {
-                git_head(&root)?
-            };
-            IndexBuilder::verify(&root, &commit)?;
-            println!("V4_ACTIVE_INDEX_OK");
             Ok(())
         }
         "build-consumer" => {

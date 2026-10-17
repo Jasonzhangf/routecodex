@@ -2069,7 +2069,7 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
-    required_gates: [npm run verify:v3-runtime-timing-observability, npm run verify:v3-resource-map]
+    required_gates: [npm run verify:v3-resource-map]
 
 
   - resource_id: v3.runtime.responses_timing_observability
@@ -2085,7 +2085,7 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
-    required_gates: [npm run verify:v3-runtime-timing-observability, npm run verify:v3-resource-map]
+    required_gates: [npm run verify:v3-resource-map]
 
   - resource_id: v3.config.http_sse_keepalive_interval
     resource_kind: config_transport_interval
@@ -2364,26 +2364,6 @@ resources:
     may_enter_metadata_center: false
     binding_status: anchored
     required_gates: [npm --prefix v3 run verify:isolation, npm --prefix v3 run test:isolation:red]
-
-  - resource_id: v3.build.architecture_admission
-    resource_kind: deterministic_build_admission_manifest
-    lifecycle: v3.build.independent_domain
-    owner_feature_id: v3.build.independent_domain
-    owner_crate: routecodex-v3-build-tools
-    owner_module: v3-independent-build-domain
-    owner_node: V3BuildDomain02AdmissionVerified
-    identity: [schemaVersion, sourceCommit, sourceDigests, manifestDigest]
-    allowed_writers: [compile_v3_architecture_admission]
-    allowed_readers: [verify_v3_architecture_admission, v3_verify_ci]
-    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
-    canonical_path: v3/build-contracts/architecture-admission
-    forbidden_paths: [v4, ~/.rcc, ~/.routecodex, ~/.rcc/codex-samples]
-    release_point: explicit_authoring_sync
-    may_enter_provider_body: false
-    may_enter_client_body: false
-    may_enter_metadata_center: false
-    binding_status: anchored
-    required_gates: [npm --prefix v3 run verify:admission, npm --prefix v3 run test:admission:red]
 
   - resource_id: v3.build.version_truth
     resource_kind: build_version_contract

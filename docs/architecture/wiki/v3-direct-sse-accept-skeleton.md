@@ -87,8 +87,7 @@ attempt's frames must not be concatenated with the replacement attempt.
 
 ## Gate
 
-Run `npm run verify:v3-direct-sse-accept-skeleton` and
-`npm run verify:v3-direct-sse-full-attempt-commit`. The gates check source
-markers, owner symbols, map/manifest lockstep, precommit terminal admission,
-and forbidden ownership. They are sub-gates of `verify:v3-architecture-ci` and
-therefore run before V3 builds.
+The source-marker gates are retired. Use the existing client SSE transport,
+full-attempt buffering, candidate recovery and public HTTP regressions bound
+in the verification map. Keep the declared ownership and topology in the
+canonical maps. A source-text match does not prove buffering or client behavior.

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
-import { dirname, join, normalize, resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 
@@ -13,23 +13,8 @@ function read(relativePath) {
   return readFileSync(resolve(sourceRoot, relativePath), 'utf8');
 }
 
-function readWithIncludes(relativePath, seen = new Set()) {
-  if (seen.has(relativePath)) return '';
-  seen.add(relativePath);
-  return read(relativePath).replace(/include!\("([^"]+)"\)/g, (_, includeRel) => {
-    const resolved = normalize(join(dirname(relativePath), includeRel));
-    return readWithIncludes(resolved, seen);
-  });
-}
-
 function readYaml(relativePath) {
   return YAML.parse(read(relativePath));
-}
-
-function symbolExists(text, symbol) {
-  const [owner, method = null] = symbol.split('::');
-  if (method) return text.includes(owner) && text.includes(method);
-  return new RegExp(`\\b(?:fn|struct|enum|trait)\\s+${symbol}\\b`).test(text);
 }
 
 const failures = [];
@@ -101,13 +86,8 @@ for (const expected of expectedEdges) {
   if (edge.caller_file !== expected.callerFile || edge.callee_file !== expected.calleeFile) {
     failures.push(`${expected.id} caller/callee files do not match the registered modules`);
   }
-  for (const [role, file, symbol] of [
-    ['caller', expected.callerFile, expected.callerSymbol],
-    ['callee', expected.calleeFile, expected.calleeSymbol],
-  ]) {
-    if (!symbolExists(readWithIncludes(file), symbol)) {
-      failures.push(`${expected.id} ${role} symbol is not source-bound: ${symbol}`);
-    }
+  if (edge.caller_symbol !== expected.callerSymbol || edge.callee_symbol !== expected.calleeSymbol) {
+    failures.push(`${expected.id} declared caller/callee do not match the registered owner edge`);
   }
   for (const resourceId of [...expected.consumes, ...expected.produces]) {
     if (!resourceById.has(resourceId)) failures.push(`${expected.id} references unknown resource ${resourceId}`);

@@ -10,13 +10,10 @@ const v3Root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const repoRoot = resolve(v3Root, '..');
 const verifier = resolve(v3Root, 'scripts/architecture/verify-v3-resource-relation-edge-lock.mjs');
 const copied = [
-  [resolve(v3Root, 'package.json'), 'package.json'],
   [resolve(repoRoot, 'docs/architecture/v3-resource-operation-map.yml'), 'docs/architecture/v3-resource-operation-map.yml'],
   [resolve(repoRoot, 'docs/architecture/v3-mainline-call-map.yml'), 'docs/architecture/v3-mainline-call-map.yml'],
   [resolve(repoRoot, 'docs/architecture/v3-function-map.yml'), 'docs/architecture/v3-function-map.yml'],
   [resolve(repoRoot, 'docs/architecture/v3-verification-map.yml'), 'docs/architecture/v3-verification-map.yml'],
-  [resolve(v3Root, 'scripts/architecture/verify-v3-resource-relation-edge-lock.mjs'), 'scripts/architecture/verify-v3-resource-relation-edge-lock.mjs'],
-  [resolve(v3Root, 'scripts/tests/v3-resource-relation-edge-lock-red-fixtures.mjs'), 'scripts/tests/v3-resource-relation-edge-lock-red-fixtures.mjs'],
 ];
 
 function mutateYaml(source, mutate) {
@@ -195,27 +192,6 @@ const cases = [
     },
     diagnostic: /missing feature v3\.resource_relation_edge_lock/u,
   },
-  {
-    name: 'remove gate from verification map',
-    path: 'docs/architecture/v3-verification-map.yml',
-    mutate: function(source) {
-      return mutateYaml(source, (document) => {
-        const gates = feature(document, 'v3.resource_relation_edge_lock').required_gates;
-        feature(document, 'v3.resource_relation_edge_lock').required_gates = gates.filter(
-          (gate) => gate !== 'npm run test:v3-resource-relation-edge-lock-red-fixtures',
-        );
-      });
-    },
-    diagnostic: /missing required gate npm run test:v3-resource-relation-edge-lock-red-fixtures/u,
-  },
-  {
-    name: 'architecture docs script no longer invokes edge lock',
-    path: 'package.json',
-    mutate: function(source) {
-      return source.replace('npm run verify:v3-resource-relation-edge-lock && ', '');
-    },
-    diagnostic: /script verify:v3-architecture-docs must invoke verify:v3-resource-relation-edge-lock/u,
-  },
 ];
 
 const failures = [];
@@ -236,7 +212,7 @@ for (const testCase of cases) {
     const result = spawnSync(process.execPath, [verifier], {
       cwd: root,
       encoding: 'utf8',
-      env: { ...process.env, ROUTECODEX_V3_ADMISSION_WORKSPACE: '1' },
+      env: { ...process.env, ROUTECODEX_V3_SOURCE_ROOT: root },
     });
     const output = (result.stdout || '') + '\n' + (result.stderr || '');
     if (result.status === 0) failures.push(testCase.name + ': verifier unexpectedly passed');

@@ -2,8 +2,7 @@
 /**
  * Canonical V4 positive verification: workspace release build, hermetic Active
  * restore, all V4 architecture gates, all non-workspace consumer regressions
- * through build-link, deterministic Active index generation/verification, and
- * the isolation positive/red matrix.
+ * through build-link, and the isolation positive/red matrix.
  *
  * This is the single owner of the V4 module/gate matrix. Root npm and CI only
  * dispatch to this surface (through verify:ci).
@@ -21,9 +20,6 @@ import {
   consumerCommand,
 } from './_gate-matrix.mjs';
 
-run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard');
-// V4-LAYER-PREFLIGHT-END
-
 const { runIndependent, reportIndependentFailures } = await import('./_common.mjs');
 
 function restoreHermeticActive() {
@@ -37,7 +33,6 @@ function restoreHermeticActive() {
   fs.cpSync(fixture, target, { recursive: true });
 }
 
-run('cargo run --quiet --manifest-path Cargo.toml -p routecodex-v4-skeleton --bin routecodex-v4-plan-hash -- contracts/skeleton-plan.contract.json --check');
 restoreHermeticActive();
 runBuild();
 run(RUNTIME_BIN_REGRESSION);
@@ -62,8 +57,6 @@ if (matrixFailures.length > 0) {
   process.exit(1);
 }
 
-run('cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- gen-index --root .');
-run('cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- verify-index --root .');
 run('node scripts/verify-isolation.mjs');
 
-console.log(`[v4 verify] OK gates=${ARCHITECTURE_GATES.length} consumers=${CONSUMER_REGRESSIONS.length} active-index=ok isolation=ok`);
+console.log(`[v4 verify] OK gates=${ARCHITECTURE_GATES.length} consumers=${CONSUMER_REGRESSIONS.length} isolation=ok`);

@@ -1,687 +1,89 @@
 #!/usr/bin/env node
-
-import fs from "node:fs";
-import path from "node:path";
-import process from "node:process";
-import { fileURLToPath } from "node:url";
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
+import YAML from 'yaml';
 
 const root = process.env.V3_PROVIDER_SESSION_COOLDOWN_ROOT
   ? path.resolve(process.env.V3_PROVIDER_SESSION_COOLDOWN_ROOT)
-  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const read = (file) => YAML.parse(fs.readFileSync(path.join(root, 'docs/architecture', file), 'utf8'));
+const resources = read('v3-resource-operation-map.yml');
+const functions = read('v3-function-map.yml');
+const mainline = read('v3-mainline-call-map.yml');
 const failures = [];
-
-function readRequired(relativePath) {
-  const filePath = path.join(root, relativePath);
-  if (!fs.existsSync(filePath)) {
-    failures.push(`missing required source: ${relativePath}`);
-    return "";
-  }
-  return fs.readFileSync(filePath, "utf8");
-}
-
-function requireMatch(source, pattern, label) {
-  if (!pattern.test(source)) failures.push(label);
-}
-
-function forbidMatch(source, pattern, label) {
-  if (pattern.test(source)) failures.push(label);
-}
-
-function extractBracedBlock(source, marker, label) {
-  const markerIndex = source.indexOf(marker);
-  if (markerIndex < 0) {
-    failures.push(`missing ${label}`);
-    return "";
-  }
-  const blockStart = source.indexOf("{", markerIndex + marker.length);
-  if (blockStart < 0) {
-    failures.push(`missing ${label} body`);
-    return "";
-  }
-  let depth = 0;
-  for (let index = blockStart; index < source.length; index += 1) {
-    if (source[index] === "{") depth += 1;
-    if (source[index] === "}") {
-      depth -= 1;
-      if (depth === 0) return source.slice(blockStart, index + 1);
-    }
-  }
-  failures.push(`unterminated ${label} body`);
-  return "";
-}
-
-function extractYamlItem(source, key, value, label) {
-  const lines = source.split(/\r?\n/u);
-  // function map 的顶层 feature 项是 0 缩进（`- feature_id:`），mainline/resource
-  // map 的项是 2 空格缩进（`  - step_id:`）；统一按“数组项标记 + key/value”
-  // 匹配，块的结束取“同缩进的下一个顶层数组项”。
-  const start = lines.findIndex((line) => {
-    const trimmed = line.trimStart();
-    const marker = `- ${key}: ${value}`;
-    // 精确匹配项标记（允许尾随注释/空白，但拒绝更长 id 前缀，
-    // 例如 v3.provider.failure_session_scope_removed 不得匹配原资源）。
-    return (
-      /^-\s/u.test(trimmed) &&
-      (trimmed === marker || trimmed.startsWith(`${marker} `))
-    );
-  });
-  if (start < 0) {
-    failures.push(`missing ${label}`);
-    return "";
-  }
-  const indent = (lines[start].match(/^\s*/u) ?? [""])[0];
-  const nextTop = new RegExp(`^${indent}- \\S`);
-  let end = lines.length;
-  for (let index = start + 1; index < lines.length; index += 1) {
-    if (nextTop.test(lines[index])) {
-      end = index;
-      break;
-    }
-  }
-  return lines.slice(start, end).join("\n");
-}
-
-function requireBlockLine(block, pattern, label) {
-  requireMatch(block, pattern, label);
-}
-
-function forbidBlockLine(block, pattern, label) {
-  forbidMatch(block, pattern, label);
-}
-
-
-const files = {
-  error: "v3/crates/routecodex-v3-error/src/lib.rs",
-  health: "v3/crates/routecodex-v3-provider-responses/src/health.rs",
-  actionGate: "v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs",
-  policy: "v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs",
-  cooldownRescue: "v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs",
-  webSearchHop: "v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs",
-  webSearchSidecar:
-    "v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_sidecar.rs",
-  relayCore: "v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs",
-  relayShared: "v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs",
-  directState: "v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs",
-  directProtocolPlan: "v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs",
-  v3DirectCore: "v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs",
-  serverExecutors: "v3/crates/routecodex-v3-server/src/executors.rs",
-  nodes: "v3/crates/routecodex-v3-runtime/src/nodes.rs",
-  kernel: "v3/crates/routecodex-v3-runtime/src/kernel.rs",
-  directRuntimeHelpers:
-    "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs",
-  directSse:
-    "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs",
-  responses:
-    "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs",
-  responsesTypes:
-    "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs",
-  openaiChat:
-    "v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs",
-  anthropic:
-    "v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs",
-  gemini:
-    "v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs",
-  server: "v3/crates/routecodex-v3-server/src/lib.rs",
-  scopeMetadata: "v3/crates/routecodex-v3-server/src/scope_metadata.rs",
-  serverTests: "v3/crates/routecodex-v3-server/src/tests/mod.rs",
-  serverBlackbox: "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs",
-  packageJson: "package.json",
-  resourceMap: "docs/architecture/v3-resource-operation-map.yml",
-  functionMap: "docs/architecture/v3-function-map.yml",
-  mainlineMap: "docs/architecture/v3-mainline-call-map.yml",
-  verificationMap: "docs/architecture/v3-verification-map.yml",
+const requireValue = (condition, message) => { if (!condition) failures.push(message); };
+const includesAll = (values, expected) => expected.every((value) => values?.includes(value));
+const resource = (id) => {
+  const row = resources.resources?.find((item) => item.resource_id === id);
+  requireValue(Boolean(row), `missing ${id} resource`);
+  return row;
 };
-const source = Object.fromEntries(
-  Object.entries(files).map(([key, relativePath]) => [key, readRequired(relativePath)]),
-);
-// 并行 worker 拆分：responses relay 类型（RuntimeInput/Output 等）迁至 responses_relay_types.rs，
-// 会话冷却门禁同时覆盖主文件与类型文件。
-source.responses = source.responses + '\n' + source.responsesTypes;
-
-requireMatch(
-  source.error,
-  /pub struct V3ProviderFailureSessionScope\s*\{[\s\S]*server_id:\s*String,[\s\S]*routing_group:\s*String,[\s\S]*session_id:\s*String,/u,
-  "Error owner must define the typed server+routing_group+session_id failure scope",
-);
-const error05RecoveryWitnessStruct = extractBracedBlock(
-  source.error,
-  "pub struct V3Error05RecoveryAdmissionWitness",
-  "V3Error05RecoveryAdmissionWitness",
-);
-requireMatch(
-  error05RecoveryWitnessStruct,
-  /failure_session_scope:\s*V3ProviderFailureSessionScope/u,
-  "Error05 recovery witness must carry the typed failure session scope",
-);
-requireMatch(
-  source.error,
-  /impl V3Error05RecoveryAdmissionWitness\s*\{[\s\S]*pub fn new\(\s*failure_session_scope:\s*V3ProviderFailureSessionScope,/u,
-  "Error05 witness constructor must require an already validated typed session scope",
-);
-const healthSessionKeyStruct = extractBracedBlock(
-  source.health,
-  "struct V3ProviderFailureSessionKey",
-  "V3ProviderFailureSessionKey",
-);
-requireMatch(
-  healthSessionKeyStruct,
-  /server_id:\s*String,[\s\S]*routing_group:\s*String,[\s\S]*session_id:\s*String,[\s\S]*provider_runtime_identity:\s*String,/u,
-  "Provider Health must key failure-derived state by server, group, session, and runtime identity",
-);
-requireMatch(
-  source.health,
-  /pub struct V3ProviderSessionAvailabilityReader/u,
-  "Provider Health must expose a session-bound read-only availability reader",
-);
-requireMatch(
-  source.cooldownRescue,
-  /let Some\(permit\) = permit else \{[\s\S]*return Ok\(true\);/u,
-  "in-flight cooldown probes must not block target selection from using a later tier",
-);
-forbidMatch(
-  source.cooldownRescue,
-  /wait_for_provider_cooldown_probe_completion/u,
-  "request selection must not wait for another request's provider cooldown probe",
-);
-forbidMatch(
-  source.health,
-  /wait_for_provider_cooldown_probe_completion/u,
-  "Provider Health must not expose request-blocking cooldown probe waits",
-);
-forbidMatch(
-  source.health,
-  /try_acquire_cross_session_revive/u,
-  "Provider Health must not revive cooldown from state-only cross-session admission",
-);
-requireMatch(
-  source.health,
-  /retain\(|remove_expired_session_state/u,
-  "Provider Health must deterministically clean bounded session state",
-);
-requireMatch(
-  source.resourceMap,
-  /resource_id:\s*v3\.provider\.health_state[\s\S]*identity:\s*\[serverId,\s*routingGroup,\s*sessionId,\s*providerRuntimeIdentity\]/u,
-  "Resource map must bind provider health state identity to server+routing_group+session+runtime identity",
-);
-requireMatch(
-  source.resourceMap,
-  /resource_id:\s*v3\.provider\.health_state[\s\S]*allowed_writers:\s*\[[^\]]*V3ProviderHealthStore::record_provider_failure_in_session[^\]]*V3ProviderHealthStore::record_provider_success_in_session[^\]]*V3ProviderHealthStore::acquire_provider_cooldown_rescue_probe[^\]]*\]/u,
-  "Resource map provider health writers must name only session-scoped health mutation owners",
-);
-requireMatch(
-  source.resourceMap,
-  /resource_id:\s*v3\.provider\.health_state[\s\S]*allowed_readers:\s*\[[^\]]*V3ProviderHealthStore::availability_for_session[^\]]*V3ProviderSessionAvailabilityReader::availability[^\]]*\]/u,
-  "Resource map provider health readers must name the session-bound availability projection owner",
-);
-forbidMatch(
-  source.resourceMap,
-  /wait_for_provider_cooldown_probe_completion/u,
-  "Resource map must not authorize request selection to wait on provider probes",
-);
-const providerHealthStateResource = extractYamlItem(
-  source.resourceMap,
-  "resource_id",
-  "v3.provider.health_state",
-  "v3.provider.health_state resource",
-);
-forbidBlockLine(
-  providerHealthStateResource,
-  /allowed_writers:\s*\[[^\]]*V3ProviderFailureRuntimeHealth::record_provider_failure_record[^\]]*\]/u,
-  "Resource map must not register Runtime wrappers as provider health state writers",
-);
-forbidBlockLine(
-  providerHealthStateResource,
-  /\bV3ProviderHealthStore::record_provider_(failure|success)\b/u,
-  "Resource map must not retain legacy provider-global health mutation owners",
-);
-requireMatch(
-  source.resourceMap,
-  /resource_id:\s*v3\.provider\.availability_projection[\s\S]*identity:\s*\[providerId,\s*interfaceId,\s*authAlias,\s*modelId,\s*available,\s*blockedScopes\]/u,
-  "Resource map availability projection must expose blocked session scopes rather than pretending provider-global truth",
-);
-const validatedHttpInputResource = extractYamlItem(
-  source.resourceMap,
-  "resource_id",
-  "v3.server.validated_http_input",
-  "v3.server.validated_http_input resource",
-);
-requireBlockLine(
-  validatedHttpInputResource,
-  /identity:\s*\[[^\]]*requestSessionIdHeader[^\]]*\]/u,
-  "Validated HTTP input must declare the existing request session ID header",
-);
-requireBlockLine(
-  validatedHttpInputResource,
-  /allowed_readers:\s*\[[^\]]*build_v3_provider_failure_session_scope_for_request[^\]]*\]/u,
-  "Validated HTTP input must allow only the Server scope builder to consume the session control header",
-);
-requireBlockLine(
-  validatedHttpInputResource,
-  /may_enter_provider_body:\s*false[\s\S]*may_enter_client_body:\s*false/u,
-  "Validated HTTP input control header must not enter provider or client bodies",
-);
-const failureSessionScopeResource = extractYamlItem(
-  source.resourceMap,
-  "resource_id",
-  "v3.provider.failure_session_scope",
-  "v3.provider.failure_session_scope resource",
-);
-requireBlockLine(
-  failureSessionScopeResource,
-  /resource_kind:\s*side_channel/u,
-  "Resource map failure session scope must be a side-channel control resource",
-);
-requireBlockLine(
-  failureSessionScopeResource,
-  /owner_crate:\s*routecodex-v3-error/u,
-  "Resource map failure session scope must be owned by Error, not Server or Provider Health",
-);
-requireBlockLine(
-  failureSessionScopeResource,
-  /owner_node:\s*V3ProviderFailureSessionScope/u,
-  "Resource map failure session scope must bind to the typed scope node",
-);
-requireBlockLine(
-  failureSessionScopeResource,
-  /identity:\s*\[serverId,\s*routingGroup,\s*sessionId\]/u,
-  "Resource map failure session scope identity must be server+routing_group+session only",
-);
-requireBlockLine(
-  failureSessionScopeResource,
-  /allowed_writers:\s*\[V3ProviderFailureSessionScope::new\]/u,
-  "Resource map failure session scope writer must be only the typed scope constructor",
-);
-requireBlockLine(
-  failureSessionScopeResource,
-  /allowed_readers:\s*\[[^\]]*V3Error05RecoveryAdmissionWitness::new[^\]]*V3ProviderFailureRuntimeHealth::record_provider_failure_record[^\]]*V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope[^\]]*V3ProviderFailureRuntimeHealth::session_bound_availability[^\]]*V3ProviderActionProviderScope::new[^\]]*V3ProviderSessionAvailabilityReader::availability[^\]]*\]/u,
-  "Resource map failure session scope readers must be the typed runtime/error/action/availability consumers",
-);
-forbidBlockLine(
-  failureSessionScopeResource,
-  /allowed_writers:\s*\[[^\]]*(routecodex-v3-server|V3ProviderHealthStore::record_provider_failure_in_session|V3ProviderHealthStore::record_provider_success_in_session|V3ProviderHealthStore::acquire_provider_cooldown_rescue_probe)[^\]]*\]/u,
-  "Resource map failure session scope must not be written by Server or Provider Health",
-);
-requireBlockLine(
-  failureSessionScopeResource,
-  /may_enter_provider_body:\s*false[\s\S]*may_enter_client_body:\s*false/u,
-  "Resource map failure session scope must not enter provider or client bodies",
-);
-const debugErrorFunction = extractYamlItem(
-  source.functionMap,
-  "feature_id",
-  "v3.debug_error_foundation",
-  "v3.debug_error_foundation function map feature",
-);
-requireBlockLine(
-  debugErrorFunction,
-  /- v3\.provider\.failure_session_scope/u,
-  "Function map must bind the provider failure session scope resource",
-);
-requireMatch(
-  source.functionMap,
-  /feature_id:\s*v3\.debug_error_foundation[\s\S]*V3ProviderFailureRuntimeHealth::record_provider_failure_record[\s\S]*V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope[\s\S]*V3ProviderFailureRuntimeHealth::session_bound_availability[\s\S]*V3ProviderSessionAvailabilityReader::availability[\s\S]*V3ProviderHealthStore::record_provider_failure_in_session[\s\S]*V3ProviderHealthStore::record_provider_success_in_session[\s\S]*V3ProviderHealthStore::availability_for_session[\s\S]*build_v3_provider_failure_session_scope_for_request/u,
-  "Function map must bind the session health owner, scoped availability, and request scope builder",
-);
-forbidBlockLine(
-  debugErrorFunction,
-  /\bV3ProviderHealthStore::record_provider_(failure|success)\b/u,
-  "Function map must not retain removed provider-global health entry symbols",
-);
-requireMatch(
-  source.mainlineMap,
-  /step_id:\s*v3-de-13[\s\S]*caller_symbol:\s*V3ProviderSessionAvailabilityReader::availability[\s\S]*callee_symbol:\s*V3ProviderHealthStore::availability_for_session/u,
-  "Mainline map v3-de-13 must bind session-bound availability to availability_for_session",
-);
-requireMatch(
-  source.mainlineMap,
-  /step_id:\s*v3-de-14[\s\S]*caller_symbol:\s*V3ProviderFailureRuntimeHealth::record_provider_failure_record[\s\S]*callee_symbol:\s*V3ProviderHealthStore::record_provider_failure_in_session/u,
-  "Mainline map v3-de-14 must bind typed failure recording to the session-scoped health store",
-);
-requireMatch(
-  source.mainlineMap,
-  /step_id:\s*v3-de-15[\s\S]*caller_symbol:\s*V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope[\s\S]*callee_symbol:\s*V3ProviderHealthStore::record_provider_success_in_session/u,
-  "Mainline map v3-de-15 must bind typed success recording to the session-scoped health store",
-);
-forbidMatch(
-  source.mainlineMap,
-  /step_id:\s*v3-de-1[45][\s\S]*callee_symbol:\s*V3ProviderHealthStore::record_provider_(failure|success)\b/u,
-  "Mainline map must not point direct health edges at removed provider-global APIs",
-);
-const de18Edge = extractYamlItem(
-  source.mainlineMap,
-  "step_id",
-  "v3-de-18",
-  "v3-de-18 failure session scope edge",
-);
-requireBlockLine(
-  de18Edge,
-  /from_node:\s*V3Server03HttpRequestRaw/u,
-  "Mainline map v3-de-18 must start from the server request data-plane node",
-);
-requireBlockLine(
-  de18Edge,
-  /to_node:\s*V3ProviderFailureSessionScope/u,
-  "Mainline map v3-de-18 must produce the typed provider failure session scope node",
-);
-requireBlockLine(
-  de18Edge,
-  /caller_symbol:\s*build_v3_provider_failure_session_scope_for_request[\s\S]*caller_file:\s*v3\/crates\/routecodex-v3-server\/src\/lib\.rs/u,
-  "Mainline map v3-de-18 caller must be the Server request-plane scope builder",
-);
-requireBlockLine(
-  de18Edge,
-  /callee_symbol:\s*V3ProviderFailureSessionScope::new[\s\S]*callee_file:\s*v3\/crates\/routecodex-v3-error\/src\/lib\.rs/u,
-  "Mainline map v3-de-18 callee must be the Error-owned typed scope constructor",
-);
-requireBlockLine(
-  de18Edge,
-  /owner_feature_id:\s*v3\.debug_error_foundation/u,
-  "Mainline map v3-de-18 must remain owned by v3.debug_error_foundation",
-);
-requireBlockLine(
-  de18Edge,
-  /consumes:[\s\S]*- v3\.server\.validated_http_input[\s\S]*- v3\.request\.protocol_fields/u,
-  "Mainline map v3-de-18 must consume only validated HTTP-boundary input and protocol context",
-);
-requireBlockLine(
-  de18Edge,
-  /produces:[\s\S]*- v3\.provider\.failure_session_scope/u,
-  "Mainline map v3-de-18 must produce provider failure session scope, not provider health",
-);
-requireBlockLine(
-  de18Edge,
-  /side_channel_writes:[\s\S]*- v3\.provider\.failure_session_scope/u,
-  "Mainline map v3-de-18 must write the failure session scope side-channel resource",
-);
-forbidBlockLine(
-  de18Edge,
-  /to_node:\s*V3ProviderHealthStateMutated|v3\.provider\.health_state/u,
-  "Mainline map v3-de-18 must not claim Provider Health mutation or health_state production",
-);
-requireMatch(
-  source.verificationMap,
-  /verify:v3-provider-session-cooldown/u,
-  "Verification map must require the provider session cooldown architecture gate",
-);
-
-const actionGateKeyStruct = extractBracedBlock(
-  source.actionGate,
-  "pub struct V3ProviderActionGateKey",
-  "V3ProviderActionGateKey",
-);
-requireMatch(
-  actionGateKeyStruct,
-  /session_id:\s*String,/u,
-  "Provider ActionGate key must include session_id",
-);
-const actionProviderScopeImpl = extractBracedBlock(
-  source.actionGate,
-  "impl V3ProviderActionProviderScope",
-  "V3ProviderActionProviderScope impl",
-);
-requireMatch(
-  actionProviderScopeImpl,
-  /pub fn new\(\s*failure_session_scope:\s*&V3ProviderFailureSessionScope,/u,
-  "Provider ActionGate provider scope constructor must require typed session scope",
-);
-const actionProviderScopeStruct = extractBracedBlock(
-  source.actionGate,
-  "pub struct V3ProviderActionProviderScope",
-  "V3ProviderActionProviderScope",
-);
-requireMatch(
-  actionProviderScopeStruct,
-  /session_id:\s*String,/u,
-  "Provider ActionGate success/recovery scope must include session_id",
-);
-
-for (const [label, runtimeSource, marker] of [
-  ["Direct raw request", source.nodes, "pub struct V3Server03HttpRequestRaw"],
-  ["Responses Relay", source.responses, "pub struct V3ResponsesRelayRuntimeInput"],
-  ["OpenAI Chat Relay", source.openaiChat, "pub struct V3OpenAiChatRelayRuntimeInput"],
-  ["Anthropic Relay", source.anthropic, "pub struct V3AnthropicRelayRuntimeInput"],
-  ["Gemini Relay", source.gemini, "pub struct V3GeminiRelayRuntimeInput"],
-]) {
-  const runtimeInputStruct = extractBracedBlock(runtimeSource, marker, `${label} runtime input`);
-  requireMatch(
-    runtimeInputStruct,
-    /failure_session_scope:\s*V3ProviderFailureSessionScope/u,
-    `${label} must carry the typed failure session scope`,
-  );
+const health = resource('v3.provider.health_state');
+const availability = resource('v3.provider.availability_projection');
+const http = resource('v3.server.validated_http_input');
+const scope = resource('v3.provider.failure_session_scope');
+requireValue(isDeepStrictEqual(health?.identity, ['serverId', 'routingGroup', 'sessionId', 'providerRuntimeIdentity']), 'Resource map must bind provider health state identity to server+routing_group+session+runtime identity');
+requireValue(includesAll(health?.allowed_writers, ['V3ProviderHealthStore::record_provider_failure_in_session', 'V3ProviderHealthStore::record_provider_success_in_session', 'V3ProviderHealthStore::acquire_provider_cooldown_rescue_probe']), 'Provider health writers must bind scoped Health owners');
+requireValue(includesAll(health?.allowed_readers, ['V3ProviderHealthStore::availability_for_session', 'V3ProviderSessionAvailabilityReader::availability']), 'Provider health readers must bind scoped availability');
+requireValue(!health?.allowed_writers?.includes('V3ProviderFailureRuntimeHealth::record_provider_failure_record'), 'Runtime wrappers must not own provider health writes');
+for (const operation of ['record_provider_failure', 'record_provider_success']) {
+  requireValue(!health?.allowed_writers?.includes(`V3ProviderHealthStore::${operation}`), 'Provider health must not bind removed global mutation owners');
 }
-
-requireMatch(
-  source.server,
-  /V3ProviderFailureSessionScope::new\(/u,
-  "Server/ReqInbound must construct the validated typed failure session scope",
-);
-requireMatch(
-  source.serverTests,
-  /fn provider_failure_scope_uses_existing_session_header\(\)/u,
-  "Server must lock the existing request session header as provider failure scope",
-);
-requireMatch(
-  source.serverTests,
-  /fn provider_failure_scope_never_rejects_missing_session_identity\(\)/u,
-  "Server must isolate headerless requests with their existing internal request id",
-);
-requireMatch(
-  source.serverBlackbox,
-  /async fn responses_direct_without_failure_session_header_reaches_provider\(\)/u,
-  "Server blackbox must prove a missing client session header does not block provider send",
-);
-requireMatch(
-  source.packageJson,
-  /"test:v3-provider-session-cooldown":[^\n]*-p routecodex-v3-provider-responses --lib health::tests[^\n]*responses_direct_without_failure_session_header_reaches_provider/u,
-  "Provider session cooldown gate must avoid unrelated integration binaries and run the headerless-request blackbox",
-);
-const serverFailureSessionScopeResolver = extractBracedBlock(
-  source.server,
-  "fn get_failure_session_scope",
-  "Server provider failure session scope resolver",
-);
-const serverFailureSessionScopeBuilder = extractBracedBlock(
-  source.server,
-  "fn build_v3_provider_failure_session_scope_for_request",
-  "Server provider failure session scope builder",
-);
-const serverFailureSessionHeaderReader = extractBracedBlock(
-  source.scopeMetadata,
-  "pub(crate) fn responses_control_scope_headers",
-  "Server provider failure session header reader",
-);
-requireMatch(
-  serverFailureSessionHeaderReader,
-  /first_header_text[\s\S]*"session-id"[\s\S]*"session_id"[\s\S]*"x-session-id"[\s\S]*"x-rcc-session-id"/u,
-  "Server failure scope builder must consume the existing request session header",
-);
-requireMatch(
-  serverFailureSessionScopeBuilder,
-  /V3ProviderFailureSessionScope::new\(&server\.id,\s*&server\.routing_group,\s*&session_id\)/u,
-  "Server failure scope builder must construct the typed scope from the validated session control header",
-);
-forbidMatch(
-  serverFailureSessionScopeBuilder,
-  /request_id|parse_codex_turn_metadata|TURN_METADATA_SESSION_PATHS|BODY_SESSION_PATHS|client_metadata|metadata|conversation_id|unwrap_or/u,
-  "Server failure scope builder must not derive control identity from request identity or payload metadata",
-);
-requireMatch(
-  serverFailureSessionScopeResolver,
-  /V3ProviderFailureSessionScope::new\([\s\S]*&server\.id,[\s\S]*&server\.routing_group,[\s\S]*format!\("request-local-\{request_id\}"\)/u,
-  "Server must build a headerless request-local control scope without changing client headers or payload",
-);
-forbidMatch(
-  serverFailureSessionScopeResolver,
-  /headers\.insert|payload|client_metadata|metadata/u,
-  "Headerless failure-scope isolation must not synthesize headers or rebuild control from payload",
-);
-requireMatch(
-  `${source.kernel}\n${source.directSse}\n${source.responses}\n${source.openaiChat}\n${source.anthropic}\n${source.gemini}`,
-  /record_post_commit_provider_stream_failure_from_source(?:_for_interface)?\([\s\S]*failure_session_scope/u,
-  "post-commit failure handling must receive the same typed session scope",
-);
-requireMatch(
-  source.policy,
-  /session_bound_availability|availability_for_session/u,
-  "Runtime policy must construct session-bound availability",
-);
-requireMatch(
-  source.policy,
-  /reselect_from_captured_target_plan[\s\S]*selected\.route/u,
-  "Runtime recovery must re-expand and reselect only from selected.route's captured Target07 plan",
-);
-requireMatch(
-  source.cooldownRescue,
-  /acquire_provider_cooldown_rescue_probe[\s\S]*probe_v3_provider_global_target[\s\S]*complete_provider_cooldown_probe_success_with_permit/u,
-  "Runtime rescue owner must require a successful provider probe before revival",
-);
-requireMatch(
-  source.cooldownRescue,
-  /allow_exhaustion_rescue_probe:\s*bool[\s\S]*if !allow_exhaustion_rescue_probe[\s\S]*V3TargetSelectionAfterRescue::Exhausted[\s\S]*run_exhaustion_rescue_probes/u,
-  "Shared rescue owner must terminate dry-run exhaustion before provider probe I/O",
-);
-requireMatch(
-  source.webSearchSidecar,
-  /ControlRequest::ExecuteWebSearch[\s\S]*validate_control_response/u,
-  "Web-search state machine must bind execution to the typed hooks-sidecar owner",
-);
-forbidMatch(
-  `${source.webSearchHop}\n${source.webSearchSidecar}`,
-  /execute_local_web_search_hop|build_v3_provider_12_responses_wire_payload/u,
-  "Web-search state machine must not reconstruct a provider request",
-);
-const anthropicRequestDryRun = extractBracedBlock(
-  source.anthropic,
-  "pub async fn execute_v3_anthropic_relay_dry_run_runtime_with_client_headers",
-  "Anthropic request dry-run",
-);
-requireMatch(
-  anthropicRequestDryRun,
-  /execute_v3_anthropic_relay_runtime_inner\([\s\S]*V3RelayProviderFailureRetryPolicy::from_manifest\(manifest\),\s*false,/u,
-  "Anthropic request dry-run must pass the rescue-probe-disabled gate",
-);
-requireMatch(
-  source.anthropic,
-  /async fn execute_v3_anthropic_relay_runtime_inner[\s\S]*allow_exhaustion_rescue_probe:\s*bool[\s\S]*resolve_v3_relay_target_outcome_with_admission_rescue\([\s\S]*allow_exhaustion_rescue_probe/u,
-  "Anthropic dry-run must disable provider rescue probes before target resolution",
-);
-requireMatch(
-  source.relayCore,
-  /provider_header_overrides:\s*Vec<V3ProviderRequestHeader>,[\s\S]*allow_exhaustion_rescue_probe:\s*bool[\s\S]*resolve_v3_relay_entry_target\([\s\S]*allow_exhaustion_rescue_probe/u,
-  "Generic relay core must require an explicit provider rescue-probe mode",
-);
-const relayEntryTarget = extractBracedBlock(
-  source.relayShared,
-  "pub(crate) async fn resolve_v3_relay_entry_target(",
-  "Relay entry target adapter",
-);
-requireMatch(
-  relayEntryTarget,
-  /resolve_v3_relay_target_outcome_with_admission_rescue\(\s*input,\s*allow_exhaustion_rescue_probe,\s*preferred_selected,/u,
-  "Unseeded Relay entry must preserve the rescue-probe mode",
-);
-requireMatch(
-  relayEntryTarget,
-  /select_v3_expanded_target_with_admission_rescue\([\s\S]*input\.deterministic_sample,\s*allow_exhaustion_rescue_probe,\s*preferred_selected,/u,
-  "Captured-plan Relay entry must preserve the rescue-probe mode",
-);
-requireMatch(
-  source.directState,
-  /allow_exhaustion_rescue_probe:\s*bool[\s\S]*allow_exhaustion_rescue_probe:\s*true[\s\S]*with_exhaustion_rescue_probe_disabled[\s\S]*self\.allow_exhaustion_rescue_probe\s*=\s*false/u,
-  "Direct runtime state must carry an explicit no-network rescue-probe gate",
-);
-requireMatch(
-  source.directProtocolPlan,
-  /with_provider_health_neutral\(\)[\s\S]*with_exhaustion_rescue_probe_disabled\(\)/u,
-  "Direct provider-request dry-run must disable rescue probes",
-);
-requireMatch(
-  `${source.kernel}\n${source.v3DirectCore}`,
-  /select_v3_expanded_target_with_admission_rescue\([\s\S]*allow_exhaustion_rescue_probe/u,
-  "Every direct kernel must pass the explicit rescue-probe gate to the shared owner",
-);
-requireMatch(
-  source.serverExecutors,
-  /execute_v3_direct_runtime_kernel_core::<V3ChatDirectCodec, _>\([\s\S]*now_epoch_ms,\s*true,\s*Some\(&provider_failure_event_sink\)/u,
-  "Live Chat Direct must explicitly enable exhaustion rescue probes",
-);
-const directFailurePolicyBody = extractBracedBlock(
-  source.directRuntimeHelpers,
-  "async fn run_v3_direct_provider_failure_policy",
-  "Direct provider failure policy",
-);
-forbidMatch(
-  directFailurePolicyBody,
-  /try_acquire_cross_session_revive/u,
-  "Direct provider failure policy must not revive cooldown without provider I/O",
-);
-requireMatch(
-  source.kernel,
-  /select_v3_expanded_target_with_admission_rescue/u,
-  "Direct provider selection must consume the shared exhaustion rescue owner",
-);
-const directSseMarker = "pub(crate) async fn project_and_collect_direct_sse_attempt";
-const directSseProjector = extractBracedBlock(
-  source.directSse,
-  directSseMarker,
-  "Direct SSE provider stream projector",
-);
-const directSseStart = source.directSse.indexOf(directSseMarker);
-const directSseBodyStart = source.directSse.indexOf("{", directSseStart + directSseMarker.length);
-const directSseSignature = directSseStart < 0 || directSseBodyStart < 0
-  ? ""
-  : source.directSse.slice(directSseStart, directSseBodyStart);
-requireMatch(
-  directSseSignature,
-  /\bfailure_session_scope:\s*&V3ProviderFailureSessionScope,/u,
-  "Direct SSE projection must receive the original typed failure session scope",
-);
-requireMatch(
-  directSseProjector,
-  /Some\(failure_session_scope\.session_id\(\)\.to_owned\(\)\)/u,
-  "Direct SSE projection must retain the original typed failure session scope",
-);
-const kernelProductionSource = source.kernel.split("#[cfg(test)]", 1)[0];
-requireMatch(
-  kernelProductionSource,
-  /let direct_failure_session_scope = standardized\.failure_session_scope\.clone\(\);/u,
-  "Direct runtime must not derive provider failure scope from continuation state",
-);
-
-forbidMatch(
-  `${source.policy}\n${source.kernel}\n${source.responses}\n${source.openaiChat}\n${source.anthropic}\n${source.gemini}`,
-  /session_id\s*=\s*(request_id|conversation_id)|unwrap_or\([^\n]*(request_id|conversation_id)/u,
-  "Runtime must not derive failure session identity from request_id or conversation_id",
-);
-forbidMatch(
-  `${source.error}\n${source.actionGate}`,
-  /session_id:\s*routing_group|V3ProviderFailureSessionScope::new\([^\n]*server_id[^\n]*routing_group\.clone\(\)[^\n]*routing_group/u,
-  "routing_group must never substitute for the real session_id",
-);
-forbidMatch(
-  source.health,
-  /record_(provider_failure|provider_success)\(\s*&self,\s*provider_id:/u,
-  "legacy provider-global failure/success mutation API must be physically removed",
-);
-const failurePolicyBody = source.policy.slice(
-  source.policy.indexOf("pub(crate) async fn run_v3_relay_provider_failure_policy("),
-  source.policy.indexOf("\nfn build_v3_relay_provider_error_05_decision(", source.policy.indexOf("pub(crate) async fn run_v3_relay_provider_failure_policy(")),
-);
-forbidMatch(
-  failurePolicyBody,
-  /resolve_v3_relay_target(?:_outcome)?\(/u,
-  "recovery must not perform a second Virtual Router/Target plan build",
-);
-forbidMatch(
-  `${source.kernel}\n${source.responses}\n${source.openaiChat}\n${source.anthropic}\n${source.gemini}`,
-  /cooldown_until_ms\s*=\s*[^;]*(now|now_ms)[^;]*cooldown_ms/u,
-  "failed revive must not replace the original cooldown deadline",
-);
-
-if (failures.length > 0) {
-  console.error("V3 provider session cooldown verification failed:");
-  for (const failure of failures) console.error(`- ${failure}`);
+requireValue(![...(health?.allowed_writers ?? []), ...(health?.allowed_readers ?? [])].includes('V3ProviderHealthStore::wait_for_provider_cooldown_probe_completion'), 'Provider health must not authorize request-blocking probe waits');
+requireValue(isDeepStrictEqual(availability?.identity, ['providerId', 'interfaceId', 'authAlias', 'modelId', 'available', 'blockedScopes']), 'Availability projection must bind blocked session scopes');
+requireValue(http?.identity?.includes('requestSessionIdHeader'), 'Validated HTTP input must declare the session control header');
+requireValue(http?.allowed_readers?.includes('build_v3_provider_failure_session_scope_for_request'), 'Validated HTTP input must bind the Server scope builder');
+for (const [name, row] of [['HTTP control input', http], ['failure session scope', scope]]) {
+  requireValue(row?.may_enter_provider_body === false && row?.may_enter_client_body === false, `${name} must not enter provider or client bodies`);
+}
+requireValue(scope?.resource_kind === 'side_channel' && scope?.owner_crate === 'routecodex-v3-error' && scope?.owner_node === 'V3ProviderFailureSessionScope', 'Failure session scope must bind Error-owned typed side-channel');
+requireValue(isDeepStrictEqual(scope?.identity, ['serverId', 'routingGroup', 'sessionId']), 'Failure session scope identity must bind server/group/session');
+requireValue(isDeepStrictEqual(scope?.allowed_writers, ['V3ProviderFailureSessionScope::new']), 'Failure session scope writer must be only the typed constructor');
+requireValue(includesAll(scope?.allowed_readers, [
+  'V3Error05RecoveryAdmissionWitness::new',
+  'V3ProviderFailureRuntimeHealth::record_provider_failure_record',
+  'V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope',
+  'V3ProviderFailureRuntimeHealth::session_bound_availability',
+  'V3ProviderActionProviderScope::new',
+  'V3ProviderSessionAvailabilityReader::availability',
+]), 'Failure session scope must bind typed Error/Runtime/action/availability consumers');
+const feature = functions.features?.find((row) => row.feature_id === 'v3.debug_error_foundation');
+requireValue(feature?.resource_bindings?.includes('v3.provider.failure_session_scope'), 'Function owner must bind failure session scope resource');
+requireValue(includesAll(feature?.entry_symbols, [
+  'V3ProviderFailureRuntimeHealth::record_provider_failure_record',
+  'V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope',
+  'V3ProviderFailureRuntimeHealth::session_bound_availability',
+  'V3ProviderSessionAvailabilityReader::availability',
+  'V3ProviderHealthStore::record_provider_failure_in_session',
+  'V3ProviderHealthStore::record_provider_success_in_session',
+  'V3ProviderHealthStore::availability_for_session',
+  'build_v3_provider_failure_session_scope_for_request',
+]), 'Function owner must bind scoped health and request scope operations');
+for (const symbol of ['V3ProviderHealthStore::record_provider_failure', 'V3ProviderHealthStore::record_provider_success']) {
+  requireValue(!feature?.entry_symbols?.includes(symbol), 'Function owner must not retain removed global mutation owners');
+}
+const chain = mainline.chains?.find((row) => row.chain_id === 'v3.debug_error_foundation.mainline');
+const edges = new Map((chain?.edges ?? []).map((edge) => [edge.step_id, edge]));
+for (const [id, caller, callee] of [
+  ['v3-de-13', 'V3ProviderSessionAvailabilityReader::availability', 'V3ProviderHealthStore::availability_for_session'],
+  ['v3-de-14', 'V3ProviderFailureRuntimeHealth::record_provider_failure_record', 'V3ProviderHealthStore::record_provider_failure_in_session'],
+  ['v3-de-15', 'V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope', 'V3ProviderHealthStore::record_provider_success_in_session'],
+]) {
+  const edge = edges.get(id);
+  requireValue(edge?.caller_symbol === caller && edge?.callee_symbol === callee, `${id} must bind scoped health caller/callee`);
+}
+const edge = edges.get('v3-de-18');
+requireValue(edge?.from_node === 'V3Server03HttpRequestRaw' && edge?.to_node === 'V3ProviderFailureSessionScope', 'v3-de-18 must produce typed scope from Server request');
+requireValue(edge?.caller_symbol === 'build_v3_provider_failure_session_scope_for_request' && edge?.caller_file === 'v3/crates/routecodex-v3-server/src/lib.rs', 'v3-de-18 must bind Server scope builder');
+requireValue(edge?.callee_symbol === 'V3ProviderFailureSessionScope::new' && edge?.callee_file === 'v3/crates/routecodex-v3-error/src/lib.rs' && edge?.owner_feature_id === 'v3.debug_error_foundation', 'v3-de-18 must bind Error constructor and owner');
+requireValue(includesAll(edge?.resource_flow?.consumes, ['v3.server.validated_http_input', 'v3.request.protocol_fields']), 'v3-de-18 must consume validated HTTP and protocol context');
+requireValue(edge?.resource_flow?.produces?.includes('v3.provider.failure_session_scope') && edge?.resource_flow?.side_channel_writes?.includes('v3.provider.failure_session_scope'), 'v3-de-18 must produce and write failure session scope');
+requireValue(!Object.values(edge?.resource_flow ?? {}).flat().includes('v3.provider.health_state'), 'v3-de-18 must not claim provider health mutation');
+if (failures.length) {
+  console.error('V3 provider session cooldown verification failed:');
+  failures.forEach((failure) => console.error(`- ${failure}`));
   process.exit(1);
 }
-
-console.log("V3 provider session cooldown verification passed.");
+console.log('V3 provider session cooldown declared owner/resource verification passed.');

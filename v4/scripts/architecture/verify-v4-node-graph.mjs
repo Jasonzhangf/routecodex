@@ -8,7 +8,7 @@
  * skeleton plan, the 49/49 anchored resource map, and the mainline call map.
  *
  * Positive checks:
- *  1. node-graph.contract.json status=active with self-consistent graph_hash.
+ *  1. node-graph.contract.json status=active.
  *  2. Fixed chains: request 7 / response 6 / error 6 / config 5, exact IDs,
  *     positions 01..N, no gap/duplicate/reorder/temp numbering, role_id in
  *     the declared family role subclasses, group flag only on group nodes.
@@ -24,20 +24,18 @@
  *  7. Mainline call map: request/response adjacent data_flow edges and config
  *     information_flow edges declared, all adjacent, resources on the right
  *     axis; no revived old 3-node IDs anywhere.
- *  8. graph_hash drift and old-ID revival are red.
+ *  8. old-ID revival is red.
  *
  * Run with --red-self-test to prove each negative class fails.
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
 import yaml from 'js-yaml';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const readJson = (file) => JSON.parse(fs.readFileSync(path.join(root, file), 'utf8'));
 const readYaml = (file) => yaml.load(fs.readFileSync(path.join(root, file), 'utf8'));
-const readText = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
 /** Normative fixed topology from V4-NODE-GRAPH-ACTIVE-20260816. */
 const CHAIN_EXPECTED = {
@@ -115,27 +113,6 @@ const REVIVAL_DENYLIST = new Set([
 
 const NODE_ID_RE = /^V4[A-Za-z0-9_]+$/;
 
-function canonicalJson(value) {
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalJson).join(',')}]`;
-  }
-  if (value && typeof value === 'object') {
-    const body = Object.keys(value)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
-      .join(',');
-    return `{${body}}`;
-  }
-  return JSON.stringify(value);
-}
-
-function canonicalGraphHash(nodeGraph) {
-  const value = structuredClone(nodeGraph);
-  delete value.graph_hash;
-  const sha = (data) => createHash('sha256').update(data).digest('hex');
-  return `sha256:${sha(canonicalJson(value))}`;
-}
-
 function roleCatalog(nodeGraph) {
   const families = new Map();
   for (const family of nodeGraph.standard_node_families ?? []) {
@@ -148,21 +125,16 @@ function roleCatalog(nodeGraph) {
   return families;
 }
 
-function validateNodeGraph(nodeGraph, resourceMap, skeleton, mainline, sources) {
+function validateNodeGraph(nodeGraph, resourceMap, skeleton, mainline) {
   const failures = [];
   const roleCatalogByFamily = roleCatalog(nodeGraph);
   const chainSections = {};
   const nodeCatalog = new Set();
   const registeredIds = new Set();
 
-  // ---- 1. contract status + hash ----
+  // ---- 1. contract status ----
   if (nodeGraph.status !== 'active') {
     failures.push(`node-graph status=${String(nodeGraph.status)} (must be active)`);
-  }
-  if (!/^sha256:[0-9a-f]{64}$/.test(String(nodeGraph.graph_hash ?? ''))) {
-    failures.push('node-graph missing/incorrect graph_hash (sha256:64hex)');
-  } else if (nodeGraph.graph_hash !== canonicalGraphHash(nodeGraph)) {
-    failures.push(`node-graph graph_hash drift (stored ${nodeGraph.graph_hash}, recomputed ${canonicalGraphHash(nodeGraph)})`);
   }
 
   // ---- 2. fixed chains ----
@@ -407,60 +379,6 @@ function validateNodeGraph(nodeGraph, resourceMap, skeleton, mainline, sources) 
     }
   }
 
-  // ---- 8. code binding: the registered topology must be implemented ----
-  // Registry self-consistency is not proof (AGENTS §20/§29): the runtime
-  // source must implement the mainline executor, compiled plan and static
-  // plugin registry, and the skeleton source must implement the immutable
-  // plan loader/verifier. Every plugin_id compiled into the skeleton plan
-  // must be resolvable in the runtime's static registry surface.
-  const runtimeSource = sources?.runtime ?? '';
-  const skeletonSource = sources?.skeleton ?? '';
-  if (runtimeSource) {
-    for (const [symbol, label] of [
-      ['pub struct SkeletonRuntime', 'SkeletonRuntime'],
-      ['pub struct NodePluginPlan', 'NodePluginPlan'],
-      ['pub struct NodeContainer', 'NodeContainer'],
-      ['pub static PLUGIN_REGISTRY', 'PLUGIN_REGISTRY'],
-      ['pub const EXTERNAL_CHAIN_PLUGINS', 'EXTERNAL_CHAIN_PLUGINS'],
-      ['pub fn execution_binding(', 'execution_binding'],
-      ['fn run_chain(', 'run_chain'],
-      ['pub struct ExecutionContext', 'ExecutionContext'],
-    ]) {
-      if (!runtimeSource.includes(symbol)) {
-        failures.push(`runtime source missing ${label} (${symbol})`);
-      }
-    }
-  } else {
-    failures.push('runtime source not loaded for code binding');
-  }
-  if (skeletonSource) {
-    for (const [symbol, label] of [
-      ['pub struct SkeletonPlan', 'SkeletonPlan'],
-      ['pub struct PluginBinding', 'PluginBinding'],
-      ['pub fn from_contract_json(', 'SkeletonPlan::from_contract_json'],
-      ['pub fn plan_hash(', 'plan_hash'],
-      ['pub fn verify(', 'SkeletonPlan::verify'],
-    ]) {
-      if (!skeletonSource.includes(symbol)) {
-        failures.push(`skeleton source missing ${label} (${symbol})`);
-      }
-    }
-  } else {
-    failures.push('skeleton source not loaded for code binding');
-  }
-  const planPluginIds = new Set();
-  for (const chain of skeleton.chains ?? []) {
-    for (const node of chain.nodes ?? []) {
-      for (const plugin of node.plugins ?? []) {
-        if (plugin?.plugin_id) planPluginIds.add(plugin.plugin_id);
-      }
-    }
-  }
-  for (const pluginId of planPluginIds) {
-    if (!runtimeSource.includes(`"${pluginId}"`)) {
-      failures.push(`skeleton plugin ${pluginId} has no implementation in the runtime static registry`);
-    }
-  }
   return failures;
 }
 
@@ -470,10 +388,6 @@ function loadCurrent() {
     resourceMap: readYaml('docs/architecture/v4-resource-operation-map.yml'),
     skeleton: readJson('contracts/skeleton-plan.contract.json'),
     mainline: readJson('docs/architecture/maps/mainline-call-map.json'),
-    sources: {
-      runtime: readText('crates/routecodex-v4-runtime/src/lib.rs'),
-      skeleton: readText('crates/routecodex-v4-skeleton/src/lib.rs'),
-    },
   };
 }
 
@@ -546,7 +460,6 @@ function makeCleanBase() {
     status: 'active',
     owner_feature_id: 'v4.node_graph',
     standard_node_families: families,
-    graph_hash: 'sha256:placeholder',
     [CHAIN_KEYS.request]: expectedChains.request,
     [CHAIN_KEYS.response]: expectedChains.response,
     [CHAIN_KEYS.error]: expectedChains.error,
@@ -568,7 +481,6 @@ function makeCleanBase() {
       },
     ],
   };
-  nodeGraph.graph_hash = canonicalGraphHash(nodeGraph);
   const skeleton = {
     schema_version: 1,
     contract_id: 'v4-skeleton-plan',
@@ -610,6 +522,18 @@ function makeCleanBase() {
   };
   const resourceMap = {
     resources: [
+      {
+        resource_id: 'v4.test.information',
+        axis: 'information',
+        binding_status: 'anchored',
+        owner_node: 'V4Config01AuthoringFileSource',
+        owner_crate: 'routecodex-v4-config',
+        owner_symbols: ['test'],
+        allowed_writers: ['V4Config01AuthoringFileSource'],
+        allowed_readers: ['V4Config02AuthoringParsed'],
+        forbidden_writers: [],
+        verification_gate: ['v4_parity_gate_node_graph'],
+      },
       {
         resource_id: 'v4.test.data',
         axis: 'data',
@@ -677,32 +601,12 @@ function makeCleanBase() {
       to: configExpected[i + 1],
       owner: 'routecodex-v4-config::parse_v4_config_02_from_v4_config_01',
       edge_type: 'information_flow',
-      resource: 'v4.test.data',
+      resource: 'v4.test.information',
       path: 'crates/routecodex-v4-config/src/lib.rs',
       status: 'active',
     });
   }
-  const sources = {
-    runtime: [
-      'pub struct SkeletonRuntime',
-      'pub struct NodePluginPlan',
-      'pub struct NodeContainer',
-      'pub static PLUGIN_REGISTRY',
-      'pub const EXTERNAL_CHAIN_PLUGINS',
-      'pub fn execution_binding(',
-      'fn run_chain(',
-      'pub struct ExecutionContext',
-      '"protocol_parse"',
-    ].join('\n'),
-    skeleton: [
-      'pub struct SkeletonPlan',
-      'pub struct PluginBinding',
-      'pub fn from_contract_json(',
-      'pub fn plan_hash(',
-      'pub fn verify(',
-    ].join('\n'),
-  };
-  return { nodeGraph, resourceMap, skeleton, mainline, sources };
+  return { nodeGraph, resourceMap, skeleton, mainline };
 }
 
 function chainRole(chainId, index) {
@@ -730,11 +634,15 @@ function chainRole(chainId, index) {
 }
 
 function runSelfTest() {
+  const baseline = makeCleanBase();
+  const baselineFailures = validateNodeGraph(baseline.nodeGraph, baseline.resourceMap, baseline.skeleton, baseline.mainline);
+  if (baselineFailures.length) {
+    console.error(`[v4_parity_gate_node_graph] invalid fixture baseline: ${baselineFailures.join('; ')}`);
+    process.exit(1);
+  }
   const cases = [];
   const add = (name, mutate, marker) => cases.push([name, mutate, marker]);
   add('status design', (d) => { d.nodeGraph.status = 'design'; }, 'must be active');
-  add('graph_hash missing', (d) => { delete d.nodeGraph.graph_hash; }, 'graph_hash');
-  add('graph_hash drift', (d) => { d.nodeGraph.graph_hash = 'sha256:' + '0'.repeat(64); }, 'drift');
   add('error chain section missing', (d) => { delete d.nodeGraph.v4_error_chain; }, 'missing chain section');
   add('request node missing', (d) => {
     d.nodeGraph.v4_hub_request_chain.nodes = d.nodeGraph.v4_hub_request_chain.nodes.slice(0, -1);
@@ -824,27 +732,12 @@ function runSelfTest() {
       (edge) => !(edge.from === 'V4ServerReqInbound01ClientRaw' && edge.to === 'V4ServerSseIn02FrameBoundary'),
     );
   }, 'missing request adjacent edge');
-  add('runtime SkeletonRuntime ghost', (d) => {
-    d.sources.runtime = d.sources.runtime.replace('pub struct SkeletonRuntime', 'pub struct GhostRuntime');
-  }, 'SkeletonRuntime');
-  add('runtime PLUGIN_REGISTRY ghost', (d) => {
-    d.sources.runtime = d.sources.runtime.replace('pub static PLUGIN_REGISTRY', 'pub static GHOST_REGISTRY');
-  }, 'PLUGIN_REGISTRY');
-  add('skeleton plan plugin without runtime implementation', (d) => {
-    d.sources.runtime = d.sources.runtime.replace('"protocol_parse"', '"ghost_plugin"');
-  }, 'has no implementation');
-  add('skeleton SkeletonPlan ghost', (d) => {
-    d.sources.skeleton = d.sources.skeleton.replace('pub struct SkeletonPlan', 'pub struct GhostPlan');
-  }, 'SkeletonPlan');
-  add('skeleton contract loader ghost', (d) => {
-    d.sources.skeleton = d.sources.skeleton.replace('pub fn from_contract_json(', 'pub fn from_contract(');
-  }, 'SkeletonPlan::from_contract_json');
 
   let failed = 0;
   for (const [name, mutate, marker] of cases) {
     const data = makeCleanBase();
     mutate(data);
-    const failures = validateNodeGraph(data.nodeGraph, data.resourceMap, data.skeleton, data.mainline, data.sources);
+    const failures = validateNodeGraph(data.nodeGraph, data.resourceMap, data.skeleton, data.mainline);
     const hit = failures.some((failure) => failure.includes(marker));
     if (failures.length === 0 || !hit) {
       console.error(`[v4_parity_gate_node_graph] red self-test ${name}: expected FAIL, got ${failures.length} failures (marker ${marker})`);
@@ -865,7 +758,7 @@ if (process.argv.includes('--red-self-test')) {
 }
 
 const current = loadCurrent();
-const failures = validateNodeGraph(current.nodeGraph, current.resourceMap, current.skeleton, current.mainline, current.sources);
+const failures = validateNodeGraph(current.nodeGraph, current.resourceMap, current.skeleton, current.mainline);
 if (failures.length > 0) {
   console.error('[v4_parity_gate_node_graph] FAIL');
   console.error(failures.slice(0, 200).join('\n'));

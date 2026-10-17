@@ -1,9 +1,9 @@
 // Parity-gate helper library: matrix/semantic/shape/superset contract checks.
 // Split from verify-v3-protocol-conversion-field-parity.mjs to satisfy the
-// v3-file-size ratchet. Helpers close over the gate context (failures/paths/text).
+// v3-file-size ratchet. Helpers close over the parsed gate context.
 
 export function attachParityHelpers(context, matrixRef) {
-  const { failures, paths, text, operationFieldProfiles } = context;
+  const { failures, paths, operationFieldProfiles } = context;
 
 function requireMatrixProtocols(matrix, protocols) {
   for (const protocol of protocols) {
@@ -689,51 +689,6 @@ function requireShapeCaseFields(groupId, kind, item, allowedOwnerFiles) {
   if (item?.required_test && !/^[a-z0-9_]+$/u.test(item.required_test)) {
     failures.push(`${paths.fieldMatrix}: ${groupId} shape branch required_test must be a concrete Rust test symbol, got ${item.required_test}`);
   }
-  if (item?.protocol === 'anthropic' && item?.owner_file === paths.anthropicCodec) {
-    for (const phrase of [
-      'collect_v3_anthropic_request_shape_branch_semantics',
-      'V3AnthropicChatShapeBranchSemantic',
-      'request.messages[].content[].image.source.url',
-      'request.messages[].content[].image.source.data',
-      'request.messages[].content[].image.source.media_type',
-      'ChatImageUrlUrl',
-      'ChatInlineMediaData',
-      'ChatMediaMimeType',
-    ]) requireText(text.anthropicCodec, paths.anthropicCodec, phrase);
-    requireNear(text.anthropicCodec, paths.anthropicCodec, '"request.messages[].content[].image.source.url"', 'ChatImageUrlUrl');
-    requireNear(text.anthropicCodec, paths.anthropicCodec, '"request.messages[].content[].image.source.data"', 'ChatInlineMediaData');
-    requireNear(text.anthropicCodec, paths.anthropicCodec, '"request.messages[].content[].image.source.media_type"', 'ChatMediaMimeType');
-    forbidNear(text.anthropicCodec, paths.anthropicCodec, '"request.messages[].content[].image.source.url"', 'ChatInlineMediaData');
-    forbidNear(text.anthropicCodec, paths.anthropicCodec, '"request.messages[].content[].image.source.data"', 'ChatMediaMimeType');
-    if (item?.required_test) requireText(text.anthropicCodecTests, paths.anthropicCodecTests, item.required_test);
-    requireText(text.mainlineMap, paths.mainlineMap, 'v3-protocol-anthropic-shape-branch-01');
-    requireText(text.mainlineMap, paths.mainlineMap, 'collect_v3_anthropic_request_shape_branch_semantics');
-    requireText(text.functionMap, paths.functionMap, 'collect_v3_anthropic_request_shape_branch_semantics');
-    requireText(text.verificationMap, paths.verificationMap, 'collect_v3_anthropic_request_shape_branch_semantics');
-  }
-  if (item?.protocol === 'gemini' && item?.owner_file === paths.geminiCodec) {
-    for (const phrase of [
-      'collect_v3_gemini_request_shape_branch_semantics',
-      'V3GeminiChatShapeBranchSemantic',
-      'request.contents[].parts[].inlineData.data',
-      'request.contents[].parts[].inlineData.mimeType',
-      'request.contents[].parts[].fileData.mimeType',
-      'request.contents[].parts[].fileData.fileUri',
-    ]) requireText(text.geminiCodec, paths.geminiCodec, phrase);
-    requireNear(text.geminiCodec, paths.geminiCodec, '"request.contents[].parts[].inlineData.data"', 'ChatInlineMediaData');
-    requireNear(text.geminiCodec, paths.geminiCodec, '"request.contents[].parts[].inlineData.mimeType"', 'ChatMediaMimeType');
-    requireNear(text.geminiCodec, paths.geminiCodec, '"request.contents[].parts[].fileData.mimeType"', 'ChatMediaMimeType');
-    requireNear(text.geminiCodec, paths.geminiCodec, '"request.contents[].parts[].fileData.fileUri"', 'ChatFileFileUrl');
-    forbidNear(text.geminiCodec, paths.geminiCodec, '"request.contents[].parts[].inlineData.data"', 'ChatImageUrlUrl');
-    forbidNear(text.geminiCodec, paths.geminiCodec, '"request.contents[].parts[].inlineData.data"', 'ChatFileFileData');
-    forbidNear(text.geminiCodec, paths.geminiCodec, '"request.contents[].parts[].fileData.fileUri"', 'ChatImageUrlUrl');
-    forbidNear(text.geminiCodec, paths.geminiCodec, '"request.contents[].parts[].fileData.fileUri"', 'ChatFileFileId');
-    if (item?.required_test) requireText(text.geminiTests, paths.geminiTests, item.required_test);
-    requireText(text.mainlineMap, paths.mainlineMap, 'v3-protocol-gemini-shape-branch-01');
-    requireText(text.mainlineMap, paths.mainlineMap, 'collect_v3_gemini_request_shape_branch_semantics');
-    requireText(text.functionMap, paths.functionMap, 'collect_v3_gemini_request_shape_branch_semantics');
-    requireText(text.verificationMap, paths.verificationMap, 'collect_v3_gemini_request_shape_branch_semantics');
-  }
 }
 
 function requireGeminiToolConfigSemanticContract(matrix) {
@@ -788,38 +743,6 @@ function requireGeminiToolConfigSemanticContract(matrix) {
     if (!associations.has('tool_config')) failures.push(`${paths.fieldMatrix}: request.tool_choice.allowed_function_names must bind tool_config extension association`);
   }
 
-  for (const phrase of [
-    'collect_v3_gemini_request_tool_config_semantics',
-    'V3GeminiChatToolConfigSemantic',
-    'V3GeminiChatToolChoicePolicy',
-    'V3GeminiToolConfigSemanticValue',
-    'ToolConfigAllowedFunctionNameNotString',
-    'request.toolConfig.functionCallingConfig.mode',
-    'request.toolConfig.functionCallingConfig.allowedFunctionNames',
-    'ChatToolChoicePolicy',
-    'ChatToolChoiceAllowedFunctionNames',
-  ]) requireText(text.geminiCodec, paths.geminiCodec, phrase);
-  requireNear(text.geminiCodec, paths.geminiCodec, '"request.toolConfig.functionCallingConfig.mode"', 'ChatToolChoicePolicy');
-  requireNear(text.geminiCodec, paths.geminiCodec, '"request.toolConfig.functionCallingConfig.allowedFunctionNames"', 'ChatToolChoiceAllowedFunctionNames');
-  forbidNear(text.geminiCodec, paths.geminiCodec, '"request.toolConfig.functionCallingConfig.allowedFunctionNames"', 'ChatToolDeclarationName');
-  forbidNear(text.geminiCodec, paths.geminiCodec, '"request.toolConfig.functionCallingConfig.mode"', 'ChatParallelToolCalls');
-  for (const testSymbol of [
-    'gemini_tool_config_mode_maps_to_chat_tool_choice_policy',
-    'gemini_tool_config_allowed_function_names_maps_to_allowed_tool_choice_names',
-    'gemini_tool_config_allowed_function_names_do_not_become_tool_declarations',
-    'gemini_tool_config_mode_does_not_become_parallel_tool_calls_without_value_contract',
-    'gemini_tool_config_malformed_allowed_function_names_fail_closed',
-    'gemini_tool_config_semantics_do_not_mutate_provider_wire_payload',
-  ]) requireText(text.geminiTests, paths.geminiTests, testSymbol);
-  for (const [owner, body] of [
-    [paths.mainlineMap, text.mainlineMap],
-    [paths.functionMap, text.functionMap],
-    [paths.verificationMap, text.verificationMap],
-  ]) {
-    for (const phrase of ['v3-protocol-gemini-tool-config-01', 'collect_v3_gemini_request_tool_config_semantics']) {
-      requireText(body, owner, phrase);
-    }
-  }
 }
 
 
@@ -877,37 +800,6 @@ function requireGeminiThinkingConfigSemanticContract(matrix) {
     if (field !== 'request.reasoning_effort' && row.mapping_status !== 'extension_added') failures.push(`${paths.fieldMatrix}: ${field} must be extension_added`);
     if (field !== 'request.reasoning_effort' && row.current_impl !== 'partial') failures.push(`${paths.fieldMatrix}: ${field} current_impl must be partial after Gemini source closeout`);
   }
-  for (const phrase of [
-    'collect_v3_gemini_request_thinking_config_semantics',
-    'V3GeminiChatThinkingConfigSemantic',
-    'V3GeminiThinkingConfigSemanticValue',
-    'ThinkingConfigBudgetNotInteger',
-    'request.generationConfig.thinkingConfig.includeThoughts',
-    'request.generationConfig.thinkingConfig.thinkingBudget',
-    'request.generationConfig.thinkingConfig.thinkingLevel',
-    'ChatReasoningIncludeThoughts',
-    'ChatReasoningBudgetTokens',
-    'ChatReasoningLevel',
-  ]) requireText(text.geminiCodec, paths.geminiCodec, phrase);
-  requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.thinkingConfig.includeThoughts"', 'ChatReasoningIncludeThoughts');
-  requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.thinkingConfig.thinkingBudget"', 'ChatReasoningBudgetTokens');
-  requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.thinkingConfig.thinkingLevel"', 'ChatReasoningLevel');
-  forbidNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.thinkingConfig.thinkingBudget"', 'ChatMaxOutputTokens');
-  forbidNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.thinkingConfig.includeThoughts"', 'ChatResponseReasoningContent');
-  forbidNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.thinkingConfig.thinkingLevel"', 'ChatReasoningBudgetTokens');
-  for (const testSymbol of [
-    'gemini_thinking_config_include_thoughts_maps_to_reasoning_visibility_request',
-    'gemini_thinking_config_budget_maps_to_reasoning_budget_request',
-    'gemini_thinking_config_level_maps_to_reasoning_effort_level_request',
-    'gemini_thinking_budget_does_not_become_max_output_tokens',
-    'gemini_include_thoughts_does_not_become_response_reasoning_content',
-    'gemini_thinking_level_does_not_collapse_to_numeric_budget',
-    'gemini_thinking_config_malformed_fields_fail_closed',
-    'gemini_thinking_config_semantics_do_not_mutate_provider_wire_payload',
-  ]) requireText(text.geminiTests, paths.geminiTests, testSymbol);
-  for (const [owner, body] of [[paths.mainlineMap, text.mainlineMap], [paths.functionMap, text.functionMap], [paths.verificationMap, text.verificationMap]]) {
-    for (const phrase of ['v3-protocol-gemini-thinking-config-01', 'collect_v3_gemini_request_thinking_config_semantics']) requireText(body, owner, phrase);
-  }
 }
 
 
@@ -933,69 +825,6 @@ function requireGeminiGenerationConfigScalarSemanticContract(matrix) {
     for (const source of expected) if (!gemini.includes(source)) failures.push(`${paths.fieldMatrix}: ${field} must map Gemini ${source}`);
     for (const source of forbidden) if (gemini.includes(source)) failures.push(`${paths.fieldMatrix}: ${field} must not collapse Gemini ${source}`);
     if (row.current_impl !== status) failures.push(`${paths.fieldMatrix}: ${field} current_impl must be ${status} after Gemini generationConfig scalar source closeout`);
-  }
-  for (const phrase of [
-    'collect_v3_gemini_request_generation_config_scalar_semantics',
-    'V3GeminiChatGenerationConfigScalarSemantic',
-    'V3GeminiGenerationConfigScalarSemanticValue',
-    'GenerationConfigScalarNotInteger',
-    'GenerationConfigStopSequenceNotString',
-    'request.generationConfig.temperature',
-    'request.generationConfig.topP',
-    'request.generationConfig.topK',
-    'request.generationConfig.maxOutputTokens',
-    'request.generationConfig.stopSequences',
-    'request.generationConfig.frequencyPenalty',
-    'request.generationConfig.presencePenalty',
-    'request.generationConfig.responseLogprobs',
-    'request.generationConfig.logprobs',
-    'request.generationConfig.seed',
-    'ChatTemperature',
-    'ChatTopP',
-    'ChatTopK',
-    'ChatMaxCompletionTokens',
-    'ChatStop',
-    'ChatFrequencyPenalty',
-    'ChatPresencePenalty',
-    'ChatLogprobs',
-    'ChatTopLogprobs',
-    'ChatSeed',
-  ]) requireText(text.geminiCodec, paths.geminiCodec, phrase);
-  requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.temperature"', 'ChatTemperature');
-  requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.topP"', 'ChatTopP');
-  requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.topK"', 'ChatTopK');
-  requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.maxOutputTokens"', 'ChatMaxCompletionTokens');
-  requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.stopSequences"', 'ChatStop');
-  requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.frequencyPenalty"', 'ChatFrequencyPenalty');
-  requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.presencePenalty"', 'ChatPresencePenalty');
-  requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.responseLogprobs"', 'ChatLogprobs');
-  requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.logprobs"', 'ChatTopLogprobs');
-  requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.seed"', 'ChatSeed');
-  forbidNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.topP"', 'ChatTopK');
-  forbidNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.topK"', 'ChatTopP');
-  forbidNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.maxOutputTokens"', 'ChatReasoningBudgetTokens');
-  forbidNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.stopSequences"', 'ChatFinishReason');
-  forbidNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.frequencyPenalty"', 'ChatPresencePenalty');
-  forbidNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.responseLogprobs"', 'ChatTopLogprobs');
-  forbidNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.logprobs"', 'ChatLogprobs');
-  forbidNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.seed"', 'ChatTopLogprobs');
-  for (const testSymbol of [
-    'gemini_generation_config_temperature_maps_to_chat_temperature',
-    'gemini_generation_config_top_p_maps_to_chat_top_p',
-    'gemini_generation_config_top_k_maps_to_chat_top_k_extension',
-    'gemini_generation_config_max_output_tokens_maps_to_chat_max_completion_tokens',
-    'gemini_generation_config_stop_sequences_maps_to_chat_stop',
-    'gemini_generation_config_frequency_penalty_maps_to_chat_frequency_penalty',
-    'gemini_generation_config_presence_penalty_maps_to_chat_presence_penalty',
-    'gemini_generation_config_response_logprobs_maps_to_chat_logprobs_request',
-    'gemini_generation_config_logprobs_maps_to_chat_top_logprobs_count',
-    'gemini_generation_config_seed_maps_to_chat_seed',
-    'gemini_generation_config_penalties_logprobs_and_seed_do_not_collapse',
-    'gemini_generation_config_scalar_malformed_fields_fail_closed',
-    'gemini_generation_config_scalar_semantics_do_not_mutate_provider_wire_payload',
-  ]) requireText(text.geminiTests, paths.geminiTests, testSymbol);
-  for (const [owner, body] of [[paths.mainlineMap, text.mainlineMap], [paths.functionMap, text.functionMap], [paths.verificationMap, text.verificationMap]]) {
-    for (const phrase of ['v3-protocol-gemini-generation-config-scalar-01', 'collect_v3_gemini_request_generation_config_scalar_semantics']) requireText(body, owner, phrase);
   }
 }
 
@@ -1208,75 +1037,6 @@ function classificationBucketForField(matrix, protocol, field) {
   return 'unclassified';
 }
 
-function requireText(source, owner, phrase) {
-  if (!source.includes(phrase)) failures.push(`${owner}: missing ${phrase}`);
-}
-function requireNear(source, owner, anchor, phrase, window = 260) {
-  const index = source.indexOf(anchor);
-  if (index < 0) {
-    failures.push(`${owner}: missing ${anchor}`);
-    return;
-  }
-  const segment = source.slice(index, index + window);
-  if (!segment.includes(phrase)) failures.push(`${owner}: ${anchor} must map near ${phrase}`);
-}
-function forbidNear(source, owner, anchor, phrase, window = 260) {
-  const index = source.indexOf(anchor);
-  if (index < 0) {
-    failures.push(`${owner}: missing ${anchor}`);
-    return;
-  }
-  const segment = source.slice(index, index + window);
-  if (segment.includes(phrase)) failures.push(`${owner}: ${anchor} must not collapse near ${phrase}`);
-}
-function forbid(source, owner, patterns) {
-  for (const pattern of patterns) if (pattern.test(source)) failures.push(`${owner}: forbidden ${pattern}`);
-}
-function requireOrder(source, owner, phrases) {
-  let cursor = 0;
-  for (const phrase of phrases) {
-    const index = source.indexOf(phrase, cursor);
-    if (index < 0) {
-      failures.push(`${owner}: missing or reordered ${phrase}`);
-      return;
-    }
-    cursor = index + phrase.length;
-  }
-}
-function functionSlice(source, owner, start, end) {
-  const startIndex = source.indexOf(start);
-  if (startIndex < 0) {
-    failures.push(`${owner}: missing ${start}`);
-    return '';
-  }
-  const endIndex = source.indexOf(end, startIndex + start.length);
-  if (endIndex < 0) return source.slice(startIndex);
-  return source.slice(startIndex, endIndex);
-}
-function featureBlock(source, marker) {
-  const start = source.indexOf(marker);
-  if (start < 0) {
-    failures.push(`feature block missing ${marker}`);
-    return '';
-  }
-  // function map 的顶层 feature 项是 0 缩进（`- feature_id:`）；下一个
-  // feature 用 0 或 2 空格缩进都算作块边界。
-  let next = -1;
-  for (const candidate of ['\n- feature_id:', '\n  - feature_id:']) {
-    const found = source.indexOf(candidate, start + marker.length);
-    if (found >= 0 && (next < 0 || found < next)) {
-      next = found;
-    }
-  }
-  return next < 0 ? source.slice(start) : source.slice(start, next);
-}
-function sectionSlice(source, startMarker, endMarker) {
-  const start = source.indexOf(startMarker);
-  if (start < 0) return '';
-  const end = source.indexOf(endMarker, start + startMarker.length);
-  return end < 0 ? source.slice(start) : source.slice(start, end);
-}
-
   return {
     requireMatrixProtocols,
     requireMatrixFields,
@@ -1309,13 +1069,5 @@ function sectionSlice(source, startMarker, endMarker) {
     collectSourceInventoryFields,
     extensionIdsForField,
     classificationBucketForField,
-    requireText,
-    requireNear,
-    forbidNear,
-    forbid,
-    requireOrder,
-    functionSlice,
-    sectionSlice,
-    featureBlock,
   };
 }
