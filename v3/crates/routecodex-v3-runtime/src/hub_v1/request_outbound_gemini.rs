@@ -207,7 +207,8 @@ fn project_gemini_native_messages(
         let role = message_row
             .get("role")
             .and_then(Value::as_str)
-            .unwrap_or("user").to_owned();
+            .unwrap_or("user")
+            .to_owned();
         let mut records = take_gemini_native_records(&mut message_row)?;
         let container = records
             .iter()
@@ -232,8 +233,17 @@ fn project_gemini_native_messages(
                 &mut native_contents,
                 content_index,
                 native_role,
-                container.as_ref().and_then(|record| record.get("role_present")).and_then(Value::as_bool).unwrap_or(false),
-                container.as_ref().and_then(|record| record.get("fields")).and_then(Value::as_object).cloned().unwrap_or_default(),
+                container
+                    .as_ref()
+                    .and_then(|record| record.get("role_present"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                container
+                    .as_ref()
+                    .and_then(|record| record.get("fields"))
+                    .and_then(Value::as_object)
+                    .cloned()
+                    .unwrap_or_default(),
                 (part_index, function_response),
             );
             continue;
@@ -378,7 +388,9 @@ fn add_gemini_native_content<'a>(
         fields,
         parts: Vec::new(),
     });
-    contents.last_mut().expect("native content was just inserted")
+    contents
+        .last_mut()
+        .expect("native content was just inserted")
 }
 
 fn project_gemini_native_function_response(
@@ -448,8 +460,7 @@ fn project_gemini_native_function_response(
         .and_then(Value::as_array)
         .is_some_and(|containers| {
             containers.iter().any(|container| {
-                container.get("source_path")
-                    == Some(&json!(["functionResponse", "parts"]))
+                container.get("source_path") == Some(&json!(["functionResponse", "parts"]))
                     && container.get("empty").and_then(Value::as_bool) == Some(true)
             })
         })
@@ -638,7 +649,10 @@ fn restore_gemini_native_request(
                     == Some(true)
                 {
                     if let Some(parameters) = declaration.pointer("/function/parameters").cloned() {
-                        if let Some(function) = declaration.get_mut("function").and_then(Value::as_object_mut) {
+                        if let Some(function) = declaration
+                            .get_mut("function")
+                            .and_then(Value::as_object_mut)
+                        {
                             function.insert("parametersJsonSchema".to_string(), parameters);
                             function.remove("parameters");
                         }
@@ -649,16 +663,23 @@ fn restore_gemini_native_request(
                     let function = declaration.get("function").cloned().unwrap_or(declaration);
                     let mut entry = function;
                     if let Some(fields) = association.get("fields").and_then(Value::as_object) {
-                        let Some(entry) = entry.as_object_mut() else { continue };
+                        let Some(entry) = entry.as_object_mut() else {
+                            continue;
+                        };
                         for (key, value) in fields {
                             entry.entry(key.clone()).or_insert_with(|| value.clone());
                         }
                     }
-                    let tool_index = association.get("tool_index").and_then(Value::as_u64).unwrap_or(0) as usize;
+                    let tool_index = association
+                        .get("tool_index")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0) as usize;
                     while restored_tools.len() <= tool_index {
                         restored_tools.push(json!({}));
                     }
-                    if let Some(tool_fields) = association.get("tool_fields").and_then(Value::as_object) {
+                    if let Some(tool_fields) =
+                        association.get("tool_fields").and_then(Value::as_object)
+                    {
                         let tool = restored_tools[tool_index].as_object_mut().unwrap();
                         for (key, value) in tool_fields {
                             if key != "functionDeclarations" {
@@ -667,7 +688,9 @@ fn restore_gemini_native_request(
                         }
                     }
                     let tool = restored_tools[tool_index].as_object_mut().unwrap();
-                    let declarations = tool.entry("functionDeclarations").or_insert_with(|| json!([]));
+                    let declarations = tool
+                        .entry("functionDeclarations")
+                        .or_insert_with(|| json!([]));
                     let declarations = declarations.as_array_mut().unwrap();
                     while declarations.len() <= declaration_index {
                         declarations.push(Value::Null);
@@ -692,18 +715,16 @@ fn restore_gemini_native_request(
         .and_then(Value::as_object)
     {
         let mut mapped = Map::new();
-        for (canonical, native) in [
-            ("temperature", "temperature"),
-            ("top_p", "topP"),
-            ("top_k", "topK"),
-            ("max_completion_tokens", "maxOutputTokens"),
-            ("stop", "stopSequences"),
-            ("frequency_penalty", "frequencyPenalty"),
-            ("presence_penalty", "presencePenalty"),
-            ("logprobs", "responseLogprobs"),
-            ("top_logprobs", "logprobs"),
-            ("seed", "seed"),
-        ] {
+        for canonical in super::gemini_request_normalization::V3_GEMINI_GENERATION_SCALAR_FIELDS {
+            let Some(native) = crate::protocol_tables::map_field(
+                "gemini",
+                canonical,
+                crate::protocol_tables::V3TableDirection::Outbound,
+            )
+            .map_err(|error| format!("Gemini field_map lookup failed: {error}"))?
+            else {
+                continue;
+            };
             if let Some(value) = row.remove(canonical) {
                 mapped.insert(native.to_string(), value);
             }
@@ -810,25 +831,56 @@ fn apply_gemini_part_bindings(
     record: &Value,
 ) -> Result<(), String> {
     let mut restored = Value::Object(std::mem::take(target));
-    for binding in record.get("bindings").and_then(Value::as_array).into_iter().flatten() {
-        let source: Vec<&str> = binding.get("source_path").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect();
-        let path: Vec<&str> = binding.get("canonical_path").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect();
-        let Some(value) = value_at_path(canonical, &path) else { continue };
+    for binding in record
+        .get("bindings")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let source: Vec<&str> = binding
+            .get("source_path")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        let path: Vec<&str> = binding
+            .get("canonical_path")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        let Some(value) = value_at_path(canonical, &path) else {
+            continue;
+        };
         let value = match binding.get("encoding").and_then(Value::as_str) {
             Some("json_text") => match value {
                 Value::String(text) => serde_json::from_str(text).unwrap_or_else(|_| value.clone()),
                 _ => value.clone(),
             },
             Some("inline_data_uri" | "file_data_uri") => {
-                let uri = value.as_str().ok_or("canonical media URI must be a string")?;
-                let (mime, data) = uri.strip_prefix("data:").and_then(|uri| uri.split_once(";base64,")).ok_or("canonical inline media URI is not representable")?;
-                if source.last() == Some(&"mimeType") { json!(mime) } else { json!(data) }
+                let uri = value
+                    .as_str()
+                    .ok_or("canonical media URI must be a string")?;
+                let (mime, data) = uri
+                    .strip_prefix("data:")
+                    .and_then(|uri| uri.split_once(";base64,"))
+                    .ok_or("canonical inline media URI is not representable")?;
+                if source.last() == Some(&"mimeType") {
+                    json!(mime)
+                } else {
+                    json!(data)
+                }
             }
             _ => value.clone(),
         };
         insert_at_path(&mut restored, &source, value);
     }
-    *target = restored.as_object_mut().map(std::mem::take).ok_or("native part must remain an object")?;
+    *target = restored
+        .as_object_mut()
+        .map(std::mem::take)
+        .ok_or("native part must remain an object")?;
     Ok(())
 }
 
@@ -851,7 +903,11 @@ fn insert_at_path(target: &mut Value, path: &[&str], value: Value) {
     for segment in parents {
         let next = current
             .as_object_mut()
-            .map(|object| object.entry((*segment).to_string()).or_insert_with(|| json!({})))
+            .map(|object| {
+                object
+                    .entry((*segment).to_string())
+                    .or_insert_with(|| json!({}))
+            })
             .expect("native binding parent must be an object");
         current = next;
     }
@@ -1017,14 +1073,17 @@ fn project_gemini_tool_choice(
     tool_choice: Value,
 ) -> Result<(), String> {
     let (mode, allowed_names) = match tool_choice {
-        Value::String(value) => (gemini_tool_choice_mode(&value), Vec::new()),
+        Value::String(value) => (gemini_tool_choice_mode(&value)?, Vec::new()),
         Value::Object(object) => {
             validate_gemini_tool_choice_object_shape(&object)?;
-            let mode = object
+            let mode = match object
                 .get("type")
                 .and_then(Value::as_str)
                 .or_else(|| object.get("mode").and_then(Value::as_str))
-                .and_then(gemini_tool_choice_mode);
+            {
+                Some(value) => gemini_tool_choice_mode(value)?,
+                None => None,
+            };
             let allowed_names = object
                 .get("allowed_function_names")
                 .map(|value| ("allowed_function_names", value))
@@ -1140,11 +1199,14 @@ fn gemini_nonempty_string(value: &Value, path: &str) -> Result<String, String> {
         .ok_or_else(|| format!("MalformedOutboundField target_protocol=gemini path={path}"))
 }
 
-fn gemini_tool_choice_mode(value: &str) -> Option<String> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "auto" => Some("AUTO".to_string()),
-        "none" => Some("NONE".to_string()),
-        "required" | "any" | "tool" | "function" => Some("ANY".to_string()),
-        _ => None,
-    }
+fn gemini_tool_choice_mode(value: &str) -> Result<Option<String>, String> {
+    let normalized = value.trim().to_ascii_lowercase();
+    crate::protocol_tables::map_value(
+        crate::protocol_tables::V3TableKind::ToolChoice,
+        "gemini",
+        &normalized,
+        crate::protocol_tables::V3TableDirection::Outbound,
+    )
+    .map_err(|error| format!("Gemini tool_choice_map lookup failed: {error}"))
+    .map(|mode| mode.map(str::to_owned))
 }

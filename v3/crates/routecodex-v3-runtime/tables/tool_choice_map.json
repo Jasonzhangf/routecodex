@@ -2,13 +2,18 @@
   "table_id": "tool_choice_map",
   "kind": "protocol_value_map",
   "protocols": ["responses", "anthropic", "gemini"],
-  "description": "tool_choice 类型双向映射。数据来源：responses_to_anthropic.rs:997-1047 (responses_tool_choice_as_anthropic_tool_choice)、anthropic_codec_tool_projection.rs:23-33。hub 轴为 canonical tool_choice 语义；responses 'function'/'tool'/'custom' 入站均归一化为 hub 'tool'（拆行表达，各自唯一）；出站 hub 'tool' -> responses 'function'（代码实际产出）。对象变换（name 提取、disable_parallel_tool_use 透传）由 transform 兜底。Gemini toolConfig.functionCallingConfig.mode 登记 auto/none/required -> AUTO/NONE/ANY；hub 'tool'（指定函数）在 Gemini 需 mode=ANY 叠加 allowedFunctionNames 容器变换，未注册 transform，故不登记 gemini 列。",
+  "description": "tool_choice 类型双向映射。Gemini 入站 ANY 归一化为 required，出站 any/tool/function 是模式别名；命名工具的 allowedFunctionNames 容器仍由既有 owner 构造。对象变换不属于此值映射表。",
   "values": [
     { "hub": "auto", "responses": "auto", "anthropic": "auto", "gemini": "AUTO" },
     { "hub": "none", "responses": "none", "anthropic": "none", "gemini": "NONE" },
-    { "hub": "required", "responses": "required", "anthropic": "any", "gemini": "ANY" },
-    { "hub": "tool", "responses": "function", "anthropic": "tool" },
+    { "hub": "required", "direction": "outbound", "responses": "required", "anthropic": "any", "gemini": "ANY" },
+    { "hub": "required", "direction": "inbound", "responses": "required", "anthropic": "any", "gemini": "ANY" },
+    { "hub": "tool", "direction": "outbound", "responses": "function", "anthropic": "tool", "gemini": "ANY" },
+    { "hub": "tool", "direction": "inbound", "responses": "function" },
     { "hub": "tool", "direction": "inbound", "responses": "tool" },
-    { "hub": "tool", "direction": "inbound", "responses": "custom" }
+    { "hub": "tool", "direction": "inbound", "responses": "custom" },
+    { "hub": "tool", "direction": "inbound", "anthropic": "tool" },
+    { "hub": "any", "direction": "outbound", "gemini": "ANY" },
+    { "hub": "function", "direction": "outbound", "gemini": "ANY" }
   ]
 }

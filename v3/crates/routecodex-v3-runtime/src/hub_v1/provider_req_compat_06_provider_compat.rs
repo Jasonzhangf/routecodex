@@ -1,14 +1,7 @@
-use super::request_outbound_format::{
-    project_outbound_payload_for_selected_target_protocol_with_drops, V3OutboundTargetProtocol,
-};
 use super::{
-    build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops,
-    build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording,
-    build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options,
-    classify_v3_provider_compat_error, encode_v3_responses_semantic_as_anthropic_request,
-    provider_protocol_compat_id, ProviderReqCompat06Projected, V3HubOpaquePayload,
-    V3HubProviderWireProtocol, V3HubReqOutbound07ProviderSemantic, V3ProviderCompatError,
-    V3ProviderCompatProfileId,
+    classify_v3_provider_compat_error, provider_protocol_compat_id, ProviderReqCompat06Projected,
+    V3HubOpaquePayload, V3HubProviderWireProtocol, V3HubReqOutbound07ProviderSemantic,
+    V3ProviderCompatError, V3ProviderCompatProfileId,
 };
 use provider_compat_core::opencode_zen_tcm::{
     apply_opencode_zen_tcm_request, compile_opencode_zen_tcm_bridge, OpencodeZenTcmBridgeBinding,
@@ -22,10 +15,7 @@ use provider_compat_core::{
 };
 use serde_json::Value;
 
-use crate::projection_drop_log::{V3ProjectionDropContext, V3ProjectionDropRecord};
-use crate::selected_provider_model_binding::{
-    bind_v3_selected_provider_model, V3SelectedProviderModelBinding,
-};
+use crate::projection_drop_log::V3ProjectionDropRecord;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProviderReqCompat06ProviderCompat {
@@ -54,7 +44,7 @@ pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
         && input.provider_protocol == V3HubProviderWireProtocol::OpenAiChat
         && input.previous.previous.execution == super::V3HubExecutionMode::Relay
     {
-        compile_opencode_zen_tcm_bridge(input.provider_semantic_payload(), &payload)
+        compile_opencode_zen_tcm_bridge(input.governed_payload(), &payload)
     } else {
         None
     };
@@ -86,21 +76,17 @@ pub(super) fn apply_v3_provider_req_compat(
     ),
     V3ProviderCompatError,
 > {
-    let (payload, drops, namespace_registry) =
-        build_v3_provider_standard_protocol_payload_from_req07(input).map_err(|reason| {
-            classify_v3_provider_compat_error("request_protocol", profile, reason)
-        })?;
     let (payload, custom_tool_function_binding) = apply_v3_provider_req_compat_to_provider_payload(
-        payload,
+        input.provider_semantic_payload().clone(),
         input.selected_target(),
         input.provider_protocol,
         profile,
     )?;
     Ok((
         payload,
-        drops,
+        input.drops.clone(),
         custom_tool_function_binding,
-        namespace_registry,
+        input.namespace_registry.clone(),
     ))
 }
 
@@ -189,93 +175,6 @@ use provider_req_compat_06_output_cap::project_provider_declared_output_cap;
 mod provider_req_compat_06_reasoning_effort;
 use provider_req_compat_06_reasoning_effort::project_reasoning_effort_for_selected_target;
 
-fn build_v3_provider_standard_protocol_payload_from_req07(
-    input: &V3HubReqOutbound07ProviderSemantic,
-) -> Result<
-    (
-        Value,
-        Vec<V3ProjectionDropRecord>,
-        provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry,
-    ),
-    String,
-> {
-    let selected = input.selected_target();
-    let mut drops = Vec::new();
-    let namespace_registry =
-        provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::from_request(
-            input.provider_semantic_payload(),
-            &provider_protocol_compat_id(input.provider_protocol),
-        )?;
-    let mut provider_protocol_payload = match input.provider_protocol {
-        V3HubProviderWireProtocol::OpenAiChat => {
-            let (payload, openai_chat_drops) =
-                build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording(
-                    input.provider_semantic_payload(),
-                    selected.web_search_execution_mode,
-                    selected
-                        .model_capabilities
-                        .iter()
-                        .any(|capability| capability == "web_search"),
-                    &V3ProjectionDropContext::disabled(),
-                )?;
-            drops.extend(openai_chat_drops);
-            payload
-        }
-        V3HubProviderWireProtocol::Responses => {
-            // The `responses:custom-tool-function` compat profile owns the
-            // custom→function projection, so the standard Responses projection
-            // must keep client `custom` tool declarations on the wire for it.
-            let preserve_responses_custom_tools = selected
-                .compatibility_profile
-                .as_deref()
-                .is_some_and(|profile| profile.eq_ignore_ascii_case(CUSTOM_TOOL_FUNCTION_PROFILE));
-            let (payload, responses_drops) =
-                build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options(
-                    input.provider_semantic_payload(),
-                    selected
-                        .model_capabilities
-                        .iter()
-                        .any(|capability| capability == "web_search"),
-                    preserve_responses_custom_tools,
-                )?;
-            drops.extend(responses_drops);
-            payload
-        }
-        V3HubProviderWireProtocol::Anthropic => {
-            let (source, anthropic_drops) =
-                build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops(
-                    input.provider_semantic_payload(),
-                    input.entry_protocol(),
-                )?;
-            drops.extend(anthropic_drops);
-            encode_v3_responses_semantic_as_anthropic_request(source)
-                .map_err(|error| error.to_string())?
-        }
-        V3HubProviderWireProtocol::Gemini => {
-            let (payload, gemini_drops) =
-                project_outbound_payload_for_selected_target_protocol_with_drops(
-                    input.provider_semantic_payload(),
-                    V3OutboundTargetProtocol::Gemini,
-                    &selected.model_capabilities,
-                )?;
-            drops.extend(gemini_drops);
-            payload
-        }
-    };
-    super::request_outbound_format::project_standard_request_transport_intent(
-        &mut provider_protocol_payload,
-        input.entry_protocol(),
-        input.provider_protocol,
-        input.transport_intent(),
-    );
-    if input.provider_protocol == V3HubProviderWireProtocol::Responses {
-        namespace_registry.project_request(&mut provider_protocol_payload, "openai-responses")?;
-    }
-    let payload = bind_v3_selected_provider_model(provider_protocol_payload, selected)
-        .map(V3SelectedProviderModelBinding::into_payload)?;
-    Ok((payload, drops, namespace_registry))
-}
-
 #[path = "provider_req_compat_06_deepseek.rs"]
 mod provider_req_compat_06_deepseek;
 use provider_req_compat_06_deepseek::{
@@ -350,9 +249,10 @@ mod tests {
         }
     }
 
-    fn relay_req07(
+    fn relay_req07_with_candidate(
         provider_protocol: V3HubProviderWireProtocol,
-    ) -> V3HubReqOutbound07ProviderSemantic {
+        selected_target: V3TargetCandidate,
+    ) -> Result<V3HubReqOutbound07ProviderSemantic, V3ProviderCompatError> {
         let req01 = build_v3_hub_req_inbound_01_client_raw(
             json!({
                 "model": "client-route-alias",
@@ -375,16 +275,24 @@ mod tests {
         let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
             req05,
             V3HubTargetResolution::Routed,
-            selected_candidate(provider_protocol),
+            selected_target,
         );
         build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_protocol)
     }
 
-    fn relay_req07_for_entry(
+    fn relay_req07(
+        provider_protocol: V3HubProviderWireProtocol,
+    ) -> V3HubReqOutbound07ProviderSemantic {
+        relay_req07_with_candidate(provider_protocol, selected_candidate(provider_protocol))
+            .expect("test fixture Node06 standard projection must succeed")
+    }
+
+    fn relay_req07_for_entry_with_candidate(
         entry_protocol: V3HubEntryProtocol,
         payload: serde_json::Value,
         provider_protocol: V3HubProviderWireProtocol,
-    ) -> V3HubReqOutbound07ProviderSemantic {
+        selected_target: V3TargetCandidate,
+    ) -> Result<V3HubReqOutbound07ProviderSemantic, V3ProviderCompatError> {
         let req01 = build_v3_hub_req_inbound_01_client_raw(
             payload,
             entry_protocol,
@@ -400,9 +308,23 @@ mod tests {
         let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
             req05,
             V3HubTargetResolution::Routed,
-            selected_candidate(provider_protocol),
+            selected_target,
         );
         build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_protocol)
+    }
+
+    fn relay_req07_for_entry(
+        entry_protocol: V3HubEntryProtocol,
+        payload: serde_json::Value,
+        provider_protocol: V3HubProviderWireProtocol,
+    ) -> V3HubReqOutbound07ProviderSemantic {
+        relay_req07_for_entry_with_candidate(
+            entry_protocol,
+            payload,
+            provider_protocol,
+            selected_candidate(provider_protocol),
+        )
+        .expect("test fixture Node06 standard projection must succeed")
     }
 
     #[test]
@@ -479,7 +401,7 @@ mod tests {
 
     #[test]
     fn gemini_provider_req_rejects_reasoning_effort_without_selected_reasoning_capability() {
-        let req07 = relay_req07_for_entry(
+        let error = relay_req07_for_entry_with_candidate(
             V3HubEntryProtocol::OpenAiChat,
             json!({
                 "model": "client-route-alias",
@@ -487,25 +409,27 @@ mod tests {
                 "reasoning_effort": "high"
             }),
             V3HubProviderWireProtocol::Gemini,
-        );
-
-        let error = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
-            .expect_err("Gemini provider send must validate selected target capabilities");
+            selected_candidate(V3HubProviderWireProtocol::Gemini),
+        )
+        .expect_err("Gemini Node06 must validate selected target capabilities");
+        assert_eq!(error.stage, "request_protocol");
         assert_eq!(
             error.classification(),
             crate::hub_v1::V3ProviderCompatErrorClassification::RequestPayloadInvalid
         );
-        assert!(
-            error
-                .to_string()
-                .contains("paths=$.reasoning_effort missing_capability=reasoning"),
-            "{error}"
+        assert_eq!(
+            error.reason,
+            "UnmappedOutboundFields target_protocol=gemini paths=$.reasoning_effort missing_capability=reasoning"
         );
     }
 
     #[test]
     fn gemini_provider_req_projects_reasoning_effort_with_selected_reasoning_capability() {
-        let mut req07 = relay_req07_for_entry(
+        let mut selected_target = selected_candidate(V3HubProviderWireProtocol::Gemini);
+        selected_target
+            .model_capabilities
+            .push("reasoning".to_string());
+        let req07 = relay_req07_for_entry_with_candidate(
             V3HubEntryProtocol::OpenAiChat,
             json!({
                 "model": "client-route-alias",
@@ -513,12 +437,9 @@ mod tests {
                 "reasoning_effort": "high"
             }),
             V3HubProviderWireProtocol::Gemini,
-        );
-        req07
-            .previous
-            .selected_target
-            .model_capabilities
-            .push("reasoning".to_string());
+            selected_target,
+        )
+        .expect("selected Gemini target with reasoning capability must pass Node06");
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("selected Gemini target with reasoning capability must accept effort");
@@ -970,7 +891,7 @@ mod tests {
 
     #[test]
     fn responses_store_true_fails_when_anthropic_cannot_preserve_remote_storage_semantics() {
-        let req07 = relay_req07_for_entry(
+        let error = relay_req07_for_entry_with_candidate(
             V3HubEntryProtocol::Responses,
             json!({
                 "model": "client-route-alias",
@@ -978,16 +899,23 @@ mod tests {
                 "store": true
             }),
             V3HubProviderWireProtocol::Anthropic,
+            selected_candidate(V3HubProviderWireProtocol::Anthropic),
+        )
+        .expect_err("Anthropic Node06 must not silently strip store=true");
+        assert_eq!(error.stage, "request_protocol");
+        assert_eq!(
+            error.classification(),
+            crate::hub_v1::V3ProviderCompatErrorClassification::RequestPayloadInvalid
         );
-
-        let error = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
-            .expect_err("Anthropic wire must not silently strip store=true");
-        assert!(error.reason.contains("store"), "{error:?}");
+        assert_eq!(
+            error.reason,
+            "UnmappedOutboundFields target_protocol=anthropic paths=$.request.store"
+        );
     }
 
     #[test]
     fn responses_unsupported_verbosity_fails_at_anthropic_adjacent_codec() {
-        let req07 = relay_req07_for_entry(
+        let error = relay_req07_for_entry_with_candidate(
             V3HubEntryProtocol::Responses,
             json!({
                 "model": "client-route-alias",
@@ -995,11 +923,18 @@ mod tests {
                 "text": {"verbosity": "extreme"}
             }),
             V3HubProviderWireProtocol::Anthropic,
+            selected_candidate(V3HubProviderWireProtocol::Anthropic),
+        )
+        .expect_err("unsupported Responses verbosity must fail at Anthropic Node06");
+        assert_eq!(error.stage, "request_protocol");
+        assert_eq!(
+            error.classification(),
+            crate::hub_v1::V3ProviderCompatErrorClassification::RequestPayloadInvalid
         );
-
-        let error = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
-            .expect_err("unsupported Responses verbosity must fail before Anthropic wire");
-        assert!(error.reason.contains("verbosity"), "{error:?}");
+        assert_eq!(
+            error.reason,
+            "Anthropic codec malformed routecodex_chat_extension.responses_request.text.verbosity"
+        );
     }
 
     #[test]
@@ -1245,7 +1180,13 @@ mod tests {
 
     #[test]
     fn openai_chat_relay_projects_responses_web_search_with_image_to_local_servertool_function() {
-        let mut req07 = relay_req07_for_entry(
+        let mut selected_target = selected_candidate(V3HubProviderWireProtocol::OpenAiChat);
+        selected_target.web_search_execution_mode =
+            V3WebSearchExecutionMode::MetadataCenterLocalSearch;
+        selected_target
+            .model_capabilities
+            .push("web_search".to_string());
+        let req07 = relay_req07_for_entry_with_candidate(
             V3HubEntryProtocol::Responses,
             json!({
                 "model": "client-route-alias",
@@ -1258,14 +1199,9 @@ mod tests {
                 }]
             }),
             V3HubProviderWireProtocol::OpenAiChat,
-        );
-        req07.previous.selected_target.web_search_execution_mode =
-            V3WebSearchExecutionMode::MetadataCenterLocalSearch;
-        req07
-            .previous
-            .selected_target
-            .model_capabilities
-            .push("web_search".to_string());
+            selected_target,
+        )
+        .expect("Mode B candidate must pass OpenAI Chat Node06");
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).expect(
             "Mode B OpenAI Chat relay must project built-in web search to local websearch function",
@@ -1293,7 +1229,14 @@ mod tests {
 
     #[test]
     fn minimax_openai_chat_profile_accepts_local_websearch_function_projection() {
-        let mut req07 = relay_req07_for_entry(
+        let mut selected_target = selected_candidate(V3HubProviderWireProtocol::OpenAiChat);
+        selected_target.web_search_execution_mode =
+            V3WebSearchExecutionMode::ServertoolSearchBackend;
+        selected_target
+            .model_capabilities
+            .push("web_search".to_string());
+        selected_target.compatibility_profile = Some("chat:minimax".to_string());
+        let req07 = relay_req07_for_entry_with_candidate(
             V3HubEntryProtocol::Responses,
             json!({
                 "model": "client-route-alias",
@@ -1305,15 +1248,9 @@ mod tests {
                 }]
             }),
             V3HubProviderWireProtocol::OpenAiChat,
-        );
-        req07.previous.selected_target.web_search_execution_mode =
-            V3WebSearchExecutionMode::ServertoolSearchBackend;
-        req07
-            .previous
-            .selected_target
-            .model_capabilities
-            .push("web_search".to_string());
-        req07.previous.selected_target.compatibility_profile = Some("chat:minimax".to_string());
+            selected_target,
+        )
+        .expect("MiniMax candidate must pass OpenAI Chat Node06");
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("MiniMax Chat compat must accept Mode B local websearch function");
@@ -1334,9 +1271,14 @@ mod tests {
         ] {
             let req07 = relay_req07(protocol);
             assert_eq!(
-                req07.provider_semantic_payload()["model"],
+                req07.previous.previous.governed_payload()["model"],
                 "client-route-alias",
-                "client route model remains routing input before the shared binding block"
+                "{protocol:?} governed source must retain the client route alias"
+            );
+            assert_eq!(
+                req07.provider_semantic_payload()["model"],
+                "provider-wire-model",
+                "{protocol:?} Node06 output must use the selected wire model"
             );
 
             let req_compat =
