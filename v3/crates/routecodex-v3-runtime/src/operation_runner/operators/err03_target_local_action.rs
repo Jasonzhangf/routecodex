@@ -123,9 +123,11 @@ mod tests {
     #[test]
     fn provider_failure_action_tracks_candidate_budget() {
         let code = "provider_http_500";
+        let classified = classified(V3ErrorSourceKind::ProviderFailure, code);
+        let classified_input = serde_json::to_value(&classified).unwrap();
         let (projection, typed) = run_v3_error_03_target_local_action_operator(
-            serde_json::json!({"classified": {"source": {"code": code}}}),
-            classified(V3ErrorSourceKind::ProviderFailure, code),
+            classified_input.clone(),
+            classified.clone(),
             provider_scope(),
             2,
         )
@@ -142,8 +144,8 @@ mod tests {
         );
 
         let (exhausted_projection, exhausted) = run_v3_error_03_target_local_action_operator(
-            serde_json::json!({"classified": {"source": {"code": code}}}),
-            classified(V3ErrorSourceKind::ProviderFailure, code),
+            classified_input,
+            classified,
             provider_scope(),
             0,
         )
@@ -173,9 +175,11 @@ mod tests {
                 "health_neutral_client_disconnect",
             ),
         ] {
+            let classified = classified(source_kind, code);
+            let classified_input = serde_json::to_value(&classified).unwrap();
             let (projection, typed) = run_v3_error_03_target_local_action_operator(
-                serde_json::json!({"classified": {"source": {"code": code}}}),
-                classified(source_kind, code),
+                classified_input,
+                classified,
                 provider_scope(),
                 1,
             )
@@ -193,10 +197,12 @@ mod tests {
     #[test]
     fn provider_failure_projection_preserves_exact_scope_and_reason() {
         let code = "provider_stream_failed";
+        let classified = classified(V3ErrorSourceKind::ProviderFailure, code);
+        let classified_input = serde_json::to_value(&classified).unwrap();
         let scope = provider_scope();
         let (projection, typed) = run_v3_error_03_target_local_action_operator(
-            serde_json::json!({"classified": {"source": {"code": code}}}),
-            classified(V3ErrorSourceKind::ProviderFailure, code),
+            classified_input,
+            classified,
             scope.clone(),
             1,
         )

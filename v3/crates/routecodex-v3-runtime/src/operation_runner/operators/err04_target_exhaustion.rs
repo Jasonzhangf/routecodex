@@ -147,9 +147,10 @@ mod tests {
     #[test]
     fn provider_failure_exhaustion_tracks_route_pool_and_default_availability() {
         let action = provider_action(1);
+        let action_input = serde_json::to_value(&action).unwrap();
 
         let (projection, typed) = run_v3_error_04_target_exhaustion_operator(
-            serde_json::json!({"local_action": {"action": {"reason": "provider_http_503"}}}),
+            action_input.clone(),
             action.clone(),
             1,
             false,
@@ -163,7 +164,7 @@ mod tests {
         assert_eq!(projection["same_provider_retry_available"], false);
 
         let (exhausted_projection, exhausted) = run_v3_error_04_target_exhaustion_operator(
-            serde_json::json!({"local_action": {"action": {"reason": "provider_http_503"}}}),
+            action_input.clone(),
             action.clone(),
             0,
             false,
@@ -173,14 +174,9 @@ mod tests {
         assert!(exhausted.target_exhausted);
         assert_eq!(exhausted_projection["target_exhausted"], true);
 
-        let (default_pool_projection, default_pool) = run_v3_error_04_target_exhaustion_operator(
-            serde_json::json!({"local_action": {"action": {"reason": "provider_http_503"}}}),
-            action,
-            0,
-            true,
-            true,
-        )
-        .unwrap();
+        let (default_pool_projection, default_pool) =
+            run_v3_error_04_target_exhaustion_operator(action_input, action, 0, true, true)
+                .unwrap();
         assert!(!default_pool.target_exhausted);
         assert!(default_pool.default_pool_available);
         assert!(default_pool.same_provider_retry_available);
@@ -195,14 +191,10 @@ mod tests {
     #[test]
     fn non_provider_exhaustion_preserves_original_chain() {
         let action = client_disconnect_action();
-        let (projection, typed) = run_v3_error_04_target_exhaustion_operator(
-            serde_json::json!({"local_action": {"action": {"reason": "client_disconnect"}}}),
-            action,
-            3,
-            true,
-            false,
-        )
-        .unwrap();
+        let action_input = serde_json::to_value(&action).unwrap();
+        let (projection, typed) =
+            run_v3_error_04_target_exhaustion_operator(action_input, action, 3, true, false)
+                .unwrap();
 
         assert!(typed.target_exhausted);
         assert_eq!(
