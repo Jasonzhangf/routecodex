@@ -26,7 +26,6 @@ const ADJUST_PROVIDER_PRIVATE_REQUEST_NODE: &str = "adjust_provider_private_requ
 
 #[derive(Debug)]
 struct AdjustProviderPrivateRequestOutcome {
-    payload: Value,
     opencode_zen_tcm_bridge: Option<OpencodeZenTcmBridgeBinding>,
     custom_tool_function_binding: Option<CustomToolFunctionBinding>,
 }
@@ -93,21 +92,28 @@ impl Operator for AdjustProviderPrivateRequestOperator {
             if let Some(binding) = &opencode_zen_tcm_bridge {
                 apply_opencode_zen_tcm_request(&mut payload, binding);
             }
-            AdjustProviderPrivateRequestOutcome {
-                payload,
+            let outcome = AdjustProviderPrivateRequestOutcome {
                 opencode_zen_tcm_bridge,
                 custom_tool_function_binding,
-            }
+            };
+            (payload, outcome)
         })
         .map_err(|error| AdjustProviderPrivateRequestError { error });
-        let execution = match &result {
-            Ok(outcome) => Ok(outcome.payload.clone()),
-            Err(error) => Err(error.error.to_string()),
-        };
-        *self.side_output.outcome.lock().map_err(|_| {
-            "adjust_provider_private_request side output lock poisoned".to_string()
-        })? = Some(result);
-        execution
+        let mut side_output =
+            self.side_output.outcome.lock().map_err(|_| {
+                "adjust_provider_private_request side output lock poisoned".to_string()
+            })?;
+        match result {
+            Ok((payload, outcome)) => {
+                *side_output = Some(Ok(outcome));
+                Ok(payload)
+            }
+            Err(error) => {
+                let message = error.error.to_string();
+                *side_output = Some(Err(error));
+                Err(message)
+            }
+        }
     }
 }
 
@@ -175,14 +181,6 @@ pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
     };
     let output = output
         .map_err(|error| classify_v3_provider_compat_error("request", &profile, error.message))?;
-    if outcome.payload != output {
-        return Err(classify_v3_provider_compat_error(
-            "request",
-            &profile,
-            "adjust_provider_private_request SDK output diverged from its typed outcome"
-                .to_string(),
-        ));
-    }
     let namespace_registry = input.namespace_registry.clone();
     let drops = input.drops.clone();
     Ok(ProviderReqCompat06Projected {
@@ -1342,7 +1340,6 @@ mod tests {
             .take()
             .expect("operator must retain typed side output")
             .expect("operator must succeed");
-        assert_eq!(output, outcome.payload);
         let bridge = outcome
             .opencode_zen_tcm_bridge
             .expect("actual TCM declaration and provider projection must bind");
