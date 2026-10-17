@@ -8,7 +8,9 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { HARNESS_ID, SOURCE_REPO, SOURCE_SHA, inspectCorpus } from './protocol-live-mock/corpus.mjs';
-import { startMockProvider } from './protocol-live-mock/mock-provider.mjs';
+import { MockProviderError, startMockProvider } from './protocol-live-mock/mock-provider.mjs';
+import { assertProviderCaptures } from './protocol-live-mock/assertions.mjs';
+import { describeTurns } from './protocol-live-mock/case-contract.mjs';
 import {
   captureRuntimeIdentity, generateRccConfig, sendHttp, startRcc, stopRcc,
 } from './protocol-live-mock/lifecycle.mjs';
@@ -112,7 +114,19 @@ Defaults are anchored to this script, so root and v3 working directories work.`)
     let phase = 'mock_start';
     const cleanup = { complete: true, case_id: fixture.case_id };
     try {
-      mock = await startMockProvider();
+      mock = await startMockProvider({
+        validateRequest(capture, fixture, turnIndex) {
+          const expected = describeTurns(fixture)[turnIndex]?.providerExpected;
+          if (!expected) return;
+          const result = assertProviderCaptures([capture], 0, expected, {
+            providerProtocol: fixture.cell.provider_protocol,
+            noControlLeakage: fixture.assertions?.no_control_leakage,
+          });
+          if (!result.ok) {
+            throw new MockProviderError('mock_provider_request_shape_mismatch', result.diagnostics.join('; '));
+          }
+        },
+      });
       phase = 'config_generation';
       const rccPort = await allocatePort();
       const runtimeSetup = fixture.runtime_setup;

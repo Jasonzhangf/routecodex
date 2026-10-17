@@ -6,14 +6,14 @@
     "method": "POST",
     "path": "/v1/messages",
     "headers": {"content-type": "application/json"},
-    "body": {"model": "mock.responses-model", "max_tokens": 64, "messages": [{"role": "user", "content": "hello"}], "stream": false}
+    "body": {"model": "mock.responses-model", "max_tokens": 64, "system": [{"type":"text","text":"cache this system block","cache_control":{"type":"ephemeral"}}], "messages": [{"role": "user", "content": "hello"}], "stream": false}
   },
   "expected_provider": {
     "paths": ["/v1/responses"],
     "method": "POST",
     "auth_required": true,
-    "body_must": {"model": "responses-model", "input.0.role": "user", "input.0.content.0.text": "hello", "stream": false},
-    "body_must_not": ["routecodex_internal", "metadata_center", "debug_snapshot"],
+    "body_must": {"model": "responses-model", "input.0.role": "system", "input.0.content.0.text": "cache this system block", "input.1.role": "user", "input.1.content.0.text": "hello", "routecodex_chat_extension.anthropic_request.system": [{"type":"text","cache_control":{"type":"ephemeral"}}], "stream": false},
+    "body_must_not": ["routecodex_internal", "metadata_center", "debug_snapshot", "routecodex_chat_extension.anthropic_request.system.0.text"],
     "exact": null
   },
   "upstream_response": {
@@ -35,7 +35,7 @@
     "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
     "files": ["internal/gateway/testdata/upstream_bodies/anthropic-to-responses.json"],
     "tests": ["internal/gateway/gemini_signature_test.go::TestGeminiThoughtSignatureThroughAnthropic"],
-    "adaptation": "Anthropic entry to Responses provider; expected values from the two standard protocol shapes."
+    "adaptation": "Anthropic entry to Responses provider; governed system text maps once to the standard message while native system block residuals keep their inverse association. The provider validates both before returning business content."
   },
   "contract_differences": []
 }
