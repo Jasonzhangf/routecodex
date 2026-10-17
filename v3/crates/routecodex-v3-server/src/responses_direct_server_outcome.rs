@@ -355,9 +355,6 @@ pub(super) async fn execute_responses_direct_server_outcome(
             ),
         );
     }
-    if let Some(disposition) = output.terminal_disposition.take() {
-        return V3ResponsesDirectServerOutcome::ProviderTerminal(disposition);
-    }
     let scope = match state
         .debug
         .start_trace(&state.server.id, &request_id, &execution_id)
@@ -375,6 +372,33 @@ pub(super) async fn execute_responses_direct_server_outcome(
             );
         }
     };
+    if let Some(error_chain) = output.error_chain.as_deref() {
+        let body = match &output.client_payload.body {
+            V3ClientBody::Json(body) => Some(body),
+            _ => None,
+        };
+        let _ = record_and_emit_v3_error_projection(
+            state,
+            &scope,
+            V3ErrorProjectionConsoleInput {
+                endpoint: &path,
+                request_id: &request_id,
+                entry_protocol: "responses",
+                session_id: None,
+                status: output.client_payload.status,
+                error_chain,
+                body,
+                project_path: None,
+                error06_exposed: false,
+                error_class: None,
+                health_action: None,
+                upstream_request_id: None,
+            },
+        );
+    }
+    if let Some(disposition) = output.terminal_disposition.take() {
+        return V3ResponsesDirectServerOutcome::ProviderTerminal(disposition);
+    }
     if let Err(error) = state.debug.record_node_event(
         &scope,
         "V3Server16HttpFrame",

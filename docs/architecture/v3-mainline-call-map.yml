@@ -3741,6 +3741,23 @@ chains:
       side_channel_reads: [v3.error.source]
       side_channel_writes: [v3.runtime.responses_observability]
     status: anchored
+  - step_id: v3-de-25
+    from_node: V3Error06ClientProjected
+    to_node: V3DebugEventLedgerRecorded
+    caller_symbol: execute_responses_direct_server_outcome
+    caller_file: v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
+    callee_symbol: record_and_emit_v3_error_projection
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    owner_feature_id: v3.debug_error_foundation
+    semantic_contract:
+    - Record the Runtime's existing typed terminal error chain before the Direct server outcome discards its internal error projection and terminates the request transport.
+    - Reuse the shared Server diagnostic recorder; diagnostic error content never reaches the model client or changes provider health or recovery.
+    resource_flow:
+      consumes: [v3.error.client_projection, v3.debug.trace_context]
+      produces: [v3.debug.event_ledger]
+      side_channel_reads: [v3.error.client_projection]
+      side_channel_writes: [v3.debug.event_ledger]
+    status: anchored
 - chain_id: v3.anthropic_relay.controlled_runtime
   owner_feature_id: v3.anthropic_relay_runtime_integration
   summary: Controlled Anthropic /v1/messages Relay request through the sole Hub v1 lifecycle, generic Responses transport, Error01-06, and the sole Anthropic client projection exit.
