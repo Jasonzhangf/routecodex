@@ -24,7 +24,7 @@ const health = resource('v3.provider.health_state');
 const availability = resource('v3.provider.availability_projection');
 const http = resource('v3.server.validated_http_input');
 const scope = resource('v3.provider.failure_session_scope');
-requireValue(isDeepStrictEqual(health?.identity, ['serverId', 'routingGroup', 'sessionId', 'providerRuntimeIdentity']), 'Resource map must bind provider health state identity to server+routing_group+session+runtime identity');
+requireValue(isDeepStrictEqual(health?.identity, ['listenerPort', 'serverId', 'routingGroup', 'sessionId', 'providerRuntimeIdentity']), 'Resource map must bind provider health state identity to listener+server+routing_group+session+runtime identity');
 requireValue(includesAll(health?.allowed_writers, ['V3ProviderHealthStore::record_provider_failure_in_session', 'V3ProviderHealthStore::record_provider_success_in_session', 'V3ProviderHealthStore::acquire_provider_cooldown_rescue_probe']), 'Provider health writers must bind scoped Health owners');
 requireValue(includesAll(health?.allowed_readers, ['V3ProviderHealthStore::availability_for_session', 'V3ProviderSessionAvailabilityReader::availability']), 'Provider health readers must bind scoped availability');
 requireValue(!health?.allowed_writers?.includes('V3ProviderFailureRuntimeHealth::record_provider_failure_record'), 'Runtime wrappers must not own provider health writes');

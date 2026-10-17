@@ -2,7 +2,7 @@ use super::*;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 
 #[tokio::test]
-async fn transient_terminal_projection_releases_action_admission() {
+async fn transient_last_candidate_recovery_releases_action_admission() {
     let scope = "transient_terminal_projection";
     let manifest = target_resolution_manifest(scope);
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -49,24 +49,32 @@ async fn transient_terminal_projection_releases_action_admission() {
     .expect("terminal projection must not wait on its own transient admission")
     .expect("transient provider failure must project through Error05");
 
-    assert!(
-        matches!(
-            result.event.action.as_str(),
-            "terminal_default_floor_exhausted" | "terminal_route_and_default_exhausted"
-        ),
-        "unexpected terminal action: {}",
-        result.event.action
-    );
-    assert!(result.retry_selected.is_none());
-    assert!(result.terminal_projection.is_some());
-    assert_eq!(
-        result.terminal_disposition,
-        Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
-    );
+    assert_eq!(result.event.action, "retry_last_routable");
+    assert_eq!(result.event.wait_ms, Some(1_000));
+    assert!(result.terminal_projection.is_none());
+    assert!(result.terminal_disposition.is_none());
+    let V3Error05ExecutionAction::WaitThenRetrySame { recovery } = &result.decision.action else {
+        panic!("last candidate must retain its recovery witness");
+    };
+    let transition = health
+        .wait_for_error05_recovery(
+            recovery,
+            result
+                .retry_selected
+                .as_ref()
+                .expect("last candidate retained"),
+            std::time::Instant::now() + std::time::Duration::from_secs(3),
+        )
+        .await
+        .expect("transient action must not block its own recovery");
+    assert!(matches!(
+        transition,
+        crate::provider_action_gate::V3ProviderActionRecoveryTransition::Admitted(_)
+    ));
 }
 
 #[tokio::test]
-async fn reselect_before_client_projection_does_not_retry_same_when_pool_exhausted() {
+async fn reselect_policy_keeps_last_candidate_routable() {
     let scope = "response_policy_reselect_exhausted";
     let source = r#"
 version = 3
@@ -150,15 +158,10 @@ targets = [
     .await
     .expect("reselect-before-projection policy must drive Error05");
 
-    assert!(
-        matches!(
-            result.event.action.as_str(),
-            "terminal_default_floor_exhausted" | "terminal_route_and_default_exhausted"
-        ),
-        "unexpected terminal action: {}",
-        result.event.action
-    );
-    assert!(result.retry_selected.is_none());
+    assert_eq!(result.event.action, "retry_last_routable");
+    assert_eq!(result.event.wait_ms, Some(1_000));
+    assert!(result.retry_selected.is_some());
+    assert!(result.terminal_projection.is_none());
     assert!(
         same_candidate_retries.values().all(|retries| *retries == 0),
         "reselect exhaustion must not consume a same-candidate retry budget"

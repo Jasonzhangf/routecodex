@@ -33,6 +33,19 @@ async fn recovery_peer(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
+    if headers.get("authorization").unwrap() == "Bearer pool-key-02" {
+        // The healthy spare serves fallback business traffic independently.
+        if body.pointer("/messages/0/content")
+            != Some(&json!("Reply exactly OK. Do not call tools."))
+        {
+            return success_response(Mode::Relay, body["stream"] == true);
+        }
+        return (
+            [("content-type", "text/event-stream")],
+            peer.probe_body.lock().await.clone(),
+        )
+            .into_response();
+    }
     assert_eq!(headers.get("authorization").unwrap(), "Bearer pool-key-01");
     assert_eq!(body["model"], "wire-pool-model");
     if body.pointer("/messages/0/content") == Some(&json!("Reply exactly OK. Do not call tools.")) {
@@ -90,14 +103,16 @@ async fn zen_429_three_failures_and_http_2xx_streaming_recovery_public() {
         .await
         .unwrap();
     });
-    let mut config = manifest(free_port(), port, 11, Mode::Relay);
+    // Keep a healthy fallback so cooling key 01 does not empty the pool.
+    // Each request can try the failed identity and the healthy spare.
+    let mut config = manifest(free_port(), port, 2, Mode::Relay);
     config
         .providers
         .get_mut("poolpeer")
         .unwrap()
         .auth
         .entries
-        .truncate(1);
+        .truncate(2);
     for pool in config
         .route_groups
         .get_mut("default")
@@ -105,7 +120,8 @@ async fn zen_429_three_failures_and_http_2xx_streaming_recovery_public() {
         .pools
         .values_mut()
     {
-        pool.targets.truncate(1);
+        pool.targets.truncate(2);
+        pool.targets[0].priority = Some(3);
     }
     let server = spawn_v3_server_aggregate(config).await.unwrap();
     let base = format!("http://{}", server.listeners[0].addr);
@@ -113,16 +129,17 @@ async fn zen_429_three_failures_and_http_2xx_streaming_recovery_public() {
         .timeout(Duration::from_secs(30))
         .build()
         .unwrap();
+    let mut recovery_request = request(false);
+    recovery_request["model"] = json!("client-test");
     for number in 1..=3 {
         let reply = client
             .post(format!("{base}/v1/responses"))
-            .json(&request(false))
+            .json(&recovery_request)
             .send()
             .await;
-        if let Ok(reply) = reply {
-            assert!(!reply.status().is_success());
-            let _ = reply.bytes().await;
-        }
+        let reply = reply.expect("the healthy spare must recover the request");
+        assert!(reply.status().is_success());
+        assert_eq!(reply.json::<Value>().await.unwrap()["status"], "completed");
         let pool: Value = client
             .get(format!("{base}/_routecodex/health/cooldown-pool"))
             .send()
@@ -170,7 +187,7 @@ async fn zen_429_three_failures_and_http_2xx_streaming_recovery_public() {
     .expect("HTTP 2xx probe must restore identity");
     let reply = client
         .post(format!("{base}/v1/responses"))
-        .json(&request(false))
+        .json(&recovery_request)
         .send()
         .await
         .unwrap();

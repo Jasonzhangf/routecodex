@@ -646,7 +646,9 @@ async fn assert_chat_front_sse_transport_break(port: u16) {
         "streaming no-response must frame the break as an incomplete chunked body: {text:?}"
     );
     assert!(
-        text.contains(":\n\n") && !text.contains("provider") && !text.contains("transport break"),
+        (text.contains(":\n\n") || text.contains(": keepalive\n\n"))
+            && !text.contains("provider")
+            && !text.contains("transport break"),
         "streaming no-response must flush neutral SSE framing without control facts: {text:?}"
     );
     assert!(
@@ -948,6 +950,12 @@ routing_group = "chat_exhausted"
 endpoints = ["openai_chat"]
 
 {exhausted_execution}
+
+# This listener tests terminal transport exhaustion after both candidates have
+# been attempted. Last-candidate recovery is covered separately; do not spend
+# the default retry budget before checking the aborted client transfer.
+[servers.chat_exhausted.execution.attempt_store]
+request_max_attempts = 2
 
 [providers.success]
 type = "{provider_type}"

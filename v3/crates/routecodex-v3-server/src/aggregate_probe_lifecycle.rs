@@ -30,14 +30,40 @@ pub(crate) struct ProbeQuiescenceGuard {
 
 impl AggregateProbeLifecycle {
     pub(crate) fn start(
-        manifest: Arc<V3Config05ManifestPublished>,
-        health: Arc<V3ResponsesRelayProviderHealthHandle>,
+        health: Vec<(
+            Arc<V3Config05ManifestPublished>,
+            Arc<V3ResponsesRelayProviderHealthHandle>,
+        )>,
     ) -> Result<Self, String> {
-        let runtime_health = health.runtime_health();
-        let (shutdown, shutdown_rx) = oneshot::channel();
-        let future = runtime_health
-            .aggregate_provider_probe_lifecycle(Arc::clone(&manifest), shutdown_rx)?;
-        let probe = tokio::spawn(future);
+        let spawn_probes = move |resume: bool| -> Result<_, String> {
+            let mut futures: Vec<Pin<Box<dyn Future<Output = ()> + Send>>> = Vec::new();
+            let mut shutdowns = Vec::new();
+            for (manifest, health) in &health {
+                let runtime_health = health.runtime_health();
+                let (shutdown, shutdown_rx) = oneshot::channel();
+                let future: Pin<Box<dyn Future<Output = ()> + Send>> =
+                    if resume {
+                        Box::pin(runtime_health.aggregate_provider_probe_lifecycle_resume(
+                            Arc::clone(manifest),
+                            shutdown_rx,
+                        )?)
+                    } else {
+                        Box::pin(runtime_health.aggregate_provider_probe_lifecycle(
+                            Arc::clone(manifest),
+                            shutdown_rx,
+                        )?)
+                    };
+                shutdowns.push(shutdown);
+                futures.push(future);
+            }
+            Ok((
+                tokio::spawn(async move {
+                    futures_util::future::join_all(futures).await;
+                }),
+                shutdowns,
+            ))
+        };
+        let (probe, shutdown) = spawn_probes(false)?;
         let (commands, mut receiver) = mpsc::unbounded_channel::<Quiesce>();
         let (terminal, mut terminal_rx) = watch::channel(false);
         let terminal_state = Arc::new(std::sync::Mutex::new(false));
@@ -96,7 +122,6 @@ impl AggregateProbeLifecycle {
                     _ = wait_for_terminal(&mut terminal_rx) => return,
                     _ = &mut rollback => {}
                 }
-                let (next_shutdown, next_shutdown_rx) = oneshot::channel();
                 // Serialize terminal intent with registration, including calls
                 // from another executor thread. No late guard may restore an
                 // owner after terminal shutdown has acquired this boundary.
@@ -107,19 +132,12 @@ impl AggregateProbeLifecycle {
                     if *terminal {
                         None
                     } else {
-                        Some(
-                            runtime_health
-                                .aggregate_provider_probe_lifecycle_resume(
-                                    Arc::clone(&manifest),
-                                    next_shutdown_rx,
-                                )
-                                .map(tokio::spawn),
-                        )
+                        Some(spawn_probes(true))
                     }
                 };
-                probe = match registration {
+                let (next_probe, next_shutdown) = match registration {
                     None => return,
-                    Some(Ok(task)) => task,
+                    Some(Ok(tasks)) => tasks,
                     Some(Err(error)) => {
                         eprintln!("V3 aggregate probe restoration failed: {error}; maintenance retained, ordinary admission unavailable");
                         let _ = terminal_rx.wait_for(|value| *value).await;
@@ -127,6 +145,7 @@ impl AggregateProbeLifecycle {
                         return;
                     }
                 };
+                probe = next_probe;
                 shutdown = next_shutdown;
                 // Runtime registration is synchronous and old ownership joined.
                 // Only now may ordinary business admission resume.

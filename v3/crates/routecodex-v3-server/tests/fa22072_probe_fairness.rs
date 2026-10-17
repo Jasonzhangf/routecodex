@@ -1,4 +1,4 @@
-//! Real public-entry regression: transport-busy early identities cannot starve a free fifth.
+//! Real public-entry regression: held business transports cannot occupy probe capacity.
 #[path = "support/fa22072_probe_fairness_fixture.rs"]
 mod fixture;
 
@@ -68,12 +68,23 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
     )
     .await
     .expect("real failures must terminate independently");
+    let initial = pool(&client, &base).await;
+    for id in &ids {
+        assert!(
+            exact(&initial, id).is_none(),
+            "a pinned last candidate must not cool: {initial}"
+        );
+        let response = client.post(format!("{base}/_routecodex/health/cooldown-pool/add"))
+            .json(&json!({"provider_id":id,"interface_id":"default","auth_alias":"key","model_id":"recovery","kind":"probe","duration_ms":60000}))
+            .send().await.unwrap();
+        assert_eq!(response.status(), 200);
+    }
     let before = pool(&client, &base).await;
-    eprintln!("fairness genuine-failure cooldown={before}");
+    eprintln!("fairness explicit-control cooldown={before}");
     for id in &ids {
         assert!(
             exact(&before, id).is_some(),
-            "genuine failure must cool exact model {id}"
+            "manual control must seed the exact recovery identity {id}"
         );
     }
     let mut holders = Vec::new();
@@ -90,20 +101,31 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
         .forget();
     assert!(holders.iter().all(|holder| !holder.is_finished()));
     peer.ready.store(true, Ordering::SeqCst);
+    for id in &ids {
+        let response = client.post(format!("{base}/_routecodex/health/cooldown-pool/probe"))
+            .json(&json!({"provider_id":id,"interface_id":"default","auth_alias":"key","model_id":"recovery"}))
+            .send().await.unwrap();
+        assert_eq!(response.status(), 200);
+    }
     let admitted = timeout(Duration::from_secs(15), peer.fifth_entered.acquire()).await;
-    let during = pool(&client, &base).await;
+    let during = timeout(Duration::from_secs(2), async {
+        loop {
+            let current = pool(&client, &base).await;
+            if ids[..4].iter().all(|id| exact(&current, id).is_none()) {
+                break current;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("all four probes must progress independently of held business transports");
     eprintln!(
         "fairness held transports=4 fifth_probe_captured={} cooldown={during}",
         admitted.is_ok()
     );
-    // Capacity denial must preserve failure count and the original ladder.
-    // The public projection hides expired until_ms; it must never introduce a
-    // new future deadline or restore a held provider's exact recovery model.
+    // Real 2xx probes restore recovery identities while sibling business is held.
     for id in &ids[..4] {
-        let earlier = exact(&before, id).unwrap();
-        let current = exact(&during, id).expect("capacity-busy identity remains cooled");
-        assert_eq!(current["failure_count"], earlier["failure_count"]);
-        assert!(current["until_ms"].is_null() || current["until_ms"] == earlier["until_ms"]);
+        assert!(exact(&during, id).is_none());
     }
     assert!(!during["entries"]
         .as_array()
@@ -122,7 +144,7 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
         }
         upstream.abort();
         let _ = upstream.await;
-        panic!("fixed due-prefix starved the free fifth identity while four real sibling transports remained held");
+        panic!("held business transports prevented the fifth recovery probe");
     }
     assert_eq!(exact(&during, &ids[4]).unwrap()["state"], "probing");
     peer.fifth_release.add_permits(1);
@@ -145,12 +167,17 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
     assert!(holders.iter().all(|holder| !holder.is_finished()));
     assert_eq!(peer.holders_release.available_permits(), 0);
     let after = pool(&client, &base).await;
-    for id in &ids[..4] {
-        assert_eq!(
-            exact(&after, id).unwrap()["failure_count"],
-            exact(&before, id).unwrap()["failure_count"]
-        );
+    for id in &ids {
+        assert!(exact(&after, id).is_none());
     }
+    let captures = peer.captures.lock().await;
+    for index in 0..5 {
+        assert!(captures.iter().any(|capture| capture["index"] == index
+            && capture["authorization"] == "Bearer fairness-fixture-key"
+            && capture["body"]["model"] == "recovery"
+            && capture["body"]["messages"][0]["content"] == "ping; reply pong"));
+    }
+    drop(captures);
     peer.holders_release.add_permits(4);
     for holder in holders {
         assert_eq!(

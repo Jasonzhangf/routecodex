@@ -220,7 +220,7 @@ const responsesRelayFailureHandlerBody = findFunctionBody(
   files.responses,
 );
 if (
-  !/^\{\s*if\s+failure\.terminal_projection\.is_some\(\)\s*\{\s*return\s+Ok\(Some\(failure\)\);\s*\}\s*let\s+result\s*=\s*run_v3_relay_provider_failure_policy\s*\(/u
+  !/^\{\s*if\s+failure\.terminal_projection\.is_some\(\)\s*\{\s*return\s+Ok\(Some\(failure\)\);\s*\}\s*let\s+(?:mut\s+)?result\s*=\s*run_v3_relay_provider_failure_policy\s*\(/u
     .test(responsesRelayFailureHandlerBody)
 ) {
   failures.push(
@@ -237,19 +237,19 @@ for (const token of [
   'impl Drop for V3ProviderActionPermit',
   'self.gate.abandon_admission(&self.key, self.generation)',
   'waiter_queue: VecDeque<u64>',
-  'state.waiter_queue.len() > 1',
   'state.admitted_generation.is_some()',
   '!require_admission && *active_key == *key && state.admitted_generation.is_some()',
-  'let active_admission_owned = states.iter().any',
-  'if !active_admission_owned {',
-  'let group_has_active_admission = states.iter().any',
+  'if state.admitted_generation.is_none() {',
+  'cyclic_delay_ms(state.consecutive_failures)',
+  '[1_000, 3_000, 5_000, 16_000, 30_000]',
+  'let group_has_active_admission = states',
   '(!self.admit_action || !group_has_active_admission)',
   'record_failure_and_commit_terminal_projection',
   'pub async fn wait_for_exact_provider_action(',
   'pub fn abandon_admission(',
   'pub fn commit_terminal_admission(',
   'V3ProviderActionRecoveryTransition',
-  'state.next_admission_at = now + Duration::from_millis(sustained_delay_ms());',
+  'state.next_admission_at = state.next_admission_at.max(now);',
 ]) {
   requireText(text.gate, files.gate, token);
 }
@@ -260,11 +260,11 @@ const recordProviderSuccessBody = findFunctionBody(
   files.gate,
 );
 if (
-  !/key\.provider_scope\s*==\s*\*provider_scope\s*\|\|\s*state\.admitted_action_scope\.as_ref\(\)\s*==\s*Some\(provider_scope\)/u
+  !/key\.provider_scope\.provider_runtime_identity\s*==\s*provider_scope\.provider_runtime_identity/u
     .test(recordProviderSuccessBody)
 ) {
   failures.push(
-    `${files.gate}: provider success may release only its exact provider scope or the permit-owned action scope`,
+    `${files.gate}: provider success may release only its complete runtime identity`,
   );
 }
 for (const forbidden of [
@@ -503,7 +503,7 @@ requireOccurrenceCount(
   text.responses,
   files.responses,
   'drop(_provider_action_permit.take());',
-  9,
+  8,
 );
 // openai_chat/gemini 的局部变量 permit drop（每协议 4 处）已收敛到统一 relay 骨架。
 requireOccurrenceCount(
@@ -590,14 +590,14 @@ const requiredGateTests = [
   'isolated_terminal_projection_commits_without_waiting_for_provider_action_admission',
   'terminal_projection_advances_an_active_exact_key_and_preserves_its_permit',
   'unrelated_success_cannot_delay_a_terminal_projection',
-  'overlapping_waiter_promotes_scope_to_five_seconds_and_one_admission',
+  'overlapping_waiter_preserves_failure_delay_and_single_admission',
   'process_shared_handles_observe_the_same_cross_request_generation',
   'terminal_transition_wakes_old_waiter_for_reselection_then_serializes_next_generation',
-  'changing_provider_and_error_family_cannot_restart_an_active_lane_at_one_second',
+  'changing_provider_keeps_independent_first_failure_delay',
   'admitted_action_requires_explicit_drop_before_replacement_generation',
   'unrelated_same_group_provider_success_cannot_release_an_owned_action_permit',
   'fifo_waiter_cancellation_removes_only_its_ticket',
-  'success_released_recovery_reenters_the_retained_five_second_generation',
+  'success_released_recovery_reenters_without_delay',
 ];
 for (const testName of requiredGateTests) {
   assertRustTest(text.gateTests, files.gateTests, testName);
@@ -628,7 +628,7 @@ assertRustTest(
 assertRustTest(
   text.responsesRelayTests,
   files.responsesRelayTests,
-  'responses_relay_terminal_missing_fails_explicitly_but_fresh_request_bypasses_recovery',
+  'responses_relay_terminal_missing_keeps_last_identity_routable_with_backoff',
 );
 assertRustTest(
   text.responsesRelayTests,

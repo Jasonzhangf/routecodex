@@ -103,9 +103,9 @@ jobs:
       - name: Fallback and internal policy hardcode gate
         if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
         run: npm run verify:fallback-hardcode
-      - name: V3 Responses session admission behavior
+      - name: V3 HTTP request independence behavior
         if: ${{ !cancelled() && needs.scope.outputs.v3_session == 'true' }}
-        run: npm run test:v3-responses-session-admission
+        run: npm run test:v3-http-request-isolation
       - name: V3 provider action gate
         if: ${{ !cancelled() && needs.scope.outputs.v3_provider == 'true' }}
         run: npm run test:v3-provider-action-gate

@@ -115,6 +115,7 @@ endpoints = ["responses"]
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
+attempt_store = {{ request_max_attempts = 1 }}
 [providers.primary]
 type = "responses"
 base_url = "{upstream_base}"
@@ -274,9 +275,11 @@ async fn issue127_disabled_health_persistence_direct_public_blackbox() {
         "routecodex-issue127-disabled-seed-{}.json",
         std::process::id()
     ));
-    issue127_write_seed(&disabled_seed);
+    let disabled_port = free_port();
+    let disabled_listener_seed = disabled_seed.with_extension(format!("port-{disabled_port}.json"));
+    issue127_write_seed(&disabled_listener_seed);
     env::set_var("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE", &disabled_seed);
-    let handle = spawn_v3_server_aggregate(issue127_manifest(free_port(), &upstream_base, false))
+    let handle = spawn_v3_server_aggregate(issue127_manifest(disabled_port, &upstream_base, false))
         .await
         .unwrap();
     let base = format!("http://{}", handle.listeners[0].addr);
@@ -346,7 +349,7 @@ async fn issue127_disabled_health_persistence_direct_public_blackbox() {
         "persistence flush must succeed: {persist_failures:?}"
     );
     assert!(
-        !issue127_has_fresh_automatic_cooldown(&disabled_seed),
+        !issue127_has_fresh_automatic_cooldown(&disabled_listener_seed),
         "health-disabled provider must not persist a fresh automatic cooldown"
     );
 
@@ -356,9 +359,11 @@ async fn issue127_disabled_health_persistence_direct_public_blackbox() {
         "routecodex-issue127-enabled-seed-{}.json",
         std::process::id()
     ));
-    issue127_write_seed(&enabled_seed);
+    let enabled_port = free_port();
+    let enabled_listener_seed = enabled_seed.with_extension(format!("port-{enabled_port}.json"));
+    issue127_write_seed(&enabled_listener_seed);
     env::set_var("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE", &enabled_seed);
-    let control = spawn_v3_server_aggregate(issue127_manifest(free_port(), &upstream_base, true))
+    let control = spawn_v3_server_aggregate(issue127_manifest(enabled_port, &upstream_base, true))
         .await
         .unwrap();
     let control_base = format!("http://{}", control.listeners[0].addr);
@@ -394,6 +399,8 @@ async fn issue127_disabled_health_persistence_direct_public_blackbox() {
     upstream_task.await.unwrap();
     let _ = fs::remove_file(&disabled_seed);
     let _ = fs::remove_file(&enabled_seed);
+    let _ = fs::remove_file(&disabled_listener_seed);
+    let _ = fs::remove_file(&enabled_listener_seed);
     env::remove_var("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE");
     env::remove_var(ISSUE127_AUTH_ENV);
 }

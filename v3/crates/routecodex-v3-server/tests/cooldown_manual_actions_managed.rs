@@ -366,7 +366,7 @@ async fn zero_score_cooldown_excludes_exact_key_and_valid_probe_restores_it() {
 
     // The cooled identity receives no further business attempt.
     let blocked = "zero:blocked";
-    zero_fail(&client, &base, "test", blocked).await;
+    zero_fail(&client, &base, "test.test", blocked).await;
     assert!(
         !upstream.business.lock().await.contains_key(blocked),
         "the cooled identity must not receive another business attempt"
@@ -572,7 +572,10 @@ auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_COOLDOWN_MANU
 
 [route_groups.default.pools.default]
 selection = {{ strategy = "priority" }}
-targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 100 }}]
+targets = [
+  {{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 100 }},
+  {{ kind = "provider_model", provider = "independent", model = "test", key = "key", priority = 1 }}
+]
 [route_groups.default.pools.sibling]
 match = {{ models = ["sibling"], precedence = 10 }}
 targets = [{{ kind = "provider_model", provider = "test", model = "sibling", key = "key", priority = 100 }}]
@@ -582,6 +585,8 @@ targets = [{{ kind = "provider_model", provider = "independent", model = "test",
 
 {declaration}
 {execution}
+[servers.main.execution.attempt_store]
+request_max_attempts = 1
 "#
     )
 }

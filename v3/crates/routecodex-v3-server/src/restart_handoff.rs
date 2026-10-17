@@ -1,8 +1,8 @@
 use crate::client_transport_observation::{
     V3ClientResponseObservation, V3ClientTransportObservation,
 };
+use crate::request_activity::V3ServerRequestActivityPermit;
 use crate::restart_closeout::V3FrontTransportCloseoutState;
-use crate::session_admission::V3ServerRequestActivityPermit;
 use crate::V3MetadataCenterExecutionPlan;
 use axum::body::Body;
 use axum::extract::ConnectInfo;

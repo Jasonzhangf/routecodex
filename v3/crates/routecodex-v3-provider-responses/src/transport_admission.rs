@@ -64,6 +64,7 @@ pub(crate) fn take_or_acquire_provider_admission(
     pre_acquired: Option<V3AdaptiveConcurrencyLease>,
     controller: V3AdaptiveConcurrencyController,
     provider_key: String,
+    now_ms: u64,
 ) -> Result<V3AdaptiveConcurrencyLease, V3ProviderAdmissionError> {
     match pre_acquired {
         Some(lease) if lease.provider_key() == provider_key && lease.belongs_to(&controller) => {
@@ -76,7 +77,7 @@ pub(crate) fn take_or_acquire_provider_admission(
             Err(V3ProviderAdmissionError::LeaseMismatch)
         }
         None => controller
-            .try_acquire_business(&provider_key)
+            .try_acquire(&provider_key, now_ms)
             .ok_or(V3ProviderAdmissionError::Busy),
     }
 }
@@ -118,6 +119,7 @@ mod tests {
             None,
             controller.clone(),
             "provider:key".to_string(),
+            0,
         );
 
         assert!(matches!(result, Err(V3ProviderAdmissionError::Busy)));
@@ -139,6 +141,7 @@ mod tests {
             Some(lease),
             controller.clone(),
             "provider-b:key".to_string(),
+            0,
         );
 
         assert!(matches!(
@@ -162,6 +165,7 @@ mod tests {
             Some(lease),
             transport.clone(),
             "provider:key".to_string(),
+            0,
         );
 
         assert!(matches!(

@@ -435,6 +435,9 @@ routing_group = "sse"
 endpoints = ["responses"]
 {server_execution}
 
+[servers.sse.execution.attempt_store]
+request_max_attempts = 1
+
 [providers.sse]
 type = "gemini"
 base_url = "{upstream_base_url}"

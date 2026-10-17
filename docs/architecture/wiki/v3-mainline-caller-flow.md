@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 94 functional paths, 577 caller edges.
+Generated view: 94 functional paths, 572 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -64,8 +64,8 @@ flowchart TD
   module_v3_runtime__hub_v1 -->|1 edges / 1 paths| module_routecodex_v3_hooks
   module_v3_runtime__hub_v1 -->|1 edges / 1 paths| module_routecodex_v3_sse
   module_v3_runtime__hub_v1 -->|2 edges / 2 paths| module_v3_error
-  module_v3_runtime__hub_v1 -->|8 edges / 6 paths| module_v3_provider_responses
-  module_v3_runtime__hub_v1 -->|32 edges / 6 paths| module_v3_runtime
+  module_v3_runtime__hub_v1 -->|5 edges / 5 paths| module_v3_provider_responses
+  module_v3_runtime__hub_v1 -->|32 edges / 7 paths| module_v3_runtime
   module_v3_runtime__hub_v1 -->|144 edges / 29 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|1 edges / 1 paths| module_provider_compat_core
   module_v3_runtime -->|2 edges / 1 paths| module_routecodex_v3_agent_memory
@@ -73,8 +73,8 @@ flowchart TD
   module_v3_runtime -->|1 edges / 1 paths| module_routecodex_v3_sse
   module_v3_runtime -->|5 edges / 1 paths| module_v3_debug
   module_v3_runtime -->|9 edges / 5 paths| module_v3_error
-  module_v3_runtime -->|24 edges / 8 paths| module_v3_provider_responses
-  module_v3_runtime -->|57 edges / 18 paths| module_v3_runtime
+  module_v3_runtime -->|20 edges / 8 paths| module_v3_provider_responses
+  module_v3_runtime -->|58 edges / 18 paths| module_v3_runtime
   module_v3_runtime -->|48 edges / 13 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|3 edges / 1 paths| module_v3_target
   module_v3_runtime -->|5 edges / 2 paths| module_v3_virtual_router
@@ -83,8 +83,8 @@ flowchart TD
   module_v3_server -->|8 edges / 4 paths| module_v3_debug
   module_v3_server -->|3 edges / 2 paths| module_v3_error
   module_v3_server -->|6 edges / 4 paths| module_v3_runtime
-  module_v3_server -->|7 edges / 5 paths| module_v3_runtime__hub_v1
-  module_v3_server -->|47 edges / 20 paths| module_v3_server
+  module_v3_server -->|8 edges / 6 paths| module_v3_runtime__hub_v1
+  module_v3_server -->|47 edges / 21 paths| module_v3_server
   module_v3_server -->|1 edges / 1 paths| module_v3_vendor
   module_v3_target -->|1 edges / 1 paths| module_v3_provider_responses
   module_v3_target -->|1 edges / 1 paths| module_v3_target
@@ -123,8 +123,8 @@ flowchart TD
 | v3-runtime::hub_v1 | routecodex-v3-hooks | 1 | `v3.web_search_servertool_state_machine` |
 | v3-runtime::hub_v1 | routecodex-v3-sse | 1 | `v3.sse.protocol_codec_projection_boundary` |
 | v3-runtime::hub_v1 | v3-error | 2 | `v3.provider_global_subscription_probe`<br/>`v3.route_policy.condition_evaluation` |
-| v3-runtime::hub_v1 | v3-provider-responses | 8 | `v3-provider-admission-lease-lifecycle`<br/>`v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry` |
-| v3-runtime::hub_v1 | v3-runtime | 32 | `v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_admission_rescue_entrypoints`<br/>`v3.provider_global_subscription_probe`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding` |
+| v3-runtime::hub_v1 | v3-provider-responses | 5 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry` |
+| v3-runtime::hub_v1 | v3-runtime | 32 | `v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_admission_rescue_entrypoints`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding` |
 | v3-runtime::hub_v1 | v3-runtime::hub_v1 | 144 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.config.provider_sse_timeout_projection.mainline`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_pipeline.v1.relay_request_source_slice`<br/>`v3.hub_pipeline.v1.relay_response_source_slice`<br/>`v3.hub_pipeline.v1.request`<br/>`v3.hub_pipeline.v1.response`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.openai_chat_sse_typed_tree`<br/>`v3.protocol_conversion.gemini_standard_bridge`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_conversion_field_parity.outbound_helper_bindings`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_compat.request_invalid_error_source`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.responses_chat_sse_typed_tree`<br/>`v3.responses_provider_event.gemini_materialization`<br/>`v3.responses_provider_event.terminal_merge`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.servertool_center.skeleton`<br/>`v3.sse.protocol_codec_projection_boundary`<br/>`v3.tool_thinking_hook_skeleton.mainline`<br/>`v3.web_search_servertool_state_machine` |
 | v3-runtime | provider-compat-core | 1 | `v3.sse_error_and_direct_consumer_pre_wiring` |
 | v3-runtime | routecodex-v3-agent-memory | 2 | `v3.memory_raw_capture` |
@@ -132,8 +132,8 @@ flowchart TD
 | v3-runtime | routecodex-v3-sse | 1 | `v3.sse_error_and_direct_consumer_pre_wiring` |
 | v3-runtime | v3-debug | 5 | `v3.debug_error_foundation.mainline` |
 | v3-runtime | v3-error | 9 | `v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.hub_relay.response_failure_entry`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.route_policy.condition_evaluation` |
-| v3-runtime | v3-provider-responses | 24 | `v3-provider-admission-lease-lifecycle`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.selected_provider_model_binding` |
-| v3-runtime | v3-runtime | 57 | `v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.direct.request_key_hooks`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.execution_control_payload_architecture`<br/>`v3.memory_raw_capture`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_admission_rescue_entrypoints`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_direct_full_attempt_commit`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.sse_error_and_direct_consumer_pre_wiring`<br/>`v3.target.session_global_selection`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
+| v3-runtime | v3-provider-responses | 20 | `v3-provider-admission-lease-lifecycle`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.selected_provider_model_binding` |
+| v3-runtime | v3-runtime | 58 | `v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.direct.request_key_hooks`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.execution_control_payload_architecture`<br/>`v3.memory_raw_capture`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_admission_rescue_entrypoints`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_direct_full_attempt_commit`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.sse_error_and_direct_consumer_pre_wiring`<br/>`v3.target.session_global_selection`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
 | v3-runtime | v3-runtime::hub_v1 | 48 | `v3.hub_pipeline.v1.hook_registry_compile`<br/>`v3.hub_pipeline.v1.relay_payload_copy_runtime_probes`<br/>`v3.hub_relay.tool_servertool_multiturn_parity`<br/>`v3.protocol.anthropic.characterization`<br/>`v3.protocol.gemini.characterization`<br/>`v3.protocol.openai_chat.characterization`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
 | v3-runtime | v3-target | 3 | `v3.responses_direct.required_mainline` |
 | v3-runtime | v3-virtual-router | 5 | `v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation` |
@@ -142,8 +142,8 @@ flowchart TD
 | v3-server | v3-debug | 8 | `v3.codex_sample_retention_snap_scope`<br/>`v3.managed_restart_attempt`<br/>`v3.server.internal_observability_projection`<br/>`v3.server.startup` |
 | v3-server | v3-error | 3 | `v3.debug_error_foundation.mainline`<br/>`v3.server.startup` |
 | v3-server | v3-runtime | 6 | `v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline` |
-| v3-server | v3-runtime::hub_v1 | 7 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.runtime_timing_observability.mainline` |
-| v3-server | v3-server | 47 | `v3.client_sse_head_commit`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.managed_restart_attempt`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_restart_handoff_skeleton`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
+| v3-server | v3-runtime::hub_v1 | 8 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.runtime_timing_observability.mainline` |
+| v3-server | v3-server | 47 | `v3.client_sse_head_commit`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.http_request_isolation`<br/>`v3.managed_restart_attempt`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.runtime_restart_handoff_skeleton`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
 | v3-server | v3/vendor | 1 | `v3.server.startup` |
 | v3-target | v3-provider-responses | 1 | `v3.provider_key_health_model_granularity` |
 | v3-target | v3-target | 1 | `v3.provider_oauth_credentials.mainline` |
@@ -243,32 +243,40 @@ flowchart TD
 
 ## v3.provider_global_cooldown_persistence
 
-Provider cooldown state is loaded before listeners bind, persisted on provider health mutation, and probed once after ready before re-admission.
+Each listener owns independent provider cooldown storage and probe registration; aggregate startup never hydrates one port from another port's state.
 
 Owner feature: `v3.provider_global_cooldown_persistence`
 
 ```mermaid
 flowchart TD
   subgraph c_1_v3_provider_global_cooldown_persistence_m_v3_provider_responses["v3-provider-responses"]
-    c_1_v3_provider_global_cooldown_persistence_1["v3-provider-responses<br/>V3ProviderHealthStore::from_manifest<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
-    c_1_v3_provider_global_cooldown_persistence_2["v3-provider-responses<br/>start_provider_health_persistence<br/><small>routecodex-v3-provider-responses/src/health/persistence.rs</small>"]
-    c_1_v3_provider_global_cooldown_persistence_3["v3-provider-responses<br/>V3ProviderCooldownCoordinator::load<br/><small>routecodex-v3-provider-responses/src/global_cooldown.rs</small>"]
+    c_1_v3_provider_global_cooldown_persistence_3["v3-provider-responses<br/>V3ProviderHealthStore::from_manifest_for_listener<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
+    c_1_v3_provider_global_cooldown_persistence_4["v3-provider-responses<br/>start_provider_health_persistence<br/><small>routecodex-v3-provider-responses/src/health/persistence.rs</small>"]
+    c_1_v3_provider_global_cooldown_persistence_5["v3-provider-responses<br/>V3ProviderCooldownCoordinator::load<br/><small>routecodex-v3-provider-responses/src/global_cooldown.rs</small>"]
   end
   subgraph c_1_v3_provider_global_cooldown_persistence_m_v3_runtime["v3-runtime"]
-    c_1_v3_provider_global_cooldown_persistence_0["v3-runtime<br/>V3ProviderFailureRuntimeHealth::from_manifest<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
-    c_1_v3_provider_global_cooldown_persistence_5["v3-runtime<br/>V3ProviderFailureRuntimeHealth::aggregate_provider_probe_lifecycle<br/><small>routecodex-v3-runtime/src/provider_probe_lifecycle.rs</small>"]
+    c_1_v3_provider_global_cooldown_persistence_2["v3-runtime<br/>V3ProviderFailureRuntimeHealth::from_manifest_for_listener<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs</small>"]
+    c_1_v3_provider_global_cooldown_persistence_7["v3-runtime<br/>V3ProviderFailureRuntimeHealth::aggregate_provider_probe_lifecycle<br/><small>routecodex-v3-runtime/src/provider_probe_lifecycle.rs</small>"]
+  end
+  subgraph c_1_v3_provider_global_cooldown_persistence_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
+    c_1_v3_provider_global_cooldown_persistence_1["v3-runtime::hub_v1<br/>V3ResponsesRelayProviderHealthHandle::from_manifest_for_listener<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small>"]
   end
   subgraph c_1_v3_provider_global_cooldown_persistence_m_v3_server["v3-server"]
-    c_1_v3_provider_global_cooldown_persistence_4["v3-server<br/>AggregateProbeLifecycle::start<br/><small>routecodex-v3-server/src/aggregate_probe_lifecycle.rs</small>"]
+    c_1_v3_provider_global_cooldown_persistence_0["v3-server<br/>spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_1_v3_provider_global_cooldown_persistence_6["v3-server<br/>AggregateProbeLifecycle::start<br/><small>routecodex-v3-server/src/aggregate_probe_lifecycle.rs</small>"]
   end
-  c_1_v3_provider_global_cooldown_persistence_0 -->|v3-provider-global-cooldown-01<br/>V3Config05ManifestPublished → V3ProviderHealthStore| c_1_v3_provider_global_cooldown_persistence_1
-  c_1_v3_provider_global_cooldown_persistence_2 -->|v3-provider-global-cooldown-02<br/>V3ProviderHealthStore → V3ProviderCooldownCoordinator| c_1_v3_provider_global_cooldown_persistence_3
-  c_1_v3_provider_global_cooldown_persistence_4 -->|v3-provider-global-cooldown-03<br/>V3ServerStartup01ListenerSetPreflight → V3ProviderHealthStore| c_1_v3_provider_global_cooldown_persistence_5
+  c_1_v3_provider_global_cooldown_persistence_0 -->|v3-provider-listener-health-01<br/>V3ServerStartup01ListenerSetPreflight → V3ProviderHealthStore| c_1_v3_provider_global_cooldown_persistence_1
+  c_1_v3_provider_global_cooldown_persistence_1 -->|v3-provider-listener-health-02<br/>V3Config05ManifestPublished → V3ProviderHealthStore| c_1_v3_provider_global_cooldown_persistence_2
+  c_1_v3_provider_global_cooldown_persistence_2 -->|v3-provider-global-cooldown-01<br/>V3Config05ManifestPublished → V3ProviderHealthStore| c_1_v3_provider_global_cooldown_persistence_3
+  c_1_v3_provider_global_cooldown_persistence_4 -->|v3-provider-global-cooldown-02<br/>V3ProviderHealthStore → V3ProviderCooldownCoordinator| c_1_v3_provider_global_cooldown_persistence_5
+  c_1_v3_provider_global_cooldown_persistence_6 -->|v3-provider-global-cooldown-03<br/>V3ServerStartup01ListenerSetPreflight → V3ProviderHealthStore| c_1_v3_provider_global_cooldown_persistence_7
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-provider-global-cooldown-01` | `V3Config05ManifestPublished` → `V3ProviderHealthStore` | as_is_bound | V3ProviderFailureRuntimeHealth::from_manifest<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderHealthStore::from_manifest<br/><small>routecodex-v3-provider-responses/src/health.rs</small> | `v3.provider_global_cooldown_persistence` |
+| `v3-provider-listener-health-01` | `V3ServerStartup01ListenerSetPreflight` → `V3ProviderHealthStore` | anchored | spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket<br/><small>routecodex-v3-server/src/lib.rs</small> | V3ResponsesRelayProviderHealthHandle::from_manifest_for_listener<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small> | `v3.provider_global_cooldown_persistence` |
+| `v3-provider-listener-health-02` | `V3Config05ManifestPublished` → `V3ProviderHealthStore` | anchored | V3ResponsesRelayProviderHealthHandle::from_manifest_for_listener<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small> | V3ProviderFailureRuntimeHealth::from_manifest_for_listener<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs</small> | `v3.provider_global_cooldown_persistence` |
+| `v3-provider-global-cooldown-01` | `V3Config05ManifestPublished` → `V3ProviderHealthStore` | as_is_bound | V3ProviderFailureRuntimeHealth::from_manifest_for_listener<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs</small> | V3ProviderHealthStore::from_manifest_for_listener<br/><small>routecodex-v3-provider-responses/src/health.rs</small> | `v3.provider_global_cooldown_persistence` |
 | `v3-provider-global-cooldown-02` | `V3ProviderHealthStore` → `V3ProviderCooldownCoordinator` | anchored | start_provider_health_persistence<br/><small>routecodex-v3-provider-responses/src/health/persistence.rs</small> | V3ProviderCooldownCoordinator::load<br/><small>routecodex-v3-provider-responses/src/global_cooldown.rs</small> | `v3.provider_global_cooldown_persistence` |
 | `v3-provider-global-cooldown-03` | `V3ServerStartup01ListenerSetPreflight` → `V3ProviderHealthStore` | anchored | AggregateProbeLifecycle::start<br/><small>routecodex-v3-server/src/aggregate_probe_lifecycle.rs</small> | V3ProviderFailureRuntimeHealth::aggregate_provider_probe_lifecycle<br/><small>routecodex-v3-runtime/src/provider_probe_lifecycle.rs</small> | `v3.provider_global_cooldown_persistence` |
 
@@ -665,7 +673,7 @@ flowchart TD
   end
   subgraph c_14_v3_managed_restart_attempt_m_v3_server["v3-server"]
     c_14_v3_managed_restart_attempt_5["v3-server<br/>V3ServerAggregateHandle::prepare_exec_attempt<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_14_v3_managed_restart_attempt_6["v3-server<br/>V3ServerRequestActivityGate::begin_maintenance<br/><small>routecodex-v3-server/src/session_admission.rs</small>"]
+    c_14_v3_managed_restart_attempt_6["v3-server<br/>V3ServerRequestActivityGate::begin_maintenance<br/><small>routecodex-v3-server/src/request_activity.rs</small>"]
     c_14_v3_managed_restart_attempt_19["v3-server<br/>V3FrontTransportBroker::freeze<br/><small>routecodex-v3-server/src/restart_handoff.rs</small>"]
     c_14_v3_managed_restart_attempt_31["v3-server<br/>spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket<br/><small>routecodex-v3-server/src/lib.rs</small>"]
     c_14_v3_managed_restart_attempt_32["v3-server<br/>build_v3_server_startup_01_listener_set_from_config_05<br/><small>routecodex-v3-server/src/lib.rs</small>"]
@@ -710,7 +718,7 @@ flowchart TD
 | `v3-restart-prepare-previous-release-transfer` | `V3Lifecycle06LiveControlled` → `V3LifecycleRestartPrepared` | anchored | V3ManagedLifecycle::restart_with_observer<br/><small>routecodex-v3-lifecycle/src/lib.rs</small> | prepare_previous_release_restart_transfer<br/><small>routecodex-v3-lifecycle/src/exec_restart.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-bind-transfer-rejection-guard` | `V3Lifecycle06LiveControlled` → `V3LifecycleRestartPrepared` | anchored | restart_managed_runtime_in_place<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small> | bind_previous_release_restart_transfer<br/><small>routecodex-v3-lifecycle/src/exec_restart.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-prepare-live` | `V3Lifecycle06LiveControlled` → `V3LifecycleRestartPrepared` | anchored | restart_managed_runtime_in_place<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small> | V3ServerAggregateHandle::prepare_exec_attempt<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.managed_server_lifecycle` |
-| `v3-restart-quiesce-live` | `V3LifecycleRestartPrepared` → `V3Front08ClientTerminalOrError` | anchored | V3ServerAggregateHandle::prepare_exec_attempt<br/><small>routecodex-v3-server/src/lib.rs</small> | V3ServerRequestActivityGate::begin_maintenance<br/><small>routecodex-v3-server/src/session_admission.rs</small> | `v3.managed_server_lifecycle` |
+| `v3-restart-quiesce-live` | `V3LifecycleRestartPrepared` → `V3Front08ClientTerminalOrError` | anchored | V3ServerAggregateHandle::prepare_exec_attempt<br/><small>routecodex-v3-server/src/lib.rs</small> | V3ServerRequestActivityGate::begin_maintenance<br/><small>routecodex-v3-server/src/request_activity.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-cleanup-exact-hooks` | `V3LifecycleRestartExecReentered` → `V3LifecycleRestartHooksReconciled` | anchored | V3ManagedLifecycle::run_managed_child_with_declaration<br/><small>routecodex-v3-lifecycle/src/lib.rs</small> | V3HooksSidecarSupervisor::cleanup_exec_owner<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-control-exchange` | `V3Lifecycle02InstanceDeclared` → `V3Lifecycle06LiveControlled` | anchored | send_restart_control<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small> | send_control_without_timeout<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-retain-hooks-cleanup-owner` | `V3LifecycleRestartExecReentered` → `V3LifecycleRestartHooksOwnerRetained` | anchored | adopt_exec_restart_declaration_change<br/><small>routecodex-v3-lifecycle/src/exec_restart.rs</small> | V3HooksSidecarSupervisor::retain_exec_owner<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small> | `v3.managed_server_lifecycle` |
@@ -1530,6 +1538,8 @@ flowchart TD
   end
   subgraph c_36_v3_debug_error_foundation_mainline_m_v3_server["v3-server"]
     c_36_v3_debug_error_foundation_mainline_25["v3-server<br/>build_v3_provider_failure_session_scope_for_request<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_36_v3_debug_error_foundation_mainline_37["v3-server<br/>execute_responses_direct_server_outcome<br/><small>routecodex-v3-server/src/responses_direct_server_outcome.rs</small>"]
+    c_36_v3_debug_error_foundation_mainline_38["v3-server<br/>record_and_emit_v3_error_projection<br/><small>routecodex-v3-server/src/lib.rs</small>"]
   end
   c_36_v3_debug_error_foundation_mainline_0 -->|v3-de-01<br/>V3Server03HttpRequestRaw → V3DebugTraceContextStarted| c_36_v3_debug_error_foundation_mainline_1
   c_36_v3_debug_error_foundation_mainline_0 -->|v3-de-02<br/>V3DebugTraceContextStarted → V3DebugRawCaptureStored| c_36_v3_debug_error_foundation_mainline_2
@@ -1555,6 +1565,7 @@ flowchart TD
   c_36_v3_debug_error_foundation_mainline_32 -->|v3-de-22<br/>V3AnthropicRelayRuntimeOutput → V3DryRunResponseReplayCaptured| c_36_v3_debug_error_foundation_mainline_33
   c_36_v3_debug_error_foundation_mainline_34 -->|v3-de-23<br/>V3ProviderAttemptFailed → V3Error01SourceRaised| c_36_v3_debug_error_foundation_mainline_23
   c_36_v3_debug_error_foundation_mainline_35 -->|v3-de-24<br/>V3Error01SourceRaised → V3RuntimeProviderFailureObservation| c_36_v3_debug_error_foundation_mainline_36
+  c_36_v3_debug_error_foundation_mainline_37 -->|v3-de-25<br/>V3Error06ClientProjected → V3DebugEventLedgerRecorded| c_36_v3_debug_error_foundation_mainline_38
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -1583,6 +1594,7 @@ flowchart TD
 | `v3-de-22` | `V3AnthropicRelayRuntimeOutput` → `V3DryRunResponseReplayCaptured` | anchored | execute_v3_anthropic_relay_response_dry_run_runtime<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small> | V3AnthropicRelayRuntimeOutput::client_response<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-23` | `V3ProviderAttemptFailed` → `V3Error01SourceRaised` | anchored | build_v3_relay_provider_attempt_source<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | build_v3_error_01_source_raised_external<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-24` | `V3Error01SourceRaised` → `V3RuntimeProviderFailureObservation` | anchored | handle_provider_failure<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs</small> | build_v3_runtime_provider_failure_observation_from_policy_event<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs</small> | `v3.debug_error_foundation` |
+| `v3-de-25` | `V3Error06ClientProjected` → `V3DebugEventLedgerRecorded` | anchored | execute_responses_direct_server_outcome<br/><small>routecodex-v3-server/src/responses_direct_server_outcome.rs</small> | record_and_emit_v3_error_projection<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.debug_error_foundation` |
 
 ## v3.anthropic_relay.controlled_runtime
 
@@ -1686,7 +1698,7 @@ flowchart TD
     c_39_v3_openai_chat_relay_controlled_runtime_12["v3-provider-responses<br/>ResponsesTransport::send<br/><small>routecodex-v3-provider-responses/src/transport.rs</small>"]
   end
   subgraph c_39_v3_openai_chat_relay_controlled_runtime_m_v3_runtime["v3-runtime"]
-    c_39_v3_openai_chat_relay_controlled_runtime_25["v3-runtime<br/>select_v3_expanded_target_with_admission_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small>"]
+    c_39_v3_openai_chat_relay_controlled_runtime_25["v3-runtime<br/>select_v3_expanded_target_with_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small>"]
   end
   subgraph c_39_v3_openai_chat_relay_controlled_runtime_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
     c_39_v3_openai_chat_relay_controlled_runtime_1["v3-runtime::hub_v1<br/>execute_v3_openai_chat_relay_runtime_with_default_transport<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small>"]
@@ -1757,7 +1769,7 @@ flowchart TD
 | `v3-chat-direct-relay-handoff-01` | `V3ResponsesProtocolRelayHandoff` → `V3OpenAiChatRelaySeededEntry` | anchored | execute_v3_openai_chat_direct_server_outcome<br/><small>routecodex-v3-server/src/executors.rs</small> | execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_handoff<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small> | `v3.openai_chat_relay_runtime_integration` |
 | `v3-chat-direct-relay-handoff-02` | `V3OpenAiChatRelaySeededEntry` → `V3RelayRuntimeCore` | anchored | execute_v3_openai_chat_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small> | execute_v3_relay_runtime_core<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs</small> | `v3.relay_runtime_core` |
 | `v3-chat-direct-relay-handoff-03` | `V3RelayRuntimeCore` → `V3RelayCapturedPlanAdmission` | anchored | execute_v3_relay_runtime_core<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs</small> | resolve_v3_relay_entry_target<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs</small> | `v3.relay_runtime_shared` |
-| `v3-chat-direct-relay-handoff-04` | `V3RelayCapturedPlanAdmission` → `V3Target10ConcreteProviderSelected` | anchored | resolve_v3_relay_entry_target<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs</small> | select_v3_expanded_target_with_admission_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | `v3.relay_runtime_shared` |
+| `v3-chat-direct-relay-handoff-04` | `V3RelayCapturedPlanAdmission` → `V3Target10ConcreteProviderSelected` | anchored | resolve_v3_relay_entry_target<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs</small> | select_v3_expanded_target_with_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | `v3.relay_runtime_shared` |
 
 ## v3.gemini_relay.controlled_runtime
 
@@ -2620,29 +2632,25 @@ flowchart TD
 | `v3-runtime-timing-13` | `V3RuntimeTimingExternalComplete` → `V3RuntimeTimingProtocolHandoff` | anchored | execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | with_additional_attempts<br/><small>routecodex-v3-runtime/src/runtime_timing.rs</small> | `v3.runtime_timing_observability` |
 | `v3-runtime-timing-14` | `V3RuntimeTimingProtocolHandoff` → `V3RuntimeTimingExternalAttempt` | anchored | execute_responses_direct_server_outcome<br/><small>routecodex-v3-server/src/responses_direct_server_outcome.rs</small> | execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small> | `v3.runtime_timing_observability` |
 
-## v3.responses_session_admission
+## v3.http_request_isolation
 
-The listener-local HTTP boundary admits one active Responses request per explicit session or conversation, waits on overlap before Runtime/provider send, and holds the exact permit until the client response body reaches EOF, errors, or is dropped.
+Each parsed HTTP request independently enters Runtime without a session or conversation serialization gate.
 
-Owner feature: `v3.responses_session_inflight_admission`
-Manifest: `docs/architecture/manifests/v3.responses_session_admission.mainline.yml`
+Owner feature: `v3.http_request_isolation`
+Manifest: `docs/architecture/manifests/v3.http_request_isolation.mainline.yml`
 
 ```mermaid
 flowchart TD
-  subgraph c_62_v3_responses_session_admission_m_v3_server["v3-server"]
-    c_62_v3_responses_session_admission_0["v3-server<br/>admit_v3_responses_session_after_json_parse<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_62_v3_responses_session_admission_1["v3-server<br/>V3ResponsesSessionAdmissionGate::admit<br/><small>routecodex-v3-server/src/session_admission.rs</small>"]
-    c_62_v3_responses_session_admission_2["v3-server<br/>pending_endpoint<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small>"]
-    c_62_v3_responses_session_admission_3["v3-server<br/>hold_response_body_admission_permit<br/><small>routecodex-v3-server/src/session_admission.rs</small>"]
+  subgraph c_62_v3_http_request_isolation_m_v3_server["v3-server"]
+    c_62_v3_http_request_isolation_0["v3-server<br/>pending_model_request<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_62_v3_http_request_isolation_1["v3-server<br/>pending_endpoint_after_responses_admission<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small>"]
   end
-  c_62_v3_responses_session_admission_0 -->|v3-responses-admission-01<br/>V3Server03HttpRequestRaw → V3Server03ResponsesSessionAdmissionBlock| c_62_v3_responses_session_admission_1
-  c_62_v3_responses_session_admission_2 -->|v3-responses-admission-release-03<br/>V3Server03ResponsesSessionAdmissionBlock → V3ServerRespOutbound06ClientFrame| c_62_v3_responses_session_admission_3
+  c_62_v3_http_request_isolation_0 -->|v3-http-request-independent-01<br/>V3Server03HttpRequestRaw → V3HubReqInbound01ClientRaw| c_62_v3_http_request_isolation_1
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-responses-admission-01` | `V3Server03HttpRequestRaw` → `V3Server03ResponsesSessionAdmissionBlock` | anchored | admit_v3_responses_session_after_json_parse<br/><small>routecodex-v3-server/src/lib.rs</small> | V3ResponsesSessionAdmissionGate::admit<br/><small>routecodex-v3-server/src/session_admission.rs</small> | `v3.responses_session_inflight_admission` |
-| `v3-responses-admission-release-03` | `V3Server03ResponsesSessionAdmissionBlock` → `V3ServerRespOutbound06ClientFrame` | anchored | pending_endpoint<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | hold_response_body_admission_permit<br/><small>routecodex-v3-server/src/session_admission.rs</small> | `v3.responses_session_inflight_admission` |
+| `v3-http-request-independent-01` | `V3Server03HttpRequestRaw` → `V3HubReqInbound01ClientRaw` | anchored | pending_model_request<br/><small>routecodex-v3-server/src/lib.rs</small> | pending_endpoint_after_responses_admission<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | `v3.http_request_isolation` |
 
 ## v3.sse.http_keepalive_boundary
 
@@ -2678,7 +2686,7 @@ flowchart TD
   subgraph c_64_v3_client_sse_head_commit_m_v3_server["v3-server"]
     c_64_v3_client_sse_head_commit_0["v3-server<br/>pending_model_request<br/><small>routecodex-v3-server/src/lib.rs</small>"]
     c_64_v3_client_sse_head_commit_1["v3-server<br/>accept_v3_client_sse_transport<br/><small>routecodex-v3-server/src/client_sse_transport.rs</small>"]
-    c_64_v3_client_sse_head_commit_2["v3-server<br/>hold_response_body_request_activity_permit<br/><small>routecodex-v3-server/src/session_admission.rs</small>"]
+    c_64_v3_client_sse_head_commit_2["v3-server<br/>hold_response_body_request_activity_permit<br/><small>routecodex-v3-server/src/request_activity.rs</small>"]
     c_64_v3_client_sse_head_commit_3["v3-server<br/>V3StableFrontSocket::hold_activity_until_flush<br/><small>routecodex-v3-server/src/restart_handoff.rs</small>"]
     c_64_v3_client_sse_head_commit_4["v3-server<br/>V3StableFrontSocket::spawn<br/><small>routecodex-v3-server/src/restart_handoff.rs</small>"]
     c_64_v3_client_sse_head_commit_5["v3-server<br/>write_front_command<br/><small>routecodex-v3-server/src/restart_handoff.rs</small>"]
@@ -2691,7 +2699,7 @@ flowchart TD
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
 | `v3-client-sse-head-commit-01` | `V3ServerSseHeadCommit01ClientHead` → `V3ServerRespOutbound06ClientFrame` | anchored | pending_model_request<br/><small>routecodex-v3-server/src/lib.rs</small> | accept_v3_client_sse_transport<br/><small>routecodex-v3-server/src/client_sse_transport.rs</small> | `v3.client_sse_head_commit` |
-| `v3-client-body-eof-front-held` | `V3ServerRespOutbound06ClientFrame` → `V3FrontClientBodyEofHeld` | anchored | hold_response_body_request_activity_permit<br/><small>routecodex-v3-server/src/session_admission.rs</small> | V3StableFrontSocket::hold_activity_until_flush<br/><small>routecodex-v3-server/src/restart_handoff.rs</small> | `v3.client_sse_head_commit` |
+| `v3-client-body-eof-front-held` | `V3ServerRespOutbound06ClientFrame` → `V3FrontClientBodyEofHeld` | anchored | hold_response_body_request_activity_permit<br/><small>routecodex-v3-server/src/request_activity.rs</small> | V3StableFrontSocket::hold_activity_until_flush<br/><small>routecodex-v3-server/src/restart_handoff.rs</small> | `v3.client_sse_head_commit` |
 | `v3-client-front-flush-completed` | `V3FrontClientBodyEofHeld` → `V3Front08ClientTerminalOrError` | anchored | V3StableFrontSocket::spawn<br/><small>routecodex-v3-server/src/restart_handoff.rs</small> | write_front_command<br/><small>routecodex-v3-server/src/restart_handoff.rs</small> | `v3.client_sse_head_commit` |
 
 ## v3.provider_action_gate.mainline
@@ -2720,10 +2728,11 @@ flowchart TD
     c_65_v3_provider_action_gate_mainline_20["v3-runtime<br/>V3ProviderActionGate::abandon_admission<br/><small>routecodex-v3-runtime/src/provider_action_gate.rs</small>"]
     c_65_v3_provider_action_gate_mainline_21["v3-runtime<br/>record_v3_direct_provider_success<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs</small>"]
     c_65_v3_provider_action_gate_mainline_22["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
-    c_65_v3_provider_action_gate_mainline_23["v3-runtime<br/>record_v3_direct_provider_failure_record<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs</small>"]
-    c_65_v3_provider_action_gate_mainline_26["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
-    c_65_v3_provider_action_gate_mainline_30["v3-runtime<br/>record_direct_sse_provider_event_json_chunk<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs</small>"]
-    c_65_v3_provider_action_gate_mainline_32["v3-runtime<br/>process_sse_object_frame<br/><small>routecodex-v3-runtime/src/sse_object_pipeline.rs</small>"]
+    c_65_v3_provider_action_gate_mainline_23["v3-runtime<br/>run_v3_direct_provider_failure_policy_inner<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs</small>"]
+    c_65_v3_provider_action_gate_mainline_24["v3-runtime<br/>record_v3_direct_provider_failure_record<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs</small>"]
+    c_65_v3_provider_action_gate_mainline_29["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_candidate_failure<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
+    c_65_v3_provider_action_gate_mainline_31["v3-runtime<br/>record_direct_sse_provider_event_json_chunk<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs</small>"]
+    c_65_v3_provider_action_gate_mainline_33["v3-runtime<br/>process_sse_object_frame<br/><small>routecodex-v3-runtime/src/sse_object_pipeline.rs</small>"]
   end
   subgraph c_65_v3_provider_action_gate_mainline_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
     c_65_v3_provider_action_gate_mainline_0["v3-runtime::hub_v1<br/>execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small>"]
@@ -2733,16 +2742,16 @@ flowchart TD
     c_65_v3_provider_action_gate_mainline_15["v3-runtime::hub_v1<br/>handle_provider_failure<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs</small>"]
     c_65_v3_provider_action_gate_mainline_18["v3-runtime::hub_v1<br/>V3OpenAiChatSseProviderOutcome::record_failure<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small>"]
     c_65_v3_provider_action_gate_mainline_19["v3-runtime::hub_v1<br/>V3GeminiSseProviderOutcome::record_failure<br/><small>routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs</small>"]
-    c_65_v3_provider_action_gate_mainline_24["v3-runtime::hub_v1<br/>project_sse_stream<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small>"]
-    c_65_v3_provider_action_gate_mainline_25["v3-runtime::hub_v1<br/>V3OpenAiChatSseProviderOutcome::record_success<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small>"]
+    c_65_v3_provider_action_gate_mainline_25["v3-runtime::hub_v1<br/>project_sse_stream<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small>"]
+    c_65_v3_provider_action_gate_mainline_26["v3-runtime::hub_v1<br/>V3OpenAiChatSseProviderOutcome::record_success<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small>"]
     c_65_v3_provider_action_gate_mainline_27["v3-runtime::hub_v1<br/>project_sse_stream<br/><small>routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs</small>"]
     c_65_v3_provider_action_gate_mainline_28["v3-runtime::hub_v1<br/>V3GeminiSseProviderOutcome::record_success<br/><small>routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs</small>"]
-    c_65_v3_provider_action_gate_mainline_29["v3-runtime::hub_v1<br/>record_provider_success_after_response_governance<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small>"]
-    c_65_v3_provider_action_gate_mainline_31["v3-runtime::hub_v1<br/>classify_v3_provider_sse_json_data<br/><small>routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs</small>"]
-    c_65_v3_provider_action_gate_mainline_33["v3-runtime::hub_v1<br/>build_v3_hub_resp_inbound_02_from_responses_provider_stream_events<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs</small>"]
-    c_65_v3_provider_action_gate_mainline_34["v3-runtime::hub_v1<br/>observe_v3_runtime_responses_sse_transport_chunk_typed<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs</small>"]
-    c_65_v3_provider_action_gate_mainline_35["v3-runtime::hub_v1<br/>apply_v3_typed_responses_event<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs</small>"]
-    c_65_v3_provider_action_gate_mainline_36["v3-runtime::hub_v1<br/>V3ResponsesSseReducerState::apply_event<br/><small>routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs</small>"]
+    c_65_v3_provider_action_gate_mainline_30["v3-runtime::hub_v1<br/>record_provider_success_after_response_governance<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small>"]
+    c_65_v3_provider_action_gate_mainline_32["v3-runtime::hub_v1<br/>classify_v3_provider_sse_json_data<br/><small>routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs</small>"]
+    c_65_v3_provider_action_gate_mainline_34["v3-runtime::hub_v1<br/>build_v3_hub_resp_inbound_02_from_responses_provider_stream_events<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs</small>"]
+    c_65_v3_provider_action_gate_mainline_35["v3-runtime::hub_v1<br/>observe_v3_runtime_responses_sse_transport_chunk_typed<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs</small>"]
+    c_65_v3_provider_action_gate_mainline_36["v3-runtime::hub_v1<br/>apply_v3_typed_responses_event<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs</small>"]
+    c_65_v3_provider_action_gate_mainline_37["v3-runtime::hub_v1<br/>V3ResponsesSseReducerState::apply_event<br/><small>routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs</small>"]
   end
   c_65_v3_provider_action_gate_mainline_0 -->|v3-provider-action-gate-01<br/>ProviderReqCompat06ProviderCompat → V3Error05ExecutionDecision| c_65_v3_provider_action_gate_mainline_1
   c_65_v3_provider_action_gate_mainline_0 -->|v3-provider-action-gate-02<br/>V3ProviderReqOutbound08WirePayload → V3Error05ExecutionDecision| c_65_v3_provider_action_gate_mainline_1
@@ -2776,22 +2785,22 @@ flowchart TD
   c_65_v3_provider_action_gate_mainline_11 -->|v3-provider-action-gate-33<br/>V3ProviderActionPermitInFlight → V3ProviderActionSuccessObserved| c_65_v3_provider_action_gate_mainline_21
   c_65_v3_provider_action_gate_mainline_21 -->|v3-provider-action-gate-34<br/>V3ProviderActionSuccessObserved → V3ProviderActionSuccessRecorded| c_65_v3_provider_action_gate_mainline_22
   c_65_v3_provider_action_gate_mainline_11 -->|v3-provider-action-gate-35<br/>V3ProviderActionPermitAbandoned → V3ProviderActionFailureObserved| c_65_v3_provider_action_gate_mainline_14
-  c_65_v3_provider_action_gate_mainline_14 -->|v3-provider-action-gate-36<br/>V3ProviderActionFailureObserved → V3ProviderActionFailureRecorded| c_65_v3_provider_action_gate_mainline_23
-  c_65_v3_provider_action_gate_mainline_24 -->|v3-provider-action-gate-37<br/>V3ProviderActionPermitInFlight → V3ProviderActionSuccessObserved| c_65_v3_provider_action_gate_mainline_25
-  c_65_v3_provider_action_gate_mainline_25 -->|v3-provider-action-gate-38<br/>V3ProviderActionSuccessObserved → V3ProviderActionSuccessRecorded| c_65_v3_provider_action_gate_mainline_22
-  c_65_v3_provider_action_gate_mainline_24 -->|v3-provider-action-gate-39<br/>V3ProviderActionPermitInFlight → V3ProviderActionFailureObserved| c_65_v3_provider_action_gate_mainline_18
-  c_65_v3_provider_action_gate_mainline_18 -->|v3-provider-action-gate-40<br/>V3ProviderActionPermitAbandoned → V3ProviderActionFailureRecorded| c_65_v3_provider_action_gate_mainline_26
+  c_65_v3_provider_action_gate_mainline_23 -->|v3-provider-action-gate-36<br/>V3ProviderActionFailureObserved → V3ProviderActionFailureRecorded| c_65_v3_provider_action_gate_mainline_24
+  c_65_v3_provider_action_gate_mainline_25 -->|v3-provider-action-gate-37<br/>V3ProviderActionPermitInFlight → V3ProviderActionSuccessObserved| c_65_v3_provider_action_gate_mainline_26
+  c_65_v3_provider_action_gate_mainline_26 -->|v3-provider-action-gate-38<br/>V3ProviderActionSuccessObserved → V3ProviderActionSuccessRecorded| c_65_v3_provider_action_gate_mainline_22
+  c_65_v3_provider_action_gate_mainline_25 -->|v3-provider-action-gate-39<br/>V3ProviderActionPermitInFlight → V3ProviderActionFailureObserved| c_65_v3_provider_action_gate_mainline_18
+  c_65_v3_provider_action_gate_mainline_15 -->|v3-provider-action-gate-40<br/>V3ProviderActionPermitAbandoned → V3ProviderActionFailureRecorded| c_65_v3_provider_action_gate_mainline_2
   c_65_v3_provider_action_gate_mainline_27 -->|v3-provider-action-gate-41<br/>V3ProviderActionPermitInFlight → V3ProviderActionSuccessObserved| c_65_v3_provider_action_gate_mainline_28
   c_65_v3_provider_action_gate_mainline_28 -->|v3-provider-action-gate-42<br/>V3ProviderActionSuccessObserved → V3ProviderActionSuccessRecorded| c_65_v3_provider_action_gate_mainline_22
   c_65_v3_provider_action_gate_mainline_27 -->|v3-provider-action-gate-43<br/>V3ProviderActionPermitInFlight → V3ProviderActionFailureObserved| c_65_v3_provider_action_gate_mainline_19
-  c_65_v3_provider_action_gate_mainline_19 -->|v3-provider-action-gate-44<br/>V3ProviderActionPermitAbandoned → V3ProviderActionFailureRecorded| c_65_v3_provider_action_gate_mainline_26
+  c_65_v3_provider_action_gate_mainline_2 -->|v3-provider-action-gate-44<br/>V3ProviderActionPermitAbandoned → V3ProviderActionFailureRecorded| c_65_v3_provider_action_gate_mainline_29
   c_65_v3_provider_action_gate_mainline_0 -->|v3-provider-action-gate-45<br/>V3ProviderActionPermitInFlight → V3ProviderActionSuccessRecorded| c_65_v3_provider_action_gate_mainline_22
-  c_65_v3_provider_action_gate_mainline_12 -->|v3-provider-action-gate-46<br/>V3ProviderActionPermitInFlight → V3ProviderActionSuccessFinalize| c_65_v3_provider_action_gate_mainline_29
-  c_65_v3_provider_action_gate_mainline_29 -->|v3-provider-action-gate-47<br/>V3ProviderActionSuccessFinalize → V3ProviderActionSuccessRecorded| c_65_v3_provider_action_gate_mainline_22
-  c_65_v3_provider_action_gate_mainline_30 -->|v3-provider-action-gate-48<br/>V3ProviderRespInbound01Raw → V3ProviderResponsesEventCodec| c_65_v3_provider_action_gate_mainline_31
-  c_65_v3_provider_action_gate_mainline_30 -->|v3-provider-action-gate-49<br/>V3ProviderResponsesEventCodec → V3ProviderResponsesTerminalOrFailureObserved| c_65_v3_provider_action_gate_mainline_32
-  c_65_v3_provider_action_gate_mainline_33 -->|v3-provider-action-gate-50<br/>V3ProviderRespInbound01Raw → V3ProviderResponsesEventCodec| c_65_v3_provider_action_gate_mainline_34
-  c_65_v3_provider_action_gate_mainline_35 -->|v3-provider-action-gate-51<br/>V3ProviderResponsesEventCodec → V3ProviderResponsesTerminalOrFailureObserved| c_65_v3_provider_action_gate_mainline_36
+  c_65_v3_provider_action_gate_mainline_12 -->|v3-provider-action-gate-46<br/>V3ProviderActionPermitInFlight → V3ProviderActionSuccessFinalize| c_65_v3_provider_action_gate_mainline_30
+  c_65_v3_provider_action_gate_mainline_30 -->|v3-provider-action-gate-47<br/>V3ProviderActionSuccessFinalize → V3ProviderActionSuccessRecorded| c_65_v3_provider_action_gate_mainline_22
+  c_65_v3_provider_action_gate_mainline_31 -->|v3-provider-action-gate-48<br/>V3ProviderRespInbound01Raw → V3ProviderResponsesEventCodec| c_65_v3_provider_action_gate_mainline_32
+  c_65_v3_provider_action_gate_mainline_31 -->|v3-provider-action-gate-49<br/>V3ProviderResponsesEventCodec → V3ProviderResponsesTerminalOrFailureObserved| c_65_v3_provider_action_gate_mainline_33
+  c_65_v3_provider_action_gate_mainline_34 -->|v3-provider-action-gate-50<br/>V3ProviderRespInbound01Raw → V3ProviderResponsesEventCodec| c_65_v3_provider_action_gate_mainline_35
+  c_65_v3_provider_action_gate_mainline_36 -->|v3-provider-action-gate-51<br/>V3ProviderResponsesEventCodec → V3ProviderResponsesTerminalOrFailureObserved| c_65_v3_provider_action_gate_mainline_37
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -2828,15 +2837,15 @@ flowchart TD
 | `v3-provider-action-gate-33` | `V3ProviderActionPermitInFlight` → `V3ProviderActionSuccessObserved` | anchored | execute_v3_responses_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | record_v3_direct_provider_success<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs</small> | `v3.provider_action_gate` |
 | `v3-provider-action-gate-34` | `V3ProviderActionSuccessObserved` → `V3ProviderActionSuccessRecorded` | anchored | record_v3_direct_provider_success<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs</small> | V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_action_gate` |
 | `v3-provider-action-gate-35` | `V3ProviderActionPermitAbandoned` → `V3ProviderActionFailureObserved` | anchored | execute_v3_responses_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | run_v3_direct_provider_failure_policy<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs</small> | `v3.provider_action_gate` |
-| `v3-provider-action-gate-36` | `V3ProviderActionFailureObserved` → `V3ProviderActionFailureRecorded` | anchored | run_v3_direct_provider_failure_policy<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs</small> | record_v3_direct_provider_failure_record<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs</small> | `v3.provider_action_gate` |
+| `v3-provider-action-gate-36` | `V3ProviderActionFailureObserved` → `V3ProviderActionFailureRecorded` | anchored | run_v3_direct_provider_failure_policy_inner<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs</small> | record_v3_direct_provider_failure_record<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs</small> | `v3.provider_action_gate` |
 | `v3-provider-action-gate-37` | `V3ProviderActionPermitInFlight` → `V3ProviderActionSuccessObserved` | anchored | project_sse_stream<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small> | V3OpenAiChatSseProviderOutcome::record_success<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small> | `v3.provider_action_gate` |
 | `v3-provider-action-gate-38` | `V3ProviderActionSuccessObserved` → `V3ProviderActionSuccessRecorded` | anchored | V3OpenAiChatSseProviderOutcome::record_success<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small> | V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_action_gate` |
 | `v3-provider-action-gate-39` | `V3ProviderActionPermitInFlight` → `V3ProviderActionFailureObserved` | anchored | project_sse_stream<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small> | V3OpenAiChatSseProviderOutcome::record_failure<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small> | `v3.provider_action_gate` |
-| `v3-provider-action-gate-40` | `V3ProviderActionPermitAbandoned` → `V3ProviderActionFailureRecorded` | anchored | V3OpenAiChatSseProviderOutcome::record_failure<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small> | V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_action_gate` |
+| `v3-provider-action-gate-40` | `V3ProviderActionPermitAbandoned` → `V3ProviderActionFailureRecorded` | anchored | handle_provider_failure<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs</small> | run_v3_relay_provider_failure_policy<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_action_gate` |
 | `v3-provider-action-gate-41` | `V3ProviderActionPermitInFlight` → `V3ProviderActionSuccessObserved` | anchored | project_sse_stream<br/><small>routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs</small> | V3GeminiSseProviderOutcome::record_success<br/><small>routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs</small> | `v3.provider_action_gate` |
 | `v3-provider-action-gate-42` | `V3ProviderActionSuccessObserved` → `V3ProviderActionSuccessRecorded` | anchored | V3GeminiSseProviderOutcome::record_success<br/><small>routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs</small> | V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_action_gate` |
 | `v3-provider-action-gate-43` | `V3ProviderActionPermitInFlight` → `V3ProviderActionFailureObserved` | anchored | project_sse_stream<br/><small>routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs</small> | V3GeminiSseProviderOutcome::record_failure<br/><small>routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs</small> | `v3.provider_action_gate` |
-| `v3-provider-action-gate-44` | `V3ProviderActionPermitAbandoned` → `V3ProviderActionFailureRecorded` | anchored | V3GeminiSseProviderOutcome::record_failure<br/><small>routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs</small> | V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_action_gate` |
+| `v3-provider-action-gate-44` | `V3ProviderActionPermitAbandoned` → `V3ProviderActionFailureRecorded` | anchored | run_v3_relay_provider_failure_policy<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderFailureRuntimeHealth::record_candidate_failure<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_action_gate` |
 | `v3-provider-action-gate-45` | `V3ProviderActionPermitInFlight` → `V3ProviderActionSuccessRecorded` | anchored | execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small> | V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_action_gate` |
 | `v3-provider-action-gate-46` | `V3ProviderActionPermitInFlight` → `V3ProviderActionSuccessFinalize` | anchored | execute_v3_anthropic_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small> | record_provider_success_after_response_governance<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small> | `v3.provider_action_gate` |
 | `v3-provider-action-gate-47` | `V3ProviderActionSuccessFinalize` → `V3ProviderActionSuccessRecorded` | anchored | record_provider_success_after_response_governance<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small> | V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_action_gate` |
@@ -2948,7 +2957,7 @@ flowchart TD
 
 ## v3.provider_admission_rescue_entrypoints
 
-Direct and Relay use one pre-transport selection boundary with atomic provider+authAlias capacity admission; full candidates are skipped request-locally without waiting, health mutation or Router reentry.
+Direct and Relay select healthy targets with cooldown rescue; in-flight business requests never exclude candidates.
 
 Owner feature: `v3.provider_global_subscription_probe`
 
@@ -2956,9 +2965,9 @@ Owner feature: `v3.provider_global_subscription_probe`
 flowchart TD
   subgraph c_70_v3_provider_admission_rescue_entrypoints_m_v3_runtime["v3-runtime"]
     c_70_v3_provider_admission_rescue_entrypoints_0["v3-runtime<br/>execute_v3_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel/v3_direct_core.rs</small>"]
-    c_70_v3_provider_admission_rescue_entrypoints_1["v3-runtime<br/>select_v3_expanded_target_with_admission_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small>"]
+    c_70_v3_provider_admission_rescue_entrypoints_1["v3-runtime<br/>select_v3_expanded_target_with_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small>"]
     c_70_v3_provider_admission_rescue_entrypoints_2["v3-runtime<br/>execute_v3_responses_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
-    c_70_v3_provider_admission_rescue_entrypoints_4["v3-runtime<br/>resolve_v3_relay_target_outcome_with_admission_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small>"]
+    c_70_v3_provider_admission_rescue_entrypoints_4["v3-runtime<br/>resolve_v3_relay_target_outcome_with_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small>"]
   end
   subgraph c_70_v3_provider_admission_rescue_entrypoints_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
     c_70_v3_provider_admission_rescue_entrypoints_3["v3-runtime::hub_v1<br/>execute_v3_relay_runtime_core<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs</small>"]
@@ -2974,69 +2983,44 @@ flowchart TD
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-rd-target-select-direct-admission-rescue` | `V3Target09CandidateSetExpanded` → `V3Target10ConcreteProviderSelected` | anchored | execute_v3_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel/v3_direct_core.rs</small> | select_v3_expanded_target_with_admission_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | `v3.provider_global_subscription_probe` |
-| `v3-rd-target-select-responses-direct-admission-rescue` | `V3Target09CandidateSetExpanded` → `V3Target10ConcreteProviderSelected` | anchored | execute_v3_responses_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | select_v3_expanded_target_with_admission_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | `v3.provider_global_subscription_probe` |
-| `v3-rd-target-select-relay-core-admission-rescue` | `V3Target09CandidateSetExpanded` → `V3Target10ConcreteProviderSelected` | anchored | execute_v3_relay_runtime_core<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs</small> | resolve_v3_relay_target_outcome_with_admission_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | `v3.provider_global_subscription_probe` |
-| `v3-rd-target-select-responses-relay-admission-rescue` | `V3Target09CandidateSetExpanded` → `V3Target10ConcreteProviderSelected` | anchored | execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small> | resolve_v3_relay_target_outcome_with_admission_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | `v3.provider_global_subscription_probe` |
-| `v3-rd-target-select-anthropic-relay-admission-rescue` | `V3Target09CandidateSetExpanded` → `V3Target10ConcreteProviderSelected` | anchored | execute_v3_anthropic_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small> | resolve_v3_relay_target_outcome_with_admission_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | `v3.provider_global_subscription_probe` |
+| `v3-rd-target-select-direct-admission-rescue` | `V3Target09CandidateSetExpanded` → `V3Target10ConcreteProviderSelected` | anchored | execute_v3_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel/v3_direct_core.rs</small> | select_v3_expanded_target_with_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | `v3.provider_global_subscription_probe` |
+| `v3-rd-target-select-responses-direct-admission-rescue` | `V3Target09CandidateSetExpanded` → `V3Target10ConcreteProviderSelected` | anchored | execute_v3_responses_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | select_v3_expanded_target_with_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | `v3.provider_global_subscription_probe` |
+| `v3-rd-target-select-relay-core-admission-rescue` | `V3Target09CandidateSetExpanded` → `V3Target10ConcreteProviderSelected` | anchored | execute_v3_relay_runtime_core<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs</small> | resolve_v3_relay_target_outcome_with_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | `v3.provider_global_subscription_probe` |
+| `v3-rd-target-select-responses-relay-admission-rescue` | `V3Target09CandidateSetExpanded` → `V3Target10ConcreteProviderSelected` | anchored | execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small> | resolve_v3_relay_target_outcome_with_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | `v3.provider_global_subscription_probe` |
+| `v3-rd-target-select-anthropic-relay-admission-rescue` | `V3Target09CandidateSetExpanded` → `V3Target10ConcreteProviderSelected` | anchored | execute_v3_anthropic_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small> | resolve_v3_relay_target_outcome_with_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | `v3.provider_global_subscription_probe` |
 
 ## v3-provider-admission-lease-lifecycle
 
-Runtime acquires one provider+authAlias capacity lease before transport and hands it to Provider; WebSocketV2 releases that lease before waiting for a shared session slot and reacquires it only after slot ownership, every path releases owned resources through RAII, and a completed business success restores one unit of the exact provider+authAlias adaptive budget.
+Only health probes own bounded control capacity. Business requests never acquire or wait for these leases.
 
 Owner feature: `v3.provider_global_subscription_probe`
 
 ```mermaid
 flowchart TD
   subgraph c_71_v3_provider_admission_lease_lifecycle_m_v3_provider_responses["v3-provider-responses"]
-    c_71_v3_provider_admission_lease_lifecycle_1["v3-provider-responses<br/>V3AdaptiveConcurrencyController::try_acquire_business<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small>"]
-    c_71_v3_provider_admission_lease_lifecycle_3["v3-provider-responses<br/>V3Transport13ResponsesRequest::with_pre_acquired_admission<br/><small>routecodex-v3-provider-responses/src/transport.rs</small>"]
-    c_71_v3_provider_admission_lease_lifecycle_7["v3-provider-responses<br/>V3ProviderResponsesTransport::send<br/><small>routecodex-v3-provider-responses/src/transport.rs</small>"]
-    c_71_v3_provider_admission_lease_lifecycle_8["v3-provider-responses<br/>acquire_admission_and_connection_slot<br/><small>routecodex-v3-provider-responses/src/transport/websocket.rs</small>"]
-    c_71_v3_provider_admission_lease_lifecycle_11["v3-provider-responses<br/>V3AdaptiveConcurrencyController::release<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small>"]
-    c_71_v3_provider_admission_lease_lifecycle_12["v3-provider-responses<br/>V3PreAcquiredProviderAdmission::drop<br/><small>routecodex-v3-provider-responses/src/transport_admission.rs</small>"]
-    c_71_v3_provider_admission_lease_lifecycle_13["v3-provider-responses<br/>V3AdaptiveConcurrencyLease::release<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small>"]
-    c_71_v3_provider_admission_lease_lifecycle_14["v3-provider-responses<br/>V3AdaptiveConcurrencyPermitGuard::drop<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small>"]
-    c_71_v3_provider_admission_lease_lifecycle_16["v3-provider-responses<br/>V3AdaptiveConcurrencyController::observe_business_success<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small>"]
+    c_71_v3_provider_admission_lease_lifecycle_1["v3-provider-responses<br/>V3AdaptiveConcurrencyController::try_acquire<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small>"]
+    c_71_v3_provider_admission_lease_lifecycle_2["v3-provider-responses<br/>V3ProviderResponsesTransport::send<br/><small>routecodex-v3-provider-responses/src/transport.rs</small>"]
+    c_71_v3_provider_admission_lease_lifecycle_3["v3-provider-responses<br/>acquire_connection_slot<br/><small>routecodex-v3-provider-responses/src/transport/websocket.rs</small>"]
+    c_71_v3_provider_admission_lease_lifecycle_4["v3-provider-responses<br/>V3PreAcquiredProviderAdmission::drop<br/><small>routecodex-v3-provider-responses/src/transport_admission.rs</small>"]
+    c_71_v3_provider_admission_lease_lifecycle_5["v3-provider-responses<br/>V3AdaptiveConcurrencyLease::release<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small>"]
+    c_71_v3_provider_admission_lease_lifecycle_6["v3-provider-responses<br/>V3AdaptiveConcurrencyPermitGuard::drop<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small>"]
+    c_71_v3_provider_admission_lease_lifecycle_7["v3-provider-responses<br/>V3AdaptiveConcurrencyController::release<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small>"]
   end
   subgraph c_71_v3_provider_admission_lease_lifecycle_m_v3_runtime["v3-runtime"]
-    c_71_v3_provider_admission_lease_lifecycle_0["v3-runtime<br/>select_v3_expanded_target_with_admission_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small>"]
-    c_71_v3_provider_admission_lease_lifecycle_2["v3-runtime<br/>execute_v3_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel/v3_direct_core.rs</small>"]
-    c_71_v3_provider_admission_lease_lifecycle_4["v3-runtime<br/>execute_v3_responses_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
-    c_71_v3_provider_admission_lease_lifecycle_10["v3-runtime<br/>V3RuntimeProviderAdmission::drop<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small>"]
-    c_71_v3_provider_admission_lease_lifecycle_15["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope_for_interface<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs</small>"]
+    c_71_v3_provider_admission_lease_lifecycle_0["v3-runtime<br/>probe_v3_provider_global_target_impl<br/><small>routecodex-v3-runtime/src/provider_failure_global_probe.rs</small>"]
   end
-  subgraph c_71_v3_provider_admission_lease_lifecycle_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
-    c_71_v3_provider_admission_lease_lifecycle_5["v3-runtime::hub_v1<br/>execute_v3_relay_runtime_core<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs</small>"]
-    c_71_v3_provider_admission_lease_lifecycle_6["v3-runtime::hub_v1<br/>execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small>"]
-    c_71_v3_provider_admission_lease_lifecycle_9["v3-runtime::hub_v1<br/>execute_v3_anthropic_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small>"]
-  end
-  c_71_v3_provider_admission_lease_lifecycle_0 -->|v3-provider-admission-lease-acquire<br/>V3Target10ConcreteProviderSelected → V3RuntimeProviderAdmission| c_71_v3_provider_admission_lease_lifecycle_1
-  c_71_v3_provider_admission_lease_lifecycle_2 -->|v3-provider-admission-lease-direct-handoff<br/>V3RuntimeProviderAdmission → V3PreAcquiredProviderAdmission| c_71_v3_provider_admission_lease_lifecycle_3
-  c_71_v3_provider_admission_lease_lifecycle_4 -->|v3-provider-admission-lease-responses-direct-handoff<br/>V3RuntimeProviderAdmission → V3PreAcquiredProviderAdmission| c_71_v3_provider_admission_lease_lifecycle_3
-  c_71_v3_provider_admission_lease_lifecycle_5 -->|v3-provider-admission-lease-relay-handoff<br/>V3RuntimeProviderAdmission → V3PreAcquiredProviderAdmission| c_71_v3_provider_admission_lease_lifecycle_3
-  c_71_v3_provider_admission_lease_lifecycle_6 -->|v3-provider-admission-lease-responses-relay-handoff<br/>V3RuntimeProviderAdmission → V3PreAcquiredProviderAdmission| c_71_v3_provider_admission_lease_lifecycle_3
-  c_71_v3_provider_admission_lease_lifecycle_7 -->|v3-provider-admission-lease-websocket-v2-slot-order<br/>V3PreAcquiredProviderAdmission → V3ProviderResponsesWebSocketSessionSlot| c_71_v3_provider_admission_lease_lifecycle_8
-  c_71_v3_provider_admission_lease_lifecycle_9 -->|v3-provider-admission-lease-anthropic-relay-handoff<br/>V3RuntimeProviderAdmission → V3PreAcquiredProviderAdmission| c_71_v3_provider_admission_lease_lifecycle_3
-  c_71_v3_provider_admission_lease_lifecycle_10 -->|v3-provider-admission-lease-runtime-early-release<br/>V3RuntimeProviderAdmission → V3AdaptiveConcurrencyPermitReleased| c_71_v3_provider_admission_lease_lifecycle_11
-  c_71_v3_provider_admission_lease_lifecycle_12 -->|v3-provider-admission-lease-request-drop-release<br/>V3PreAcquiredProviderAdmission → V3AdaptiveConcurrencyPermitReleased| c_71_v3_provider_admission_lease_lifecycle_13
-  c_71_v3_provider_admission_lease_lifecycle_14 -->|v3-provider-admission-lease-provider-terminal-release<br/>V3ProviderResponsesTransportSend → V3AdaptiveConcurrencyPermitReleased| c_71_v3_provider_admission_lease_lifecycle_11
-  c_71_v3_provider_admission_lease_lifecycle_15 -->|v3-provider-admission-budget-recover-business-success<br/>V3ProviderHealthStateMutated → V3AdaptiveConcurrencyController| c_71_v3_provider_admission_lease_lifecycle_16
+  c_71_v3_provider_admission_lease_lifecycle_0 -->|v3-provider-admission-lease-acquire<br/>V3ProviderHealthProbePermit → V3PreAcquiredProviderAdmission| c_71_v3_provider_admission_lease_lifecycle_1
+  c_71_v3_provider_admission_lease_lifecycle_2 -->|v3-provider-admission-lease-websocket-v2-slot-order<br/>V3ProviderResponsesTransportSend → V3ProviderResponsesWebSocketSessionSlot| c_71_v3_provider_admission_lease_lifecycle_3
+  c_71_v3_provider_admission_lease_lifecycle_4 -->|v3-provider-admission-lease-request-drop-release<br/>V3PreAcquiredProviderAdmission → V3AdaptiveConcurrencyPermitReleased| c_71_v3_provider_admission_lease_lifecycle_5
+  c_71_v3_provider_admission_lease_lifecycle_6 -->|v3-provider-admission-lease-provider-terminal-release<br/>V3ProviderResponsesTransportSend → V3AdaptiveConcurrencyPermitReleased| c_71_v3_provider_admission_lease_lifecycle_7
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-provider-admission-lease-acquire` | `V3Target10ConcreteProviderSelected` → `V3RuntimeProviderAdmission` | anchored | select_v3_expanded_target_with_admission_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | V3AdaptiveConcurrencyController::try_acquire_business<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small> | `v3.provider_global_subscription_probe` |
-| `v3-provider-admission-lease-direct-handoff` | `V3RuntimeProviderAdmission` → `V3PreAcquiredProviderAdmission` | anchored | execute_v3_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel/v3_direct_core.rs</small> | V3Transport13ResponsesRequest::with_pre_acquired_admission<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | `v3.provider_global_subscription_probe` |
-| `v3-provider-admission-lease-responses-direct-handoff` | `V3RuntimeProviderAdmission` → `V3PreAcquiredProviderAdmission` | anchored | execute_v3_responses_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | V3Transport13ResponsesRequest::with_pre_acquired_admission<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | `v3.provider_global_subscription_probe` |
-| `v3-provider-admission-lease-relay-handoff` | `V3RuntimeProviderAdmission` → `V3PreAcquiredProviderAdmission` | anchored | execute_v3_relay_runtime_core<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs</small> | V3Transport13ResponsesRequest::with_pre_acquired_admission<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | `v3.provider_global_subscription_probe` |
-| `v3-provider-admission-lease-responses-relay-handoff` | `V3RuntimeProviderAdmission` → `V3PreAcquiredProviderAdmission` | anchored | execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small> | V3Transport13ResponsesRequest::with_pre_acquired_admission<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | `v3.provider_global_subscription_probe` |
-| `v3-provider-admission-lease-websocket-v2-slot-order` | `V3PreAcquiredProviderAdmission` → `V3ProviderResponsesWebSocketSessionSlot` | anchored | V3ProviderResponsesTransport::send<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | acquire_admission_and_connection_slot<br/><small>routecodex-v3-provider-responses/src/transport/websocket.rs</small> | `v3.provider_global_subscription_probe` |
-| `v3-provider-admission-lease-anthropic-relay-handoff` | `V3RuntimeProviderAdmission` → `V3PreAcquiredProviderAdmission` | anchored | execute_v3_anthropic_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small> | V3Transport13ResponsesRequest::with_pre_acquired_admission<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | `v3.provider_global_subscription_probe` |
-| `v3-provider-admission-lease-runtime-early-release` | `V3RuntimeProviderAdmission` → `V3AdaptiveConcurrencyPermitReleased` | anchored | V3RuntimeProviderAdmission::drop<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | V3AdaptiveConcurrencyController::release<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small> | `v3.provider_global_subscription_probe` |
+| `v3-provider-admission-lease-acquire` | `V3ProviderHealthProbePermit` → `V3PreAcquiredProviderAdmission` | anchored | probe_v3_provider_global_target_impl<br/><small>routecodex-v3-runtime/src/provider_failure_global_probe.rs</small> | V3AdaptiveConcurrencyController::try_acquire<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small> | `v3.provider_global_subscription_probe` |
+| `v3-provider-admission-lease-websocket-v2-slot-order` | `V3ProviderResponsesTransportSend` → `V3ProviderResponsesWebSocketSessionSlot` | anchored | V3ProviderResponsesTransport::send<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | acquire_connection_slot<br/><small>routecodex-v3-provider-responses/src/transport/websocket.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-admission-lease-request-drop-release` | `V3PreAcquiredProviderAdmission` → `V3AdaptiveConcurrencyPermitReleased` | anchored | V3PreAcquiredProviderAdmission::drop<br/><small>routecodex-v3-provider-responses/src/transport_admission.rs</small> | V3AdaptiveConcurrencyLease::release<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-admission-lease-provider-terminal-release` | `V3ProviderResponsesTransportSend` → `V3AdaptiveConcurrencyPermitReleased` | anchored | V3AdaptiveConcurrencyPermitGuard::drop<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small> | V3AdaptiveConcurrencyController::release<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small> | `v3.provider_global_subscription_probe` |
-| `v3-provider-admission-budget-recover-business-success` | `V3ProviderHealthStateMutated` → `V3AdaptiveConcurrencyController` | anchored | V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope_for_interface<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs</small> | V3AdaptiveConcurrencyController::observe_business_success<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small> | `v3.provider_global_subscription_probe` |
 
 ## v3.provider_global_subscription_probe
 
@@ -3391,7 +3375,7 @@ flowchart TD
     c_79_v3_runtime_restart_handoff_skeleton_4["v3-server<br/>V3FrontRequestLease<br/><small>routecodex-v3-server/src/restart_handoff.rs</small>"]
     c_79_v3_runtime_restart_handoff_skeleton_5["v3-server<br/>V3FrontRequestLeaseKey<br/><small>routecodex-v3-server/src/restart_handoff.rs</small>"]
     c_79_v3_runtime_restart_handoff_skeleton_6["v3-server<br/>V3ServerAggregateHandle::prepare_for_exec<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_79_v3_runtime_restart_handoff_skeleton_7["v3-server<br/>V3ServerRequestActivityGate::begin_maintenance<br/><small>routecodex-v3-server/src/session_admission.rs</small>"]
+    c_79_v3_runtime_restart_handoff_skeleton_7["v3-server<br/>V3ServerRequestActivityGate::begin_maintenance<br/><small>routecodex-v3-server/src/request_activity.rs</small>"]
   end
   c_79_v3_runtime_restart_handoff_skeleton_0 -->|v3-front-client-observation-01<br/>V3Front01StableRequestOwner → V3ClientTransportObservation| c_79_v3_runtime_restart_handoff_skeleton_1
   c_79_v3_runtime_restart_handoff_skeleton_2 -->|v3-front-client-observation-02<br/>V3StableFrontSocket → V3ClientTransportObservation| c_79_v3_runtime_restart_handoff_skeleton_3
@@ -3404,7 +3388,7 @@ flowchart TD
 | `v3-front-client-observation-01` | `V3Front01StableRequestOwner` → `V3ClientTransportObservation` | anchored | serve_v3_front_http_connection<br/><small>routecodex-v3-server/src/restart_handoff.rs</small> | V3ClientTransportObservation::prepared<br/><small>routecodex-v3-server/src/client_transport_observation.rs</small> | `v3.runtime_restart_handoff_skeleton` |
 | `v3-front-client-observation-02` | `V3StableFrontSocket` → `V3ClientTransportObservation` | anchored | V3StableFrontSocket::spawn<br/><small>routecodex-v3-server/src/restart_handoff.rs</small> | V3ClientTransportObservation::wrote<br/><small>routecodex-v3-server/src/client_transport_observation.rs</small> | `v3.runtime_restart_handoff_skeleton` |
 | `v3-runtime-restart-handoff-01` | `V3Front01StableRequestOwner` → `V3Front02RequestLeaseBound` | binding_pending | V3FrontRequestLease<br/><small>routecodex-v3-server/src/restart_handoff.rs</small> | V3FrontRequestLeaseKey<br/><small>routecodex-v3-server/src/restart_handoff.rs</small> | `v3.runtime_restart_handoff_skeleton` |
-| `v3-runtime-restart-handoff-02` | `V3Front02RequestLeaseBound` → `V3Front08ClientTerminalOrError` | binding_pending | V3ServerAggregateHandle::prepare_for_exec<br/><small>routecodex-v3-server/src/lib.rs</small> | V3ServerRequestActivityGate::begin_maintenance<br/><small>routecodex-v3-server/src/session_admission.rs</small> | `v3.runtime_restart_handoff_skeleton` |
+| `v3-runtime-restart-handoff-02` | `V3Front02RequestLeaseBound` → `V3Front08ClientTerminalOrError` | binding_pending | V3ServerAggregateHandle::prepare_for_exec<br/><small>routecodex-v3-server/src/lib.rs</small> | V3ServerRequestActivityGate::begin_maintenance<br/><small>routecodex-v3-server/src/request_activity.rs</small> | `v3.runtime_restart_handoff_skeleton` |
 
 ## v3.direct_sse_accept_skeleton
 

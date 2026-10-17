@@ -235,6 +235,10 @@ endpoints = ["responses"]
 
 {exhausted_execution}
 
+# Exercise the terminal after the optional and default candidates both fail.
+[servers.vr_exhausted.execution.attempt_store]
+request_max_attempts = 2
+
 [providers.optional]
 type = "responses"
 base_url = "{failure_a_base}"

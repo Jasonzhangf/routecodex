@@ -96,7 +96,6 @@ fn direct_policy_with_models(
             candidate_count: 1,
             unavailable_candidates: Vec::new(),
             attempts: 1,
-            default_floor_protected: false,
         },
         request_id: "req-direct-model-binding".to_string(),
         request_body: json!({"model": client_model, "input": "hello"}),

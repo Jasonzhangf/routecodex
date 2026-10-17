@@ -235,7 +235,18 @@ async fn residence_deadline_terminates_uncommitted_direct_sse_with_typed_error_a
 
     let (wire, elapsed, ended) = raw_deadline_request(&entry).await;
     let wire_text = String::from_utf8_lossy(&wire);
-    let logs = public_logs(&entry).await;
+    let log_deadline = Instant::now() + Duration::from_secs(1);
+    let logs = loop {
+        let logs = public_logs(&entry).await;
+        let complete = logs["logs"].as_array().unwrap().iter().any(|event| {
+            event["node_id"] == "V3Error06ClientProjected"
+                && event["details"].to_string().contains("residence deadline")
+        });
+        if complete || Instant::now() >= log_deadline {
+            break logs;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    };
     let projected_chains = logs["logs"]
         .as_array()
         .unwrap()
@@ -274,7 +285,7 @@ async fn residence_deadline_terminates_uncommitted_direct_sse_with_typed_error_a
         .post(format!("{}/v1/responses", entry.base()))
         .header("x-session-id", "e041a3b-deadline")
         .json(&json!({
-            "model": "test.test",
+            "model": "test.recover",
             "input": "healthy-sibling",
             "stream": true
         }))

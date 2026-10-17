@@ -60,11 +60,9 @@ async fn issue231_stale_probe_witness(outcome: StaleProbeOutcome) {
         spawn_provider_router(post(cooled_provider), cooled_peer.clone()).await;
     let (healthy_base, healthy_shutdown) =
         spawn_provider_router(post(healthy_provider), healthy_peer.clone()).await;
-    let handle = spawn_v3_server_aggregate(issue231_manifest(
-        free_port(),
-        free_port(),
-        &cooled_base,
-        &healthy_base,
+    let handle = spawn_v3_server_aggregate(with_attempt_budget(
+        issue231_manifest(free_port(), free_port(), &cooled_base, &healthy_base),
+        1,
     ))
     .await
     .unwrap();
@@ -72,13 +70,13 @@ async fn issue231_stale_probe_witness(outcome: StaleProbeOutcome) {
     let endpoint = format!("{base}/v1/responses");
     let client = reqwest::Client::new();
 
-    // 1. Park the pinned same-identity business request while `cooled` has no
+    // 1. Park the preferred identity's business request while `cooled` has no
     //    cooldown yet, so it selects the preferred provider as a normal
     //    business attempt and reaches the controlled upstream.
     let earlier_business = tokio::spawn(send_for_outcome(
         client.clone(),
         endpoint.clone(),
-        "cooled.wire-test",
+        "wire-test",
         BUSINESS_FAILURE_MARKER,
     ));
     timeout(
@@ -86,7 +84,7 @@ async fn issue231_stale_probe_witness(outcome: StaleProbeOutcome) {
         cooled_peer.business_entered.acquire(),
     )
     .await
-    .expect("pinned same-identity business request must reach the provider")
+    .expect("preferred identity business request must reach the provider")
     .unwrap()
     .forget();
 

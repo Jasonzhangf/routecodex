@@ -608,37 +608,71 @@ impl V3ManagedLifecycle {
         executable_path: impl AsRef<Path>,
     ) -> Result<V3ManagedStatusRecord, V3LifecycleError> {
         let (declaration, _) = self.declaration(executable_path)?;
-        self.query_live(&declaration).await.or_else(|error| {
-            let path = self
-                .instance_dir(&declaration.instance_id)
-                .join("status.json");
-            if path.exists() {
-                let status: V3ManagedStatusRecord = read_json(&path)?;
-                if status.instance_id != declaration.instance_id {
-                    return Err(V3LifecycleError::IdentityMismatch(
-                        "status instance id differs from config identity".to_string(),
-                    ));
+        let instance_dir = self.instance_dir(&declaration.instance_id);
+
+        match self
+            .query_live_for_status(&instance_dir, &declaration)
+            .await
+        {
+            Ok(live_status) => Ok(live_status),
+            Err(V3LifecycleError::NotRunning(not_running_id)) => {
+                let not_running_err = V3LifecycleError::NotRunning(not_running_id);
+                if unreachable_status_owner_may_be_live(&instance_dir, &declaration)? {
+                    return Err(not_running_err);
                 }
-                if matches!(
-                    status.state,
-                    V3ManagedRunState::Stopped | V3ManagedRunState::Failed
-                ) {
-                    Ok(status)
+
+                let candidates = find_same_config_drift_candidates(&self.state_root, &declaration)?;
+                for (candidate_dir, published) in candidates {
+                    match self.query_live_for_status(&candidate_dir, &published).await {
+                        Ok(candidate_status) => {
+                            if matches!(
+                                candidate_status.state,
+                                V3ManagedRunState::Starting | V3ManagedRunState::Running
+                            ) {
+                                return Ok(candidate_status);
+                            }
+                        }
+                        Err(V3LifecycleError::NotRunning(_)) => {
+                            if unreachable_status_owner_may_be_live(&candidate_dir, &published)? {
+                                return Err(V3LifecycleError::NotRunning(published.instance_id));
+                            }
+                        }
+                        Err(other_error) => {
+                            return Err(other_error);
+                        }
+                    }
+                }
+
+                let path = instance_dir.join("status.json");
+                if path.exists() {
+                    let status: V3ManagedStatusRecord = read_json(&path)?;
+                    if status.instance_id != declaration.instance_id {
+                        return Err(V3LifecycleError::IdentityMismatch(
+                            "status instance id differs from config identity".to_string(),
+                        ));
+                    }
+                    if matches!(
+                        status.state,
+                        V3ManagedRunState::Stopped | V3ManagedRunState::Failed
+                    ) {
+                        Ok(status)
+                    } else {
+                        Err(not_running_err)
+                    }
                 } else {
-                    Err(error)
+                    Ok(V3ManagedStatusRecord {
+                        schema_version: SCHEMA_VERSION,
+                        instance_id: declaration.instance_id,
+                        state: V3ManagedRunState::Stopped,
+                        updated_at_epoch_ms: epoch_ms(),
+                        detail: Some(format!(
+                            "no managed runtime state; query_live failed: {not_running_err}"
+                        )),
+                    })
                 }
-            } else {
-                Ok(V3ManagedStatusRecord {
-                    schema_version: SCHEMA_VERSION,
-                    instance_id: declaration.instance_id,
-                    state: V3ManagedRunState::Stopped,
-                    updated_at_epoch_ms: epoch_ms(),
-                    detail: Some(format!(
-                        "no managed runtime state; query_live failed: {error}"
-                    )),
-                })
             }
-        })
+            Err(other_error) => Err(other_error),
+        }
     }
 
     pub async fn stop(
@@ -1183,6 +1217,44 @@ impl V3ManagedLifecycle {
             detail,
         })
     }
+
+    async fn query_live_for_status(
+        &self,
+        instance_dir: &Path,
+        declaration: &V3ManagedInstanceDeclaration,
+    ) -> Result<V3ManagedStatusRecord, V3LifecycleError> {
+        let actual = verify_published_declaration_for_status(instance_dir, declaration)?;
+        self.query_live(&actual).await
+    }
+}
+
+fn unreachable_status_owner_may_be_live(
+    instance_dir: &Path,
+    declaration: &V3ManagedInstanceDeclaration,
+) -> Result<bool, V3LifecycleError> {
+    let pid_path = instance_dir.join("pid.cache");
+    if pid_path.exists() {
+        let pid: V3ManagedPidCache = read_json(&pid_path)?;
+        if pid.instance_id != declaration.instance_id {
+            return Err(V3LifecycleError::IdentityMismatch(
+                "refusing to inspect pid cache for a different instance".to_string(),
+            ));
+        }
+        if pid_is_alive(pid.pid) {
+            return Ok(true);
+        }
+    }
+    let control_path = instance_dir.join("control.json");
+    if control_path.exists() {
+        let control: V3ManagedControlRecord = read_json(&control_path)?;
+        if control.instance_id != declaration.instance_id {
+            return Err(V3LifecycleError::IdentityMismatch(
+                "refusing to inspect control record for a different instance".to_string(),
+            ));
+        }
+        return Ok(Path::new(&control.socket_path).exists());
+    }
+    Ok(false)
 }
 
 fn managed_config_is_ephemeral(config_path: &Path) -> bool {
