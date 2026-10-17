@@ -4338,8 +4338,8 @@ chains:
     to_node: V3RelayCapturedPlanAdmission
     caller_symbol: execute_v3_relay_runtime_core
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
-    callee_symbol: resolve_v3_relay_entry_target
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
+    callee_symbol: run_v3_plan_execution_operator_with_probes
+    callee_file: v3/crates/routecodex-v3-runtime/src/operation_runner/plan_execution.rs
     status: anchored
     owner_feature_id: v3.relay_runtime_shared
     resource_flow:
@@ -4350,9 +4350,9 @@ chains:
   - step_id: v3-chat-direct-relay-handoff-04
     from_node: V3RelayCapturedPlanAdmission
     to_node: V3Target10ConcreteProviderSelected
-    caller_symbol: resolve_v3_relay_entry_target
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
-    callee_symbol: select_v3_expanded_target_with_admission_rescue
+    caller_symbol: execute_plan
+    caller_file: v3/crates/routecodex-v3-runtime/src/operation_runner/plan_execution.rs
+    callee_symbol: step_v3_target_planning_with_admission_sync
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
     status: anchored
     owner_feature_id: v3.relay_runtime_shared
@@ -9680,9 +9680,9 @@ chains:
         consumer_symbol: run_v3_resolve_target_operator
         consumer_file: v3/crates/routecodex-v3-runtime/src/operation_runner/resolve_target.rs
         caller_scope: Chat and Gemini Relay only; Anthropic, Responses, and Direct remain pending
-        order: normalized SDK Value -> resolve_target SDK Value and typed opaque hit -> existing Target expansion -> request governance
+        order: normalized SDK Value -> resolve_target SDK Value and typed opaque hit -> plan_execution SDK expansion and admission -> request governance
         recovery: retained expanded target is consumed on retries without Router reclassification
-        boundary: plan_execution SDK and admission-before-governance remain pending
+        boundary: Anthropic, Responses, and Direct target planning remain pending
       direct_hooks: remain owned by Direct; this binding does not migrate Native Direct
   edges:
   - step_id: v3-op-runner-req-01
@@ -9733,6 +9733,20 @@ chains:
       produces: [v3.request.normal_payload, v3.route.opaque_target]
       side_channel_reads: [v3.execution.target_plan]
       side_channel_writes: []
+  - step_id: v3-op-runner-req-shared-plan-01
+    from_node: V3RelayRuntimeCore
+    to_node: V3OperationRunnerPlanExecution
+    caller_symbol: execute_v3_relay_runtime_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+    callee_symbol: run_v3_plan_execution_operator_with_probes
+    callee_file: v3/crates/routecodex-v3-runtime/src/operation_runner/plan_execution.rs
+    status: runtime_bound
+    owner_feature_id: v3.unified_operation_runner_design
+    resource_flow:
+      consumes: [v3.request.normal_payload, v3.route.opaque_target, v3.config.published_manifest]
+      produces: [v3.request.normal_payload, v3.hub.resolved_target, v3.operation_runner.execution_mode]
+      side_channel_reads: [v3.provider.availability_projection, v3.operation_runner.request_local_exclusions]
+      side_channel_writes: [v3.hub.resolved_target, v3.operation_runner.execution_mode]
   - step_id: v3-op-runner-req-03
     from_node: V3OperationRunnerResolveTarget
     to_node: V3OperationRunnerPlanExecution

@@ -10,19 +10,20 @@
 //! 里程碑 2：trait + 骨架。SSE 状态机（协议特定）经 [`V3RelayProtocolCodec::project_sse`]
 //! 收敛；JSON 响应链（resp01->02->03->04->05->06）经 `project_json_response` 收敛。
 
-use super::relay_runtime_shared::{
-    relay_handoff_entry_state, relay_request_execution_control, resolve_v3_relay_entry_target,
-};
+use super::relay_runtime_shared::{relay_handoff_entry_state, relay_request_execution_control};
 use super::*;
 use crate::nodes::{V3AttemptStoreError, V3CommittedClientSseBuilder};
+use crate::operation_runner::plan_execution::{
+    run_v3_plan_execution_operator_with_probes, V3PlanExecutionModePolicy, V3PlanExecutionStop,
+    V3PlanExecutionTargetSource,
+};
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key;
 use crate::provider_failure_runtime_policy::{
-    admit_v3_selected_target_after_recovery, expand_v3_relay_target_candidates_from_opaque_hit,
-    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
-    V3AdmitAfterRecovery, V3ProviderFailureRuntimeHealth, V3RelayProviderAdmittedTargetResolution,
-    V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyState,
-    V3RelayProviderFailureRetryPolicy, V3RelayProviderTargetResolutionInput,
+    admit_v3_selected_target_after_recovery, v3_relay_provider_policy_now_epoch_ms,
+    v3_relay_provider_target_selection_sample, V3AdmitAfterRecovery,
+    V3ProviderFailureRuntimeHealth, V3RelayProviderFailurePolicyContext,
+    V3RelayProviderFailurePolicyState, V3RelayProviderFailureRetryPolicy,
     V3RuntimeProviderAdmission,
 };
 use futures_util::StreamExt;
@@ -511,19 +512,62 @@ where
                 V3RelayCoreError::Target(error.to_string())
             }
         })?;
-    req02.previous.payload.0 = std::sync::Arc::new(target_resolved_request);
     let route_policy_pending = resolved_target.route_policy_pending;
-    let retained_expanded = match initial_handoff.as_ref() {
-        Some(handoff) => handoff.expanded.clone(),
-        None => expand_v3_relay_target_candidates_from_opaque_hit(
-            manifest,
-            resolved_target.opaque_hit,
-            deterministic_sample,
-        )
-        .map_err(|source| {
-            V3RelayCoreError::Target(format!("{}: {}", source.code, source.message))
-        })?,
+    if execution_mode != V3HubExecutionMode::Relay {
+        return Err(V3RelayCoreError::Target(format!(
+            "relay runtime received non-relay execution mode: {execution_mode:?}"
+        )));
+    }
+    let target_source = match initial_handoff.as_ref() {
+        Some(handoff) => V3PlanExecutionTargetSource::Expanded(handoff.expanded.clone()),
+        None => V3PlanExecutionTargetSource::OpaqueHit(resolved_target.opaque_hit),
     };
+    let (execution_planned_request, initial_plan) =
+        match run_v3_plan_execution_operator_with_probes(
+            target_resolved_request,
+            manifest,
+            target_source,
+            &failure_session_scope,
+            &provider_health,
+            &failed_candidates,
+            v3_relay_provider_policy_now_epoch_ms().map_err(V3RelayCoreError::Target)?,
+            deterministic_sample,
+            allow_exhaustion_rescue_probe,
+            retry_selected.take(),
+            V3PlanExecutionModePolicy::RelayOnly {
+                entry_protocol: C::ENTRY_PROTOCOL,
+            },
+        )
+        .await
+        {
+            Ok(plan) => plan,
+            Err(V3PlanExecutionStop::Failed(source)) => {
+                return Err(V3RelayCoreError::Target(format!(
+                    "{}: {}",
+                    source.code, source.message
+                )));
+            }
+            Err(V3PlanExecutionStop::Exhausted { exhaustion, .. }) => {
+                let failure = C::request_failure_builder(
+                    "V3Target10ConcreteProviderSelected",
+                    "selected_target_exhausted",
+                    format!(
+                        "selected target exhausted after {:?}",
+                        exhaustion.attempted_candidates
+                    ),
+                );
+                return Ok(C::assemble_failure_output(
+                    terminalize_provider_failure(failure, None),
+                    trace,
+                    std::mem::take(failure_events),
+                ));
+            }
+        };
+    req02.previous.payload.0 = std::sync::Arc::new(execution_planned_request);
+    let retained_expanded = initial_plan.expanded;
+    failed_candidates.extend(initial_plan.request_local_excluded_candidates);
+    let planned_execution_mode = initial_plan.execution_mode;
+    let mut initial_admitted = Some((initial_plan.selected, initial_plan.admission));
     let request_outcome = compile_v3_hub_relay_request_hooks()
         .run_from_normalized(req02, &request_hook_profile)
         .map_err(|error| V3RelayCoreError::Target(error.to_string()))?;
@@ -531,13 +575,10 @@ where
     let request_web_search_state = request_outcome.web_search_state().cloned();
     let request_tool_thinking_enabled = request_outcome.tool_thinking_enabled();
     let req04 = request_outcome.into_governed();
-    if execution_mode != V3HubExecutionMode::Relay {
-        return Err(V3RelayCoreError::Target(format!(
-            "relay runtime received non-relay execution mode: {execution_mode:?}"
-        )));
-    }
-    let req05 =
-        build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(req04, execution_mode);
+    let mut req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
+        req04,
+        planned_execution_mode,
+    );
     trace.push("V3HubReqExecution05Planned");
     let mut pending_provider_action_recovery = None;
     let mut provider_action_permit: Option<V3ProviderActionPermit> = None;
@@ -560,40 +601,40 @@ where
         let (selected, mut selected_admission): (
             routecodex_v3_target::V3Target10ConcreteProviderSelected,
             Option<V3RuntimeProviderAdmission>,
-        ) = {
-            let target_resolution_input = V3RelayProviderTargetResolutionInput {
+        ) = if let Some((selected, admission)) = initial_admitted.take() {
+            (selected, Some(admission))
+        } else {
+            let target_resolution = run_v3_plan_execution_operator_with_probes(
+                (*req05.previous.previous.previous.payload.0).clone(),
                 manifest,
-                server_id,
-                failure_session_scope: &failure_session_scope,
-                entry_kind: C::ENTRY_KIND,
-                endpoint_path,
-                body: &req05.previous.previous.previous.payload.0,
-                request_local_excluded_candidates: &failed_candidates,
-                provider_health: &provider_health,
-                now_ms: v3_relay_provider_policy_now_epoch_ms()
-                    .map_err(V3RelayCoreError::Target)?,
+                V3PlanExecutionTargetSource::Expanded(retained_expanded.clone()),
+                &failure_session_scope,
+                &provider_health,
+                &failed_candidates,
+                v3_relay_provider_policy_now_epoch_ms().map_err(V3RelayCoreError::Target)?,
                 deterministic_sample,
-            };
-            let target_resolution = resolve_v3_relay_entry_target(
-                target_resolution_input,
                 allow_exhaustion_rescue_probe,
                 preferred_selected,
-                Some(&retained_expanded),
+                V3PlanExecutionModePolicy::RelayOnly {
+                    entry_protocol: C::ENTRY_PROTOCOL,
+                },
             )
             .await;
             match target_resolution {
-                V3RelayProviderAdmittedTargetResolution::Selected(selected) => {
-                    (selected.selected, Some(selected.admission))
+                Ok((execution_planned_request, plan)) => {
+                    req05.previous.previous.previous.payload.0 =
+                        std::sync::Arc::new(execution_planned_request);
+                    failed_candidates.extend(plan.request_local_excluded_candidates);
+                    (plan.selected, Some(plan.admission))
                 }
-                V3RelayProviderAdmittedTargetResolution::Failed(source) => {
+                Err(V3PlanExecutionStop::Failed(source)) => {
                     return Err(V3RelayCoreError::Target(format!(
                         "{}: {}",
                         source.code, source.message
                     )));
                 }
-                V3RelayProviderAdmittedTargetResolution::Exhausted {
-                    attempted_candidates,
-                } => {
+                Err(V3PlanExecutionStop::Exhausted { exhaustion, .. }) => {
+                    let attempted_candidates = exhaustion.attempted_candidates;
                     let failure = C::request_failure_builder(
                         "V3Target10ConcreteProviderSelected",
                         "selected_target_exhausted",

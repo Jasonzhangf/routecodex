@@ -49,6 +49,14 @@ pub(crate) struct V3PlanExecutionCompleted {
     pub(crate) execution_mode: V3HubExecutionMode,
 }
 
+pub(crate) enum V3PlanExecutionStop {
+    Exhausted {
+        expanded: V3Target09CandidateSetExpanded,
+        exhaustion: V3TargetExhaustion,
+    },
+    Failed(V3Error01SourceRaised),
+}
+
 pub(crate) enum V3PlanExecutionOutcome {
     Selected {
         execution_planned_request: Value,
@@ -397,7 +405,7 @@ pub(crate) async fn run_v3_plan_execution_operator_with_probes(
     allow_exhaustion_rescue_probe: bool,
     preferred_selected: Option<V3Target10ConcreteProviderSelected>,
     mode_policy: V3PlanExecutionModePolicy,
-) -> V3PlanExecutionOutcome {
+) -> Result<(Value, V3PlanExecutionCompleted), V3PlanExecutionStop> {
     let mut source = target_source;
     let mut preferred = preferred_selected;
     let mut request_local_excluded_candidates = request_local_excluded_candidates.clone();
@@ -434,11 +442,13 @@ pub(crate) async fn run_v3_plan_execution_operator_with_probes(
         ) {
             Ok(outcome) => outcome,
             Err(error) => {
-                return V3PlanExecutionOutcome::Failed(build_v3_error_01_source_raised(
-                    V3ErrorSourceKind::RuntimeFailure,
-                    "V3OperationRunnerPlanExecution",
-                    "plan_execution_operator_failed",
-                    error.message,
+                return Err(V3PlanExecutionStop::Failed(
+                    build_v3_error_01_source_raised(
+                        V3ErrorSourceKind::RuntimeFailure,
+                        "V3OperationRunnerPlanExecution",
+                        "plan_execution_operator_failed",
+                        error.message,
+                    ),
                 ));
             }
         };
@@ -456,14 +466,14 @@ pub(crate) async fn run_v3_plan_execution_operator_with_probes(
                 )
                 .await
                 {
-                    return V3PlanExecutionOutcome::Failed(source);
+                    return Err(V3PlanExecutionStop::Failed(source));
                 }
                 request_local_excluded_candidates.extend(admitted_exclusions);
                 exhaustion_probes_completed = false;
                 exhaustion_generation = None;
                 now_ms = match current_time("target_pre_exhaustion_rescue_clock_failed") {
                     Ok(now_ms) => now_ms,
-                    Err(source) => return V3PlanExecutionOutcome::Failed(source),
+                    Err(source) => return Err(V3PlanExecutionStop::Failed(source)),
                 };
                 pre_exhaustion_probes_completed = true;
                 source = V3PlanExecutionTargetSource::Expanded(expanded);
@@ -480,7 +490,7 @@ pub(crate) async fn run_v3_plan_execution_operator_with_probes(
                 if exhaustion_generation != Some(generation) {
                     now_ms = match current_time("target_exhaustion_rescue_clock_failed") {
                         Ok(now_ms) => now_ms,
-                        Err(source) => return V3PlanExecutionOutcome::Failed(source),
+                        Err(source) => return Err(V3PlanExecutionStop::Failed(source)),
                     };
                     exhaustion_generation = Some(generation);
                     source = V3PlanExecutionTargetSource::Expanded(expanded);
@@ -493,28 +503,47 @@ pub(crate) async fn run_v3_plan_execution_operator_with_probes(
                     Ok(true) => {
                         now_ms = match current_time("target_exhaustion_rescue_clock_failed") {
                             Ok(now_ms) => now_ms,
-                            Err(source) => return V3PlanExecutionOutcome::Failed(source),
+                            Err(source) => return Err(V3PlanExecutionStop::Failed(source)),
                         };
                         exhaustion_probes_completed = true;
                         source = V3PlanExecutionTargetSource::Expanded(expanded);
                     }
                     Ok(false) => {
-                        return V3PlanExecutionOutcome::Exhausted {
+                        return Err(V3PlanExecutionStop::Exhausted {
                             expanded,
                             exhaustion,
-                        }
+                        });
                     }
                     Err(error) => {
-                        return V3PlanExecutionOutcome::Failed(build_v3_error_01_source_raised(
-                            V3ErrorSourceKind::RuntimeFailure,
-                            "V3ProviderCooldownRescueProbe",
-                            "target_exhaustion_rescue_probe_failed",
-                            error,
-                        ))
+                        return Err(V3PlanExecutionStop::Failed(
+                            build_v3_error_01_source_raised(
+                                V3ErrorSourceKind::RuntimeFailure,
+                                "V3ProviderCooldownRescueProbe",
+                                "target_exhaustion_rescue_probe_failed",
+                                error,
+                            ),
+                        ));
                     }
                 }
             }
-            outcome => return outcome,
+            V3PlanExecutionOutcome::Selected {
+                execution_planned_request,
+                plan,
+            } => {
+                return Ok((execution_planned_request, plan));
+            }
+            V3PlanExecutionOutcome::Exhausted {
+                expanded,
+                exhaustion,
+            } => {
+                return Err(V3PlanExecutionStop::Exhausted {
+                    expanded,
+                    exhaustion,
+                });
+            }
+            V3PlanExecutionOutcome::Failed(source) => {
+                return Err(V3PlanExecutionStop::Failed(source));
+            }
         }
     }
 }
@@ -1067,11 +1096,7 @@ targets = [
             .await
             .expect("probe resume must complete")
             .expect("plan execution task");
-        let V3PlanExecutionOutcome::Selected {
-            execution_planned_request,
-            plan,
-        } = outcome
-        else {
+        let Ok((execution_planned_request, plan)) = outcome else {
             panic!("expected selected plan after resume");
         };
         assert_eq!(
