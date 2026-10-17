@@ -624,7 +624,7 @@ assertRustTest(
 assertRustTest(
   text.responsesRelayTests,
   files.responsesRelayTests,
-  'responses_relay_terminal_missing_fails_explicitly_but_fresh_request_bypasses_recovery',
+  'responses_relay_terminal_missing_keeps_last_identity_routable_with_backoff',
 );
 assertRustTest(
   text.responsesRelayTests,

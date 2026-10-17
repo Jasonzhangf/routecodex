@@ -83,6 +83,8 @@ port = {port}
 routing_group = "health"
 endpoints = ["responses"]
 {execution}
+[servers.health.execution.attempt_store]
+request_max_attempts = 1
 [providers.primary]
 type = "responses"
 base_url = "{upstream}/v1"
@@ -108,7 +110,10 @@ snapshots = false
 codex_samples = false
 [route_groups.health.pools.default]
 selection = {{ strategy = "priority" }}
-targets = [{{ kind = "provider_model", provider = "primary", model = "main", key = "{alias}", priority = 100 }}]
+targets = [
+  {{ kind = "provider_model", provider = "primary", model = "main", key = "{alias}", priority = 100 }},
+  {{ kind = "provider_model", provider = "primary", model = "main", key = "sibling", priority = 1 }}
+]
 [route_groups.health.pools.other]
 match = {{ models = ["other"], precedence = 10 }}
 targets = [{{ kind = "provider_model", provider = "primary", model = "other", key = "{alias}", priority = 100 }}]
@@ -125,7 +130,7 @@ targets = [{{ kind = "provider_model", provider = "independent", model = "main",
 
 async fn request(client: &reqwest::Client, base: &str, model: &str, marker: &str, success: bool) {
     let response = timeout(
-        Duration::from_secs(2),
+        Duration::from_secs(if model == "main" { 6 } else { 2 }),
         client
             .post(format!("{base}/v1/responses"))
             .header("session-id", marker)
@@ -134,7 +139,7 @@ async fn request(client: &reqwest::Client, base: &str, model: &str, marker: &str
             .send(),
     )
     .await
-    .expect("request must finish without recovery wait");
+    .expect("request must finish within its own identity's bounded recovery wait");
     if success {
         let response = response.expect("a healthy provider must actually answer the next request");
         assert_eq!(response.status(), 200);
@@ -250,14 +255,14 @@ async fn no_first_failure_cooldown_public_http() {
             && e["model_id"] == "main"),
         "consecutive third HTTP 429 must cool exact provider/key/model: {entries:?}"
     );
-    request(&client, &base, "main", "health-test:blocked", false).await;
+    request(&client, &base, "main", "health-test:blocked", true).await;
+    receipt(&state, "health-test:blocked").await;
     assert!(
-        !state
-            .receipts
-            .lock()
+        pool(&client, &base)
             .await
-            .contains_key("health-test:blocked"),
-        "cooled key must not receive another business attempt"
+            .iter()
+            .any(|entry| entry["provider_id"] == "primary" && entry["auth_alias"] == alias),
+        "healthy sibling-key fallback must not restore the cooled key"
     );
     request(&client, &base, "other", "health-test:other-model", true).await;
     request(&client, &base, "sibling", "health-test:other-key", true).await;
@@ -298,7 +303,7 @@ async fn no_first_failure_cooldown_public_http() {
             .any(|e| e["provider_id"] == "primary"
                 && e["auth_alias"] == alias
                 && e["model_id"] == "other"),
-        "HTTP 500 retains its declared immediate threshold on the other model"
+        "HTTP 500 cools the failed identity while the default sibling remains routable"
     );
     request(
         &client,
@@ -324,7 +329,7 @@ async fn no_first_failure_cooldown_public_http() {
             .await
             .iter()
             .any(|e| e["provider_id"] == "independent"),
-        "auth failure retains immediate isolation"
+        "auth failure isolates its identity while the default sibling remains routable"
     );
     handle.shutdown().await;
     shutdown.send(()).unwrap();

@@ -119,6 +119,10 @@ pub(super) fn recovery_manifest(
 ) -> V3Config05ManifestPublished {
     let declaration = hub_v1_fixture::hub_v1_test_declaration();
     let execution = hub_v1_fixture::hub_v1_server_execution(server_id);
+    let request_max_attempts = providers
+        .iter()
+        .filter(|provider| provider.priority.is_some())
+        .count();
     let mut blocks = String::new();
     for provider in providers {
         blocks.push_str(&format!(
@@ -161,6 +165,8 @@ port = {port}
 routing_group = "{server_id}"
 endpoints = ["openai_chat"]
 {execution}
+[servers.{server_id}.execution.attempt_store]
+request_max_attempts = {request_max_attempts}
 {blocks}
 [route_groups.{server_id}.pools.default]
 selection = {{ strategy = "priority" }}

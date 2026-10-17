@@ -172,13 +172,13 @@ const cases = [
     diagnostic: /missing active Rust test failed_terminal_sse_attempt_never_commits_partial_bytes_and_exhausts_to_error06/u,
   },
   {
-    name: 'Responses Relay terminal-missing loses fresh-request isolation coverage',
+    name: 'Responses Relay terminal-missing loses last-identity backoff coverage',
     path: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs',
     mutate: (source) => source.replace(
-      'responses_relay_terminal_missing_fails_explicitly_but_fresh_request_bypasses_recovery',
-      'responses_relay_terminal_missing_has_no_fresh_request_isolation_contract',
+      'responses_relay_terminal_missing_keeps_last_identity_routable_with_backoff',
+      'responses_relay_terminal_missing_has_no_last_identity_backoff_contract',
     ),
-    diagnostic: /missing active Rust test responses_relay_terminal_missing_fails_explicitly_but_fresh_request_bypasses_recovery/u,
+    diagnostic: /missing active Rust test responses_relay_terminal_missing_keeps_last_identity_routable_with_backoff/u,
   },
   {
     name: 'Responses Relay content_filter terminal loses faithful-forward coverage',

@@ -702,6 +702,9 @@ endpoints = ["openai_chat"]
 
 {server_execution}
 
+[servers.controlled.execution.attempt_store]
+request_max_attempts = 1
+
 [providers.controlled]
 type = "openai_chat"
 base_url = "http://127.0.0.1:{upstream_port}/v1"

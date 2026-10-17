@@ -154,7 +154,7 @@
       "cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test openai_chat_relay_runtime_integration terminal_sse_recovery_does_not_block_a_fresh_request -- --exact --nocapture",
       "cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test gemini_relay_runtime_integration terminal_sse_recovery_does_not_block_a_fresh_request -- --exact --nocapture"
       ,
-      "cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_runtime_closeout responses_relay_terminal_missing_fails_explicitly_but_fresh_request_bypasses_recovery -- --exact --nocapture",
+      "cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_runtime_closeout responses_relay_terminal_missing_keeps_last_identity_routable_with_backoff -- --exact --nocapture",
       "cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_direct_remote_continuation_integration pinned_post_commit_stream_failure_preserves_pin_and_gates_the_same_provider_scope -- --exact --nocapture"
     ]
   },
