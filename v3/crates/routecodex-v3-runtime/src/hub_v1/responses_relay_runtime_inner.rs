@@ -3,11 +3,14 @@ use super::responses_relay_failures::V3_RELAY_TRANSPORT_HANG_REASON;
 use super::web_search_hop::store_v3_responses_relay_web_search_state;
 use super::web_search_sidecar::execute_web_search_through_hooks_sidecar;
 use super::*;
+use crate::operation_runner::plan_execution::{
+    run_v3_plan_execution_operator_with_probes, V3PlanExecutionModePolicy, V3PlanExecutionStop,
+    V3PlanExecutionTargetSource,
+};
 use crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key;
 use crate::provider_failure_runtime_policy::{
     admit_v3_selected_target_after_recovery, V3AdmitAfterRecovery,
 };
-use futures_util::StreamExt;
 use serde_json::{json, Value};
 
 fn construct_responses_relay_transport_request(
@@ -48,7 +51,7 @@ fn construct_responses_relay_transport_request(
 
 pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
     manifest: &V3Config05ManifestPublished,
-    mut input: V3ResponsesRelayRuntimeInput,
+    input: V3ResponsesRelayRuntimeInput,
     transport: &T,
     server_tool_state: Option<V3ResponsesRelayServerToolExecution<'_>>,
     provider_health: V3ProviderFailureRuntimeHealth,
@@ -64,7 +67,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     let observability_accumulator = initial_relay_seeds
         .observability_accumulator
         .unwrap_or_else(V3RuntimeObservabilityAccumulator::start);
-    let route_policy_pending = initial_relay_seeds.route_policy_pending;
+    let mut route_policy_pending = initial_relay_seeds.route_policy_pending;
     let route_policy_scope = initial_relay_seeds.route_policy_scope;
     let runtime_timing = observability_accumulator.timing();
     macro_rules! commit_route_policy_if_present {
@@ -135,6 +138,99 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         &input.server_id,
         request_web_search_execution_mode,
     );
+    let deterministic_sample = v3_relay_provider_target_selection_sample(&input.request_id);
+    let resolve_mode = match initial_expanded.as_ref() {
+        Some(expanded) => crate::operation_runner::V3ResolveTargetExecutionMode::CapturedHandoff {
+            opaque_hit: expanded.route.clone(),
+            route_policy_pending: route_policy_pending.clone(),
+            route_policy_scope: route_policy_scope.clone(),
+        },
+        None => crate::operation_runner::V3ResolveTargetExecutionMode::RelayFresh {
+            manifest: std::sync::Arc::new(manifest.clone()),
+            server_id: input.server_id.clone(),
+            entry_kind: "responses".to_string(),
+            endpoint_path: "/v1/responses".to_string(),
+            requested_model: None,
+            deterministic_sample,
+        },
+    };
+    let (target_resolved_request, resolved_target) =
+        crate::operation_runner::run_v3_resolve_target_operator(
+            req02.payload().clone(),
+            resolve_mode,
+        )
+        .map_err(|error| match error {
+            crate::operation_runner::V3ResolveTargetOperatorError::Typed(source) => {
+                V3ResponsesRelayRuntimeError::Target(format!("{}: {}", source.code, source.message))
+            }
+            crate::operation_runner::V3ResolveTargetOperatorError::Runner(error) => {
+                V3ResponsesRelayRuntimeError::Target(error.to_string())
+            }
+        })?;
+    route_policy_pending = resolved_target.route_policy_pending;
+    let target_source = match initial_expanded.clone() {
+        Some(expanded) => V3PlanExecutionTargetSource::Expanded(expanded),
+        None => V3PlanExecutionTargetSource::OpaqueHit(resolved_target.opaque_hit),
+    };
+    let mut failed_candidates = initial_request_local_excluded_candidates;
+    let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
+    let mut initial_selected_target = initial_selected_target;
+    let (execution_planned_request, initial_plan) =
+        match run_v3_plan_execution_operator_with_probes(
+            target_resolved_request,
+            manifest,
+            target_source,
+            &input.failure_session_scope,
+            &provider_health,
+            &failed_candidates,
+            v3_relay_provider_policy_now_epoch_ms()
+                .map_err(V3ResponsesRelayRuntimeError::Target)?,
+            deterministic_sample,
+            allow_exhaustion_rescue_probe,
+            retry_selected
+                .take()
+                .or_else(|| initial_selected_target.take()),
+            V3PlanExecutionModePolicy::RelayOnly {
+                entry_protocol: V3HubEntryProtocol::Responses,
+            },
+        )
+        .await
+        {
+            Ok(plan) => plan,
+            Err(V3PlanExecutionStop::Failed(source)) => {
+                return Err(V3ResponsesRelayRuntimeError::Target(format!(
+                    "{}: {}",
+                    source.code, source.message
+                )));
+            }
+            Err(V3PlanExecutionStop::Exhausted { exhaustion, .. }) => {
+                let failure = V3ResponsesRelayProviderFailure {
+                    status: 502,
+                    provider_status: None,
+                    policy_error_type: "selected_target_exhausted".to_string(),
+                    policy_error_message: format!(
+                        "selected target exhausted after {:?}",
+                        exhaustion.attempted_candidates
+                    ),
+                    provider_id: "none".to_string(),
+                    source_stage: "V3Target10ConcreteProviderSelected",
+                    observability: None,
+                    terminal_projection: None,
+                    terminal_disposition: None,
+                    matched_policy: None,
+                };
+                return Ok(provider_failure_output(
+                    terminalize_v3_responses_relay_provider_failure(failure, None),
+                    trace,
+                    0,
+                ));
+            }
+        };
+    let retained_expanded = initial_plan.expanded;
+    failed_candidates.extend(initial_plan.request_local_excluded_candidates);
+    let mut initial_admitted = Some((initial_plan.selected, initial_plan.admission));
+    let mut req02 = req02;
+    req02.previous.payload.0 = std::sync::Arc::new(execution_planned_request);
     let request_outcome = {
         compile_v3_hub_relay_request_hooks().run_from_normalized(req02, &request_hook_profile)?
     };
@@ -155,10 +251,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         };
     }
     let provider_semantic_body = std::sync::Arc::clone(request_outcome.payload_arc());
-    // Virtual Router consumes the governed ChatProcess semantic object. Using the
-    // pre-hook Responses body here would classify the wire shape instead of the
-    // normalized request and can miss semantic routing facts such as reasoning.
-    let route_facts_body = std::sync::Arc::clone(request_outcome.payload_arc());
     let anthropic_response_projection_context =
         V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&provider_semantic_body)
             .map_err(|error| {
@@ -167,17 +259,14 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     let request_tool_thinking_enabled = request_outcome.tool_thinking_enabled();
     let request_tool_thinking_turn_context = request_outcome.tool_thinking_turn_context().clone();
     let req04 = request_outcome.into_governed();
-    let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
+    let mut req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
         req04,
         V3HubExecutionMode::Relay,
     );
     trace.push("V3HubReqExecution05Planned");
-    let mut failed_candidates = initial_request_local_excluded_candidates;
-    let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
     let mut pending_provider_action_recovery = None;
     let mut _provider_action_permit: Option<V3ProviderActionPermit> = None;
     let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> = None;
-    let mut initial_selected_target = initial_selected_target;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut last_external_http = None;
     let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
@@ -188,7 +277,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     };
     let attempt_budget = request_execution_control.attempt_budget();
     let mut provider_send_attempts = attempt_budget.transport_attempts();
-    let deterministic_sample = v3_relay_provider_target_selection_sample(&input.request_id);
     let allowed_execution_modes = handle_error_before_resp03!(
         allowed_execution_modes_for_relay_server(manifest, &input.server_id,)
     );
@@ -196,7 +284,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     let provider_failure_health = provider_health.clone();
     let failure_context = V3RelayProviderFailurePolicyContext {
         manifest,
-        captured_target_09: initial_expanded.as_ref(),
+        captured_target_09: Some(&retained_expanded),
         failure_session_scope: input.failure_session_scope.clone(),
         provider_health: &provider_failure_health,
         retry_policy: shared_retry_policy,
@@ -206,49 +294,48 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         let (selected, mut selected_admission): (
             routecodex_v3_target::V3Target10ConcreteProviderSelected,
             Option<V3RuntimeProviderAdmission>,
-        ) = {
-            let preferred_selected = retry_selected
-                .take()
-                .or_else(|| initial_selected_target.take());
-            let target_resolution_input = V3RelayProviderTargetResolutionInput {
+        ) = if let Some((selected, admission)) = initial_admitted.take() {
+            (selected, Some(admission))
+        } else {
+            let preferred_selected = retry_selected.take();
+            match run_v3_plan_execution_operator_with_probes(
+                (*req05.previous.previous.previous.payload.0).clone(),
                 manifest,
-                server_id: &input.server_id,
-                failure_session_scope: &input.failure_session_scope,
-                entry_kind: "responses",
-                endpoint_path: "/v1/responses",
-                body: &route_facts_body,
-                request_local_excluded_candidates: &failed_candidates,
-                provider_health: &provider_health,
-                now_ms: v3_relay_provider_policy_now_epoch_ms()
+                V3PlanExecutionTargetSource::Expanded(retained_expanded.clone()),
+                &input.failure_session_scope,
+                &provider_health,
+                &failed_candidates,
+                v3_relay_provider_policy_now_epoch_ms()
                     .map_err(V3ResponsesRelayRuntimeError::Target)?,
                 deterministic_sample,
-            };
-            let target_resolution = resolve_v3_relay_target_outcome_with_admission_rescue(
-                target_resolution_input,
                 allow_exhaustion_rescue_probe,
                 preferred_selected,
+                V3PlanExecutionModePolicy::RelayOnly {
+                    entry_protocol: V3HubEntryProtocol::Responses,
+                },
             )
-            .await;
-            match target_resolution {
-                V3RelayProviderAdmittedTargetResolution::Selected(selected) => {
-                    (selected.selected, Some(selected.admission))
+            .await
+            {
+                Ok((execution_planned_request, plan)) => {
+                    req05.previous.previous.previous.payload.0 =
+                        std::sync::Arc::new(execution_planned_request);
+                    failed_candidates.extend(plan.request_local_excluded_candidates);
+                    (plan.selected, Some(plan.admission))
                 }
-                V3RelayProviderAdmittedTargetResolution::Failed(source) => {
+                Err(V3PlanExecutionStop::Failed(source)) => {
                     return Err(V3ResponsesRelayRuntimeError::Target(format!(
                         "{}: {}",
                         source.code, source.message
                     )));
                 }
-                V3RelayProviderAdmittedTargetResolution::Exhausted {
-                    attempted_candidates,
-                } => {
+                Err(V3PlanExecutionStop::Exhausted { exhaustion, .. }) => {
                     let failure = V3ResponsesRelayProviderFailure {
                         status: 502,
-                        // Target exhaustion is local: no upstream HTTP response.
                         provider_status: None,
                         policy_error_type: "selected_target_exhausted".to_string(),
                         policy_error_message: format!(
-                            "selected target exhausted after {attempted_candidates:?}"
+                            "selected target exhausted after {:?}",
+                            exhaustion.attempted_candidates
                         ),
                         provider_id: "none".to_string(),
                         source_stage: "V3Target10ConcreteProviderSelected",
@@ -295,18 +382,9 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
             protocol_decision.mode,
             crate::nodes::V3Execution11ProtocolDecisionMode::SameProtocolDirect
         ) {
-            let captured_expanded = match initial_expanded.as_ref() {
-                Some(expanded) => expanded.clone(),
-                None => handle_error_before_resp03!(expand_v3_relay_target_plan_for_selected(
-                    manifest,
-                    &selected,
-                    deterministic_sample,
-                )
-                .map_err(V3ResponsesRelayRuntimeError::ExecutionControl)),
-            };
             let protocol_candidate_keys = handle_error_before_resp03!(
                 crate::kernel::protocol_candidate_keys_for_decision_mode(
-                    &captured_expanded,
+                    &retained_expanded,
                     "responses",
                     &allowed_execution_modes,
                     protocol_decision.mode,
@@ -333,7 +411,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     plan: V3ResponsesProtocolExecutionPlan {
                         decision: protocol_decision,
                         node_trace: handoff_trace.clone(),
-                        expanded: captured_expanded,
+                        expanded: retained_expanded.clone(),
                         protocol_candidate_keys,
                         request_local_excluded_candidates: failed_candidates.clone(),
                         _route_policy_pending: route_policy_pending.clone(),
