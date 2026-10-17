@@ -344,8 +344,8 @@ fn gemini_function_response_identity_is_governed_at_req04_after_normalization() 
     let valid = json!({
         "contents":[
             {"role":"user","parts":[{"text":"lookup"}]},
-            {"role":"model","parts":[{"functionCall":{"name":"lookup","args":{"city":"Tokyo"}}}]},
-            {"role":"user","parts":[{"functionResponse":{"name":"lookup","response":{"forecast":"sunny"}}}]}
+            {"role":"model","parts":[{"functionCall":{"id":"call_1","name":"lookup","args":{"city":"Tokyo"}}}]},
+            {"role":"user","parts":[{"functionResponse":{"id":"call_1","name":"lookup","response":{"forecast":"sunny"}}}]}
         ]
     });
     let governed = hooks
@@ -354,26 +354,71 @@ fn gemini_function_response_identity_is_governed_at_req04_after_normalization() 
             &V3HubServertoolRequestProfile::disabled(),
         )
         .unwrap();
-    assert!(governed
+    // ReqInbound02 已把 Gemini 归一化为 canonical Chat `messages`，不再对原始
+    // `contents` 二次治理；工具历史统一由既有 canonical Chat 治理处理。
+    assert!(!governed
         .hook_events()
         .contains(&V3HubRelayRequestHookEvent::Req04ProtocolToolIdentityGoverned));
+    assert!(governed
+        .hook_events()
+        .contains(&V3HubRelayRequestHookEvent::Req04ToolGoverned));
+    assert!(governed.payload().get("contents").is_none());
+    let messages = governed.payload()["messages"]
+        .as_array()
+        .expect("Gemini inbound must canonicalize to Chat messages");
+    assert_eq!(messages[0]["role"], "user");
+    assert_eq!(messages[0]["content"][0]["text"], "lookup");
+    assert_eq!(messages[1]["role"], "assistant");
+    assert_eq!(messages[1]["tool_calls"][0]["id"], "call_1");
+    assert_eq!(messages[1]["tool_calls"][0]["function"]["name"], "lookup");
+    assert_eq!(messages[2]["role"], "tool");
+    assert_eq!(messages[2]["tool_call_id"], "call_1");
 
-    for invalid in [
-        json!({"contents":[{"role":"user","parts":[{"functionResponse":{"response":{"x":1}}}]}]}),
-        json!({"contents":[{"role":"user","parts":[{"functionResponse":{"name":"","response":{"x":1}}}]}]}),
-        json!({"contents":[{"role":"user","parts":[{"functionResponse":{"name":"orphan","response":{"x":1}}}]}]}),
-    ] {
-        assert!(matches!(
-            hooks.run(
-                raw_for(invalid, V3HubEntryProtocol::Gemini),
-                &V3HubServertoolRequestProfile::disabled(),
-            ),
-            Err(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
-                protocol: "gemini",
-                ..
-            })
-        ));
-    }
+    // canonical Chat 工具历史治理仍拒绝按 id 无法配对的 orphan 工具输出。
+    let orphan = json!({
+        "contents":[
+            {"role":"user","parts":[{"functionResponse":{"id":"orphan","name":"lookup","response":{"x":1}}}]}
+        ]
+    });
+    assert!(matches!(
+        hooks.run(
+            raw_for(orphan, V3HubEntryProtocol::Gemini),
+            &V3HubServertoolRequestProfile::disabled(),
+        ),
+        Err(V3HubRelayRequestError::OrphanToolOutput { .. })
+    ));
+
+    // no-id functionResponse：原生 id 缺失时保持缺失，不生成 id，也不改写为 user
+    // 角色；显式 source 关联随 canonical tool receipt 一起保留。
+    let no_id = json!({
+        "contents":[
+            {"role":"user","parts":[{"text":"lookup"}]},
+            {"role":"user","parts":[{"functionResponse":{"name":"lookup","response":{"forecast":"sunny"}}}]}
+        ]
+    });
+    let governed = hooks
+        .run(
+            raw_for(no_id, V3HubEntryProtocol::Gemini),
+            &V3HubServertoolRequestProfile::disabled(),
+        )
+        .unwrap();
+    assert!(governed
+        .hook_events()
+        .contains(&V3HubRelayRequestHookEvent::Req04ToolGoverned));
+    let tool = governed.payload()["messages"]
+        .as_array()
+        .expect("Gemini inbound must canonicalize to Chat messages")
+        .iter()
+        .find(|message| message["role"] == "tool")
+        .expect("no-id functionResponse must survive as a tool receipt");
+    assert!(
+        tool.get("tool_call_id").is_none(),
+        "missing native id must stay missing"
+    );
+    assert_eq!(
+        tool["routecodex_chat_extension"]["gemini_native_fields"][0]["fields"]["functionResponse"]["name"],
+        "lookup"
+    );
 }
 
 #[test]

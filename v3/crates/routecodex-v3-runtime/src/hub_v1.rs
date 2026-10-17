@@ -37,6 +37,7 @@ pub(crate) use provider_compat_shared::{
 };
 mod relay_runtime_shared;
 pub(crate) use relay_runtime_shared::{
+    bind_v3_selected_business_auth_kind,
     build_v3_relay_observability, build_v3_runtime_provider_failure_observation_from_policy_event,
     error_output, external_http_witness_from_provider_error, external_http_witness_head,
     extract_error_type_style, extract_message_type_style, handle_provider_failure,
@@ -135,8 +136,11 @@ mod gemini_codec;
 mod gemini_responses_codec;
 mod gemini_terminal_semantics;
 pub use gemini_codec::*;
+mod gemini_request_normalization;
+pub use gemini_request_normalization::*;
 mod gemini_relay_runtime;
 pub use gemini_relay_runtime::*;
+pub(crate) use gemini_relay_runtime::gemini_model_from_endpoint_path;
 mod openai_chat_relay_runtime;
 pub use openai_chat_relay_runtime::*;
 mod responses_relay_runtime;

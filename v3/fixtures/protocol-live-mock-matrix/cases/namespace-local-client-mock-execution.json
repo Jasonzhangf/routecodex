@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "case_id": "namespace-local-client-mock-execution",
+  "cell": {"entry_protocol": "responses", "provider_protocol": "openai_chat", "transport": "sse", "mode": "relay"},
+  "client_request": {
+    "method": "POST",
+    "path": "/v1/responses",
+    "headers": {"content-type": "application/json"},
+    "body": {
+      "model": "mock.chat-model",
+      "input": "go",
+      "tools": [
+        {"type": "function", "name": "exec_command", "parameters": {"type": "object"}},
+        {"type": "namespace", "name": "collaboration", "description": "Tools in the collaboration namespace.", "tools": [
+          {"type": "function", "name": "spawn_agent", "description": "Spawns an agent.", "parameters": {"type": "object", "properties": {"message": {"type": "string"}}}},
+          {"type": "custom", "name": "freeform", "description": "no JSON schema"}
+        ]}
+      ],
+      "stream": true
+    }
+  },
+  "expected_provider": {
+    "paths": ["/v1/chat/completions"],
+    "method": "POST",
+    "auth_required": true,
+    "body_must": {"messages.0.content": "go", "tools.length": 3, "tools.0.function.name": "exec_command", "tools.1.function.name": "collaboration__spawn_agent", "tools.2.function.name": "collaboration__freeform"},
+    "body_must_not": ["routecodex_internal", "metadata_center", "debug_snapshot"],
+    "exact": null
+  },
+  "upstream_response": {
+    "protocol": "openai_chat",
+    "mode": "sse",
+    "status": 200,
+    "content_type": "text/event-stream",
+    "sse_events": [
+      {"data": {"id": "chatcmpl_ns_mock", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "id": "call_ns_1", "type": "function", "function": {"name": "collaboration__spawn_agent", "arguments": "{\"message\":\"do work\"}"}}]}}]}},
+      {"data": {"id": "chatcmpl_ns_mock", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]}},
+      {"data": "[DONE]"}
+    ]
+  },
+  "expected_client": {
+    "transport": "complete",
+    "status": 200,
+    "body_must": {"item.type": "function_call", "item.name": "spawn_agent", "item.namespace": "collaboration", "item.call_id": "call_ns_1", "item.arguments": "{\"message\":\"do work\"}"},
+    "body_must_not": ["provider_error", "internal_error", "routecodex_internal", "metadata_center"],
+    "semantic_terminal_required": true
+  },
+  "assertions": {"provider_attempt_count": 1, "probe_attempts_may_occur": true, "no_control_leakage": true},
+  "source": {
+    "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
+    "files": ["internal/gateway/namespace_test.go", "internal/gateway/codex_custom_tools_test.go"],
+    "tests": ["internal/gateway/namespace_test.go::TestNamespacedCallStreamed", "internal/gateway/codex_custom_tools_test.go::TestCodexCustomToolsTranslated"],
+    "adaptation": "Namespaced and custom declarations are adapted from Magpie. The supplemental local mock execution is an RCC test-owned extension: it selects a repo-owned function implementation explicitly and performs one bounded local file operation. No permission beyond the declared mock binding is granted; it does not launch an agent, send a message, or execute a shell command."
+  },
+  "contract_differences": [
+    {"source_behavior": "Magpie offers Codex custom tools as wrapper functions with transform-specific behavior.", "rcc_requirement": "Preserve namespace, custom/complete arguments and call binding; do not invent an executor permission from the response."},
+    {"source_behavior": "Magpie namespace calls reference agent spawning semantics.", "rcc_requirement": "The supplemental fixture binds the declared collaboration.spawn_agent function explicitly to the test-owned local-namespace-mock implementation. The observed call ID, namespace, name and complete arguments drive the next request; the local implementation's output is derived from an actual exclusive file write and readback, not from a scripted fixture value."}
+  ],
+  "turns": [
+    {
+      "turn_id": "namespace-call-mock",
+      "purpose": "The provider returns a namespaced function call with complete arguments; first-turn stream is true.",
+      "expected_client_must": {"item.type": "function_call", "item.name": "spawn_agent", "item.namespace": "collaboration", "item.call_id": "call_ns_1", "item.arguments": "{\"message\":\"do work\"}"}
+    },
+    {
+      "turn_id": "namespace-local-mock-outcome",
+      "purpose": "The test-owned local namespace mock records the call and its actual readback output; the client submits that actual output in the next request.",
+      "client_request": {
+        "method": "POST",
+        "path": "/v1/responses",
+        "headers": {"content-type": "application/json"},
+        "body": {
+          "model": "mock.chat-model",
+          "input": [
+            {"type": "message", "role": "user", "content": "go"},
+            {"type": "function_call", "call_id": "call_ns_1", "name": "spawn_agent", "namespace": "collaboration", "arguments": "{\"message\":\"do work\"}"},
+            {"type": "function_call_output", "call_id": "call_ns_1", "output": "local namespace mock recorded: do work"}
+          ],
+          "stream": false
+        }
+      },
+      "expected_provider_exact": {
+        "model": "chat-model",
+        "messages": [
+          {"role": "user", "content": "go"},
+          {"role": "assistant", "tool_calls": [{"id": "call_ns_1", "type": "function", "function": {"name": "collaboration__spawn_agent", "arguments": "{\"message\":\"do work\"}"}}]},
+          {"role": "tool", "tool_call_id": "call_ns_1", "content": "local namespace mock recorded: do work"}
+        ],
+        "stream": false
+      },
+      "upstream_response": {
+        "protocol": "openai_chat",
+        "mode": "json",
+        "status": 200,
+        "content_type": "application/json",
+        "body": {"id": "chatcmpl_ns_mock_followup", "object": "chat.completion", "choices": [{"index": 0, "message": {"role": "assistant", "content": "done"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 11, "completion_tokens": 2, "total_tokens": 13}}
+      },
+      "expected_client_contract": {
+        "transport": "complete",
+        "status": 200,
+        "body_must_not": ["provider_error", "internal_error", "routecodex_internal", "metadata_center"],
+        "semantic_terminal_required": true
+      },
+      "expected_client_must": {"output.0.content.0.text": "done", "status": "completed"}
+    }
+  ],
+  "tool_followup": {
+    "consumer": "local-namespace-mock",
+    "binding": {"namespace": "collaboration", "name": "spawn_agent", "type": "function"},
+    "side_effect": "exclusive-local-file",
+    "assert_no_synthesized_tool_result": true,
+    "assert_declared_tool_binding_only": true,
+    "assert_tool_executed_once": true
+  }
+}

@@ -51,6 +51,7 @@ pub use kernel::{
     execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target,
     plan_v3_responses_protocol_execution_with_provider_health,
     project_v3_protocol_execution_plan_failure, V3ChatDirectCodec, V3DirectProtocolCodec,
+    V3GeminiDirectCodec, V3AnthropicDirectCodec,
     V3ResponsesDirectRuntimeOutput, V3ResponsesDirectRuntimeSharedState,
     V3ResponsesDirectServerToolScope, V3ResponsesDirectServerToolState,
     V3ResponsesProtocolExecutionPlan, V3ResponsesProtocolExecutionPlanFailure,

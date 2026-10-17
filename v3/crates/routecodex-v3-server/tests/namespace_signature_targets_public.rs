@@ -363,24 +363,15 @@ targets = [{{ kind = "provider_model", provider = "signature", model = "signatur
             let records = std::fs::read_to_string(&log).unwrap_or_default();
             eprintln!("SIGNATURE_TARGET_DROP target={target} {records}");
             assert_eq!(response["status"], "completed");
+            assert_eq!(
+                response["output"],
+                json!([{
+                    "type":"message", "role":"assistant",
+                    "content":[{"type":"output_text", "text":"projection accepted"}]
+                }])
+            );
             if target == "openai_chat" {
-                // The declared Chat -> Responses codec emits output_text items.
-                // Check its complete business text, not another codec's envelope.
-                assert_eq!(
-                    response["output"],
-                    json!([{
-                        "type":"output_text", "text":"projection accepted"
-                    }])
-                );
                 assert_eq!(response["output_text"], "projection accepted");
-            } else {
-                assert_eq!(
-                    response["output"],
-                    json!([{
-                        "type":"message", "role":"assistant",
-                        "content":[{"type":"output_text", "text":"projection accepted"}]
-                    }])
-                );
             }
             for (index, signature) in [FUNCTION_SIG, CUSTOM_SIG].into_iter().enumerate() {
                 if !records

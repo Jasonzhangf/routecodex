@@ -41,7 +41,7 @@ pub(crate) fn project_gemini_response(payload: &Value, request_id: &str) -> Resu
                         ),
                     },
                 );
-                let id = item_row.remove("id").unwrap_or_else(|| {
+                let id = item_row.get("id").cloned().unwrap_or_else(|| {
                     json!(format!("{response_id}_call_{candidate_index}_{part_index}"))
                 });
                 item_row.insert("call_id".into(), id);
@@ -73,7 +73,7 @@ pub(crate) fn project_gemini_response(payload: &Value, request_id: &str) -> Resu
             }
         }
         let index = outcome
-            .remove("index")
+            .get("index").cloned()
             .unwrap_or_else(|| json!(candidate_index));
         outcome.insert("candidate_index".into(), index);
         outcome.insert(
@@ -112,6 +112,149 @@ pub(crate) fn project_gemini_response(payload: &Value, request_id: &str) -> Resu
         row.insert("usage".into(), canonical_usage);
     }
     Ok(response)
+}
+
+/// Adjacent client projection. Input must be the final governed Responses
+/// semantic payload; source protocol selects native identity/terminal rules.
+pub(crate) fn project_responses_to_gemini_client(
+    payload: &Value,
+    source: super::V3HubProviderWireProtocol,
+) -> Result<Value, String> {
+    use super::V3HubProviderWireProtocol;
+    let root = payload.as_object().ok_or("governed response must be an object")?;
+    let output = root.get("output").and_then(Value::as_array);
+    let mut response = root.clone();
+    for key in ["id", "object", "output", "output_text", "status", "incomplete_details", "usage", "gemini_candidate_outcomes", "finishReason"] {
+        response.remove(key);
+    }
+    let mut candidates = Vec::new();
+    if source == V3HubProviderWireProtocol::Gemini {
+        if let Some(outcomes) = root.get("gemini_candidate_outcomes").and_then(Value::as_array) {
+            for outcome in outcomes {
+                let mut candidate = outcome.as_object().cloned().ok_or("Gemini candidate outcome must be an object")?;
+                candidate.remove("candidate_index");
+                candidate.remove("output_indices");
+                let mut parts = Vec::new();
+                for index in outcome.get("output_indices").and_then(Value::as_array).into_iter().flatten() {
+                    let item = index.as_u64().and_then(|i| output.and_then(|items| items.get(i as usize))).ok_or("Gemini output association is unavailable")?;
+                    parts.extend(gemini_parts_from_governed_item(item, source)?);
+                }
+                if !parts.is_empty() || candidate.get("content").is_some() {
+                    let content = candidate.entry("content").or_insert_with(|| json!({}));
+                    let content = content.as_object_mut().ok_or("Gemini content must be an object")?;
+                    content.insert("parts".into(), Value::Array(parts));
+                }
+                candidates.push(Value::Object(candidate));
+            }
+        }
+    } else {
+        let mut parts = Vec::new();
+        for item in output.into_iter().flatten() {
+            parts.extend(gemini_parts_from_governed_item(item, source)?);
+        }
+        let mut candidate = json!({"content":{"role":"model","parts":parts}});
+        let reason = root.get("finishReason").and_then(Value::as_str)
+            .or_else(|| root.get("finish_reason").and_then(Value::as_str))
+            .or_else(|| payload.pointer("/incomplete_details/reason").and_then(Value::as_str));
+        let hub_reason = match reason {
+            Some("length" | "max_output_tokens") => Some("max_tokens"),
+            Some("end_turn" | "tool_calls") => Some("stop"),
+            Some(reason) => Some(reason),
+            None if root.get("status").and_then(Value::as_str) == Some("completed") => Some("stop"),
+            None => None,
+        };
+        if let Some(reason) = hub_reason {
+            let mapped = crate::protocol_tables::map_value(
+                crate::protocol_tables::V3TableKind::FinishReason, "gemini", reason,
+                crate::protocol_tables::V3TableDirection::Outbound,
+            )?;
+            candidate["finishReason"] = json!(mapped.unwrap_or(reason));
+        }
+        candidates.push(candidate);
+        if let Some(id) = root.get("id") {
+            response.insert("responseId".into(), id.clone());
+        }
+    }
+    response.insert("candidates".into(), Value::Array(candidates));
+    if let Some(usage) = root.get("usage") {
+        if let Some(fields) = usage.as_object() {
+            let mut projected = fields.clone();
+            for (canonical, native) in [
+                ("input_tokens", "promptTokenCount"), ("prompt_tokens", "promptTokenCount"),
+                ("output_tokens", "candidatesTokenCount"), ("completion_tokens", "candidatesTokenCount"),
+                ("total_tokens", "totalTokenCount"),
+            ] {
+                if let Some(value) = fields.get(canonical) {
+                    projected.insert(native.into(), value.clone());
+                }
+                projected.remove(canonical);
+            }
+            if let Some(value) = usage.pointer("/input_tokens_details/cached_tokens") {
+                projected.insert("cachedContentTokenCount".into(), value.clone());
+            }
+            if let Some(value) = usage.pointer("/output_tokens_details/reasoning_tokens") {
+                projected.insert("thoughtsTokenCount".into(), value.clone());
+            }
+            response.insert("usageMetadata".into(), Value::Object(projected));
+        } else {
+            response.insert("usageMetadata".into(), usage.clone());
+        }
+    }
+    Ok(Value::Object(response))
+}
+
+fn gemini_parts_from_governed_item(item: &Value, source: super::V3HubProviderWireProtocol) -> Result<Vec<Value>, String> {
+    match item.get("type").and_then(Value::as_str) {
+        Some("message") => {
+            let mut parts = Vec::new();
+            for part in item.get("content").and_then(Value::as_array).into_iter().flatten() {
+                let mut part = part.clone();
+                if matches!(part.get("type").and_then(Value::as_str), Some("output_text" | "text")) {
+                    part.as_object_mut().unwrap().remove("type");
+                }
+                parts.push(part);
+            }
+            Ok(parts)
+        }
+        Some("output_text" | "text") => {
+            let mut part = item.clone();
+            part.as_object_mut().unwrap().remove("type");
+            Ok(vec![part])
+        }
+        Some("function_call" | "custom_tool_call" | "tool_call") => {
+            let mut call = item.as_object().cloned().ok_or("tool item must be an object")?;
+            let args = call.remove("arguments").or_else(|| call.remove("input"));
+            if let Some(args) = args {
+                let args = match args {
+                    Value::String(text) => serde_json::from_str(&text).unwrap_or(Value::String(text)),
+                    value => value,
+                };
+                call.insert("args".into(), args);
+            }
+            if source != super::V3HubProviderWireProtocol::Gemini {
+                if let Some(id) = call.get("call_id").cloned() { call.insert("id".into(), id); }
+            }
+            for field in ["type", "call_id"] { call.remove(field); }
+            let signature = call.remove("thought_signature");
+            let mut part = json!({"functionCall":call});
+            if let Some(signature) = signature { part["thoughtSignature"] = signature; }
+            Ok(vec![part])
+        }
+        Some("reasoning") => {
+            let mut parts = Vec::new();
+            for content in item.get("summary").or_else(|| item.get("content")).and_then(Value::as_array).into_iter().flatten() {
+                let mut part = content.clone();
+                if let Some(part) = part.as_object_mut() { part.remove("type"); part.insert("thought".into(), json!(true)); }
+                parts.push(part);
+            }
+            if let Some(signature) = item.get("encrypted_content").or_else(|| item.get("thought_signature")) {
+                if parts.is_empty() { parts.push(json!({"thought":true})); }
+                parts[0]["thoughtSignature"] = signature.clone();
+            }
+            Ok(parts)
+        }
+        _ => Ok(vec![item.clone()]),
+    }
 }
 
 /// Resp03 consumes the exact request attempt's standard binding.
@@ -160,6 +303,33 @@ pub(crate) fn restore_gemini_tool_kinds(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gemini_client_inverse_preserves_candidate_parts_and_native_id_presence() {
+        use super::*;
+        let source = json!({"responseId":"native","opaque":{"keep":true},"candidates":[
+            {"index":4,"content":{"role":"model","parts":[{"text":"one","opaque":1},{"inlineData":{"mimeType":"image/png","data":"AA=="}}]},"finishReason":"MAX_TOKENS"},
+            {"content":{"parts":[{"functionCall":{"name":"tool","args":"invalid arguments"},"thoughtSignature":"sig"}]},"finishReason":"STOP"}
+        ],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":2,"totalTokenCount":9,"opaqueCount":11}});
+        let canonical = project_gemini_response(&source, "real-request").unwrap();
+        let projected = project_responses_to_gemini_client(&canonical, crate::hub_v1::V3HubProviderWireProtocol::Gemini).unwrap();
+        assert_eq!(projected, source);
+    }
+
+    #[test]
+    fn gemini_client_inverse_keeps_all_parts_and_raw_tool_arguments() {
+        use super::*;
+        let canonical = json!({"id":"upstream","status":"completed","output":[
+            {"type":"message","content":[{"type":"output_text","text":"first"},{"type":"output_text","text":"second","annotation":1}]},
+            {"type":"function_call","call_id":"paired","name":"tool","arguments":"broken json"}
+        ],"usage":{"input_tokens":7,"output_tokens":2,"total_tokens":9}});
+        let projected = project_responses_to_gemini_client(&canonical, crate::hub_v1::V3HubProviderWireProtocol::Responses).unwrap();
+        assert_eq!(projected["candidates"][0]["content"]["parts"], json!([
+            {"text":"first"},{"text":"second","annotation":1},{"functionCall":{"id":"paired","name":"tool","args":"broken json"}}
+        ]));
+        assert_eq!(projected["usageMetadata"]["totalTokenCount"], 9);
+        assert_eq!(projected["candidates"][0]["finishReason"], "STOP");
+    }
+
     use super::*;
     #[test]
     fn gemini_terminal_mixed_outcomes_are_order_independent_and_associated() {

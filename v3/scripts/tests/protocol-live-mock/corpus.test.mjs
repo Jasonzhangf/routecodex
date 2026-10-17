@@ -64,9 +64,9 @@ function findingsOf(root) {
   return inspectCorpus(root).findings.join('\n');
 }
 
-test('real corpus loads 48 fixtures sorted with exact identities', () => {
+test('real corpus loads 58 fixtures sorted with exact identities', () => {
   const loaded = loadFixtures(realFixtureRoot);
-  assert.equal(loaded.length, 48);
+  assert.equal(loaded.length, 58);
   const ids = loaded.map((entry) => entry.value.case_id);
   assert.equal(ids.length, new Set(ids).size);
   assert.equal(ids[0], 'anthropic-to-anthropic-json');
@@ -74,12 +74,12 @@ test('real corpus loads 48 fixtures sorted with exact identities', () => {
   assert.deepEqual(loaded.map((entry) => entry.relative), [...loaded.map((entry) => entry.relative)].sort());
   const report = inspectCorpus(realFixtureRoot);
   assert.equal(report.ok, true, report.findings.join('\n'));
-  assert.equal(report.case_count, 48);
+  assert.equal(report.case_count, 58);
   assert.deepEqual(report.findings, []);
   assert.equal(report.coverage.base_cells, 16);
   assert.equal(report.coverage.base_cells_covered, 16);
   assert.equal(report.coverage.base_variants_covered, 32);
-  assert.equal(report.extensions.length, 16);
+  assert.equal(report.extensions.length, 26);
   assert.equal(report.source_refs.checked, false);
   assert.deepEqual(report.source_refs.stale_files, []);
   assert.deepEqual(report.source_refs.stale_tests, []);
@@ -238,6 +238,97 @@ test('runtime_setup rejects unsupported or inconsistent typed declarations', () 
   });
 });
 
+test('local namespace mock consumer requires the declared binding, exclusive effect and declared origin', () => {
+  const declaredTool = {
+    type: 'namespace',
+    name: 'collaboration',
+    tools: [{ type: 'function', name: 'spawn_agent', parameters: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'] } }],
+  };
+  const valid = baseCase({
+    client_request: { method: 'POST', path: '/v1/responses', headers: { 'content-type': 'application/json' }, body: { model: 'mock.chat-model', input: 'go', tools: [declaredTool] } },
+    turns: [
+      { turn_id: 'call' },
+      { turn_id: 'followup', client_request: { method: 'POST', path: '/v1/responses', body: { input: [{ type: 'function_call_output', call_id: 'call_ns_1', output: 'local namespace mock recorded: do work' }] } } },
+    ],
+    tool_followup: { consumer: 'local-namespace-mock', side_effect: 'exclusive-local-file', binding: { namespace: 'collaboration', name: 'spawn_agent', type: 'function' }, input: { message: 'do work' }, expected_output: 'local namespace mock recorded: do work', assert_no_synthesized_tool_result: true, assert_declared_tool_binding_only: true, assert_tool_executed_once: true },
+  });
+  withFixture({ 'valid-case': valid }, validManifest(['valid-case']), (root) => {
+    assert.deepEqual(inspectCorpus(root).findings, []);
+  });
+
+  const invalid = baseCase({
+    turns: [
+      { turn_id: 'call' },
+      { turn_id: 'followup', client_request: { method: 'POST', path: '/v1/responses', body: { input: [] } } },
+    ],
+    tool_followup: { consumer: 'local-namespace-mock', side_effect: 'none', binding: { namespace: 'other', name: 'spawn_agent', type: 'function' }, assert_tool_executed_once: true },
+  });
+  withFixture({ 'valid-case': invalid }, validManifest(['valid-case']), (root) => {
+    const message = findingsOf(root);
+    assert.match(message, /tool_followup\.consumer local-namespace-mock requires binding \{namespace: collaboration/);
+    assert.match(message, /tool_followup\.consumer local-namespace-mock requires side_effect exclusive-local-file/);
+    assert.match(message, /tool_followup\.consumer local-namespace-mock requires the originating collaboration\.spawn_agent declaration/);
+  });
+});
+
+test('echo-line-result consumer requires the declared echo tool and the exact structured paired response', () => {
+  const response = { output: 'native-tool-result\n', exitCode: 0 };
+  const base = {
+    cell: { entry_protocol: 'gemini', provider_protocol: 'gemini', transport: 'json', mode: 'relay' },
+    client_request: {
+      method: 'POST',
+      path: '/v1beta/models/mock.chat-model:generateContent',
+      headers: { 'content-type': 'application/json' },
+      body: {
+        contents: [{ role: 'user', parts: [{ text: 'go' }] }],
+        tools: [{ functionDeclarations: [{ name: 'echo', parameters: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'] } }] }],
+      },
+    },
+    turns: [
+      { turn_id: 'call' },
+      {
+        turn_id: 'followup',
+        client_request: {
+          method: 'POST',
+          path: '/v1beta/models/mock.chat-model:generateContent',
+          body: { contents: [{ role: 'user', parts: [{ text: 'go' }] }, { parts: [{ functionResponse: { name: 'echo', response } }] }] },
+        },
+      },
+    ],
+    tool_followup: {
+      consumer: 'echo-line-result',
+      side_effect: 'none',
+      input: { message: 'native-tool-result' },
+      expected_output: response,
+      assert_no_synthesized_tool_result: true,
+      assert_declared_tool_binding_only: true,
+      assert_tool_executed_once: true,
+    },
+  };
+  withFixture({ 'valid-case': baseCase(base) }, validManifest(['valid-case']), (root) => {
+    assert.deepEqual(inspectCorpus(root).findings, []);
+  });
+
+  const polluted = baseCase(structuredClone(base));
+  polluted.turns[1].client_request.body.contents[1].parts[0].functionResponse.response = { output: 'native-tool-result\n', exitCode: 7 };
+  withFixture({ 'valid-case': polluted }, validManifest(['valid-case']), (root) => {
+    assert.match(findingsOf(root), /paired functionResponse\.response to equal expected_output/);
+  });
+
+  const invalid = baseCase(structuredClone(base));
+  invalid.cell.entry_protocol = 'openai_chat';
+  invalid.tool_followup.side_effect = 'exclusive-local-file';
+  invalid.tool_followup.input = { text: 'wrong-key' };
+  invalid.tool_followup.expected_output = { output: 'x', exitCode: 1 };
+  withFixture({ 'valid-case': invalid }, validManifest(['valid-case']), (root) => {
+    const message = findingsOf(root);
+    assert.match(message, /tool_followup\.consumer echo-line-result requires side_effect none/);
+    assert.match(message, /requires a string input\.message/);
+    assert.match(message, /requires expected_output \{output: string, exitCode: 0\}/);
+    assert.match(message, /requires the gemini entry protocol/);
+  });
+});
+
 test('auth_orders requires exactly two ordered two-identity proofs', () => {
   const valid = baseCase({
     expected_provider: {
@@ -352,7 +443,7 @@ test('static namespace history cannot claim actual execution by the echo consume
     tool_followup: { consumer: 'namespace declaration only', assert_tool_executed_once: true },
   });
   withFixture({ 'valid-case': value }, validManifest(['valid-case']), (root) => {
-    assert.match(findingsOf(root), /assert_tool_executed_once requires the actual echo consumer/);
+    assert.match(findingsOf(root), /assert_tool_executed_once requires an executing consumer/);
   });
 });
 

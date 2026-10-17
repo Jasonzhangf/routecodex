@@ -262,6 +262,10 @@ fn build_v3_provider_standard_protocol_payload_from_req07(
             payload
         }
     };
+    super::request_outbound_format::project_standard_request_transport_intent(
+        &mut provider_protocol_payload, input.entry_protocol(), input.provider_protocol,
+        input.transport_intent(),
+    );
     if input.provider_protocol == V3HubProviderWireProtocol::Responses {
         namespace_registry.project_request(&mut provider_protocol_payload, "openai-responses")?;
     }
@@ -840,8 +844,11 @@ mod tests {
         assert!(payload.get("input").is_none());
         assert_eq!(payload["messages"][0]["role"], "user");
         assert_eq!(payload["messages"][1]["role"], "assistant");
-        assert_eq!(payload["messages"][1]["content"][0]["type"], "text");
-        assert_eq!(payload["messages"][1]["content"][1]["type"], "tool_use");
+        assert_eq!(payload["messages"][1]["content"].as_array().unwrap().len(), 1);
+        assert_eq!(payload["messages"][1]["content"][0]["type"], "tool_use");
+        assert_eq!(payload["messages"][1]["content"][0]["id"], "call_lookup");
+        assert_eq!(payload["messages"][1]["content"][0]["name"], "lookup");
+        assert_eq!(payload["messages"][1]["content"][0]["input"]["query"], "routecodex");
         assert_eq!(payload["messages"][2]["role"], "user");
         assert_eq!(payload["messages"][2]["content"][0]["type"], "tool_result");
     }

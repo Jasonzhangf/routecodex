@@ -422,11 +422,7 @@ fn project_json_response(
                 )));
             }
         }
-        unsupported => {
-            return Err(V3OpenAiChatRelayRuntimeError::Target(format!(
-                "OpenAI Chat relay response codec has no registered provider protocol: {unsupported:?}"
-            )));
-        }
+        V3HubProviderWireProtocol::Gemini => {}
     }
     let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
         provider_value,
@@ -442,11 +438,18 @@ fn project_json_response(
     trace.push("V3ProviderRespInbound01Raw");
     let compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01)?;
     trace.push("ProviderRespCompat02ProviderCompat");
-    let resp02 = build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request(
+    let mut resp02 = build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request(
         compat,
         Some(chat_request),
     )
     .map_err(V3OpenAiChatRelayRuntimeError::Target)?;
+    if provider_protocol == V3HubProviderWireProtocol::Gemini {
+        let request_id = request_id.ok_or_else(|| V3OpenAiChatRelayRuntimeError::Target(
+            "Gemini response normalization requires the runtime request ID".to_string(),
+        ))?;
+        resp02.normalize_gemini_business_response(request_id)
+            .map_err(V3OpenAiChatRelayRuntimeError::Target)?;
+    }
     trace.push("V3HubRespInbound02Normalized");
     let hooks = compile_v3_hub_relay_response_hooks();
     let mut response_profile = V3HubRelayResponseHookProfile::empty()
@@ -1384,7 +1387,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
     fn build_transport_request(
         request_id: &str,
         target: V3ResponsesProviderTarget,
-        _transport_intent: V3HubTransportIntent,
+        transport_intent: V3HubTransportIntent,
         body: Value,
         _provider_header_overrides: Vec<V3ProviderRequestHeader>,
     ) -> Result<V3Transport13ResponsesHttpRequest, V3RelayCoreError> {
@@ -1394,6 +1397,18 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
                 .map_err(|error| V3RelayCoreError::Target(error.to_string()))?;
         let wire = build_v3_provider_12_responses_wire_payload(request_id, target, body)
             .map_err(|error| V3RelayCoreError::Target(error.to_string()))?;
+        let wire = if wire_protocol == V3HubProviderWireProtocol::Gemini {
+            wire.with_stream_intent(match transport_intent {
+                V3HubTransportIntent::Json => {
+                    routecodex_v3_provider_responses::V3ResponsesStreamIntent::Json
+                }
+                V3HubTransportIntent::Sse => {
+                    routecodex_v3_provider_responses::V3ResponsesStreamIntent::Sse
+                }
+            })
+        } else {
+            wire
+        };
         build_v3_provider_transport_request_for_protocol(wire_protocol, wire)
             .map_err(|error| V3RelayCoreError::Target(error.to_string()))
     }
@@ -1474,6 +1489,13 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         outcome: V3OpenAiChatSseProviderOutcome,
     ) -> Result<V3OpenAiChatClientStream, V3RelayCoreError> {
         let session_id = outcome.failure_session_scope.session_id().to_owned();
+        if provider_wire_protocol == V3HubProviderWireProtocol::Gemini {
+            return Ok(project_gemini_sse_as_openai_chat_stream(
+                request_id.to_owned(), session_id, provider, compatibility_profile,
+                web_search_execution_mode, web_search_state, _retain_response_cipher,
+                tool_thinking_enabled, stream_observation, client_include_usage, outcome,
+            ));
+        }
         if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
             return Ok(project_anthropic_sse_as_openai_chat_stream(
                 request_id.to_owned(),

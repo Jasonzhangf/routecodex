@@ -16,7 +16,7 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
         Some(Value::String(text)) => vec![json!({
             "type": "message",
             "role": "user",
-            "content": [{"type": "input_text", "text": text}]
+            "content": text
         })],
         _ => {
             return Err(
@@ -731,7 +731,10 @@ fn build_v3_openai_chat_assistant_tool_call_message(
     let tool_call = project_v3_responses_tool_call_to_openai_chat(item, call_id, name);
     let mut message = Map::new();
     message.insert("role".to_string(), Value::String("assistant".to_string()));
-    message.insert("content".to_string(), Value::String(String::new()));
+    if item.contains_key("content") {
+        let (content, _) = build_v3_openai_chat_content_from_responses_content(item.get("content"))?;
+        message.insert("content".to_string(), content);
+    }
     message.insert("tool_calls".to_string(), Value::Array(vec![tool_call]));
     if let Some(reasoning_content) = join_v3_openai_chat_reasoning_segments(
         collect_v3_openai_chat_reasoning_segments(
@@ -1177,10 +1180,8 @@ fn build_v3_openai_chat_content_from_responses_content(
     let Some(parts) = content.as_array() else {
         return Ok((Value::String(content.to_string()), Vec::new()));
     };
-    let mut text_segments = Vec::new();
     let mut converted_parts = Vec::new();
     let mut reasoning_segments = Vec::new();
-    let mut text_only = true;
     for part in parts {
         let object = part.as_object().ok_or_else(|| {
             "Responses message content part must be an object before OpenAI Chat encoding"
@@ -1188,18 +1189,19 @@ fn build_v3_openai_chat_content_from_responses_content(
         })?;
         match object.get("type").and_then(Value::as_str) {
             Some("input_text" | "output_text" | "text") => {
-                let text = object
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                text_segments.push(text.to_string());
-                converted_parts.push(json!({"type":"text","text":text}));
+                let mut converted = object.clone();
+                converted.insert("type".to_string(), Value::String("text".to_string()));
+                if let Some(text) = converted.get_mut("text") {
+                    if !text.is_string() {
+                        *text = Value::String(text.to_string());
+                    }
+                }
+                converted_parts.push(Value::Object(converted));
             }
             Some("reasoning_text" | "thinking" | "reasoning") => {
                 reasoning_segments.extend(collect_v3_openai_chat_reasoning_segments(Some(part)));
             }
             Some("input_image" | "image_url") => {
-                text_only = false;
                 converted_parts.push(convert_v3_responses_image_part_to_openai_chat_part(object));
             }
             Some(other) => {
@@ -1215,11 +1217,7 @@ fn build_v3_openai_chat_content_from_responses_content(
             }
         }
     }
-    if text_only {
-        Ok((Value::String(text_segments.join("")), reasoning_segments))
-    } else {
-        Ok((Value::Array(converted_parts), reasoning_segments))
-    }
+    Ok((Value::Array(converted_parts), reasoning_segments))
 }
 
 fn collect_v3_openai_chat_reasoning_segments(value: Option<&Value>) -> Vec<String> {

@@ -470,7 +470,7 @@ async fn gemini_model_tool_error_terminal_preserves_business_public() {
             "OTHER",
         ] {
             let candidate = json!({"index":0,"finishReason":reason,"finishMessage":"invalid generated call","content":{"parts":[]}});
-            let outcome = json!({"candidate_index":0,"finishReason":reason,"finishMessage":"invalid generated call","output_indices":[]});
+            let outcome = json!({"index":0,"candidate_index":0,"finishReason":reason,"finishMessage":"invalid generated call","output_indices":[]});
             run_checked(
                 vec![json!({"candidates":[candidate]})],
                 json_provider,
@@ -490,7 +490,7 @@ async fn gemini_opaque_part_preserves_business_public() {
     let _home = Home::new();
     let part = json!({"thought":false,"fileData":{"mimeType":"image/png","fileUri":"https://example.test/result.png"},"opaque":{"original":[false,17]}});
     let output = [json!({"type":"message","role":"assistant","content":[part.clone()]})];
-    let outcome = json!({"candidate_index":0,"finishReason":"STOP","output_indices":[0]});
+    let outcome = json!({"index":0,"candidate_index":0,"finishReason":"STOP","output_indices":[0]});
     for json_provider in [false, true] {
         run_checked(vec![json!({"candidates":[{"index":0,"finishReason":"STOP","content":{"parts":[part.clone()]}}]})], json_provider, Some("STOP"), &[], None, Some((&output, &outcome))).await;
     }
@@ -589,7 +589,7 @@ async fn transformed_association(json_provider: bool, think: bool) {
     } else {
         vec![vec![], vec![0]]
     };
-    output.push(json!({"type":"function_call","namespace":"terminal_ops","name":"evaluate","arguments":ARGS,"call_id":"candidate_1","thought_signature":"candidate-one-signature"}));
+    output.push(json!({"type":"function_call","namespace":"terminal_ops","name":"evaluate","arguments":ARGS,"id":"candidate_1","call_id":"candidate_1","thought_signature":"candidate-one-signature"}));
     run_checked(
         frames,
         json_provider,

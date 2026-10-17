@@ -65,7 +65,8 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             .session_id;
     let responses_entry_facts =
         (entry_protocol == "responses").then(|| V3ResponsesEntryFacts::project(&payload));
-    let requested_stream = v3_request_wants_sse(&request_headers, &payload);
+    let requested_stream = v3_request_wants_sse(&request_headers, &payload)
+        || (entry_protocol == "gemini" && path.ends_with(":streamGenerateContent"));
     let (execution_id, trace_scope) =
         match crate::client_transport_observation::start_v3_client_trace(
             &state,
@@ -527,6 +528,40 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             return response;
         }
         return foundation_output_response(output);
+    }
+    if entry_protocol == "gemini" && execution_mode == V3EntryProtocolExecutionMode::Direct {
+        return execute_v3_gemini_direct_server_outcome(
+            &state,
+            front_connection_identity,
+            method,
+            path.clone(),
+            request_id.clone(),
+            execution_id,
+            payload,
+            provider_failure_session_scope.clone(),
+            &request_headers,
+            &request_identity,
+            started_at,
+            request_purpose,
+        )
+        .await;
+    }
+    if entry_protocol == "anthropic" && execution_mode == V3EntryProtocolExecutionMode::Direct {
+        return execute_v3_anthropic_direct_server_outcome(
+            &state,
+            front_connection_identity,
+            method,
+            path.clone(),
+            request_id.clone(),
+            execution_id,
+            payload,
+            provider_failure_session_scope.clone(),
+            &request_headers,
+            &request_identity,
+            started_at,
+            request_purpose,
+        )
+        .await;
     }
     if entry_protocol == "openai_chat" && execution_mode == V3EntryProtocolExecutionMode::Direct {
         return execute_v3_openai_chat_direct_server_outcome(

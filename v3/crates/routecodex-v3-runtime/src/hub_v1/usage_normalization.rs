@@ -146,10 +146,17 @@ pub(crate) fn project_v3_chat_usage_from_canonical(usage: &Value) -> Option<Valu
         "total_tokens".to_string(),
         Value::from(cache.effective_input_tokens.saturating_add(output_tokens)),
     );
+    let mut prompt_details = Map::new();
     if let Some(cached) = cache.cached_tokens {
+        prompt_details.insert("cached_tokens".to_string(), Value::from(cached));
+    }
+    if let Some(created) = cache.cache_creation_input_tokens {
+        prompt_details.insert("cache_write_tokens".to_string(), Value::from(created));
+    }
+    if !prompt_details.is_empty() {
         projected.insert(
             "prompt_tokens_details".to_string(),
-            json!({"cached_tokens": cached}),
+            Value::Object(prompt_details),
         );
     }
     if let Some(reasoning) = read_v3_canonical_usage_reasoning_tokens(source) {
@@ -342,6 +349,27 @@ mod tests {
             projected["prompt_tokens_details"]["cached_tokens"],
             json!(217_088)
         );
+    }
+
+    #[test]
+    fn chat_projection_preserves_cache_write_tokens() {
+        let projected = project_v3_chat_usage_from_canonical(&json!({
+            "input_tokens": 10,
+            "cache_creation_input_tokens": 6416,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 40
+        }))
+        .unwrap();
+
+        assert_eq!(projected["prompt_tokens"], json!(6426));
+        assert_eq!(projected["completion_tokens"], json!(40));
+        assert_eq!(projected["total_tokens"], json!(6466));
+        assert_eq!(
+            projected["prompt_tokens_details"],
+            json!({"cached_tokens": 0, "cache_write_tokens": 6416})
+        );
+        assert!(projected.get("cache_creation_input_tokens").is_none());
+        assert!(projected.get("cache_read_input_tokens").is_none());
     }
 
     #[test]

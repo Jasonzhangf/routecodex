@@ -1502,12 +1502,11 @@ async fn side_channel_request_fails_before_provider_send() {
 }
 
 #[tokio::test]
-async fn non_gemini_route_target_fails_before_provider_send() {
-    let transport = JsonTransport {
-        captured_url: Mutex::new(None),
-        captured_body: Mutex::new(None),
+async fn non_gemini_route_target_returns_gemini_client_projection() {
+    let transport = StaticJsonTransport {
+        provider_body: json!({"id":"chat-cross","choices":[{"index":0,"message":{"role":"assistant","content":"cross target"},"finish_reason":"stop"}]}),
     };
-    let error = execute_v3_gemini_relay_runtime(
+    let output = execute_v3_gemini_relay_runtime(
         &manifest_with_provider_type("openai_chat"),
         V3GeminiRelayRuntimeInput {
             server_id: "controlled".into(),
@@ -1520,23 +1519,74 @@ async fn non_gemini_route_target_fails_before_provider_send() {
             request_id: "req-non-gemini-target".into(),
             endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
             payload: json!({
-                "contents":[{"role":"user","parts":[{"text":"must not hit OpenAI target"}]}],
+                "contents":[{"role":"user","parts":[{"text":"use selected OpenAI target"}]}],
                 "stream":false
             }),
         },
         &transport,
     )
     .await
-    .expect_err("non-Gemini provider target must fail before transport");
+    .expect("selected cross-protocol provider must execute");
+    let V3GeminiRelayClientBody::Json(payload) = output.client_body else { panic!("JSON client projection expected") };
+    assert_eq!(payload["candidates"][0]["content"]["parts"][0]["text"], "cross target");
+    assert_eq!(payload["candidates"][0]["finishReason"], "STOP");
+}
 
-    assert!(
-        error
-            .to_string()
-            .contains("no compatible Gemini provider target"),
-        "{error:?}"
-    );
-    assert!(transport.captured_url.lock().unwrap().is_none());
-    assert!(transport.captured_body.lock().unwrap().is_none());
+async fn run_json_client_with_chat_sse(
+    limit: usize,
+    hold_open: bool,
+) -> Result<routecodex_v3_runtime::V3GeminiRelayRuntimeOutput, String> {
+    let (sender, receiver) = tokio::sync::mpsc::channel(4);
+    let content = if hold_open { "x".repeat(2048) } else { "complete JSON".to_string() };
+    let mut bytes = format!("data: {}\n\n", json!({"id":"chat-json","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":content}}]})).into_bytes();
+    if !hold_open {
+        bytes.extend_from_slice(b"data: {\"id\":\"chat-json\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n");
+    }
+    sender.send(Ok(bytes)).await.unwrap();
+    let sender = hold_open.then_some(sender);
+    let transport = ControlledSseTransport { receiver: Mutex::new(Some(receiver)) };
+    let mut manifest = manifest_with_provider_type("openai_chat");
+    manifest.servers.get_mut("controlled").unwrap().execution.as_mut().unwrap().attempt_store.attempt_max_bytes = limit;
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let output = tokio::time::timeout(Duration::from_millis(500), execute_v3_gemini_relay_runtime_with_provider_health(
+        &manifest,
+        V3GeminiRelayRuntimeInput {
+            server_id:"controlled".into(),
+            failure_session_scope:routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server","test-group",format!("json-chat-sse-{limit}-{hold_open}")).unwrap(),
+            request_id:format!("json-chat-sse-{limit}-{hold_open}"),
+            endpoint_path:"/v1beta/models/gemini-client:generateContent".into(),
+            payload:json!({"contents":[{"role":"user","parts":[{"text":"hello"}]}]})
+        }, &transport, provider_health.runtime_health()
+    )).await.map_err(|_| "runtime did not settle before the held-open provider terminal".to_string())?
+      .map_err(|error| error.to_string());
+    drop(sender);
+    if hold_open {
+        let availability = provider_health.store().availability("controlled", Some("controlled"), Some("gemini-wire"), u64::MAX);
+        assert!(availability.available, "local resource exhaustion must not cool the provider");
+        assert!(availability.blocked_scopes.is_empty());
+    }
+    output
+}
+
+#[tokio::test]
+async fn gemini_json_client_materializes_complete_chat_sse_as_json() {
+    let output = run_json_client_with_chat_sse(16384, false).await.unwrap();
+    let V3GeminiRelayClientBody::Json(payload) = output.client_body else { panic!("JSON client must receive projected JSON") };
+    assert_eq!(payload["candidates"][0]["content"]["parts"][0]["text"], "complete JSON", "status={} payload={payload} trace={:?}", output.status, output.node_trace);
+    assert_eq!(payload["candidates"][0]["finishReason"], "STOP");
+}
+
+#[tokio::test]
+async fn gemini_json_client_stops_over_budget_chat_sse_before_terminal() {
+    let error = match run_json_client_with_chat_sse(1024, true).await {
+        Err(error) => error,
+        Ok(output) => match output.client_body {
+            V3GeminiRelayClientBody::Json(payload) => panic!("over-budget attempt returned status={} payload={payload} trace={:?}", output.status, output.node_trace),
+            _ => panic!("over-budget attempt returned a stream"),
+        },
+    };
+    assert!(error.contains("V3ExecutionAttemptPayloadStore"), "unexpected failure: {error}");
 }
 
 async fn collect_sse_failure(

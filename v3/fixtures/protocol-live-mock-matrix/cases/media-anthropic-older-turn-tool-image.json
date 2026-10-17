@@ -25,10 +25,10 @@
     "body_must": {
       "messages": [
         {"role": "user", "content": "take a screenshot"},
-        {"role": "assistant", "content": "", "tool_calls": [{"id": "toolu_1", "type": "function", "function": {"name": "screenshot", "arguments": "{}"}}]},
-        {"role": "tool", "tool_call_id": "toolu_1", "content": ""},
+        {"role": "assistant", "tool_calls": [{"id": "toolu_1", "type": "function", "function": {"name": "screenshot", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "toolu_1", "content": []},
         {"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="}}]},
-        {"role": "assistant", "content": "It shows a login page."},
+        {"role": "assistant", "content": [{"type": "text", "text": "It shows a login page."}]},
         {"role": "user", "content": "what colour was the button?"}
       ]
     },
@@ -54,7 +54,7 @@
     "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
     "files": ["internal/gateway/tool_images_test.go"],
     "tests": ["internal/gateway/tool_images_test.go::TestOlderTurnToolResultImageKept"],
-    "adaptation": "The fixed older-turn image bytes are replayed; the expected followup keeps the image in the same position rather than summarizing it."
+    "adaptation": "The fixed older-turn image bytes are replayed; the expected followup keeps the image in the same position rather than summarizing it. The intervening assistant text stays in its legal OpenAI Chat text-part array shape."
   },
   "contract_differences": [
     {"source_behavior": "Magpie moves some tool images into the next user message with a label.", "rcc_requirement": "Preserve the representable image and paired tool result without dropping or rewriting semantics."}

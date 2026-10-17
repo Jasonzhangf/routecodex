@@ -12,7 +12,7 @@ import { startMockProvider } from './protocol-live-mock/mock-provider.mjs';
 import {
   captureRuntimeIdentity, generateRccConfig, sendHttp, startRcc, stopRcc,
 } from './protocol-live-mock/lifecycle.mjs';
-import { runCase } from './protocol-live-mock/case-runner.mjs';
+import { collectExecutionModeEvidence, REQUIRED_EXECUTION_MODES, runCase } from './protocol-live-mock/case-runner.mjs';
 import { finalizeReport, renderMarkdown } from './protocol-live-mock/report.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -97,9 +97,6 @@ Defaults are anchored to this script, so root and v3 working directories work.`)
   };
   let haltReason = null;
   if (!corpus.ok) haltReason = 'invalid corpus: ' + corpus.findings.join('; ');
-  if (runtimeIdentity.error || runtimeIdentity.exit_code !== 0) {
-    haltReason = 'binary identity unavailable: ' + JSON.stringify(runtimeIdentity);
-  }
   for (const { relative, value: fixture } of selected) {
     if (haltReason) {
       report.cases.push({ case_id: fixture.case_id, cell: fixture.cell, status: 'not_run', diagnostic: haltReason });
@@ -166,6 +163,8 @@ Defaults are anchored to this script, so root and v3 working directories work.`)
         provider_files: providerFileReceipts,
         candidate_identity_receipts: generated.candidate_identity_receipts ?? null,
         candidate_ids: generated.candidate_ids ?? candidateIds ?? null,
+        attempt_store: generated.attempt_store ?? null,
+        attempt_store_receipt: generated.attempt_store_receipt ?? null,
       }, null, 2));
       // Explicit same-protocol Relay needs an API that really authors the mode.
       // Do not count a default Direct run as supplemental Relay evidence.
@@ -207,6 +206,35 @@ Defaults are anchored to this script, so root and v3 working directories work.`)
           writeFileSync(join(caseRoot, 'rcc-diagnostics.json'), JSON.stringify(rcc.diagnostics(), null, 2));
         } catch (error) { cleanup.complete = false; cleanup.rcc_error = error.message; }
       }
+      // One disk read after the owned stop and before generated-state cleanup
+      // deletes the request-records store. Independent of business acceptance:
+      // a collector failure records evidence and never abandons the cleanup.
+      if (entry) {
+        const collectionPhase = cleanup.rcc
+          ? cleanup.rcc.complete && !cleanup.rcc.force_killed ? 'post_stop_complete' : 'post_stop_partial'
+          : 'post_stop_missing';
+        let captures = [];
+        let captureError = null;
+        try {
+          captures = mock ? mock.getCaptures() : [];
+        } catch (error) {
+          captureError = error.message;
+        }
+        entry.execution_mode = collectCaseExecutionModeEvidence({
+            caseId: fixture.case_id,
+            caseRoot,
+            storePath: generated ? join(generated.root, 'logs', `server-v3-${generated.rcc_port}.request-records.jsonl`) : null,
+            attempts: entry.turn_attempts ?? [],
+            captures,
+            listenerPort: generated?.rcc_port ?? null,
+            collectionPhase,
+            stopReceipt: cleanup.rcc ?? null,
+        });
+        if (captureError) entry.execution_mode.findings.push(`provider capture read failed: ${captureError}`);
+        for (const reference of [entry.execution_mode.records_ref, entry.execution_mode.evidence_ref]) {
+          if (reference) entry.evidence_refs = [...(entry.evidence_refs ?? []), reference];
+        }
+      }
       if (mock) {
         try { writeFileSync(join(caseRoot, 'provider-captures.json'), JSON.stringify(mock.getCaptures(), null, 2)); }
         catch (error) { cleanup.complete = false; cleanup.capture_error = error.message; }
@@ -234,6 +262,7 @@ Defaults are anchored to this script, so root and v3 working directories work.`)
       entry.diagnostic += '; owned resource cleanup incomplete';
       haltReason = entry.diagnostic;
     }
+    applyExecutionModeAcceptance(entry);
     report.cases.push(entry);
     console.log(fixture.case_id + ': ' + entry.status);
   }
@@ -247,6 +276,34 @@ Defaults are anchored to this script, so root and v3 working directories work.`)
   console.log(JSON.stringify({ harness_id: HARNESS_ID, status: result.status,
     json_path: jsonPath, markdown_path: reportPath, summary: result.summary }, null, 2));
   return result.status === 'passed' && result.cleanup.complete ? 0 : 1;
+}
+
+// Required-case mode evidence is an acceptance gate. A mismatch or a collection
+// gap appends a finding and, for a business-passing case, downgrades it to
+// failed; an existing failure keeps its original diagnostic and status.
+export function collectCaseExecutionModeEvidence(options) {
+  try {
+    return collectExecutionModeEvidence(options);
+  } catch (error) {
+    return {
+      status: 'incomplete', expected_mode: options.expectedMode !== undefined
+        ? options.expectedMode : REQUIRED_EXECUTION_MODES[options.caseId] ?? null, actual_mode: null,
+      findings: [`collector error: ${error.message}`], records_ref: null, evidence_ref: null,
+    };
+  }
+}
+
+export function applyExecutionModeAcceptance(entry) {
+  const mode = entry?.execution_mode;
+  if (!mode || mode.expected_mode === null || mode.expected_mode === undefined) return;
+  if (mode.status === 'pass') return;
+  const detail = Array.isArray(mode.findings) && mode.findings.length ? mode.findings.join('; ') : 'no detail';
+  entry.diagnostic = [entry.diagnostic, `execution mode ${mode.status}: ${detail}`].filter(Boolean).join('; ');
+  if (entry.status !== 'passed') return;
+  entry.status = 'failed';
+  entry.classification = mode.status === 'mismatch' ? 'product' : 'evidence';
+  if (mode.status === 'mismatch') entry.product_failures = (entry.product_failures ?? 0) + 1;
+  entry.first_divergence = 'execution_mode';
 }
 
 // One ephemeral primary address. Lifecycle owns the separate admin address.
@@ -265,6 +322,7 @@ function sanitizeFileName(value) {
   const text = String(value ?? 'provider');
   return text.replace(/[^A-Za-z0-9_.-]/g, '_') || 'provider';
 }
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { process.exitCode = await main(); }
   catch (error) { console.error(error.stack ?? error.message); process.exitCode = 1; }

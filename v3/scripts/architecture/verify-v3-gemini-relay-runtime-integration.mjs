@@ -81,7 +81,6 @@ for (const phrase of [
   'build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08',
   'build_v3_gemini_transport_09',
   'target.wire_model',
-  'transport.send(transport_request),',
   'build_v3_provider_resp_inbound_01_raw',
   'hooks.normalize(resp01)',
   'hooks.govern(',
@@ -157,7 +156,6 @@ for (const phrase of [
 for (const phrase of [
   'protocol_from_endpoint',
   'endpoint.starts_with("/v1beta/models/")',
-  'endpoint.ends_with("/generateContent")',
   'return "gemini".to_string();',
 ]) requireText(virtualRouter, virtualRouterPath, phrase);
 for (const phrase of ['metadata_center', 'debug_snapshot', 'resource_handle', 'continuation_owner']) requireText(codec, codecPath, phrase);

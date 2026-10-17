@@ -63,9 +63,15 @@ mod direct_sse_consumers;
 use direct_execution_control::resolve_v3_direct_request_execution_control;
 use direct_runtime_timing::finish_v3_direct_runtime_timing;
 pub(crate) use direct_sse_consumers::V3DirectSseTypedHookCatalog;
+mod v3_direct_gemini_codec;
 mod v3_direct_protocol_codec;
+pub use v3_direct_gemini_codec::V3GeminiDirectCodec;
 pub use v3_direct_protocol_codec::{
     V3ChatDirectCodec, V3DirectProtocolCodec, V3ResponsesDirectCodec,
+};
+mod v3_direct_anthropic_codec;
+pub use v3_direct_anthropic_codec::{
+    V3AnthropicDirect11Policy, V3AnthropicDirectCodec, V3Req04StandardizedAnthropic,
 };
 #[path = "kernel/default_transport.rs"]
 mod default_transport;

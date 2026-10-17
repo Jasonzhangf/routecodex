@@ -18,10 +18,17 @@
     "method": "POST",
     "auth_required": true,
     "body_must": {
+      "messages.0.tool_calls.0.id": "c1",
+      "messages.0.tool_calls.0.function.name": "read",
+      "messages.0.tool_calls.0.function.arguments": "{}",
       "messages.1.role": "tool",
       "messages.1.tool_call_id": "c1",
+      "messages.1.content": "{\"output\":\"read it\"}",
       "messages.2.role": "user",
-      "messages.2.content.0.image_url.url": "data:image/png;base64,UERG"
+      "messages.2.content": [
+        {"type": "file", "file": {"file_data": "data:application/pdf;base64,UERG"}},
+        {"type": "image_url", "image_url": {"url": "https://x/y.png"}}
+      ]
     },
     "body_must_not": ["routecodex_internal", "metadata_center", "debug_snapshot"],
     "exact": null

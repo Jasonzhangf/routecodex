@@ -302,6 +302,8 @@ export function actualToolFixture() {
   fixture.cell.provider_protocol = 'responses';
   fixture.client_request.headers = { ...fixture.client_request.headers, authorization: TEST_PROVIDER_AUTH };
   fixture.client_request.body.model = 'chat-model';
+  // The module script observes live-ping, so the declared expectation matches it.
+  fixture.tool_followup.expected_output = ACTUAL_TOOL_TEXT;
   fixture.turns[0].client_request.headers = { ...fixture.turns[0].client_request.headers, authorization: TEST_PROVIDER_AUTH };
   fixture.turns[0].client_request.body.model = 'chat-model';
   fixture.turns[1].client_request.headers = { ...fixture.turns[1].client_request.headers, authorization: TEST_PROVIDER_AUTH };

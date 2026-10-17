@@ -130,6 +130,56 @@ fn native_v3_root_loads_referenced_provider_files() {
     fs::remove_dir_all(root).unwrap();
 }
 
+#[test]
+fn provider_directory_responses_omitted_block_preserves_absence() {
+    // A Responses provider that omits the whole Responses subconfiguration must
+    // take the same-protocol Direct default instead of the force-Relay "chat"
+    // policy. Explicit declarations stay untouched (see the neighbors below).
+    let root = temp_root("responses-omitted-block");
+    let token = write_token(&root, "external");
+    write_provider(&root, "external", "responses", "gpt-test", &token, "");
+    let config_path = root.join("config.v3.toml");
+    fs::write(&config_path, directory_root_config("external", "gpt-test")).unwrap();
+
+    let manifest = V3ConfigStore::new(&config_path)
+        .load_snapshot()
+        .expect("omitted Responses block must compile");
+    assert!(manifest.providers["external"].interfaces["default"].responses.is_none(),
+        "an omitted Responses block must not invent a process policy");
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn provider_directory_responses_explicit_process_is_preserved() {
+    let root = temp_root("responses-explicit-process");
+    let token = write_token(&root, "external");
+    write_provider(
+        &root,
+        "external",
+        "responses",
+        "gpt-test",
+        &token,
+        "\n[provider.responses]\nprocess = \"chat\"\nstreaming = \"always\"\n",
+    );
+    let config_path = root.join("config.v3.toml");
+    fs::write(&config_path, directory_root_config("external", "gpt-test")).unwrap();
+
+    let manifest = V3ConfigStore::new(&config_path)
+        .load_snapshot()
+        .expect("explicit Responses block must compile");
+    let responses = manifest.providers["external"].interfaces["default"]
+        .responses
+        .as_ref()
+        .expect("responses provider must materialize a Responses policy");
+    assert_eq!(
+        responses.process, "chat",
+        "an explicit process declaration must be preserved"
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
 fn write_multi_interface_provider(root: &Path, provider_id: &str, token_file: &Path) -> PathBuf {
     let path = root
         .join("provider")
