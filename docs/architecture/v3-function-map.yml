@@ -646,6 +646,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_configured.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/frame_builders.rs
+  - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
   resource_bindings:
   - v3.request.protocol_fields
   - v3.debug.trace_context
@@ -693,8 +694,10 @@ features:
   - v3-de-22
   - v3-de-23
   - v3-de-24
+  - v3-de-25
   entry_symbols:
   - execute_v3_foundation_pending_runtime
+  - record_and_emit_v3_error_projection
   - execute_v3_responses_direct_dry_run_runtime
   - execute_v3_anthropic_relay_response_dry_run_runtime
   - V3DryRunNoNetworkTransport::send
