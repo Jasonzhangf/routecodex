@@ -35,7 +35,6 @@ static TEST_LOCK: Mutex<()> = Mutex::const_new(());
 #[path = "support/image_input_blackbox.rs"]
 mod image_input_blackbox;
 
-
 #[path = "multi_listener_server/issue127_disabled_health.rs"]
 mod issue127_disabled_health;
 
