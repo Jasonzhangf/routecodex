@@ -534,14 +534,6 @@
     },
     {
       "from": "routecodex-v4-build-link",
-      "to": "v4.build.active_artifact_index",
-      "owner": "routecodex-v4-build-link",
-      "edge_type": "artifact_link",
-      "path": "build-control/active-index.json",
-      "status": "active"
-    },
-    {
-      "from": "routecodex-v4-build-link",
       "to": "v4.build.architecture_gates",
       "owner": "appsdk::build_domain",
       "edge_type": "verification_input",

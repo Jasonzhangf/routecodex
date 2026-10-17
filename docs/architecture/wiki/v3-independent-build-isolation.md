@@ -1,6 +1,6 @@
 # V3 Independent Build Isolation
 
-Status: active; canonical V3 build-domain gates pass locally. Global publication and live runtime evidence remain explicit release steps.
+Status: active build-isolation contract. Historical execution results belong to their run records; this page does not assert current build or live acceptance.
 
 ## Review Flow
 
@@ -16,9 +16,9 @@ flowchart LR
 
 | Node | Owner | Contract |
 | --- | --- | --- |
-| `V3BuildDomain00RootDispatcher` | root npm/CI/release | Thin `npm --prefix v3` dispatch only; the admission compiler mutation-locks retired root bin/lifecycle aliases and root build-info isolation. |
-| `V3BuildDomain01LocalContractsLoaded` | `v3/package.json` | Load V3-local Node, Cargo, toolchain, version, and tracked admission inputs. |
-| `V3BuildDomain02AdmissionVerified` | `v3/scripts/verify-isolation.mjs` | Fail on missing, stale, tampered, escaping, or root-fallback inputs. |
+| `V3BuildDomain00RootDispatcher` | root npm/CI/release | Dispatch V3 commands to their V3 owners. |
+| `V3BuildDomain01LocalContractsLoaded` | `v3/package.json` | Load V3-local Node, Cargo, toolchain, and version inputs. |
+| `V3BuildDomain02AdmissionVerified` | `v3/scripts/verify-isolation.mjs` | Check required local inputs, dependency ownership, and dependency/output path isolation. The historical node name does not require an admission snapshot. |
 | `V3BuildDomain03LocalArtifactsProduced` | `v3/scripts/**` | Write compilation, test, assembly, and package staging only under declared V3 roots. |
 | `V3BuildDomain04ReleaseSurfaceReady` | V3 install/pack owners | Emit V3-local packages or atomically publish the verified binary. |
 
@@ -26,7 +26,7 @@ flowchart LR
 
 - Source contracts: `v3.build.node_dependency_lock`,
   `v3.build.cargo_dependency_lock`, `v3.build.rust_toolchain_contract`,
-  `v3.build.architecture_admission`, and `v3.build.version_truth`.
+  and `v3.build.version_truth`.
 - Mutable local outputs: `v3.build.ordinary_cargo_target`,
   `v3.build.install_target`, `v3.build.pack_staging`,
   `v3.build.test_artifact_store`, and `v3.build.dependency_cache`.
@@ -40,32 +40,21 @@ flowchart LR
 
 - `provider-compat-core` and `servertool-core` move byte-first
   into `v3/crates/`; path edits follow the move.
-- The old shared owners are removed only after zero-consumer, metadata/tree, focused
-  test, workspace test, and behavioral equivalence evidence.
+- Shared crate ownership stays in V3. Verify affected consumers and path isolation when that ownership changes.
 - V4 and root runtime semantics are forbidden scope.
-- Root authoring maps may remain canonical, but ordinary V3 builds consume only
-  deterministic tracked V3-local admission manifests.
+- Root authoring maps remain canonical. Architecture tools read those maps directly; ordinary builds do not create an admission mirror.
 
 ## Failure Paths
 
 - Missing local input: fail before build.
 - Escaping dependency or output path: fail before write.
-- Stale/tampered admission: fail before build.
 - Active concurrent V3 builder during over-budget eviction: fail without racing.
 - Failed install/pack: release run-owned staging; do not publish partial output.
 - Any runtime semantic delta: fail migration and return to the owning runtime feature.
 
-## Review Checklist
+## Verification Boundaries
 
-- [x] Every build resource has a real owner/path/gate.
-- [x] Cargo metadata has zero path dependencies outside V3.
-- [x] Root package/CI/release are thin V3 dispatchers; obsolete root `bin` and start/dev aliases are retired, so root `dist/bin/rccv3` is not published or executed.
-- [x] Canonical build/test/verify write set stays under V3.
-- [x] Shared crate owners are physically retired with no duplicate fallback.
-- [x] Positive and red isolation/admission gates pass from V3.
-- [x] Runtime request/response/error topology and payload/control separation are unchanged.
-- [x] Global install, one aggregate restart, all health endpoints, and old samples pass.
-- [ ] Post-live review passes; DSH r4 is explicitly unavailable on quota, so Codex Review is the authorized fallback.
+Use the affected isolation consumer tests and actual build/install results. Keep runtime request/response/error behavior in its owning regression suite. A tooling result does not prove installation, restart, health, or live replay. Live lifecycle actions require explicit approval.
 
 ## Canonical Sources
 

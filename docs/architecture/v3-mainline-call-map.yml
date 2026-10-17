@@ -7899,7 +7899,7 @@ chains:
       status: anchored
       owner_feature_id: v3.build_test_artifact_budget
       resource_flow:
-        consumes: [v3.build.dependency_cache, v3.build.node_dependency_lock, v3.build.cargo_dependency_lock, v3.build.rust_toolchain_contract, v3.build.version_truth, v3.build.architecture_admission]
+        consumes: [v3.build.dependency_cache, v3.build.node_dependency_lock, v3.build.cargo_dependency_lock, v3.build.rust_toolchain_contract, v3.build.version_truth]
         produces: [v3.build.test_artifact_store, v3.build.ordinary_cargo_target]
         side_channel_reads: []
         side_channel_writes: []

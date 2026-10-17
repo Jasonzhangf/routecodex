@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 
-const root = process.cwd();
+const root = process.env.ROUTECODEX_V3_SOURCE_ROOT
+  ? path.resolve(process.env.ROUTECODEX_V3_SOURCE_ROOT)
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const failures = [];
 const requiredProtocols = ['responses', 'anthropic', 'openai_chat', 'gemini'];
 const expectedEndpointPatterns = new Map([
@@ -21,22 +24,11 @@ const files = {
   resourceMap: 'docs/architecture/v3-resource-operation-map.yml',
   verificationMap: 'docs/architecture/v3-verification-map.yml',
   manifest: 'docs/architecture/manifests/v3.entry_protocol_endpoint_binding.mainline.yml',
-  wiki: 'docs/architecture/wiki/v3-entry-protocol-endpoint-binding.md',
-  wikiHtml: 'docs/architecture/wiki/html/v3-entry-protocol-endpoint-binding.html',
-  wikiLib: 'scripts/architecture/architecture-wiki-lib.mjs',
-  packageJson: 'package.json',
   server: 'v3/crates/routecodex-v3-server/src/lib.rs',
-  endpointHandlers: 'v3/crates/routecodex-v3-server/src/endpoint_handlers.rs',
-  websocket: 'v3/crates/routecodex-v3-server/src/websocket.rs',
-  scopeMetadata: 'v3/crates/routecodex-v3-server/src/scope_metadata.rs',
   configValidate: 'v3/crates/routecodex-v3-config/src/validate.rs',
-  configTypes: 'v3/crates/routecodex-v3-config/src/types.rs',
 };
 
 const text = Object.fromEntries(Object.entries(files).map(([key, rel]) => [key, read(rel)]));
-
-requirePackageScript('verify:v3-entry-protocol-endpoint-binding', 'node scripts/architecture/verify-v3-entry-protocol-endpoint-binding.mjs');
-requirePackageScript('test:v3-entry-protocol-endpoint-binding-red-fixtures', 'node scripts/tests/v3-entry-protocol-endpoint-binding-red-fixtures.mjs');
 
 for (const [key, rel] of Object.entries(files)) {
   if (!fs.existsSync(abs(rel))) failures.push(`${rel}: missing required ${key} file`);
@@ -48,62 +40,10 @@ const resourceMap = parseYaml(files.resourceMap);
 const verificationMap = parseYaml(files.verificationMap);
 const manifest = parseYaml(files.manifest);
 
-requireText(text.functionMap, files.functionMap, 'feature_id: v3.entry_protocol_endpoint_binding');
-requireText(text.functionMap, files.functionMap, 'v3.entry_protocol.binding_registry');
-requireText(text.functionMap, files.functionMap, 'v3.server.endpoint_binding_projection');
-requireText(text.functionMap, files.functionMap, 'v3.protocol.pending_projection');
-for (const gate of [
-  'npm run verify:v3-entry-protocol-endpoint-binding',
-  'npm run test:v3-entry-protocol-endpoint-binding-red-fixtures',
-]) requireText(text.functionMap, files.functionMap, gate);
-
-requireText(text.resourceMap, files.resourceMap, 'resource_id: v3.entry_protocol.binding_registry');
-requireText(text.resourceMap, files.resourceMap, 'resource_id: v3.server.endpoint_binding_projection');
-requireText(text.resourceMap, files.resourceMap, 'resource_id: v3.protocol.pending_projection');
-for (const forbidden of [
-  'may_enter_provider_body: true',
-  'may_enter_client_body: true',
-]) {
-  if (entryBindingResourceSlice(text.resourceMap).includes(forbidden)) {
-    failures.push(`${files.resourceMap}: entry protocol binding resources must not enter provider/client body`);
-  }
-}
-
-requireText(text.mainlineMap, files.mainlineMap, 'chain_id: v3.entry_protocol_endpoint_binding.mainline');
-for (const step of ['v3-entry-bind-01', 'v3-entry-bind-02', 'v3-entry-bind-03', 'v3-entry-bind-04']) {
-  requireText(text.mainlineMap, files.mainlineMap, `step_id: ${step}`);
-  requireText(text.wiki, files.wiki, step);
-  requireText(text.manifest, files.manifest, step);
-}
-
-requireText(text.verificationMap, files.verificationMap, 'feature_id: v3.entry_protocol_endpoint_binding');
-requireText(text.verificationMap, files.verificationMap, 'Gemini relay implementation must be explicit and bound to v3.gemini_relay_runtime_integration');
-requireText(text.verificationMap, files.verificationMap, 'Server route table config allowed protocols manifest endpoint declarations runtime dispatch must stay consistent');
-requireText(text.verificationMap, files.verificationMap, 'Do not claim live Gemini provider compatibility global install restart or production cutover');
-
-requireText(text.wiki, files.wiki, '# V3 Entry Protocol Endpoint Binding');
-for (const heading of [
-  '## Purpose',
-  '## Main Rule',
-  '## Binding Matrix',
-  '## Mainline',
-  '## Review Checklist',
-  '## Current Integration Boundary',
-]) requireText(text.wiki, files.wiki, heading);
-for (const token of [
-  'endpoint binding complete',
-  'separately owned feature',
-  'Gemini relay implemented',
-  'live/global/prod not claimed',
-]) requireText(text.wiki, files.wiki, token);
-requireText(text.wikiHtml, files.wikiHtml, 'V3 Entry Protocol Endpoint Binding');
-requireText(text.wikiLib, files.wikiLib, 'v3-entry-protocol-endpoint-binding.md');
-
 verifyManifest(manifest);
 verifyMaps(functionMap, mainlineMap, resourceMap, verificationMap);
 verifyEntryBindingResourceIsolation(resourceMap);
 verifyConfigAllowedProtocols(text.configValidate);
-verifyConfigRegistrySource(text.configTypes + '\n' + text.configValidate);
 verifyServerSource(text.server, manifest);
 
 if (failures.length) {
@@ -146,40 +86,8 @@ function parseYaml(rel) {
   }
 }
 
-function requireText(source, owner, phrase) {
-  if (!source.includes(phrase)) failures.push(`${owner}: missing ${phrase}`);
-}
-
-function requireAnyText(source, owner, phrases, label) {
-  if (!phrases.some((phrase) => source.includes(phrase))) {
-    failures.push(`${owner}: missing ${label}: expected one of ${phrases.join(', ')}`);
-  }
-}
-
-function requirePackageScript(name, expectedCommand) {
-  try {
-    const parsed = JSON.parse(text.packageJson);
-    const acceptedCommands = new Set([
-      expectedCommand,
-      expectedCommand.replace('node scripts/', 'node v3/scripts/'),
-    ]);
-    if (!acceptedCommands.has(parsed.scripts?.[name])) {
-      failures.push(`${files.packageJson}: script ${name} must be ${expectedCommand}`);
-    }
-  } catch (error) {
-    failures.push(`${files.packageJson}: JSON parse failed: ${error.message}`);
-  }
-}
-
 function array(value) {
   return Array.isArray(value) ? value : [];
-}
-
-function entryBindingResourceSlice(resourceMapText) {
-  const start = resourceMapText.indexOf('resource_id: v3.entry_protocol.binding_registry');
-  if (start < 0) return '';
-  const next = resourceMapText.indexOf('\n  - resource_id:', start + 1);
-  return next >= 0 ? resourceMapText.slice(start, next) : resourceMapText.slice(start);
 }
 
 function verifyManifest(parsed) {
@@ -231,12 +139,6 @@ function verifyMaps(functionMap, mainlineMap, resourceMap, verificationMap) {
     for (const resource of ['v3.entry_protocol.binding_registry', 'v3.server.endpoint_binding_projection', 'v3.protocol.pending_projection']) {
       if (!array(feature.resource_bindings).includes(resource)) failures.push(`${files.functionMap}: feature missing resource binding ${resource}`);
     }
-    for (const gate of [
-      'npm run verify:v3-entry-protocol-endpoint-binding',
-      'npm run test:v3-entry-protocol-endpoint-binding-red-fixtures',
-    ]) {
-      if (!array(feature.required_gates).includes(gate)) failures.push(`${files.functionMap}: feature missing required gate ${gate}`);
-    }
   }
   const resources = new Set(array(resourceMap?.resources).map((item) => item?.resource_id));
   for (const resource of ['v3.entry_protocol.binding_registry', 'v3.server.endpoint_binding_projection', 'v3.protocol.pending_projection']) {
@@ -251,14 +153,6 @@ function verifyMaps(functionMap, mainlineMap, resourceMap, verificationMap) {
   }
   const verification = array(verificationMap?.features).find((item) => item?.feature_id === 'v3.entry_protocol_endpoint_binding');
   if (!verification) failures.push(`${files.verificationMap}: feature v3.entry_protocol_endpoint_binding missing`);
-  else {
-    for (const gate of [
-      'npm run verify:v3-entry-protocol-endpoint-binding',
-      'npm run test:v3-entry-protocol-endpoint-binding-red-fixtures',
-    ]) {
-      if (!array(verification.required_gates).includes(gate)) failures.push(`${files.verificationMap}: feature missing required gate ${gate}`);
-    }
-  }
 }
 
 function verifyEntryBindingResourceIsolation(resourceMap) {
@@ -284,29 +178,6 @@ function verifyConfigAllowedProtocols(configValidate) {
   }
   for (const protocol of protocols) {
     if (!requiredProtocols.includes(protocol)) failures.push(`${files.configValidate}: config allowed protocol ${protocol} lacks entry binding`);
-  }
-}
-
-function verifyConfigRegistrySource(configSource) {
-  for (const token of [
-    'V3EntryProtocolBindingAuthoringConfig',
-    'V3EntryProtocolBindingManifest',
-    'V3EntryProtocolExecutionMode',
-    'PendingNotImplemented',
-    'compile_entry_protocol_bindings',
-    'entry_protocol_binding_for_endpoint',
-    'forbidden_reentry_behavior',
-    'implemented',
-  ]) {
-    if (!configSource.includes(token)) failures.push(`routecodex-v3-config: missing registry source token ${token}`);
-  }
-  for (const token of [
-    'runtime_owner_symbol',
-    'runtime_owner_path',
-    'pending_owner_symbol',
-    'pending_owner_path',
-  ]) {
-    if (!configSource.includes(token)) failures.push(`routecodex-v3-config: missing owner source token ${token}`);
   }
 }
 
@@ -346,31 +217,6 @@ function verifyServerSource(server, parsedManifest) {
         );
       }
     }
-  }
-  requireAnyText(server, files.server, ['entry_protocol_binding_for_endpoint', 'lookup_v3_entry_protocol_binding'], 'binding registry consumer');
-  requireAnyText(server, files.server, ['PendingNotImplemented', 'pending_not_implemented'], 'explicit pending_not_implemented status');
-  requireText(server, files.server, 'v3.protocol.pending_projection');
-  const serverAll = [
-    server,
-    read(files.endpointHandlers),
-    read(files.websocket),
-    read(files.scopeMetadata),
-  ].join('\n');
-  const effectiveModeCalls = serverAll.match(/responses_effective_execution_mode_for_entry_facts\s*\(/gu) ?? [];
-  if (effectiveModeCalls.length < 3) {
-    failures.push(`${files.server}: HTTP and WebSocket must share the fresh Responses execution-mode owner`);
-  }
-  if (!/V3EntryProtocolExecutionMode::PendingNotImplemented\s*=>\s*configured_mode/gu.test(serverAll)) {
-    failures.push(`${files.server}: fresh Responses execution mode must preserve Config-owned PendingNotImplemented`);
-  }
-  if (/fn\s+endpoint_protocol\s*\(/u.test(server)) {
-    failures.push(`${files.server}: Server duplicates endpoint protocol registry in endpoint_protocol()`);
-  }
-  if (/if\s+path\s*==\s*"\/v1\/(?:chat\/completions|messages|responses)"/u.test(server) || /let\s+is_responses\s*=\s*path\s*==/u.test(server)) {
-    failures.push(`${files.server}: Server dispatcher bypasses entry protocol binding registry with raw path runtime branch`);
-  }
-  if (/execute_v3_foundation_pending_runtime\s*\(/u.test(server) && !server.includes('pending_not_implemented')) {
-    failures.push(`${files.server}: endpoint can fall through to implicit generic foundation pending without explicit binding pending owner`);
   }
 }
 

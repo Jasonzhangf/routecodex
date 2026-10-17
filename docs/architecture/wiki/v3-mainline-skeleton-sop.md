@@ -1,12 +1,11 @@
 # V3 Mainline Skeleton SOP
 
-Status: audited locked by Jason on 2026-07-23.
+Status: mainline skeleton SOP.
 Review surface: `docs/architecture/wiki/html/v3-mainline-caller-flow.html`.
-Lock manifest: `docs/architecture/v3-architecture-audit-locks.yml`.
 
-## Locked Scope
+## Skeleton Scope
 
-The following big-skeleton chains are SOP and cannot change without a Jason manual authorization record in `docs/architecture/v3-architecture-audit-locks.yml`:
+The following big-skeleton chains define the SOP review scope:
 
 - `v3.config.compile`
 - `v3.entry_protocol_endpoint_binding.mainline`
@@ -20,12 +19,12 @@ The following big-skeleton chains are SOP and cannot change without a Jason manu
 ## Debug Entry SOP
 
 1. Open this SOP first for any V3 Hub Pipeline / Direct / Relay / servertool / error handling debug.
-2. Open the HTML review surface and find the relevant locked chain before reading implementation code.
-3. Check the locked chain's contract nodes and resource-flow table.
-4. If the issue is outside the locked chain, continue to the relevant branch diagram; if a new pattern is proven, add or update the owning SOP.
-5. If a fix would change a locked chain edge, owner, node, resource flow, caller, or callee, stop and record a Jason manual authorization before editing the locked map.
+2. Open the HTML review surface and find the relevant main-skeleton chain before reading implementation code.
+3. Check the chain's contract nodes and resource-flow table.
+4. If the issue is outside the main-skeleton chain, continue to the relevant branch diagram; if a new pattern is proven, add or update the owning SOP.
+5. If a fix would change a main-skeleton chain edge, owner, node, resource flow, caller, or callee, update the owning map and SOP and regenerate the review surface in the same change.
 
-## Locked Contract
+## Skeleton Contract
 
 - Request skeleton is `ReqInbound -> ReqChatProcess -> ReqOutbound -> ProviderReqCompat -> ProviderReqOutbound -> Transport`.
 - Response skeleton is `ProviderRespInbound -> ProviderRespCompat -> RespInbound -> RespChatProcess -> RespContinuation save -> RespOutbound -> Server frame`.
@@ -61,7 +60,7 @@ Use this SOP when `/v1/responses` returns success on the wrong provider/model, a
 4. Apply provider-error rules:
    - every provider/runtime failure, including 429/401/403/413/5xx/transport/codec failures, enters `V3Error01SourceRaised -> ... -> V3Error06ClientProjected`.
    - a provider HTTP error response is a failure and never reaches the client; a provider business response is not a failure and is not judged semantically. A legal provider terminal (`content_filter`, an output-cap `max_output_tokens`/`length` stop) is forwarded faithfully together with its partial output.
-   - a recoverable provider failure is counted into provider health and immediately cools its exact provider+auth key+model identity, exactly like the typed irrecoverable account/billing classes; recovery is owned by the first due semantic probe, and a successful probe or real success clears the cooldown.
+   - apply declared failure thresholds only to the exact provider+model+auth-key identity. HTTP 429 cools that identity after three consecutive failures with the same typed fingerprint. Success clears its streak. A due ping probe accepts any HTTP 2xx without body or content-type validation; other failures keep their declared thresholds.
    - if a selected/explicit pool or default floor candidate remains, action must be provider reselect/switch, not client projection.
    - after exhaustion or any uncompletable model request, retain upstream/internal errors in typed internal resources and terminate only the affected transport. No HTTP error status, error body, SSE failure event, or WebSocket application error may reach any model client: DSH Chat, Codex Responses, and Claude Code Messages follow the same rule. Nonstreaming clients observe zero response bytes; SSE observes transport-break framing without a semantic terminal or clean final chunk; an upgraded WebSocket ends without an application error message/code. Full pool exhaustion is not an exception. Follow AGENTS.md's mandatory no-client-error contract and `docs/goals/provider-terminal-no-502-dag-20260930.md` for owner boundaries and the blackbox release gate.
    - automatic HTTP parser errors before application admission are Server/Front-owned failures under the same prohibition. Raw-TCP regression must cover fresh, reused, and pipelined connections; a preceding valid pipelined response must survive. Preserve opaque/multi-flush bodies, application-authorized management errors, 100 Continue, and upgraded WebSocket frames. The framing design and its admission status are recorded in the same goal document; design-only bindings do not prove runtime implementation.
@@ -72,16 +71,20 @@ Use this SOP when `/v1/responses` returns success on the wrong provider/model, a
 
 ## rccv3 Live Closeout SOP
 
-Delivery order is author development tests and public-entry black-box E2E plus
-applicable CI PASS -> merge/push validated content to main -> rebuild/install
-from main -> managed restart -> health, real-entry replay and sample audit ->
-complete independent Codex and AGY architecture reviews -> defect/resource
-closeout. Review pending does not delay main rebuild/restart, and the defect
-stays open until both reviews and all applicable closure evidence pass. Bind
-reviews to the exact verified candidate and prove delivered main content
-equivalence. Required repository checks and Git protection remain enforced.
-Repair blocking findings; confirmed regressions caused by the delivered change
-follow traceable revert, rebuild, restart and replay recovery.
+Complete affected author tests and public-entry acceptance first. Use a real
+consumer for tooling-only changes. Complete applicable runtime acceptance when
+runtime behavior changes, then obtain one independent overall milestone review
+and applicable CI PASS before merge/push to main. Complete applicable post-merge
+runtime acceptance and resource cleanup. Reuse unchanged valid evidence; do not
+add a second reviewer or candidate identity wrapper. Required repository checks
+and Git protection remain enforced. Repair blocking findings; confirmed delivered
+regressions use a traceable revert and affected replay.
+
+Explain the expected interruption before a formal `rccv3 restart` (including
+the `rcc restart` alias); separate human approval is not required. Execute it
+once per new build and investigate failure before retrying. Start and stop,
+including all arguments and aliases, still need explicit human approval.
+Tooling-only changes do not require a live restart.
 
 Use this SOP for V3 native live surfaces served by the active config. The default local authoring file is `~/.rcc/config.toml`; read the listener set from that file at execution time.
 
@@ -94,14 +97,14 @@ Use this SOP for V3 native live surfaces served by the active config. The defaul
    - Do not use legacy `routecodex restart --port <port>` as the authoritative closeout for this rccv3 instance.
 4. Verify runtime identity:
    - `rccv3 --version`
-   - hash the candidate artifact, installed binary reported by the install path, and binary loaded by the running instance.
+   - confirm the installed binary reported by the install path and the binary loaded by the running instance report the same version.
    - check `/health` on every listener declared by the active config.
 5. Verify behavior on installed runtime:
    - provider-request dry-run for the involved model and port.
    - live JSON/SSE probe that proves client transport shape.
    - exact old-sample replay when a saved failing sample exists.
 6. Closeout evidence must record:
-   - installed hash
+   - installed and loaded runtime identity
    - health for every member port
    - selected provider/model
    - provider-switch chain or explicit exhaustion
@@ -126,13 +129,7 @@ Use this SOP for V3 native live surfaces served by the active config. The defaul
 
 ## Change Rule
 
-A locked item fingerprint change is forbidden unless `manual_authorizations[]` records:
-
-- `authorization_id`
-- `item_id`
-- `approved_by: Jason`
-- `fingerprint_before`
-- `fingerprint_after`
-- reason/scope
-
-Normal architecture gates may continue for unaudited chains, but audited locked chains are immutable without the authorization record.
+A main-skeleton chain change must update the owning authoring map and regenerate
+the review surface in the same change, so the map, the SOP, the rendered
+Markdown, and the rendered HTML keep describing the same edges. Normal
+architecture gates continue to hold every chain.

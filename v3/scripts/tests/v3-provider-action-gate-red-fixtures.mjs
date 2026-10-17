@@ -8,10 +8,9 @@ import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 
 const v3Root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const admissionRoot = resolve(v3Root, 'build-contracts', 'architecture-admission', 'repo');
 const verifier = resolve(v3Root, 'scripts/architecture/verify-v3-provider-action-gate.mjs');
 const copied = [
-  'package.json',
+  'v3/package.json',
   '.github/workflows/test.yml',
   'v3/crates/routecodex-v3-error/src/lib.rs',
   'v3/crates/routecodex-v3-error/tests/typed_error05_terminal_contract.rs',
@@ -594,10 +593,7 @@ const cases = [
 ];
 
 function sourcePath(rel) {
-  const projectRoot = resolve(v3Root, '..');
-  if (rel === 'package.json') return resolve(projectRoot, rel);
-  if (rel.startsWith('v3/')) return resolve(v3Root, rel.slice('v3/'.length));
-  return resolve(projectRoot, rel);
+  return resolve(v3Root, '..', rel);
 }
 
 function copyFixtureSurface(root) {
@@ -611,7 +607,11 @@ function copyFixtureSurface(root) {
 const failures = [];
 const baselineRoot = mkdtempSync(join(tmpdir(), 'v3-provider-action-gate-baseline-'));
 copyFixtureSurface(baselineRoot);
-const baseline = spawnSync(process.execPath, [verifier], { cwd: baselineRoot, encoding: 'utf8' });
+const baseline = spawnSync(process.execPath, [verifier], {
+  cwd: baselineRoot,
+  encoding: 'utf8',
+  env: { ...process.env, ROUTECODEX_V3_SOURCE_ROOT: baselineRoot },
+});
 rmSync(baselineRoot, { recursive: true, force: true });
 if (baseline.status !== 0) {
   const output = `${baseline.stdout || ''}\n${baseline.stderr || ''}`.trim();
@@ -633,7 +633,11 @@ for (const testCase of cases) {
       continue;
     }
     writeFileSync(target, mutated);
-    const result = spawnSync(process.execPath, [verifier], { cwd: root, encoding: 'utf8' });
+    const result = spawnSync(process.execPath, [verifier], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, ROUTECODEX_V3_SOURCE_ROOT: root },
+    });
     const output = `${result.stdout || ''}\n${result.stderr || ''}`;
     if (result.status === 0) failures.push(`${testCase.name}: verifier unexpectedly passed`);
     else if (!testCase.diagnostic.test(output)) failures.push(`${testCase.name}: wrong diagnostic: ${output.slice(-1200)}`);

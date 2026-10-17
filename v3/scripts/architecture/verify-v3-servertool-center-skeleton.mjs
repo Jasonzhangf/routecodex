@@ -19,14 +19,10 @@ import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 
 const v3Root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const admissionRoot = path.resolve(v3Root, 'build-contracts', 'architecture-admission', 'repo');
 const sourceRoot = process.env.ROUTECODEX_V3_SOURCE_ROOT;
-const admissionWorkspace = process.env.ROUTECODEX_V3_ADMISSION_WORKSPACE === '1';
 const root = sourceRoot
   ? path.resolve(sourceRoot)
-  : admissionWorkspace
-    ? path.dirname(v3Root)
-    : admissionRoot;
+  : path.dirname(v3Root);
 const rewriteRel = (rel) => {
   if (rel.startsWith('v3/')) return path.join(v3Root, rel.slice('v3/'.length));
   return path.join(root, rel);

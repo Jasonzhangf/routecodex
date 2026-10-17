@@ -3,7 +3,7 @@
 ## Issue DAG
 
 Use the project's canonical defect flow in `AGENTS.md` and issue contract in
-`.appsdk/skills/appsdk-project-governance/SKILL.md`. This reference supplies the
+the installed `~/.agents/skills/appsdk-project-governance/SKILL.md`. This reference supplies the
 per-issue DAG and the required post-restart Codex sample decision. Intake or
 deduplicate every execution-bound defect and carry its authoritative bug ID
 through its own worktree, evidence, review, merge, cleanup, and solution receipt.
@@ -33,23 +33,22 @@ bug intake / dedup
 -> clean issue worktree at playground/<issue-id> from latest origin/main
 -> reproduce + feature DAG/map + first divergence + unique owner + red regression test
 -> minimal owner-scoped fix
--> fetch/combine latest origin/main in the issue worktree -> freeze candidate tree identity
+-> fetch/combine latest origin/main in the issue worktree
 -> mapped tests/build + author E2E + candidate install/restart/replay when runtime-impacting
 -> health + real-entry replay + post-restart sample audit
--> effective independent overall architecture review on the validated candidate -> candidate commit + exact SHA
--> applicable PR CI PASS -> recheck origin/main -> merge validated candidate to clean main -> push + candidate/main equivalence + remote receipt
+-> effective independent overall architecture review on the tested changes -> candidate commit
+-> applicable PR CI PASS -> merge tested changes to clean main -> push + remote receipt
 -> post-merge verification: runtime path rebuild/install/restart -> health -> real-entry replay -> sample audit; otherwise scoped consumer check
 -> issue-owned resource cleanup + absence checks
 -> one issue disposition receipt
 ```
 
-The frozen candidate tree binds validation, runtime replay and review; its
-subsequent commit must have the same tree. A commit is not the delivery merge
-and does not authorize integration. Any source change or newer `origin/main` invalidates evidence whose
-bound inputs changed. Record the new candidate under the same authoritative
-bug ID and rerun affected gates and E2E before integration; bind the independent
-review to the final candidate/main content. Do not silently reuse stale PASS
-evidence. Review pending never means solved. Blocking findings require repair
+Use the task branch, necessary diff and actual test/runtime results to describe
+the tested changes. Do not freeze a candidate or add identity checks. A commit
+is not the delivery merge and does not authorize integration. Source or upstream
+changes require only affected validation; unchanged evidence remains usable.
+Keep the work under the same bug ID. Do not reuse results for changed behavior.
+Review pending never means solved. Blocking findings require repair
 and affected revalidation; a confirmed delivered regression follows the global
 traceable revert/rebuild/restart/replay recovery contract.
 
@@ -62,11 +61,13 @@ new DAG run from the persisted bug record; it is not a back-edge in the prior
 run. Keep an active or blocked issue's worktree. Do not emit a solved receipt or
 clean resources still needed for recovery on an incomplete run.
 
-Bind candidate and merged-main evidence separately: candidate SHA, fetched
-`origin/main` SHA, artifact hashes, restart time, loaded runtime identity, and
-sample window. Verify candidate/main content equivalence after merge. If the
-issue does not change the installed runtime artifact, record the unchanged
-binary identity and mark install/restart not applicable; do not restart solely
+Record actual tests, runtime entry, restart time when applicable and sample
+window. Use ordinary Git operation receipts when integration occurs. Before
+external release preparation, do not compute or compare SHA/checksums, create
+hash manifests or frozen snapshots, or add candidate identity, byte comparison,
+patch reconstruction or packaging gates. Release checks cover only actual
+publication needs. If the issue does not change the installed runtime artifact,
+mark install/restart not applicable; do not restart solely
 to claim that a test-only or documentation change was loaded. If a managed
 restart is otherwise required or performed, run the sample audit after it.
 

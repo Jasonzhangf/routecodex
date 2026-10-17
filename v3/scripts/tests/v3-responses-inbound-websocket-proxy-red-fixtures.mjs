@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const v3Root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const admissionRoot = resolve(v3Root, 'build-contracts', 'architecture-admission', 'repo');
+const repoRoot = resolve(v3Root, '..');
 const verifier = resolve(v3Root, 'scripts/architecture/verify-v3-responses-inbound-websocket-proxy.mjs');
 const copied = [
   'v3/crates/routecodex-v3-server/src/lib.rs',
@@ -126,9 +126,7 @@ for (const testCase of cases) {
     for (const path of copied) {
       const destination = resolve(root, path);
       mkdirSync(dirname(destination), { recursive: true });
-      const source = path.startsWith('v3/')
-        ? resolve(v3Root, path.slice(3))
-        : resolve(admissionRoot, path);
+      const source = resolve(repoRoot, path);
       cpSync(source, destination);
     }
     const target = resolve(root, testCase.file);

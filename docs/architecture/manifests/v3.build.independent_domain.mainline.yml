@@ -28,7 +28,6 @@ edges:
     from: V3BuildDomain00RootDispatcher
     to: V3BuildDomain01LocalContractsLoaded
     binding_status: anchored
-    guard: scripts/architecture/v3-root-thin-dispatch-contract.mjs
   - edge_id: v3-build-domain-01-global-install-wrapper
     from: V3BuildDomain00RootDispatcher
     to: V3BuildDomain04ReleaseSurfaceReady
@@ -58,7 +57,6 @@ resource_flow:
     - v3.build.node_dependency_lock
     - v3.build.cargo_dependency_lock
     - v3.build.rust_toolchain_contract
-    - v3.build.architecture_admission
     - v3.build.version_truth
   mutable_local_outputs:
     - v3.build.ordinary_cargo_target
@@ -73,6 +71,4 @@ resource_flow:
 verification_gates:
   - npm --prefix v3 run verify:isolation
   - npm --prefix v3 run test:isolation:red
-  - npm --prefix v3 run verify:admission
-  - npm --prefix v3 run test:admission:red
   - npm --prefix v3 run verify:ci

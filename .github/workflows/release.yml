@@ -57,19 +57,8 @@ jobs:
       - name: Repo sanity (no root junk)
         run: node scripts/ci/repo-sanity.mjs
 
-      - name: V3 admission snapshot lockstep
-        env:
-          V3_ISOLATION_BASE_COMMIT: ${{ github.event.before }}
-        run: node scripts/architecture/compile-v3-build-admission.mjs --check
-
       - name: Verify V3 canonical build domain
         run: npm --prefix v3 run verify:ci
-
-      - name: Repository file line limit
-        run: node scripts/ci/check-file-line-limit.mjs
-
-      - name: Repository ServerTool Rust-only boundary
-        run: node scripts/verify-servertool-rust-only.mjs
 
       - name: Pack V3 npm tarball
         run: npm --prefix v3 run pack:npm

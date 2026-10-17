@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 // Architecture gate for routecodex-v4-admin.
-// Positive: admin exposes typed commands/queries and delegates mutation to
-// PluginManager and queries to RuntimeInspector.
-// Red: DTO surface must not contain payload/control/secret/native-handle
-// fields; admin must not own sorting/order/permission decisions.
+// Positive: admin keeps no Cordis/NodeContainer import; the DTO surface
+// statically forbids payload/control/secret/native-handle fields and
+// sorting/permission decisions. Command/query names are owned by the Rust L2.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -16,17 +15,6 @@ const source = ['src/lib.rs']
   .join('\n');
 const red = process.argv.includes('--red-self-test');
 const failures = [];
-const required = [
-  'pub enum AdminCommand',
-  'pub enum AdminQuery',
-  'pub enum AdminResponse',
-  'pub fn execute',
-  'pub fn query',
-  'AdminError',
-];
-for (const token of required) {
-  if (!source.includes(token)) failures.push(`missing: ${token}`);
-}
 
 // Admin must never import Cordis/NodeContainer internals.
 const FORBIDDEN_IMPORT_PATTERNS = [

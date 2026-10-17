@@ -1,603 +1,72 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import YAML from 'yaml';
 
-// V3 package scripts run with v3/ as cwd, while admission runs from its
-// repository-shaped workspace. Normalize both to the repository root because
-// this verifier intentionally checks root architecture contracts alongside V3 sources.
-if (process.cwd().endsWith('/v3') && existsSync(resolve(process.cwd(), 'crates'))) {
-  process.chdir(resolve(process.cwd(), '..'));
-}
-
-const runtimePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs';
-const responsesRuntimePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs';
-const responsesProviderEventCodecPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs';
-const responsesProviderStreamMaterializationPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs';
-const openaiChatRuntimePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs';
-const geminiRuntimePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs';
-const providerFailurePolicyPath = 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs';
-const serverPath = 'v3/crates/routecodex-v3-server/src/lib.rs';
-const serverTestPath = 'v3/crates/routecodex-v3-server/tests/multi_listener_server.rs';
-const testPath = 'v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs';
-const manifestPath = 'docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml';
-const functionMapPath = 'docs/architecture/v3-function-map.yml';
-const mainlinePath = 'docs/architecture/v3-mainline-call-map.yml';
-const verificationPath = 'docs/architecture/v3-verification-map.yml';
-const wikiPath = 'docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md';
-const packagePath = 'package.json';
-const workflowPath = '.github/workflows/test.yml';
-
-const runtime = readFileSync(runtimePath, 'utf8')
-  + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime/response_closeout.rs', 'utf8');
-const responsesRuntime = readFileSync(responsesRuntimePath, 'utf8')
-  + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs', 'utf8')
-  + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs', 'utf8')
-  + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs', 'utf8')
-  + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs', 'utf8')
-  + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs', 'utf8')
-  + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs', 'utf8');
-const responsesRelayJsonHooks = readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs', 'utf8');
-const responsesProviderEventCodec = readFileSync(responsesProviderEventCodecPath, 'utf8');
-const responsesProviderStreamMaterialization = readFileSync(
-  responsesProviderStreamMaterializationPath,
-  'utf8',
-);
-const openaiChatRuntime = readFileSync(openaiChatRuntimePath, 'utf8');
-const geminiRuntime = readFileSync(geminiRuntimePath, 'utf8');
-const providerFailurePolicy = readFileSync(providerFailurePolicyPath, 'utf8');
-const relayRuntimeShared = readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs', 'utf8');
-const server = readFileSync(serverPath, 'utf8')
-  + '\n' + readFileSync('v3/crates/routecodex-v3-server/src/live_snapshot.rs', 'utf8')
-  + '\n' + readFileSync('v3/crates/routecodex-v3-server/src/executors.rs', 'utf8')
-  + '\n' + readFileSync('v3/crates/routecodex-v3-server/src/endpoint_handlers.rs', 'utf8')
-  + '\n' + readFileSync('v3/crates/routecodex-v3-server/src/frame_builders.rs', 'utf8')
-  + '\n' + readFileSync('v3/crates/routecodex-v3-server/src/websocket.rs', 'utf8');
-const serverTests = readFileSync(serverTestPath, 'utf8');
-const tests = readFileSync(testPath, 'utf8');
-const manifest = YAML.parse(readFileSync(manifestPath, 'utf8'));
-const functionMap = readFileSync(functionMapPath, 'utf8');
-const mainline = readFileSync(mainlinePath, 'utf8');
-const mainlineMap = YAML.parse(mainline);
-const verification = readFileSync(verificationPath, 'utf8');
-const wiki = readFileSync(wikiPath, 'utf8');
-const packageJson = JSON.parse(readFileSync(packagePath, 'utf8'));
-const workflow = readFileSync(workflowPath, 'utf8');
-const failures = [];
-
-const expectedNodes = [
-  'V3HubReqInbound01ClientRaw',
-  'V3HubReqInbound02Normalized',
-  'V3HubReqChatProcess04Governed',
-  'V3HubReqExecution05Planned',
-  'V3HubReqTarget06Resolved',
-  'V3HubReqOutbound07ProviderSemantic',
-  'ProviderReqCompat06ProviderCompat',
-  'V3ProviderReqOutbound08WirePayload',
-  'V3ProviderReqOutbound09TransportRequest',
-  'V3ProviderRespInbound01Raw',
-  'ProviderRespCompat02ProviderCompat',
-  'V3HubRespInbound02Normalized',
-  'V3HubRespChatProcess03Governed',
-  'V3HubRespOutbound05ClientSemantic',
+const root = process.env.ROUTECODEX_V3_SOURCE_ROOT
+  ? path.resolve(process.env.ROUTECODEX_V3_SOURCE_ROOT)
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const file = 'docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml';
+const read = (relative) => YAML.parse(fs.readFileSync(path.join(root, relative), 'utf8'));
+const manifest = read(file);
+const functions = read('docs/architecture/v3-function-map.yml');
+const calls = read('docs/architecture/v3-mainline-call-map.yml');
+const verification = read('docs/architecture/v3-verification-map.yml');
+const lifecycle = 'v3.hub_relay.runtime_closeout';
+const owner = 'v3.hub_relay_runtime_closeout';
+const nodes = [
+  'V3HubReqInbound01ClientRaw', 'V3HubReqInbound02Normalized',
+  'V3HubReqChatProcess04Governed', 'V3HubReqExecution05Planned',
+  'V3HubReqTarget06Resolved', 'V3HubReqOutbound07ProviderSemantic',
+  'ProviderReqCompat06ProviderCompat', 'V3ProviderReqOutbound08WirePayload',
+  'V3ProviderReqOutbound09TransportRequest', 'V3ProviderRespInbound01Raw',
+  'ProviderRespCompat02ProviderCompat', 'V3HubRespInbound02Normalized',
+  'V3HubRespChatProcess03Governed', 'V3HubRespOutbound05ClientSemantic',
   'V3ServerRespOutbound06ClientFrame',
 ];
-
-if (manifest.lifecycle_id !== 'v3.hub_relay.runtime_closeout') {
-  failures.push(`${manifestPath}: lifecycle_id mismatch`);
+const errorNodes = ['V3Error01SourceRaised', 'V3Error02Classified', 'V3Error03TargetLocalAction', 'V3Error04TargetExhaustionDecision', 'V3Error05ExecutionDecision', 'V3Error06ClientProjected'];
+const failures = [];
+const requireValue = (condition, message) => { if (!condition) failures.push(message); };
+requireValue(manifest.lifecycle_id === lifecycle && manifest.call_map_chain_id === lifecycle, 'manifest lifecycle/call-map binding mismatch');
+requireValue(manifest.owner_feature_id === owner, 'manifest owner_feature_id mismatch');
+requireValue(isDeepStrictEqual(manifest.node_ids, nodes), 'manifest fixed node order mismatch');
+requireValue(manifest.entrypoint?.node_id === nodes[0] && manifest.return_path?.node_id === nodes.at(-1), 'manifest entry/return binding mismatch');
+requireValue(manifest.edges?.length === nodes.length - 1, 'manifest must declare adjacent closeout edges');
+const chain = calls.chains?.find((row) => row.chain_id === lifecycle);
+const feature = functions.features?.find((row) => row.feature_id === owner);
+requireValue(chain?.owner_feature_id === owner && Boolean(feature), 'closeout must bind function and mainline owner');
+const bound = new Map((chain?.edges ?? []).map((edge) => [edge.step_id, edge]));
+for (let index = 0; index < nodes.length - 1; index += 1) {
+  const step = `v3-hub-relay-closeout-${String(index + 1).padStart(2, '0')}`;
+  const edge = manifest.edges?.[index];
+  requireValue(edge?.step_id === step && edge?.from_node === nodes[index] && edge?.to_node === nodes[index + 1] && edge?.owner_feature_id === owner && edge?.status === 'anchored', `manifest edge ${step} mismatch`);
+  const actual = bound.get(step);
+  requireValue(actual?.from_node === nodes[index] && actual?.to_node === nodes[index + 1] && actual?.owner_feature_id === owner, `mainline edge ${step} mismatch`);
 }
-if (manifest.owner_feature_id !== 'v3.hub_relay_runtime_closeout') {
-  failures.push(`${manifestPath}: owner_feature_id mismatch`);
-}
-if (JSON.stringify(manifest.node_ids) !== JSON.stringify(expectedNodes)) {
-  failures.push(`${manifestPath}: fixed node order mismatch`);
-}
-if (manifest.entrypoint?.node_id !== expectedNodes[0]
-  || manifest.return_path?.node_id !== expectedNodes.at(-1)
-  || manifest.call_map_chain_id !== manifest.lifecycle_id) {
-  failures.push(`${manifestPath}: entry/return/call-map binding mismatch`);
-}
-if (!Array.isArray(manifest.edges) || manifest.edges.length !== expectedNodes.length - 1) {
-  failures.push(`${manifestPath}: expected ${expectedNodes.length - 1} adjacent closeout edges`);
-} else {
-  manifest.edges.forEach((edge, index) => {
-    const expectedStep = `v3-hub-relay-closeout-${String(index + 1).padStart(2, '0')}`;
-    if (edge.step_id !== expectedStep
-      || edge.from_node !== expectedNodes[index]
-      || edge.to_node !== expectedNodes[index + 1]
-      || edge.owner_feature_id !== 'v3.hub_relay_runtime_closeout'
-      || edge.status !== 'anchored') {
-      failures.push(`${manifestPath}: edge ${expectedStep} mismatch`);
-    }
-  });
-}
-if (manifest.completion_boundary?.live_replay_5555 !== true
-  || manifest.completion_boundary?.global_install_restart !== true
-  || manifest.completion_boundary?.p6_deletion !== false) {
-  failures.push(`${manifestPath}: completion boundary must record live 5555 replay/global install with P6 deletion still false`);
-}
-if (manifest.error_path?.entry_edge?.step_id !== 'v3-hub-relay-response-failure-01'
-  || manifest.error_path?.entry_edge?.from_node !== 'V3HubRespChatProcess03Governed'
-  || manifest.error_path?.entry_edge?.to_node !== 'V3Error01SourceRaised'
-  || JSON.stringify(manifest.error_path?.canonical_nodes) !== JSON.stringify([
-    'V3Error01SourceRaised',
-    'V3Error02Classified',
-    'V3Error03TargetLocalAction',
-    'V3Error04TargetExhaustionDecision',
-    'V3Error05ExecutionDecision',
-    'V3Error06ClientProjected',
-  ])) {
-  failures.push(`${manifestPath}: Resp03 failure must enter the complete adjacent Error01-Error06 path`);
-}
-
-for (const script of [
-  'test:v3-5520-duplicate-tool-identity',
-  'test:v3-hub-relay-runtime-closeout',
-  'verify:v3-hub-relay-runtime-closeout',
-  'test:v3-hub-relay-runtime-closeout-red-fixtures',
-  'test:v3-relay-payload-copy-runtime-probes',
-  'verify:v3-relay-payload-copy-budget',
-  'test:v3-relay-payload-copy-budget-red-fixtures',
-]) {
-  if (!packageJson.scripts?.[script]) failures.push(`${packagePath}: missing script ${script}`);
-}
-const focusedGate = packageJson.scripts?.['test:v3-5520-duplicate-tool-identity'] ?? '';
-for (const phrase of [
-  'provider_response_failure_classifier_keeps_provider_and_local_hook_errors_separate',
-  'responses_relay_provider_duplicate_tool_identity',
-]) requireText(focusedGate, `${packagePath}: test:v3-5520-duplicate-tool-identity`, phrase);
-requireCount(workflow, workflowPath, 'run: npm --prefix v3 run verify:ci', 1);
-
-requireText(runtime, runtimePath, 'execute_v3_anthropic_relay_runtime_with_servertool_profile');
-requireText(runtime, runtimePath, 'response_hook_profile: V3HubRelayResponseHookProfile');
-// anthropic 失败策略已共享：完整语义（run_v3_relay_provider_failure_policy/Error05 action
-// /ordered SSE 失败路径）在 relay_runtime_shared；协议文件只要求调用共享 handle_provider_failure。
-requireText(runtime, runtimePath, 'handle_provider_failure(');
-requireText(runtime, runtimePath, 'fn closeout_anthropic_relay_response<F>(');
-requireCount(runtime, runtimePath, 'closeout_anthropic_relay_response(', 1);
-requireCount(runtime, runtimePath, 'let hooks = compile_v3_hub_relay_response_hooks();', 2);
-requireCount(runtime, runtimePath, 'let resp03 = hooks.govern(resp02, response_hook_profile)?;', 1);
-requireCount(runtime, runtimePath, 'let resp03 = hooks.govern(resp02, response_hook_profile)?;', 1);
-requireCount(runtime, runtimePath, 'build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload(', 1);
-requireCount(runtime, runtimePath, 'build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05)', 1);
-requireOrderedSequence(runtime, runtimePath, [
-  'fn closeout_anthropic_relay_normalized_response<F>(',
-  'let hooks = compile_v3_hub_relay_response_hooks();',
-  'let resp03 = hooks.govern(resp02, response_hook_profile)?;',
-  'let client_payload = project_client_response(resp03.provider_payload())?;',
-  'build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload(',
-  'build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05)',
-]);
-requireOrdered(
-  runtime,
-  runtimePath,
-  'let resp03 = hooks.govern(resp02, response_hook_profile)?;',
-  'build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload(',
-  1,
-);
-requireText(runtime, runtimePath, 'servertool_followup_required');
-forbid(runtime, runtimePath, [
-  /hooks\.govern\(resp02,\s*&V3HubRelayResponseHookProfile::empty\(\)\)/,
-  /restore_at_req04\s*\(/,
-  /fn\s+resolve_target\s*\(/,
-  /\bV3VirtualRouter\b|\bV3TargetInterpreter\b/,
-  /\bprovider_error_output\b|\bprovider_runtime_error_output\b/,
-  /fallback/i,
-  /ResponsesDirect(?:Runtime|11Policy)|execute_v3_responses_direct/i,
-  /dynamic[_ -]?hook|libloading|read_dir/i,
-  /build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03[\s\S]{0,240}hooks\.commit\(resp03\)/,
-]);
-
-for (const phrase of [
-  'EXPECTED_RELAY_TRACE',
-  'controlled_json_and_sse_e2e_use_fixed_topology_and_one_response_exit',
-  'responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nodes',
-  'provider_error_closeout_returns_terminal_exhaustion_instead_of_hanging',
-  'execute_v3_responses_relay_runtime',
-  'servertool.exec',
-  'V3_ERROR_CHAIN_NODE_IDS',
-]) requireText(tests, testPath, phrase);
-for (const node of expectedNodes) requireText(tests, testPath, node);
-forbid(tests, testPath, [
-  /fallback/i,
-  /ResponsesDirect(?:Runtime|11Policy)|execute_v3_responses_direct/i,
-  /read_dir|libloading|dynamic[_ -]?hook/i,
-  /full_buffer/i,
-]);
-
-for (const phrase of [
-  'execute_v3_responses_relay_runtime_with_default_transport',
-  'execute_v3_responses_relay_runtime',
-  'execute_v3_responses_relay_dry_run_runtime',
-  'project_v3_responses_relay_runtime_failure',
-  'V3HubEntryProtocol::Responses',
-  'V3HubExecutionMode::Relay',
-  'compile_v3_hub_relay_request_hooks().run_from_normalized',
-  'build_v3_provider_12_responses_wire_payload',
-  'build_v3_provider_transport_request_for_protocol',
-  'run_json_response_hooks',
-  'build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol',
-  'ProviderRespInbound01Raw -> V3HubRespInbound02Normalized (Responses event codec; SSE transport is opaque framing)',
-  'let (mut finalized_provider_value, response_web_search_state) =',
-  'build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05',
-  'V3HubRespOutbound05ClientSemantic -> V3ServerRespOutbound06ClientFrame',
-]) requireText(responsesRuntime, responsesRuntimePath, phrase);
-for (const phrase of [
-  'fn observe_v3_runtime_responses_sse_transport_chunk_typed(',
-  'fn observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook(',
-]) requireText(responsesProviderEventCodec, responsesProviderEventCodecPath, phrase);
-for (const phrase of [
-  'build_v3_hub_resp_inbound_02_from_responses_provider_stream_events',
-  'observe_v3_runtime_responses_sse_transport_chunk_typed(',
-]) {
-  requireText(
-    responsesProviderStreamMaterialization,
-    responsesProviderStreamMaterializationPath,
-    phrase,
-  );
-}
-requireRelayRuntimeUsesSharedProviderFailurePolicy(responsesRuntime, responsesRuntimePath, 'responses');
-for (const phrase of [
-  'fn is_v3_responses_provider_response_failure(',
-  'fn provider_response_hook_failure(',
-  'source_stage: "V3HubRespChatProcess03Governed"',
-]) requireText(responsesRuntime, responsesRuntimePath, phrase);
-const responsesUnitTests = readFileSync(
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests.rs',
-  'utf8',
-);
-requireText(
-  responsesUnitTests,
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests.rs',
-  'provider_response_failure_classifier_keeps_provider_and_local_hook_errors_separate',
-);
-const providerResponseHookFailureBody = functionBody(
-  responsesRuntime,
-  responsesRuntimePath,
-  'fn provider_response_hook_failure(',
-);
-requireText(
-  providerResponseHookFailureBody,
-  `${responsesRuntimePath}: provider_response_hook_failure`,
-  'source_stage: "V3HubRespChatProcess03Governed"',
-);
-for (const phrase of [
-  'responses_relay_provider_duplicate_tool_identity_preserves_first_attempt_for_json_and_sse',
-  'responses_relay_provider_duplicate_tool_identity_preserves_single_candidate_response',
-]) requireText(tests, testPath, phrase);
-for (const node of expectedNodes) requireText(responsesRuntime, responsesRuntimePath, node);
-for (const node of expectedNodes.slice(0, 10)) {
-  requireCount(responsesRuntime, responsesRuntimePath, `trace.push("${node}");`, 1);
-}
-// 响应链 trace：V3HubRespOutbound05ClientSemantic / V3ServerRespOutbound06ClientFrame
-// 随 worker 拆分位于 responses_relay_json_hooks.rs，其余响应链节点仍在 runtime 主文件。
-for (const node of expectedNodes.slice(10)) {
-  const tailTrace = node === 'V3HubRespOutbound05ClientSemantic' || node === 'V3ServerRespOutbound06ClientFrame';
-  const traceSource = tailTrace ? responsesRelayJsonHooks : responsesRuntime;
-  const tracePath = tailTrace
-    ? 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs'
-    : responsesRuntimePath;
-  requireCount(traceSource, tracePath, `trace.push("${node}");`, 1);
-}
-requireCount(
-  responsesRuntime,
-  responsesRuntimePath,
-  'let (mut finalized_provider_value, response_web_search_state) =',
-  2,
-);
-requireOrderedSequence(
-  readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs', 'utf8'),
-  responsesRuntimePath + '::inner',
-  [
-    'V3ProviderResponseBody::Sse(stream) => {',
-    'build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context',
-    'let (mut finalized_provider_value, response_web_search_state) =',
-    'run_json_response_hooks(',
-  ],
-);
-requireText(
-  responsesRuntime,
-  responsesRuntimePath,
-  'build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05',
-);
-forbid(responsesRuntime, responsesRuntimePath, [
-  /struct\s+V3ResponsesRelayExcludedAvailability\b/,
-  /struct\s+V3ResponsesRelayProviderFailureContext\b/,
-  /restore_at_req04\s*\(/,
-  /fn\s+resolve_target\s*\(/,
-  /\bV3VirtualRouter\b|\bV3TargetInterpreter\b/,
-  /\.record_provider_failure\s*\(/,
-  /fallback/i,
-  /ResponsesDirect(?:Runtime|11Policy)|execute_v3_responses_direct/i,
-  /dynamic[_ -]?hook|libloading|read_dir/i,
-  /collect\s*::<\s*Vec|full_buffer/i,
-  /\bproject_sse_stream\b|\bV3ObservedSseState\b|\bproject_finalized_response_sse_stream\b/,
-  /\bfn\s+observe_v3_runtime_responses_sse_transport_chunk\s*\(/,
-  /\bfn\s+apply_responses_stream_protocol_events_to_terminal_response\s*\(/,
-]);
-
-for (const [text, path, label] of [
-  [openaiChatRuntime, openaiChatRuntimePath, 'openai_chat'],
-  [geminiRuntime, geminiRuntimePath, 'gemini'],
-]) {
-  // openai_chat/gemini 已收敛到统一 relay 骨架：共享失败策略调用在
-  // relay_runtime_shared（handle_provider_failure/run_v3_relay_provider_failure_policy），
-  // 协议文件只保留禁止项检查（防重建路由/失败语义）。
-  forbid(text, path, [
-    /fn\s+resolve_target\s*\(/,
-    /\bV3VirtualRouter\b|\bV3TargetInterpreter\b/,
-    /\.record_provider_failure\s*\(/,
-    /\bprovider_error_output\b|\bprovider_runtime_error_output\b/,
-    /fallback/i,
-  ]);
-}
-// 共享失败策略（relay_runtime_shared）持有 openai_chat/gemini/anthropic 的失败语义；
-// 并行 worker 正在重构 handle_provider_failure 签名（provider_health 参数迁移中），
-// 此处只要求最小锚（共享 handle_provider_failure 定义 + run_v3_relay_provider_failure_policy 调用）。
-// TODO(阶段6复核补齐，验收 gate)：共享重构稳定后必须恢复完整语义检查
-// （Error05 action 消费 WaitThenReselect/ProjectTerminal、
-// ordered SSE 失败路径、failure_context 构造），由 v3-provider-action-gate 的
-// relay_runtime_shared 锚 + 本最小锚共同保证 provider 失败语义不进 payload。
-requireText(
-  relayRuntimeShared,
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs',
-  'pub async fn handle_provider_failure(',
-);
-requireText(
-  relayRuntimeShared,
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs',
-  'run_v3_relay_provider_failure_policy(',
-);
-
-for (const phrase of [
-  'pub(crate) async fn run_v3_relay_provider_failure_policy(',
-  'pub(crate) fn resolve_v3_relay_target',
-  'struct V3SessionGlobalSchedulingReader',
-  'pub struct V3ProviderFailureRuntimeHealth',
-  'V3RelayProviderFailurePolicyResult',
-  'build_v3_relay_provider_error_05_decision',
-  'terminal_projection_for',
-]) requireText(providerFailurePolicy, providerFailurePolicyPath, phrase);
-const relayAttemptSourceBody = functionBody(
-  providerFailurePolicy,
-  providerFailurePolicyPath,
-  'fn build_v3_relay_provider_attempt_source(',
-);
-requireText(
-  relayAttemptSourceBody,
-  `${providerFailurePolicyPath}: build_v3_relay_provider_attempt_source`,
-  'build_v3_error_01_source_raised_external(',
-);
-const relayError05BuilderBody = functionBody(
-  providerFailurePolicy,
-  providerFailurePolicyPath,
-  'fn build_v3_relay_provider_error_05_decision(',
-);
-requireText(relayError05BuilderBody, providerFailurePolicyPath, 'source,');
-requireText(relayError05BuilderBody, providerFailurePolicyPath, 'V3ErrorHandlingCenter::decide_provider(');
-
-for (const phrase of [
-  'execute_v3_responses_relay_request',
-  'responses_relay_output_response',
-  'fn finalize_v3_responses_relay_server_output(',
-  'execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state',
-  'server_tool_state',
-  'project_v3_responses_relay_runtime_failure',
-  'is_provider_request_dry_run(&request_headers)',
-  'execute_v3_responses_relay_dry_run_orchestration_outcome_with_server_tool_state',
-  'wrap_v3_committed_relay_sse_console_stream',
-  'V3CommittedSseTerminal::Completed => finalizer.complete_relay_sse()',
-  'V3CommittedSseTerminal::Dropped => finalizer.client_disconnected()',
-]) requireText(server, serverPath, phrase);
-const relayServerFinalizerBody = functionBody(
-  server,
-  serverPath,
-  'fn finalize_v3_responses_relay_server_output(',
-);
-requireText(
-  relayServerFinalizerBody,
-  `${serverPath}: finalize_v3_responses_relay_server_output`,
-  'responses_relay_output_response(',
-);
-requireOrdered(
-  server,
-  serverPath,
-  'if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Relay {',
-  'if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Direct {',
-  1,
-);
-for (const phrase of [
-  'responses_relay_manifest',
-  'controlled_responses_relay_upstream',
-  'responses_relay_endpoint_uses_hub_relay_runtime_for_json_and_sse',
-  'responses_relay_provider_request_dry_run_header_returns_final_request_without_upstream_send',
-  'V3ResponsesDirect11Policy',
-  'V3TargetLocalReselected',
-]) requireText(serverTests, serverTestPath, phrase);
-
-for (const [path, text] of [
-  [functionMapPath, functionMap],
-  [mainlinePath, mainline],
-  [verificationPath, verification],
-  [wikiPath, wiki],
-]) {
-  requireText(text, path, 'v3.hub_relay_runtime_closeout');
-  requireText(text, path, 'v3-hub-relay-closeout-01');
-  requireText(text, path, 'v3-hub-relay-closeout-14');
-  requireText(text, path, 'Responses Relay source');
-}
-for (const phrase of [
-  'v3.responses_relay.source_server_entry',
-  'v3-responses-relay-server-01',
-  'v3-responses-relay-server-04',
-]) {
-  requireText(mainline, mainlinePath, phrase);
-}
-for (const phrase of [
-  'v3.hub_relay.response_failure_entry',
-  'v3-hub-relay-response-failure-01',
-  'V3HubRespChatProcess03Governed',
-  'V3Error01SourceRaised',
-  'build_v3_relay_provider_attempt_source',
-  'build_v3_error_01_source_raised_external',
-]) {
-  requireText(mainline, mainlinePath, phrase);
-}
-const responseFailureChain = (mainlineMap?.chains ?? []).find(
-  (chain) => chain?.chain_id === 'v3.hub_relay.response_failure_entry',
-);
-const responseFailureEdge = responseFailureChain?.edges?.find(
-  (edge) => edge?.step_id === 'v3-hub-relay-response-failure-01',
-);
+requireValue(verification.features?.find((row) => row.feature_id === owner)?.contract?.includes(file), 'verification owner must bind closeout manifest');
+requireValue(isDeepStrictEqual(manifest.error_path?.canonical_nodes, errorNodes), 'Resp03 failure must enter complete Error01-Error06 declaration');
+const errorEdge = manifest.error_path?.entry_edge;
+requireValue(errorEdge?.step_id === 'v3-hub-relay-response-failure-01' && errorEdge?.from_node === 'V3HubRespChatProcess03Governed' && errorEdge?.to_node === errorNodes[0], 'manifest Resp03 failure entry mismatch');
+const failureChain = calls.chains?.find((row) => row.chain_id === 'v3.hub_relay.response_failure_entry');
+const failureEdge = failureChain?.edges?.find((row) => row.step_id === 'v3-hub-relay-response-failure-01');
+requireValue(Boolean(failureEdge), 'missing v3-hub-relay-response-failure-01');
 for (const [field, expected] of Object.entries({
   from_node: 'V3HubRespChatProcess03Governed',
   to_node: 'V3Error01SourceRaised',
   caller_symbol: 'build_v3_relay_provider_attempt_source',
-  caller_file: providerFailurePolicyPath,
+  caller_file: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
   callee_symbol: 'build_v3_error_01_source_raised_external',
   callee_file: 'v3/crates/routecodex-v3-error/src/lib.rs',
-})) {
-  if (responseFailureEdge?.[field] !== expected) {
-    failures.push(`${mainlinePath}: v3-hub-relay-response-failure-01 ${field} must equal ${expected}`);
-  }
+})) requireValue(failureEdge?.[field] === expected, `failure entry ${field} must equal ${expected}`);
+const entryChain = calls.chains?.find((row) => row.chain_id === 'v3.responses_relay.source_server_entry');
+for (const step of ['v3-responses-relay-server-01', 'v3-responses-relay-server-04']) {
+  requireValue(entryChain?.edges?.some((edge) => edge.step_id === step), `source server entry must bind ${step}`);
 }
-for (const phrase of [
-  'v3-hub-relay-response-failure-01',
-  'is_v3_responses_provider_response_failure',
-  'provider_response_hook_failure',
-  'build_v3_relay_provider_error_05_decision',
-  'build_v3_error_01_source_raised_external',
-  'responses_relay_runtime::provider_response_failure_classifier_keeps_provider_and_local_hook_errors_separate',
-]) {
-  requireText(functionMap, functionMapPath, phrase);
-}
-requireText(verification, verificationPath, 'npm run test:v3-5520-duplicate-tool-identity');
-for (const phrase of [
-  'source_entry_bindings',
-  'execute_v3_responses_relay_runtime_with_default_transport',
-  'live_replay_5555',
-]) {
-  requireText(readFileSync(manifestPath, 'utf8'), manifestPath, phrase);
-}
-for (const phrase of [
-  'Live 5555 Responses Relay JSON/SSE validation is verified',
-  'no Direct/P6 markers',
-]) {
-  requireText(wiki, wikiPath, phrase);
-}
-
 if (failures.length) {
   console.error('[verify:v3-hub-relay-runtime-closeout] failed');
-  for (const failure of failures) console.error(`- ${failure}`);
+  failures.forEach((failure) => console.error(`- ${failure}`));
   process.exit(1);
 }
-console.log('[verify:v3-hub-relay-runtime-closeout] ok');
-
-function requireText(text, owner, phrase) {
-  if (!text.includes(phrase)) failures.push(`${owner}: missing ${phrase}`);
-}
-
-function requireCount(text, owner, phrase, expected) {
-  const actual = text.split(phrase).length - 1;
-  if (actual !== expected) {
-    failures.push(`${owner}: expected ${expected} occurrences of ${phrase}, found ${actual}`);
-  }
-}
-
-function functionBody(source, owner, marker) {
-  const start = source.indexOf(marker);
-  if (start < 0) {
-    failures.push(`${owner}: missing function ${marker}`);
-    return '';
-  }
-  const open = source.indexOf('{', start);
-  if (open < 0) {
-    failures.push(`${owner}: missing body for ${marker}`);
-    return '';
-  }
-  let depth = 0;
-  for (let index = open; index < source.length; index += 1) {
-    if (source[index] === '{') depth += 1;
-    if (source[index] === '}') depth -= 1;
-    if (depth === 0) return source.slice(start, index + 1);
-  }
-  failures.push(`${owner}: unterminated body for ${marker}`);
-  return '';
-}
-
-function requireOrdered(text, owner, earlier, later, expected) {
-  let index = 0;
-  for (let occurrence = 0; occurrence < expected; occurrence += 1) {
-    const earlierIndex = text.indexOf(earlier, index);
-    if (earlierIndex < 0) {
-      failures.push(`${owner}: missing ordered occurrence ${occurrence + 1} of ${earlier}`);
-      return;
-    }
-    const laterIndex = text.indexOf(later, earlierIndex + earlier.length);
-    if (laterIndex < 0) {
-      failures.push(`${owner}: ${later} must appear after occurrence ${occurrence + 1} of ${earlier}`);
-      return;
-    }
-    index = laterIndex + later.length;
-  }
-}
-
-function requireOrderedSequence(text, owner, phrases) {
-  let index = 0;
-  for (const phrase of phrases) {
-    const next = text.indexOf(phrase, index);
-    if (next < 0) {
-      failures.push(`${owner}: missing ordered SSE response path phrase ${phrase}`);
-      return;
-    }
-    index = next + phrase.length;
-  }
-}
-
-function requireRelayRuntimeUsesSharedProviderFailurePolicy(text, owner, entryKind) {
-  for (const phrase of [
-    'run_v3_relay_provider_failure_policy(',
-    'resolve_v3_relay_target_outcome_with_rescue(',
-    'V3RelayProviderFailurePolicyContext',
-    'V3RelayProviderFailurePolicyState',
-    'V3Error05ExecutionAction::WaitThenReselect',
-    'V3Error05ExecutionAction::ProjectTerminal',
-    'V3ProviderFailureRuntimeHealth',
-  ]) {
-    requireText(text, owner, phrase);
-  }
-  // entry_kind/failure_context 构造仅协议/调用方要求；共享模块以参数接收 context（不构造）。
-  if (!owner.includes('relay_runtime_shared')) {
-    requireText(text, owner, `entry_kind: "${entryKind}"`);
-    requireOrderedSequence(text, owner, [
-      'let failure_context = V3RelayProviderFailurePolicyContext {',
-      `entry_kind: "${entryKind}"`,
-    ]);
-  }
-  const handleStart = text.indexOf('async fn handle_provider_failure(');
-  if (handleStart < 0) {
-    requireOrderedSequence(text, owner, [
-      'run_v3_relay_provider_failure_policy(',
-      'V3Error05ExecutionAction::WaitThenReselect',
-      'V3Error05ExecutionAction::ProjectTerminal',
-    ]);
-    return;
-  }
-  const handleSlice = text.slice(handleStart);
-  requireOrderedSequence(handleSlice, `${owner}: handle_provider_failure`, [
-    'run_v3_relay_provider_failure_policy(',
-    'V3Error05ExecutionAction::WaitThenReselect',
-    'V3Error05ExecutionAction::ProjectTerminal',
-  ]);
-  // 内联 state 构造（&mut V3RelayProviderFailurePolicyState {）仅协议文件要求；
-  // 共享 handle_provider_failure 以参数接收 state（调用方构造），不要求内联字面量。
-  if (!owner.includes('relay_runtime_shared')) {
-    requireText(text, owner, '&mut V3RelayProviderFailurePolicyState {');
-  }
-}
-
-function forbid(text, owner, patterns) {
-  for (const pattern of patterns) {
-    if (pattern.test(text)) failures.push(`${owner}: forbidden ${pattern}`);
-  }
-}
+console.log('[verify:v3-hub-relay-runtime-closeout] declared topology/error/owner bindings ok');

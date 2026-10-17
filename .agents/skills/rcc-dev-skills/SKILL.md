@@ -10,7 +10,7 @@ This skill owns V3 command and gate sequencing. Inherit general methods from `co
 ## Command-First Flow
 
 1. Read `AGENTS.md`.
-   For a module under DAGPipe governance, first read `docs/architecture/dagpipe/README.md` and its business graph. Correct and review the target graph against the proxy contract, then compare it with the maps, code and same-entry evidence. Run `npm run verify:v3-dagpipe-governance` for registered static graphs. An unregistered module remains pending; CLI validation does not prove SDK compile or runtime execution.
+   For a module under DAGPipe governance, first read `docs/architecture/dagpipe/README.md` and its business graph. Compare the affected path with the proxy contract, owner and same-entry evidence. Validate a changed graph once; reuse unchanged graph results. CLI validation does not prove SDK compile or runtime execution.
 2. Query maps before source:
 
 ```bash
@@ -28,13 +28,9 @@ rg -n "feature_id: ${rcc_task_feature}" \
 6. Record red evidence: focused failing test, saved failing shape, or controlled replay.
 7. Keep the two response categories separate. A Provider HTTP/error response is control-plane failure: do not return it to the client; let the Error chain recover/reselect, then terminate only the affected transport if candidates are exhausted. A Provider's business/model response, including model-generated invalid tool arguments, is data-plane content: do not semantically judge it; preserve and forward it when representable so the client can correct the next turn. Add public-entry regressions for both categories.
 8. Patch only mapped owner. For feature development or bug repair, add or update real public-entry black-box behavior tests. A controlled external peer or upstream is acceptable as long as the test enters through a real public entry (HTTP, WebSocket, or CLI); source-string checks, private unit-only tests, or mocks that do not reach the public entry do not satisfy this step. Each such test carries a stable test ID and records the exact command that executes it.
-9. Run positive and negative tests, then run feature `required_gates`, including the public-entry black-box tests by their recorded commands, then project architecture gate:
+9. Run the affected positive, negative and side-effect checks through their recorded public commands. Retain checks with a concrete behavior, security or data-correctness guarantee; remove redundant source-text, identity and historical-output locks at their owner and callers. Do not automatically run a full architecture umbrella for every local edit. Reuse unchanged results. Before external release preparation, do not add SHA/checksum, frozen snapshots, candidate identity or packaging checks. Actual release checks cover distribution needs only.
 
-```bash
-npm run verify:v3-architecture-ci
-```
-
-For runtime code changes, passing local gates on the exact candidate immediately triggers steps 10–11. Run GitHub PR CI in parallel; pending remote CI does not delay local candidate runtime acceptance.
+For runtime changes, applicable local behavior verification precedes steps 10–11. Run applicable PR CI in parallel; pending remote CI does not delay authorized local runtime acceptance. Pure rule, tooling and test changes do not trigger a runtime install or restart.
 
 10. Runtime-impacting change: load `references/50-rcc-config-ssot.md`; prove build, install, config check, managed restart, all-listener health, and same-entry replay. `rccv3 restart` controls an existing instance and exits non-zero with `NotRunning` when none is live, leaving the service down; a non-zero restart exit or a status that is not `running` is an incomplete step. Stop this lifecycle path and record the blocker. Do not substitute `start` or another lifecycle action unless that action is explicitly authorized by the applicable project contract or user.
 11. If a failing runtime sample exists, include its exact replay or same-entry semantic equivalent in step 10 evidence. For tool/function-call flows, verify the full client round trip: tool identity/namespace, complete arguments, actual client execution receipt/output, and any follow-up request; HTTP 200 or `requires_action` alone is not tool success. Review only after verification; do not repeat an unchanged replay solely for this step.
@@ -42,7 +38,7 @@ For runtime code changes, passing local gates on the exact candidate immediately
 ## Defect Lifecycle
 
 Every execution-bound defect uses the canonical issue intake and close contract
-in `.appsdk/skills/appsdk-project-governance/SKILL.md`. For the issue DAG,
+in the installed `~/.agents/skills/appsdk-project-governance/SKILL.md`. For the issue DAG,
 per-restart Codex sample audit, and master residual-resource closeout, read
 [`references/60-defect-lifecycle.md`](references/60-defect-lifecycle.md).
 Repeated regressions require a regression test in the mapped required gate.
@@ -50,18 +46,18 @@ Repeated regressions require a regression test in the mapped required gate.
 For any corresponding AppSDK bug record to close, including a functional work
 item with such a record, the stable public-entry black-box test IDs and their
 execution commands must be written into that record with
-`appsdk bug comment <id> -m <test IDs and commands>`, then read back with
-`appsdk bug show <id> --json` and confirmed before close. A record without that
-read-back confirmation stays open. Close it with `appsdk bug close` only after
-that confirmation exists and all other applicable delivery conditions pass.
+`appsdk bug comment <id> -m <test IDs and commands>`. Use the command receipt;
+do not add a routine read-back gate. Close with `appsdk bug close` only after
+all applicable delivery conditions pass. A failed or uncertain record write
+requires checking that specific failure.
 
 ## Review Gate
 
 The global host orchestrator owns review roles, timing and delivery order.
 After author verification and applicable runtime acceptance, obtain one
 effective independent overall review before commit/integration. Fix blocking
-findings and revalidate their affected behavior. Bind candidate, installed
-artifact and delivered main separately; preserve repository checks, Git
+findings and revalidate their affected behavior. Report source, runtime and
+delivery results separately without identity packaging; preserve Git
 protection and the defect close conditions in `references/60-defect-lifecycle.md`.
 
 ## Routes

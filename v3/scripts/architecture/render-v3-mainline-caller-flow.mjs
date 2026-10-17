@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   renderV3MainlineCallerFlowHtml,
   renderV3MainlineCallerFlowMarkdown,
@@ -8,9 +9,9 @@ import {
   V3_CALLER_FLOW_PATH,
 } from './v3-mainline-caller-flow-lib.mjs';
 
-const root = process.env.ROUTECODEX_V3_ADMISSION_WORKSPACE === '1'
-  ? process.cwd()
-  : path.join(process.cwd(), 'build-contracts', 'architecture-admission', 'repo');
+const root = process.env.ROUTECODEX_V3_SOURCE_ROOT
+  ? path.resolve(process.env.ROUTECODEX_V3_SOURCE_ROOT)
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const output = renderV3MainlineCallerFlowMarkdown(root);
 const outputPath = path.join(root, V3_CALLER_FLOW_PATH);
 fs.mkdirSync(path.dirname(outputPath), { recursive: true });

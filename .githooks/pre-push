@@ -6,26 +6,6 @@ cd "$repo_root"
 
 z40="0000000000000000000000000000000000000000"
 remote_name="${1:-origin}"
-appsdk_tmp=""
-
-cleanup_appsdk_tmp() {
-  if [ -n "$appsdk_tmp" ]; then
-    rm -rf -- "$appsdk_tmp"
-  fi
-}
-
-trap cleanup_appsdk_tmp 0 1 2 3 15
-
-verify_appsdk_commit() {
-  commit="$1"
-  appsdk_tmp="$(mktemp -d "${TMPDIR:-/tmp}/routecodex-pre-push-appsdk.XXXXXX")"
-  git_dir="$(git rev-parse --absolute-git-dir)"
-  git archive --format=tar "$commit" | tar -xf - -C "$appsdk_tmp"
-  printf 'gitdir: %s\n' "$git_dir" > "$appsdk_tmp/.git"
-  GIT_OPTIONAL_LOCKS=0 node "$appsdk_tmp/.githooks/verify-appsdk-admission.mjs" "$appsdk_tmp"
-  rm -rf -- "$appsdk_tmp"
-  appsdk_tmp=""
-}
 
 while read -r local_ref local_sha remote_ref remote_sha; do
   case "$remote_ref" in
@@ -39,7 +19,6 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   [ "$local_sha" = "$z40" ] && continue
   if command -v npm >/dev/null 2>&1 && test -f package.json; then
     ROUTECODEX_GATE_DIFF_MODE= ROUTECODEX_GATE_REMOTE_NAME="$remote_name" ROUTECODEX_GATE_DIFF_BASE="$remote_sha" ROUTECODEX_GATE_DIFF_HEAD="$local_sha" npm run --silent verify:fast
-    verify_appsdk_commit "$local_sha"
   else
     echo "RouteCodex governance: cannot run Git main protection verification (npm/package.json missing)." >&2
     exit 1

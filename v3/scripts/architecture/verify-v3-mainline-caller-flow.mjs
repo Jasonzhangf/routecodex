@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   auditV3CallerFlow,
   auditV3CallerFlowSource,
@@ -12,9 +13,9 @@ import {
   V3_CALLER_FLOW_PATH,
 } from './v3-mainline-caller-flow-lib.mjs';
 
-const root = process.env.ROUTECODEX_V3_ADMISSION_WORKSPACE === '1'
-  ? process.cwd()
-  : path.join(process.cwd(), 'build-contracts', 'architecture-admission', 'repo');
+const root = process.env.ROUTECODEX_V3_SOURCE_ROOT
+  ? path.resolve(process.env.ROUTECODEX_V3_SOURCE_ROOT)
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const expected = renderV3MainlineCallerFlowMarkdown(root);
 const outputPath = path.join(root, V3_CALLER_FLOW_PATH);
 const expectedHtml = renderV3MainlineCallerFlowHtml(root);
@@ -57,7 +58,6 @@ for (const helper of sourceAudit.forbiddenProtocolDecisionHelpers) {
 for (const edge of audit.missing) {
   failures.push(`missing caller map field: ${edge.chain_id}/${edge.step_id} ${edge.reason}`);
 }
-
 if (failures.length) {
   console.error('[verify:v3-mainline-caller-flow] failed');
   for (const failure of failures) console.error(`- ${failure}`);

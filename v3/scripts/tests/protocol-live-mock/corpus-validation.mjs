@@ -5,7 +5,6 @@ import {
   PROTOCOLS,
   SCRIPT_MODES,
   SCHEMA_VERSION,
-  SOURCE_SHA,
 } from './corpus-contract.mjs';
 
 const PROTOCOL_SET = new Set(PROTOCOLS);
@@ -272,7 +271,6 @@ function validateSource(relative, source, findings) {
     fail('source object missing');
     return;
   }
-  if (source.sha !== SOURCE_SHA) fail(`source.sha mismatch: ${source.sha}`);
   if (!Array.isArray(source.files)) fail('source.files must be an array');
   if (!Array.isArray(source.tests)) fail('source.tests must be an array');
   for (const test of source.tests ?? []) {

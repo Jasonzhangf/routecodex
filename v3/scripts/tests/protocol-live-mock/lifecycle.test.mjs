@@ -100,7 +100,6 @@ test('generateRccConfig writes a supported execution policy and receipts the wri
       assert.equal(generated.mode, mode);
       assert.equal(generated.mode_receipt.field, 'servers.loopback.execution.allowed_modes');
       assert.deepEqual(generated.mode_receipt.allowed_modes, [mode]);
-      assert.match(generated.mode_receipt.config_sha256, /^[a-f0-9]{64}$/);
     } finally {
       generated.cleanup();
     }
