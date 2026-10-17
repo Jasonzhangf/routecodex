@@ -253,7 +253,7 @@ const cases = [
     name: 'V3 unrelated same-group provider success releases another provider permit',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
     mutate: (source) => source.replace(
-      '(key.provider_scope.server_id == provider_scope.server_id\n                        && key.provider_scope.provider_runtime_identity\n                        == provider_scope.provider_runtime_identity)',
+      /\(key\.provider_scope\.server_id == provider_scope\.server_id\s*&& key\.provider_scope\.provider_runtime_identity\s*== provider_scope\.provider_runtime_identity\)/u,
       '(key.provider_scope.server_id == provider_scope.server_id\n                        && key.provider_scope.routing_group == provider_scope.routing_group)',
     ),
     diagnostic: /provider success may release only its complete runtime identity/u,

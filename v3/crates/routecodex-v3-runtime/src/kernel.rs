@@ -422,14 +422,26 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             sink(&observability);
         }
         if pending_provider_action_recovery.is_none() && provider_action_permit.is_none() {
-            pending_provider_action_recovery = match provider_health.recovery_for_selected_provider(&direct_failure_session_scope, &selected) {
+            pending_provider_action_recovery = match provider_health
+                .recovery_for_selected_provider(&direct_failure_session_scope, &selected)
+            {
                 Ok(witness) => witness,
-                Err(error) => return error_output(runtime_source("V3ProviderActionGateAdmission", error), trace, &hook_registry),
+                Err(error) => {
+                    return error_output(
+                        runtime_source("V3ProviderActionGateAdmission", error),
+                        trace,
+                        &hook_registry,
+                    )
+                }
             };
         }
         if let Some(recovery) = pending_provider_action_recovery.take() {
             match provider_health
-                .wait_for_error05_recovery(&recovery, &selected, attempt_budget.residence_deadline())
+                .wait_for_error05_recovery(
+                    &recovery,
+                    &selected,
+                    attempt_budget.residence_deadline(),
+                )
                 .await
             {
                 Ok(V3ProviderActionRecoveryTransition::Admitted(mut admission)) => {

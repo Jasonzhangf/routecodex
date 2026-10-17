@@ -272,7 +272,8 @@ impl V3AttemptBudget {
 
     pub(crate) fn can_retry_after_ms(&self, delay_ms: u64) -> bool {
         self.transport_attempts() < self.inner.limits.request_max_attempts
-            && Instant::now().checked_add(Duration::from_millis(delay_ms))
+            && Instant::now()
+                .checked_add(Duration::from_millis(delay_ms))
                 .is_some_and(|next| next < self.inner.deadline)
     }
 

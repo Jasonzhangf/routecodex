@@ -255,7 +255,9 @@ fn prune_stale_provider_cooldown_scope_files(current: &Path, legacy: Option<&Pat
         return;
     };
     let now = std::time::SystemTime::now();
-    let listener_suffix = current.file_name().and_then(|name| name.to_str())
+    let listener_suffix = current
+        .file_name()
+        .and_then(|name| name.to_str())
         .and_then(|name| name.split_once(".port-").map(|(_, suffix)| suffix));
     let mut superseded = Vec::new();
     for entry in entries.flatten() {
@@ -533,16 +535,31 @@ mod tests {
             let result = std::process::Command::new(std::env::current_exe().unwrap())
                 .args(["--exact", "health::persistence::tests::listener_persistence_does_not_restore_another_ports_cooldown", "--nocapture"])
                 .env(CHILD, "1").output().unwrap();
-            assert!(result.status.success() && String::from_utf8_lossy(&result.stdout).contains("1 passed"), "child failed: {} {}", String::from_utf8_lossy(&result.stdout), String::from_utf8_lossy(&result.stderr));
+            assert!(
+                result.status.success()
+                    && String::from_utf8_lossy(&result.stdout).contains("1 passed"),
+                "child failed: {} {}",
+                String::from_utf8_lossy(&result.stdout),
+                String::from_utf8_lossy(&result.stderr)
+            );
             return;
         }
         let root = tempfile::tempdir().unwrap();
-        std::env::set_var("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE", root.path().join("health.json"));
-        let manifest = manifest_with_servers(&[("main", "127.0.0.1", 4444), ("sole", "127.0.0.1", 7777)]);
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+        std::env::set_var(
+            "ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE",
+            root.path().join("health.json"),
+        );
+        let manifest =
+            manifest_with_servers(&[("main", "127.0.0.1", 4444), ("sole", "127.0.0.1", 7777)]);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
         let first = V3ProviderHealthStore::from_manifest_for_listener(&manifest, 4444);
         let second = V3ProviderHealthStore::from_manifest_for_listener(&manifest, 7777);
-        first.record_provider_cooldown_failure("p", Some("k"), Some("m"), "timeout", now, 60_000).unwrap();
+        first
+            .record_provider_cooldown_failure("p", Some("k"), Some("m"), "timeout", now, 60_000)
+            .unwrap();
         first.flush_persistence().unwrap();
         second.flush_persistence().unwrap();
         drop(first);
@@ -550,8 +567,16 @@ mod tests {
         assert!(root.path().join("health.port-4444.json").exists());
         let first = V3ProviderHealthStore::from_manifest_for_listener(&manifest, 4444);
         let second = V3ProviderHealthStore::from_manifest_for_listener(&manifest, 7777);
-        assert!(!first.availability("p", Some("k"), Some("m"), now + 1).available);
-        assert!(second.availability("p", Some("k"), Some("m"), now + 1).available);
+        assert!(
+            !first
+                .availability("p", Some("k"), Some("m"), now + 1)
+                .available
+        );
+        assert!(
+            second
+                .availability("p", Some("k"), Some("m"), now + 1)
+                .available
+        );
         first.flush_persistence().unwrap();
         second.flush_persistence().unwrap();
         drop(first);
@@ -1027,7 +1052,10 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
             unrelated.exists(),
             "an undigested provider-cooldowns.json is not a scope generation"
         );
-        assert!(other_port.exists(), "aggregate pruning must not delete port-owned state");
+        assert!(
+            other_port.exists(),
+            "aggregate pruning must not delete port-owned state"
+        );
         assert!(
             concurrent.exists(),
             "a recently written scope file is never pruned, even when superseded by name"

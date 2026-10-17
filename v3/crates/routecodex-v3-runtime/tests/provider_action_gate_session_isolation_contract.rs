@@ -40,15 +40,31 @@ async fn different_listener_ports_do_not_share_failure_or_success() {
     let server_b = V3ProviderFailureSessionScope::new("listener-7777", "default", "b").unwrap();
     let key_a = V3ProviderActionGateKey::new(&server_a, "provider:key:model", "http429").unwrap();
     let key_b = V3ProviderActionGateKey::new(&server_b, "provider:key:model", "http429").unwrap();
-    assert_ne!(key_a, key_b, "each listener must own its provider failure lane");
+    assert_ne!(
+        key_a, key_b,
+        "each listener must own its provider failure lane"
+    );
     let scope_a = V3ProviderActionProviderScope::new(&server_a, "provider:key:model").unwrap();
     let scope_b = V3ProviderActionProviderScope::new(&server_b, "provider:key:model").unwrap();
     gate.record_failure(&key_a).unwrap();
-    assert!(tokio::time::timeout(Duration::from_millis(100), gate.wait_for_exact_provider_action(&scope_b))
-        .await.expect("4444 failure cannot delay7777").unwrap().is_none());
+    assert!(tokio::time::timeout(
+        Duration::from_millis(100),
+        gate.wait_for_exact_provider_action(&scope_b)
+    )
+    .await
+    .expect("4444 failure cannot delay7777")
+    .unwrap()
+    .is_none());
     gate.record_provider_success(&scope_b).unwrap();
-    assert!(tokio::time::timeout(Duration::from_millis(100), gate.wait_for_exact_provider_action(&scope_a))
-        .await.is_err(), "7777 success cannot release4444 backoff");
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(100),
+            gate.wait_for_exact_provider_action(&scope_a)
+        )
+        .await
+        .is_err(),
+        "7777 success cannot release4444 backoff"
+    );
 }
 
 #[tokio::test]
@@ -74,7 +90,11 @@ async fn real_success_from_another_session_clears_same_identity() {
         tokio::time::timeout(
             Duration::from_millis(100),
             gate.wait_for_exact_provider_action(&provider_scope("session-a")),
-        ).await.unwrap().unwrap().is_none(),
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .is_none(),
         "success must reset the identity in every session"
     );
 }

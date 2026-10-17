@@ -422,7 +422,11 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         }
         if let Some(recovery) = pending_provider_action_recovery.take() {
             match handle_error_before_resp03!(provider_health
-                .wait_for_error05_recovery(&recovery, &selected, attempt_budget.residence_deadline())
+                .wait_for_error05_recovery(
+                    &recovery,
+                    &selected,
+                    attempt_budget.residence_deadline()
+                )
                 .await
                 .map_err(V3ResponsesRelayRuntimeError::ProviderHealth))
             {

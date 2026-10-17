@@ -107,7 +107,7 @@ impl PartialEq for V3ProviderActionGateKey {
     fn eq(&self, other: &Self) -> bool {
         self.provider_scope.server_id == other.provider_scope.server_id
             && self.provider_scope.provider_runtime_identity
-            == other.provider_scope.provider_runtime_identity
+                == other.provider_scope.provider_runtime_identity
     }
 }
 
@@ -314,7 +314,7 @@ impl V3ProviderActionGate {
     ) -> Result<V3ProviderActionRecoveryTransition, String> {
         if ticket.key.provider_scope.server_id != action_scope.server_id
             || ticket.key.provider_scope.provider_runtime_identity
-            != action_scope.provider_runtime_identity
+                != action_scope.provider_runtime_identity
         {
             let admission = self
                 .wait_for_exact_provider_action(&action_scope)
@@ -375,7 +375,7 @@ impl V3ProviderActionGate {
                 state.consecutive_failures > 0
                     && key.provider_scope.server_id == provider_scope.server_id
                     && key.provider_scope.provider_runtime_identity
-                    == provider_scope.provider_runtime_identity
+                        == provider_scope.provider_runtime_identity
             })
             .map(|(key, state)| key.recovery_witness(state.generation))
             .transpose()
@@ -402,7 +402,7 @@ impl V3ProviderActionGate {
                 .filter(|(key, _)| {
                     key.provider_scope.server_id == provider_scope.server_id
                         && key.provider_scope.provider_runtime_identity
-                        == provider_scope.provider_runtime_identity
+                            == provider_scope.provider_runtime_identity
                 })
                 .max_by_key(|(_, state)| state.next_admission_at)
                 .map(|(key, _)| key.clone())
@@ -461,7 +461,7 @@ impl V3ProviderActionGate {
                 .filter_map(|(key, _state)| {
                     (key.provider_scope.server_id == provider_scope.server_id
                         && key.provider_scope.provider_runtime_identity
-                        == provider_scope.provider_runtime_identity)
+                            == provider_scope.provider_runtime_identity)
                         .then_some(key.clone())
                 })
                 .collect::<Vec<_>>();
@@ -1048,8 +1048,7 @@ mod tests {
     #[test]
     fn cyclic_backoff_is_shared_by_identity_and_reset_by_real_success() {
         let scope = V3ProviderFailureSessionScope::new("server", "group", "one").unwrap();
-        let other =
-            V3ProviderFailureSessionScope::new("server", "other-group", "two").unwrap();
+        let other = V3ProviderFailureSessionScope::new("server", "other-group", "two").unwrap();
         let key =
             V3ProviderActionGateKey::new(&scope, "provider[interface].key.model", "eof").unwrap();
         let same =

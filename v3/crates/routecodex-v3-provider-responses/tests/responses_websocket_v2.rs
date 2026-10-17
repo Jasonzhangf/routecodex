@@ -1168,7 +1168,9 @@ async fn websocket_v2_busy_shared_connection_wait_does_not_hold_provider_permit(
     assert!(String::from_utf8(first_body.next().await.unwrap().unwrap())
         .unwrap()
         .contains("held"));
-    assert!(V3AdaptiveConcurrencyController::process_shared().snapshot(provider_key).is_none());
+    assert!(V3AdaptiveConcurrencyController::process_shared()
+        .snapshot(provider_key)
+        .is_none());
 
     let second_cancellation = routecodex_v3_provider_responses::V3ProviderCancellation::new();
     let second_wire = build_v3_provider_12_responses_wire_payload(
@@ -1186,7 +1188,9 @@ async fn websocket_v2_busy_shared_connection_wait_does_not_hold_provider_permit(
     });
 
     tokio::time::sleep(Duration::from_millis(100)).await;
-    assert!(V3AdaptiveConcurrencyController::process_shared().snapshot(provider_key).is_none());
+    assert!(V3AdaptiveConcurrencyController::process_shared()
+        .snapshot(provider_key)
+        .is_none());
     second_cancellation.cancel();
     assert!(matches!(
         second_send.await.unwrap().unwrap_err(),
@@ -1195,7 +1199,9 @@ async fn websocket_v2_busy_shared_connection_wait_does_not_hold_provider_permit(
 
     release_first_tx.send(()).unwrap();
     while first_body.next().await.is_some() {}
-    assert!(V3AdaptiveConcurrencyController::process_shared().snapshot(provider_key).is_none());
+    assert!(V3AdaptiveConcurrencyController::process_shared()
+        .snapshot(provider_key)
+        .is_none());
     std::env::remove_var("V3_WS_KEY_BUSY_SLOT");
 }
 

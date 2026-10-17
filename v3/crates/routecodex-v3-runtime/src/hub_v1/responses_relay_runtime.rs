@@ -68,7 +68,9 @@ pub struct V3ResponsesRelayProviderHealthHandle {
 impl V3ResponsesRelayProviderHealthHandle {
     pub fn from_manifest_for_listener(manifest: &V3Config05ManifestPublished, port: u16) -> Self {
         Self {
-            runtime_health: V3ProviderFailureRuntimeHealth::from_manifest_for_listener(manifest, port),
+            runtime_health: V3ProviderFailureRuntimeHealth::from_manifest_for_listener(
+                manifest, port,
+            ),
         }
     }
 
@@ -216,7 +218,10 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_se
     ))
     .await?;
     let failed_attempt = output.terminal_disposition.is_some()
-        || output.observability.as_ref().is_some_and(|value| !value.provider_failure_events.is_empty());
+        || output
+            .observability
+            .as_ref()
+            .is_some_and(|value| !value.provider_failure_events.is_empty());
     output.provider_snapshots = Some(snapshots.into_payload(
         provider_snapshots.provider_request || failed_attempt,
         provider_snapshots.provider_response || failed_attempt,

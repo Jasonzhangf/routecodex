@@ -727,7 +727,11 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         }
         if let Some(recovery) = pending_provider_action_recovery.take() {
             match provider_health
-                .wait_for_error05_recovery(&recovery, &selected, attempt_budget.residence_deadline())
+                .wait_for_error05_recovery(
+                    &recovery,
+                    &selected,
+                    attempt_budget.residence_deadline(),
+                )
                 .await
                 .map_err(V3AnthropicRelayRuntimeError::Target)?
             {

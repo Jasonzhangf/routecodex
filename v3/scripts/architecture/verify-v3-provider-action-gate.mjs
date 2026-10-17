@@ -499,7 +499,7 @@ requireOccurrenceCount(
   text.responses,
   files.responses,
   'drop(_provider_action_permit.take());',
-  9,
+  8,
 );
 // openai_chat/gemini 的局部变量 permit drop（每协议 4 处）已收敛到统一 relay 骨架。
 requireOccurrenceCount(

@@ -611,9 +611,12 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
             let mut scoped = (*manifest).clone();
             scoped.servers.retain(|id, _| id == &server_id);
             let scoped = Arc::new(scoped);
-            let health = Arc::new(V3ResponsesRelayProviderHealthHandle::from_manifest_for_listener(
-                &scoped, server.port,
-            ));
+            let health = Arc::new(
+                V3ResponsesRelayProviderHealthHandle::from_manifest_for_listener(
+                    &scoped,
+                    server.port,
+                ),
+            );
             provider_health.push(Arc::clone(&health));
             probe_health.push((scoped, Arc::clone(&health)));
             let config_path = canonical_admin_config_path.as_ref().ok_or_else(|| {
@@ -722,10 +725,8 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
     if console_enabled {
         emit_v3_startup_console_line(&listeners);
     }
-    let probe_lifecycle = aggregate_probe_lifecycle::AggregateProbeLifecycle::start(
-        probe_health,
-    )
-    .map_err(std::io::Error::other)?;
+    let probe_lifecycle = aggregate_probe_lifecycle::AggregateProbeLifecycle::start(probe_health)
+        .map_err(std::io::Error::other)?;
     Ok(V3ServerAggregateHandle {
         listeners,
         probe_lifecycle,

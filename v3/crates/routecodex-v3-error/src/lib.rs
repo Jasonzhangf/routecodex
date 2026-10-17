@@ -916,23 +916,24 @@ pub fn build_v3_error_04_target_exhaustion_decision_with_provider_availability(
         local_action.classified.source.source_kind,
         V3ErrorSourceKind::ProviderFailure
     );
-    let target_exhausted =
-        (provider_failure && route_pool_remaining_after_exclusion == 0 && !default_pool_available
-            && !same_provider_retry_available)
-            || matches!(
-                local_action.classified.source.source_kind,
-                V3ErrorSourceKind::PendingEndpoint
-                    | V3ErrorSourceKind::InvalidRequest
-                    | V3ErrorSourceKind::RequestConflict
-                    | V3ErrorSourceKind::UnsupportedMediaType
-                    | V3ErrorSourceKind::PayloadTooLarge
-                    | V3ErrorSourceKind::MethodNotAllowed
-                    | V3ErrorSourceKind::PathNotFound
-                    | V3ErrorSourceKind::TargetPoolExhausted
-                    | V3ErrorSourceKind::RuntimeFailure
-                    | V3ErrorSourceKind::ClientDisconnect
-                    | V3ErrorSourceKind::SuccessControl
-            );
+    let target_exhausted = (provider_failure
+        && route_pool_remaining_after_exclusion == 0
+        && !default_pool_available
+        && !same_provider_retry_available)
+        || matches!(
+            local_action.classified.source.source_kind,
+            V3ErrorSourceKind::PendingEndpoint
+                | V3ErrorSourceKind::InvalidRequest
+                | V3ErrorSourceKind::RequestConflict
+                | V3ErrorSourceKind::UnsupportedMediaType
+                | V3ErrorSourceKind::PayloadTooLarge
+                | V3ErrorSourceKind::MethodNotAllowed
+                | V3ErrorSourceKind::PathNotFound
+                | V3ErrorSourceKind::TargetPoolExhausted
+                | V3ErrorSourceKind::RuntimeFailure
+                | V3ErrorSourceKind::ClientDisconnect
+                | V3ErrorSourceKind::SuccessControl
+        );
     V3Error04TargetExhaustionDecision {
         local_action,
         route_pool_remaining_after_exclusion,
@@ -959,7 +960,8 @@ pub fn build_v3_error_05_execution_decision_from_v3_error_04(
         }
         V3ErrorSourceKind::ProviderFailure if exhaustion.same_provider_retry_available => {
             V3Error05ExecutionAction::WaitThenRetrySame {
-                recovery: recovery.expect("same-provider retry requires an exact recovery admission witness"),
+                recovery: recovery
+                    .expect("same-provider retry requires an exact recovery admission witness"),
             }
         }
         V3ErrorSourceKind::ProviderFailure => V3Error05ExecutionAction::ProjectTerminal,

@@ -439,7 +439,9 @@ impl V3ProviderHealthStore {
 
     pub fn from_manifest_for_listener(manifest: &V3Config05ManifestPublished, port: u16) -> Self {
         let mut scoped = manifest.clone();
-        scoped.servers.retain(|_, server| server.enabled && server.port == port);
+        scoped
+            .servers
+            .retain(|_, server| server.enabled && server.port == port);
         // Never hydrate the retired aggregate file into a listener. Explicit
         // persistence overrides must also remain separate for each port.
         let path = provider_cooldown_state_path_for_manifest(&scoped)

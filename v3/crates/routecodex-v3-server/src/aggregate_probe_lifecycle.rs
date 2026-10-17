@@ -30,7 +30,10 @@ pub(crate) struct ProbeQuiescenceGuard {
 
 impl AggregateProbeLifecycle {
     pub(crate) fn start(
-        health: Vec<(Arc<V3Config05ManifestPublished>, Arc<V3ResponsesRelayProviderHealthHandle>)>,
+        health: Vec<(
+            Arc<V3Config05ManifestPublished>,
+            Arc<V3ResponsesRelayProviderHealthHandle>,
+        )>,
     ) -> Result<Self, String> {
         let spawn_probes = move |resume: bool| -> Result<_, String> {
             let mut futures: Vec<Pin<Box<dyn Future<Output = ()> + Send>>> = Vec::new();
@@ -38,21 +41,27 @@ impl AggregateProbeLifecycle {
             for (manifest, health) in &health {
                 let runtime_health = health.runtime_health();
                 let (shutdown, shutdown_rx) = oneshot::channel();
-                let future: Pin<Box<dyn Future<Output = ()> + Send>> = if resume {
-                    Box::pin(runtime_health.aggregate_provider_probe_lifecycle_resume(
-                        Arc::clone(manifest), shutdown_rx,
-                    )?)
-                } else {
-                    Box::pin(runtime_health.aggregate_provider_probe_lifecycle(
-                        Arc::clone(manifest), shutdown_rx,
-                    )?)
-                };
+                let future: Pin<Box<dyn Future<Output = ()> + Send>> =
+                    if resume {
+                        Box::pin(runtime_health.aggregate_provider_probe_lifecycle_resume(
+                            Arc::clone(manifest),
+                            shutdown_rx,
+                        )?)
+                    } else {
+                        Box::pin(runtime_health.aggregate_provider_probe_lifecycle(
+                            Arc::clone(manifest),
+                            shutdown_rx,
+                        )?)
+                    };
                 shutdowns.push(shutdown);
                 futures.push(future);
             }
-            Ok((tokio::spawn(async move {
-                futures_util::future::join_all(futures).await;
-            }), shutdowns))
+            Ok((
+                tokio::spawn(async move {
+                    futures_util::future::join_all(futures).await;
+                }),
+                shutdowns,
+            ))
         };
         let (probe, shutdown) = spawn_probes(false)?;
         let (commands, mut receiver) = mpsc::unbounded_channel::<Quiesce>();

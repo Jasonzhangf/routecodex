@@ -31,11 +31,19 @@ fn fresh_process_resets_shared_backoff() {
     let gate = V3ProviderActionGate::process_shared();
     let scope = scoped_key("restart", "restart", "restart-provider:key:model", "eof");
     assert_eq!(gate.record_failure(&scope).unwrap().minimum_delay_ms, 1000);
-    if std::env::var_os("RCC_BACKOFF_FRESH_PROCESS_TEST").is_some() { return; }
+    if std::env::var_os("RCC_BACKOFF_FRESH_PROCESS_TEST").is_some() {
+        return;
+    }
     assert_eq!(gate.record_failure(&scope).unwrap().minimum_delay_ms, 3000);
     let status = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", "fresh_process_resets_shared_backoff", "--nocapture"])
-        .env("RCC_BACKOFF_FRESH_PROCESS_TEST", "1").status().unwrap();
+        .args([
+            "--exact",
+            "fresh_process_resets_shared_backoff",
+            "--nocapture",
+        ])
+        .env("RCC_BACKOFF_FRESH_PROCESS_TEST", "1")
+        .status()
+        .unwrap();
     assert!(status.success(), "fresh process inherited previous backoff");
     gate.record_success(&scope).unwrap();
 }
@@ -274,7 +282,8 @@ async fn overlapping_waiter_preserves_failure_delay_and_single_admission() {
     };
     assert_eq!(admission.mode, V3ProviderActionGateMode::Isolated);
     assert!(
-        started.elapsed() >= Duration::from_millis(1000) && started.elapsed() < Duration::from_millis(2000),
+        started.elapsed() >= Duration::from_millis(1000)
+            && started.elapsed() < Duration::from_millis(2000),
         "queueing must not promote the failure delay"
     );
     assert!(
@@ -327,8 +336,10 @@ async fn success_resets_all_error_families_for_same_identity() {
         .expect("transport waiter task")
         .expect("transport waiter release");
     assert!(released.released_by_success);
-    assert!(malformed_waiter.await.unwrap().unwrap().released_by_success,
-        "real success must reset every error family for the same identity");
+    assert!(
+        malformed_waiter.await.unwrap().unwrap().released_by_success,
+        "real success must reset every error family for the same identity"
+    );
     assert_eq!(gate.active_waiters(&malformed).expect("waiter count"), 0);
 }
 
@@ -365,7 +376,8 @@ async fn healthy_reselected_provider_bypasses_failed_identity_gate() {
     gate.record_provider_success(&provider_scope("provider-b:key-b:model-b"))
         .expect("reselected provider success reset");
     assert!(!blocked.is_finished(), "B success must not reset failed A");
-    gate.record_provider_success(&provider_scope("provider-a:key-a:model-a")).unwrap();
+    gate.record_provider_success(&provider_scope("provider-a:key-a:model-a"))
+        .unwrap();
     let released = blocked
         .await
         .expect("blocked waiter task")
@@ -493,10 +505,7 @@ fn consecutive_failures_follow_cyclic_ladder_and_success_resets() {
 
     let fourth = gate.record_failure(&scope).expect("fourth failure");
     assert_eq!(fourth.mode, V3ProviderActionGateMode::Sustained);
-    assert_eq!(
-        fourth.minimum_delay_ms,
-        16_000
-    );
+    assert_eq!(fourth.minimum_delay_ms, 16_000);
 
     gate.record_success(&scope)
         .expect("success resets failure sequence");
@@ -924,7 +933,10 @@ async fn reselected_healthy_provider_does_not_consume_failed_ticket() {
     let V3ProviderActionRecoveryTransition::Admitted(admission) = transition else {
         panic!("unrelated provider/error-family lane replaced the exact recovery ticket");
     };
-    assert_eq!(admission.minimum_delay_ms, 0, "healthy C never consumes A's gate");
+    assert_eq!(
+        admission.minimum_delay_ms, 0,
+        "healthy C never consumes A's gate"
+    );
 
     drop(admission);
     gate.record_success(&failed_b)
@@ -1038,7 +1050,10 @@ async fn success_released_recovery_reenters_without_delay() {
         panic!("retained recovery generation must admit exactly one provider action");
     };
     assert_eq!(admission.mode, V3ProviderActionGateMode::Sustained);
-    assert!(admission.released_by_success, "real success must release recovery waiters without owning another send permit");
+    assert!(
+        admission.released_by_success,
+        "real success must release recovery waiters without owning another send permit"
+    );
     assert!(
         sustained_started.elapsed() < Duration::from_millis(500),
         "real success must clear the identity delay immediately"

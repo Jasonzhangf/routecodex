@@ -258,7 +258,12 @@ targets = [{{ kind = "provider_model", provider = "first_{id}", model = "fixture
     let manifest =
         compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap();
     let server = spawn_v3_server_aggregate(manifest).await.unwrap();
-    let addr = server.listeners.iter().find(|listener| listener.server_id == id).unwrap().addr;
+    let addr = server
+        .listeners
+        .iter()
+        .find(|listener| listener.server_id == id)
+        .unwrap()
+        .addr;
     let url = format!("http://{addr}/v1/responses");
     let client = reqwest::Client::builder()
         .no_proxy()
@@ -284,7 +289,10 @@ targets = [{{ kind = "provider_model", provider = "first_{id}", model = "fixture
             request_started.elapsed() < Duration::from_millis(800),
             "exhausted request must not enter an impossible wait"
         );
-        assert!(raw.is_err(), "exhaustion must end transport detectably, never as empty success");
+        assert!(
+            raw.is_err(),
+            "exhaustion must end transport detectably, never as empty success"
+        );
         if let Ok(raw) = raw {
             assert!(
                 !raw.contains("response.completed")
@@ -394,31 +402,70 @@ targets = [{{ kind = "provider_model", provider = "first_{id}", model = "fixture
     drop(first_calls);
     // The multi-member listener cooled `first`; the other listener's sole
     // candidate must still be attempted, retried and remain outside cooldown.
-    let sole_addr = server.listeners.iter().find(|listener| listener.server_id == sole).unwrap().addr;
+    let sole_addr = server
+        .listeners
+        .iter()
+        .find(|listener| listener.server_id == sole)
+        .unwrap()
+        .addr;
     let before = Instant::now();
     let response = client.post(format!("http://{sole_addr}/v1/responses"))
         .header("session_id", "sole-other-port")
         .json(&json!({"model":"router","input":"use a tool","tools":[{"type":"function","name":"noop","parameters":{"type":"object"}}],"stream":true}))
         .send().await.unwrap().text().await;
-    assert!(response.is_err(), "fixture rejects both sole attempts; transport must terminate");
+    assert!(
+        response.is_err(),
+        "fixture rejects both sole attempts; transport must terminate"
+    );
     let calls = peer.first.lock().await;
-    assert_eq!(calls.len(), 3, "other port cooldown cannot suppress sole candidate attempts");
-    assert!(calls[1].duration_since(before) < Duration::from_millis(800), "other port gate cannot delay first send");
-    assert!(calls[2].duration_since(calls[1]) >= Duration::from_millis(900), "sole failure must back off and resend");
+    assert_eq!(
+        calls.len(),
+        3,
+        "other port cooldown cannot suppress sole candidate attempts"
+    );
+    assert!(
+        calls[1].duration_since(before) < Duration::from_millis(800),
+        "other port gate cannot delay first send"
+    );
+    assert!(
+        calls[2].duration_since(calls[1]) >= Duration::from_millis(900),
+        "sole failure must back off and resend"
+    );
     drop(calls);
     let preparation = tokio::time::timeout(Duration::from_secs(2), server.prepare_exec_attempt())
-        .await.expect("both listener probe owners must quiesce").unwrap();
+        .await
+        .expect("both listener probe owners must quiesce")
+        .unwrap();
     drop(preparation);
-    let resumed = client.post(&url).header("session_id", "after-two-port-probe-rollback")
+    let resumed = client
+        .post(&url)
+        .header("session_id", "after-two-port-probe-rollback")
         .json(&json!({"model":"router","input":"use a tool","tools":tools,"stream":true}))
-        .send().await.unwrap().text().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
     completed(&resumed);
     for (address, should_be_cooled) in [(addr, true), (sole_addr, false)] {
-        let health: Value = client.get(format!("http://{address}/_routecodex/health/cooldown-pool"))
-            .send().await.unwrap().json().await.unwrap();
-        let cooled = health["entries"].as_array().unwrap().iter()
+        let health: Value = client
+            .get(format!("http://{address}/_routecodex/health/cooldown-pool"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let cooled = health["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
             .any(|entry| entry["provider_id"] == format!("first_{id}"));
-        assert_eq!(cooled, should_be_cooled, "cooldown visibility must belong to its listener: {health}");
+        assert_eq!(
+            cooled, should_be_cooled,
+            "cooldown visibility must belong to its listener: {health}"
+        );
     }
     assert!(server.shutdown().await.is_empty());
     let _ = shutdown.send(());
