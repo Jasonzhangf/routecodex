@@ -288,33 +288,37 @@ fn provider_runtime_failure(error: V3ProviderError, provider_id: &str) -> V3Rela
             }
         };
         let source = crate::hooks::build_v3_provider_error_source(source_stage, error);
-        let projected =
-            V3ErrorHandlingCenter::project_terminal(V3ErrorHandlingCenter::decide_provider(
-                V3ErrorHandlingCenterInput {
-                    source,
-                    action_scope: V3ErrorActionScope::None,
-                    candidates_remaining: 0,
-                    source_status: None,
-                },
-                false,
-                false,
+        let source_message = source.message.clone();
+        let (status, message, terminal_projection, error_operator_fault) =
+            match crate::provider_failure_runtime_policy::project_v3_relay_error_source(
+                source,
+                V3ErrorActionScope::None,
+                0,
                 None,
-            ));
+            ) {
+                Ok(projected) => (
+                    projected.status,
+                    projected.error_detail.clone(),
+                    Some(projected),
+                    None,
+                ),
+                Err(fault) => (599, source_message, None, Some(fault)),
+            };
         return V3RelayProviderFailure {
-            status: projected.status,
+            status,
             // Internal transport handoff failure: no upstream HTTP response exists.
             provider_status: None,
             client_response: json!({
                 "type": "error",
                 "error": {
                     "type": "provider_internal_transport_error",
-                    "message": projected.error_detail
+                    "message": message
                 }
             }),
             source_stage,
-            terminal_projection: Some(projected),
+            terminal_projection,
             terminal_disposition: None,
-            error_operator_fault: None,
+            error_operator_fault,
             error_type_fn: extract_error_type_style,
             error_message_fn: extract_message_type_style,
         };
@@ -686,6 +690,83 @@ async fn collect_v3_anthropic_relay_provider_sse_chunks(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn anthropic_internal_transport_preserves_both_source_lanes() {
+        let request_error = V3ProviderError::InternalTransport {
+            request_id: "req-internal-request".to_string(),
+            provider_id: "provider-a".to_string(),
+            lane: routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Request,
+            reason: "admission lease mismatch".to_string(),
+        };
+        let expected_request_message = request_error.to_string();
+        let failure = provider_runtime_failure(request_error, "provider-a");
+        let projected = failure
+            .terminal_projection
+            .as_ref()
+            .expect("InternalTransport must execute the real SDK projection");
+
+        assert_eq!(
+            failure.source_stage,
+            "V3ProviderReqOutbound09TransportRequest"
+        );
+        assert_eq!(failure.status, 598);
+        assert_eq!(projected.status, 598);
+        assert_eq!(
+            projected.chain,
+            routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS
+        );
+        assert_eq!(
+            projected.diagnostic_source.source_kind,
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure
+        );
+        assert_eq!(
+            projected.diagnostic_source.source_stage,
+            "V3Transport13ResponsesHttpRequest"
+        );
+        assert_eq!(
+            projected.diagnostic_source.code,
+            "provider_internal_transport_error"
+        );
+        assert_eq!(
+            projected.diagnostic_source.message,
+            expected_request_message
+        );
+        assert_eq!(
+            failure.client_response["error"]["message"],
+            projected.error_detail
+        );
+        assert!(failure.error_operator_fault.is_none());
+
+        let response_error = V3ProviderError::InternalTransport {
+            request_id: "req-internal-response".to_string(),
+            provider_id: "provider-a".to_string(),
+            lane: routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Response,
+            reason: "provider frame sequence mismatch".to_string(),
+        };
+        let expected_response_message = response_error.to_string();
+        let response_failure = provider_runtime_failure(response_error, "provider-a");
+        let response_projected = response_failure
+            .terminal_projection
+            .as_ref()
+            .expect("InternalTransport response lane must execute the real SDK projection");
+
+        assert_eq!(response_failure.source_stage, "V3ProviderRespInbound01Raw");
+        assert_eq!(response_failure.status, 599);
+        assert_eq!(response_projected.status, 599);
+        assert_eq!(
+            response_projected.chain,
+            routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS
+        );
+        assert_eq!(
+            response_projected.diagnostic_source.source_stage,
+            "V3ProviderResp14Raw"
+        );
+        assert_eq!(
+            response_projected.diagnostic_source.message,
+            expected_response_message
+        );
+    }
 
     #[test]
     fn relay_error_operator_fault_projects_internal_599_without_client_error() {
