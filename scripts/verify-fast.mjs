@@ -92,6 +92,7 @@ function changedFileLines(relative, commit = null) {
 function classifyWorkflowScope(entries) {
   let v3 = false;
   let v4 = false;
+  let v3Build = false;
   const v3Marker = /\bV3\b|needs\.scope\.outputs\.v3|(?:^|[\s"'`/:])v3(?:[-_/.:]|[\s"'`]|$)/u;
   const v4Marker = /\bV4\b|needs\.scope\.outputs\.v4|(?:^|[\s"'`/:])v4(?:[-_/.:]|[\s"'`]|$)/u;
 
@@ -108,6 +109,10 @@ function classifyWorkflowScope(entries) {
     const changedLines = changedFileLines(relative, commit);
     const touchesV3 = changedLines.some((line) => v3Marker.test(line));
     const touchesV4 = changedLines.some((line) => v4Marker.test(line));
+    if (touchesV3 && !touchesV4) {
+      v3Build ||= changedLines.some((line) =>
+        /needs\.scope\.outputs\.v3_build\b|npm run (?:build:min|install:v3|fix:cli-shim)\b|v3\/scripts\/(?:tests\/v3-protocol-live-mock-matrix|run-v3-cargo-test)\.mjs/u.test(line));
+    }
     if (touchesV3 && !touchesV4) v3 = true;
     else if (touchesV4 && !touchesV3) v4 = true;
     else {
@@ -115,7 +120,7 @@ function classifyWorkflowScope(entries) {
       v4 = true;
     }
   }
-  return { v3, v4 };
+  return { v3, v4, v3Build };
 }
 
 function classifyRootPackageScope(entries) {
@@ -237,6 +242,7 @@ function classifyV3FineScopes(paths, { workflowScope }) {
 
   if (workflowScope.v3 && paths.some((path) => /^\.github\/workflows\//u.test(path))) {
     add('v3_architecture');
+    if (workflowScope.v3Build) add('v3_build');
   }
 
   for (const path of paths) {
