@@ -1285,6 +1285,7 @@ fn openai_chat_provider_http_failure(
         terminal_projection: None,
         terminal_disposition: None,
         error_operator_fault: None,
+        failed_attempt_evidence: None,
         error_type_fn: extract_error_type_style,
         error_message_fn: extract_message_type_style,
     }
@@ -1367,6 +1368,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             terminal_projection: None,
             terminal_disposition: None,
             error_operator_fault: None,
+            failed_attempt_evidence: None,
             error_type_fn: extract_error_type_style,
             error_message_fn: extract_message_type_style,
         }

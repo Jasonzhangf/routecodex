@@ -29,8 +29,10 @@ use routecodex_v3_virtual_router::{V3Router07OpaqueTargetHitOnce, V3VirtualRoute
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::hub_v1::V3RuntimeProviderFailedAttemptEvidence;
 use crate::operation_runner::{
     run_v3_err01_source_raised_operator, run_v3_error_02_to_05_decision_operators,
     run_v3_error_06_terminal_projection_operator, V3Err01SourceInput,
@@ -435,6 +437,9 @@ pub(crate) struct V3RelayProviderFailurePolicyEvent {
     /// this policy run. It is carried so a later target-resolution failure can
     /// never erase the provider cause that actually began the attempt.
     pub(crate) diagnostic_source: V3Error01SourceRaised,
+    /// Attempt-local transport evidence attached beside the typed failure. It is
+    /// diagnostic only and never participates in policy decisions.
+    pub(crate) failed_attempt_evidence: Option<Arc<V3RuntimeProviderFailedAttemptEvidence>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -266,6 +266,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                         terminal_projection: None,
                         terminal_disposition: None,
                         error_operator_fault: None,
+                        failed_attempt_evidence: None,
                         matched_policy: None,
                     };
                     return Ok(provider_failure_output(
@@ -405,6 +406,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                             terminal_projection: None,
                             terminal_disposition: None,
                             error_operator_fault: None,
+                            failed_attempt_evidence: None,
                             matched_policy: None,
                         };
                         return Ok(provider_failure_output(
@@ -602,6 +604,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                 handle_provider_request_failure!(error);
             }
             trace.push("V3ProviderReqOutbound09TransportRequest");
+            let provider_request_snapshot = transport_request.provider_request_projection();
             if pending_provider_action_recovery.is_some() {
                 drop(selected_admission.take());
             }
@@ -701,7 +704,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                     handle_error_before_resp03!(runtime_timing
                         .finish_external()
                         .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
-                    let failure = if let Some(reason) = &response.body_read_failure {
+                    let mut failure = if let Some(reason) = &response.body_read_failure {
                         let mut failure = provider_runtime_failure(
                             V3ProviderError::ResponseBody {
                                 request_id: response.request_id.clone(),
@@ -728,6 +731,16 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                             Some(selected_observability.clone()),
                         )
                     };
+                    failure.failed_attempt_evidence = Some(
+                        build_v3_runtime_provider_failed_attempt_evidence_from_response(
+                            provider_send_attempts,
+                            Some(provider_request_snapshot.clone()),
+                            response.status,
+                            &response.headers,
+                            &response.body,
+                            response.body_read_failure.as_deref(),
+                        ),
+                    );
                     drop(_provider_action_permit.take());
                     let terminal_failure = handle_error_before_resp03!(
                         handle_v3_responses_relay_provider_failure(
@@ -762,11 +775,18 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                     {
                         last_external_http = Some(witness);
                     }
-                    let failure = provider_runtime_failure(
+                    let failed_attempt_evidence =
+                        build_v3_runtime_provider_failed_attempt_evidence_from_error(
+                            provider_send_attempts,
+                            Some(provider_request_snapshot.clone()),
+                            &error,
+                        );
+                    let mut failure = provider_runtime_failure(
                         error,
                         &selected_target_provider_id,
                         Some(selected_observability.clone()),
                     );
+                    failure.failed_attempt_evidence = failed_attempt_evidence;
                     drop(_provider_action_permit.take());
                     let terminal_failure = handle_error_before_resp03!(
                         handle_v3_responses_relay_provider_failure(

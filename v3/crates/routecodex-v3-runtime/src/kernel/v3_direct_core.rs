@@ -599,6 +599,12 @@ where
                 continue;
             }
             Err(error) => {
+                let failed_attempt_evidence =
+                    crate::hub_v1::build_v3_runtime_provider_failed_attempt_evidence_from_error(
+                        total_attempts(&accumulator, send_attempts),
+                        provider_request_snapshot.clone(),
+                        &error,
+                    );
                 if let Some(witness) =
                     crate::hub_v1::external_http_witness_from_provider_error(&error)
                 {
@@ -612,30 +618,30 @@ where
                         &crate::hooks::register_responses_direct_hooks(),
                     );
                 }
-                let source =
-                    match build_v3_provider_error_source("V3Transport13ResponsesHttpRequest", error)
-                    {
-                        Ok(source) => source,
-                        Err(fault) => {
-                            let mut observability = build_v3_direct_runtime_observability(
-                                C::policy_target(&policy),
-                                C::ENTRY_PROTOCOL,
-                                if C::body(&standardized)
-                                    .get("stream")
-                                    .and_then(serde_json::Value::as_bool)
-                                    .unwrap_or(false)
-                                {
-                                    "sse"
-                                } else {
-                                    "json"
-                                },
-                                None,
-                                "failed",
-                                provider_failure_events.clone(),
-                            );
-                            observability.attempts =
-                                Some(total_attempts(&accumulator, send_attempts));
-                            return direct_runtime_helpers_stream::source_failure_output_with_observability_and_snapshots(
+                let source = match build_v3_provider_error_source(
+                    "V3Transport13ResponsesHttpRequest",
+                    error,
+                ) {
+                    Ok(source) => source,
+                    Err(fault) => {
+                        let mut observability = build_v3_direct_runtime_observability(
+                            C::policy_target(&policy),
+                            C::ENTRY_PROTOCOL,
+                            if C::body(&standardized)
+                                .get("stream")
+                                .and_then(serde_json::Value::as_bool)
+                                .unwrap_or(false)
+                            {
+                                "sse"
+                            } else {
+                                "json"
+                            },
+                            None,
+                            "failed",
+                            provider_failure_events.clone(),
+                        );
+                        observability.attempts = Some(total_attempts(&accumulator, send_attempts));
+                        return direct_runtime_helpers_stream::source_failure_output_with_observability_and_snapshots(
                                 Err(fault),
                                 last_external_http,
                                 trace,
@@ -644,8 +650,8 @@ where
                                 provider_request_snapshot,
                                 None,
                             );
-                        }
-                    };
+                    }
+                };
                 if source.source_kind != V3ErrorSourceKind::ProviderFailure {
                     drop(provider_action_permit.take());
                     return error_output(
@@ -686,6 +692,8 @@ where
                     }
                 };
                 if let Some(event) = policy_result.event.clone() {
+                    let mut event = event;
+                    event.failed_attempt_evidence = failed_attempt_evidence;
                     provider_failure_events.push(event.clone());
                     publish_v3_direct_provider_failure_event(
                         provider_failure_event_sink,

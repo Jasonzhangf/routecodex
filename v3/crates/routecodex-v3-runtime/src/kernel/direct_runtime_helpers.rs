@@ -891,6 +891,7 @@ fn build_v3_direct_provider_failure_observation(
         next_provider_key,
         wait_ms,
         diagnostic_source: Some(source.clone()),
+        failed_attempt_evidence: None,
     }
 }
 

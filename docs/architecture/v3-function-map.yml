@@ -4792,10 +4792,14 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
   entry_symbols:
+  - build_v3_runtime_provider_failed_attempt_evidence_from_error
+  - build_v3_runtime_provider_failed_attempt_evidence_from_response
+  - build_v3_runtime_provider_failed_attempt_evidence_no_response
   - relay_handoff_entry_state
   - relay_request_execution_control
   - resolve_v3_relay_entry_target
   resource_bindings:
+  - v3.runtime.responses_observability
   - v3.execution.target_plan
   - v3.execution.request_lifecycle_control
   - v3.runtime.responses_timing_observability

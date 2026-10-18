@@ -925,7 +925,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         if let Err(timing_error) = runtime_timing.start_external() {
             return Err(V3AnthropicRelayRuntimeError::Target(timing_error));
         }
-        attempt_budget.admit_transport_attempt().map_err(|error| {
+        let transport_attempt = attempt_budget.admit_transport_attempt().map_err(|error| {
             V3AnthropicRelayRuntimeError::ExecutionControlRequest(error.to_string())
         })?;
         let transport_request = match selected_admission.take() {
@@ -963,7 +963,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 last_external_http = Some(
                     crate::hub_v1::relay_runtime_shared::external_http_witness(&response),
                 );
-                let failure = if let Some(reason) = &response.body_read_failure {
+                let mut failure = if let Some(reason) = &response.body_read_failure {
                     let mut failure = provider_runtime_failure(
                         V3ProviderError::ResponseBody {
                             request_id: response.request_id.clone(),
@@ -988,6 +988,16 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         &selected_target_provider_id,
                     )
                 };
+                failure.failed_attempt_evidence = Some(
+                    build_v3_runtime_provider_failed_attempt_evidence_from_response(
+                        transport_attempt,
+                        Some(provider_request_snapshot.clone()),
+                        response.status,
+                        &response.headers,
+                        &response.body,
+                        response.body_read_failure.as_deref(),
+                    ),
+                );
                 let _ = runtime_timing.finish_external();
                 drop(_provider_action_permit.take());
                 if let Some(failure) = handle_provider_failure(
@@ -1020,7 +1030,14 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 {
                     last_external_http = Some(witness);
                 }
-                let failure = provider_runtime_failure(error, &selected_target_provider_id);
+                let failed_attempt_evidence =
+                    build_v3_runtime_provider_failed_attempt_evidence_from_error(
+                        transport_attempt,
+                        Some(provider_request_snapshot.clone()),
+                        &error,
+                    );
+                let mut failure = provider_runtime_failure(error, &selected_target_provider_id);
+                failure.failed_attempt_evidence = failed_attempt_evidence;
                 let _ = runtime_timing.finish_external();
                 drop(_provider_action_permit.take());
                 if let Some(failure) = handle_provider_failure(
@@ -1613,6 +1630,7 @@ async fn anthropic_provider_stream_failure_from_closeout_error(
         terminal_projection: failure.terminal_projection,
         terminal_disposition: failure.terminal_disposition,
         error_operator_fault: failure.error_operator_fault,
+        failed_attempt_evidence: failure.failed_attempt_evidence,
         error_type_fn: extract_error_type_style,
         error_message_fn: extract_message_type_style,
     })
