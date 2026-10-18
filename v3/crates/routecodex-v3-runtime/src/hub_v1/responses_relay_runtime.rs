@@ -1277,7 +1277,7 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
         let external = source
             .external_error
             .as_ref()
-            .expect("policy fallback must preserve provider identity");
+            .expect("ordinary failure policy must preserve provider identity");
         assert_eq!(
             external.kind,
             routecodex_v3_error::V3ExternalErrorKind::Provider
