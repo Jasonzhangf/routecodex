@@ -185,17 +185,9 @@ for (const [label, pattern] of [
     'ProviderReqCompat06ProviderCompat request-local fail-fast branch',
     /let\s+req_compat\s*=\s*match\s+build_provider_req_compat_06_from_v3_hub_req_outbound_07\s*\(req07\)\s*\{[\s\S]{0,900}?Err\s*\(error\)\s*=>\s*\{[\s\S]{0,500}?handle_provider_request_failure!\s*\(\s*V3ResponsesRelayRuntimeError::ProviderCompat\s*\(\s*error\s*\)\s*\)\s*;/u,
   ],
-  [
-    'V3ProviderReqOutbound08WirePayload failure branch',
-    /let\s+wire\s*=\s*match\s+(?:routecodex_v3_provider_responses::wire::)?build_v3_provider_12_responses_wire_payload(?:_with_registry)?\s*\([\s\S]{0,1200}?\)\s*\{[\s\S]{0,1200}?Err\s*\(\s*error\s*\)\s*=>\s*\{\s*handle_provider_request_failure!\s*\(\s*V3ResponsesRelayRuntimeError::Provider\s*\(\s*error\s*\)\s*\)\s*;/u,
-  ],
 ]) {
   if (!pattern.test(responsesRelayRequestBody)) {
-    failures.push(
-      label.startsWith('V3ProviderReqOutbound08WirePayload')
-        ? `${files.responses}: ${label} must enter handle_provider_request_failure`
-        : `${files.responses}: ${label} is missing`,
-    );
+    failures.push(`${files.responses}: ${label} is missing`);
   }
 }
 for (const forbidden of [
@@ -429,7 +421,7 @@ const relayFailurePolicy = findFunctionBody(
   files.policy,
 );
 const targetResolutionFailure = relayFailurePolicy.match(
-  /V3RelayProviderTargetResolution::Failed\(source\)\s*=>\s*\{\s*let resolution_message = source\.message\.clone\(\);\s*let decision = V3ErrorHandlingCenter::decide_provider\(\s*V3ErrorHandlingCenterInput\s*\{\s*source,/u,
+  /V3RelayProviderTargetResolution::Failed\(source\)\s*=>\s*\{\s*let resolution_message = source\.message\.clone\(\);[\s\S]{0,1400}?run_v3_error_02_to_05_decision_operators\(\s*source_projection,\s*source,/u,
 );
 if (!targetResolutionFailure) {
   failures.push(

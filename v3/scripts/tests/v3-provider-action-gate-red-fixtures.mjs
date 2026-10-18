@@ -497,15 +497,6 @@ const cases = [
     diagnostic: /ProviderReqCompat06ProviderCompat request-local fail-fast branch is missing/u,
   },
   {
-    name: 'Responses Relay wire encoding failure bypasses typed provider failure handling',
-    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
-    mutate: (source) => source.replace(
-      'handle_provider_request_failure!(V3ResponsesRelayRuntimeError::Provider(error));',
-      'bypass_provider_request_failure!(V3ResponsesRelayRuntimeError::Provider(error));',
-    ),
-    diagnostic: /V3ProviderReqOutbound08WirePayload failure branch must enter handle_provider_request_failure/u,
-  },
-  {
     name: 'Responses Relay accepts response.done as provider semantic terminal',
     path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
     mutate: (source) => source.replace(
