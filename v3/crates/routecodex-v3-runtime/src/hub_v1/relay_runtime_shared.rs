@@ -23,8 +23,8 @@ use futures_util::StreamExt;
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness,
-    V3Error06ClientProjected, V3ErrorActionScope, V3ErrorHandlingCenter,
-    V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3ExternalHttpWitness, V3_ERROR_CHAIN_NODE_IDS,
+    V3Error06ClientProjected, V3ErrorActionScope, V3ErrorSourceKind, V3ExternalHttpWitness,
+    V3_ERROR_CHAIN_NODE_IDS,
     V3_TRANSIENT_TRANSPORT_HANG_CODE,
 };
 use routecodex_v3_provider_responses::{
@@ -694,7 +694,18 @@ pub fn terminalize_provider_failure(
     mut failure: V3RelayProviderFailure,
     last_external_http: Option<routecodex_v3_error::V3ExternalHttpWitness>,
 ) -> V3RelayProviderFailure {
-    if failure.terminal_projection.is_some() || failure.error_operator_fault.is_some() {
+    if failure.terminal_projection.is_some() {
+        return failure;
+    }
+    if failure.terminal_disposition.is_none() {
+        failure.terminal_disposition = Some(match last_external_http {
+            Some(witness) => {
+                routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)
+            }
+            None => routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+        });
+    }
+    if failure.error_operator_fault.is_some() {
         return failure;
     }
     let source = build_v3_error_01_source_raised(
@@ -705,24 +716,15 @@ pub fn terminalize_provider_failure(
             .unwrap_or("provider_error"),
         provider_failure_message(&failure),
     );
-    let terminal = V3ErrorHandlingCenter::decide_provider(
-        V3ErrorHandlingCenterInput {
-            source,
-            action_scope: V3ErrorActionScope::None,
-            candidates_remaining: 0,
-            source_status: Some(failure.status),
-        },
-        false,
-        false,
+    match crate::provider_failure_runtime_policy::project_v3_relay_error_source(
+        source,
+        V3ErrorActionScope::None,
+        0,
         None,
-    )
-    .try_into_terminal()
-    .expect("provider residence-budget terminal requires exhausted Error05");
-    failure.terminal_disposition = Some(V3ErrorHandlingCenter::provider_terminal_disposition(
-        terminal.clone(),
-        last_external_http,
-    ));
-    failure.terminal_projection = Some(V3ErrorHandlingCenter::project_terminal_decision(terminal));
+    ) {
+        Ok(projected) => failure.terminal_projection = Some(projected),
+        Err(fault) => failure.error_operator_fault = Some(fault),
+    }
     failure
 }
 
@@ -1217,6 +1219,59 @@ mod tests {
         let error = wrapped.next().await.unwrap().unwrap_err();
         assert!(error.contains("final frame delimiter"));
         assert!(wrapped.next().await.is_none());
+    }
+
+    #[test]
+    fn terminalizer_retains_full_http_witness_with_and_without_sdk_fault() {
+        for status in [200, 429] {
+            let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
+                status,
+                vec![("x-provider-trace".to_string(), b"trace-a".to_vec())],
+                b"provider-private-body".to_vec(),
+            )
+            .with_body_read_failure("truncated provider body");
+            for sdk_fault in [false, true] {
+                let mut failure = provider_runtime_failure(
+                    V3ProviderError::Transport {
+                        request_id: "req-terminal-witness".to_string(),
+                        provider_id: "provider-a".to_string(),
+                        reason: "residence budget exhausted".to_string(),
+                    },
+                    "provider-a",
+                );
+                if sdk_fault {
+                    let source = build_v3_error_01_source_raised(
+                        V3ErrorSourceKind::ProviderFailure,
+                        failure.source_stage,
+                        "provider_error",
+                        "residence budget exhausted",
+                    );
+                    failure.error_operator_fault = Some(
+                        crate::provider_failure_runtime_policy::finish_v3_relay_error_projection(
+                            source,
+                            Ok(None),
+                        )
+                        .expect_err("missing Error06 is a typed SDK fault"),
+                    );
+                }
+                let terminal = terminalize_provider_failure(failure, Some(witness.clone()));
+                assert_eq!(
+                    terminal.terminal_disposition,
+                    Some(
+                        routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(
+                            witness.clone()
+                        )
+                    )
+                );
+                if sdk_fault {
+                    assert!(terminal.terminal_projection.is_none());
+                    assert!(terminal.error_operator_fault.is_some());
+                } else {
+                    assert_eq!(terminal.terminal_projection.unwrap().status, 502);
+                    assert!(terminal.error_operator_fault.is_none());
+                }
+            }
+        }
     }
 
     #[test]
