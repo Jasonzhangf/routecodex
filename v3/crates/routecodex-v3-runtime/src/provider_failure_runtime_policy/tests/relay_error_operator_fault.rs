@@ -20,6 +20,24 @@ fn real_client_disconnect_source() -> (serde_json::Value, V3Error01SourceRaised)
     .expect("real Error01 SDK must raise the source")
 }
 
+fn real_provider_failure_source() -> (serde_json::Value, V3Error01SourceRaised) {
+    raise_v3_source_via_err01(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderRespInbound01Raw",
+        "provider_unavailable",
+        "provider unavailable",
+        V3Err01SourceInput::External(V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: Some(503),
+            code: Some("provider_unavailable".to_string()),
+            provider_id: Some("provider-a".to_string()),
+            upstream_request_id: Some("request-a".to_string()),
+            message: Some("provider unavailable".to_string()),
+        }),
+    )
+    .expect("real Error01 SDK must raise the provider failure source")
+}
+
 #[test]
 fn source_helper_preserves_real_sdk_output_for_plain_internal_and_external() {
     let (plain_projection, plain_source) = raise_v3_source_via_err01(
@@ -299,6 +317,111 @@ fn omitted_terminal_projection_is_a_typed_contract_fault() {
     assert_eq!(
         fault.policy_failure.code,
         "relay_error_projection_nonterminal"
+    );
+    assert_eq!(fault.original_source, Some(source));
+}
+
+#[test]
+fn health_error02_sdk_rejection_preserves_external_source_witness() {
+    let (_, source) = real_provider_failure_source();
+    let fault = classify_v3_provider_health_source_via_err02(json!(null), source.clone())
+        .expect_err("the real Error02 SDK must reject a non-object source projection");
+
+    assert_eq!(
+        fault.policy_failure.code,
+        "relay_error_operator_sdk_failure"
+    );
+    assert_eq!(fault.original_source, Some(source.clone()));
+    assert_eq!(
+        fault
+            .original_source
+            .as_ref()
+            .and_then(|source| source.external_error.as_ref())
+            .and_then(|error| error.status),
+        Some(503)
+    );
+}
+
+#[test]
+fn policy_error02_to_05_sdk_rejection_preserves_original_source() {
+    let scope = "h2_policy_error02_to_05_rejection";
+    let manifest = target_resolution_manifest(scope);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let selected = match resolve_target(&manifest, scope, &BTreeSet::new(), &health) {
+        V3RelayProviderTargetResolution::Selected(selected) => selected,
+        _ => panic!("valid fixture must select the provider"),
+    };
+    let (_, source) = real_provider_failure_source();
+    let fault = build_v3_relay_provider_error_05_decision(
+        &selected,
+        json!(null),
+        source.clone(),
+        0,
+        false,
+        false,
+        None,
+    )
+    .expect_err("the real Error02..05 SDK chain must reject a non-object source projection");
+
+    assert_eq!(
+        fault.policy_failure.code,
+        "relay_error_operator_sdk_failure"
+    );
+    assert_eq!(fault.original_source, Some(source));
+}
+
+#[test]
+fn terminal_error06_rejection_preserves_decision_source_and_nonterminal_stays_none() {
+    let scope = "h2_terminal_error06_rejection";
+    let manifest = target_resolution_manifest(scope);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let selected = match resolve_target(&manifest, scope, &BTreeSet::new(), &health) {
+        V3RelayProviderTargetResolution::Selected(selected) => selected,
+        _ => panic!("valid fixture must select the provider"),
+    };
+    let (source_projection, source) = real_provider_failure_source();
+    let recovery = V3Error05RecoveryAdmissionWitness::new(
+        test_provider_failure_scope(scope, scope, "session-h2-terminal")
+            .expect("test failure session scope"),
+        v3_relay_provider_candidate_key(&selected.candidate),
+        "provider_unavailable",
+        1,
+    )
+    .expect("test recovery witness");
+    let (decision_projection, decision) = build_v3_relay_provider_error_05_decision(
+        &selected,
+        source_projection.clone(),
+        source.clone(),
+        1,
+        true,
+        false,
+        Some(recovery),
+    )
+    .expect("real Error02..05 SDK chain must produce a switch-provider decision");
+
+    assert_eq!(
+        terminal_projection_for(decision_projection.clone(), &decision, None)
+            .expect("a valid nonterminal decision must not enter Error06"),
+        None
+    );
+
+    let (_, terminal_decision) = build_v3_relay_provider_error_05_decision(
+        &selected,
+        source_projection,
+        source.clone(),
+        0,
+        false,
+        false,
+        None,
+    )
+    .expect("real Error02..05 SDK chain must produce a terminal decision");
+    assert!(terminal_decision.clone().try_into_terminal().is_ok());
+
+    let fault = terminal_projection_for(json!(null), &terminal_decision, None)
+        .expect_err("the real Error06 SDK must reject a non-object decision projection");
+    assert_eq!(
+        fault.policy_failure.code,
+        "relay_error_operator_sdk_failure"
     );
     assert_eq!(fault.original_source, Some(source));
 }

@@ -1,3 +1,19 @@
+fn classify_v3_provider_health_source_via_err02(
+    source_projection: Value,
+    source: V3Error01SourceRaised,
+) -> Result<routecodex_v3_error::V3Error02Classified, V3RelayErrorOperatorFault> {
+    let original_source = source.clone();
+    crate::operation_runner::run_v3_err02_classified_operator(source_projection, source, None)
+        .map(|(_projection, classified)| classified)
+        .map_err(|error| {
+            relay_error_operator_fault(
+                "relay_error_operator_sdk_failure",
+                error.message,
+                Some(original_source),
+            )
+        })
+}
+
 impl V3ProviderFailureRuntimeHealth {
     pub fn from_manifest_for_tests(manifest: &V3Config05ManifestPublished) -> Self {
         let store = V3ProviderHealthStore::from_manifest_without_persistence(manifest);
@@ -466,12 +482,9 @@ impl V3ProviderFailureRuntimeHealth {
                 }),
             )
             .map_err(Err)?;
-        let (_, classified) = crate::operation_runner::run_v3_err02_classified_operator(
-            source_projection,
-            source,
-            None,
-        )
-        .map_err(|error| Ok(error.to_string()))?;
+        let classified =
+            classify_v3_provider_health_source_via_err02(source_projection, source)
+                .map_err(Err)?;
         let failure_action = build_v3_provider_failure_action_from_v3_error_02(&classified);
         if let Some(policy) = matched_policy_directive
             .map(|policy| {

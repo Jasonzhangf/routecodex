@@ -970,7 +970,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                         )
                     },
                 )
-                .map_err(v3_relay_provider_policy_ordinary_error)?;
+                .map_err(Err)?;
                 state.failed_candidates.insert(candidate_key);
                 state.trace.push("V3TargetLocalReselected");
                 return Ok(V3RelayProviderFailurePolicyResult {
@@ -979,7 +979,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                         &decision,
                         matched_policy,
                     )
-                    .map_err(v3_relay_provider_policy_ordinary_error)?,
+                    .map_err(Err)?,
                     terminal_disposition: terminal_disposition_for(&decision, state),
                     decision,
                     retry_selected: Some(Box::new(alternative)),
@@ -1005,11 +1005,12 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         } => true,
         V3RelayProviderTargetResolution::Failed(source) => {
             let resolution_message = source.message.clone();
-            let source_stage = source.source_stage;
-            let source_code = source.code.clone();
+            let original_source = source.clone();
             let source_projection = serde_json::to_value(&source).map_err(|error| {
-                v3_relay_provider_policy_ordinary_error(format!(
-                    "serialize raised target-resolution source: {error}"
+                Err(relay_error_operator_fault(
+                    "relay_error_operator_sdk_failure",
+                    format!("serialize raised target-resolution source: {error}"),
+                    Some(original_source.clone()),
                 ))
             })?;
             // The target-resolution source already raised Err01. Its Err01
@@ -1025,14 +1026,15 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                 None,
             )
             .map_err(|error| {
-                v3_relay_provider_policy_ordinary_error(format!(
-                    "{error} (diagnostic_source={}:{})",
-                    source_stage, source_code
+                Err(relay_error_operator_fault(
+                    "relay_error_operator_sdk_failure",
+                    error.message,
+                    Some(original_source),
                 ))
             })?;
             let terminal_projection =
                 terminal_projection_for(decision_projection, &decision, matched_policy)
-                    .map_err(v3_relay_provider_policy_ordinary_error)?;
+                    .map_err(Err)?;
             return Ok(V3RelayProviderFailurePolicyResult {
                 terminal_projection,
                 terminal_disposition: None,
@@ -1068,14 +1070,14 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
             false,
             None,
         )
-        .map_err(v3_relay_provider_policy_ordinary_error)?;
+        .map_err(Err)?;
         return Ok(V3RelayProviderFailurePolicyResult {
             terminal_projection: terminal_projection_for(
                 decision_projection,
                 &decision,
                 matched_policy,
             )
-            .map_err(v3_relay_provider_policy_ordinary_error)?,
+            .map_err(Err)?,
             terminal_disposition: terminal_disposition_for(&decision, state),
             decision,
             retry_selected: None,
@@ -1110,7 +1112,9 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         false,
         None,
     )
-    .map_err(v3_relay_provider_policy_ordinary_error)?;
+    .map_err(Err)?;
+    let terminal_projection =
+        terminal_projection_for(decision_projection, &decision, matched_policy).map_err(Err)?;
     let admission = context
         .provider_health
         .record_terminal_provider_projection_in_scope_for_interface(
@@ -1122,9 +1126,6 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
             error_type.as_deref().unwrap_or("provider_failure"),
         )
         .map_err(v3_relay_provider_policy_ordinary_error)?;
-    let terminal_projection =
-        terminal_projection_for(decision_projection, &decision, matched_policy)
-            .map_err(v3_relay_provider_policy_ordinary_error)?;
     let terminal_disposition = terminal_disposition_for(&decision, state);
     Ok(V3RelayProviderFailurePolicyResult {
         terminal_projection,
@@ -1163,19 +1164,14 @@ fn terminal_projection_for(
     decision_projection: Value,
     decision: &V3Error05ExecutionDecision,
     matched_policy: Option<&V3ProviderErrorActionPolicyManifest>,
-) -> Result<Option<V3Error06ClientProjected>, String> {
+) -> Result<Option<V3Error06ClientProjected>, V3RelayErrorOperatorFault> {
     let Some((_, mut projected)) =
         run_v3_error_06_terminal_projection_operator(decision_projection, decision.clone())
             .map_err(|error| {
-                format!(
-                    "{error} (diagnostic_source={}:{})",
-                    decision
-                        .exhaustion
-                        .local_action
-                        .classified
-                        .source
-                        .source_stage,
-                    decision.exhaustion.local_action.classified.source.code
+                relay_error_operator_fault(
+                    "relay_error_operator_sdk_failure",
+                    error.message,
+                    Some(decision.exhaustion.local_action.classified.source.clone()),
                 )
             })?
     else {
@@ -1320,9 +1316,8 @@ fn build_v3_relay_provider_error_05_decision(
     default_pool_available: bool,
     same_provider_retry_available: bool,
     recovery: Option<V3Error05RecoveryAdmissionWitness>,
-) -> Result<(Value, V3Error05ExecutionDecision), String> {
-    let source_stage = source.source_stage;
-    let source_code = source.code.clone();
+) -> Result<(Value, V3Error05ExecutionDecision), V3RelayErrorOperatorFault> {
+    let original_source = source.clone();
     run_v3_error_02_to_05_decision_operators(
         source_projection,
         source,
@@ -1337,9 +1332,10 @@ fn build_v3_relay_provider_error_05_decision(
         recovery,
     )
     .map_err(|error| {
-        format!(
-            "{error} (diagnostic_source={source_stage}:{source_code}; candidate={}:{})",
-            selected.candidate.provider_id, selected.candidate.model_id,
+        relay_error_operator_fault(
+            "relay_error_operator_sdk_failure",
+            error.message,
+            Some(original_source),
         )
     })
 }
