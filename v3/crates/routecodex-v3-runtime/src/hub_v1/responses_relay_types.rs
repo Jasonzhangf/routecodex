@@ -165,6 +165,16 @@ pub struct V3RuntimeUsageSummary {
     pub cache_creation_input_tokens: Option<u64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3RuntimeProviderFailedAttemptEvidence {
+    /// The actual admitted provider transport ordinal for this request. This is
+    /// not a candidate index or a reconstructed sequence number.
+    pub attempt: usize,
+    pub provider_request: Option<Value>,
+    /// The real response head and retained bytes, or an explicit `no_response`.
+    pub provider_response: Value,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct V3RuntimeProviderFailureObservation {
     pub provider_key: String,
@@ -193,6 +203,9 @@ pub struct V3RuntimeProviderFailureObservation {
     /// artifact serializes it explicitly, and the existing log/admin
     /// projections keep their field set unchanged.
     pub diagnostic_source: Option<V3Error01SourceRaised>,
+    /// Failure-only attempt-local wire evidence. It is serialized exclusively by
+    /// the private failed-attempt artifact and never drives policy or health.
+    pub failed_attempt_evidence: Option<Arc<V3RuntimeProviderFailedAttemptEvidence>>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -280,6 +293,7 @@ pub(crate) struct V3ResponsesRelayProviderFailure {
     pub(crate) terminal_projection: Option<routecodex_v3_error::V3Error06ClientProjected>,
     pub(crate) terminal_disposition: Option<routecodex_v3_error::V3ProviderTerminalDisposition>,
     pub(crate) error_operator_fault: Option<V3RelayErrorOperatorFault>,
+    pub(crate) failed_attempt_evidence: Option<Arc<V3RuntimeProviderFailedAttemptEvidence>>,
     pub(crate) matched_policy: Option<V3ProviderFailureDirective>,
 }
 
@@ -296,6 +310,7 @@ impl From<V3RelayErrorOperatorFault> for V3ResponsesRelayProviderFailure {
             terminal_projection: None,
             terminal_disposition: None,
             error_operator_fault: Some(fault),
+            failed_attempt_evidence: None,
             matched_policy: None,
         }
     }

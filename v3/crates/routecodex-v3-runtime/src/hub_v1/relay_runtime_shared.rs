@@ -11,7 +11,8 @@
 
 use crate::hub_v1::{
     V3HubEntryProtocol, V3HubProviderWireProtocol, V3RuntimeObservability,
-    V3RuntimeProviderFailureObservation, V3RuntimeStreamObservation,
+    V3RuntimeProviderFailedAttemptEvidence, V3RuntimeProviderFailureObservation,
+    V3RuntimeStreamObservation,
 };
 use crate::provider_failure_runtime_policy::{
     project_v3_client_disconnect, provider_runtime_failure_stage,
@@ -22,9 +23,9 @@ use crate::provider_failure_runtime_policy::{
 use futures_util::StreamExt;
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness,
-    V3Error06ClientProjected, V3ErrorActionScope, V3ErrorSourceKind, V3ExternalHttpWitness,
-    V3_ERROR_CHAIN_NODE_IDS, V3_TRANSIENT_TRANSPORT_HANG_CODE,
+    V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected,
+    V3ErrorActionScope, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
+    V3ExternalHttpWitness, V3_ERROR_CHAIN_NODE_IDS, V3_TRANSIENT_TRANSPORT_HANG_CODE,
 };
 use routecodex_v3_provider_responses::{
     v3_provider_auth_handle_from_manifest_entry, V3ProviderAuthHandle, V3ProviderError,
@@ -38,6 +39,7 @@ use routecodex_v3_target::V3Target10ConcreteProviderSelected;
 use serde_json::{json, Value};
 use std::fmt;
 use std::pin::Pin;
+use std::sync::Arc;
 
 /// 骨架内部错误（协议入口负责映射到自身错误类型）。
 #[derive(Debug, Clone, PartialEq)]
@@ -143,6 +145,9 @@ pub struct V3RelayProviderFailure {
     pub terminal_projection: Option<V3Error06ClientProjected>,
     pub terminal_disposition: Option<routecodex_v3_error::V3ProviderTerminalDisposition>,
     pub error_operator_fault: Option<V3RelayErrorOperatorFault>,
+    /// Failure-only attempt-local wire evidence transferred to the policy event.
+    /// It is never read by error classification or provider health.
+    pub failed_attempt_evidence: Option<Arc<V3RuntimeProviderFailedAttemptEvidence>>,
     /// 从 client_response 提取错误类型（协议形状相关）。
     pub error_type_fn: fn(&Value) -> Option<String>,
     /// 从 client_response 提取错误消息（协议形状相关）。
@@ -162,6 +167,7 @@ pub(crate) fn provider_operator_fault_failure(
         terminal_projection: None,
         terminal_disposition: None,
         error_operator_fault: Some(fault),
+        failed_attempt_evidence: None,
         error_type_fn: extract_error_code_style,
         error_message_fn: extract_message_code_style,
     }
@@ -233,8 +239,8 @@ pub fn server_routing_group<'a>(
 pub(crate) fn provider_pool_exhausted_source(
     source_stage: &'static str,
     attempted_candidates: &[String],
-) -> routecodex_v3_error::V3Error01SourceRaised {
-    build_v3_error_01_source_raised(
+) -> crate::shared::V3DirectSourceError {
+    crate::shared::direct_plain_error(
         V3ErrorSourceKind::TargetPoolExhausted,
         source_stage,
         "selected_target_exhausted",
@@ -352,6 +358,7 @@ pub async fn handle_provider_failure(
         }
     };
     result.event.provider_status = failure.provider_status;
+    result.event.failed_attempt_evidence = failure.failed_attempt_evidence.clone();
     provider_failure_events
         .push(build_v3_runtime_provider_failure_observation_from_policy_event(&result.event));
     match result.decision.action {
@@ -418,6 +425,7 @@ pub(crate) fn build_v3_runtime_provider_failure_observation_from_policy_event(
         next_provider_key: event.next_provider_key.clone(),
         wait_ms: event.wait_ms,
         diagnostic_source: Some(event.diagnostic_source.clone()),
+        failed_attempt_evidence: event.failed_attempt_evidence.clone(),
     }
 }
 
@@ -450,6 +458,7 @@ pub fn provider_http_failure(
         terminal_projection: None,
         terminal_disposition: None,
         error_operator_fault: None,
+        failed_attempt_evidence: None,
         error_type_fn: extract_error_code_style,
         error_message_fn: extract_message_code_style,
     }
@@ -547,6 +556,184 @@ pub(crate) fn external_http_witness_from_provider_error(
     }
 }
 
+fn v3_failed_attempt_response_header_is_credential(name: &str) -> bool {
+    matches!(
+        name.trim().to_ascii_lowercase().as_str(),
+        "authorization" | "proxy-authorization" | "x-api-key" | "api-key" | "cookie" | "set-cookie"
+    )
+}
+
+fn v3_failed_attempt_json_key_is_credential(name: &str) -> bool {
+    matches!(
+        name.trim().to_ascii_lowercase().as_str(),
+        "authorization"
+            | "proxy-authorization"
+            | "x-api-key"
+            | "api-key"
+            | "api_key"
+            | "apikey"
+            | "cookie"
+            | "set-cookie"
+            | "token"
+            | "access_token"
+            | "refresh_token"
+            | "client_secret"
+            | "password"
+            | "secret"
+    )
+}
+
+fn redact_v3_failed_attempt_json(value: &mut Value) -> bool {
+    match value {
+        Value::Object(fields) => {
+            let mut changed = false;
+            for (name, field) in fields.iter_mut() {
+                if v3_failed_attempt_json_key_is_credential(name) {
+                    changed |= field.as_str() != Some("[REDACTED]");
+                    *field = Value::String("[REDACTED]".to_string());
+                } else {
+                    changed |= redact_v3_failed_attempt_json(field);
+                }
+            }
+            changed
+        }
+        Value::Array(values) => values.iter_mut().fold(false, |changed, value| {
+            changed | redact_v3_failed_attempt_json(value)
+        }),
+        _ => false,
+    }
+}
+
+fn project_v3_failed_attempt_response(
+    status: u16,
+    headers: &[V3ProviderResponseHeader],
+    body: &[u8],
+    body_read_failure: Option<&str>,
+) -> Value {
+    let headers = headers
+        .iter()
+        .map(|header| {
+            let name = header.name.clone();
+            let value = if v3_failed_attempt_response_header_is_credential(&name) {
+                "[REDACTED]".to_string()
+            } else {
+                String::from_utf8_lossy(&header.value).to_string()
+            };
+            json!({"name": name, "value": value})
+        })
+        .collect::<Vec<Value>>();
+    let (body_bytes, redacted) = match serde_json::from_slice::<Value>(body) {
+        Ok(mut value) => {
+            if redact_v3_failed_attempt_json(&mut value) {
+                let bytes = serde_json::to_vec(&value).unwrap_or_else(|_| {
+                    b"[REDACTED: failed-attempt body serialization failed]".to_vec()
+                });
+                (bytes, true)
+            } else {
+                (body.to_vec(), false)
+            }
+        }
+        Err(_) => (body.to_vec(), false),
+    };
+    json!({
+        "kind": "external_http",
+        "status": status,
+        "headers": headers,
+        "body": {
+            "bytes": body_bytes,
+            "redacted": redacted,
+        },
+        "body_read_failure": body_read_failure,
+    })
+}
+
+pub(crate) fn build_v3_runtime_provider_failed_attempt_evidence_from_response(
+    attempt: usize,
+    provider_request: Option<Value>,
+    status: u16,
+    headers: &[V3ProviderResponseHeader],
+    body: &[u8],
+    body_read_failure: Option<&str>,
+) -> Arc<V3RuntimeProviderFailedAttemptEvidence> {
+    Arc::new(V3RuntimeProviderFailedAttemptEvidence {
+        attempt,
+        provider_request,
+        provider_response: project_v3_failed_attempt_response(
+            status,
+            headers,
+            body,
+            body_read_failure,
+        ),
+    })
+}
+
+pub(crate) fn build_v3_runtime_provider_failed_attempt_evidence_no_response(
+    attempt: usize,
+    provider_request: Option<Value>,
+) -> Arc<V3RuntimeProviderFailedAttemptEvidence> {
+    Arc::new(V3RuntimeProviderFailedAttemptEvidence {
+        attempt,
+        provider_request,
+        provider_response: json!({"kind": "no_response"}),
+    })
+}
+
+pub(crate) fn build_v3_runtime_provider_failed_attempt_evidence_from_error(
+    attempt: usize,
+    provider_request: Option<Value>,
+    error: &V3ProviderError,
+) -> Option<Arc<V3RuntimeProviderFailedAttemptEvidence>> {
+    match error {
+        V3ProviderError::HttpStatus { response } => Some(
+            build_v3_runtime_provider_failed_attempt_evidence_from_response(
+                attempt,
+                provider_request,
+                response.status,
+                &response.headers,
+                &response.body,
+                response.body_read_failure.as_deref(),
+            ),
+        ),
+        V3ProviderError::UnexpectedContentType {
+            status, headers, ..
+        } => Some(
+            build_v3_runtime_provider_failed_attempt_evidence_from_response(
+                attempt,
+                provider_request,
+                *status,
+                headers,
+                &[],
+                None,
+            ),
+        ),
+        V3ProviderError::ResponseBodyUnreadable {
+            status,
+            headers,
+            reason,
+            ..
+        } => Some(
+            build_v3_runtime_provider_failed_attempt_evidence_from_response(
+                attempt,
+                provider_request,
+                *status,
+                headers,
+                &[],
+                Some(reason),
+            ),
+        ),
+        V3ProviderError::Transport { .. }
+        | V3ProviderError::InternalTransport { .. }
+        | V3ProviderError::WebSocketTransport { .. }
+        | V3ProviderError::WebSocketProtocol { .. } => Some(
+            build_v3_runtime_provider_failed_attempt_evidence_no_response(
+                attempt,
+                provider_request,
+            ),
+        ),
+        _ => None,
+    }
+}
+
 /// Preserve the received upstream status while recording that its body read
 /// failed. This remains a provider failure, never a complete HTTP witness.
 pub fn provider_http_body_read_failure(
@@ -590,6 +777,7 @@ pub fn provider_request_failure(
         terminal_projection: None,
         terminal_disposition: None,
         error_operator_fault: None,
+        failed_attempt_evidence: None,
         error_type_fn: extract_error_code_style,
         error_message_fn: extract_message_code_style,
     }
@@ -610,14 +798,16 @@ pub fn provider_runtime_failure(
                 "V3ProviderRespInbound01Raw"
             }
         };
+        let fallback_message = error.to_string();
         let source = crate::hooks::build_v3_provider_error_source(source_stage, error);
-        let fallback_message = source.message.clone();
-        return match crate::provider_failure_runtime_policy::project_v3_relay_error_source(
-            source,
-            V3ErrorActionScope::None,
-            0,
-            None,
-        ) {
+        return match source.and_then(|source| {
+            crate::provider_failure_runtime_policy::project_v3_relay_error_source(
+                source,
+                V3ErrorActionScope::None,
+                0,
+                None,
+            )
+        }) {
             Ok(projected) => V3RelayProviderFailure {
                 status: projected.status,
                 // Internal transport handoff failure: no upstream HTTP response exists.
@@ -632,6 +822,7 @@ pub fn provider_runtime_failure(
                 terminal_projection: Some(projected),
                 terminal_disposition: None,
                 error_operator_fault: None,
+                failed_attempt_evidence: None,
                 error_type_fn: extract_error_code_style,
                 error_message_fn: extract_message_code_style,
             },
@@ -650,6 +841,7 @@ pub fn provider_runtime_failure(
                     routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
                 ),
                 error_operator_fault: Some(fault),
+                failed_attempt_evidence: None,
                 error_type_fn: extract_error_code_style,
                 error_message_fn: extract_message_code_style,
             },
@@ -697,6 +889,7 @@ pub fn provider_runtime_failure(
         terminal_projection,
         terminal_disposition: None,
         error_operator_fault,
+        failed_attempt_evidence: None,
         error_type_fn: extract_error_code_style,
         error_message_fn: extract_message_code_style,
     }
@@ -732,14 +925,34 @@ pub fn terminalize_provider_failure(
     if failure.error_operator_fault.is_some() {
         return failure;
     }
-    let source = build_v3_error_01_source_raised(
+    let source = crate::shared::direct_source_error(
         V3ErrorSourceKind::ProviderFailure,
         failure.source_stage,
         failure_error_type(&failure)
             .as_deref()
             .unwrap_or("provider_error"),
         provider_failure_message(&failure),
+        match failure.provider_status {
+            Some(status) => {
+                crate::operation_runner::V3Err01SourceInput::External(V3ExternalErrorLink {
+                    kind: V3ExternalErrorKind::Provider,
+                    status: Some(status),
+                    code: failure_error_type(&failure),
+                    provider_id: None,
+                    upstream_request_id: None,
+                    message: Some(provider_failure_message(&failure)),
+                })
+            }
+            None => crate::operation_runner::V3Err01SourceInput::Plain,
+        },
     );
+    let source = match source {
+        Ok(source) => source,
+        Err(fault) => {
+            failure.error_operator_fault = Some(fault);
+            return failure;
+        }
+    };
     match crate::provider_failure_runtime_policy::project_v3_relay_error_source(
         source,
         V3ErrorActionScope::None,
@@ -1267,7 +1480,7 @@ mod tests {
                     "provider-a",
                 );
                 if sdk_fault {
-                    let source = build_v3_error_01_source_raised(
+                    let source = routecodex_v3_error::build_v3_error_01_source_raised(
                         V3ErrorSourceKind::ProviderFailure,
                         failure.source_stage,
                         "provider_error",
@@ -1299,6 +1512,30 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn terminalizer_preserves_upstream_http_link_in_error01_source() {
+        let failure = provider_http_failure(
+            429,
+            br#"{"error":{"code":"rate_limit_error","message":"slow down"}}"#,
+            "provider-a",
+        );
+        let terminal = terminalize_provider_failure(failure, None);
+        let projection = terminal
+            .terminal_projection
+            .expect("terminalized provider failure must carry Error06 projection");
+        let external = projection
+            .diagnostic_source
+            .external_error
+            .expect("a real provider HTTP status must stay linked in Error01");
+        assert_eq!(
+            external.kind,
+            routecodex_v3_error::V3ExternalErrorKind::Provider
+        );
+        assert_eq!(external.status, Some(429));
+        assert_eq!(external.code.as_deref(), Some("rate_limit_error"));
+        assert_eq!(external.message.as_deref(), Some("slow down"));
     }
 
     #[test]

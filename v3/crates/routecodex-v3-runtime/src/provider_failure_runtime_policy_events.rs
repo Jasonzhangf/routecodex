@@ -26,6 +26,7 @@ fn build_v3_relay_provider_failure_policy_event(
         next_provider_key: input.next_provider_key,
         wait_ms: input.wait_ms,
         diagnostic_source: input.diagnostic_source,
+        failed_attempt_evidence: None,
     }
 }
 

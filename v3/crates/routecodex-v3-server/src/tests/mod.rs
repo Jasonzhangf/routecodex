@@ -11,6 +11,8 @@ use std::sync::Mutex as StdMutex;
 mod foundation_output;
 mod frame_sdk_fault;
 mod local599_output;
+mod post_commit_sse_sdk_fault;
+mod websocket_sdk_fault;
 
 #[tokio::test]
 async fn listener_bind_retries_eintr_once_before_success() {
@@ -1210,6 +1212,177 @@ async fn codex_sample_sse_recorders_persist_only_initial_and_terminal_artifacts(
     fs::remove_dir_all(root).unwrap();
 }
 
+#[test]
+fn v3_http_server_responses_direct_sse_optional_snapshot_failure_is_diagnostic_only() {
+    if std::env::var_os("V3_OPTIONAL_SNAPSHOT_DIAGNOSTIC_CHILD").is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::v3_http_server_responses_direct_sse_optional_snapshot_failure_is_diagnostic_only",
+                "--nocapture",
+            ])
+            .env("V3_OPTIONAL_SNAPSHOT_DIAGNOSTIC_CHILD", "1")
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success(),
+            "focused child failed; stdout={} stderr={stderr}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("1 passed"),
+            "focused child must execute exactly one test: {stderr}"
+        );
+        assert!(
+            stderr.contains("[v3-sse-snapshot] client response capture failed"),
+            "append failure must remain detectable as a diagnostic: {stderr}"
+        );
+        assert!(
+            stderr.contains("[v3-sse-snapshot] client response finalize failed"),
+            "terminal persistence failure must remain detectable as a diagnostic: {stderr}"
+        );
+        return;
+    }
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-optional-snapshot-failure-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state = test_v3_listener_state_with_debug(
+        &root.join("server.log"),
+        5555,
+        true,
+        true,
+        Some("client-response".to_string()),
+        true,
+    );
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let evidence = runtime.block_on(async {
+        let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
+        let business_bytes =
+            b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"business\"}\n\n"
+                .to_vec();
+        let frame = V3Server16HttpFrame {
+            status: 200,
+            content_type: "text/event-stream".to_string(),
+            body: V3Server16Body::Bytes(Vec::new()),
+            debug_node: "V3Debug01NodeEventRegistered",
+            error_node: "none",
+            error_chain: Vec::new(),
+            error_body: None,
+            diagnostic_source: None,
+            diagnostic_cause: None,
+            node_trace: vec!["V3Server16HttpFrame"],
+            observability: None,
+            stream_observation: None,
+        };
+        let recorder = V3LiveSnapDirectClientResponseSseRecorder::new(
+            Arc::clone(&state),
+            "responses".to_string(),
+            "/v1/responses".to_string(),
+            "optional-snapshot-public-consumer".to_string(),
+            &frame,
+        );
+        recorder.persist_initial().unwrap();
+        sample_worker.wait_until_idle().await.unwrap();
+        recorder.poison_raw_sse_capture_for_test();
+        let response = responses_direct_output_response(
+            V3Server16HttpFrame {
+                body: V3Server16Body::Sse(recorder.wrap_live(Box::pin(
+                    futures_util::stream::iter(vec![Ok::<
+                        Vec<u8>,
+                        routecodex_v3_error::V3Error01SourceRaised,
+                    >(business_bytes.clone())]),
+                ))),
+                ..frame
+            },
+            None,
+        );
+        let mut client = response.into_body().into_data_stream();
+        let mut delivered = Vec::new();
+        let mut body_error = None;
+        while let Some(item) = client.next().await {
+            match item {
+                Ok(bytes) => delivered.extend_from_slice(&bytes),
+                Err(error) => {
+                    body_error = Some(error.to_string());
+                    break;
+                }
+            }
+        }
+
+        let original_source = routecodex_v3_error::build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3ServerRespOutbound05ClientFrame",
+            "original_business_source",
+            "original source must survive optional snapshot failure",
+        );
+        let source_frame = V3Server16HttpFrame {
+            status: 200,
+            content_type: "text/event-stream".to_string(),
+            body: V3Server16Body::Bytes(Vec::new()),
+            debug_node: "V3Debug01NodeEventRegistered",
+            error_node: "none",
+            error_chain: Vec::new(),
+            error_body: None,
+            diagnostic_source: None,
+            diagnostic_cause: None,
+            node_trace: vec!["V3Server16HttpFrame"],
+            observability: None,
+            stream_observation: None,
+        };
+        let source_recorder = V3LiveSnapDirectClientResponseSseRecorder::new(
+            Arc::clone(&state),
+            "responses".to_string(),
+            "/v1/responses".to_string(),
+            "optional-snapshot-source-error".to_string(),
+            &source_frame,
+        );
+        source_recorder.persist_initial().unwrap();
+        sample_worker.wait_until_idle().await.unwrap();
+        source_recorder.poison_raw_sse_capture_for_test();
+        let mut source_stream = source_recorder.wrap_live(Box::pin(
+            futures_util::stream::iter(vec![Err::<
+                Vec<u8>,
+                routecodex_v3_error::V3Error01SourceRaised,
+            >(original_source.clone())]),
+        ));
+        let yielded_source = match source_stream.next().await {
+            Some(Err(error)) => error,
+            Some(Ok(bytes)) => panic!("source stream yielded business bytes: {bytes:?}"),
+            None => panic!("source stream ended without yielding the original source"),
+        };
+        sample_worker.shutdown().await;
+        (
+            business_bytes,
+            delivered,
+            body_error,
+            original_source,
+            yielded_source,
+        )
+    });
+    let (business_bytes, delivered, body_error, original_source, yielded_source) = evidence;
+
+    assert_eq!(
+        delivered, business_bytes,
+        "optional snapshot failure must preserve every original business byte"
+    );
+    assert!(
+        body_error.is_none(),
+        "optional snapshot failure must not terminate the public SSE consumer: {body_error:?}"
+    );
+    assert_eq!(
+        yielded_source, original_source,
+        "optional snapshot failure must preserve the original upstream source"
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
 #[tokio::test]
 async fn codex_sample_sse_recorder_persists_drop_artifact_with_stream_error() {
     let _home_lock = TEST_HOME_LOCK.lock().unwrap();
@@ -1659,6 +1832,7 @@ fn test_provider_failure_observation() -> V3RuntimeProviderFailureObservation {
         next_provider_key: Some("second:key:gpt-5.5".to_string()),
         wait_ms: None,
         diagnostic_source: None,
+        failed_attempt_evidence: None,
     }
 }
 
@@ -2606,9 +2780,10 @@ async fn malformed_json_error_includes_body_length_without_raw_payload() {
         .body(Body::from(r#"{"model":"gpt-5.5","input":"#))
         .unwrap();
 
-    let projected = read_json_payload(request)
+    let projection = read_json_payload(request)
         .await
         .expect_err("truncated JSON must fail at the HTTP boundary");
+    let projected = projection.expect("normal malformed JSON must produce Error06");
 
     assert_eq!(projected.status, 400);
     assert_eq!(projected.body["error"]["code"], "malformed_json");
@@ -2886,6 +3061,7 @@ fn provider_failure_console_content_exposes_red_error_and_switch() {
         next_provider_key: Some("minimax:key1:MiniMax-M3".to_string()),
         wait_ms: None,
         diagnostic_source: None,
+        failed_attempt_evidence: None,
     };
     let error_content = format_v3_provider_failure_console_content("req-provider-switch", &event);
     assert!(error_content.contains("❌ [provider-error]"));
@@ -3904,13 +4080,12 @@ async fn direct_live_sse_drop_after_completed_before_ping_is_completed() {
         stream_observation: Some(observation),
     };
     let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
-    let mut stream = wrap_v3_direct_live_sse_console_stream(
-        match frame.body {
-            V3Server16Body::Sse(stream) => stream,
-            _ => unreachable!("test frame owns Direct live SSE body"),
-        },
-        finalizer,
-    );
+    let client_stream = match frame.body {
+        V3Server16Body::Sse(stream) => stream,
+        _ => unreachable!("test frame owns Direct live SSE body"),
+    };
+    let mut stream: V3IoSseStream =
+        wrap_v3_direct_live_sse_console_stream(client_stream, finalizer);
     let chunk = stream.next().await.unwrap().unwrap();
     assert!(std::str::from_utf8(&chunk)
         .unwrap()
@@ -3962,13 +4137,12 @@ async fn direct_live_sse_drop_before_terminal_remains_client_disconnect() {
         stream_observation: Some(V3RuntimeStreamObservation::default()),
     };
     let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
-    let mut stream = wrap_v3_direct_live_sse_console_stream(
-        match frame.body {
-            V3Server16Body::Sse(stream) => stream,
-            _ => unreachable!("test frame owns Direct live SSE body"),
-        },
-        finalizer,
-    );
+    let client_stream = match frame.body {
+        V3Server16Body::Sse(stream) => stream,
+        _ => unreachable!("test frame owns Direct live SSE body"),
+    };
+    let mut stream: V3IoSseStream =
+        wrap_v3_direct_live_sse_console_stream(client_stream, finalizer);
     assert!(stream.next().await.unwrap().unwrap().starts_with(b"event:"));
     drop(stream);
 
@@ -4021,13 +4195,12 @@ async fn direct_live_sse_drop_after_failure_terminal_does_not_become_client_disc
         stream_observation: Some(observation),
     };
     let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
-    let mut stream = wrap_v3_direct_live_sse_console_stream(
-        match frame.body {
-            V3Server16Body::Sse(stream) => stream,
-            _ => unreachable!("test frame owns Direct live SSE body"),
-        },
-        finalizer,
-    );
+    let client_stream = match frame.body {
+        V3Server16Body::Sse(stream) => stream,
+        _ => unreachable!("test frame owns Direct live SSE body"),
+    };
+    let mut stream: V3IoSseStream =
+        wrap_v3_direct_live_sse_console_stream(client_stream, finalizer);
     assert!(stream.next().await.unwrap().unwrap().starts_with(b"event:"));
     drop(stream);
 
@@ -5057,6 +5230,7 @@ async fn responses_live_sse_error_aborts_without_failed_terminal() {
     )]);
     let body = v3_live_client_sse_body_for_protocol(
         Box::pin(provider),
+        None,
         None,
         V3SseClientProtocol::Responses,
     );

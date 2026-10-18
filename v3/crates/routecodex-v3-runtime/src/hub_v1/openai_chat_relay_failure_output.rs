@@ -59,7 +59,7 @@ pub(super) fn error_output(
     error_output_from_projection(projected, trace)
 }
 
-fn error_output_from_projection(
+pub(super) fn error_output_from_projection(
     projected: Result<
         routecodex_v3_error::V3Error06ClientProjected,
         crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
@@ -165,6 +165,48 @@ mod tests {
     }
 
     #[test]
+    fn provider_compat_source_fault_short_circuits_with_original_cause() {
+        let error = V3ProviderCompatError::new_payload_boundary(
+            "response",
+            "passthrough".to_string(),
+            "ProviderCompatPayloadBoundaryViolation field=metadata value=control".to_string(),
+        );
+        let source = crate::hub_v1::provider_compat_boundary_source(
+            "ProviderRespCompat02ProviderCompat",
+            &error,
+        )
+        .expect("compat boundary source must execute Error01 successfully");
+        let fault = crate::provider_failure_runtime_policy::finish_v3_relay_error_projection(
+            source.clone(),
+            Ok(None),
+        )
+        .expect_err("missing terminal Error06 is a typed SDK fault");
+        let diagnostic_source = fault.policy_failure.clone();
+        let diagnostic_cause = fault
+            .original_source
+            .clone()
+            .expect("the SDK fault keeps its original compat source");
+
+        let output =
+            error_output_from_projection(Err(fault), vec!["ProviderRespCompat02ProviderCompat"]);
+
+        assert_eq!(output.status, 599);
+        assert_eq!(
+            output.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
+        );
+        assert!(matches!(
+            &output.client_body,
+            V3OpenAiChatRelayClientBody::Json(value) if value.is_null()
+        ));
+        assert!(output.error_chain.is_none());
+        assert!(!output.node_trace.contains(&"V3Error06ClientProjected"));
+        assert_eq!(output.diagnostic_source, Some(diagnostic_source));
+        assert_eq!(output.diagnostic_cause, Some(diagnostic_cause.clone()));
+        assert_eq!(diagnostic_cause, source);
+    }
+
+    #[test]
     fn relay_error_operator_fault_projects_internal_599_without_client_error() {
         let source = routecodex_v3_error::build_v3_error_01_source_raised(
             routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
@@ -212,6 +254,7 @@ mod tests {
                     terminal_projection: None,
                     terminal_disposition: None,
                     error_operator_fault: Some(fault.clone()),
+                    failed_attempt_evidence: None,
                     error_type_fn: |_| None,
                     error_message_fn: |_| "unused".to_string(),
                 },
@@ -231,6 +274,7 @@ mod tests {
                         ),
                     ),
                     error_operator_fault: Some(fault),
+                    failed_attempt_evidence: None,
                     error_type_fn: |_| None,
                     error_message_fn: |_| "unused".to_string(),
                 },

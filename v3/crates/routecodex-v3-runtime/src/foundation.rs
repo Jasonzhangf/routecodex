@@ -9,7 +9,8 @@ use crate::provider_failure_runtime_policy::{
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_debug::{V3DebugError, V3DebugRuntime};
 use routecodex_v3_error::{
-    V3Error01SourceRaised, V3Error06ClientProjected, V3ErrorActionScope, V3ErrorSourceKind,
+    v3_http_boundary_error_spec, v3_server_websocket_error_spec, V3Error01SourceRaised,
+    V3Error06ClientProjected, V3ErrorActionScope, V3ErrorSourceKind, V3HttpBoundaryErrorKind,
 };
 use routecodex_v3_provider_responses::{
     V3ProviderAvailabilityReader, V3ProviderAvailabilityRegistry,
@@ -72,23 +73,24 @@ pub struct V3FoundationRuntimeOutput {
     pub diagnostic_cause: Option<V3Error01SourceRaised>,
 }
 
-fn raise_and_project_foundation_error(
+pub fn project_v3_server_boundary_error_via_sdk(
     source_kind: V3ErrorSourceKind,
     source_stage: &'static str,
     code: &'static str,
-    message: String,
+    message: impl Into<String>,
+    source_status: Option<u16>,
 ) -> Result<V3Error06ClientProjected, V3RelayErrorOperatorFault> {
     let (_source_projection, source) = raise_v3_source_via_err01(
         source_kind,
         source_stage,
         code,
-        message,
+        message.into(),
         V3Err01SourceInput::Plain,
     )?;
-    project_v3_relay_error_source(source, V3ErrorActionScope::None, 0, None)
+    project_v3_relay_error_source(source, V3ErrorActionScope::None, 0, source_status)
 }
 
-fn foundation_output_from_error_sdk_result(
+pub fn foundation_output_from_error_sdk_result(
     debug_node: &'static str,
     fault_node_trace: Vec<&'static str>,
     success_node_trace: Option<Vec<&'static str>>,
@@ -122,6 +124,57 @@ fn foundation_output_from_error_sdk_result(
             diagnostic_cause: fault.original_source,
         },
     }
+}
+
+pub fn project_v3_http_boundary_error_via_sdk(
+    kind: V3HttpBoundaryErrorKind,
+    detail: impl Into<String>,
+) -> Result<V3Error06ClientProjected, V3RelayErrorOperatorFault> {
+    let (source_kind, source_stage, code) = v3_http_boundary_error_spec(kind);
+    project_v3_server_boundary_error_via_sdk(source_kind, source_stage, code, detail, None)
+}
+
+pub fn project_v3_server_websocket_error_via_sdk(
+    code: &'static str,
+    detail: impl Into<String>,
+) -> Result<V3Error06ClientProjected, V3RelayErrorOperatorFault> {
+    let (source_kind, source_stage, source_status) = v3_server_websocket_error_spec(code);
+    project_v3_server_boundary_error_via_sdk(
+        source_kind,
+        source_stage,
+        code,
+        detail,
+        Some(source_status),
+    )
+}
+
+/// Project an already-raised Source through the REST error SDK.
+///
+/// Post-commit producers own reaching a real `V3Error01SourceRaised`. Running
+/// Err01 again would replace that source with a synthetic local failure.
+pub fn project_v3_post_commit_sse_source_via_sdk(
+    source: V3Error01SourceRaised,
+    status: u16,
+) -> Result<V3Error06ClientProjected, V3RelayErrorOperatorFault> {
+    project_v3_relay_error_source(source, V3ErrorActionScope::None, 0, Some(status)).map(
+        |mut projected| {
+            projected.status = status;
+            projected
+        },
+    )
+}
+
+pub fn project_v3_runtime_observability_contract_failure_via_sdk(
+    message: impl Into<String>,
+) -> Result<V3Error06ClientProjected, V3RelayErrorOperatorFault> {
+    let (_source_projection, source) = raise_v3_source_via_err01(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3RuntimeObservability",
+        "runtime_observability_contract",
+        message.into(),
+        V3Err01SourceInput::Plain,
+    )?;
+    project_v3_post_commit_sse_source_via_sdk(source, 500)
 }
 
 pub fn execute_v3_p5_routing_runtime<R: V3ProviderAvailabilityReader>(
@@ -333,11 +386,12 @@ fn project_p5_failure(
         source_stage,
         Vec::new(),
         None,
-        raise_and_project_foundation_error(
+        project_v3_server_boundary_error_via_sdk(
             V3ErrorSourceKind::TargetPoolExhausted,
             source_stage,
             code,
             message,
+            None,
         ),
     )
 }
@@ -425,11 +479,12 @@ pub fn project_v3_debug_failure(
         source_stage,
         Vec::new(),
         None,
-        raise_and_project_foundation_error(
+        project_v3_server_boundary_error_via_sdk(
             V3ErrorSourceKind::RuntimeFailure,
             source_stage,
             "v3_debug_failure",
             error.to_string(),
+            None,
         ),
     )
 }
@@ -437,7 +492,7 @@ pub fn project_v3_debug_failure(
 fn build_pending_projection(
     input: &V3FoundationRuntimeInput,
 ) -> Result<V3Error06ClientProjected, V3RelayErrorOperatorFault> {
-    raise_and_project_foundation_error(
+    project_v3_server_boundary_error_via_sdk(
         V3ErrorSourceKind::PendingEndpoint,
         "V3Server03HttpRequestRaw",
         "not_implemented",
@@ -445,6 +500,7 @@ fn build_pending_projection(
             "V3 endpoint node is registered but not implemented: {} {} on {}",
             input.method, input.path, input.server_id
         ),
+        None,
     )
 }
 
@@ -554,6 +610,168 @@ mod tests {
             "relay_error_operator_sdk_failure"
         );
         assert_eq!(output.diagnostic_cause, Some(original_source));
+    }
+
+    #[test]
+    fn http_boundary_error_executes_canonical_error_nodes_and_preserves_fault_cause() {
+        let projected = project_v3_http_boundary_error_via_sdk(
+            routecodex_v3_error::V3HttpBoundaryErrorKind::MalformedJson,
+            "malformed JSON request body",
+        )
+        .expect("normal HTTP boundary input must project through Err01..Err06");
+
+        assert_eq!(
+            projected.chain,
+            [
+                "V3Error01SourceRaised",
+                "V3Error02Classified",
+                "V3Error03TargetLocalAction",
+                "V3Error04TargetExhaustionDecision",
+                "V3Error05ExecutionDecision",
+                "V3Error06ClientProjected",
+            ]
+        );
+        assert_eq!(projected.status, 400);
+        assert_eq!(projected.body["error"]["code"], "malformed_json");
+        assert_eq!(
+            projected.diagnostic_source.source_stage,
+            "V3Server03HttpRequestRaw"
+        );
+
+        let (_, original_source) = raise_v3_source_via_err01(
+            V3ErrorSourceKind::InvalidRequest,
+            "V3Server03HttpRequestRaw",
+            "malformed_json",
+            "malformed JSON request body",
+            V3Err01SourceInput::Plain,
+        )
+        .expect("fault fixture source must be canonical");
+        let fault = V3RelayErrorOperatorFault {
+            policy_failure: routecodex_v3_error::build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3Error06ClientProjected",
+                "relay_error_operator_sdk_failure",
+                "synthetic HTTP boundary Error06 failure",
+            ),
+            original_source: Some(original_source.clone()),
+        };
+        let output = foundation_output_from_error_sdk_result(
+            "V3Server03HttpRequestRaw",
+            vec!["V3Server03HttpRequestRaw"],
+            None,
+            Err(fault),
+        );
+
+        assert_eq!(output.status, 599);
+        assert_eq!(output.body, Value::Null);
+        assert_eq!(output.error_node, "none");
+        assert_eq!(
+            output.diagnostic_source.as_ref().unwrap().source_stage,
+            "V3Error06ClientProjected"
+        );
+        assert_eq!(output.diagnostic_cause, Some(original_source));
+        assert!(
+            output
+                .node_trace
+                .iter()
+                .all(|node| *node != "V3Error01SourceRaised"),
+            "the raw SDK fault must not recursively raise another Err01: {:?}",
+            output.node_trace
+        );
+    }
+
+    #[test]
+    fn websocket_error_sdk_classification_matches_existing_parity() {
+        let invalid_client_event = project_v3_server_websocket_error_via_sdk(
+            "invalid_client_event",
+            "client WebSocket event is missing type",
+        )
+        .expect("invalid client event must project through Err01..Err06");
+        assert_eq!(
+            invalid_client_event.chain,
+            routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS
+        );
+        assert_eq!(invalid_client_event.status, 400);
+        assert_eq!(
+            invalid_client_event.diagnostic_source.source_kind,
+            V3ErrorSourceKind::InvalidRequest
+        );
+        assert_eq!(
+            invalid_client_event.diagnostic_source.source_stage,
+            "V3ServerRespOutbound06ClientFrame"
+        );
+        assert_eq!(
+            invalid_client_event.diagnostic_source.code,
+            "invalid_client_event"
+        );
+
+        for code in ["invalid_request", "runtime_error"] {
+            let projected =
+                project_v3_server_websocket_error_via_sdk(code, "WebSocket runtime error")
+                    .expect("runtime WebSocket error must project through Err01..Err06");
+            assert_eq!(
+                projected.chain,
+                routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS
+            );
+            assert_eq!(projected.status, 599);
+            assert_eq!(
+                projected.diagnostic_source.source_kind,
+                V3ErrorSourceKind::RuntimeFailure
+            );
+            assert_eq!(
+                projected.diagnostic_source.source_stage,
+                "V3ServerRespOutbound06ClientFrame"
+            );
+            assert_eq!(projected.diagnostic_source.code, code);
+        }
+
+        let capture = project_v3_server_boundary_error_via_sdk(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3OperationRunnerCaptureClientJson",
+            "operation_runner_capture_client_json_failed",
+            "capture client JSON failed",
+            Some(598),
+        )
+        .expect("capture client JSON failure must project through Err01..Err06");
+        assert_eq!(capture.chain, routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS);
+        assert_eq!(capture.status, 598);
+        assert_eq!(
+            capture.diagnostic_source.source_kind,
+            V3ErrorSourceKind::RuntimeFailure
+        );
+        assert_eq!(
+            capture.diagnostic_source.source_stage,
+            "V3OperationRunnerCaptureClientJson"
+        );
+        assert_eq!(
+            capture.diagnostic_source.code,
+            "operation_runner_capture_client_json_failed"
+        );
+
+        let observability =
+            project_v3_runtime_observability_contract_failure_via_sdk("missing required timing")
+                .expect("observability contract must project through Err01..Err06");
+        assert_eq!(observability.status, 500);
+        assert_eq!(
+            observability.chain,
+            routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS
+        );
+        assert_eq!(
+            observability.diagnostic_source.source_kind,
+            V3ErrorSourceKind::RuntimeFailure
+        );
+        assert_eq!(
+            observability.diagnostic_source.source_stage,
+            "V3RuntimeObservability"
+        );
+        assert_eq!(
+            observability.diagnostic_source.code,
+            "runtime_observability_contract"
+        );
+        assert_eq!(
+            observability.diagnostic_source.message,
+            "missing required timing"
+        );
     }
 
     #[test]

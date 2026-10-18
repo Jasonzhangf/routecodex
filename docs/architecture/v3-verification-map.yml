@@ -1342,6 +1342,8 @@ features:
   - routecodex-v3-error six adjacent builders, taxonomy, action scope, target exhaustion, client projection
   - routecodex-v3-provider-responses server/routing-group/session/provider-runtime scoped failure health state and read-only availability
   - routecodex-v3-runtime foundation pending and dry-run kernels
+  - routecodex-v3-runtime foundation::tests::websocket_error_sdk_classification_matches_existing_parity executes all six SDK nodes with the existing WebSocket source kind, stage, code and internal status
+  - routecodex-v3-server tests::websocket_sdk_fault::websocket_sdk_fault_consumer_breaks_transport_and_retains_both_diagnostics uses a real WebSocket and the production consumer diagnostic point; dropping the original cause must fail without a test-only persistence shortcut
   - Responses response dry-run consumes captured provider JSON or SSE through the registered Direct response hook and materializes the resulting client payload without provider network access
   - Responses response dry-run rejects malformed captured provider-response envelopes and does not fabricate toolreason projection when reason is absent
   - Anthropic Relay response dry-run consumes captured provider JSON or SSE through RespInbound and Resp03, then materializes the Anthropic client projection without provider network access
@@ -1357,6 +1359,10 @@ features:
   - External provider/upstream/transport errors keep external_error identity and never receive internal_code
   - RouteCodex-owned runtime failures receive stable internal_code 500-* by node and never receive external_error
   - Client-input malformed request projection has neither internal_code nor external_error
+  required_positive:
+  - v3_http_server_responses_direct_sse_optional_snapshot_failure_is_diagnostic_only proves the public Responses Direct live SSE consumer receives every original business byte after optional snapshot append and terminal persistence fail, while the snapshot diagnostic remains observable.
+  required_negative:
+  - The optional snapshot failure test proves no V3DebugArtifact source replaces the original upstream source and no snapshot failure terminates the public SSE consumer.
   required_integration:
   - All model entry errors stay internal even on pool exhaustion; multi_listener_server model_entries_never_deliver_provider_or_sse_decode_errors_blackbox captures real HTTP bytes for Chat, Responses including compact, Messages, and Gemini JSON/SSE with upstream503 and malformed SSE; responses_inbound_websocket_sse_decode_failure_never_sends_client_error and the provider429/binary/502, malformed input, pool exhaustion, session isolation, and successful tool tests are mandatory in test:v3-server-debug-error-blackbox and the V3 cargo workspace CI run
   - multi_listener_server malformed_http_framing_never_sends_client_error_blackbox proves fresh, reused and pipelined HTTP parse failures terminate with zero new bytes; front_http_framing_preserves_authorized_responses_blackbox preserves control errors, opaque/multi-flush bodies and Expect/100-continue; hyper_default_error_policy_preserves_upstream_behavior_blackbox proves the dependency default and explicit true preserve native 400/431; existing success gates preserve SSE and WebSocket
@@ -1386,6 +1392,7 @@ features:
   - npm run verify:v3-clippy
   - npm run test:v3-workspace
   - npm run build:v3-cli
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --lib tests::v3_http_server_responses_direct_sse_optional_snapshot_failure_is_diagnostic_only -- --exact --nocapture
   completion_rule:
     source: P3/P4 unit, module blackbox, architecture gates, fmt, clippy, workspace tests, and CLI build must pass.
     runtime: The built V3 CLI must start dedicated multi-listener fixture ports and real HTTP probes must prove debug endpoints, dry-run no-send, and six-node error chain.
@@ -3060,6 +3067,8 @@ features:
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   required_positive:
+  - Failed transport attempts retain their admitted ordinal, provider request projection, actual response head and redacted body bytes in the request-qualified artifact; a pre-head failure records no_response and an unreadable body records the received head plus read failure without inventing partial bytes.
+  - The public fa22072_chat_failed_attempt_recovers_with_source_public_entry and seeded Relay success/exhaustion cases assert failed wire pairing, cumulative attempt order and preserved client behavior for JSON and SSE.
   - Terminal Relay failure enqueues verbatim request and Error chain evidence through the declared side-channel edge, and the shared sample worker persists it.
   - One Chat client request retains its connection across failed Provider A and genuine Provider B completion in JSON and SSE, while the private artifact retains the exact original typed cause and actual upstream status.
   - Diagnostic filesystem failure remains request/file-qualified in the failure ledger while the same client request completes from B without extra attempts.

@@ -216,6 +216,20 @@ pub(crate) fn persist_v3_chat_failure_evidence_sources(
                     "provider_status".to_string(),
                     json!(attempt.external_error_status),
                 );
+                fields.insert(
+                    "failed_attempt_evidence".to_string(),
+                    attempt
+                        .failed_attempt_evidence
+                        .as_deref()
+                        .map(|evidence| {
+                            json!({
+                                "attempt": evidence.attempt,
+                                "provider_request": evidence.provider_request,
+                                "provider_response": evidence.provider_response,
+                            })
+                        })
+                        .unwrap_or(Value::Null),
+                );
             }
             projected
         })

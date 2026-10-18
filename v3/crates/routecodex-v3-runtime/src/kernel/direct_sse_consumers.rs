@@ -447,13 +447,15 @@ impl V3DirectSseContentConsumer {
 
 pub(crate) fn build_v3_sse_transport_error_source(
     error: SseTransportError,
-) -> V3Error01SourceRaised {
+) -> Result<V3Error01SourceRaised, crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault>
+{
     let exported = SseTransportErrorExport::from(error);
-    build_v3_error_01_source_raised(
+    crate::shared::direct_source_error(
         V3ErrorSourceKind::ProviderFailure,
         "V3ProviderResp14Raw",
         exported.code,
         exported.message,
+        crate::operation_runner::V3Err01SourceInput::Plain,
     )
 }
 
@@ -537,16 +539,14 @@ impl SseObjectConsumer for V3DirectSseContentConsumer {
         // ProviderResponseCompat plan block, and the typed projection already
         // ran, matching Relay's ordering exactly.
         if let Some(profile) = self.provider_response_compat_profile.as_deref() {
-            rewritten = crate::shared::apply_direct_provider_response_compat(
+            rewritten = crate::shared::apply_direct_provider_response_compat_value(
                 rewritten,
                 profile,
                 provider_protocol,
                 self.request_id.as_deref().unwrap_or_default(),
                 self.custom_tool_function_binding.as_ref(),
             )
-            .map_err(|error| SseObjectError::Consumer {
-                message: error.code,
-            })?;
+            .map_err(|error| SseObjectError::Consumer { message: error })?;
         }
         if self.tool_thinking_enabled {
             crate::hub_v1::collect_v3_responses_sse_tool_name_at_resp03(

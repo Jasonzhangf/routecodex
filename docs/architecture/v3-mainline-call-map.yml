@@ -3173,10 +3173,10 @@ chains:
   - step_id: v3-srv-http-error-01
     from_node: V3Server03HttpRequestRaw
     to_node: V3Error01SourceRaised
-    caller_symbol: read_json_payload
+    caller_symbol: project_http_input_error
     caller_file: v3/crates/routecodex-v3-server/src/frame_builders.rs
-    callee_symbol: project_v3_http_boundary_error
-    callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+    callee_symbol: project_v3_http_boundary_error_via_sdk
+    callee_file: v3/crates/routecodex-v3-runtime/src/foundation.rs
     owner_feature_id: v3.config_server_full_function
     resource_flow:
       consumes:
@@ -3341,7 +3341,7 @@ chains:
   - step_id: v3-de-04
     from_node: V3Server03HttpRequestRaw
     to_node: V3Error01SourceRaised
-    caller_symbol: raise_and_project_foundation_error
+    caller_symbol: project_v3_server_boundary_error_via_sdk
     caller_file: v3/crates/routecodex-v3-runtime/src/foundation.rs
     callee_symbol: raise_v3_source_via_err01
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -5375,7 +5375,7 @@ chains:
       - v3.debug.dry_run_execution
 - chain_id: v3.error.raw_wire_evidence
   owner_feature_id: v3.error.raw_wire_evidence
-  summary: Responses terminal failures and Chat failed attempts enqueue private diagnostic evidence through the Server-owned side channel. Chat retains original typed sources even when a later Provider succeeds; diagnostic writes do not alter provider selection or client framing.
+  summary: Responses terminal failures and Chat failed attempts enqueue private diagnostic evidence through the Server-owned side channel. Runtime observations retain failure-only admitted request/response evidence before candidate switching; Server serializes it with original typed sources even when a later Provider succeeds. Diagnostic writes do not alter provider selection or client framing.
   edges:
   - step_id: v3-responses-relay-error-evidence-01
     from_node: V3Error06ClientProjected
@@ -9613,7 +9613,6 @@ chains:
       execution_scope: existing Relay path; Direct hooks retain their current owners
     candidate_stage_bindings:
       status: candidate_behavior_13_of_20_scoped
-      delivery_state: candidate_installed_review_and_main_merge_pending
       acceptance_scope: nine_request_and_four_response_nodes; frame_limited_to_existing_responses_json_path
       acceptance_evidence: live-self-contained58-m2-final-images-20261018/baseline-report.json passed 58 of 58 with cleanup complete; m2-final-image-runtime-r2.log passed 1358 with one existing ignore; m2-final-image-server.log passed 127; m2-final-image-build.log passed
       canonical_execution:
@@ -9933,7 +9932,6 @@ chains:
     owner_doc: docs/design/v3-unified-operation-runner-design.md
     candidate_stage_bindings:
       status: candidate_behavior_13_of_20_scoped
-      delivery_state: candidate_installed_review_and_main_merge_pending
       acceptance_scope: four_response_nodes; frame_limited_to_existing_responses_json_path
       acceptance_evidence: live-self-contained58-m2-final-images-20261018/baseline-report.json passed 58 of 58 with cleanup complete; m2-final-image-runtime-r2.log passed 1358 with one existing ignore; m2-final-image-server.log passed 127; m2-final-image-build.log passed
       canonical_execution:
@@ -10207,9 +10205,9 @@ chains:
     public_evidence: [publicChat46, publicGemini24, publicAnthropic18, policy86]
     merged_candidate: c15ac140d
     pending:
-    - 'H: Server HTTP boundary error source origins (read_json_payload / project_v3_http_boundary_error)'
-    - 'D: Direct runtime request/response/SSE error source origins outside shared raise'
-    - 'R: Remaining Relay/target-origin/post-commit SSE error source bindings and global Error pipeline cutover'
+    - 'H: Server HTTP, WebSocket, precommit and postcommit source implementations are integrated; final combined runtime acceptance, review and main delivery remain pending'
+    - 'D: Direct shared Provider/Compat and private response stream sources are integrated; target/protocol Source01 closure is under author acceptance'
+    - 'R: remaining ordinary Relay/pool/terminal Source01 callers and final global Error pipeline acceptance'
     - inverse_project_client_response (pending REQ02)
   edges:
   - step_id: v3-op-runner-err-01

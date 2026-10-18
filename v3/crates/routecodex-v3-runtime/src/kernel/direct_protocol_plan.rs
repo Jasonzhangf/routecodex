@@ -9,7 +9,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
         Ok(standardized) => standardized,
         Err(error) => {
             trace.push("V3Req04StandardizedResponses");
-            return Err(protocol_plan_failure(
+            return Err(protocol_plan_source_failure(
                 runtime_source("V3Req04StandardizedResponses", error),
                 trace,
             ));
@@ -21,7 +21,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
         .get("previous_response_id")
         .is_some_and(|value| !value.is_null())
     {
-        return Err(protocol_plan_failure(
+        return Err(protocol_plan_source_failure(
             runtime_source(
                 "V3HubReqInbound02Normalized",
                 "protocol execution plan only handles non-continuation responses requests",
@@ -36,7 +36,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
     {
         Some(execution) => execution.allowed_modes.clone(),
         None => {
-            return Err(protocol_plan_failure(
+            return Err(protocol_plan_source_failure(
                 runtime_source(
                     "V3Execution11ProtocolDecision",
                     format!(
@@ -86,7 +86,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
                 return Err(crate::kernel::protocol_plan_operator_fault(fault, trace))
             }
             Err(crate::operation_runner::V3ResolveTargetOperatorError::Runner(error)) => {
-                return Err(protocol_plan_failure(
+                return Err(protocol_plan_source_failure(
                     runtime_source("V3Router07OpaqueTargetHitOnce", error),
                     trace,
                 ))
@@ -124,8 +124,8 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
                 exhaustion,
                 ..
             }) => {
-                return Err(protocol_plan_failure(
-                    build_v3_error_01_source_raised(
+                return Err(protocol_plan_source_failure(
+                    crate::shared::direct_plain_error(
                         V3ErrorSourceKind::TargetPoolExhausted,
                         "V3Target10ConcreteProviderSelected",
                         "selected_target_exhausted",
@@ -140,9 +140,9 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
             Err(crate::operation_runner::plan_execution::V3PlanExecutionStop::Failed(source)) => {
                 return Err(protocol_plan_failure(source, trace))
             }
-            Err(crate::operation_runner::plan_execution::V3PlanExecutionStop::OperatorFault(fault)) => {
-                return Err(crate::kernel::protocol_plan_operator_fault(fault, trace))
-            }
+            Err(crate::operation_runner::plan_execution::V3PlanExecutionStop::OperatorFault(
+                fault,
+            )) => return Err(crate::kernel::protocol_plan_operator_fault(fault, trace)),
         };
     trace.push("V3Target08KindClassified");
     trace.push("V3Target09CandidateSetExpanded");
@@ -155,7 +155,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
         preplan.protocol_decision.mode,
     ) {
         Ok(keys) => keys,
-        Err(source) => return Err(protocol_plan_failure(source, trace)),
+        Err(source) => return Err(protocol_plan_source_failure(source, trace)),
     };
     Ok(V3ResponsesProtocolExecutionPlan {
         decision: preplan.protocol_decision,
@@ -173,7 +173,7 @@ pub(crate) fn protocol_candidate_keys_for_decision_mode(
     entry_protocol: &str,
     allowed_modes: &[String],
     mode: V3Execution11ProtocolDecisionMode,
-) -> Result<BTreeSet<String>, V3Error01SourceRaised> {
+) -> crate::shared::V3DirectSourceResult<BTreeSet<String>> {
     let mut candidate_keys = BTreeSet::new();
     for candidate in &expanded.candidates {
         let selected = routecodex_v3_target::V3Target10ConcreteProviderSelected {
@@ -195,11 +195,11 @@ pub(crate) fn protocol_candidate_keys_for_decision_mode(
             Ok(_) => {}
             Err(source) if source.code == "protocol_mismatch_relay_not_allowed" => {}
             Err(source) if source.code == "responses_process_chat_relay_not_allowed" => {}
-            Err(source) => return Err(source),
+            Err(source) => return Err(Ok(source)),
         }
     }
     if candidate_keys.is_empty() {
-        return Err(build_v3_error_01_source_raised(
+        return Err(crate::shared::direct_plain_error(
             V3ErrorSourceKind::RuntimeFailure,
             "V3Execution11ProtocolDecision",
             "protocol_mode_candidate_set_empty",
@@ -217,6 +217,16 @@ fn protocol_plan_failure(
         source,
         node_trace,
         error_operator_fault: None,
+    }
+}
+
+fn protocol_plan_source_failure(
+    source: crate::shared::V3DirectSourceError,
+    node_trace: Vec<&'static str>,
+) -> V3ResponsesProtocolExecutionPlanFailure {
+    match source {
+        Ok(source) => protocol_plan_failure(source, node_trace),
+        Err(fault) => crate::kernel::protocol_plan_operator_fault(fault, node_trace),
     }
 }
 

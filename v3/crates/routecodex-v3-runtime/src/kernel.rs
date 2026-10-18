@@ -140,8 +140,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         Ok(standardized) => standardized,
         Err(error) => {
             trace.push("V3Req04StandardizedResponses");
-            return error_output(
+            return direct_runtime_helpers_stream::source_failure_output(
                 runtime_source("V3Req04StandardizedResponses", error),
+                None,
                 trace,
                 &hook_registry,
             );
@@ -154,7 +155,14 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         &standardized.server_id,
     ) {
         Ok(control) => control,
-        Err(source) => return error_output(source, trace, &hook_registry),
+        Err(source) => {
+            return direct_runtime_helpers_stream::source_failure_output(
+                source,
+                None,
+                trace,
+                &hook_registry,
+            )
+        }
     };
     let attempt_budget = request_execution_control.attempt_budget();
     if let Some(plan_trace) = initial_plan_trace {
@@ -162,15 +170,21 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         trace.extend(plan_trace);
     }
     if let Some(source) = v3_direct_retired_continuation_error(&standardized.body) {
-        return error_output(source, trace, &hook_registry);
+        return direct_runtime_helpers_stream::source_failure_output(
+            source,
+            None,
+            trace,
+            &hook_registry,
+        );
     }
     if let Err(message) = validate_initial_direct_plan(
         initial_selected_target.is_some(),
         initial_protocol_decision.is_some(),
     ) {
         trace.push("V3Execution11ProtocolDecision");
-        return error_output(
+        return direct_runtime_helpers_stream::source_failure_output(
             runtime_source("V3Execution11ProtocolDecision", message),
+            None,
             trace,
             &hook_registry,
         );
@@ -241,8 +255,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 );
             }
             Err(crate::operation_runner::V3ResolveTargetOperatorError::Runner(error)) => {
-                return error_output(
+                return direct_runtime_helpers_stream::source_failure_output(
                     runtime_source("V3Router07OpaqueTargetHitOnce", error),
+                    None,
                     trace,
                     &hook_registry,
                 );
@@ -275,8 +290,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     ) {
         Ok(policies) => policies,
         Err(error) => {
-            return error_output(
+            return direct_runtime_helpers_stream::source_failure_output(
                 runtime_source("V3Router05RequestClassified", error),
+                None,
                 trace,
                 &hook_registry,
             )
@@ -372,7 +388,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                             ..V3RuntimeObservability::default()
                         };
                         return direct_runtime_helpers_stream::target_exhausted_output_with_observability(
-                            build_v3_error_01_source_raised(
+                            crate::shared::direct_plain_error(
                                 V3ErrorSourceKind::TargetPoolExhausted,
                                 "V3Target10ConcreteProviderSelected",
                                 "selected_target_exhausted",
@@ -399,11 +415,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     Err(output) => return output,
                 }
             } else {
-                return error_output(
+                return direct_runtime_helpers_stream::source_failure_output(
                     runtime_source(
                         "V3Target09CandidateSetExpanded",
                         "routed candidate set missing",
                     ),
+                    last_external_http.clone(),
                     trace,
                     &hook_registry,
                 );
@@ -465,8 +482,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                             continue;
                         }
                         V3AdmitAfterRecovery::Failed(reason) => {
-                            return error_output(
+                            return direct_runtime_helpers_stream::source_failure_output(
                                 runtime_source("V3Target10ConcreteProviderSelected", reason),
+                                last_external_http.clone(),
                                 trace,
                                 &hook_registry,
                             )
@@ -478,8 +496,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     pending_provider_action_recovery = match ticket.recovery_witness() {
                         Ok(witness) => Some(witness),
                         Err(error) => {
-                            return error_output(
+                            return direct_runtime_helpers_stream::source_failure_output(
                                 runtime_source("V3ProviderActionGateAdmission", error),
+                                last_external_http.clone(),
                                 trace,
                                 &hook_registry,
                             )
@@ -493,8 +512,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     pending_provider_action_recovery = match ticket.recovery_witness() {
                         Ok(witness) => Some(witness),
                         Err(error) => {
-                            return error_output(
+                            return direct_runtime_helpers_stream::source_failure_output(
                                 runtime_source("V3ProviderActionGateAdmission", error),
+                                last_external_http.clone(),
                                 trace,
                                 &hook_registry,
                             )
@@ -511,8 +531,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     continue;
                 }
                 Err(error) => {
-                    return error_output(
+                    return direct_runtime_helpers_stream::source_failure_output(
                         runtime_source("V3ProviderActionGateAdmission", error),
+                        last_external_http.clone(),
                         trace,
                         &hook_registry,
                     )
@@ -528,13 +549,27 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             now_epoch_ms,
         );
         if !selected_available {
-            let source = build_v3_error_01_source_raised(
+            let source = crate::shared::direct_plain_error(
                 V3ErrorSourceKind::ProviderFailure,
                 "V3HubReqTarget06Resolved",
                 "selected_provider_unavailable",
                 "selected provider is unavailable",
             );
             drop(provider_action_permit.take());
+            let source = match source {
+                Ok(source) => source,
+                Err(fault) => {
+                    return direct_runtime_helpers_stream::source_failure_output_with_observability_and_snapshots(
+                        Err(fault),
+                        last_external_http,
+                        trace,
+                        &hook_registry,
+                        None,
+                        provider_request_snapshot,
+                        None,
+                    )
+                }
+            };
             let policy_result = match run_v3_direct_provider_failure_policy(
                 &V3DirectProviderFailurePolicyContext {
                     failure_session_scope: &direct_failure_session_scope,
@@ -612,11 +647,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 }
                 V3Error05ExecutionAction::ClientDisconnected
                 | V3Error05ExecutionAction::RejectNonProviderError => {
-                    return error_output(
+                    return direct_runtime_helpers_stream::source_failure_output(
                         runtime_source(
                             "V3Error05ExecutionDecision",
                             "provider availability failure entered a non-provider Error05 lane",
                         ),
+                        last_external_http.clone(),
                         trace,
                         &hook_registry,
                     )
@@ -644,11 +680,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             let captured_target_09 = match expanded.as_ref() {
                 Some(expanded) => expanded.clone(),
                 None => {
-                    return error_output(
+                    return direct_runtime_helpers_stream::source_failure_output(
                         runtime_source(
                             "V3Target09CandidateSetExpanded",
                             "typed Relay handoff requires the captured Target09 candidate set",
                         ),
+                        last_external_http.clone(),
                         trace,
                         &hook_registry,
                     )
@@ -674,7 +711,14 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             &mut trace,
         ) {
             Ok(()) => {}
-            Err(source) => return error_output(source, trace, &hook_registry),
+            Err(source) => {
+                return direct_runtime_helpers_stream::source_failure_output(
+                    source,
+                    last_external_http.clone(),
+                    trace,
+                    &hook_registry,
+                )
+            }
         }
         if let Err(source) = apply_v3_responses_direct_web_search_control_completion(
             server_tool_state.as_deref(),
@@ -682,7 +726,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             &standardized.body,
             &mut trace,
         ) {
-            return error_output(source, trace, &hook_registry);
+            return direct_runtime_helpers_stream::source_failure_output(
+                source,
+                last_external_http.clone(),
+                trace,
+                &hook_registry,
+            );
         }
 
         // Responses direct has a protocol-specific kernel, so it must enter the
@@ -700,7 +749,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 &mut trace,
             )
         {
-            return error_output(source, trace, &hook_registry);
+            return direct_runtime_helpers_stream::source_failure_output(
+                source,
+                last_external_http.clone(),
+                trace,
+                &hook_registry,
+            );
         }
 
         let policy = hook_registry.run_route(selected, &standardized);
@@ -722,7 +776,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         {
             Ok(value) => value,
             Err(source) => {
-                return error_output(source, trace, &hook_registry);
+                return direct_runtime_helpers_stream::source_failure_output(
+                    source,
+                    last_external_http.clone(),
+                    trace,
+                    &hook_registry,
+                );
             }
         };
         trace.push("V3Provider12ResponsesWirePayload");
@@ -731,7 +790,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         let transport_request = match hook_registry.run_provider_transport(wire) {
             Ok(value) => value,
             Err(source) => {
-                return error_output(source, trace, &hook_registry);
+                return direct_runtime_helpers_stream::source_failure_output(
+                    source,
+                    last_external_http.clone(),
+                    trace,
+                    &hook_registry,
+                );
             }
         };
         let handoff_scope = match (
@@ -757,11 +821,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 }
             }
             _ => {
-                return error_output(
+                return direct_runtime_helpers_stream::source_failure_output(
                     runtime_source(
                         "V3Transport13ResponsesHttpRequest",
                         "provider transport handoff scope is missing",
                     ),
+                    last_external_http.clone(),
                     trace,
                     &hook_registry,
                 )
@@ -770,8 +835,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         let transport_request = match transport_request.with_handoff_scope(handoff_scope) {
             Ok(request) => request,
             Err(error) => {
-                return error_output(
+                return direct_runtime_helpers_stream::source_failure_output(
                     runtime_source("V3Transport13ResponsesHttpRequest", error),
+                    last_external_http.clone(),
                     trace,
                     &hook_registry,
                 )
@@ -789,16 +855,18 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         send_attempts = match attempt_budget.admit_transport_attempt() {
             Ok(attempts) => attempts,
             Err(error) => {
-                return error_output(
+                return direct_runtime_helpers_stream::source_failure_output(
                     direct_runtime_helpers_stream::direct_attempt_budget_error_source(error),
+                    last_external_http.clone(),
                     trace,
                     &hook_registry,
                 )
             }
         };
         if let Err(error) = runtime_timing.start_external() {
-            return error_output(
+            return direct_runtime_helpers_stream::source_failure_output(
                 runtime_source("V3RuntimeTimingExternal", error),
+                last_external_http.clone(),
                 trace,
                 &hook_registry,
             );
@@ -824,8 +892,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             Ok(raw) => raw,
             Err(V3ProviderError::ConcurrencyBusy { .. }) => {
                 if let Err(error) = runtime_timing.finish_external() {
-                    return error_output(
+                    return direct_runtime_helpers_stream::source_failure_output(
                         runtime_source("V3RuntimeTimingExternal", error),
+                        last_external_http.clone(),
                         trace,
                         &hook_registry,
                     );
@@ -842,8 +911,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     last_external_http = Some(witness);
                 }
                 if let Err(timing_error) = runtime_timing.finish_external() {
-                    return error_output(
+                    return direct_runtime_helpers_stream::source_failure_output(
                         runtime_source("V3RuntimeTimingExternal", timing_error),
+                        last_external_http.clone(),
                         trace,
                         &hook_registry,
                     );
@@ -856,8 +926,41 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                 reason,
                             )
                 );
-                let source =
-                    build_v3_provider_error_source("V3Transport13ResponsesHttpRequest", error);
+                let source = match build_v3_provider_error_source(
+                    "V3Transport13ResponsesHttpRequest",
+                    error,
+                ) {
+                    Ok(source) => source,
+                    Err(fault) => {
+                        let mut observability = build_v3_direct_runtime_observability(
+                            &policy.target,
+                            "responses",
+                            if standardized
+                                .body
+                                .get("stream")
+                                .and_then(serde_json::Value::as_bool)
+                                .unwrap_or(false)
+                            {
+                                "sse"
+                            } else {
+                                "json"
+                            },
+                            None,
+                            "failed",
+                            provider_failure_events.clone(),
+                        );
+                        observability.attempts = Some(total_attempts(&accumulator, send_attempts));
+                        return direct_runtime_helpers_stream::source_failure_output_with_observability_and_snapshots(
+                                Err(fault),
+                                last_external_http,
+                                trace,
+                                &hook_registry,
+                                Some(observability),
+                                provider_request_snapshot,
+                                None,
+                            );
+                    }
+                };
                 if source.source_kind != V3ErrorSourceKind::ProviderFailure {
                     drop(provider_action_permit.take());
                     return error_output(source, trace, &hook_registry);
@@ -961,11 +1064,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         );
                     }
                     V3Error05ExecutionAction::RejectNonProviderError => {
-                        return error_output(
+                        return direct_runtime_helpers_stream::source_failure_output(
                             runtime_source(
                                 "V3Error05ExecutionDecision",
                                 "provider failure entered a non-provider Error05 lane",
                             ),
+                            last_external_http.clone(),
                             trace,
                             &hook_registry,
                         )
@@ -983,8 +1087,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         last_external_http = Some(crate::hub_v1::external_http_witness_head(&provider_raw));
         if !provider_response_is_stream {
             if let Err(error) = runtime_timing.finish_external() {
-                return error_output(
+                return direct_runtime_helpers_stream::source_failure_output(
                     runtime_source("V3RuntimeTimingExternal", error),
+                    last_external_http.clone(),
                     trace,
                     &hook_registry,
                 );
@@ -1022,8 +1127,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         ) {
             Ok(context) => context,
             Err(error) => {
-                return error_output(
+                return direct_runtime_helpers_stream::source_failure_output(
                     runtime_source("V3DirectResp14ProviderCompat", error),
+                    last_external_http.clone(),
                     trace,
                     &hook_registry,
                 )
@@ -1035,19 +1141,42 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             .await
         {
             Ok(projection) => projection,
-            Err(source) => {
+            Err(Err(fault)) => {
+                return direct_runtime_helpers_stream::source_failure_output_with_observability_and_snapshots(
+                    Err(fault),
+                    last_external_http.clone(),
+                    trace,
+                    &hook_registry,
+                    None,
+                    provider_request_snapshot,
+                    None,
+                )
+            }
+            Err(Ok(source)) => {
                 let transport_source = source.clone();
                 if provider_response_is_stream {
                     if let Err(error) = runtime_timing.finish_external() {
-                        return error_output(
+                        return direct_runtime_helpers_stream::source_failure_output_with_observability_and_snapshots(
                             runtime_source("V3RuntimeTimingExternal", error),
+                            last_external_http.clone(),
                             trace,
                             &hook_registry,
+                            None,
+                            provider_request_snapshot,
+                            None,
                         );
                     }
                 }
                 if !matches!(source.source_kind, V3ErrorSourceKind::ProviderFailure) {
-                    return error_output(source, trace, &hook_registry);
+                    return direct_runtime_helpers_stream::source_failure_output_with_observability_and_snapshots(
+                        Ok(source),
+                        last_external_http.clone(),
+                        trace,
+                        &hook_registry,
+                        None,
+                        provider_request_snapshot,
+                        None,
+                    );
                 }
                 drop(provider_action_permit.take());
                 let policy_result = match run_v3_direct_provider_failure_policy(
@@ -1147,11 +1276,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         );
                     }
                     V3Error05ExecutionAction::RejectNonProviderError => {
-                        return error_output(
+                        return direct_runtime_helpers_stream::source_failure_output(
                             runtime_source(
                                 "V3Error05ExecutionDecision",
                                 "provider failure entered a non-provider Error05 lane",
                             ),
+                            last_external_http.clone(),
                             trace,
                             &hook_registry,
                         )
@@ -1178,8 +1308,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 (Some(control), Some(scope)) => match control.web_search_load_for_scope(scope) {
                     Ok(state) => state,
                     Err(error) => {
-                        return error_output(
+                        return direct_runtime_helpers_stream::source_failure_output(
                             runtime_source("V3DirectWebSearchResp01Intercepted", error),
+                            last_external_http.clone(),
                             trace,
                             &hook_registry,
                         )
@@ -1214,11 +1345,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         state
                     } else {
                         let Some(server_tool_scope) = server_tool_scope.as_ref() else {
-                            return error_output(
+                            return direct_runtime_helpers_stream::source_failure_output(
                                 runtime_source(
                                     "V3DirectWebSearchResp02RuntimeControlUpdated",
                                     "web_search execution scope is unavailable",
                                 ),
+                                last_external_http.clone(),
                                 trace,
                                 &hook_registry,
                             );
@@ -1250,18 +1382,24 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                         error,
                                     ),
                                 };
-                                return error_output(source, trace, &hook_registry);
+                                return direct_runtime_helpers_stream::source_failure_output(
+                                    source,
+                                    last_external_http.clone(),
+                                    trace,
+                                    &hook_registry,
+                                );
                             }
                         }
                     };
                     match crate::hub_v1::project_web_search_result_into_finalized(body, &captured) {
                         Ok(()) => {}
                         Err(error) => {
-                            return error_output(
+                            return direct_runtime_helpers_stream::source_failure_output(
                                 runtime_source(
                                     "V3DirectWebSearchResp03HostedResultProjected",
                                     error,
                                 ),
+                                last_external_http.clone(),
                                 trace,
                                 &hook_registry,
                             )
@@ -1281,11 +1419,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                             Some("resp02 persist captured web_search state"),
                             None,
                         ) {
-                            return error_output(
+                            return direct_runtime_helpers_stream::source_failure_output(
                                 runtime_source(
                                     "V3DirectWebSearchResp02RuntimeControlUpdated",
                                     error,
                                 ),
+                                last_external_http.clone(),
                                 trace,
                                 &hook_registry,
                             );
@@ -1294,7 +1433,14 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     trace.push("V3DirectWebSearchResp03HostedResultProjected");
                 }
                 Ok(None) => {}
-                Err(source) => return error_output(source, trace, &hook_registry),
+                Err(source) => {
+                    return direct_runtime_helpers_stream::source_failure_output(
+                        source,
+                        last_external_http.clone(),
+                        trace,
+                        &hook_registry,
+                    )
+                }
             }
         }
         let attempt_body = std::mem::replace(
@@ -1327,21 +1473,47 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     .await
                     {
                         Ok(committed) => committed,
-                        Err(source) if source.source_kind != V3ErrorSourceKind::ProviderFailure => {
+                        Err(Err(fault)) => {
                             if let Err(error) = runtime_timing.finish_external_if_active() {
-                                return error_output(
+                                return direct_runtime_helpers_stream::source_failure_output(
                                     runtime_source("V3RuntimeTimingExternal", error),
+                                    last_external_http.clone(),
                                     trace,
                                     &hook_registry,
                                 );
                             }
                             drop(provider_action_permit.take());
-                            return error_output(source, trace, &hook_registry);
+                            return direct_runtime_helpers_stream::source_failure_output(
+                                Err(fault),
+                                last_external_http.clone(),
+                                trace,
+                                &hook_registry,
+                            );
                         }
-                        Err(source) => {
+                        Err(Ok(source))
+                            if source.source_kind != V3ErrorSourceKind::ProviderFailure =>
+                        {
                             if let Err(error) = runtime_timing.finish_external_if_active() {
-                                return error_output(
+                                return direct_runtime_helpers_stream::source_failure_output(
                                     runtime_source("V3RuntimeTimingExternal", error),
+                                    last_external_http.clone(),
+                                    trace,
+                                    &hook_registry,
+                                );
+                            }
+                            drop(provider_action_permit.take());
+                            return direct_runtime_helpers_stream::source_failure_output(
+                                Ok(source),
+                                last_external_http.clone(),
+                                trace,
+                                &hook_registry,
+                            );
+                        }
+                        Err(Ok(source)) => {
+                            if let Err(error) = runtime_timing.finish_external_if_active() {
+                                return direct_runtime_helpers_stream::source_failure_output(
+                                    runtime_source("V3RuntimeTimingExternal", error),
+                                    last_external_http.clone(),
                                     trace,
                                     &hook_registry,
                                 );
@@ -1443,11 +1615,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                     );
                                 }
                                 V3Error05ExecutionAction::RejectNonProviderError => {
-                                    return error_output(
+                                    return direct_runtime_helpers_stream::source_failure_output(
                                         runtime_source(
                                             "V3Error05ExecutionDecision",
                                             "provider failure entered a non-provider Error05 lane",
                                         ),
+                                        last_external_http.clone(),
                                         trace,
                                         &hook_registry,
                                     )
@@ -1485,12 +1658,18 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 &policy.target,
                 now_epoch_ms,
             ) {
-                return error_output(source, trace, &hook_registry);
+                return direct_runtime_helpers_stream::source_failure_output(
+                    source,
+                    last_external_http.clone(),
+                    trace,
+                    &hook_registry,
+                );
             }
         }
         if let Err(error) = commit_route_policy(&attempt_success_receipt) {
-            return error_output(
+            return direct_runtime_helpers_stream::source_failure_output(
                 runtime_source("V3Router06RoutePoolResolved", error),
+                last_external_http.clone(),
                 trace,
                 &hook_registry,
             );
@@ -1504,7 +1683,14 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             &runtime_timing,
         ) {
             Ok(timing) => timing,
-            Err(source) => return error_output(source, trace, &hook_registry),
+            Err(source) => {
+                return direct_runtime_helpers_stream::source_failure_output(
+                    source,
+                    last_external_http.clone(),
+                    trace,
+                    &hook_registry,
+                )
+            }
         };
         let mut observability = build_v3_direct_runtime_observability(
             &policy.target,

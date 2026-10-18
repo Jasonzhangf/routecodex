@@ -80,8 +80,8 @@ flowchart TD
   module_v3_server -->|1 edges / 1 paths| module_routecodex_v3_sse
   module_v3_server -->|2 edges / 2 paths| module_v3_config
   module_v3_server -->|8 edges / 4 paths| module_v3_debug
-  module_v3_server -->|3 edges / 2 paths| module_v3_error
-  module_v3_server -->|6 edges / 4 paths| module_v3_runtime
+  module_v3_server -->|2 edges / 2 paths| module_v3_error
+  module_v3_server -->|7 edges / 5 paths| module_v3_runtime
   module_v3_server -->|7 edges / 5 paths| module_v3_runtime__hub_v1
   module_v3_server -->|47 edges / 20 paths| module_v3_server
   module_v3_server -->|1 edges / 1 paths| module_v3_vendor
@@ -138,8 +138,8 @@ flowchart TD
 | v3-server | routecodex-v3-sse | 1 | `v3.sse.http_keepalive_boundary` |
 | v3-server | v3-config | 2 | `v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.models.capability_catalog` |
 | v3-server | v3-debug | 8 | `v3.codex_sample_retention_snap_scope`<br/>`v3.managed_restart_attempt`<br/>`v3.server.internal_observability_projection`<br/>`v3.server.startup` |
-| v3-server | v3-error | 3 | `v3.debug_error_foundation.mainline`<br/>`v3.server.startup` |
-| v3-server | v3-runtime | 6 | `v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline` |
+| v3-server | v3-error | 2 | `v3.debug_error_foundation.mainline`<br/>`v3.server.startup` |
+| v3-server | v3-runtime | 7 | `v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.server.startup` |
 | v3-server | v3-runtime::hub_v1 | 7 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.runtime_timing_observability.mainline` |
 | v3-server | v3-server | 47 | `v3.client_sse_head_commit`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.managed_restart_attempt`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_restart_handoff_skeleton`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
 | v3-server | v3/vendor | 1 | `v3.server.startup` |
@@ -1422,15 +1422,17 @@ flowchart TD
     c_35_v3_server_startup_6["v3-debug<br/>register_v3_debug_01_pending_endpoint_event<br/><small>routecodex-v3-debug/src/lib.rs</small>"]
   end
   subgraph c_35_v3_server_startup_m_v3_error["v3-error"]
-    c_35_v3_server_startup_5["v3-error<br/>project_v3_http_boundary_error<br/><small>routecodex-v3-error/src/lib.rs</small>"]
     c_35_v3_server_startup_7["v3-error<br/>project_v3_pending_endpoint_error<br/><small>routecodex-v3-error/src/lib.rs</small>"]
+  end
+  subgraph c_35_v3_server_startup_m_v3_runtime["v3-runtime"]
+    c_35_v3_server_startup_5["v3-runtime<br/>project_v3_http_boundary_error_via_sdk<br/><small>routecodex-v3-runtime/src/foundation.rs</small>"]
   end
   subgraph c_35_v3_server_startup_m_v3_server["v3-server"]
     c_35_v3_server_startup_0["v3-server<br/>spawn_v3_server_aggregate<br/><small>routecodex-v3-server/src/lib.rs</small>"]
     c_35_v3_server_startup_1["v3-server<br/>build_v3_server_startup_01_listener_set_from_config_05<br/><small>routecodex-v3-server/src/lib.rs</small>"]
     c_35_v3_server_startup_2["v3-server<br/>pending_endpoint<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small>"]
     c_35_v3_server_startup_3["v3-server<br/>build_v3_server_03_http_request_raw<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_35_v3_server_startup_4["v3-server<br/>read_json_payload<br/><small>routecodex-v3-server/src/frame_builders.rs</small>"]
+    c_35_v3_server_startup_4["v3-server<br/>project_http_input_error<br/><small>routecodex-v3-server/src/frame_builders.rs</small>"]
     c_35_v3_server_startup_8["v3-server<br/>responses_direct_output_response_with_console_for_protocol<br/><small>routecodex-v3-server/src/frame_builders.rs</small>"]
     c_35_v3_server_startup_9["v3-server<br/>model_no_response_output<br/><small>routecodex-v3-server/src/frame_builders.rs</small>"]
     c_35_v3_server_startup_10["v3-server<br/>commit_model_transport_outcome<br/><small>routecodex-v3-server/src/frame_builders.rs</small>"]
@@ -1457,7 +1459,7 @@ flowchart TD
 | --- | --- | --- | --- | --- | --- |
 | `v3-srv-01` | `V3Config05ManifestPublished` → `V3ServerStartup01ListenerSetPreflight` | anchored | spawn_v3_server_aggregate<br/><small>routecodex-v3-server/src/lib.rs</small> | build_v3_server_startup_01_listener_set_from_config_05<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.foundation_p0_p2` |
 | `v3-srv-02` | `V3ServerStartup01ListenerSetPreflight` → `V3Server03HttpRequestRaw` | anchored | pending_endpoint<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | build_v3_server_03_http_request_raw<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.foundation_p0_p2` |
-| `v3-srv-http-error-01` | `V3Server03HttpRequestRaw` → `V3Error01SourceRaised` | anchored | read_json_payload<br/><small>routecodex-v3-server/src/frame_builders.rs</small> | project_v3_http_boundary_error<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.config_server_full_function` |
+| `v3-srv-http-error-01` | `V3Server03HttpRequestRaw` → `V3Error01SourceRaised` | anchored | project_http_input_error<br/><small>routecodex-v3-server/src/frame_builders.rs</small> | project_v3_http_boundary_error_via_sdk<br/><small>routecodex-v3-runtime/src/foundation.rs</small> | `v3.config_server_full_function` |
 | `v3-srv-03` | `V3Server03HttpRequestRaw` → `V3Debug01NodeEventRegistered` | anchored | pending_endpoint<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | register_v3_debug_01_pending_endpoint_event<br/><small>routecodex-v3-debug/src/lib.rs</small> | `v3.foundation_p0_p2` |
 | `v3-srv-04` | `V3Debug01NodeEventRegistered` → `V3Error06ClientProjected` | anchored | pending_endpoint<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | project_v3_pending_endpoint_error<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.foundation_p0_p2` |
 | `v3-srv-05` | `V3Error06ClientProjected` → `V3ModelClientNoResponse` | anchored | responses_direct_output_response_with_console_for_protocol<br/><small>routecodex-v3-server/src/frame_builders.rs</small> | model_no_response_output<br/><small>routecodex-v3-server/src/frame_builders.rs</small> | `v3.foundation_p0_p2` |
@@ -1494,7 +1496,7 @@ flowchart TD
   end
   subgraph c_36_v3_debug_error_foundation_mainline_m_v3_runtime["v3-runtime"]
     c_36_v3_debug_error_foundation_mainline_0["v3-runtime<br/>execute_v3_foundation_pending_runtime<br/><small>routecodex-v3-runtime/src/foundation.rs</small>"]
-    c_36_v3_debug_error_foundation_mainline_4["v3-runtime<br/>raise_and_project_foundation_error<br/><small>routecodex-v3-runtime/src/foundation.rs</small>"]
+    c_36_v3_debug_error_foundation_mainline_4["v3-runtime<br/>project_v3_server_boundary_error_via_sdk<br/><small>routecodex-v3-runtime/src/foundation.rs</small>"]
     c_36_v3_debug_error_foundation_mainline_5["v3-runtime<br/>raise_v3_source_via_err01<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
     c_36_v3_debug_error_foundation_mainline_6["v3-runtime<br/>run_v3_error_02_to_05_decision_operators<br/><small>routecodex-v3-runtime/src/operation_runner/error_decision.rs</small>"]
     c_36_v3_debug_error_foundation_mainline_7["v3-runtime<br/>run_v3_err02_classified_operator<br/><small>routecodex-v3-runtime/src/operation_runner/operators/err02_classified.rs</small>"]
@@ -1553,7 +1555,7 @@ flowchart TD
 | `v3-de-01` | `V3Server03HttpRequestRaw` → `V3DebugTraceContextStarted` | anchored | execute_v3_foundation_pending_runtime<br/><small>routecodex-v3-runtime/src/foundation.rs</small> | V3DebugRuntime::start_trace<br/><small>routecodex-v3-debug/src/lib.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-02` | `V3DebugTraceContextStarted` → `V3DebugRawCaptureStored` | anchored | execute_v3_foundation_pending_runtime<br/><small>routecodex-v3-runtime/src/foundation.rs</small> | V3DebugRuntime::capture_raw_request<br/><small>routecodex-v3-debug/src/lib.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-03` | `V3DebugTraceContextStarted` → `V3DebugEventLedgerRecorded` | anchored | execute_v3_foundation_pending_runtime<br/><small>routecodex-v3-runtime/src/foundation.rs</small> | V3DebugRuntime::record_node_event<br/><small>routecodex-v3-debug/src/lib.rs</small> | `v3.debug_error_foundation` |
-| `v3-de-04` | `V3Server03HttpRequestRaw` → `V3Error01SourceRaised` | anchored | raise_and_project_foundation_error<br/><small>routecodex-v3-runtime/src/foundation.rs</small> | raise_v3_source_via_err01<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.debug_error_foundation` |
+| `v3-de-04` | `V3Server03HttpRequestRaw` → `V3Error01SourceRaised` | anchored | project_v3_server_boundary_error_via_sdk<br/><small>routecodex-v3-runtime/src/foundation.rs</small> | raise_v3_source_via_err01<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-05` | `V3Error01SourceRaised` → `V3Error02Classified` | anchored | run_v3_error_02_to_05_decision_operators<br/><small>routecodex-v3-runtime/src/operation_runner/error_decision.rs</small> | run_v3_err02_classified_operator<br/><small>routecodex-v3-runtime/src/operation_runner/operators/err02_classified.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-06` | `V3Error02Classified` → `V3Error03TargetLocalAction` | anchored | run_v3_error_02_to_05_decision_operators<br/><small>routecodex-v3-runtime/src/operation_runner/error_decision.rs</small> | run_v3_error_03_target_local_action_operator<br/><small>routecodex-v3-runtime/src/operation_runner/operators/err03_target_local_action.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-07` | `V3Error03TargetLocalAction` → `V3Error04TargetExhaustionDecision` | anchored | run_v3_error_02_to_05_decision_operators<br/><small>routecodex-v3-runtime/src/operation_runner/error_decision.rs</small> | run_v3_error_04_target_exhaustion_operator<br/><small>routecodex-v3-runtime/src/operation_runner/operators/err04_target_exhaustion.rs</small> | `v3.debug_error_foundation` |
@@ -2120,7 +2122,7 @@ flowchart TD
 
 ## v3.error.raw_wire_evidence
 
-Responses terminal failures and Chat failed attempts enqueue private diagnostic evidence through the Server-owned side channel. Chat retains original typed sources even when a later Provider succeeds; diagnostic writes do not alter provider selection or client framing.
+Responses terminal failures and Chat failed attempts enqueue private diagnostic evidence through the Server-owned side channel. Runtime observations retain failure-only admitted request/response evidence before candidate switching; Server serializes it with original typed sources even when a later Provider succeeds. Diagnostic writes do not alter provider selection or client framing.
 
 Owner feature: `v3.error.raw_wire_evidence`
 
