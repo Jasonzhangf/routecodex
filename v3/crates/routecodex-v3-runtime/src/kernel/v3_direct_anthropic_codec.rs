@@ -7,7 +7,7 @@ use crate::kernel::V3DirectProtocolCodec;
 use crate::nodes::V3Server03HttpRequestRaw;
 use crate::operation_runner::V3Err01SourceInput;
 use crate::provider_failure_runtime_policy::raise_v3_source_via_err01;
-use routecodex_v3_error::{V3Error01SourceRaised, V3ErrorSourceKind, V3InternalErrorCode};
+use routecodex_v3_error::{V3ErrorSourceKind, V3InternalErrorCode};
 use routecodex_v3_provider_responses::{
     build_v3_provider_12_responses_wire_payload,
     v3_provider_auth_secret_handle_from_declaration_fields, V3Provider12ResponsesWirePayload,
@@ -222,7 +222,7 @@ impl V3DirectProtocolCodec for V3AnthropicDirectCodec {
         _request_id: &str,
         _now_epoch_ms: u64,
         _trace: &mut Vec<&'static str>,
-    ) -> Result<bool, V3Error01SourceRaised> {
+    ) -> crate::shared::V3DirectSourceResult<bool> {
         copy_anthropic_client_headers(control, standardized);
         Ok(standardized.tool_thinking_turn_context.enabled_flag())
     }

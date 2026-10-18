@@ -17,12 +17,10 @@ use crate::{
     direct_response_hooks::V3DirectResponseCompatContext,
     hooks::build_v3_provider_error_source,
     nodes::{V3Req04StandardizedResponses, V3ResponsesDirect11Policy},
+    operation_runner::V3Err01SourceInput,
     shared::V3DirectSourceResult,
 };
-use routecodex_v3_error::{
-    build_v3_error_01_source_raised_internal, V3Error01SourceRaised, V3ErrorSourceKind,
-    V3InternalErrorCode,
-};
+use routecodex_v3_error::{V3Error01SourceRaised, V3ErrorSourceKind, V3InternalErrorCode};
 use routecodex_v3_provider_responses::{
     build_v3_provider_12_responses_wire_payload, V3Provider12ResponsesWirePayload,
     V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderResp14Raw,
@@ -148,7 +146,7 @@ pub trait V3DirectProtocolCodec {
         request_id: &str,
         now_epoch_ms: u64,
         trace: &mut Vec<&'static str>,
-    ) -> Result<bool, V3Error01SourceRaised> {
+    ) -> V3DirectSourceResult<bool> {
         let _ = (
             control,
             manifest,
@@ -318,19 +316,22 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
         _request_id: &str,
         _now_epoch_ms: u64,
         _trace: &mut Vec<&'static str>,
-    ) -> Result<bool, V3Error01SourceRaised> {
+    ) -> V3DirectSourceResult<bool> {
         let enabled = crate::hub_v1::v3_tool_thinking_enabled_for_server(manifest, server_id);
         let memory_enabled = manifest.memory_raw_capture.enabled;
         if memory_enabled && !standardized.memory_raw_capture_guidance_injected {
             routecodex_v3_agent_memory::inject_memory_raw_capture_guidance(&mut standardized.body)
                 .map_err(|error| {
-                    build_v3_error_01_source_raised_internal(
+                    crate::provider_failure_runtime_policy::raise_v3_source_via_err01(
                         V3ErrorSourceKind::RuntimeFailure,
                         "V3Req04StandardizedResponses",
                         "direct_memory_raw_capture_guidance_injection_failed",
-                        error,
-                        V3InternalErrorCode::V3Req04StandardizedResponses,
+                        error.to_string(),
+                        V3Err01SourceInput::Internal(
+                            V3InternalErrorCode::V3Req04StandardizedResponses,
+                        ),
                     )
+                    .map(|(_, source)| source)
                 })?;
             standardized.memory_raw_capture_guidance_injected = true;
         }
@@ -344,13 +345,14 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
             &standardized.body,
         )
         .map_err(|error| {
-            build_v3_error_01_source_raised_internal(
+            crate::provider_failure_runtime_policy::raise_v3_source_via_err01(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3Req04StandardizedResponses",
                 "direct_tool_thinking_req04_current_boundary_missing",
                 error,
-                V3InternalErrorCode::V3Req04StandardizedResponses,
+                V3Err01SourceInput::Internal(V3InternalErrorCode::V3Req04StandardizedResponses),
             )
+            .map(|(_, source)| source)
         })?;
         standardized.tool_thinking_turn_context =
             crate::hub_v1::compile_v3_tool_thinking_turn_context_at_req04(
@@ -359,13 +361,14 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
                 enabled,
             )
             .map_err(|error| {
-                build_v3_error_01_source_raised_internal(
+                crate::provider_failure_runtime_policy::raise_v3_source_via_err01(
                     V3ErrorSourceKind::RuntimeFailure,
                     "V3Req04StandardizedResponses",
                     "direct_tool_thinking_req04_injection_failed",
                     error.to_string(),
-                    V3InternalErrorCode::V3Req04StandardizedResponses,
+                    V3Err01SourceInput::Internal(V3InternalErrorCode::V3Req04StandardizedResponses),
                 )
+                .map(|(_, source)| source)
             })?;
         Ok(enabled || memory_enabled)
     }
@@ -492,7 +495,7 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
         _request_id: &str,
         _now_epoch_ms: u64,
         _trace: &mut Vec<&'static str>,
-    ) -> Result<bool, V3Error01SourceRaised> {
+    ) -> V3DirectSourceResult<bool> {
         let enabled = crate::hub_v1::v3_tool_thinking_enabled_for_server(manifest, server_id);
         if standardized.tool_thinking_turn_context.enabled_flag() {
             return Ok(true);
@@ -501,13 +504,14 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
             &standardized.body,
         )
         .map_err(|error| {
-            build_v3_error_01_source_raised_internal(
+            crate::provider_failure_runtime_policy::raise_v3_source_via_err01(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3Req04StandardizedChat",
                 "direct_tool_thinking_req04_current_boundary_missing",
                 error,
-                V3InternalErrorCode::V3Req04StandardizedChat,
+                V3Err01SourceInput::Internal(V3InternalErrorCode::V3Req04StandardizedChat),
             )
+            .map(|(_, source)| source)
         })?;
         standardized.tool_thinking_turn_context =
             crate::hub_v1::compile_v3_tool_thinking_turn_context_at_req04(
@@ -516,13 +520,14 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
                 enabled,
             )
             .map_err(|error| {
-                build_v3_error_01_source_raised_internal(
+                crate::provider_failure_runtime_policy::raise_v3_source_via_err01(
                     V3ErrorSourceKind::RuntimeFailure,
                     "V3Req04StandardizedChat",
                     "direct_tool_thinking_req04_injection_failed",
                     error.to_string(),
-                    V3InternalErrorCode::V3Req04StandardizedChat,
+                    V3Err01SourceInput::Internal(V3InternalErrorCode::V3Req04StandardizedChat),
                 )
+                .map(|(_, source)| source)
             })?;
         Ok(enabled)
     }

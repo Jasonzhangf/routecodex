@@ -13,10 +13,7 @@ use crate::nodes::V3Server03HttpRequestRaw;
 use crate::operation_runner::V3Err01SourceInput;
 use crate::provider_failure_runtime_policy::raise_v3_source_via_err01;
 use crate::{V3DirectProtocolCodec, V3ToolThinkingTurnContext};
-use routecodex_v3_error::{
-    build_v3_error_01_source_raised_internal, V3Error01SourceRaised, V3ErrorSourceKind,
-    V3InternalErrorCode,
-};
+use routecodex_v3_error::{V3ErrorSourceKind, V3InternalErrorCode};
 use routecodex_v3_provider_responses::{
     build_v3_provider_12_responses_wire_payload,
     v3_provider_auth_secret_handle_from_declaration_fields, V3Provider12ResponsesWirePayload,
@@ -296,7 +293,7 @@ impl V3DirectProtocolCodec for V3GeminiDirectCodec {
         _request_id: &str,
         _now_epoch_ms: u64,
         _trace: &mut Vec<&'static str>,
-    ) -> Result<bool, V3Error01SourceRaised> {
+    ) -> crate::shared::V3DirectSourceResult<bool> {
         let enabled = crate::hub_v1::v3_tool_thinking_enabled_for_server(manifest, server_id);
         if standardized.tool_thinking_turn_context.enabled_flag() {
             return Ok(true);
@@ -308,10 +305,14 @@ impl V3DirectProtocolCodec for V3GeminiDirectCodec {
                 enabled,
             )
             .map_err(|error| {
-                direct_gemini_internal_error(
+                raise_v3_source_via_err01(
+                    V3ErrorSourceKind::RuntimeFailure,
+                    "V3Req04StandardizedGemini",
                     "direct_tool_thinking_req04_injection_failed",
                     error.to_string(),
+                    V3Err01SourceInput::Internal(V3InternalErrorCode::V3Req04StandardizedResponses),
                 )
+                .map(|(_, source)| source)
             })?;
         Ok(standardized.tool_thinking_turn_context.enabled_flag())
     }
@@ -340,19 +341,6 @@ fn apply_gemini_request_key_hook(
             )
             .map(|(_, source)| source)
         },
-    )
-}
-
-fn direct_gemini_internal_error(
-    code: &'static str,
-    message: impl Into<String>,
-) -> V3Error01SourceRaised {
-    build_v3_error_01_source_raised_internal(
-        V3ErrorSourceKind::RuntimeFailure,
-        "V3Req04StandardizedGemini",
-        code,
-        message.into(),
-        V3InternalErrorCode::V3Req04StandardizedResponses,
     )
 }
 

@@ -700,7 +700,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 &mut trace,
             )
         {
-            return error_output(source, trace, &hook_registry);
+            return direct_runtime_helpers_stream::source_failure_output(
+                source,
+                last_external_http.clone(),
+                trace,
+                &hook_registry,
+            );
         }
 
         let policy = hook_registry.run_route(selected, &standardized);
