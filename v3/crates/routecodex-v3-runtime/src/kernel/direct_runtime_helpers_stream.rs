@@ -973,14 +973,76 @@ pub(crate) fn error_output_with_observability(
     observability: Option<V3RuntimeObservability>,
 ) -> V3ResponsesDirectRuntimeOutput {
     let target_exhausted = source.source_kind == V3ErrorSourceKind::TargetPoolExhausted;
-    let decision = hook_registry.run_error(source, V3ErrorActionScope::None, 0, false, false, None);
-    let projected = V3ErrorHandlingCenter::project_terminal(decision);
+    let original_source = source.clone();
+    let (decision_projection, decision) =
+        match hook_registry.run_error(source, V3ErrorActionScope::None, 0, false, false, None) {
+            Ok(result) => result,
+            Err(error) => {
+                return sdk_runtime_fault_output_with_observability_and_snapshots(
+                    original_source,
+                    runtime_source("V3Error05ExecutionDecision", error),
+                    None,
+                    node_trace,
+                    observability,
+                    None,
+                    None,
+                )
+            }
+        };
+    let projected = match crate::operation_runner::run_v3_error_06_terminal_projection_operator(
+        decision_projection,
+        decision,
+    ) {
+        Ok(Some((_, projected))) => projected,
+        Ok(None) => {
+            return sdk_runtime_fault_output_with_observability_and_snapshots(
+                original_source.clone(),
+                runtime_source(
+                    "V3Error06ClientProjected",
+                    "normal local terminal decision was not terminal",
+                ),
+                None,
+                node_trace,
+                observability,
+                None,
+                None,
+            )
+        }
+        Err(error) => {
+            return sdk_runtime_fault_output_with_observability_and_snapshots(
+                original_source,
+                runtime_source("V3Error06ClientProjected", error),
+                None,
+                node_trace,
+                observability,
+                None,
+                None,
+            )
+        }
+    };
     let mut output =
         projected_error_output_with_observability(projected, node_trace, observability);
     if target_exhausted {
         output.terminal_disposition = Some(V3ProviderTerminalDisposition::NoResponse);
     }
     output
+}
+
+pub(crate) fn policy_failure_output_with_observability(
+    failure: DirectPolicyFailure,
+    last_external_http: Option<V3ExternalHttpWitness>,
+    node_trace: Vec<&'static str>,
+    observability: Option<V3RuntimeObservability>,
+) -> V3ResponsesDirectRuntimeOutput {
+    sdk_runtime_fault_output_with_observability_and_snapshots(
+        failure.original_source,
+        failure.policy_failure,
+        last_external_http,
+        node_trace,
+        observability,
+        None,
+        None,
+    )
 }
 
 pub(crate) fn target_exhausted_output_with_observability(
@@ -1028,6 +1090,7 @@ pub(crate) fn projected_error_output_with_observability_and_snapshots(
         observability,
         terminal_disposition: None,
         diagnostic_source: Some(projected.diagnostic_source),
+        diagnostic_cause: None,
         stream_observation: None,
         provider_request_snapshot,
         provider_response_snapshot,
@@ -1050,21 +1113,195 @@ pub(crate) fn provider_terminal_output(
     provider_request_snapshot: Option<serde_json::Value>,
     provider_response_snapshot: Option<serde_json::Value>,
 ) -> V3ResponsesDirectRuntimeOutput {
-    let terminal = decision
-        .clone()
-        .try_into_terminal()
-        .expect("provider terminal output requires terminal Error05 decision");
-    let disposition = V3ErrorHandlingCenter::provider_terminal_disposition(terminal, witness);
-    let projected = V3ErrorHandlingCenter::project_terminal(decision);
-    let mut output = projected_error_output_with_observability_and_snapshots(
-        projected,
+    let decision_projection = match serde_json::to_value(&decision) {
+        Ok(projection) => projection,
+        Err(error) => {
+            return sdk_runtime_fault_output_with_observability_and_snapshots(
+                decision.exhaustion.local_action.classified.source,
+                runtime_source("V3Error06ClientProjected", error),
+                witness,
+                node_trace,
+                observability,
+                provider_request_snapshot,
+                provider_response_snapshot,
+            )
+        }
+    };
+    let disposition = match witness {
+        Some(response) => V3ProviderTerminalDisposition::ExternalHttp(response),
+        None => V3ProviderTerminalDisposition::NoResponse,
+    };
+    provider_terminal_output_with_decision_projection(
+        decision,
+        decision_projection,
+        disposition,
         node_trace,
         observability,
         provider_request_snapshot,
         provider_response_snapshot,
-    );
-    output.terminal_disposition = Some(disposition);
-    output
+    )
+}
+
+fn provider_terminal_output_with_decision_projection(
+    decision: V3Error05ExecutionDecision,
+    decision_projection: serde_json::Value,
+    disposition: V3ProviderTerminalDisposition,
+    node_trace: Vec<&'static str>,
+    observability: Option<V3RuntimeObservability>,
+    provider_request_snapshot: Option<serde_json::Value>,
+    provider_response_snapshot: Option<serde_json::Value>,
+) -> V3ResponsesDirectRuntimeOutput {
+    let original_source = decision.exhaustion.local_action.classified.source.clone();
+    match crate::operation_runner::run_v3_error_06_terminal_projection_operator(
+        decision_projection,
+        decision,
+    ) {
+        Ok(Some((_, projected))) => {
+            let mut output = projected_error_output_with_observability_and_snapshots(
+                projected,
+                node_trace,
+                observability,
+                provider_request_snapshot,
+                provider_response_snapshot,
+            );
+            output.terminal_disposition = Some(disposition);
+            output
+        }
+        Ok(None) => sdk_runtime_fault_output_with_observability_and_snapshots(
+            original_source.clone(),
+            runtime_source(
+                "V3Error06ClientProjected",
+                "provider terminal decision was not terminal",
+            ),
+            match disposition.clone() {
+                V3ProviderTerminalDisposition::ExternalHttp(witness) => Some(witness),
+                V3ProviderTerminalDisposition::NoResponse => None,
+            },
+            node_trace,
+            observability,
+            provider_request_snapshot,
+            provider_response_snapshot,
+        ),
+        Err(error) => sdk_runtime_fault_output_with_observability_and_snapshots(
+            original_source,
+            runtime_source("V3Error06ClientProjected", error),
+            match disposition {
+                V3ProviderTerminalDisposition::ExternalHttp(witness) => Some(witness),
+                V3ProviderTerminalDisposition::NoResponse => None,
+            },
+            node_trace,
+            observability,
+            provider_request_snapshot,
+            provider_response_snapshot,
+        ),
+    }
+}
+
+pub(crate) fn client_disconnect_terminal_output(
+    decision: V3Error05ExecutionDecision,
+    node_trace: Vec<&'static str>,
+    observability: Option<V3RuntimeObservability>,
+) -> V3ResponsesDirectRuntimeOutput {
+    let decision_projection = match serde_json::to_value(&decision) {
+        Ok(projection) => projection,
+        Err(error) => {
+            return sdk_runtime_fault_output_with_observability_and_snapshots(
+                decision.exhaustion.local_action.classified.source,
+                runtime_source("V3Error06ClientProjected", error),
+                None,
+                node_trace,
+                observability,
+                None,
+                None,
+            )
+        }
+    };
+    client_disconnect_terminal_output_with_decision_projection(
+        decision,
+        decision_projection,
+        node_trace,
+        observability,
+        None,
+        None,
+    )
+}
+
+fn client_disconnect_terminal_output_with_decision_projection(
+    decision: V3Error05ExecutionDecision,
+    decision_projection: serde_json::Value,
+    node_trace: Vec<&'static str>,
+    observability: Option<V3RuntimeObservability>,
+    provider_request_snapshot: Option<serde_json::Value>,
+    provider_response_snapshot: Option<serde_json::Value>,
+) -> V3ResponsesDirectRuntimeOutput {
+    let original_source = decision.exhaustion.local_action.classified.source.clone();
+    match crate::operation_runner::run_v3_error_06_terminal_projection_operator(
+        decision_projection,
+        decision,
+    ) {
+        Ok(Some((_, projected))) => projected_error_output_with_observability_and_snapshots(
+            projected,
+            node_trace,
+            observability,
+            provider_request_snapshot,
+            provider_response_snapshot,
+        ),
+        Ok(None) => sdk_runtime_fault_output_with_observability_and_snapshots(
+            original_source.clone(),
+            crate::kernel::direct_runtime_helpers_stream::runtime_source(
+                "V3Error06ClientProjected",
+                "client disconnect decision was not terminal",
+            ),
+            None,
+            node_trace,
+            observability,
+            provider_request_snapshot,
+            provider_response_snapshot,
+        ),
+        Err(error) => sdk_runtime_fault_output_with_observability_and_snapshots(
+            original_source,
+            crate::kernel::direct_runtime_helpers_stream::runtime_source(
+                "V3Error06ClientProjected",
+                error,
+            ),
+            None,
+            node_trace,
+            observability,
+            provider_request_snapshot,
+            provider_response_snapshot,
+        ),
+    }
+}
+
+fn sdk_runtime_fault_output_with_observability_and_snapshots(
+    original_source: V3Error01SourceRaised,
+    sdk_fault: V3Error01SourceRaised,
+    witness: Option<V3ExternalHttpWitness>,
+    node_trace: Vec<&'static str>,
+    observability: Option<V3RuntimeObservability>,
+    provider_request_snapshot: Option<serde_json::Value>,
+    provider_response_snapshot: Option<serde_json::Value>,
+) -> V3ResponsesDirectRuntimeOutput {
+    V3ResponsesDirectRuntimeOutput {
+        observability,
+        terminal_disposition: Some(match witness {
+            Some(response) => V3ProviderTerminalDisposition::ExternalHttp(response),
+            None => V3ProviderTerminalDisposition::NoResponse,
+        }),
+        diagnostic_source: Some(sdk_fault),
+        diagnostic_cause: Some(original_source),
+        stream_observation: None,
+        provider_request_snapshot,
+        provider_response_snapshot,
+        client_payload: V3Resp15ClientPayload {
+            status: 599,
+            headers: BTreeMap::from([("content-type".to_string(), "application/json".to_string())]),
+            body: V3ClientBody::Json(serde_json::Value::Null),
+        },
+        node_trace,
+        error_chain: None,
+        protocol_relay_handoff: None,
+    }
 }
 
 #[cfg(test)]
@@ -1160,33 +1397,297 @@ mod target_exhaustion_disposition_tests {
             Some(V3ProviderTerminalDisposition::ExternalHttp(witness))
         );
     }
-}
 
-pub(crate) fn committed_sse_provider_failure_output(
-    source: V3Error01SourceRaised,
-    provider_id: Option<String>,
-    node_trace: Vec<&'static str>,
-    hook_registry: &V3HookRegistry,
-    observability: Option<V3RuntimeObservability>,
-) -> V3ResponsesDirectRuntimeOutput {
-    let scope = provider_id.map(|provider_id| V3ErrorActionScope::ProviderInstance { provider_id });
-    let decision = hook_registry.run_error(
-        source,
-        scope.unwrap_or(V3ErrorActionScope::None),
-        0,
-        false,
-        false,
-        None,
-    );
-    assert!(
-        matches!(decision.action, V3Error05ExecutionAction::ProjectTerminal),
-        "committed SSE provider failures must terminate without retry or reselection"
-    );
-    projected_error_output_with_observability(
-        V3ErrorHandlingCenter::project_terminal(decision),
-        node_trace,
-        observability,
-    )
+    fn provider_terminal_decision() -> V3Error05ExecutionDecision {
+        let source = routecodex_v3_error::build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3Transport13ResponsesHttpRequest",
+            "provider_transport_error",
+            "provider connection failed",
+        );
+        let classified = routecodex_v3_error::build_v3_error_02_classified_from_v3_error_01(source);
+        let action = routecodex_v3_error::build_v3_error_03_target_local_action_from_v3_error_02(
+            classified,
+            V3ErrorActionScope::ProviderKeyModel {
+                provider_id: "provider-a".to_string(),
+                auth_alias: "key-a".to_string(),
+                model_id: "model-a".to_string(),
+            },
+            0,
+        );
+        let exhaustion =
+            routecodex_v3_error::build_v3_error_04_target_exhaustion_decision_with_provider_availability(
+                action,
+                0,
+                false,
+                false,
+            );
+        routecodex_v3_error::build_v3_error_05_execution_decision_from_v3_error_04(exhaustion, None)
+    }
+
+    #[test]
+    fn provider_terminal_sdk_fault_retains_sources_witness_snapshots_and_observability() {
+        let decision = provider_terminal_decision();
+        let original_source = decision.exhaustion.local_action.classified.source.clone();
+        let witness = V3ExternalHttpWitness::new(
+            200,
+            vec![("content-type".into(), b"application/json".to_vec())],
+            br#"{"id":"provider-response"}"#.to_vec(),
+        );
+        let observability = V3RuntimeObservability {
+            entry_protocol: "responses".to_string(),
+            execution_mode: "direct".to_string(),
+            transport: "sse".to_string(),
+            provider_status: Some(200),
+            ..Default::default()
+        };
+        let request_snapshot = json!({"model": "provider-wire-model"});
+        let response_snapshot = json!({"status": 200, "body": {"id": "provider-response"}});
+
+        let nonterminal_source = routecodex_v3_error::build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3Transport13ResponsesHttpRequest",
+            "provider_transport_error",
+            "provider connection failed",
+        );
+        let nonterminal_recovery = V3Error05RecoveryAdmissionWitness::new(
+            V3ProviderFailureSessionScope::new("server-a", "group-a", "session-a")
+                .expect("test session scope must be valid"),
+            "provider-a:key-a:model-a",
+            "provider_transport_error",
+            1,
+        )
+        .expect("test recovery witness must be valid");
+        let nonterminal_decision = V3ErrorHandlingCenter::decide_provider(
+            V3ErrorHandlingCenterInput {
+                source: nonterminal_source.clone(),
+                action_scope: V3ErrorActionScope::ProviderKeyModel {
+                    provider_id: "provider-a".to_string(),
+                    auth_alias: "key-a".to_string(),
+                    model_id: "model-a".to_string(),
+                },
+                candidates_remaining: 1,
+                source_status: Some(200),
+            },
+            false,
+            false,
+            Some(nonterminal_recovery),
+        );
+        assert_eq!(
+            nonterminal_decision.action,
+            V3Error05ExecutionAction::WaitThenReselect {
+                recovery: nonterminal_decision
+                    .action
+                    .recovery_witness()
+                    .expect("nonterminal decision must retain recovery")
+                    .clone(),
+            }
+        );
+        let nonterminal = provider_terminal_output(
+            nonterminal_decision,
+            Some(witness.clone()),
+            vec!["V3ProviderResp14Raw"],
+            Some(observability.clone()),
+            Some(request_snapshot.clone()),
+            Some(response_snapshot.clone()),
+        );
+        let nonterminal_fault = nonterminal
+            .diagnostic_source
+            .as_ref()
+            .expect("failed SDK06 must retain the generated RuntimeFailure");
+        assert_eq!(
+            nonterminal_fault.source_kind,
+            V3ErrorSourceKind::RuntimeFailure
+        );
+        assert_eq!(nonterminal_fault.source_stage, "V3Error06ClientProjected");
+        assert_eq!(nonterminal_fault.code, "v3_route_target_runtime_failure");
+        assert_eq!(
+            nonterminal.diagnostic_cause.as_ref(),
+            Some(&nonterminal_source)
+        );
+        assert_eq!(
+            nonterminal.terminal_disposition,
+            Some(V3ProviderTerminalDisposition::ExternalHttp(witness.clone()))
+        );
+        assert_eq!(
+            nonterminal.provider_request_snapshot.as_ref(),
+            Some(&request_snapshot)
+        );
+        assert_eq!(
+            nonterminal.provider_response_snapshot.as_ref(),
+            Some(&response_snapshot)
+        );
+        assert_eq!(nonterminal.observability, Some(observability.clone()));
+        assert_eq!(nonterminal.node_trace, vec!["V3ProviderResp14Raw"]);
+        assert_eq!(nonterminal.error_chain, None);
+        assert!(nonterminal.stream_observation.is_none());
+        assert!(nonterminal.protocol_relay_handoff.is_none());
+        assert_eq!(nonterminal.client_payload.status, 599);
+        assert!(matches!(
+            &nonterminal.client_payload.body,
+            V3ClientBody::Json(value) if value.is_null()
+        ));
+
+        let output = provider_terminal_output_with_decision_projection(
+            decision,
+            serde_json::Value::Null,
+            V3ProviderTerminalDisposition::ExternalHttp(witness.clone()),
+            vec!["V3ProviderResp14Raw"],
+            Some(observability.clone()),
+            Some(request_snapshot.clone()),
+            Some(response_snapshot.clone()),
+        );
+
+        let fault = output
+            .diagnostic_source
+            .as_ref()
+            .expect("failed SDK06 must retain the generated RuntimeFailure");
+        assert_eq!(fault.source_kind, V3ErrorSourceKind::RuntimeFailure);
+        assert_eq!(fault.source_stage, "V3Error06ClientProjected");
+        assert_eq!(fault.code, "v3_route_target_runtime_failure");
+        assert_eq!(output.diagnostic_cause.as_ref(), Some(&original_source));
+        assert_eq!(
+            output.terminal_disposition,
+            Some(V3ProviderTerminalDisposition::ExternalHttp(witness))
+        );
+        assert_eq!(
+            output.provider_request_snapshot.as_ref(),
+            Some(&request_snapshot)
+        );
+        assert_eq!(
+            output.provider_response_snapshot.as_ref(),
+            Some(&response_snapshot)
+        );
+        assert_eq!(output.observability, Some(observability));
+        assert_eq!(output.node_trace, vec!["V3ProviderResp14Raw"]);
+        assert_eq!(output.error_chain, None);
+        assert!(output.stream_observation.is_none());
+        assert!(output.protocol_relay_handoff.is_none());
+        assert_eq!(output.client_payload.status, 599);
+        assert!(matches!(
+            &output.client_payload.body,
+            V3ClientBody::Json(value) if value.is_null()
+        ));
+
+        let no_response_decision = provider_terminal_decision();
+        let no_response_source = no_response_decision
+            .exhaustion
+            .local_action
+            .classified
+            .source
+            .clone();
+        let no_response_observability = V3RuntimeObservability {
+            entry_protocol: "responses".to_string(),
+            execution_mode: "direct".to_string(),
+            transport: "json".to_string(),
+            provider_status: None,
+            ..Default::default()
+        };
+        let no_response = provider_terminal_output_with_decision_projection(
+            no_response_decision,
+            serde_json::Value::Null,
+            V3ProviderTerminalDisposition::NoResponse,
+            vec!["V3ProviderResp14Raw"],
+            Some(no_response_observability.clone()),
+            Some(request_snapshot.clone()),
+            Some(response_snapshot.clone()),
+        );
+        let no_response_fault = no_response
+            .diagnostic_source
+            .as_ref()
+            .expect("failed SDK06 must retain the generated RuntimeFailure");
+        assert_eq!(
+            no_response_fault.source_kind,
+            V3ErrorSourceKind::RuntimeFailure
+        );
+        assert_eq!(no_response_fault.source_stage, "V3Error06ClientProjected");
+        assert_eq!(
+            no_response.diagnostic_cause.as_ref(),
+            Some(&no_response_source)
+        );
+        assert_eq!(
+            no_response.terminal_disposition,
+            Some(V3ProviderTerminalDisposition::NoResponse)
+        );
+        assert_eq!(
+            no_response.provider_request_snapshot,
+            Some(request_snapshot)
+        );
+        assert_eq!(
+            no_response.provider_response_snapshot,
+            Some(response_snapshot)
+        );
+        assert_eq!(no_response.observability, Some(no_response_observability));
+        assert_eq!(no_response.error_chain, None);
+    }
+
+    fn client_disconnect_decision() -> (V3Error01SourceRaised, V3Error05ExecutionDecision) {
+        let source = build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ClientDisconnect,
+            "V3Transport13ResponsesHttpRequest",
+            "client_disconnect",
+            "client disconnected",
+        );
+        let classified =
+            routecodex_v3_error::build_v3_error_02_classified_from_v3_error_01(source.clone());
+        let action = routecodex_v3_error::build_v3_error_03_target_local_action_from_v3_error_02(
+            classified,
+            V3ErrorActionScope::None,
+            0,
+        );
+        let exhaustion =
+            routecodex_v3_error::build_v3_error_04_target_exhaustion_decision_with_provider_availability(
+                action,
+                0,
+                false,
+                false,
+            );
+        let decision = routecodex_v3_error::build_v3_error_05_execution_decision_from_v3_error_04(
+            exhaustion, None,
+        );
+        (source, decision)
+    }
+
+    #[test]
+    fn disconnect_terminal_projection_keeps_existing_health_neutral_result() {
+        let (source, decision) = client_disconnect_decision();
+        let output = client_disconnect_terminal_output(
+            decision,
+            vec!["V3Transport13ResponsesHttpRequest"],
+            None,
+        );
+
+        assert_eq!(output.diagnostic_source.as_ref(), Some(&source));
+        assert_eq!(output.diagnostic_cause, None);
+        assert_eq!(output.terminal_disposition, None);
+        assert!(output.error_chain.is_some());
+    }
+
+    #[test]
+    fn disconnect_sdk_fault_uses_no_response_and_preserves_existing_source() {
+        let (source, decision) = client_disconnect_decision();
+        let output = client_disconnect_terminal_output_with_decision_projection(
+            decision,
+            serde_json::Value::Null,
+            vec!["V3Transport13ResponsesHttpRequest"],
+            None,
+            None,
+            None,
+        );
+
+        let fault = output
+            .diagnostic_source
+            .as_ref()
+            .expect("failed SDK06 must retain the generated RuntimeFailure");
+        assert_eq!(fault.source_kind, V3ErrorSourceKind::RuntimeFailure);
+        assert_eq!(fault.source_stage, "V3Error06ClientProjected");
+        assert_eq!(output.diagnostic_cause.as_ref(), Some(&source));
+        assert_eq!(
+            output.terminal_disposition,
+            Some(V3ProviderTerminalDisposition::NoResponse)
+        );
+        assert_eq!(output.error_chain, None);
+    }
 }
 
 pub(crate) fn relay_handoff_output(
@@ -1204,6 +1705,7 @@ pub(crate) fn relay_handoff_output(
         observability: None,
         terminal_disposition: None,
         diagnostic_source: None,
+        diagnostic_cause: None,
         stream_observation: None,
         provider_request_snapshot: None,
         provider_response_snapshot: None,

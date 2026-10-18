@@ -118,6 +118,26 @@ fn responses_direct_static_hooks_are_registered() {
 }
 
 #[test]
+fn responses_direct_error_hook_runs_sdk_02_through_05_and_returns_decision_projection() {
+    let registry = register_responses_direct_hooks();
+    let source = build_v3_error_01_source_raised(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3Transport13ResponsesHttpRequest",
+        "provider_transport_error",
+        "provider connection failed",
+    );
+    let (projection, decision) = registry
+        .run_error(source, V3ErrorActionScope::None, 0, false, false, None)
+        .expect("registered Error hook must execute SDK Error02 through Error05");
+
+    assert_eq!(
+        decision.action,
+        routecodex_v3_error::V3Error05ExecutionAction::ProjectTerminal
+    );
+    assert_eq!(projection, serde_json::to_value(&decision).unwrap());
+}
+
+#[test]
 fn direct_request_projection_binds_selected_wire_model_before_provider_wire() {
     let registry = register_responses_direct_hooks();
     let policy = direct_policy_with_models(

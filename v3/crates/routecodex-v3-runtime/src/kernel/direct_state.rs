@@ -311,6 +311,7 @@ pub struct V3ResponsesDirectRuntimeOutput {
     pub client_payload: V3Resp15ClientPayload,
     pub terminal_disposition: Option<V3ProviderTerminalDisposition>,
     pub diagnostic_source: Option<routecodex_v3_error::V3Error01SourceRaised>,
+    pub diagnostic_cause: Option<routecodex_v3_error::V3Error01SourceRaised>,
     pub provider_request_snapshot: Option<serde_json::Value>,
     pub provider_response_snapshot: Option<serde_json::Value>,
     pub node_trace: Vec<&'static str>,
@@ -395,11 +396,11 @@ pub struct V3ResponsesProtocolExecutionPlanFailure {
 
 pub fn project_v3_protocol_execution_plan_failure(
     failure: V3ResponsesProtocolExecutionPlanFailure,
-) -> V3Error06ClientProjected {
-    V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
-        source: failure.source,
-        action_scope: V3ErrorActionScope::None,
-        candidates_remaining: 0,
-        source_status: None,
-    })
+) -> Result<V3Error06ClientProjected, crate::V3RelayErrorOperatorFault> {
+    crate::provider_failure_runtime_policy::project_v3_relay_error_source(
+        failure.source,
+        V3ErrorActionScope::None,
+        0,
+        None,
+    )
 }

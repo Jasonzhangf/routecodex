@@ -117,15 +117,6 @@ pub trait V3DirectProtocolCodec {
         context: V3DirectResponseCompatContext,
     ) -> V3DirectResponseProjectionFuture;
 
-    fn run_error(
-        source: V3Error01SourceRaised,
-        scope: routecodex_v3_error::V3ErrorActionScope,
-        candidates_remaining: usize,
-        default_pool_available: bool,
-        same_provider_retry_available: bool,
-        recovery: Option<routecodex_v3_error::V3Error05RecoveryAdmissionWitness>,
-    ) -> routecodex_v3_error::V3Error05ExecutionDecision;
-
     /// 协议控制面：失败会话作用域（responses 续接作用域；chat 用请求本身）。
     fn failure_session_scope(
         control: &Self::Control,
@@ -384,24 +375,6 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
         Ok(enabled || memory_enabled)
     }
 
-    fn run_error(
-        source: V3Error01SourceRaised,
-        scope: routecodex_v3_error::V3ErrorActionScope,
-        candidates_remaining: usize,
-        default_pool_available: bool,
-        same_provider_retry_available: bool,
-        recovery: Option<routecodex_v3_error::V3Error05RecoveryAdmissionWitness>,
-    ) -> routecodex_v3_error::V3Error05ExecutionDecision {
-        crate::hooks::responses_direct_error_hook(
-            source,
-            scope,
-            candidates_remaining,
-            default_pool_available,
-            same_provider_retry_available,
-            recovery,
-        )
-    }
-
     fn failure_session_scope(
         _control: &Self::Control,
         standardized: &Self::Standardized,
@@ -559,24 +532,6 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
                 )
             })?;
         Ok(enabled)
-    }
-
-    fn run_error(
-        source: V3Error01SourceRaised,
-        scope: routecodex_v3_error::V3ErrorActionScope,
-        candidates_remaining: usize,
-        default_pool_available: bool,
-        same_provider_retry_available: bool,
-        recovery: Option<routecodex_v3_error::V3Error05RecoveryAdmissionWitness>,
-    ) -> routecodex_v3_error::V3Error05ExecutionDecision {
-        crate::hooks::responses_direct_error_hook(
-            source,
-            scope,
-            candidates_remaining,
-            default_pool_available,
-            same_provider_retry_available,
-            recovery,
-        )
     }
 
     fn failure_session_scope(

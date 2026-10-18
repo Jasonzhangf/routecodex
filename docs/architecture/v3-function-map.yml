@@ -813,6 +813,9 @@ features:
   - build_v3_execution_11_protocol_decision_from_v3_target_10
   - plan_v3_responses_protocol_execution_with_provider_health
   - project_v3_protocol_execution_plan_failure
+  - finish_v3_protocol_execution_plan_failure
+  - kernel::tests::protocol_plan_failure_preserves_source_status_and_pool_exhausted
+  - tests::protocol_plan_operator_fault_consumer_preserves_sources_without_error06
   - V3ResponsesDirectRuntimeSharedState
   - responses_direct_route_hook
   - responses_direct_response_projection_hook

@@ -578,6 +578,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             return Ok(provider_failure_output(
                 terminalize_provider_failure(failure, None),
                 trace,
+                Vec::new(),
             ));
         }
     };
@@ -685,6 +686,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         return Ok(provider_failure_output(
                             terminalize_provider_failure(failure, last_external_http.clone()),
                             trace,
+                            std::mem::take(&mut provider_failure_events),
                         ));
                     }
                 }
@@ -742,7 +744,11 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 )
                 .await?;
                 if let Some(failure) = terminal_failure {
-                    return Ok(provider_failure_output(failure, trace));
+                    return Ok(provider_failure_output(
+                        failure,
+                        trace,
+                        std::mem::take(&mut provider_failure_events),
+                    ));
                 }
                 continue;
             }};
@@ -970,7 +976,11 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 )
                 .await?
                 {
-                    return Ok(provider_failure_output(failure, trace));
+                    return Ok(provider_failure_output(
+                        failure,
+                        trace,
+                        std::mem::take(&mut provider_failure_events),
+                    ));
                 }
                 continue;
             }
@@ -999,7 +1009,11 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 )
                 .await?
                 {
-                    return Ok(provider_failure_output(failure, trace));
+                    return Ok(provider_failure_output(
+                        failure,
+                        trace,
+                        std::mem::take(&mut provider_failure_events),
+                    ));
                 }
                 continue;
             }
@@ -1059,12 +1073,17 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         )
                         .await?;
                         if let Some(failure) = terminal_failure {
-                            return Ok(provider_failure_output(failure, trace));
+                            return Ok(provider_failure_output(
+                                failure,
+                                trace,
+                                std::mem::take(&mut provider_failure_events),
+                            ));
                         }
                         if attempt_budget.residence_deadline() <= std::time::Instant::now() {
                             return Ok(provider_failure_output(
                                 terminalize_provider_failure(failure, last_external_http.clone()),
                                 trace,
+                                std::mem::take(&mut provider_failure_events),
                             ));
                         }
                         continue;
@@ -1172,7 +1191,11 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                             )
                             .await?
                             {
-                                return Ok(provider_failure_output(failure, trace));
+                                return Ok(provider_failure_output(
+                                    failure,
+                                    trace,
+                                    std::mem::take(&mut provider_failure_events),
+                                ));
                             }
                             continue;
                         }
@@ -1225,6 +1248,9 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     error_chain: None,
                     servertool_followup_required,
                     observability: Some(observability),
+                    provider_failure_attempts: Vec::new(),
+                    diagnostic_source: None,
+                    diagnostic_cause: None,
                     stream_observation: Some(stream_observation),
                     provider_snapshots: Some(V3RelayProviderSnapshots {
                         provider_request: Some(provider_request_snapshot.clone()),
@@ -1261,7 +1287,11 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         )
                         .await?
                         {
-                            return Ok(provider_failure_output(failure, trace));
+                            return Ok(provider_failure_output(
+                                failure,
+                                trace,
+                                std::mem::take(&mut provider_failure_events),
+                            ));
                         }
                         continue;
                     }
@@ -1299,7 +1329,11 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                                 )
                                 .await?
                                 {
-                                    return Ok(provider_failure_output(failure, trace));
+                                    return Ok(provider_failure_output(
+                                        failure,
+                                        trace,
+                                        std::mem::take(&mut provider_failure_events),
+                                    ));
                                 }
                                 continue;
                             }
@@ -1404,7 +1438,11 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                             )
                             .await?
                             {
-                                return Ok(provider_failure_output(failure, trace));
+                                return Ok(provider_failure_output(
+                                    failure,
+                                    trace,
+                                    std::mem::take(&mut provider_failure_events),
+                                ));
                             }
                             continue;
                         }
@@ -1457,6 +1495,9 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     error_chain: None,
                     servertool_followup_required,
                     observability: Some(observability),
+                    provider_failure_attempts: Vec::new(),
+                    diagnostic_source: None,
+                    diagnostic_cause: None,
                     stream_observation: Some(stream_observation),
                     provider_snapshots: Some(V3RelayProviderSnapshots {
                         provider_request: Some(provider_request_snapshot),
@@ -1547,6 +1588,7 @@ async fn anthropic_provider_stream_failure_from_closeout_error(
         source_stage: failure.source_stage,
         terminal_projection: failure.terminal_projection,
         terminal_disposition: failure.terminal_disposition,
+        error_operator_fault: failure.error_operator_fault,
         error_type_fn: extract_error_type_style,
         error_message_fn: extract_message_type_style,
     })

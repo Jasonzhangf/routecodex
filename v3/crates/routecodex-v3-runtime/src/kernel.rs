@@ -526,7 +526,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 &V3DirectProviderFailurePolicyContext {
                     failure_session_scope: &direct_failure_session_scope,
                     provider_health: &provider_health,
-                    run_error: crate::hooks::responses_direct_error_hook,
                     availability: &availability,
                     expanded: expanded.as_ref(),
                     provider_pinned: false,
@@ -544,7 +543,14 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             .await
             {
                 Ok(result) => result,
-                Err(source) => return error_output(source, trace, &hook_registry),
+                Err(failure) => {
+                    return direct_runtime_helpers_stream::policy_failure_output_with_observability(
+                        failure,
+                        last_external_http,
+                        trace,
+                        None,
+                    )
+                }
             };
             if let Some(event) = policy_result.event.clone() {
                 provider_failure_events.push(event.clone());
@@ -857,7 +863,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     &V3DirectProviderFailurePolicyContext {
                         failure_session_scope: &direct_failure_session_scope,
                         provider_health: &provider_health,
-                        run_error: crate::hooks::responses_direct_error_hook,
                         availability: &availability,
                         expanded: expanded.as_ref(),
                         provider_pinned: false,
@@ -875,7 +880,14 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 .await
                 {
                     Ok(result) => result,
-                    Err(source) => return error_output(source, trace, &hook_registry),
+                    Err(failure) => {
+                        return direct_runtime_helpers_stream::policy_failure_output_with_observability(
+                            failure,
+                            last_external_http,
+                            trace,
+                            None,
+                        )
+                    }
                 };
                 if let Some(event) = policy_result.event.clone() {
                     provider_failure_events.push(event.clone());
@@ -929,8 +941,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         );
                     }
                     V3Error05ExecutionAction::ClientDisconnected => {
-                        return projected_error_output_with_observability(
-                            V3ErrorHandlingCenter::project_terminal(policy_result.decision),
+                        return direct_runtime_helpers_stream::client_disconnect_terminal_output(
+                            policy_result.decision,
                             trace,
                             None,
                         );
@@ -1029,7 +1041,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     &V3DirectProviderFailurePolicyContext {
                         failure_session_scope: &direct_failure_session_scope,
                         provider_health: &provider_health,
-                        run_error: crate::hooks::responses_direct_error_hook,
                         availability: &availability,
                         expanded: expanded.as_ref(),
                         provider_pinned: false,
@@ -1047,7 +1058,14 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 .await
                 {
                     Ok(result) => result,
-                    Err(source) => return error_output(source, trace, &hook_registry),
+                    Err(failure) => {
+                        return direct_runtime_helpers_stream::policy_failure_output_with_observability(
+                            failure,
+                            last_external_http,
+                            trace,
+                            None,
+                        )
+                    }
                 };
                 if let Some(event) = policy_result.event.clone() {
                     provider_failure_events.push(event.clone());
@@ -1109,8 +1127,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         );
                     }
                     V3Error05ExecutionAction::ClientDisconnected => {
-                        return projected_error_output_with_observability(
-                            V3ErrorHandlingCenter::project_terminal(policy_result.decision),
+                        return direct_runtime_helpers_stream::client_disconnect_terminal_output(
+                            policy_result.decision,
                             trace,
                             None,
                         );
@@ -1320,7 +1338,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                 &V3DirectProviderFailurePolicyContext {
                                     failure_session_scope: &direct_failure_session_scope,
                                     provider_health: &provider_health,
-                                    run_error: crate::hooks::responses_direct_error_hook,
                                     availability: &availability,
                                     expanded: expanded.as_ref(),
                                     provider_pinned: false,
@@ -1338,9 +1355,25 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                             .await
                             {
                                 Ok(result) => result,
-                                Err(source) => return error_output(source, trace, &hook_registry),
+                                Err(failure) => {
+                                    return direct_runtime_helpers_stream::policy_failure_output_with_observability(
+                                        failure,
+                                        last_external_http,
+                                        trace,
+                                        None,
+                                    )
+                                }
                             };
-                            policy_result.exhaust_if_residence_expired(&attempt_budget);
+                            if let Err(failure) =
+                                policy_result.exhaust_if_residence_expired(&attempt_budget)
+                            {
+                                return direct_runtime_helpers_stream::policy_failure_output_with_observability(
+                                    failure,
+                                    last_external_http,
+                                    trace,
+                                    None,
+                                );
+                            }
                             if let Some(event) = policy_result.event.clone() {
                                 provider_failure_events.push(event.clone());
                                 publish_v3_direct_provider_failure_event(
@@ -1390,10 +1423,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                     );
                                 }
                                 V3Error05ExecutionAction::ClientDisconnected => {
-                                    return projected_error_output_with_observability(
-                                        V3ErrorHandlingCenter::project_terminal(
-                                            policy_result.decision,
-                                        ),
+                                    return direct_runtime_helpers_stream::client_disconnect_terminal_output(
+                                        policy_result.decision,
                                         trace,
                                         None,
                                     );
@@ -1477,6 +1508,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             observability: Some(observability),
             terminal_disposition: None,
             diagnostic_source: None,
+            diagnostic_cause: None,
             stream_observation: response_projection.stream_observation.clone(),
             client_payload,
             provider_request_snapshot,

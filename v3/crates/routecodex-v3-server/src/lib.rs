@@ -1457,6 +1457,77 @@ pub(crate) fn persist_v3_chat_failure_evidence(
         request_id,
         attempts,
         output.diagnostic_source.as_ref(),
+        output.diagnostic_cause.as_ref(),
+    );
+}
+
+pub(crate) fn persist_v3_anthropic_relay_failure_evidence(
+    state: &Arc<V3ListenerState>,
+    endpoint: &str,
+    request_id: &str,
+    output: &routecodex_v3_runtime::V3AnthropicRelayRuntimeOutput,
+) {
+    let attempts = output
+        .observability
+        .as_ref()
+        .map_or(output.provider_failure_attempts.as_slice(), |observation| {
+            observation.provider_failure_events.as_slice()
+        });
+    persist_v3_chat_failure_evidence_sources(
+        state,
+        "anthropic",
+        endpoint,
+        request_id,
+        attempts,
+        output.diagnostic_source.as_ref(),
+        output.diagnostic_cause.as_ref(),
+    );
+}
+
+pub(crate) fn persist_v3_gemini_relay_failure_evidence(
+    state: &Arc<V3ListenerState>,
+    endpoint: &str,
+    request_id: &str,
+    output: &routecodex_v3_runtime::V3GeminiRelayRuntimeOutput,
+) {
+    let attempts = output
+        .observability
+        .as_ref()
+        .map_or(output.provider_failure_attempts.as_slice(), |observation| {
+            observation.provider_failure_events.as_slice()
+        });
+    persist_v3_chat_failure_evidence_sources(
+        state,
+        "gemini",
+        endpoint,
+        request_id,
+        attempts,
+        output.diagnostic_source.as_ref(),
+        output.diagnostic_cause.as_ref(),
+    );
+}
+
+pub(crate) fn persist_v3_responses_relay_failure_sources(
+    state: &Arc<V3ListenerState>,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+    output: &routecodex_v3_runtime::V3ResponsesRelayRuntimeOutput,
+) {
+    let attempts = output
+        .observability
+        .as_ref()
+        .map_or(&[][..], |observation| {
+            observation.provider_failure_events.as_slice()
+        });
+    persist_v3_chat_failure_evidence_sources(
+        state,
+        entry_protocol,
+        endpoint,
+        request_id,
+        attempts,
+        output.diagnostic_source.as_ref(),
+        output.diagnostic_cause.as_ref(),
     );
 }
 #[cfg(test)]

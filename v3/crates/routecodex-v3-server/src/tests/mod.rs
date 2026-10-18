@@ -450,6 +450,497 @@ fn codex_sample_store_persistence_and_retention_are_owned_by_debug_crate() {
     sample_runtime.block_on(sample_worker.shutdown());
 }
 
+#[test]
+fn failure_evidence_preserves_distinct_terminal_sources() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-terminal-source-evidence-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, true, None, true);
+    let (sample_runtime, mut sample_worker) = start_test_codex_sample_worker(&state);
+
+    let provider_source = routecodex_v3_error::build_v3_error_01_source_raised_external(
+        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+        "V3Transport13ResponsesHttpRequest",
+        "provider_http_429",
+        "provider returned HTTP 429",
+        routecodex_v3_error::V3ExternalErrorLink {
+            kind: routecodex_v3_error::V3ExternalErrorKind::Provider,
+            status: Some(429),
+            code: Some("rate_limit".to_string()),
+            provider_id: Some("alpha".to_string()),
+            upstream_request_id: Some("upstream-cause".to_string()),
+            message: Some("rate limited".to_string()),
+        },
+    );
+    let runtime_source = routecodex_v3_error::build_v3_error_01_source_raised(
+        routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+        "V3Error05ExecutionDecision",
+        "sdk_error",
+        "SDK policy decision failed",
+    );
+    let attempts = vec![V3RuntimeProviderFailureObservation {
+        external_error_status: provider_source
+            .external_error
+            .as_ref()
+            .and_then(|link| link.status),
+        diagnostic_source: Some(provider_source.clone()),
+        ..test_provider_failure_observation()
+    }];
+
+    persist_v3_chat_failure_evidence_sources(
+        &state,
+        "responses",
+        "/v1/responses",
+        "terminal-source-preserved",
+        &attempts,
+        Some(&runtime_source),
+        Some(&provider_source),
+    );
+    sample_runtime
+        .block_on(sample_worker.wait_until_idle())
+        .unwrap();
+
+    let evidence_path = root.join(
+        ".rcc/codex-samples/openai-responses/ports/5555/\
+         terminal-source-preserved/provider-failed-attempts.json",
+    );
+    let evidence: Value =
+        serde_json::from_str(&fs::read_to_string(&evidence_path).unwrap()).unwrap();
+    assert_eq!(
+        evidence["terminal_source"],
+        serde_json::to_value(&runtime_source).unwrap()
+    );
+    assert_eq!(
+        evidence["terminal_cause"],
+        serde_json::to_value(&provider_source).unwrap()
+    );
+    assert_eq!(
+        evidence["attempts"][0]["diagnostic_source"],
+        serde_json::to_value(&provider_source).unwrap()
+    );
+    assert_eq!(evidence["attempts"][0]["provider_status"], json!(429));
+
+    persist_v3_chat_failure_evidence_sources(
+        &state,
+        "responses",
+        "/v1/responses",
+        "terminal-source-absent",
+        &[],
+        Some(&provider_source),
+        None,
+    );
+    sample_runtime
+        .block_on(sample_worker.wait_until_idle())
+        .unwrap();
+    let legacy_path = root.join(
+        ".rcc/codex-samples/openai-responses/ports/5555/\
+         terminal-source-absent/provider-failed-attempts.json",
+    );
+    let legacy: Value = serde_json::from_str(&fs::read_to_string(&legacy_path).unwrap()).unwrap();
+    assert_eq!(
+        legacy["terminal_source"],
+        serde_json::to_value(&provider_source).unwrap()
+    );
+    assert!(
+        legacy.get("terminal_cause").is_none(),
+        "absence of a separate cause must preserve the existing artifact shape: {legacy}"
+    );
+    sample_runtime.block_on(sample_worker.shutdown());
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn relay_consumers_preserve_sources_without_observation_or_attempts() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-relay-source-consumers-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, true, None, true);
+    let (runtime, mut worker) = start_test_codex_sample_worker(&state);
+    let cause = routecodex_v3_error::build_v3_error_01_source_raised(
+        routecodex_v3_error::V3ErrorSourceKind::ClientDisconnect,
+        "V3ProviderReqOutbound09TransportRequest",
+        "client_disconnect",
+        "client closed",
+    );
+    let source = routecodex_v3_error::build_v3_error_01_source_raised(
+        routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+        "V3Error06ClientProjected",
+        "relay_error_operator_sdk_failure",
+        "SDK rejected input",
+    );
+    let chat = V3OpenAiChatRelayRuntimeOutput {
+        status: 599,
+        terminal_disposition: Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
+        client_body: routecodex_v3_runtime::V3OpenAiChatRelayClientBody::Json(Value::Null),
+        node_trace: Vec::new(),
+        error_chain: None,
+        error_class: None,
+        error_detail: None,
+        observability: None,
+        stream_observation: None,
+        provider_snapshots: None,
+        provider_failure_attempts: Vec::new(),
+        diagnostic_source: Some(source.clone()),
+        diagnostic_cause: Some(cause.clone()),
+    };
+    persist_v3_chat_failure_evidence(
+        &state,
+        "openai_chat",
+        "/v1/chat/completions",
+        "relay-chat",
+        &chat,
+    );
+    let anthropic = V3AnthropicRelayRuntimeOutput {
+        status: 599,
+        terminal_disposition: Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
+        client_response: Value::Null,
+        client_body: routecodex_v3_runtime::V3AnthropicRelayClientBody::Json,
+        node_trace: Vec::new(),
+        error_chain: None,
+        servertool_followup_required: false,
+        observability: None,
+        stream_observation: None,
+        provider_snapshots: None,
+        provider_failure_attempts: Vec::new(),
+        diagnostic_source: Some(source.clone()),
+        diagnostic_cause: Some(cause.clone()),
+    };
+    persist_v3_anthropic_relay_failure_evidence(
+        &state,
+        "/v1/messages",
+        "relay-anthropic",
+        &anthropic,
+    );
+    let gemini = V3GeminiRelayRuntimeOutput {
+        status: 599,
+        terminal_disposition: Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
+        client_body: routecodex_v3_runtime::V3GeminiRelayClientBody::Json(Value::Null),
+        node_trace: Vec::new(),
+        error_chain: None,
+        observability: None,
+        stream_observation: None,
+        provider_snapshots: None,
+        provider_failure_attempts: Vec::new(),
+        diagnostic_source: Some(source.clone()),
+        diagnostic_cause: Some(cause.clone()),
+    };
+    persist_v3_gemini_relay_failure_evidence(
+        &state,
+        "/v1beta/models/model:generateContent",
+        "relay-gemini",
+        &gemini,
+    );
+    let responses = V3ResponsesRelayRuntimeOutput {
+        status: 599,
+        terminal_disposition: Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
+        client_body: routecodex_v3_runtime::V3ResponsesRelayClientBody::Json(Value::Null),
+        node_trace: Vec::new(),
+        error_chain: None,
+        observability: None,
+        stream_observation: None,
+        provider_snapshots: None,
+        finalized_response: None,
+        protocol_direct_handoff: None,
+        diagnostic_source: Some(source.clone()),
+        diagnostic_cause: Some(cause.clone()),
+    };
+    persist_v3_responses_relay_failure_sources(
+        &state,
+        "responses",
+        "/v1/responses",
+        "relay-responses",
+        &responses,
+    );
+    runtime.block_on(worker.wait_until_idle()).unwrap();
+    for (protocol, request) in [
+        ("openai-chat-completions", "relay-chat"),
+        ("anthropic-messages", "relay-anthropic"),
+        ("gemini-generate-content", "relay-gemini"),
+        ("openai-responses", "relay-responses"),
+    ] {
+        let path = root
+            .join(".rcc/codex-samples")
+            .join(protocol)
+            .join("ports/5555")
+            .join(request)
+            .join("provider-failed-attempts.json");
+        let evidence: Value = serde_json::from_str(
+            &fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("{}: {error}", path.display())),
+        )
+        .unwrap();
+        assert_eq!(
+            evidence["terminal_source"],
+            serde_json::to_value(&source).unwrap()
+        );
+        assert_eq!(
+            evidence["terminal_cause"],
+            serde_json::to_value(&cause).unwrap()
+        );
+        assert_eq!(evidence["attempts"], json!([]));
+    }
+    runtime.block_on(worker.shutdown());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn responses_direct_policy_failure_consumer_preserves_cause_and_transport_break() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-direct-policy-terminal-consumer-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, true, None, true);
+    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
+
+    // The Runtime producer test proves the SDK policy fault and its original
+    // cause. SDK failure is not inducible through the Server HTTP entry, so this
+    // consumer starts from that actual output contract and exercises the real
+    // Server persistence and terminal transport owners.
+    let provider_source = routecodex_v3_error::build_v3_error_01_source_raised_external(
+        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderResp14Raw",
+        "provider_http_200",
+        "provider returned HTTP 200",
+        routecodex_v3_error::V3ExternalErrorLink {
+            kind: routecodex_v3_error::V3ExternalErrorKind::Provider,
+            status: Some(200),
+            code: Some("HTTP_200".to_string()),
+            provider_id: Some("provider-a".to_string()),
+            upstream_request_id: Some("upstream-200".to_string()),
+            message: Some("provider returned HTTP 200".to_string()),
+        },
+    );
+    let policy_source = routecodex_v3_error::build_v3_error_01_source_raised(
+        routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+        "V3Error05ExecutionDecision",
+        "v3_route_target_runtime_failure",
+        "SDK policy decision failed",
+    );
+    let mut attempt = test_provider_failure_observation();
+    attempt.diagnostic_source = Some(provider_source.clone());
+    attempt.external_error_status = Some(200);
+    let raw_body = br#"{"id":"provider-response"}"#.to_vec();
+    let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
+        200,
+        vec![("content-type".to_string(), b"application/json".to_vec())],
+        raw_body.clone(),
+    );
+    let mut output = routecodex_v3_runtime::V3ResponsesDirectRuntimeOutput {
+        client_payload: V3Resp15ClientPayload {
+            status: 502,
+            headers: BTreeMap::new(),
+            body: V3ClientBody::Json(json!({
+                "error": {"code": "must_not_reach_client"}
+            })),
+        },
+        terminal_disposition: Some(
+            routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness),
+        ),
+        diagnostic_source: Some(policy_source.clone()),
+        diagnostic_cause: Some(provider_source.clone()),
+        provider_request_snapshot: None,
+        provider_response_snapshot: None,
+        node_trace: vec!["V3Error05ExecutionDecision", "V3Error06ClientProjected"],
+        error_chain: Some(vec![
+            "V3Error05ExecutionDecision",
+            "V3Error06ClientProjected",
+        ]),
+        observability: Some(test_direct_observability(vec![attempt])),
+        stream_observation: None,
+        protocol_relay_handoff: None,
+    };
+
+    let terminal = responses_direct_server_outcome::take_responses_direct_terminal_outcome(
+        &state,
+        "/v1/responses",
+        "direct-policy-failure-consumer",
+        &mut output,
+    )
+    .expect("Direct policy failure must retain its provider terminal disposition");
+    let responses_direct_server_outcome::V3ResponsesDirectServerOutcome::ProviderTerminal(
+        disposition,
+    ) = terminal
+    else {
+        panic!("Direct policy failure must use the provider terminal transport owner");
+    };
+    let response = provider_terminal_response(
+        &state,
+        None,
+        disposition,
+        true,
+        V3ProviderTerminalEvidence {
+            entry_protocol: "responses",
+            endpoint: "/v1/responses",
+            request_id: "direct-policy-failure-consumer",
+        },
+    );
+    sample_worker.wait_until_idle().await.unwrap();
+
+    let sample_dir =
+        root.join(".rcc/codex-samples/openai-responses/ports/5555/direct-policy-failure-consumer");
+    let evidence: Value = serde_json::from_str(
+        &fs::read_to_string(sample_dir.join("provider-failed-attempts.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        evidence["terminal_source"],
+        serde_json::to_value(&policy_source).unwrap()
+    );
+    assert_eq!(
+        evidence["terminal_cause"],
+        serde_json::to_value(&provider_source).unwrap()
+    );
+    assert_eq!(
+        evidence["attempts"][0]["diagnostic_source"],
+        serde_json::to_value(&provider_source).unwrap()
+    );
+    assert_eq!(evidence["attempts"][0]["provider_status"], json!(200));
+
+    let terminal: Value = serde_json::from_str(
+        &fs::read_to_string(sample_dir.join("provider-terminal.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(terminal["kind"], "external_http");
+    assert_eq!(terminal["status"], 200);
+    assert_eq!(terminal["body"], json!(raw_body));
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    let error = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect_err("Direct policy failure must break the client transport");
+    assert!(
+        error.to_string().contains("provider pool exhausted"),
+        "{error}"
+    );
+    assert!(
+        !error.to_string().contains("must_not_reach_client"),
+        "{error}"
+    );
+    assert!(!error.to_string().contains("provider-response"), "{error}");
+
+    sample_worker.shutdown().await;
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn protocol_plan_operator_fault_consumer_preserves_sources_without_error06() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-protocol-plan-fault-consumer-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, true, None, true);
+    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
+
+    // Runtime's real-rejection test proves this fault is the contract emitted by
+    // the Error operator. SDK rejection has no public HTTP injection path, so this
+    // test begins at that typed output and exercises the actual Server consumer.
+    let original_source = routecodex_v3_error::build_v3_error_01_source_raised(
+        routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+        "V3Execution11ProtocolDecision",
+        "protocol_plan_runtime_failure",
+        "protocol plan failed before dispatch",
+    );
+    let fault = routecodex_v3_runtime::V3RelayErrorOperatorFault {
+        policy_failure: routecodex_v3_error::build_v3_error_01_source_raised(
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+            "V3Error06ClientProjected",
+            "relay_error_operator_sdk_failure",
+            "Error06 SDK rejected the source projection",
+        ),
+        original_source: Some(original_source.clone()),
+    };
+    let response = crate::endpoint_handlers::finish_v3_protocol_execution_plan_failure(
+        &state,
+        None,
+        "responses",
+        "/v1/responses",
+        "protocol-plan-operator-fault",
+        true,
+        V3ProviderTerminalEvidence {
+            entry_protocol: "responses",
+            endpoint: "/v1/responses",
+            request_id: "protocol-plan-operator-fault",
+        },
+        Err(fault.clone()),
+    )
+    .expect_err("the consumer must not turn an operator fault into Error06 success");
+    sample_worker.wait_until_idle().await.unwrap();
+
+    let sample_dir =
+        root.join(".rcc/codex-samples/openai-responses/ports/5555/protocol-plan-operator-fault");
+    let evidence: Value = serde_json::from_str(
+        &fs::read_to_string(sample_dir.join("provider-failed-attempts.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        evidence["terminal_source"],
+        serde_json::to_value(&fault.policy_failure).unwrap()
+    );
+    assert_eq!(
+        evidence["terminal_cause"],
+        serde_json::to_value(&original_source).unwrap()
+    );
+    assert_eq!(evidence["attempts"], json!([]));
+
+    let terminal: Value = serde_json::from_str(
+        &fs::read_to_string(sample_dir.join("provider-terminal.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(terminal["kind"], "no_response");
+    assert_eq!(terminal["status"], Value::Null);
+    assert_eq!(terminal["body"], Value::Null);
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    let mut client = response.into_body().into_data_stream();
+    let mut wire = Vec::new();
+    let terminal_error = loop {
+        match client.next().await {
+            Some(Ok(chunk)) => wire.extend_from_slice(chunk.as_ref()),
+            Some(Err(error)) => break error,
+            None => panic!("operator fault must break the client transport"),
+        }
+    };
+    let wire = String::from_utf8(wire).unwrap();
+    assert_eq!(wire, ":\n\n");
+    assert!(!wire.contains("event:"), "{wire}");
+    assert!(!wire.contains("data:"), "{wire}");
+    assert!(!wire.contains("protocol_plan_runtime_failure"), "{wire}");
+    assert!(!wire.contains("relay_error_operator_sdk_failure"), "{wire}");
+    assert!(terminal_error
+        .to_string()
+        .contains("SSE transport unavailable"));
+    assert!(
+        client.next().await.is_none(),
+        "operator fault must close the body after the transport break"
+    );
+
+    sample_worker.shutdown().await;
+    fs::remove_dir_all(root).unwrap();
+}
+
 #[tokio::test]
 async fn direct_sse_http_projection_injects_keepalive_and_preserves_provider_bytes() {
     let provider_bytes = b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec();
@@ -796,6 +1287,8 @@ fn relay_provider_snapshots_are_persisted_verbatim_in_codex_samples() {
     let mut output = V3ResponsesRelayRuntimeOutput {
         status: 200,
         client_body: V3ResponsesRelayClientBody::Json(json!({})),
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: Vec::new(),
         error_chain: None,
         observability: None,
@@ -868,6 +1361,8 @@ fn relay_missing_provider_snapshot_does_not_project_client_failure() {
     let output = V3ResponsesRelayRuntimeOutput {
         status: 200,
         client_body: V3ResponsesRelayClientBody::Json(json!({"status": "completed"})),
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: Vec::new(),
         error_chain: None,
         observability: None,
@@ -916,6 +1411,9 @@ fn anthropic_relay_client_response_is_persisted_in_codex_samples() {
         node_trace: vec!["V3Resp03ToolReason"],
         error_chain: None,
         servertool_followup_required: false,
+        diagnostic_source: None,
+        diagnostic_cause: None,
+        provider_failure_attempts: Vec::new(),
         observability: None,
         stream_observation: None,
         provider_snapshots: None,
@@ -982,6 +1480,7 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
         protocol_relay_handoff: None,
         terminal_disposition: None,
         diagnostic_source: None,
+        diagnostic_cause: None,
     };
     assert!(capture_v3_responses_direct_provider_snapshots(
         &state,
@@ -1031,6 +1530,7 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
         protocol_relay_handoff: None,
         terminal_disposition: None,
         diagnostic_source: None,
+        diagnostic_cause: None,
     };
     assert!(capture_v3_responses_direct_provider_snapshots(
         &state,
@@ -1071,6 +1571,7 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
         protocol_relay_handoff: None,
         terminal_disposition: None,
         diagnostic_source: None,
+        diagnostic_cause: None,
     };
     assert!(capture_v3_responses_direct_provider_snapshots(
         &state,
@@ -1198,6 +1699,8 @@ fn direct_to_relay_handoff_preserves_failure_event_order() {
     let mut output = V3ResponsesRelayRuntimeOutput {
         status: 200,
         client_body: V3ResponsesRelayClientBody::Json(json!({"status":"completed"})),
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: Vec::new(),
         error_chain: None,
         observability: Some(test_direct_observability(vec![relay_event])),
@@ -2753,6 +3256,7 @@ fn openai_chat_relay_internal_error_returns_typed_no_response() {
         provider_snapshots: None,
         provider_failure_attempts: Vec::new(),
         diagnostic_source: None,
+        diagnostic_cause: None,
         terminal_disposition: None,
     };
     let response = openai_chat_relay_output_response(output, None, Duration::from_secs(1), false);
@@ -3663,6 +4167,8 @@ fn recovered_provider_attempts_do_not_fabricate_missing_relay_snapshot_errors() 
         ..Default::default()
     };
     let mut recovered = V3ResponsesRelayRuntimeOutput {
+        diagnostic_source: None,
+        diagnostic_cause: None,
         status: 200,
         client_body: V3ResponsesRelayClientBody::Json(json!({"status": "completed"})),
         node_trace: Vec::new(),
@@ -3690,6 +4196,8 @@ fn recovered_provider_attempts_do_not_fabricate_missing_relay_snapshot_errors() 
     );
 
     let mut terminal_failure = V3ResponsesRelayRuntimeOutput {
+        diagnostic_source: None,
+        diagnostic_cause: None,
         status: 502,
         client_body: V3ResponsesRelayClientBody::Json(json!({})),
         node_trace: Vec::new(),
@@ -4155,6 +4663,8 @@ async fn responses_relay_output_accepts_runtime_sealed_sse() {
     let output = V3ResponsesRelayRuntimeOutput {
         status: 200,
         client_body: V3ResponsesRelayClientBody::Sse(test_committed_responses_sse()),
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: vec!["V3HubRespOutbound05ClientSemantic"],
         error_chain: None,
         observability: None,
@@ -4188,6 +4698,8 @@ async fn responses_relay_output_accepts_runtime_sealed_sse() {
 async fn responses_relay_json_error_returns_typed_no_response() {
     let output = V3ResponsesRelayRuntimeOutput {
         status: 598,
+        diagnostic_source: None,
+        diagnostic_cause: None,
         client_body: V3ResponsesRelayClientBody::Json(json!({
             "error": {
                 "code": "provider_request_payload_invalid",
@@ -4537,6 +5049,9 @@ async fn anthropic_relay_output_consumes_typed_sealed_sse_body() {
         status: 200,
         client_response: json!({"events": events.clone()}),
         client_body: V3AnthropicRelayClientBody::Sse(test_committed_anthropic_sse(events)),
+        diagnostic_source: None,
+        diagnostic_cause: None,
+        provider_failure_attempts: Vec::new(),
         node_trace: vec!["V3ServerRespOutbound06ClientFrame"],
         error_chain: None,
         servertool_followup_required: false,

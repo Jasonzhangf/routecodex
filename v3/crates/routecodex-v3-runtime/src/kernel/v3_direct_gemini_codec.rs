@@ -284,24 +284,6 @@ impl V3DirectProtocolCodec for V3GeminiDirectCodec {
         Ok(standardized.tool_thinking_turn_context.enabled_flag())
     }
 
-    fn run_error(
-        source: V3Error01SourceRaised,
-        scope: routecodex_v3_error::V3ErrorActionScope,
-        candidates_remaining: usize,
-        default_pool_available: bool,
-        same_provider_retry_available: bool,
-        recovery: Option<routecodex_v3_error::V3Error05RecoveryAdmissionWitness>,
-    ) -> routecodex_v3_error::V3Error05ExecutionDecision {
-        crate::hooks::responses_direct_error_hook(
-            source,
-            scope,
-            candidates_remaining,
-            default_pool_available,
-            same_provider_retry_available,
-            recovery,
-        )
-    }
-
     fn failure_session_scope(
         _control: &Self::Control,
         standardized: &Self::Standardized,

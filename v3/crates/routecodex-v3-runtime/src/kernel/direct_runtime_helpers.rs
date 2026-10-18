@@ -105,24 +105,52 @@ pub(crate) struct V3DirectProviderFailurePolicyResult {
 }
 
 impl V3DirectProviderFailurePolicyResult {
-    fn exhaust_if_residence_expired(&mut self, budget: &V3AttemptBudget) {
+    fn exhaust_if_residence_expired(
+        &mut self,
+        budget: &V3AttemptBudget,
+    ) -> Result<(), DirectPolicyFailure> {
         if std::time::Instant::now() < budget.residence_deadline()
             || self.decision.action.is_terminal()
         {
-            return;
+            return Ok(());
         }
-        // Retain Error01-03 provenance and the exact attempted-provider action.
-        // The expired request has no eligible next attempt, regardless of pool health.
-        let exhaustion = routecodex_v3_error::build_v3_error_04_target_exhaustion_decision_with_provider_availability(
-            self.decision.exhaustion.local_action.clone(), 0, false, false,
-        );
-        self.decision = routecodex_v3_error::build_v3_error_05_execution_decision_from_v3_error_04(
-            exhaustion, None,
-        );
+        let original_source = self
+            .decision
+            .exhaustion
+            .local_action
+            .classified
+            .source
+            .clone();
+        let action_projection = serde_json::to_value(&self.decision.exhaustion.local_action)
+            .map_err(|error| {
+                direct_policy_failure(&original_source, "V3Error04TargetExhaustionDecision", error)
+            })?;
+        let (exhaustion_projection, exhaustion) =
+            crate::operation_runner::run_v3_error_04_target_exhaustion_operator(
+                action_projection,
+                self.decision.exhaustion.local_action.clone(),
+                0,
+                false,
+                false,
+            )
+            .map_err(|error| {
+                direct_policy_failure(&original_source, "V3Error04TargetExhaustionDecision", error)
+            })?;
+        let (_, decision) =
+            crate::operation_runner::execute_v3_operation_runner_error_err05_execution_decision(
+                exhaustion_projection,
+                exhaustion,
+                None,
+            )
+            .map_err(|error| {
+                direct_policy_failure(&original_source, "V3Error05ExecutionDecision", error)
+            })?;
+        self.decision = decision;
         if let Some(event) = self.event.as_mut() {
             event.action = "terminal_no_response".to_owned();
             event.next_provider_key = None;
         }
+        Ok(())
     }
 }
 
@@ -132,26 +160,76 @@ pub(crate) struct V3DirectProviderFailurePolicyContext<
 > {
     failure_session_scope: &'ctx V3ProviderFailureSessionScope,
     provider_health: &'ctx V3ProviderFailureRuntimeHealth,
-    run_error: ErrorDecisionFn,
     availability: &'ctx R,
     expanded: Option<&'ctx routecodex_v3_target::V3Target09CandidateSetExpanded>,
     provider_pinned: bool,
     now_epoch_ms: u64,
 }
 
-pub(crate) type ErrorDecisionFn = fn(
-    V3Error01SourceRaised,
-    V3ErrorActionScope,
-    usize,
-    bool,
-    bool,
-    Option<routecodex_v3_error::V3Error05RecoveryAdmissionWitness>,
-) -> V3Error05ExecutionDecision;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DirectPolicyFailure {
+    pub(crate) original_source: V3Error01SourceRaised,
+    pub(crate) policy_failure: V3Error01SourceRaised,
+}
 
 pub(crate) struct V3DirectProviderFailurePolicyState<'state> {
     failed_candidates: &'state mut BTreeSet<String>,
     same_candidate_retries: &'state mut BTreeMap<String, usize>,
     trace: &'state mut Vec<&'static str>,
+}
+
+fn direct_policy_failure(
+    original_source: &V3Error01SourceRaised,
+    source_stage: &'static str,
+    error: impl std::fmt::Display,
+) -> DirectPolicyFailure {
+    DirectPolicyFailure {
+        original_source: original_source.clone(),
+        policy_failure: runtime_source(source_stage, error),
+    }
+}
+
+fn run_v3_direct_policy_error_02_to_05_decision_from_projection(
+    source_projection: serde_json::Value,
+    original_source: &V3Error01SourceRaised,
+    scope: V3ErrorActionScope,
+    route_pool_remaining_after_exclusion: usize,
+    default_pool_available: bool,
+    same_provider_retry_available: bool,
+    recovery: Option<routecodex_v3_error::V3Error05RecoveryAdmissionWitness>,
+) -> Result<V3Error05ExecutionDecision, DirectPolicyFailure> {
+    crate::operation_runner::run_v3_error_02_to_05_decision_operators(
+        source_projection,
+        original_source.clone(),
+        scope,
+        route_pool_remaining_after_exclusion,
+        default_pool_available,
+        same_provider_retry_available,
+        recovery,
+    )
+    .map(|(_decision_projection, decision)| decision)
+    .map_err(|error| direct_policy_failure(original_source, "V3Error05ExecutionDecision", error))
+}
+
+fn run_v3_direct_policy_error_02_to_05_decision(
+    original_source: &V3Error01SourceRaised,
+    scope: V3ErrorActionScope,
+    route_pool_remaining_after_exclusion: usize,
+    default_pool_available: bool,
+    same_provider_retry_available: bool,
+    recovery: Option<routecodex_v3_error::V3Error05RecoveryAdmissionWitness>,
+) -> Result<V3Error05ExecutionDecision, DirectPolicyFailure> {
+    let source_projection = serde_json::to_value(original_source)
+        .map_err(|error| direct_policy_failure(original_source, "V3Error02Classified", error))?;
+    run_v3_direct_policy_error_02_to_05_decision_from_projection(
+        source_projection,
+        original_source,
+        scope,
+        route_pool_remaining_after_exclusion,
+        default_pool_available,
+        same_provider_retry_available,
+        recovery,
+    )
 }
 
 fn record_v3_direct_provider_failure_record(
@@ -161,31 +239,15 @@ fn record_v3_direct_provider_failure_record(
     source: &V3Error01SourceRaised,
     now_epoch_ms: u64,
 ) -> Result<V3ProviderFailureRecord, V3Error01SourceRaised> {
-    let classified =
-        routecodex_v3_error::build_v3_error_02_classified_from_v3_error_01(source.clone());
-    // 统一错误模型：direct runtime 路径同样经 internal 全局策略表盖章，
-    // 400/无状态码失败与 401/403 按既定阈值进入冷却，不允许绕过。
-    let status = source
-        .external_error
-        .as_ref()
-        .and_then(|error| error.status)
-        .unwrap_or(0);
-    let action = crate::provider_failure_runtime_policy::apply_v3_internal_provider_failure_policy(
-        routecodex_v3_error::build_v3_provider_failure_action_from_v3_error_02(&classified),
-        source.source_stage,
-        status,
-        &source.code,
-    );
     provider_health
-        .record_provider_failure_record_with_action_for_interface(
+        .record_provider_failure_record_from_source_for_interface(
             failure_session_scope,
             &selected.candidate.provider_id,
             &selected.candidate.interface_id,
             Some(&selected.candidate.auth_alias),
             Some(&selected.candidate.model_id),
-            Some(&source.message),
+            source,
             now_epoch_ms,
-            &action,
         )
         .map_err(|error| runtime_source("V3ProviderHealthStateMutated", error))
 }
@@ -214,6 +276,91 @@ fn record_v3_direct_provider_success(
 mod external_http_witness_tests {
     use super::*;
     use crate::hub_v1::external_http_witness_from_provider_error;
+    use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
+    use std::time::Duration;
+
+    fn attempt_budget_with_residence_timeout_ms(residence_timeout_ms: u64) -> V3AttemptBudget {
+        let source = format!(
+            r#"
+version = 3
+[pipelines.hub_v1]
+skeleton = "hub_v1"
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+[servers.test.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+attempt_store = {{ residence_timeout_ms = {residence_timeout_ms} }}
+[providers.test]
+type = "responses"
+base_url = "http://127.0.0.1:9/v1"
+default_model = "test-model"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "TEST_KEY" }}] }}
+[providers.test.models.test-model]
+capabilities = ["text"]
+[route_groups.default.pools.default]
+targets = [{{ kind = "provider_model", provider = "test", model = "test-model", priority = 1 }}]
+"#
+        );
+        let manifest = compile_v3_config_05_manifest(
+            parse_v3_config_02_authoring(&source).expect("residence test authoring"),
+        )
+        .expect("residence test manifest");
+        V3AttemptBudget::from_manifest(&manifest, "test").expect("residence test budget")
+    }
+
+    fn nonterminal_policy_result() -> V3DirectProviderFailurePolicyResult {
+        let source = build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderRespInbound01Raw",
+            "provider_http_502",
+            "provider failure with another candidate",
+        );
+        let witness = routecodex_v3_error::V3Error05RecoveryAdmissionWitness::new(
+            V3ProviderFailureSessionScope::new("server", "group", "session")
+                .expect("failure session scope"),
+            "provider-a:key-a:model-a",
+            "provider_http_502",
+            1,
+        )
+        .expect("recovery witness");
+        let decision = run_v3_direct_policy_error_02_to_05_decision(
+            &source,
+            V3ErrorActionScope::ProviderKeyModel {
+                provider_id: "provider-a".to_string(),
+                auth_alias: "key-a".to_string(),
+                model_id: "model-a".to_string(),
+            },
+            1,
+            false,
+            false,
+            Some(witness),
+        )
+        .expect("nonterminal policy decision");
+        assert!(matches!(
+            decision.action,
+            V3Error05ExecutionAction::WaitThenReselect { .. }
+        ));
+        V3DirectProviderFailurePolicyResult {
+            decision,
+            retry_selected: None,
+            event: Some(V3RuntimeProviderFailureObservation {
+                provider_key: "provider-a:key-a:model-a".to_string(),
+                provider_id: "provider-a".to_string(),
+                auth_alias: Some("key-a".to_string()),
+                model_id: "model-a".to_string(),
+                status: 502,
+                action: "switch_provider".to_string(),
+                next_provider_key: Some("provider-b:key-b:model-b".to_string()),
+                wait_ms: Some(10),
+                ..Default::default()
+            }),
+            retryable_transient: false,
+        }
+    }
 
     #[test]
     fn direct_retains_exact_real_http_error_including_upstream_502() {
@@ -247,6 +394,142 @@ mod external_http_witness_tests {
         assert_eq!(witness.status(), 502);
         assert_eq!(witness.body(), b"bad gateway");
     }
+
+    #[test]
+    fn direct_policy_sdk_failure_preserves_source_and_terminal_witness() {
+        let original_source = build_v3_error_01_source_raised_external(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderResp14Raw",
+            "provider_http_200",
+            "provider returned HTTP 200",
+            V3ExternalErrorLink {
+                kind: V3ExternalErrorKind::Provider,
+                status: Some(200),
+                code: Some("HTTP_200".to_string()),
+                provider_id: Some("provider-a".to_string()),
+                upstream_request_id: None,
+                message: Some("provider returned HTTP 200".to_string()),
+            },
+        );
+        let failure = run_v3_direct_policy_error_02_to_05_decision_from_projection(
+            json!(null),
+            &original_source,
+            V3ErrorActionScope::ProviderKeyModel {
+                provider_id: "provider-a".to_string(),
+                auth_alias: "key-a".to_string(),
+                model_id: "model-a".to_string(),
+            },
+            1,
+            false,
+            false,
+            None,
+        )
+        .expect_err("the SDK must reject a non-object Error02 projection");
+
+        assert_eq!(failure.original_source, original_source);
+        assert_eq!(
+            failure.policy_failure.source_kind,
+            V3ErrorSourceKind::RuntimeFailure
+        );
+        assert_eq!(
+            failure.policy_failure.source_stage,
+            "V3Error05ExecutionDecision"
+        );
+        assert_eq!(
+            failure.policy_failure.code,
+            "v3_route_target_runtime_failure"
+        );
+        assert!(failure.policy_failure.internal_error.is_none());
+        assert!(failure.policy_failure.external_error.is_none());
+
+        let witness = V3ExternalHttpWitness::new(
+            200,
+            vec![("content-type".into(), b"application/json".to_vec())],
+            br#"{"id":"provider-response"}"#.to_vec(),
+        );
+        let policy_failure = failure.policy_failure.clone();
+        let output = policy_failure_output_with_observability(
+            failure.clone(),
+            Some(witness.clone()),
+            Vec::new(),
+            None,
+        );
+        assert_eq!(
+            output.diagnostic_source.as_ref(),
+            Some(&failure.policy_failure)
+        );
+        assert_eq!(output.diagnostic_cause.as_ref(), Some(&original_source));
+        assert_eq!(
+            output.terminal_disposition,
+            Some(V3ProviderTerminalDisposition::ExternalHttp(witness))
+        );
+        assert_eq!(output.error_chain, None);
+
+        let no_response = policy_failure_output_with_observability(failure, None, Vec::new(), None);
+        assert_eq!(
+            no_response.terminal_disposition,
+            Some(V3ProviderTerminalDisposition::NoResponse)
+        );
+        assert_eq!(
+            no_response.diagnostic_source.as_ref(),
+            Some(&policy_failure)
+        );
+        assert_eq!(
+            no_response.diagnostic_cause.as_ref(),
+            Some(&original_source)
+        );
+        assert_eq!(no_response.error_chain, None);
+    }
+
+    #[test]
+    fn residence_expiry_converts_nonterminal_decision_to_terminal_no_response() {
+        let mut policy_result = nonterminal_policy_result();
+        let original_source = policy_result
+            .decision
+            .exhaustion
+            .local_action
+            .classified
+            .source
+            .clone();
+        let budget = attempt_budget_with_residence_timeout_ms(1);
+        std::thread::sleep(Duration::from_millis(10));
+
+        policy_result
+            .exhaust_if_residence_expired(&budget)
+            .expect("residence expiry must execute SDK04 and SDK05");
+
+        assert_eq!(
+            policy_result.decision.action,
+            V3Error05ExecutionAction::ProjectTerminal
+        );
+        assert_eq!(
+            policy_result
+                .decision
+                .exhaustion
+                .local_action
+                .classified
+                .source,
+            original_source
+        );
+        let event = policy_result.event.expect("provider failure event");
+        assert_eq!(event.action, "terminal_no_response");
+        assert_eq!(event.next_provider_key, None);
+    }
+
+    #[test]
+    fn unexpired_residence_keeps_nonterminal_decision_and_event() {
+        let mut policy_result = nonterminal_policy_result();
+        let original_decision = policy_result.decision.clone();
+        let original_event = policy_result.event.clone();
+        let budget = attempt_budget_with_residence_timeout_ms(60_000);
+
+        policy_result
+            .exhaust_if_residence_expired(&budget)
+            .expect("unexpired residence must not enter the SDK");
+
+        assert_eq!(policy_result.decision, original_decision);
+        assert_eq!(policy_result.event, original_event);
+    }
 }
 
 pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabilityReader>(
@@ -255,10 +538,10 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
     source: V3Error01SourceRaised,
     status: u16,
     state: &mut V3DirectProviderFailurePolicyState<'_>,
-) -> Result<V3DirectProviderFailurePolicyResult, V3Error01SourceRaised> {
+) -> Result<V3DirectProviderFailurePolicyResult, DirectPolicyFailure> {
     if matches!(source.source_kind, V3ErrorSourceKind::ClientDisconnect) {
-        let decision = (context.run_error)(
-            source,
+        let decision = run_v3_direct_policy_error_02_to_05_decision(
+            &source,
             V3ErrorActionScope::ProviderInstance {
                 provider_id: selected.candidate.provider_id.clone(),
             },
@@ -266,7 +549,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             false,
             false,
             None,
-        );
+        )?;
         return Ok(V3DirectProviderFailurePolicyResult {
             decision,
             retry_selected: None,
@@ -305,16 +588,23 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             selected,
             &source,
             context.now_epoch_ms,
-        )?
+        )
+        .map_err(|policy_failure| DirectPolicyFailure {
+            original_source: source.clone(),
+            policy_failure,
+        })?
     };
     let expanded_candidates = match (context.expanded, context.provider_pinned) {
         (Some(expanded), _) => Some(&expanded.candidates),
         (None, true) => None,
         (None, false) => {
-            return Err(runtime_source(
-                "V3Target09CandidateSetExpanded",
-                "routed candidate set missing",
-            ))
+            return Err(DirectPolicyFailure {
+                original_source: source,
+                policy_failure: runtime_source(
+                    "V3Target09CandidateSetExpanded",
+                    "routed candidate set missing",
+                ),
+            })
         }
     };
     let request_local_excluded = BTreeSet::from([failed_key.clone()]);
@@ -393,17 +683,17 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                     Some(&selected.candidate.model_id),
                     &source.code,
                 )
-                .map_err(|error| runtime_source("V3ProviderActionGateAdmission", error))?,
+                .map_err(|error| {
+                    direct_policy_failure(&source, "V3ProviderActionGateAdmission", error)
+                })?,
         )
     } else {
         None
     };
     let recovery_witness = match recovery_record.as_ref() {
-        Some(record) => Some(
-            record
-                .recovery_witness()
-                .map_err(|error| runtime_source("V3ProviderActionGateAdmission", error))?,
-        ),
+        Some(record) => Some(record.recovery_witness().map_err(|error| {
+            direct_policy_failure(&source, "V3ProviderActionGateAdmission", error)
+        })?),
         None if remaining > 0 => Some(
             routecodex_v3_error::V3Error05RecoveryAdmissionWitness::new(
                 context.failure_session_scope.clone(),
@@ -411,18 +701,20 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                 source.code.clone(),
                 1,
             )
-            .map_err(|error| runtime_source("V3ProviderActionGateAdmission", error))?,
+            .map_err(|error| {
+                direct_policy_failure(&source, "V3ProviderActionGateAdmission", error)
+            })?,
         ),
         None => None,
     };
-    let decision = (context.run_error)(
-        source.clone(),
+    let decision = run_v3_direct_policy_error_02_to_05_decision(
+        &source,
         provider_key_model_scope,
         remaining,
         false,
         false,
         recovery_witness,
-    );
+    )?;
     state
         .trace
         .extend(V3_ERROR_CHAIN_NODE_IDS.iter().take(5).copied());
@@ -431,22 +723,23 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         V3Error05ExecutionAction::WaitThenReselect { .. }
     ) {
         state.trace.push("V3TargetLocalReselected");
+        let event = Some(build_v3_direct_provider_failure_observation(
+            selected,
+            observed_status,
+            &source,
+            &health_record,
+            "switch_provider",
+            next_provider_key,
+            Some(
+                recovery_record
+                    .as_ref()
+                    .map_or(0, |record| record.minimum_delay_ms),
+            ),
+        ));
         return Ok(V3DirectProviderFailurePolicyResult {
             decision,
             retry_selected: None,
-            event: Some(build_v3_direct_provider_failure_observation(
-                selected,
-                observed_status,
-                &source,
-                &health_record,
-                "switch_provider",
-                next_provider_key,
-                Some(
-                    recovery_record
-                        .as_ref()
-                        .map_or(0, |record| record.minimum_delay_ms),
-                ),
-            )),
+            event,
             // Candidate-scoped request/provider compatibility failures are
             // health-neutral and must reselect immediately without entering
             // the provider action gate.
@@ -457,19 +750,25 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         decision.action,
         V3Error05ExecutionAction::WaitThenRetrySame { .. }
     ) {
-        return Err(runtime_source(
-            "V3Error05ExecutionDecision",
-            "retry_same is not a production provider failure action",
-        ));
+        return Err(DirectPolicyFailure {
+            original_source: source,
+            policy_failure: runtime_source(
+                "V3Error05ExecutionDecision",
+                "retry_same is not a production provider failure action",
+            ),
+        });
     }
     if !matches!(decision.action, V3Error05ExecutionAction::ProjectTerminal) {
-        return Err(runtime_source(
-            "V3Error05ExecutionDecision",
-            format!(
-                "provider failure produced invalid Error05 action {:?}",
-                decision.action
+        return Err(DirectPolicyFailure {
+            original_source: source,
+            policy_failure: runtime_source(
+                "V3Error05ExecutionDecision",
+                format!(
+                    "provider failure produced invalid Error05 action {:?}",
+                    decision.action
+                ),
             ),
-        ));
+        });
     }
     if context.provider_pinned && health_record.state == "cooldown" {
         context
@@ -482,7 +781,9 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                 Some(&selected.candidate.model_id),
                 &source.code,
             )
-            .map_err(|error| runtime_source("V3ProviderActionGateAdmission", error))?;
+            .map_err(|error| {
+                direct_policy_failure(&source, "V3ProviderActionGateAdmission", error)
+            })?;
     }
     let admission = if is_request_local_compat_failure {
         None
@@ -498,24 +799,27 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                     Some(&selected.candidate.model_id),
                     &source.code,
                 )
-                .map_err(|error| runtime_source("V3ProviderActionGateAdmission", error))?,
+                .map_err(|error| {
+                    direct_policy_failure(&source, "V3ProviderActionGateAdmission", error)
+                })?,
         )
     };
     state.trace.push("V3Error06ClientProjected");
+    let event = Some(build_v3_direct_provider_failure_observation(
+        selected,
+        observed_status,
+        &source,
+        &health_record,
+        "terminal_default_floor_exhausted",
+        None,
+        admission
+            .as_ref()
+            .map(|admission| admission.minimum_delay_ms),
+    ));
     Ok(V3DirectProviderFailurePolicyResult {
         decision,
         retry_selected: None,
-        event: Some(build_v3_direct_provider_failure_observation(
-            selected,
-            observed_status,
-            &source,
-            &health_record,
-            "terminal_default_floor_exhausted",
-            None,
-            admission
-                .as_ref()
-                .map(|admission| admission.minimum_delay_ms),
-        )),
+        event,
         retryable_transient: false,
     })
 }
