@@ -197,7 +197,7 @@ fn relay_error_operator_fault(
 /// Convert the canonical Error06 SDK result without inventing a projection or
 /// recursively invoking the SDK. Both an SDK error and a missing terminal
 /// projection are typed operator faults.
-pub fn finish_v3_relay_error_projection(
+pub(crate) fn finish_v3_relay_error_projection(
     original_source: V3Error01SourceRaised,
     result: Result<
         Option<(Value, V3Error06ClientProjected)>,

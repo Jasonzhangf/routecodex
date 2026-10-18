@@ -474,7 +474,7 @@ pub(crate) fn provider_failure_output_with_observation(
 ) -> V3ResponsesRelayRuntimeOutput {
     if let Some(fault) = failure.error_operator_fault {
         return V3ResponsesRelayRuntimeOutput {
-            status: 499,
+            status: 599,
             terminal_disposition: Some(
                 routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
             ),
@@ -567,6 +567,65 @@ pub(crate) fn error_output(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relay_error_operator_fault_projects_internal_599_without_client_error() {
+        let source = routecodex_v3_error::build_v3_error_01_source_raised(
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+            "V3Error06ClientProjected",
+            "relay_error_projection_nonterminal",
+            "Error06 SDK completed without a terminal client projection",
+        );
+        let fault = crate::provider_failure_runtime_policy::finish_v3_relay_error_projection(
+            source.clone(),
+            Ok(None),
+        )
+        .expect_err("Ok(None) must produce a typed operator fault");
+        let diagnostic_source = fault.policy_failure.clone();
+        let diagnostic_cause = fault
+            .original_source
+            .clone()
+            .expect("the real source must remain the fault cause");
+
+        let output = provider_failure_output(
+            V3ResponsesRelayProviderFailure {
+                status: 502,
+                provider_status: None,
+                policy_error_type: "relay_error_projection_nonterminal".to_string(),
+                policy_error_message: "Error06 SDK completed without a terminal client projection"
+                    .to_string(),
+                provider_id: "provider-a".to_string(),
+                source_stage: "V3Error06ClientProjected",
+                observability: None,
+                terminal_projection: None,
+                terminal_disposition: None,
+                error_operator_fault: Some(fault),
+                matched_policy: None,
+            },
+            vec!["V3ProviderRespInbound01Raw"],
+            0,
+        );
+
+        assert_eq!(output.status, 599);
+        assert_eq!(
+            output.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
+        );
+        assert!(matches!(
+            &output.client_body,
+            V3ResponsesRelayClientBody::Json(value) if value.is_null()
+        ));
+        assert!(output.error_chain.is_none());
+        assert!(!output.node_trace.contains(&"V3Error06ClientProjected"));
+        assert_eq!(output.diagnostic_source, Some(diagnostic_source.clone()));
+        assert_eq!(output.diagnostic_cause, Some(diagnostic_cause.clone()));
+        assert_eq!(
+            diagnostic_source.source_kind,
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure
+        );
+        assert_eq!(diagnostic_source.code, "relay_error_projection_nonterminal");
+        assert_eq!(diagnostic_cause, source);
+    }
 
     #[test]
     fn exhausted_received_http_200_codec_failure_never_projects_error06_to_client() {
