@@ -514,7 +514,7 @@ resources:
       protocol_decision_inputs: providerType and provider.responses.process from the selected Target10 truth; process=chat is a Relay execution requirement, not a provider id special case.
       provider_request_policy: the selected candidate carries the compiled provider reasoning-effort policy; ProviderReqCompat06ProviderCompat is the only runtime owner that applies it to the provider wire payload, and an unsupported protocol policy is rejected by Config compile before manifest publication.
     allowed_writers: [V3Target10ConcreteProviderSelected]
-    allowed_readers: [V3Execution11ProtocolDecision, V3ResponsesDirect11Policy, ProviderReqCompat06ProviderCompat, V3Provider12ResponsesWirePayload, build_v3_openai_chat_transport_request_from_v3_provider_08]
+    allowed_readers: [V3Execution11ProtocolDecision, V3ResponsesDirect11Policy, ProviderReqCompat06ProviderCompat, V3Provider12ResponsesWirePayload, build_v3_openai_chat_transport_request_from_v3_provider_08, v3_provider_profile_requires_upstream_sse]
     forbidden_writers: [routecodex-v3-virtual-router, routecodex-v3-server, V3Resp15ClientPayload]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -664,7 +664,7 @@ resources:
     owner_node: V3ProviderResp14Raw
     identity: [requestId, providerId, statusCode]
     allowed_writers: [V3ProviderResp14Raw, ProviderResponsesTransport::send_http]
-    allowed_readers: [V3Resp15ClientPayload, V3ProviderRespInbound01Raw, V3Error01SourceRaised]
+    allowed_readers: [V3Resp15ClientPayload, V3ProviderRespInbound01Raw, V3Error01SourceRaised, collect_direct_sse_attempt_after_terminal]
     forbidden_writers: [V3Server16HttpFrame, V3Provider12ResponsesWirePayload]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -675,7 +675,7 @@ resources:
     owner_crate: routecodex-v3-runtime
     owner_node: V3Resp15ClientPayload
     identity: [requestId, endpoint, streamIntent]
-    allowed_writers: [V3Resp15ClientPayload, V3HubRespOutbound05ClientSemantic]
+    allowed_writers: [V3Resp15ClientPayload, V3HubRespOutbound05ClientSemantic, collapse_direct_client_sse_to_json]
     allowed_readers: [V3Server16HttpFrame, V3ServerRespOutbound06ClientFrame]
     forbidden_writers: [V3ProviderResp14Raw, V3Transport13ResponsesHttpRequest]
     may_enter_provider_body: false
@@ -3040,8 +3040,8 @@ resources:
     owner_module: direct_runtime_helpers_stream
     owner_node: V3CommittedClientSseBuilder
     identity: [requestId, attemptId, providerKey, protocol]
-    allowed_writers: [V3CommittedClientSseBuilder::push, V3CommittedClientSseBuilder::seal, V3CommittedClientSseBuilder::drop]
-    allowed_readers: [collect_direct_sse_attempt_after_terminal, V3CommittedClientSseStream]
+    allowed_writers: [V3CommittedClientSseBuilder::push, V3CommittedClientSseBuilder::seal, V3CommittedClientSseBuilder::drop, collect_direct_sse_attempt_after_terminal]
+    allowed_readers: [collect_direct_sse_attempt_after_terminal, V3CommittedClientSseStream, collapse_direct_client_sse_to_json]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-sse, MetadataCenter, request.normal_payload, response.client_payload, provider.wire_payload, session.cache]
     must_pass_through: [V3ProviderResp14Raw, V3DirectResp14ProviderProjectionPrepared, Error01, Error03, Error04, Error05]
     may_enter_provider_body: false
