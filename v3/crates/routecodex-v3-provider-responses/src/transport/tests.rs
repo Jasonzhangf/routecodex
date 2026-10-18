@@ -250,6 +250,30 @@ fn responses_http_target() -> V3ResponsesProviderTarget {
     }
 }
 
+#[test]
+fn wire_parts_transport_uses_the_supplied_body_and_typed_endpoint() {
+    let mut target = responses_http_target();
+    target.base_url = "http://127.0.0.1:1/v1".into();
+    target
+        .headers
+        .insert("x-test-owner".into(), "transport".into());
+    let body = json!({"model":"glm-5.2","input":"from-sdk","opaque":[null,{"keep":true}]});
+    let request = build_v3_transport_13_responses_request_from_wire_parts(
+        "req-sdk-transport".into(),
+        target,
+        V3ResponsesStreamIntent::Json,
+        crate::V3ResponsesRequestEndpoint::Compact,
+        body.clone(),
+    )
+    .unwrap();
+    assert_eq!(request.body(), &body);
+    assert_eq!(request.url(), "http://127.0.0.1:1/v1/responses/compact");
+    assert!(request
+        .provider_headers()
+        .iter()
+        .any(|header| header.name() == "x-test-owner" && header.value() == "transport"));
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn saturated_provider_admission_without_preacquired_lease_does_not_wait() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -378,6 +402,16 @@ fn configured_provider_headers_debug_redacts_value() {
 
 #[tokio::test]
 async fn configured_provider_headers_reach_wire_with_single_bearer_and_unchanged_body() {
+    assert_configured_auth_wire(None).await;
+}
+
+#[tokio::test]
+async fn gemini_auth_kind_selects_api_key_or_existing_bearer_on_wire() {
+    assert_configured_auth_wire(Some(routecodex_v3_config::V3ProviderAuthType::ApiKey)).await;
+    assert_configured_auth_wire(Some(routecodex_v3_config::V3ProviderAuthType::OAuth)).await;
+}
+
+async fn assert_configured_auth_wire(auth_kind: Option<routecodex_v3_config::V3ProviderAuthType>) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -450,6 +484,10 @@ async fn configured_provider_headers_reach_wire_with_single_bearer_and_unchanged
         Some(Duration::from_secs(5)),
     )
     .unwrap();
+    let request = match auth_kind.as_ref() {
+        Some(kind) => request.with_gemini_auth_kind(kind),
+        None => request,
+    };
     let projection = request.provider_request_projection();
     assert_eq!(projection["headers"]["x-opencode-client"], "[REDACTED]");
     assert_eq!(projection["headers"]["x-opencode-session"], "[REDACTED]");
@@ -471,11 +509,24 @@ async fn configured_provider_headers_reach_wire_with_single_bearer_and_unchanged
         headers.contains("x-opencode-request: msg_test\r\n"),
         "{headers}"
     );
-    assert_eq!(headers.matches("authorization:").count(), 1, "{headers}");
-    assert!(
-        headers.contains("authorization: bearer test-account-secret\r\n"),
-        "{headers}"
-    );
+    if matches!(
+        auth_kind,
+        Some(routecodex_v3_config::V3ProviderAuthType::ApiKey)
+    ) {
+        assert_eq!(headers.matches("authorization:").count(), 0, "{headers}");
+        assert_eq!(headers.matches("x-goog-api-key:").count(), 1, "{headers}");
+        assert!(
+            headers.contains("x-goog-api-key: test-account-secret\r\n"),
+            "{headers}"
+        );
+    } else {
+        assert_eq!(headers.matches("authorization:").count(), 1, "{headers}");
+        assert_eq!(headers.matches("x-goog-api-key:").count(), 0, "{headers}");
+        assert!(
+            headers.contains("authorization: bearer test-account-secret\r\n"),
+            "{headers}"
+        );
+    }
     assert_eq!(serde_json::from_slice::<Value>(&wire_body).unwrap(), body);
 }
 

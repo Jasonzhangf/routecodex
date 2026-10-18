@@ -508,9 +508,9 @@ arc_schema_registry:
       schema: Any
     - id: v3.operation_runner.arc.canonical_request
       schema: Object
-    - id: v3.operation_runner.arc.selected_target
+    - id: v3.operation_runner.arc.target_resolved_request
       schema: Object
-    - id: v3.operation_runner.arc.execution_plan
+    - id: v3.operation_runner.arc.execution_planned_request
       schema: Object
     - id: v3.operation_runner.arc.governed_request
       schema: Object
@@ -538,15 +538,13 @@ arc_schema_registry:
       schema: Object
     - id: v3.operation_runner.arc.error_source
       schema: Object
-    - id: v3.operation_runner.arc.error_host_captured
-      schema: Object
     - id: v3.operation_runner.arc.error_classified
       schema: Object
-    - id: v3.operation_runner.arc.error_policy_applied
+    - id: v3.operation_runner.arc.error_target_local_action
+      schema: Object
+    - id: v3.operation_runner.arc.error_target_exhaustion
       schema: Object
     - id: v3.operation_runner.arc.error_execution_decision
-      schema: Object
-    - id: v3.operation_runner.arc.error_projection_input
       schema: Object
     - id: v3.operation_runner.arc.error_client_projected
       schema: Object
@@ -747,27 +745,15 @@ arc_schemas:
           enum:
             - v3.operation_runner.arc.canonical_request
       additionalProperties: true
-  - id: v3.operation_runner.arc.selected_target
+  - id: v3.operation_runner.arc.target_resolved_request
     schema:
+      description: The complete unchanged canonical business request after target resolution; target control remains in typed resources and side outputs.
       type: object
-      required:
-        - arc_id
-      properties:
-        arc_id:
-          type: string
-          enum:
-            - v3.operation_runner.arc.selected_target
       additionalProperties: true
-  - id: v3.operation_runner.arc.execution_plan
+  - id: v3.operation_runner.arc.execution_planned_request
     schema:
+      description: The complete unchanged canonical business request after execution planning; execution control remains in typed resources and side outputs.
       type: object
-      required:
-        - arc_id
-      properties:
-        arc_id:
-          type: string
-          enum:
-            - v3.operation_runner.arc.execution_plan
       additionalProperties: true
   - id: v3.operation_runner.arc.governed_request
     schema:
@@ -893,90 +879,30 @@ arc_schemas:
   - id: v3.operation_runner.arc.source_failure
     schema:
       type: object
-      required:
-        - arc_id
-      properties:
-        arc_id:
-          type: string
-          enum:
-            - v3.operation_runner.arc.source_failure
       additionalProperties: true
   - id: v3.operation_runner.arc.error_source
     schema:
       type: object
-      required:
-        - arc_id
-      properties:
-        arc_id:
-          type: string
-          enum:
-            - v3.operation_runner.arc.error_source
-      additionalProperties: true
-  - id: v3.operation_runner.arc.error_host_captured
-    schema:
-      type: object
-      required:
-        - arc_id
-      properties:
-        arc_id:
-          type: string
-          enum:
-            - v3.operation_runner.arc.error_host_captured
       additionalProperties: true
   - id: v3.operation_runner.arc.error_classified
     schema:
       type: object
-      required:
-        - arc_id
-      properties:
-        arc_id:
-          type: string
-          enum:
-            - v3.operation_runner.arc.error_classified
       additionalProperties: true
-  - id: v3.operation_runner.arc.error_policy_applied
+  - id: v3.operation_runner.arc.error_target_local_action
     schema:
       type: object
-      required:
-        - arc_id
-      properties:
-        arc_id:
-          type: string
-          enum:
-            - v3.operation_runner.arc.error_policy_applied
+      additionalProperties: true
+  - id: v3.operation_runner.arc.error_target_exhaustion
+    schema:
+      type: object
       additionalProperties: true
   - id: v3.operation_runner.arc.error_execution_decision
     schema:
       type: object
-      required:
-        - arc_id
-      properties:
-        arc_id:
-          type: string
-          enum:
-            - v3.operation_runner.arc.error_execution_decision
-      additionalProperties: true
-  - id: v3.operation_runner.arc.error_projection_input
-    schema:
-      type: object
-      required:
-        - arc_id
-      properties:
-        arc_id:
-          type: string
-          enum:
-            - v3.operation_runner.arc.error_projection_input
       additionalProperties: true
   - id: v3.operation_runner.arc.error_client_projected
     schema:
       type: object
-      required:
-        - arc_id
-      properties:
-        arc_id:
-          type: string
-          enum:
-            - v3.operation_runner.arc.error_client_projected
       additionalProperties: true
 path_consumers:
   - protocol: responses
@@ -7657,6 +7583,18 @@ extension_path_consumers:
       semantics: enum(extended_semantic)
       failure_class: enum(598)
     mapping_record: exact
+  - path: request.messages.parts_items.gemini_native_fields
+    direction: request
+    consumers:
+      client_request_to_chat: routecodex.v3.field.identity_preserve@1
+      chat_to_provider: routecodex.v3.field.request_field_whitelist@1
+    protocol: openai_chat_extension
+    section: extended_superset
+    params:
+      shape: leaf
+      semantics: enum(extended_semantic)
+      failure_class: enum(598)
+    mapping_record: exact
   - path: request.messages.parts_items.part_metadata
     direction: request
     consumers:
@@ -9579,34 +9517,31 @@ operator_registry:
         source_stage: enum
         source_kind: enum
         external_status: number
-    - operator: routecodex.v3.error.err02_host_captured
+    - operator: routecodex.v3.error.err02_classified
+      operator_version: "1"
+      params:
+        source_raised: resource
+        provider_global_policy: resource
+    - operator: routecodex.v3.error.err03_target_local_action
       operator_version: "1"
       params:
         classified_source: resource
-        provider_runtime_observation: resource
-    - operator: routecodex.v3.error.err03_runtime_classified
+        target_action_policy: resource
+    - operator: routecodex.v3.error.err04_target_exhaustion
       operator_version: "1"
       params:
-        internal_request: 598
-        internal_response: 599
-        network: 502
-        external: preserve
-    - operator: routecodex.v3.error.err04_router_policy_applied
-      operator_version: "1"
-      params:
-        retry_exclusion_set: resource
-        target_resolution_state: enum
+        target_local_action: resource
+        target_resolution_state: resource
     - operator: routecodex.v3.error.err05_execution_decision
       operator_version: "1"
       params:
-        action_plan: resource
-        attempt_budget: resource
+        target_exhaustion: resource
+        provider_action_gate: resource
     - operator: routecodex.v3.error.err06_client_projected
       operator_version: "1"
       params:
-        entry_error_codec: string
-        entry_error_frame_codec: string
-        precommit_or_postcommit: enum
+        error_05_terminal_decision: resource
+        client_payload_suppression: enum
   field_operator_param_authority: typed_operator_profiles
   field_operators:
     - operator: routecodex.v3.field.lossless_preserve

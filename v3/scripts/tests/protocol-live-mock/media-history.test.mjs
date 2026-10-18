@@ -30,13 +30,35 @@ const declaredOracle = fixture.expected_provider.body_must;
 const imageUrl =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
-// The complete OpenAI Chat wire history the case must forward, as one literal
+// The current OpenAI Chat wire history the case must forward, as one literal
 // independent expectation (not derived from any provider output index): the
 // assistant tool_use keeps its exact call id/name/arguments, the tool_result
 // stays paired by the same tool_call_id, the representable image is carried on
 // the following user message, and the intervening assistant text plus the final
 // user question keep their exact order.
-const fullHistory = [
+const currentFullHistory = [
+  {
+    role: 'user',
+    content: [
+      { type: 'text', text: 'take a screenshot' },
+      { type: 'text', text: '[Image]', future_sibling: { occurrence: 1 } },
+      { type: 'text', text: '[Image]', future_sibling: { occurrence: 2 } },
+    ],
+  },
+  {
+    role: 'assistant',
+    tool_calls: [{ id: 'toolu_1', type: 'function', function: { name: 'screenshot', arguments: '{}' } }],
+  },
+  { role: 'tool', tool_call_id: 'toolu_1', content: [] },
+  { role: 'user', content: [{ type: 'image_url', image_url: { url: imageUrl } }] },
+  { role: 'assistant', content: [{ type: 'text', text: 'It shows a login page.' }] },
+  { role: 'user', content: 'what colour was the button?' },
+];
+
+// The archived capture was produced before the text-part shape was pinned and
+// keeps the same assistant text as a plain string. This historical expectation
+// is independent of the current oracle and applies only to that archive.
+const historicalFullHistory = [
   { role: 'user', content: 'take a screenshot' },
   {
     role: 'assistant',
@@ -53,8 +75,16 @@ function captureFor(messages) {
   return { attempt_kind: 'business', body: { model: 'chat-model', messages, stream: false } };
 }
 
-function checkMessages(messages) {
+function checkCurrentMessages(messages) {
   return assertProviderCaptures([captureFor(messages)], 0, { body_must: declaredOracle }, {
+    providerProtocol: 'openai_chat',
+  });
+}
+
+function checkHistoricalMessages(messages) {
+  return assertProviderCaptures([captureFor(messages)], 0, {
+    body_must: { messages: historicalFullHistory },
+  }, {
     providerProtocol: 'openai_chat',
   });
 }
@@ -63,10 +93,10 @@ test('older-turn tool-image oracle keeps the complete OpenAI Chat history', () =
   // Feeding the literal history through the public assertion passes only if the
   // fixture's declared oracle is that full six-message history, so a shifted
   // subset that drops the intervening assistant turn can no longer pass.
-  assert.deepEqual(checkMessages(fullHistory), { ok: true, diagnostics: [] });
+  assert.deepEqual(checkCurrentMessages(currentFullHistory), { ok: true, diagnostics: [] });
 });
 
-test('archived real provider capture is accepted only with the assistant history intact', () => {
+test('archived real provider capture is accepted only with its historical assistant history intact', () => {
   const capture = archivedCaptures.find((entry) => entry.case_id === fixture.case_id);
   assert.ok(capture, 'archived capture for the case must exist');
 
@@ -74,7 +104,7 @@ test('archived real provider capture is accepted only with the assistant history
     paths: fixture.expected_provider.paths,
     method: fixture.expected_provider.method,
     auth_required: fixture.expected_provider.auth_required,
-    body_must: declaredOracle,
+    body_must: { messages: historicalFullHistory },
   }, { providerProtocol: 'openai_chat' });
   assert.deepEqual(accepted, { ok: true, diagnostics: [] });
 
@@ -82,28 +112,28 @@ test('archived real provider capture is accepted only with the assistant history
   // now fail the same public assertion.
   const withoutAssistant = capture.body.messages.filter((message, index) => index !== 4);
   assert.equal(withoutAssistant.length, capture.body.messages.length - 1);
-  const removed = checkMessages(withoutAssistant);
+  const removed = checkHistoricalMessages(withoutAssistant);
   assert.equal(removed.ok, false);
   assert.ok(removed.diagnostics.includes('provider body_must messages mismatch'));
 });
 
 test('negative controls: removing or reordering the assistant turn fails', () => {
-  const removed = fullHistory.filter((message, index) => index !== 4);
-  const removal = checkMessages(removed);
+  const removed = currentFullHistory.filter((message, index) => index !== 4);
+  const removal = checkCurrentMessages(removed);
   assert.equal(removal.ok, false);
   assert.ok(removal.diagnostics.includes('provider body_must messages mismatch'));
 
-  const reordered = structuredClone(fullHistory);
+  const reordered = structuredClone(currentFullHistory);
   [reordered[4], reordered[5]] = [reordered[5], reordered[4]];
-  const swap = checkMessages(reordered);
+  const swap = checkCurrentMessages(reordered);
   assert.equal(swap.ok, false);
   assert.ok(swap.diagnostics.includes('provider body_must messages mismatch'));
 });
 
 test('negative control: breaking the tool-result pairing fails', () => {
-  const unpaired = structuredClone(fullHistory);
+  const unpaired = structuredClone(currentFullHistory);
   unpaired[2].tool_call_id = 'toolu_other';
-  const result = checkMessages(unpaired);
+  const result = checkCurrentMessages(unpaired);
   assert.equal(result.ok, false);
   assert.ok(result.diagnostics.includes('provider body_must messages mismatch'));
 });

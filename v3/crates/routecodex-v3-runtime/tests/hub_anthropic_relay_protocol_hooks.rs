@@ -65,7 +65,10 @@ fn anthropic_entry_req_inbound_hook_normalizes_to_chat_extension_before_req04() 
     assert_eq!(normalized.payload()["messages"][0]["role"], "system");
     assert_eq!(normalized.payload()["messages"][0]["content"], "be exact");
     assert_eq!(normalized.payload()["messages"][1]["role"], "user");
-    assert_eq!(normalized.payload()["messages"][1]["content"], "hello");
+    assert_eq!(
+        normalized.payload()["messages"][1]["content"],
+        json!([{"type":"text","text":"hello"}])
+    );
     assert_eq!(normalized.payload()["messages"][2]["role"], "assistant");
     assert_eq!(
         normalized.payload()["messages"][2]["tool_calls"][0]["id"],

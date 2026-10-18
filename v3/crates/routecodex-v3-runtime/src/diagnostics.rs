@@ -559,7 +559,15 @@ fn entry_protocol_from_endpoint(endpoint: &str) -> &str {
         "anthropic"
     } else if endpoint.starts_with("/v1/chat/completions") {
         "openai_chat"
-    } else if endpoint.starts_with("/v1beta/models/") && endpoint.ends_with("/generateContent") {
+    } else if endpoint.starts_with("/v1beta/models/")
+        && [
+            "/generateContent",
+            ":generateContent",
+            ":streamGenerateContent",
+        ]
+        .iter()
+        .any(|action| endpoint.ends_with(action))
+    {
         "gemini"
     } else {
         "responses"

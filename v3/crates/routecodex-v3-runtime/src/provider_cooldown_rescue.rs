@@ -45,6 +45,91 @@ pub(crate) enum V3AdmittedTargetSelectionAfterRescue {
     Failed(routecodex_v3_error::V3Error01SourceRaised),
 }
 
+pub(crate) enum V3SynchronousTargetPlanningStep {
+    Selected(V3Target10ConcreteProviderSelected),
+    NeedPreExhaustionProbes {
+        expanded: V3Target09CandidateSetExpanded,
+        rescue_candidates: Vec<V3TargetCandidate>,
+        request_local_excluded_candidates: BTreeSet<String>,
+    },
+    NeedExhaustionProbes {
+        expanded: V3Target09CandidateSetExpanded,
+        exhaustion: V3TargetExhaustion,
+        request_local_excluded_candidates: BTreeSet<String>,
+    },
+    Exhausted(V3TargetExhaustion),
+    Failed(routecodex_v3_error::V3Error01SourceRaised),
+}
+
+pub(crate) enum V3SynchronousTargetAdmissionStep {
+    Selected {
+        selected: V3AdmittedTargetSelection,
+        request_local_excluded_candidates: BTreeSet<String>,
+    },
+    NeedPreExhaustionProbes {
+        expanded: V3Target09CandidateSetExpanded,
+        rescue_candidates: Vec<V3TargetCandidate>,
+        request_local_excluded_candidates: BTreeSet<String>,
+    },
+    NeedExhaustionProbes {
+        expanded: V3Target09CandidateSetExpanded,
+        exhaustion: V3TargetExhaustion,
+        request_local_excluded_candidates: BTreeSet<String>,
+    },
+    Exhausted(V3TargetExhaustion),
+    Failed(routecodex_v3_error::V3Error01SourceRaised),
+}
+
+pub(crate) async fn initiate_v3_target_pre_exhaustion_rescue_probes(
+    provider_health: &V3ProviderFailureRuntimeHealth,
+    manifest: &V3Config05ManifestPublished,
+    candidates: &[V3TargetCandidate],
+    now_ms: u64,
+) -> Result<(), routecodex_v3_error::V3Error01SourceRaised> {
+    let mut identities = BTreeSet::new();
+    for candidate in candidates {
+        if !identities.insert(v3_relay_provider_candidate_key(candidate)) {
+            continue;
+        }
+        match provider_health
+            .initiate_cooldown_rescue_probe(manifest, candidate, now_ms)
+            .await
+        {
+            Ok(V3ProbeInitiation::Completed(completion)) => {
+                let _ = completion;
+            }
+            Ok(
+                V3ProbeInitiation::Initiated
+                | V3ProbeInitiation::AlreadyOwned
+                | V3ProbeInitiation::CapacityUnavailable
+                | V3ProbeInitiation::OwnerUnavailable,
+            ) => {}
+            Err(error) => {
+                return Err(target_resolution_source(
+                    "V3ProviderCooldownRescueProbe",
+                    "target_pre_exhaustion_rescue_probe_failed",
+                    error,
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) struct V3SynchronousTargetPlanningInput<'a> {
+    pub(crate) manifest: &'a V3Config05ManifestPublished,
+    pub(crate) expanded: V3Target09CandidateSetExpanded,
+    pub(crate) failure_session_scope: &'a V3ProviderFailureSessionScope,
+    pub(crate) provider_health: &'a V3ProviderFailureRuntimeHealth,
+    pub(crate) request_local_excluded_candidates: &'a BTreeSet<String>,
+    pub(crate) now_ms: u64,
+    pub(crate) deterministic_sample: u64,
+    pub(crate) allow_exhaustion_rescue_probe: bool,
+    pub(crate) preferred_selected: Option<V3Target10ConcreteProviderSelected>,
+    pub(crate) pre_exhaustion_probes_completed: bool,
+    pub(crate) exhaustion_probes_completed: bool,
+}
+
 pub(crate) enum V3RelayProviderAdmittedTargetResolution {
     Selected(V3AdmittedTargetSelection),
     Exhausted { attempted_candidates: Vec<String> },
@@ -87,6 +172,279 @@ pub(crate) fn admit_v3_selected_target_after_recovery(
     }
 }
 
+fn v3_rescue_candidates_for_selected(
+    expanded: &V3Target09CandidateSetExpanded,
+    provider_health: &V3ProviderFailureRuntimeHealth,
+    request_local_excluded_candidates: &BTreeSet<String>,
+    now_ms: u64,
+    selected: &V3Target10ConcreteProviderSelected,
+) -> Vec<V3TargetCandidate> {
+    let selected_key = v3_relay_provider_candidate_key(&selected.candidate);
+    let available_count = expanded
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            let key = v3_relay_provider_candidate_key(candidate);
+            !request_local_excluded_candidates.contains(&key)
+                && provider_health
+                    .availability_for_interface(
+                        &candidate.provider_id,
+                        &candidate.interface_id,
+                        Some(&candidate.auth_alias),
+                        Some(&candidate.model_id),
+                        now_ms,
+                    )
+                    .available
+        })
+        .count();
+    let cooled_peer_exists = expanded.candidates.iter().any(|candidate| {
+        let key = v3_relay_provider_candidate_key(candidate);
+        key != selected_key
+            && !request_local_excluded_candidates.contains(&key)
+            && provider_health
+                .availability_for_interface(
+                    &candidate.provider_id,
+                    &candidate.interface_id,
+                    Some(&candidate.auth_alias),
+                    Some(&candidate.model_id),
+                    now_ms,
+                )
+                .blocked_scopes
+                .iter()
+                .any(|scope| scope.contains("cooldown"))
+    });
+    let selected_tier =
+        V3TargetInterpreter::route_tier_index_for_candidate(&selected.route, &selected.candidate);
+    let preceding_tier_candidates = if selected_tier == usize::MAX {
+        Vec::new()
+    } else {
+        expanded
+            .candidates
+            .iter()
+            .filter(|candidate| {
+                let key = v3_relay_provider_candidate_key(candidate);
+                V3TargetInterpreter::route_tier_index_for_candidate(&selected.route, candidate)
+                    < selected_tier
+                    && !request_local_excluded_candidates.contains(&key)
+                    && provider_health
+                        .availability_for_interface(
+                            &candidate.provider_id,
+                            &candidate.interface_id,
+                            Some(&candidate.auth_alias),
+                            Some(&candidate.model_id),
+                            now_ms,
+                        )
+                        .blocked_scopes
+                        .iter()
+                        .any(|scope| scope.contains("cooldown"))
+            })
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    // A later tier is selected only after its preceding tiers are unavailable.
+    // Request-local failures stay excluded permanently.
+    if !preceding_tier_candidates.is_empty() {
+        preceding_tier_candidates
+    } else if selected_tier == 0 && available_count == 1 && cooled_peer_exists {
+        expanded
+            .candidates
+            .iter()
+            .filter(|candidate| {
+                !request_local_excluded_candidates
+                    .contains(&v3_relay_provider_candidate_key(candidate))
+            })
+            .cloned()
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    }
+}
+
+pub(crate) fn step_v3_target_planning_sync(
+    input: V3SynchronousTargetPlanningInput<'_>,
+) -> V3SynchronousTargetPlanningStep {
+    let V3SynchronousTargetPlanningInput {
+        manifest: _manifest,
+        expanded,
+        failure_session_scope,
+        provider_health,
+        request_local_excluded_candidates,
+        now_ms,
+        deterministic_sample,
+        allow_exhaustion_rescue_probe,
+        preferred_selected,
+        pre_exhaustion_probes_completed,
+        exhaustion_probes_completed,
+    } = input;
+    let target = V3TargetInterpreter::default();
+
+    if let Some(preferred) = preferred_selected {
+        return V3SynchronousTargetPlanningStep::Selected(preferred);
+    }
+
+    let selected = if pre_exhaustion_probes_completed || exhaustion_probes_completed {
+        match select_v3_target_with_session_then_global(
+            &target,
+            expanded.clone(),
+            &provider_health.session_bound_availability(failure_session_scope),
+            provider_health,
+            request_local_excluded_candidates,
+            now_ms,
+            deterministic_sample,
+        ) {
+            Ok(selected) => selected,
+            Err(exhausted) => return V3SynchronousTargetPlanningStep::Exhausted(exhausted),
+        }
+    } else {
+        match select_v3_target_with_session_then_global(
+            &target,
+            expanded.clone(),
+            &provider_health.session_bound_availability(failure_session_scope),
+            provider_health,
+            request_local_excluded_candidates,
+            now_ms,
+            0,
+        ) {
+            Ok(selected) => selected,
+            Err(exhaustion) => {
+                if !allow_exhaustion_rescue_probe {
+                    return V3SynchronousTargetPlanningStep::Exhausted(exhaustion);
+                }
+                if !v3_exhaustion_is_cooldown_only(
+                    &expanded,
+                    request_local_excluded_candidates,
+                    failure_session_scope,
+                    provider_health,
+                    now_ms,
+                ) {
+                    return V3SynchronousTargetPlanningStep::Exhausted(exhaustion);
+                }
+                return V3SynchronousTargetPlanningStep::NeedExhaustionProbes {
+                    expanded,
+                    exhaustion,
+                    request_local_excluded_candidates: request_local_excluded_candidates.clone(),
+                };
+            }
+        }
+    };
+
+    let candidate = selected;
+    let rescue_candidates = v3_rescue_candidates_for_selected(
+        &expanded,
+        provider_health,
+        request_local_excluded_candidates,
+        now_ms,
+        &candidate,
+    );
+    if allow_exhaustion_rescue_probe
+        && !pre_exhaustion_probes_completed
+        && !rescue_candidates.is_empty()
+    {
+        return V3SynchronousTargetPlanningStep::NeedPreExhaustionProbes {
+            expanded,
+            rescue_candidates,
+            request_local_excluded_candidates: request_local_excluded_candidates.clone(),
+        };
+    }
+    V3SynchronousTargetPlanningStep::Selected(candidate)
+}
+
+pub(crate) fn step_v3_target_planning_with_admission_sync(
+    input: V3SynchronousTargetPlanningInput<'_>,
+) -> V3SynchronousTargetAdmissionStep {
+    let V3SynchronousTargetPlanningInput {
+        manifest,
+        expanded,
+        failure_session_scope,
+        provider_health,
+        request_local_excluded_candidates,
+        now_ms,
+        deterministic_sample,
+        allow_exhaustion_rescue_probe,
+        preferred_selected,
+        pre_exhaustion_probes_completed,
+        exhaustion_probes_completed,
+    } = input;
+    let mut excluded = request_local_excluded_candidates.clone();
+    let mut preferred = preferred_selected;
+    let mut pre_exhaustion_probes_completed = pre_exhaustion_probes_completed;
+    let mut exhaustion_probes_completed = exhaustion_probes_completed;
+    loop {
+        let step = step_v3_target_planning_sync(V3SynchronousTargetPlanningInput {
+            manifest,
+            expanded: expanded.clone(),
+            failure_session_scope,
+            provider_health,
+            request_local_excluded_candidates: &excluded,
+            now_ms,
+            deterministic_sample,
+            allow_exhaustion_rescue_probe,
+            preferred_selected: preferred.take(),
+            pre_exhaustion_probes_completed,
+            exhaustion_probes_completed,
+        });
+        match step {
+            V3SynchronousTargetPlanningStep::Selected(selected) => {
+                match try_admit_v3_selected_target(&selected) {
+                    Ok(Some(admission)) => {
+                        return V3SynchronousTargetAdmissionStep::Selected {
+                            selected: V3AdmittedTargetSelection {
+                                selected,
+                                admission,
+                            },
+                            request_local_excluded_candidates: excluded,
+                        };
+                    }
+                    Ok(None) => {
+                        excluded.insert(v3_relay_provider_candidate_key(&selected.candidate));
+                        pre_exhaustion_probes_completed = false;
+                        exhaustion_probes_completed = false;
+                        // Capacity excludes only this candidate. Preserve the
+                        // caller's recovery policy for eligible cooled peers.
+                    }
+                    Err(reason) => {
+                        return V3SynchronousTargetAdmissionStep::Failed(target_resolution_source(
+                            "V3Target10ConcreteProviderSelected",
+                            "provider_concurrency_admission_invalid_budget",
+                            reason,
+                        ));
+                    }
+                }
+            }
+            V3SynchronousTargetPlanningStep::NeedPreExhaustionProbes {
+                expanded,
+                rescue_candidates,
+                mut request_local_excluded_candidates,
+            } => {
+                request_local_excluded_candidates.extend(excluded);
+                return V3SynchronousTargetAdmissionStep::NeedPreExhaustionProbes {
+                    expanded,
+                    rescue_candidates,
+                    request_local_excluded_candidates,
+                };
+            }
+            V3SynchronousTargetPlanningStep::NeedExhaustionProbes {
+                expanded,
+                exhaustion,
+                mut request_local_excluded_candidates,
+            } => {
+                request_local_excluded_candidates.extend(excluded);
+                return V3SynchronousTargetAdmissionStep::NeedExhaustionProbes {
+                    expanded,
+                    exhaustion,
+                    request_local_excluded_candidates,
+                };
+            }
+            V3SynchronousTargetPlanningStep::Exhausted(exhausted) => {
+                return V3SynchronousTargetAdmissionStep::Exhausted(exhausted);
+            }
+            V3SynchronousTargetPlanningStep::Failed(source) => {
+                return V3SynchronousTargetAdmissionStep::Failed(source);
+            }
+        }
+    }
+}
+
 pub(crate) async fn select_v3_expanded_target_with_admission_rescue(
     manifest: &V3Config05ManifestPublished,
     expanded: V3Target09CandidateSetExpanded,
@@ -100,7 +458,36 @@ pub(crate) async fn select_v3_expanded_target_with_admission_rescue(
 ) -> V3AdmittedTargetSelectionAfterRescue {
     let mut excluded = request_local_excluded_candidates.clone();
     let mut selection = match preferred_selected {
-        Some(selected) => V3TargetSelectionAfterRescue::Selected(selected),
+        Some(_) => {
+            let step = step_v3_target_planning_sync(V3SynchronousTargetPlanningInput {
+                manifest,
+                expanded: expanded.clone(),
+                failure_session_scope,
+                provider_health,
+                request_local_excluded_candidates: &excluded,
+                now_ms,
+                deterministic_sample,
+                allow_exhaustion_rescue_probe,
+                preferred_selected,
+                pre_exhaustion_probes_completed: false,
+                exhaustion_probes_completed: false,
+            });
+            match step {
+                V3SynchronousTargetPlanningStep::Selected(selected) => {
+                    V3TargetSelectionAfterRescue::Selected(selected)
+                }
+                V3SynchronousTargetPlanningStep::Exhausted(exhausted) => {
+                    V3TargetSelectionAfterRescue::Exhausted(exhausted)
+                }
+                V3SynchronousTargetPlanningStep::Failed(source) => {
+                    V3TargetSelectionAfterRescue::Failed(source)
+                }
+                V3SynchronousTargetPlanningStep::NeedPreExhaustionProbes { .. }
+                | V3SynchronousTargetPlanningStep::NeedExhaustionProbes { .. } => {
+                    unreachable!("preferred target planning cannot need rescue probes")
+                }
+            }
+        }
         None => {
             select_v3_expanded_target_with_exhaustion_rescue(
                 manifest,
@@ -167,6 +554,10 @@ pub(crate) async fn select_v3_expanded_target_with_admission_rescue(
 }
 
 impl V3ProviderFailureRuntimeHealth {
+    pub(crate) fn target_availability_generation(&self) -> u64 {
+        self.store.availability_generation()
+    }
+
     async fn run_cooldown_rescue_probes_for_candidates(
         &self,
         manifest: &V3Config05ManifestPublished,
@@ -346,162 +737,66 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
     allow_exhaustion_rescue_probe: bool,
 ) -> V3TargetSelectionAfterRescue {
     let target = V3TargetInterpreter::default();
-    let session_availability = provider_health.session_bound_availability(failure_session_scope);
-    let initial_selection = select_v3_target_with_session_then_global(
-        &target,
-        expanded.clone(),
-        &session_availability,
+    let initial_step = step_v3_target_planning_sync(V3SynchronousTargetPlanningInput {
+        manifest,
+        expanded: expanded.clone(),
+        failure_session_scope,
         provider_health,
         request_local_excluded_candidates,
         now_ms,
-        0,
-    );
-    let initial_exhaustion = match initial_selection {
-        Ok(selected) => {
-            let selected_key = v3_relay_provider_candidate_key(&selected.candidate);
-            let available_count = expanded
-                .candidates
-                .iter()
-                .filter(|candidate| {
-                    let key = v3_relay_provider_candidate_key(candidate);
-                    !request_local_excluded_candidates.contains(&key)
-                        && provider_health
-                            .availability_for_interface(
-                                &candidate.provider_id,
-                                &candidate.interface_id,
-                                Some(&candidate.auth_alias),
-                                Some(&candidate.model_id),
-                                now_ms,
-                            )
-                            .available
-                })
-                .count();
-            let cooled_peer_exists = expanded.candidates.iter().any(|candidate| {
-                let key = v3_relay_provider_candidate_key(candidate);
-                key != selected_key
-                    && !request_local_excluded_candidates.contains(&key)
-                    && provider_health
-                        .availability_for_interface(
-                            &candidate.provider_id,
-                            &candidate.interface_id,
-                            Some(&candidate.auth_alias),
-                            Some(&candidate.model_id),
-                            now_ms,
-                        )
-                        .blocked_scopes
-                        .iter()
-                        .any(|scope| scope.contains("cooldown"))
-            });
-            let selected_tier = V3TargetInterpreter::route_tier_index_for_candidate(
-                &selected.route,
-                &selected.candidate,
-            );
-            let preceding_tier_candidates = if selected_tier == usize::MAX {
-                Vec::new()
-            } else {
-                expanded
-                    .candidates
-                    .iter()
-                    .filter(|candidate| {
-                        let key = v3_relay_provider_candidate_key(candidate);
-                        V3TargetInterpreter::route_tier_index_for_candidate(
-                            &selected.route,
-                            candidate,
-                        ) < selected_tier
-                            && !request_local_excluded_candidates.contains(&key)
-                            && provider_health
-                                .availability_for_interface(
-                                    &candidate.provider_id,
-                                    &candidate.interface_id,
-                                    Some(&candidate.auth_alias),
-                                    Some(&candidate.model_id),
-                                    now_ms,
-                                )
-                                .blocked_scopes
-                                .iter()
-                                .any(|scope| scope.contains("cooldown"))
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>()
-            };
-            // A later tier is selected only after its preceding tiers are
-            // unavailable. Probe those cooled members before committing to the
-            // later tier. Request-local failures stay excluded permanently.
-            let rescue_candidates = if !preceding_tier_candidates.is_empty() {
-                preceding_tier_candidates
-            } else if selected_tier == 0 && available_count == 1 && cooled_peer_exists {
-                expanded
-                    .candidates
-                    .iter()
-                    .filter(|candidate| {
-                        !request_local_excluded_candidates
-                            .contains(&v3_relay_provider_candidate_key(candidate))
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>()
-            } else {
-                Vec::new()
-            };
-            if allow_exhaustion_rescue_probe && !rescue_candidates.is_empty() {
-                let mut identities = BTreeSet::new();
-                for candidate in &rescue_candidates {
-                    if !identities.insert(v3_relay_provider_candidate_key(candidate)) {
-                        continue;
-                    }
-                    match provider_health
-                        .initiate_cooldown_rescue_probe(manifest, candidate, now_ms)
-                        .await
-                    {
-                        Ok(V3ProbeInitiation::Completed(completion)) => {
-                            let _ = completion;
-                        }
-                        Ok(
-                            V3ProbeInitiation::Initiated
-                            | V3ProbeInitiation::AlreadyOwned
-                            | V3ProbeInitiation::CapacityUnavailable
-                            | V3ProbeInitiation::OwnerUnavailable,
-                        ) => {
-                            // All outcomes keep pending/unadmitted identities cooled.
-                            // A completed success is observed by typed reselection.
-                        }
-                        Err(error) => {
-                            return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
-                                "V3ProviderCooldownRescueProbe",
-                                "target_pre_exhaustion_rescue_probe_failed",
-                                error,
-                            ));
-                        }
-                    }
-                }
-                let retry_now_ms = match v3_relay_provider_policy_now_epoch_ms() {
-                    Ok(now_ms) => now_ms,
-                    Err(error) => {
-                        return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
-                            "V3ProviderCooldownRescueProbe",
-                            "target_pre_exhaustion_rescue_clock_failed",
-                            error,
-                        ))
-                    }
-                };
-                match select_v3_target_with_session_then_global(
-                    &target,
-                    expanded.clone(),
-                    &provider_health.session_bound_availability(failure_session_scope),
-                    provider_health,
-                    request_local_excluded_candidates,
-                    retry_now_ms,
-                    deterministic_sample,
-                ) {
-                    Ok(selected) => return V3TargetSelectionAfterRescue::Selected(selected),
-                    Err(exhausted) => {
-                        return V3TargetSelectionAfterRescue::Exhausted(exhausted);
-                    }
-                }
-            } else {
-                return V3TargetSelectionAfterRescue::Selected(selected);
-            }
+        deterministic_sample,
+        allow_exhaustion_rescue_probe,
+        preferred_selected: None,
+        pre_exhaustion_probes_completed: false,
+        exhaustion_probes_completed: false,
+    });
+    let initial_exhaustion = match initial_step {
+        V3SynchronousTargetPlanningStep::Selected(selected) => {
+            return V3TargetSelectionAfterRescue::Selected(selected);
         }
-        Err(exhausted) => exhausted,
+        V3SynchronousTargetPlanningStep::NeedPreExhaustionProbes {
+            rescue_candidates, ..
+        } => {
+            if let Err(source) = initiate_v3_target_pre_exhaustion_rescue_probes(
+                provider_health,
+                manifest,
+                &rescue_candidates,
+                now_ms,
+            )
+            .await
+            {
+                return V3TargetSelectionAfterRescue::Failed(source);
+            }
+            let retry_now_ms = match v3_relay_provider_policy_now_epoch_ms() {
+                Ok(now_ms) => now_ms,
+                Err(error) => {
+                    return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
+                        "V3ProviderCooldownRescueProbe",
+                        "target_pre_exhaustion_rescue_clock_failed",
+                        error,
+                    ))
+                }
+            };
+            return match select_v3_target_with_session_then_global(
+                &target,
+                expanded,
+                &provider_health.session_bound_availability(failure_session_scope),
+                provider_health,
+                request_local_excluded_candidates,
+                retry_now_ms,
+                deterministic_sample,
+            ) {
+                Ok(selected) => V3TargetSelectionAfterRescue::Selected(selected),
+                Err(exhausted) => V3TargetSelectionAfterRescue::Exhausted(exhausted),
+            };
+        }
+        V3SynchronousTargetPlanningStep::NeedExhaustionProbes { exhaustion, .. } => exhaustion,
+        V3SynchronousTargetPlanningStep::Exhausted(exhausted) => {
+            return V3TargetSelectionAfterRescue::Exhausted(exhausted);
+        }
+        V3SynchronousTargetPlanningStep::Failed(source) => {
+            return V3TargetSelectionAfterRescue::Failed(source);
+        }
     };
     if !allow_exhaustion_rescue_probe {
         return V3TargetSelectionAfterRescue::Exhausted(initial_exhaustion);

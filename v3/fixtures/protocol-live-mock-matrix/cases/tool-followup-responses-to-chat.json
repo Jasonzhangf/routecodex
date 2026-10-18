@@ -87,7 +87,7 @@
       "expected_provider_exact": {
         "model": "chat-model",
         "messages": [
-          {"role": "user", "content": "call echo then report"},
+          {"role": "user", "content": [{"type": "text", "text": "call echo then report"}]},
           {"role": "assistant", "tool_calls": [{"id": "call_echo_1", "type": "function", "function": {"name": "echo", "arguments": "{\"text\":\"ping\"}"}}]},
           {"role": "tool", "tool_call_id": "call_echo_1", "content": "ping"}
         ],

@@ -185,7 +185,12 @@ function verifyServerSource(server, parsedManifest) {
   const businessRoutes = extractBusinessRoutes(server);
   const manifestEndpoints = new Set(array(parsedManifest?.entry_protocol_bindings).flatMap((binding) => array(binding.endpoint_patterns)));
   for (const route of businessRoutes) {
-    if (!manifestEndpoints.has(route)) failures.push(`${files.server}: unbound business endpoint ${route}`);
+    // Axum captures model:action as one segment; the configured Gemini matcher
+    // admits only declared actions under the existing semantic endpoint.
+    const endpoint = route === '/v1beta/models/:model'
+      ? '/v1beta/models/:model/generateContent'
+      : route;
+    if (!manifestEndpoints.has(endpoint)) failures.push(`${files.server}: unbound business endpoint ${route}`);
   }
   for (const endpoint of manifestEndpoints) {
     if (!businessRoutes.has(endpoint)) failures.push(`${files.server}: manifest endpoint ${endpoint} is not exposed by Server`);

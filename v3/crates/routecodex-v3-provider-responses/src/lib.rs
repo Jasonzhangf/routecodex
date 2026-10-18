@@ -51,10 +51,11 @@ pub use transport::{
     build_v3_transport_13_responses_http_request_from_v3_provider_12,
     build_v3_transport_13_responses_http_request_with_provider_headers_from_parts,
     build_v3_transport_13_responses_request_from_v3_provider_12,
-    discover_v3_provider_model_entries, discover_v3_provider_models,
-    is_v3_anthropic_provider_request_header_name, ProviderResponsesTransport,
-    ReqwestResponsesTransport, ResponsesTransport, V3ProviderCancellation, V3ProviderRequestHeader,
-    V3Transport13ResponsesHttpRequest, V3Transport13ResponsesRequest,
+    build_v3_transport_13_responses_request_from_wire_parts, discover_v3_provider_model_entries,
+    discover_v3_provider_models, is_v3_anthropic_provider_request_header_name,
+    ProviderResponsesTransport, ReqwestResponsesTransport, ResponsesTransport,
+    V3ProviderCancellation, V3ProviderRequestHeader, V3Transport13ResponsesHttpRequest,
+    V3Transport13ResponsesRequest,
 };
 pub use transport_handoff::{
     V3ProviderTransportAttemptBroker, V3ProviderTransportAttemptKey,

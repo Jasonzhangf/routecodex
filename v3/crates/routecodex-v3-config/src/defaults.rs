@@ -43,18 +43,17 @@ pub(crate) fn default_hub_v1_authoring() -> V3HubV1AuthoringConfig {
             V3EntryProtocolBindingAuthoringConfig {
                 entry_protocol: "anthropic".to_string(),
                 endpoint_patterns: vec!["/v1/messages".to_string()],
-                execution_mode: V3EntryProtocolExecutionMode::Relay,
+                execution_mode: V3EntryProtocolExecutionMode::Direct,
                 protocol_profile_owner: "v3.entry_protocol_registry_contract".to_string(),
                 implemented: true,
                 forbidden_reentry_behavior:
-                    "Anthropic Messages endpoint must not fall through to Responses Direct or pending runtime."
+                    "Anthropic Messages endpoint must use its declared Direct or Relay runtime owner and must not fall through to another protocol's runtime or pending runtime."
                         .to_string(),
                 runtime_owner_symbol: Some(
-                    "execute_v3_anthropic_relay_runtime_with_default_transport".to_string(),
+                    "execute_v3_anthropic_direct_server_outcome".to_string(),
                 ),
                 runtime_owner_path: Some(
-                    "v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs"
-                        .to_string(),
+                    "v3/crates/routecodex-v3-server/src/executors.rs".to_string(),
                 ),
                 pending_owner_symbol: None,
                 pending_owner_path: None,
@@ -80,17 +79,17 @@ pub(crate) fn default_hub_v1_authoring() -> V3HubV1AuthoringConfig {
             V3EntryProtocolBindingAuthoringConfig {
                 entry_protocol: "gemini".to_string(),
                 endpoint_patterns: vec!["/v1beta/models/:model/generateContent".to_string()],
-                execution_mode: V3EntryProtocolExecutionMode::Relay,
+                execution_mode: V3EntryProtocolExecutionMode::Direct,
                 protocol_profile_owner: "v3.gemini_relay_runtime_integration".to_string(),
                 implemented: true,
                 forbidden_reentry_behavior:
-                    "Gemini endpoint must not fall through to pending or direct runtime.".to_string(),
+                    "Gemini endpoint must use its declared Direct or Relay runtime owner and must not fall through to another protocol's runtime or pending runtime."
+                        .to_string(),
                 runtime_owner_symbol: Some(
-                    "execute_v3_gemini_relay_runtime_with_default_transport".to_string(),
+                    "execute_v3_gemini_direct_server_outcome".to_string(),
                 ),
                 runtime_owner_path: Some(
-                    "v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs"
-                        .to_string(),
+                    "v3/crates/routecodex-v3-server/src/executors.rs".to_string(),
                 ),
                 pending_owner_symbol: None,
                 pending_owner_path: None,

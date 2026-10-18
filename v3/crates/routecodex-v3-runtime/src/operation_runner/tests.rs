@@ -173,6 +173,21 @@ fn request_capture_graph_slice_preserves_the_canonical_node_contract() {
 }
 
 #[test]
+fn standard_projection_compile_requires_its_registered_operator() {
+    let error = super::compile_v3_operation_runner_request_project_standard_provider_request(
+        &pipeline_runtime::Registry::default(),
+    )
+    .expect_err("standard projection must execute a registered operator");
+    assert!(
+        error.message.contains(
+            "missing operator `routecodex.v3.operation.project_standard_provider_request@1`"
+        ),
+        "unexpected compile error: {}",
+        error.message
+    );
+}
+
+#[test]
 fn runtime_identity_matches_the_derived_compiled_capture_slice() {
     let entry = super::RuntimeRequestGraphEntry::compile().expect("capture entry compiles");
     let identity = super::request_capture_identity(&entry.graph, "identity-test".to_string());

@@ -5,6 +5,67 @@ import { assertClientResult } from './assertions.mjs';
 import { COMPLETE_RECEIPT } from './assertions-test-support.mjs';
 import { findSemanticTerminal, parseClientBody } from './protocol-semantics.mjs';
 
+test('declared opaque business records pass JSON and SSE without hiding controls', () => {
+  const opaque = { routecodex_chat_extension: { chat_extension_opaque_record: [{
+    record_id: 'opaque-1', protocol: 'anthropic', path: 'response.type', encoding: 'json',
+    canonical_path: 'chat.routecodex_chat_extension.chat_extension_opaque_record[0].value',
+    value: 'message', future_business_member: { keep: true },
+  }] } };
+  const expected = { status: 200, transport: 'complete' };
+  assert.equal(assertClientResult({
+    ...COMPLETE_RECEIPT, status: 200, headers: { 'content-type': 'application/json' },
+    bodyText: JSON.stringify(opaque),
+  }, { ...expected, body_must_not: ['routecodex_chat_extension'] }, 'openai_chat').ok, false);
+  for (const sse of [false, true]) {
+    const result = {
+      ...COMPLETE_RECEIPT, status: 200,
+      headers: { 'content-type': sse ? 'text/event-stream' : 'application/json' },
+      bodyText: sse ? `data: ${JSON.stringify(opaque)}\n\n` : JSON.stringify(opaque),
+    };
+    assert.equal(assertClientResult(result, expected, 'openai_chat', {
+      parseClientBody, findSemanticTerminal,
+    }).ok, true);
+  }
+  for (const mutate of [
+    (body) => { body.routecodex_internal = true; },
+    (body) => { body.routecodex_chat_extension.metadata_center = {}; },
+    (body) => { body.routecodex_chat_extension.chat_extension_opaque_record[0].value = { routecodex_internal: true }; },
+    (body) => { body.routecodex_chat_extension.chat_extension_opaque_record[0].canonical_path += '.routecodex_internal'; },
+    (body) => { body.routecodex_chat_extension.response_sequence = { runtime_control: true }; },
+  ]) {
+    const body = structuredClone(opaque);
+    mutate(body);
+    const result = assertClientResult({
+      ...COMPLETE_RECEIPT, status: 200, headers: { 'content-type': 'application/json' },
+      body, bodyText: JSON.stringify(body),
+    }, expected, 'openai_chat');
+    assert.equal(result.ok, false);
+    assert.ok(result.diagnostics.some((line) => line.includes('control marker')));
+  }
+});
+
+test('wire control checks cannot be suppressed by supplied observations or frame-shaped business data', () => {
+  const expected = { status: 200, transport: 'complete' };
+  for (const bodyText of [
+    '{"routecodex_internal":true}', '{"broken": routecodex_internal',
+    'data: routecodex_internal\n\n', '"routecodex_internal"',
+  ]) {
+    for (const observation of [{ kind: 'sse', frames: [] }, { kind: 'json', body: {} }]) {
+      const result = assertClientResult({
+        ...COMPLETE_RECEIPT, status: 200, headers: { 'content-type': 'text/event-stream' },
+        observation, bodyText,
+      }, expected, 'openai_chat', { parseClientBody, findSemanticTerminal });
+      assert.equal(result.ok, false);
+      assert.ok(result.diagnostics.some((line) => line.includes('control marker')));
+    }
+  }
+  const business = { event: 'message', data: {}, raw_data: 'routecodex_internal' };
+  assert.equal(assertClientResult({
+    ...COMPLETE_RECEIPT, status: 200, headers: { 'content-type': 'application/json' },
+    body: business, bodyText: JSON.stringify(business),
+  }, expected, 'openai_chat').ok, false);
+});
+
 test('strict closed rejects HTTP 500, empty HTTP 200, and any received bytes', () => {
   const expected = { transport: 'closed', status: null };
 
@@ -51,6 +112,26 @@ test('genuine socket close with no status or bytes satisfies expected closed', (
     assertClientResult({ closed: true, status: null, bodyText: '' }, expected, 'openai_chat'),
     { ok: true, diagnostics: [] },
   );
+});
+
+test('a client timeout, abort or overrun never passes as a product socket close', () => {
+  const expected = { transport: 'closed', status: null };
+  for (const code of ['ETIMEDOUT', 'ABORT_ERR', 'RESPONSE_TOO_LARGE']) {
+    for (const [label, result] of [
+      ['error_detail.code', { status: null, headers: {}, body: null, bodyText: '', closed: true,
+        error: `stopped: ${code}`, error_detail: { name: 'Error', message: `stopped: ${code}`, code } }],
+      ['error_code', { status: null, headers: {}, body: null, bodyText: '', closed: true,
+        error: `stopped: ${code}`, error_code: code }],
+    ]) {
+      const outcome = assertClientResult(result, expected, 'gemini');
+      assert.equal(outcome.ok, false, `${code}/${label} must not pass a closed expectation`);
+      assert.ok(
+        outcome.diagnostics.some((line) => line.includes(`test client stopped: ${code}`)),
+        `${code}/${label} must report the client stop`,
+      );
+    }
+  }
+
 });
 
 test('completion accepts whole-body JSON and keeps missing distinct from null and zero', () => {

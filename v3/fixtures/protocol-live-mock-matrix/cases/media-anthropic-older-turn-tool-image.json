@@ -10,7 +10,7 @@
       "model": "mock.chat-model",
       "max_tokens": 64,
       "messages": [
-        {"role": "user", "content": "take a screenshot"},
+        {"role": "user", "content": [{"type":"text","text":"take a screenshot"}, {"type":"image","source":{"type":"url","url":"https://example.test/image.png"},"future_sibling":{"occurrence":1}}, {"type":"image","source":{"type":"url","url":"https://example.test/image.png"},"future_sibling":{"occurrence":2}}]},
         {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_1", "name": "screenshot", "input": {}}]},
         {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": [{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="}}]}]},
         {"role": "assistant", "content": [{"type": "text", "text": "It shows a login page."}]},
@@ -24,11 +24,11 @@
     "auth_required": true,
     "body_must": {
       "messages": [
-        {"role": "user", "content": "take a screenshot"},
-        {"role": "assistant", "content": "", "tool_calls": [{"id": "toolu_1", "type": "function", "function": {"name": "screenshot", "arguments": "{}"}}]},
-        {"role": "tool", "tool_call_id": "toolu_1", "content": ""},
+        {"role": "user", "content": [{"type":"text","text":"take a screenshot"}, {"type":"text","text":"[Image]","future_sibling":{"occurrence":1}}, {"type":"text","text":"[Image]","future_sibling":{"occurrence":2}}]},
+        {"role": "assistant", "tool_calls": [{"id": "toolu_1", "type": "function", "function": {"name": "screenshot", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "toolu_1", "content": []},
         {"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="}}]},
-        {"role": "assistant", "content": "It shows a login page."},
+        {"role": "assistant", "content": [{"type": "text", "text": "It shows a login page."}]},
         {"role": "user", "content": "what colour was the button?"}
       ]
     },
@@ -54,9 +54,9 @@
     "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
     "files": ["internal/gateway/tool_images_test.go"],
     "tests": ["internal/gateway/tool_images_test.go::TestOlderTurnToolResultImageKept"],
-    "adaptation": "The fixed older-turn image bytes are replayed; the expected followup keeps the image in the same position rather than summarizing it."
+    "adaptation": "The latest image-bearing tool result and paired receipt survive despite later text-only turns. Earlier equal native image URLs become historical placeholders while retaining distinct opaque source-part siblings through Anthropic-to-Responses-to-Chat normalization, checked before the first provider success."
   },
   "contract_differences": [
-    {"source_behavior": "Magpie moves some tool images into the next user message with a label.", "rcc_requirement": "Preserve the representable image and paired tool result without dropping or rewriting semantics."}
+    {"source_behavior": "Magpie moves some tool images into the next user message with a label.", "rcc_requirement": "Preserve the latest image-bearing tool result and paired receipt. Replace earlier image references with the declared historical placeholder while preserving unrelated opaque fields."}
   ]
 }

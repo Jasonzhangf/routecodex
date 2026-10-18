@@ -64,9 +64,15 @@ mod direct_sse_consumers;
 use direct_execution_control::resolve_v3_direct_request_execution_control;
 use direct_runtime_timing::finish_v3_direct_runtime_timing;
 pub(crate) use direct_sse_consumers::V3DirectSseTypedHookCatalog;
+mod v3_direct_gemini_codec;
 mod v3_direct_protocol_codec;
+pub use v3_direct_gemini_codec::V3GeminiDirectCodec;
 pub use v3_direct_protocol_codec::{
     V3ChatDirectCodec, V3DirectProtocolCodec, V3ResponsesDirectCodec,
+};
+mod v3_direct_anthropic_codec;
+pub use v3_direct_anthropic_codec::{
+    V3AnthropicDirect11Policy, V3AnthropicDirectCodec, V3Req04StandardizedAnthropic,
 };
 #[path = "kernel/default_transport.rs"]
 mod default_transport;
@@ -170,14 +176,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             &hook_registry,
         );
     }
-    let target = V3TargetInterpreter::default();
     let direct_failure_session_scope = standardized.failure_session_scope.clone();
     let provider_health =
         provider_health.unwrap_or_else(|| V3ProviderFailureRuntimeHealth::from_manifest(manifest));
     let availability = provider_health.session_bound_availability(&direct_failure_session_scope);
     let mut pinned_selected = None;
     let initial_selected_target_present = initial_selected_target.is_some();
-    let route_policy_state = crate::route_policy::V3RoutePolicyRuntimeState::process_shared();
     let mut route_policy_pending = initial_route_policy_pending;
     let mut route_policy_scope = initial_route_policy_scope.unwrap_or_else(|| {
         crate::route_policy::V3RoutePolicyScope::without_conversation(
@@ -188,105 +192,76 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         )
         .with_conversation(direct_failure_session_scope.session_id())
     });
-    let expanded = if let Some(initial_expanded) = initial_expanded {
+    let (mut expanded, mut target_source) = if let Some(initial_expanded) = initial_expanded {
         // Server-side protocol plan already ran Router05..Target09; reuse its
         // candidate set for in-Target reselection instead of re-entering the
         // Router.
-        Some(initial_expanded)
+        (
+            Some(initial_expanded.clone()),
+            Some(
+                crate::operation_runner::plan_execution::V3PlanExecutionTargetSource::Expanded(
+                    initial_expanded,
+                ),
+            ),
+        )
     } else if pinned_selected.is_none() && !initial_selected_target_present {
-        let routing_facts = build_v3_router_request_facts_from_v3_req_04(&standardized, manifest);
-        let router = V3VirtualRouter::process_shared();
-        let classified = match router.classify_request_with_facts(
-            manifest,
-            &standardized.server_id,
-            &standardized.endpoint,
-            routing_facts,
-        ) {
-            Ok(value) => value,
-            Err(error) => {
-                return error_output(
-                    runtime_source("V3Router05RequestClassified", error),
-                    trace,
-                    &hook_registry,
-                )
-            }
-        };
-        route_policy_scope.routing_group_id = classified.routing_group_id.clone();
-        let route_policy_observation = crate::route_policy::observe_route_turn(
-            &standardized.body,
-            &classified.facts.route_classification.route_name,
-        );
-        let (classified, pending) = match route_policy_state.evaluate_request(
-            manifest,
-            classified,
-            route_policy_scope.clone(),
-            &standardized.request_id,
-            route_policy_observation,
-            now_epoch_ms,
-        ) {
-            Ok(value) => value,
-            Err(error) => {
-                return error_output(
-                    runtime_source("V3Router05RequestClassified", error),
-                    trace,
-                    &hook_registry,
-                )
-            }
-        };
-        route_policy_pending = Some(pending);
         let request_is_compaction = standardized.request_purpose.is_compaction()
             || standardized
                 .endpoint
                 .trim_end_matches('/')
                 .ends_with("/responses/compact");
-        let classified = if request_is_compaction {
-            V3VirtualRouter::with_route_policy_pool(classified, Some("compact".to_string()))
-        } else {
-            classified
-        };
-        trace.push("V3Router05RequestClassified");
-        let plan = match router.resolve_route_pool_plan(manifest, classified) {
+        let resolved = crate::operation_runner::run_v3_resolve_target_operator(
+            standardized.body.clone(),
+            crate::operation_runner::V3ResolveTargetExecutionMode::DirectFresh {
+                manifest: std::sync::Arc::new(manifest.clone()),
+                server_id: standardized.server_id.clone(),
+                endpoint_path: standardized.endpoint.clone(),
+                entry_protocol: "responses".to_string(),
+                request_id: standardized.request_id.clone(),
+                session_id: direct_failure_session_scope.session_id().to_string(),
+                conversation_id: direct_failure_session_scope.session_id().to_string(),
+                port: standardized.server_id.clone(),
+                longcontext_threshold_tokens: crate::configured_v3_longcontext_threshold_tokens(
+                    manifest,
+                    &standardized.server_id,
+                ),
+                is_compaction: request_is_compaction,
+                now_epoch_ms,
+            },
+        );
+        let (resolved_request, resolved_target) = match resolved {
             Ok(value) => value,
-            Err(error) => {
-                return error_output(
-                    crate::shared::v3_route_plan_error_source(
-                        "V3Router06RoutePoolResolved",
-                        "v3_route_target_runtime_failure",
-                        error,
-                    ),
-                    trace,
-                    &hook_registry,
-                )
+            Err(crate::operation_runner::V3ResolveTargetOperatorError::Typed(source)) => {
+                return error_output(source, trace, &hook_registry);
             }
-        };
-        trace.push("V3Router06RoutePoolResolved");
-        let hit = match router.hit_opaque_target_plan_once(plan, 0) {
-            Ok(value) => value,
-            Err(error) => {
+            Err(crate::operation_runner::V3ResolveTargetOperatorError::Runner(error)) => {
                 return error_output(
                     runtime_source("V3Router07OpaqueTargetHitOnce", error),
                     trace,
                     &hook_registry,
-                )
+                );
             }
         };
-        trace.push("V3Router07OpaqueTargetHitOnce");
-        let kind = target.classify_kind(hit);
-        trace.push("V3Target08KindClassified");
-        let expanded = match target.expand_candidates(manifest, kind, 0) {
-            Ok(value) => value,
-            Err(error) => {
-                return error_output(
-                    runtime_source("V3Target09CandidateSetExpanded", error),
-                    trace,
-                    &hook_registry,
-                )
-            }
-        };
-        trace.push("V3Target09CandidateSetExpanded");
-        Some(expanded)
+        standardized.body = resolved_request;
+        route_policy_pending = resolved_target.route_policy_pending;
+        if let Some(scope) = resolved_target.route_policy_scope {
+            route_policy_scope = scope;
+        }
+        trace.extend([
+            "V3Router05RequestClassified",
+            "V3Router06RoutePoolResolved",
+            "V3Router07OpaqueTargetHitOnce",
+        ]);
+        (
+            None,
+            Some(
+                crate::operation_runner::plan_execution::V3PlanExecutionTargetSource::OpaqueHit(
+                    resolved_target.opaque_hit,
+                ),
+            ),
+        )
     } else {
-        None
+        (None, None)
     };
     let route_policy_policies = match crate::route_policy::compile_route_policies(
         manifest,
@@ -322,9 +297,10 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> = None;
     let allowed_modes = direct_runtime_allowed_execution_modes(manifest, &standardized.server_id);
     loop {
-        let (selected, mut selected_admission): (
+        let (selected, mut selected_admission, planned_decision): (
             routecodex_v3_target::V3Target10ConcreteProviderSelected,
             Option<V3RuntimeProviderAdmission>,
+            Option<V3Execution11ProtocolDecision>,
         ) = {
             let pinned = pinned_selected.take();
             let preferred = pinned
@@ -332,10 +308,17 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 .cloned()
                 .or_else(|| initial_selected_target.take())
                 .or_else(|| retry_selected.take());
-            if let Some(captured_expanded) = expanded.as_ref() {
-                match Box::pin(select_v3_expanded_target_with_admission_rescue(
+            if let Some(source) = target_source.as_ref() {
+                let expands_target = matches!(
+                    source,
+                    crate::operation_runner::plan_execution::V3PlanExecutionTargetSource::OpaqueHit(
+                        _
+                    )
+                );
+                match Box::pin(crate::operation_runner::plan_execution::run_v3_plan_execution_operator_with_probes(
+                    standardized.body.clone(),
                     manifest,
-                    captured_expanded.clone(),
+                    source.clone(),
                     &direct_failure_session_scope,
                     &provider_health,
                     &failed_candidates,
@@ -343,16 +326,25 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     0,
                     allow_exhaustion_rescue_probe,
                     preferred,
+                    crate::operation_runner::plan_execution::V3PlanExecutionModePolicy::DirectEntry {
+                        entry_protocol: V3HubEntryProtocol::Responses,
+                        allowed_modes: allowed_modes.clone(),
+                    },
                 ))
                 .await
                 {
-                    V3AdmittedTargetSelectionAfterRescue::Selected(value) => {
-                        (value.selected, Some(value.admission))
+                    Ok((planned_request, plan)) => {
+                        standardized.body = planned_request;
+                        failed_candidates.extend(plan.request_local_excluded_candidates);
+                        expanded = Some(plan.expanded.clone());
+                        target_source = Some(crate::operation_runner::plan_execution::V3PlanExecutionTargetSource::Expanded(plan.expanded));
+                        if expands_target { trace.extend(["V3Target08KindClassified", "V3Target09CandidateSetExpanded"]); }
+                        (plan.selected, Some(plan.admission), Some(plan.protocol_decision))
                     }
-                    V3AdmittedTargetSelectionAfterRescue::Failed(source) => {
+                    Err(crate::operation_runner::plan_execution::V3PlanExecutionStop::Failed(source)) => {
                         return error_output(source, trace, &hook_registry);
                     }
-                    V3AdmittedTargetSelectionAfterRescue::Exhausted(error) => {
+                    Err(crate::operation_runner::plan_execution::V3PlanExecutionStop::Exhausted { exhaustion: error, .. }) => {
                         let detail = if error.attempted_candidates.is_empty() {
                             "no candidates".to_string()
                         } else {
@@ -390,7 +382,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     &trace,
                     &hook_registry,
                 ) {
-                    Ok(value) => value,
+                    Ok((selected, admission)) => (selected, admission, None),
                     Err(output) => return output,
                 }
             } else {
@@ -612,11 +604,13 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 }
             }
         }
-        let decision = match build_v3_execution_11_protocol_decision_from_v3_target_10(
-            selected.clone(),
-            "responses",
-            &allowed_modes,
-        ) {
+        let decision = match planned_decision.map(Ok).unwrap_or_else(|| {
+            build_v3_execution_11_protocol_decision_from_v3_target_10(
+                selected.clone(),
+                "responses",
+                &allowed_modes,
+            )
+        }) {
             Ok(decision) => decision,
             Err(source) => {
                 trace.push("V3Execution11ProtocolDecision");

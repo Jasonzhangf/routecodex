@@ -10,8 +10,8 @@
 //! 统一失败结构 [`V3RelayProviderFailure`] 替代各协议 `V3*RelayProviderFailure` 副本。
 
 use crate::hub_v1::{
-    V3HubEntryProtocol, V3RuntimeObservability, V3RuntimeProviderFailureObservation,
-    V3RuntimeStreamObservation,
+    V3HubEntryProtocol, V3HubProviderWireProtocol, V3RuntimeObservability,
+    V3RuntimeProviderFailureObservation, V3RuntimeStreamObservation,
 };
 use crate::provider_failure_runtime_policy::{
     project_v3_client_disconnect, provider_runtime_failure_stage,
@@ -30,7 +30,7 @@ use routecodex_v3_error::{
 use routecodex_v3_provider_responses::{
     v3_provider_auth_handle_from_manifest_entry, V3ProviderAuthHandle, V3ProviderError,
     V3ProviderHttpFailure, V3ProviderResp14Raw, V3ProviderResponseHeader,
-    V3ResponsesProviderTarget,
+    V3ResponsesProviderTarget, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, SseIncrementalDecoder, SseTransportLimits,
@@ -274,6 +274,28 @@ pub fn provider_target(
         initial_concurrency_budget: selected.initial_concurrency_budget,
         concurrency_acquire_timeout_ms: selected.concurrency_acquire_timeout_ms,
     })
+}
+
+/// 从已选 provider 的编译 auth 类型选择业务 wire 认证载体。仅 typed Gemini
+/// 协议存在非 Bearer 载体；其余显式枚举的协议保持请求不变。
+pub(crate) fn bind_v3_selected_business_auth_kind(
+    manifest: &V3Config05ManifestPublished,
+    selected: &routecodex_v3_target::V3TargetCandidate,
+    provider_protocol: V3HubProviderWireProtocol,
+    request: V3Transport13ResponsesHttpRequest,
+) -> Result<V3Transport13ResponsesHttpRequest, String> {
+    match provider_protocol {
+        V3HubProviderWireProtocol::Gemini => {
+            let provider = manifest
+                .providers
+                .get(&selected.provider_id)
+                .ok_or_else(|| "selected provider missing".to_string())?;
+            Ok(request.with_gemini_auth_kind(&provider.auth.auth_type))
+        }
+        V3HubProviderWireProtocol::Responses
+        | V3HubProviderWireProtocol::Anthropic
+        | V3HubProviderWireProtocol::OpenAiChat => Ok(request),
+    }
 }
 
 /// provider 失败策略执行（共享版；替代各协议 `handle_provider_failure` 副本）。
@@ -925,7 +947,7 @@ pub(crate) async fn resolve_v3_relay_entry_target(
     input: crate::provider_failure_runtime_policy::V3RelayProviderTargetResolutionInput<'_>,
     allow_exhaustion_rescue_probe: bool,
     preferred_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
-    handoff: Option<&crate::V3ResponsesProtocolRelayHandoff>,
+    captured_expanded: Option<&routecodex_v3_target::V3Target09CandidateSetExpanded>,
 ) -> crate::provider_failure_runtime_policy::V3RelayProviderAdmittedTargetResolution {
     use crate::provider_failure_runtime_policy::{
         resolve_v3_relay_target_outcome_with_admission_rescue,
@@ -933,7 +955,7 @@ pub(crate) async fn resolve_v3_relay_entry_target(
         V3RelayProviderAdmittedTargetResolution,
     };
 
-    let Some(handoff) = handoff else {
+    let Some(expanded) = captured_expanded else {
         return resolve_v3_relay_target_outcome_with_admission_rescue(
             input,
             allow_exhaustion_rescue_probe,
@@ -944,7 +966,7 @@ pub(crate) async fn resolve_v3_relay_entry_target(
 
     match select_v3_expanded_target_with_admission_rescue(
         input.manifest,
-        handoff.expanded.clone(),
+        expanded.clone(),
         input.failure_session_scope,
         input.provider_health,
         input.request_local_excluded_candidates,

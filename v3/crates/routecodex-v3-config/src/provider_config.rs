@@ -122,23 +122,15 @@ pub(crate) fn compile_provider_directory(
         let compatibility_profile = provider
             .compatibility_profile
             .or_else(|| resolve_v2_provider_default_compatibility_profile(provider_id));
-        let responses = if v2_responses.is_some() || provider_type == "responses" {
-            Some(V3ProviderResponsesAuthoringConfig {
-                process: v2_responses
-                    .map(|responses| responses.process.clone())
-                    .unwrap_or_else(|| "chat".to_string()),
-                streaming: v2_responses
-                    .and_then(|responses| streaming_policy(responses.streaming.as_deref()))
-                    .unwrap_or(V3StreamingPolicy::Always),
-                transport: v2_responses
-                    .and_then(|responses| responses.transport)
-                    .unwrap_or(V3ResponsesTransportKind::Http),
-                websocket_v2_url: v2_responses
-                    .and_then(|responses| responses.websocket_v2_url.clone()),
-            })
-        } else {
-            None
-        };
+        let responses = v2_responses.map(|responses| V3ProviderResponsesAuthoringConfig {
+            process: responses.process.clone(),
+            streaming: streaming_policy(responses.streaming.as_deref())
+                .unwrap_or(V3StreamingPolicy::Always),
+            transport: responses
+                .transport
+                .unwrap_or(V3ResponsesTransportKind::Http),
+            websocket_v2_url: responses.websocket_v2_url.clone(),
+        });
         let v3 = provider.v3.unwrap_or_default();
         // An empty selection means the route uses the provider default model.
         // Keep the directory model table intact so validation can verify that

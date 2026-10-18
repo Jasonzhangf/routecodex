@@ -7,6 +7,56 @@ use super::*;
 use serde_json::json;
 
 #[test]
+fn anthropic_text_delta_without_block_start_preserves_public_stream() {
+    let events = [
+        json!({"type":"message_start","message":{"id":"msg_public","type":"message","role":"assistant","content":[],"usage":{"input_tokens":7,"output_tokens":0}}}),
+        json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}),
+        json!({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}),
+        json!({"type":"message_stop"}),
+    ];
+    let mut transducer = V3OpenAiChatAnthropicSseTransducer::new(false);
+    let mut chunks = Vec::new();
+    for event in events {
+        chunks.extend(
+            transducer
+                .push_event(event)
+                .expect("parseable text stream must project"),
+        );
+    }
+    transducer
+        .finish()
+        .expect("provider terminal must remain complete");
+    let text: String = chunks
+        .iter()
+        .filter_map(|chunk| {
+            chunk
+                .pointer("/choices/0/delta/content")
+                .and_then(Value::as_str)
+        })
+        .collect();
+    assert_eq!(text, "ok");
+    assert!(chunks
+        .iter()
+        .any(|chunk| chunk.pointer("/choices/0/finish_reason") == Some(&json!("stop"))));
+    assert!(chunks
+        .iter()
+        .all(|chunk| chunk.pointer("/choices/0/delta/tool_calls").is_none()));
+    let usage = chunks
+        .iter()
+        .find_map(|chunk| chunk.get("usage"))
+        .expect("terminal usage");
+    assert_eq!(usage["prompt_tokens"], 7);
+    assert_eq!(usage["completion_tokens"], 2);
+    assert_eq!(usage["total_tokens"], 9);
+
+    let mut incomplete = V3OpenAiChatAnthropicSseTransducer::new(false);
+    incomplete.push_event(json!({"type":"message_start","message":{"id":"unfinished","type":"message","role":"assistant"}})).unwrap();
+    incomplete.push_event(json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}})).unwrap();
+    assert!(incomplete.finish().is_err());
+    assert!(incomplete.push_event(json!({"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{}"}})).is_err());
+}
+
+#[test]
 fn compact_chat_message_projection_preserves_text_and_reasoning_once() {
     for (item, text, reasoning) in [
         (
@@ -842,6 +892,56 @@ fn anthropic_transducer_folds_cache_read_into_chat_prompt_tokens() {
 }
 
 #[test]
+fn anthropic_transducer_preserves_cache_write_tokens() {
+    let mut transducer = V3OpenAiChatAnthropicSseTransducer::new(false);
+    transducer
+        .push_event(json!({
+            "type": "message_start",
+            "message": {
+                "id": "m1",
+                "role": "assistant",
+                "content": [],
+                "usage": {
+                    "input_tokens": 10,
+                    "cache_creation_input_tokens": 6416,
+                    "cache_read_input_tokens": 0,
+                    "output_tokens": 4
+                }
+            }
+        }))
+        .unwrap();
+    transducer
+        .push_event(json!({
+            "type": "message_delta",
+            "delta": {"stop_reason": "end_turn"},
+            "usage": {
+                "input_tokens": 10,
+                "cache_creation_input_tokens": 6416,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 40
+            }
+        }))
+        .unwrap();
+    let chunks = transducer
+        .push_event(json!({"type": "message_stop"}))
+        .unwrap();
+    transducer.finish().unwrap();
+
+    assert_eq!(chunks[0]["choices"][0]["finish_reason"], json!("stop"));
+    let usage = chunks
+        .iter()
+        .find_map(|chunk| chunk.get("usage"))
+        .expect("terminal usage");
+    assert_eq!(usage["prompt_tokens"], json!(6426));
+    assert_eq!(usage["completion_tokens"], json!(40));
+    assert_eq!(usage["total_tokens"], json!(6466));
+    assert_eq!(
+        usage["prompt_tokens_details"],
+        json!({"cached_tokens": 0, "cache_write_tokens": 6416})
+    );
+}
+
+#[test]
 fn anthropic_transducer_emits_cache_only_usage_terminal_chunk() {
     // 终帧门禁与投影共用 canonical_usage()：仅有缓存字段时也必须携带 usage，
     // 否则缓存命中信息会在唯一可承载它的终帧上静默丢失。
@@ -877,6 +977,9 @@ fn anthropic_transducer_emits_cache_only_usage_terminal_chunk() {
         .expect("cache-only anthropic terminal must still carry usage");
     assert_eq!(usage["prompt_tokens"], json!(64));
     assert_eq!(usage["prompt_tokens_details"]["cached_tokens"], json!(64));
+    assert!(usage["prompt_tokens_details"]
+        .get("cache_write_tokens")
+        .is_none());
     assert_eq!(usage["completion_tokens"], json!(0));
     assert_eq!(usage["total_tokens"], json!(64));
 }

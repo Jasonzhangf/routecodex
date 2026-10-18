@@ -53,10 +53,17 @@ async fn upstream(
         "sse" => Response::builder()
             .status(StatusCode::OK)
             .header("content-type", "text/event-stream; charset=utf-8")
+            .header("x-upstream", "controlled-sse")
             .body(Body::from_stream(futures_util::stream::iter([
                 Ok::<_, Infallible>("event: response.created\ndata: {\"id\":\"resp_sse\"}\n\n"),
                 Ok::<_, Infallible>("data: [DONE]\n\n"),
             ])))
+            .unwrap(),
+        "plain_text" => Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/plain; charset=utf-8")
+            .header("x-upstream", "controlled-text")
+            .body(Body::from("plain provider response"))
             .unwrap(),
         "malformed_sse" => Response::builder()
             .status(StatusCode::OK)
@@ -386,39 +393,115 @@ async fn sse_request_accepts_json_provider_response_as_json_raw_body() {
 }
 
 #[tokio::test]
-async fn json_request_rejects_sse_provider_response_without_switching_response_kind() {
+async fn json_request_accepts_sse_provider_response_as_sse_raw_body() {
     let (base_url, mut captures, shutdown) = start_upstream().await;
     std::env::set_var("V3_GENERAL_JSON_SSE_KEY", "secret-json-sse");
     let transport = ReqwestResponsesTransport::default();
+    let mut provider_target = target(
+        "json-stream-relay",
+        &base_url,
+        "model-json-stream",
+        "json-stream",
+        "V3_GENERAL_JSON_SSE_KEY",
+    );
+    provider_target.compatibility_profile = Some("responses:json-sse-preserve".to_string());
+    provider_target.sse_first_frame_timeout_ms = Some(4_321);
+    let request_body =
+        json!({"model":"model-json-stream","input":"hello","case":"sse","preserved":true});
 
     let wire = build_v3_provider_12_responses_wire_payload(
         "req-json-sse",
-        target(
-            "json-stream-relay",
-            &base_url,
-            "model-json-stream",
-            "json-stream",
-            "V3_GENERAL_JSON_SSE_KEY",
-        ),
-        json!({"model":"model-json-stream","input":"hello","case":"sse"}),
+        provider_target,
+        request_body.clone(),
     )
     .unwrap();
-    let error = transport
+    let raw = transport
         .send(build_v3_transport_13_responses_http_request_from_v3_provider_12(wire).unwrap())
         .await
-        .unwrap_err();
-    assert!(matches!(
-        error,
-        V3ProviderError::UnexpectedContentType {
-            expected: "JSON",
-            ..
-        }
-    ));
+        .unwrap();
+    assert_eq!(raw.body_kind(), V3ProviderResponseBodyKind::Sse);
+    assert_eq!(raw.status(), 200);
+    assert_eq!(
+        raw.header_text("x-upstream").unwrap(),
+        Some("controlled-sse")
+    );
+    assert_eq!(
+        raw.compatibility_profile(),
+        Some("responses:json-sse-preserve")
+    );
+    assert_eq!(raw.sse_first_frame_timeout_ms(), Some(4_321));
+    assert_eq!(
+        String::from_utf8(raw.into_body_bytes().await.unwrap()).unwrap(),
+        "event: response.created\ndata: {\"id\":\"resp_sse\"}\n\ndata: [DONE]\n\n"
+    );
     let capture = captures.recv().await.unwrap();
     assert_eq!(capture.accept.as_deref(), Some("application/json"));
     assert!(capture.body.get("stream").is_none());
+    assert_eq!(capture.body, request_body);
 
     std::env::remove_var("V3_GENERAL_JSON_SSE_KEY");
+    shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn unknown_provider_content_type_stays_typed_for_json_and_sse_intents() {
+    let (base_url, mut captures, shutdown) = start_upstream().await;
+    std::env::set_var("V3_GENERAL_UNKNOWN_TYPE_KEY", "secret-unknown-type");
+    let transport = ReqwestResponsesTransport::default();
+
+    for (request_id, stream, expected) in [
+        ("req-json-plain-text", false, "JSON"),
+        ("req-sse-plain-text", true, "SSE"),
+    ] {
+        let mut body = json!({"model":"model-unknown","input":"hello","case":"plain_text"});
+        if stream {
+            body["stream"] = Value::Bool(true);
+        }
+        let wire = build_v3_provider_12_responses_wire_payload(
+            request_id,
+            target(
+                "unknown-type-relay",
+                &base_url,
+                "model-unknown",
+                "unknown-type",
+                "V3_GENERAL_UNKNOWN_TYPE_KEY",
+            ),
+            body,
+        )
+        .unwrap();
+        let error = transport
+            .send(build_v3_transport_13_responses_http_request_from_v3_provider_12(wire).unwrap())
+            .await
+            .unwrap_err();
+        match error {
+            V3ProviderError::UnexpectedContentType {
+                expected: actual_expected,
+                content_type,
+                status,
+                headers,
+                ..
+            } => {
+                assert_eq!(actual_expected, expected);
+                assert_eq!(content_type.as_deref(), Some("text/plain; charset=utf-8"));
+                assert_eq!(status, 200);
+                assert!(headers.iter().any(|header| {
+                    header.name == "x-upstream" && header.value == b"controlled-text"
+                }));
+            }
+            other => panic!("expected typed unexpected content type error, got {other:?}"),
+        }
+        let capture = captures.recv().await.unwrap();
+        assert_eq!(
+            capture.accept.as_deref(),
+            Some(if stream {
+                "text/event-stream"
+            } else {
+                "application/json"
+            })
+        );
+    }
+
+    std::env::remove_var("V3_GENERAL_UNKNOWN_TYPE_KEY");
     shutdown.send(()).unwrap();
 }
 

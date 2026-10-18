@@ -136,95 +136,57 @@ where
     let attempt_budget = request_execution_control.attempt_budget();
     let direct_failure_session_scope = C::failure_session_scope(&control, &standardized);
     let availability = provider_health.session_bound_availability(&direct_failure_session_scope);
-    let target = V3TargetInterpreter::default();
-    let routing_facts = C::router_facts(&standardized, manifest);
-    let router = V3VirtualRouter::process_shared();
-    let classified = match router.classify_request_with_facts(
-        manifest,
-        C::server_id(&standardized),
-        C::endpoint(&standardized),
-        routing_facts,
-    ) {
-        Ok(value) => value,
-        Err(error) => {
-            return error_output(
-                runtime_source("V3Router05RequestClassified", error),
-                trace,
-                &crate::hooks::register_responses_direct_hooks(),
-            )
-        }
-    };
-    let route_policy_state = crate::route_policy::V3RoutePolicyRuntimeState::process_shared();
-    let route_policy_scope = crate::route_policy::V3RoutePolicyScope::without_conversation(
-        C::server_id(&standardized),
-        &classified.routing_group_id,
-        direct_failure_session_scope.session_id(),
-        C::server_id(&standardized),
-    )
-    .with_conversation(direct_failure_session_scope.session_id());
-    let route_policy_observation = crate::route_policy::observe_route_turn(
-        C::body(&standardized),
-        &classified.facts.route_classification.route_name,
+    let resolved = crate::operation_runner::run_v3_resolve_target_operator(
+        C::body(&standardized).clone(),
+        crate::operation_runner::V3ResolveTargetExecutionMode::DirectFresh {
+            manifest: std::sync::Arc::new(manifest.clone()),
+            server_id: C::server_id(&standardized).to_string(),
+            endpoint_path: C::endpoint(&standardized).to_string(),
+            entry_protocol: C::ENTRY_PROTOCOL.to_string(),
+            request_id: C::request_id(&standardized).to_string(),
+            session_id: direct_failure_session_scope.session_id().to_string(),
+            conversation_id: direct_failure_session_scope.session_id().to_string(),
+            port: C::server_id(&standardized).to_string(),
+            longcontext_threshold_tokens: crate::configured_v3_longcontext_threshold_tokens(
+                manifest,
+                C::server_id(&standardized),
+            ),
+            is_compaction: C::endpoint(&standardized)
+                .trim_end_matches('/')
+                .ends_with("/responses/compact"),
+            now_epoch_ms,
+        },
     );
-    let (classified, route_policy_pending) = match route_policy_state.evaluate_request(
-        manifest,
-        classified,
-        route_policy_scope.clone(),
-        C::request_id(&standardized),
-        route_policy_observation,
-        now_epoch_ms,
-    ) {
+    let (resolved_request, resolved_target) = match resolved {
         Ok(value) => value,
-        Err(error) => {
+        Err(crate::operation_runner::V3ResolveTargetOperatorError::Typed(source)) => {
             return error_output(
-                runtime_source("V3Router05RequestClassified", error),
+                source,
                 trace,
                 &crate::hooks::register_responses_direct_hooks(),
-            )
+            );
         }
-    };
-    let route_policy_pending = route_policy_pending;
-    trace.push("V3Router05RequestClassified");
-    let route_policy_group_id = classified.routing_group_id.clone();
-    let plan = match router.resolve_route_pool_plan(manifest, classified) {
-        Ok(value) => value,
-        Err(error) => {
-            return error_output(
-                crate::shared::v3_route_plan_error_source(
-                    "V3Router06RoutePoolResolved",
-                    "v3_route_target_runtime_failure",
-                    error,
-                ),
-                trace,
-                &crate::hooks::register_responses_direct_hooks(),
-            )
-        }
-    };
-    trace.push("V3Router06RoutePoolResolved");
-    let hit = match router.hit_opaque_target_plan_once(plan, 0) {
-        Ok(value) => value,
-        Err(error) => {
+        Err(crate::operation_runner::V3ResolveTargetOperatorError::Runner(error)) => {
             return error_output(
                 runtime_source("V3Router07OpaqueTargetHitOnce", error),
                 trace,
                 &crate::hooks::register_responses_direct_hooks(),
-            )
+            );
         }
     };
-    trace.push("V3Router07OpaqueTargetHitOnce");
-    let kind = target.classify_kind(hit);
-    trace.push("V3Target08KindClassified");
-    let expanded = match target.expand_candidates(manifest, kind, 0) {
-        Ok(value) => value,
-        Err(error) => {
-            return error_output(
-                runtime_source("V3Target09CandidateSetExpanded", error),
-                trace,
-                &crate::hooks::register_responses_direct_hooks(),
-            )
-        }
-    };
-    trace.push("V3Target09CandidateSetExpanded");
+    *C::body_mut(&mut standardized) = resolved_request;
+    let route_policy_pending = resolved_target.route_policy_pending;
+    let route_policy_scope = resolved_target.route_policy_scope;
+    let route_policy_group_id = resolved_target.opaque_hit.routing_group_id.clone();
+    trace.extend([
+        "V3Router05RequestClassified",
+        "V3Router06RoutePoolResolved",
+        "V3Router07OpaqueTargetHitOnce",
+    ]);
+    let mut target_source =
+        crate::operation_runner::plan_execution::V3PlanExecutionTargetSource::OpaqueHit(
+            resolved_target.opaque_hit,
+        );
     let mut failed_candidates = BTreeSet::new();
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
@@ -240,12 +202,14 @@ where
     let allowed_modes =
         direct_runtime_allowed_execution_modes(manifest, C::server_id(&standardized));
     loop {
-        let (selected, mut selected_admission): (
-            routecodex_v3_target::V3Target10ConcreteProviderSelected,
-            Option<V3RuntimeProviderAdmission>,
-        ) = match select_v3_expanded_target_with_admission_rescue(
+        let expands_target = matches!(
+            target_source,
+            crate::operation_runner::plan_execution::V3PlanExecutionTargetSource::OpaqueHit(_)
+        );
+        let (planned_request, plan) = match crate::operation_runner::plan_execution::run_v3_plan_execution_operator_with_probes(
+            C::body(&standardized).clone(),
             manifest,
-            expanded.clone(),
+            target_source.clone(),
             &direct_failure_session_scope,
             &provider_health,
             &failed_candidates,
@@ -253,20 +217,22 @@ where
             0,
             allow_exhaustion_rescue_probe,
             retry_selected.take(),
+            crate::operation_runner::plan_execution::V3PlanExecutionModePolicy::DirectEntry {
+                entry_protocol: C::HUB_ENTRY_PROTOCOL,
+                allowed_modes: allowed_modes.clone(),
+            },
         )
         .await
         {
-            V3AdmittedTargetSelectionAfterRescue::Selected(value) => {
-                (value.selected, Some(value.admission))
-            }
-            V3AdmittedTargetSelectionAfterRescue::Failed(source) => {
+            Ok(value) => value,
+            Err(crate::operation_runner::plan_execution::V3PlanExecutionStop::Failed(source)) => {
                 return error_output(
                     source,
                     trace,
                     &crate::hooks::register_responses_direct_hooks(),
                 );
             }
-            V3AdmittedTargetSelectionAfterRescue::Exhausted(error) => {
+            Err(crate::operation_runner::plan_execution::V3PlanExecutionStop::Exhausted { exhaustion: error, .. }) => {
                 // 可观测性：exhausted 时带全部候选明细（provider:alias:model:
                 // 原因），否则 console 只有 "N candidates unavailable" 无法诊断
                 // 哪个候选因何被冷却/排除。
@@ -301,6 +267,19 @@ where
                 );
             }
         };
+        *C::body_mut(&mut standardized) = planned_request;
+        failed_candidates.extend(plan.request_local_excluded_candidates);
+        let expanded = plan.expanded;
+        target_source =
+            crate::operation_runner::plan_execution::V3PlanExecutionTargetSource::Expanded(
+                expanded.clone(),
+            );
+        let selected = plan.selected;
+        let mut selected_admission = Some(plan.admission);
+        let decision = plan.protocol_decision;
+        if expands_target {
+            trace.extend(["V3Target08KindClassified", "V3Target09CandidateSetExpanded"]);
+        }
         if provider_action_permit_target
             .as_ref()
             .is_some_and(|target| {
@@ -335,21 +314,6 @@ where
             observability.attempts = Some(total_attempts(&accumulator, send_attempts));
             sink(&observability);
         }
-        let decision = match build_v3_execution_11_protocol_decision_from_v3_target_10(
-            selected.clone(),
-            C::ENTRY_PROTOCOL,
-            &allowed_modes,
-        ) {
-            Ok(decision) => decision,
-            Err(source) => {
-                trace.push("V3Execution11ProtocolDecision");
-                return error_output(
-                    source,
-                    trace,
-                    &crate::hooks::register_responses_direct_hooks(),
-                );
-            }
-        };
         trace.push("V3Execution11ProtocolDecision");
         if !matches!(
             decision.mode,
@@ -359,8 +323,8 @@ where
                 decision.target,
                 expanded.clone(),
                 failed_candidates.clone(),
-                Some(route_policy_pending.clone()),
-                Some(route_policy_scope.clone()),
+                route_policy_pending.clone(),
+                route_policy_scope.clone(),
                 trace,
                 provider_failure_events.clone(),
                 accumulator.with_additional_attempts(send_attempts),
@@ -434,6 +398,33 @@ where
             Err(source) => {
                 return error_output(
                     source,
+                    trace,
+                    &crate::hooks::register_responses_direct_hooks(),
+                )
+            }
+        };
+        let provider_protocol =
+            match crate::hub_v1::provider_wire_protocol_for_selected_candidate(&selected.candidate)
+            {
+                Ok(protocol) => protocol,
+                Err(error) => {
+                    return error_output(
+                        runtime_source("V3Transport13ResponsesHttpRequest", error),
+                        trace,
+                        &crate::hooks::register_responses_direct_hooks(),
+                    )
+                }
+            };
+        let transport_request = match crate::hub_v1::bind_v3_selected_business_auth_kind(
+            manifest,
+            &selected.candidate,
+            provider_protocol,
+            transport_request,
+        ) {
+            Ok(request) => request,
+            Err(error) => {
+                return error_output(
+                    runtime_source("V3Transport13ResponsesHttpRequest", error),
                     trace,
                     &crate::hooks::register_responses_direct_hooks(),
                 )
@@ -1309,7 +1300,11 @@ where
                     )
                 }
             };
-        if let Err(error) = route_policy_pending.commit(&policies, now_epoch_ms) {
+        if let Err(error) = route_policy_pending
+            .as_ref()
+            .map(|pending| pending.commit(&policies, now_epoch_ms))
+            .transpose()
+        {
             return error_output(
                 runtime_source("V3Router06RoutePoolResolved", error),
                 trace,

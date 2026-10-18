@@ -8,8 +8,24 @@ use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
+mod error_decision;
 mod operators;
+pub(crate) mod plan_execution;
+mod resolve_target;
+mod single_node;
+pub(crate) use error_decision::{
+    run_v3_error_02_to_05_decision_operators, run_v3_error_06_terminal_projection_operator,
+};
 use operators::CaptureClientJsonOperator;
+use operators::ProjectStandardProviderRequestOperator;
+pub(crate) use operators::{
+    run_v3_err01_source_raised_operator, run_v3_err02_classified_operator, V3Err01SourceInput,
+};
+pub(crate) use resolve_target::{
+    run_v3_resolve_target_operator, V3ResolveTargetExecutionMode, V3ResolveTargetOperatorError,
+    V3ResolveTargetSideOutput,
+};
+pub(crate) use single_node::{run_v3_single_node_operator, V3OperationGraph};
 
 const REQUEST_GRAPH_JSON: &str =
     include_str!("../../../../../docs/architecture/dagpipe/v3.operation_runner.request.graph.json");
@@ -19,8 +35,11 @@ const FIELD_PROFILES_YAML: &str = include_str!(
 const CANONICAL_REQUEST_GRAPH_ID: &str = "v3.operation_runner.request";
 const CANONICAL_REQUEST_GRAPH_VERSION: &str = "1";
 const CAPTURE_NODE_ID: &str = "capture_client_json";
+const PROJECT_STANDARD_NODE_ID: &str = "project_standard_provider_request";
 const SOURCE_REQUEST_ARC: &str = "source-request";
 const CLIENT_JSON_ARC: &str = "client-json";
+const GOVERNED_REQUEST_ARC: &str = "governed-request";
+const STANDARD_PROVIDER_REQUEST_ARC: &str = "standard-provider-request";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OperationRunnerError {
@@ -78,7 +97,7 @@ impl RuntimeRequestGraphEntry {
     pub fn capture_client_json(&self, payload: Value) -> Result<Value, OperationRunnerError> {
         static EXECUTION_SEQUENCE: AtomicU64 = AtomicU64::new(1);
         let execution_id = EXECUTION_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-        let identity = request_capture_identity(&self.graph, format!("request-{execution_id}"));
+        let identity = request_graph_identity(&self.graph, format!("request-{execution_id}"));
         let mut inputs = HashMap::<ArcId, Value>::new();
         inputs.insert(SOURCE_REQUEST_ARC.to_string(), payload);
         let result = Runtime::new(BTreeSet::new()).run(
@@ -95,7 +114,7 @@ impl RuntimeRequestGraphEntry {
     }
 }
 
-fn request_capture_identity(graph: &CompiledGraph, execution_id: String) -> Identity {
+fn request_graph_identity(graph: &CompiledGraph, execution_id: String) -> Identity {
     Identity {
         project_id: "routecodex-v3".to_string(),
         graph_id: graph.id().to_string(),
@@ -103,6 +122,10 @@ fn request_capture_identity(graph: &CompiledGraph, execution_id: String) -> Iden
         execution_id,
         attempt_id: "client-entry".to_string(),
     }
+}
+
+fn request_capture_identity(graph: &CompiledGraph, execution_id: String) -> Identity {
+    request_graph_identity(graph, execution_id)
 }
 
 #[derive(Deserialize)]
@@ -395,6 +418,128 @@ fn request_capture_graph_slice_from_sources(
     Ok(pipeline_runtime::parse_graph_json(&slice_source)?)
 }
 
+fn request_project_standard_graph_slice_from_sources(
+    graph_source: &str,
+    field_profiles_source: &str,
+) -> Result<Graph, OperationRunnerError> {
+    let mut graph: Value = serde_json::from_str(graph_source).map_err(|error| {
+        OperationRunnerError::new(format!("invalid request graph JSON: {error}"))
+    })?;
+    let registry = project_arc_schema_registry(field_profiles_source)?;
+    let canonical_graph_id = required_string(&graph, "id", "request graph")?.to_string();
+    if canonical_graph_id != CANONICAL_REQUEST_GRAPH_ID {
+        return Err(OperationRunnerError::new(format!(
+            "request graph ID must be `{CANONICAL_REQUEST_GRAPH_ID}`, got `{canonical_graph_id}`"
+        )));
+    }
+    let graph_version = required_string(&graph, "version", "request graph")?.to_string();
+    if graph_version != CANONICAL_REQUEST_GRAPH_VERSION {
+        return Err(OperationRunnerError::new(format!(
+            "request graph version must be `{CANONICAL_REQUEST_GRAPH_VERSION}`, got `{graph_version}`"
+        )));
+    }
+    let nodes = graph
+        .get("nodes")
+        .and_then(Value::as_array)
+        .ok_or_else(|| OperationRunnerError::new("request graph omitted node array"))?;
+    let node = nodes
+        .iter()
+        .find(|node| node.get("id").and_then(Value::as_str) == Some(PROJECT_STANDARD_NODE_ID))
+        .cloned()
+        .ok_or_else(|| {
+            OperationRunnerError::new("request graph omitted `project_standard_provider_request`")
+        })?;
+    let output = node
+        .get("output")
+        .ok_or_else(|| OperationRunnerError::new("standard projection node omitted output ARC"))?;
+    if required_string(output, "id", "standard projection output ARC")?
+        != STANDARD_PROVIDER_REQUEST_ARC
+    {
+        return Err(OperationRunnerError::new(format!(
+            "standard projection output ARC must be `{STANDARD_PROVIDER_REQUEST_ARC}`"
+        )));
+    }
+    let inputs = node
+        .get("inputs")
+        .and_then(Value::as_array)
+        .ok_or_else(|| OperationRunnerError::new("standard projection node omitted input ARCs"))?;
+    if inputs.as_slice() != [Value::String(GOVERNED_REQUEST_ARC.to_string())] {
+        return Err(OperationRunnerError::new(format!(
+            "standard projection input ARC must be only `{GOVERNED_REQUEST_ARC}`"
+        )));
+    }
+    let edges = graph
+        .get("edges")
+        .and_then(Value::as_array)
+        .ok_or_else(|| OperationRunnerError::new("request graph omitted edge array"))?;
+    let producer_id = edges
+        .iter()
+        .find(|edge| {
+            edge.get("to").and_then(Value::as_str) == Some(PROJECT_STANDARD_NODE_ID)
+                && edge.get("arc_id").and_then(Value::as_str) == Some(GOVERNED_REQUEST_ARC)
+        })
+        .and_then(|edge| edge.get("from").and_then(Value::as_str))
+        .ok_or_else(|| {
+            OperationRunnerError::new(
+                "request graph omitted governed-request edge into project_standard_provider_request",
+            )
+        })?;
+    let input = nodes
+        .iter()
+        .find(|node| node.get("id").and_then(Value::as_str) == Some(producer_id))
+        .and_then(|node| node.get("output"))
+        .filter(|output| output.get("id").and_then(Value::as_str) == Some(GOVERNED_REQUEST_ARC))
+        .cloned()
+        .ok_or_else(|| {
+            OperationRunnerError::new("request graph omitted governed-request producer ARC")
+        })?;
+    let input_schema = validate_arc_schema(&input, GOVERNED_REQUEST_ARC, &registry)?;
+    let output_schema = validate_arc_schema(output, STANDARD_PROVIDER_REQUEST_ARC, &registry)?;
+    if input_schema != ValueType::Object || output_schema != ValueType::Object {
+        return Err(OperationRunnerError::new(
+            "standard projection input and output ARCs must use Object schemas",
+        ));
+    }
+    let root = graph
+        .as_object_mut()
+        .ok_or_else(|| OperationRunnerError::new("request graph must be a JSON object"))?;
+    root.insert(
+        "id".to_string(),
+        Value::String(derived_capture_slice_graph_id(
+            &canonical_graph_id,
+            PROJECT_STANDARD_NODE_ID,
+        )),
+    );
+    root.insert("version".to_string(), Value::String(graph_version));
+    root.insert("nodes".to_string(), Value::Array(vec![node]));
+    root.insert("edges".to_string(), Value::Array(Vec::new()));
+    root.insert("inputs".to_string(), Value::Array(vec![input]));
+    root.insert(
+        "outputs".to_string(),
+        Value::Array(vec![Value::String(
+            STANDARD_PROVIDER_REQUEST_ARC.to_string(),
+        )]),
+    );
+    let slice_source = serde_json::to_string(&graph)
+        .map_err(|error| OperationRunnerError::new(format!("invalid standard slice: {error}")))?;
+    Ok(pipeline_runtime::parse_graph_json(&slice_source)?)
+}
+
+fn request_project_standard_graph_slice() -> Result<Graph, OperationRunnerError> {
+    request_project_standard_graph_slice_from_sources(REQUEST_GRAPH_JSON, FIELD_PROFILES_YAML)
+}
+
+pub(crate) fn compile_v3_operation_runner_request_project_standard_provider_request(
+    registry: &Registry,
+) -> Result<CompiledGraph, OperationRunnerError> {
+    let graph = request_project_standard_graph_slice()?;
+    Ok(pipeline_runtime::compile(
+        graph,
+        registry,
+        &BTreeSet::new(),
+    )?)
+}
+
 fn request_capture_graph_slice() -> Result<Graph, OperationRunnerError> {
     request_capture_graph_slice_from_sources(REQUEST_GRAPH_JSON, FIELD_PROFILES_YAML)
 }
@@ -423,6 +568,55 @@ pub fn execute_v3_operation_runner_request_capture_client_json(
     payload: Value,
 ) -> Result<Value, OperationRunnerError> {
     request_graph_entry()?.capture_client_json(payload)
+}
+
+pub(crate) fn execute_v3_operation_runner_request_project_standard_provider_request(
+    payload: Value,
+    entry_protocol: crate::hub_v1::V3HubEntryProtocol,
+    transport_intent: crate::hub_v1::V3HubTransportIntent,
+    provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
+    selected_target: routecodex_v3_target::V3TargetCandidate,
+) -> Result<crate::hub_v1::V3HubReqOutbound07StandardProjection, OperationRunnerError> {
+    let side_output = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let mut registry = Registry::default();
+    registry.register(ProjectStandardProviderRequestOperator::new(
+        entry_protocol,
+        transport_intent,
+        provider_protocol,
+        selected_target,
+        side_output.clone(),
+    ))?;
+    let graph = compile_v3_operation_runner_request_project_standard_provider_request(&registry)?;
+    static EXECUTION_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+    let execution_id = EXECUTION_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let identity = request_graph_identity(&graph, format!("request-{execution_id}"));
+    let mut inputs = HashMap::<ArcId, Value>::new();
+    inputs.insert(GOVERNED_REQUEST_ARC.to_string(), payload);
+    let result =
+        Runtime::new(BTreeSet::new()).run(&graph, identity, inputs, &Cancellation::default())?;
+    let payload = result
+        .outputs
+        .get(STANDARD_PROVIDER_REQUEST_ARC)
+        .map(|output| output.payload.clone())
+        .ok_or_else(|| {
+            OperationRunnerError::new(
+                "standard projection graph omitted `standard-provider-request` output",
+            )
+        })?;
+    let side_output = side_output
+        .lock()
+        .map_err(|_| {
+            OperationRunnerError::new("standard projection side-output holder is poisoned")
+        })?
+        .take()
+        .ok_or_else(|| {
+            OperationRunnerError::new("standard projection operator omitted typed side output")
+        })?;
+    Ok(crate::hub_v1::V3HubReqOutbound07StandardProjection {
+        payload,
+        drops: side_output.drops,
+        namespace_registry: side_output.namespace_registry,
+    })
 }
 
 #[cfg(test)]

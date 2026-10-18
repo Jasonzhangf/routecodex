@@ -1282,12 +1282,16 @@ const requestCaptureNormalizeMapEdge = (requestChain?.edges ?? []).find(
 if (!requestCaptureNormalizeMapEdge) {
   failures.push('v3-mainline-call-map.yml: v3.operation_runner.dagpipe.request missing capture_client_json -> normalize_request_losslessly caller edge');
 } else {
-  if (requestCaptureNormalizeMapEdge.status !== 'binding_pending') {
-    failures.push('v3-mainline-call-map.yml: v3-op-runner-req-01 must preserve status binding_pending');
-  }
-  for (const field of ['caller_symbol', 'caller_file', 'callee_symbol', 'callee_file']) {
-    if (requestCaptureNormalizeMapEdge[field] !== 'pending') {
-      failures.push(`v3-mainline-call-map.yml: v3-op-runner-req-01 must keep ${field} pending, not fake source binding`);
+  const normalizationBinding = {
+    status: 'runtime_bound',
+    caller_symbol: 'V3HubRelayRequestHooks::run',
+    caller_file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
+    callee_symbol: 'build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01',
+    callee_file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs',
+  };
+  for (const [field, expected] of Object.entries(normalizationBinding)) {
+    if (requestCaptureNormalizeMapEdge[field] !== expected) {
+      failures.push(`v3-mainline-call-map.yml: v3-op-runner-req-01 ${field} must bind the existing lossless normalization caller`);
     }
   }
 }
@@ -1344,25 +1348,87 @@ if (!captureSlice) {
   }
 }
 
-const normalizePlanEdges = (requestGraph.edges ?? []).filter(
-  (edge) => edge?.from === 'normalize_request_losslessly' && edge?.to === 'plan_execution',
-);
-if (normalizePlanEdges.length !== 1 || normalizePlanEdges[0]?.arc_id !== 'canonical-request') {
-  failures.push(`${requestGraphRel}: missing or malformed normalize_request_losslessly -> plan_execution edge (arc canonical-request)`);
+const requestNodesById = new Map((requestGraph.nodes ?? []).map((node) => [node.id, node]));
+const requestStageArcContract = [
+  {
+    nodeId: 'resolve_target',
+    inputs: ['canonical-request'],
+    outputId: 'target-resolved-request',
+    schemaRef: 'v3.operation_runner.arc.target_resolved_request',
+  },
+  {
+    nodeId: 'plan_execution',
+    inputs: ['target-resolved-request'],
+    outputId: 'execution-planned-request',
+    schemaRef: 'v3.operation_runner.arc.execution_planned_request',
+  },
+  {
+    nodeId: 'govern_chat_request',
+    inputs: ['execution-planned-request'],
+    outputId: 'governed-request',
+    schemaRef: 'v3.operation_runner.arc.governed_request',
+  },
+];
+for (const contract of requestStageArcContract) {
+  const node = requestNodesById.get(contract.nodeId);
+  if (!node) {
+    failures.push(`${requestGraphRel}: missing ${contract.nodeId} node`);
+    continue;
+  }
+  const inputsMatch = node.inputs?.length === contract.inputs.length
+    && node.inputs.every((arcId, index) => arcId === contract.inputs[index]);
+  if (!inputsMatch) {
+    failures.push(`${requestGraphRel}: ${contract.nodeId} inputs must be [${contract.inputs.join(', ')}]`);
+  }
+  if (node.output?.id !== contract.outputId || node.output?.schema_ref !== contract.schemaRef) {
+    failures.push(`${requestGraphRel}: ${contract.nodeId} output must be ${contract.outputId} (${contract.schemaRef})`);
+  }
 }
 
-const requestNormalizePlanMapEdge = (requestChain?.edges ?? []).find(
+for (const expected of [
+  { from: 'normalize_request_losslessly', to: 'resolve_target', arcId: 'canonical-request' },
+  { from: 'resolve_target', to: 'plan_execution', arcId: 'target-resolved-request' },
+  { from: 'plan_execution', to: 'govern_chat_request', arcId: 'execution-planned-request' },
+]) {
+  const edges = (requestGraph.edges ?? []).filter(
+    (edge) => edge?.from === expected.from && edge?.to === expected.to,
+  );
+  if (edges.length !== 1 || edges[0]?.arc_id !== expected.arcId) {
+    failures.push(`${requestGraphRel}: missing or malformed ${expected.from} -> ${expected.to} edge (arc ${expected.arcId})`);
+  }
+}
+
+const normalizePlanGraphEdges = (requestGraph.edges ?? []).filter(
+  (edge) => edge?.from === 'normalize_request_losslessly' && edge?.to === 'plan_execution',
+);
+if (normalizePlanGraphEdges.length !== 0) {
+  failures.push(`${requestGraphRel}: canonical-request bypass normalize_request_losslessly -> plan_execution must be absent`);
+}
+
+const requestNormalizePlanMapEdges = (requestChain?.edges ?? []).filter(
   (edge) => edge?.from_node === 'V3OperationRunnerNormalizeRequest' && edge?.to_node === 'V3OperationRunnerPlanExecution',
 );
-if (!requestNormalizePlanMapEdge) {
-  failures.push('v3-mainline-call-map.yml: v3.operation_runner.dagpipe.request missing normalize_request_losslessly -> plan_execution caller edge');
-} else {
-  if (requestNormalizePlanMapEdge.status !== 'binding_pending') {
-    failures.push('v3-mainline-call-map.yml: v3-op-runner-req-02b must preserve status binding_pending');
+if (requestNormalizePlanMapEdges.length !== 0) {
+  failures.push('v3-mainline-call-map.yml: canonical-request bypass normalize_request_losslessly -> plan_execution must be absent');
+}
+
+for (const expected of [
+  { stepId: 'v3-op-runner-req-03', from: 'V3OperationRunnerResolveTarget', to: 'V3OperationRunnerPlanExecution' },
+  { stepId: 'v3-op-runner-req-04', from: 'V3OperationRunnerPlanExecution', to: 'V3OperationRunnerGovernChatRequest' },
+]) {
+  const edge = (requestChain?.edges ?? []).find(
+    (candidate) => candidate?.from_node === expected.from && candidate?.to_node === expected.to,
+  );
+  if (!edge) {
+    failures.push(`v3-mainline-call-map.yml: v3.operation_runner.dagpipe.request missing ${expected.from} -> ${expected.to} caller edge`);
+    continue;
+  }
+  if (edge.step_id !== expected.stepId || edge.status !== 'binding_pending') {
+    failures.push(`v3-mainline-call-map.yml: ${expected.stepId} must preserve status binding_pending`);
   }
   for (const field of ['caller_symbol', 'caller_file', 'callee_symbol', 'callee_file']) {
-    if (requestNormalizePlanMapEdge[field] !== 'pending') {
-      failures.push(`v3-mainline-call-map.yml: v3-op-runner-req-02b must keep ${field} pending, not fake source binding`);
+    if (edge[field] !== 'pending') {
+      failures.push(`v3-mainline-call-map.yml: ${expected.stepId} must keep ${field} pending, not fake source binding`);
     }
   }
 }
@@ -1372,25 +1438,112 @@ const errorGraphRel = 'docs/architecture/dagpipe/v3.operation_runner.error.graph
 // when the graph is present, never block Node 01.
 if (fs.existsSync(path.join(root, errorGraphRel))) {
   const errorGraph = JSON.parse(fs.readFileSync(path.join(root, errorGraphRel), 'utf8'));
+const canonicalErrorStages = [
+  {
+    nodeId: 'error_err01_source_raised',
+    operator: 'routecodex.v3.error.err01_source_raised',
+    input: 'source-failure',
+    output: 'error-source',
+    schemaRef: 'v3.operation_runner.arc.error_source',
+  },
+  {
+    nodeId: 'error_err02_classified',
+    operator: 'routecodex.v3.error.err02_classified',
+    input: 'error-source',
+    output: 'error-classified',
+    schemaRef: 'v3.operation_runner.arc.error_classified',
+  },
+  {
+    nodeId: 'error_err03_target_local_action',
+    operator: 'routecodex.v3.error.err03_target_local_action',
+    input: 'error-classified',
+    output: 'error-target-local-action',
+    schemaRef: 'v3.operation_runner.arc.error_target_local_action',
+  },
+  {
+    nodeId: 'error_err04_target_exhaustion',
+    operator: 'routecodex.v3.error.err04_target_exhaustion',
+    input: 'error-target-local-action',
+    output: 'error-target-exhaustion',
+    schemaRef: 'v3.operation_runner.arc.error_target_exhaustion',
+  },
+  {
+    nodeId: 'error_err05_execution_decision',
+    operator: 'routecodex.v3.error.err05_execution_decision',
+    input: 'error-target-exhaustion',
+    output: 'error-execution-decision',
+    schemaRef: 'v3.operation_runner.arc.error_execution_decision',
+  },
+  {
+    nodeId: 'error_err06_client_projected',
+    operator: 'routecodex.v3.error.err06_client_projected',
+    input: 'error-execution-decision',
+    output: 'internal-error-outcome',
+    schemaRef: 'v3.operation_runner.arc.error_client_projected',
+  },
+];
+if ((errorGraph.inputs ?? []).length !== 1 || errorGraph.inputs[0]?.id !== 'source-failure') {
+  failures.push(`${errorGraphRel}: canonical Error graph must have one source-failure input`);
+}
+if ((errorGraph.outputs ?? []).length !== 1 || errorGraph.outputs[0] !== 'internal-error-outcome') {
+  failures.push(`${errorGraphRel}: canonical Error graph must have one internal-error-outcome output`);
+}
+const errorNodes = new Map((errorGraph.nodes ?? []).map((node) => [node.id, node]));
+const actualErrorNodeIds = (errorGraph.nodes ?? []).map((node) => node?.id ?? '');
+if (actualErrorNodeIds.length !== canonicalErrorStages.length
+  || actualErrorNodeIds.some((nodeId, index) => nodeId !== canonicalErrorStages[index].nodeId)) {
+  failures.push(`${errorGraphRel}: nodes must be exactly the six canonical Error stages in Err01..Err06 order`);
+}
+for (const stage of canonicalErrorStages) {
+  const node = errorNodes.get(stage.nodeId);
+  if (!node) {
+    failures.push(`${errorGraphRel}: missing canonical Error node ${stage.nodeId}`);
+    continue;
+  }
+  if (node.operator !== stage.operator || node.operator_version !== '1') {
+    failures.push(`${errorGraphRel}: ${stage.nodeId} must bind ${stage.operator}@1`);
+  }
+  if (node.inputs?.length !== 1 || node.inputs[0] !== stage.input) {
+    failures.push(`${errorGraphRel}: ${stage.nodeId} inputs must be [${stage.input}]`);
+  }
+  if (node.output?.id !== stage.output || node.output?.schema_ref !== stage.schemaRef) {
+    failures.push(`${errorGraphRel}: ${stage.nodeId} output must be ${stage.output} (${stage.schemaRef})`);
+  }
+}
+const expectedErrorEdges = canonicalErrorStages.slice(0, -1).map((stage, index) => ({
+  from: stage.nodeId,
+  to: canonicalErrorStages[index + 1].nodeId,
+  arcId: stage.output,
+}));
+const actualErrorEdges = errorGraph.edges ?? [];
+if (actualErrorEdges.length !== expectedErrorEdges.length) {
+  failures.push(`${errorGraphRel}: canonical Error graph must have exactly ${expectedErrorEdges.length} sequential edges`);
+}
+for (const expected of expectedErrorEdges) {
+  const matches = actualErrorEdges.filter((edge) => edge?.from === expected.from && edge?.to === expected.to);
+  if (matches.length !== 1 || matches[0]?.arc_id !== expected.arcId) {
+    failures.push(`${errorGraphRel}: missing or malformed ${expected.from} -> ${expected.to} edge (arc ${expected.arcId})`);
+  }
+}
 const expectedErrorResources = {
   error_err01_source_raised: {
     reads: [],
     writes: ['v3.error.chain'],
   },
-  error_err02_host_captured: {
+  error_err02_classified: {
     reads: ['v3.error.chain'],
     writes: ['v3.error.chain'],
   },
-  error_err03_runtime_classified: {
-    reads: ['v3.error.chain', 'provider_runtime.observation'],
-    writes: ['v3.error.chain', 'provider_runtime.observation'],
+  error_err03_target_local_action: {
+    reads: ['v3.error.chain'],
+    writes: ['v3.error.chain', 'v3.error.action_plan'],
   },
-  error_err04_router_policy_applied: {
-    reads: ['v3.error.chain', 'route.retry_exclusion_set'],
-    writes: ['v3.error.chain', 'route.retry_exclusion_set'],
+  error_err04_target_exhaustion: {
+    reads: ['v3.error.chain', 'v3.error.action_plan'],
+    writes: ['v3.error.chain', 'v3.error.exhaustion_decision'],
   },
   error_err05_execution_decision: {
-    reads: ['v3.error.chain', 'v3.error.execution_decision'],
+    reads: ['v3.error.chain', 'v3.error.exhaustion_decision'],
     writes: ['v3.error.chain', 'v3.error.execution_decision'],
   },
   error_err06_client_projected: {
@@ -1398,7 +1551,6 @@ const expectedErrorResources = {
     writes: ['v3.error.client_projection_candidate'],
   },
 };
-const errorNodes = new Map((errorGraph.nodes ?? []).map((node) => [node.id, node]));
 for (const [nodeId, expected] of Object.entries(expectedErrorResources)) {
   const node = errorNodes.get(nodeId);
   if (!node) {

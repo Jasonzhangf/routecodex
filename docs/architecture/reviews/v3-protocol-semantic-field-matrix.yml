@@ -61,7 +61,7 @@ audit_truth_contract:
     covered_but_target_dependent: 0
     runtime_conformance_pending: 3
     partial: 128
-    extension_declared: 226
+    extension_declared: 227
     source_inventory_only: 0
     shape_branch_gap: 19
     codec_shape_only: 14
@@ -88,7 +88,7 @@ audit_truth_contract:
       category: runtime_closeout
       affected_statuses:
         - extension_declared
-      affected_count: 226
+      affected_count: 227
       evidence: Long-tail semantics now have protocol-neutral OpenAI Chat extension
         fields and owners, but no runtime conversion completion claim.
       required_owner: v3 protocol codec owner selected per field family
@@ -7321,6 +7321,21 @@ extended_openai_chat_semantic_superset:
         - extension_id: thought_signature
           extension_owner: chat.extensions.gemini.thought_signature
           current_impl: extension_declared
+    - extended_openai_chat_field: request.messages.parts_items.gemini_native_fields
+      semantic_id: request.messages.parts_items.gemini_native_fields
+      direction: request
+      mapping_status: extension_added
+      semantic_owner: chat.extension_semantics
+      current_impl: extension_declared
+      gap: Gemini request inbound residual carrier implemented; Gemini projector
+        (T1) inverse still pending
+      equivalent_fields: &a183
+        responses: []
+        openai_chat: []
+        anthropic: []
+        gemini: []
+      source_classification: protocol_specific_chat_extension_fields
+      chat_extension_association: []
     - extended_openai_chat_field: request.messages.parts_items.tool_call.args
       semantic_id: request.messages.parts_items.tool_call.args
       direction: request
@@ -10269,6 +10284,19 @@ canonical_extension_registry:
     current_impl: extension_declared
     source_fields: *a52
     projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.parts_items.gemini_native_fields
+    semantic_id: request.messages.parts_items.gemini_native_fields
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a183
+    projection_rule: Gemini request inbound preserves unrepresented native part
+      fields and the source content/part/nested association as ordered records in
+      messages[].routecodex_chat_extension.gemini_native_fields (content_index,
+      part_index, optional nested_part_index, fields). The Gemini projector rebuilds
+      the exact source part from canonical values plus these records; no generated
+      id/filename/signature and no opaque-as-text fallback.
   - field: request.messages.parts_items.tool_call.args
     semantic_id: request.messages.parts_items.tool_call.args
     direction: request

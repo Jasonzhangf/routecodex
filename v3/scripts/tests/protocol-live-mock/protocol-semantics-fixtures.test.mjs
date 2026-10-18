@@ -2,16 +2,19 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { assertClientResult } from './assertions.mjs';
+import { assertClientResult, assertProviderCaptures } from './assertions.mjs';
 import {
   parseClientBody,
+  parseSse,
   findSemanticTerminal,
+  deriveSemanticObservation,
 } from './protocol-semantics.mjs';
 import {
   frame,
   fixturePath,
   loadSseFixture,
 } from './protocol-semantics-test-support.mjs';
+import { extractToolCalls } from './tool-consumer.mjs';
 
 test('Responses message snapshots expose text once and retain complete content metadata', () => {
   const content = [{ type: 'output_text', text: 'first', annotations: [{ type: 'url_citation', url: 'https://example.com' }] }, { type: 'output_text', text: 'second' }];
@@ -65,6 +68,210 @@ test('Chat usage delta keeps the golden and rejects missing or changed usage', (
   assert.equal(check({ prompt_tokens: 7, completion_tokens: 2, total_tokens: 9 }).ok, true);
   assert.equal(check().ok, false);
   assert.equal(check({ prompt_tokens: 0 }).ok, false);
+});
+
+test('Gemini SSE associates an unambiguous single candidate without inventing a wire index', () => {
+  const bytes = [
+    frame('message', { responseId: 'chatcmpl_test' }),
+    frame('message', { candidates: [{ content: { parts: [{ text: 'ok' }] } }] }),
+    frame('message', { candidates: [{ content: { role: 'model' } }] }),
+    frame('message', { candidates: [{ index: 0 }] }),
+    frame('message', { candidates: [{ finishReason: 'STOP' }] }),
+    frame('message', { candidates: [{ index: 0 }] }),
+  ].join('');
+  const parsed = parseClientBody('gemini', bytes, 'text/event-stream');
+
+  assert.equal(parsed.semantic.text, 'ok');
+  assert.equal(parsed.semantic.finishReason, 'STOP');
+  assert.deepEqual(parsed.semantic.candidates, [{
+    index: 0,
+    content: { role: 'model', parts: [{ text: 'ok' }] },
+  }]);
+  assert.equal(parsed.frames[1].data.candidates[0].content.parts[0].text, 'ok');
+  assert.equal(parsed.frames[4].data.candidates[0].finishReason, 'STOP');
+
+  const result = assertClientResult({
+    status: 200,
+    headers: { 'content-type': 'text/event-stream' },
+    bodyText: bytes,
+    observation: parsed,
+    error: null,
+    aborted: false,
+    truncated: false,
+    complete: true,
+    response_ended: true,
+  }, {
+    transport: 'complete',
+    status: 200,
+    body_must: { text: 'ok', finishReason: 'STOP' },
+    semantic_terminal_required: true,
+  }, 'gemini', { parseClientBody, findSemanticTerminal });
+  assert.deepEqual(result, { ok: true, diagnostics: [] });
+});
+
+test('Gemini SSE text and terminal negative controls rebuild from the changed bytes', () => {
+  const textOnly = frame('message', { candidates: [{ content: { parts: [{ text: 'ok' }] } }] });
+  const terminalOnly = frame('message', { candidates: [{ finishReason: 'STOP' }] });
+  const expected = { transport: 'complete', status: 200, body_must: { text: 'ok', finishReason: 'STOP' }, semantic_terminal_required: true };
+  const check = (bodyText) => assertClientResult({
+    status: 200,
+    headers: { 'content-type': 'text/event-stream' },
+    bodyText,
+    observation: parseClientBody('gemini', bodyText, 'text/event-stream'),
+    error: null,
+    aborted: false,
+    truncated: false,
+    complete: true,
+    response_ended: true,
+  }, expected, 'gemini', { parseClientBody, findSemanticTerminal });
+
+  const missingText = check(terminalOnly);
+  assert.equal(missingText.ok, false);
+  assert.ok(missingText.diagnostics.includes('client body_must text missing'));
+
+  const wrongText = check(frame('message', { candidates: [{ content: { parts: [{ text: 'wrong' }] } }] }) + terminalOnly);
+  assert.equal(wrongText.ok, false);
+  assert.ok(wrongText.diagnostics.includes('client body_must text mismatch'));
+
+  const wrongTerminal = check(textOnly + frame('message', { candidates: [{ finishReason: 'MAX_TOKENS' }] }));
+  assert.equal(wrongTerminal.ok, false);
+  assert.ok(wrongTerminal.diagnostics.includes('client body_must finishReason mismatch'));
+
+  const missingTerminal = check(textOnly);
+  assert.equal(missingTerminal.ok, false);
+  assert.ok(missingTerminal.diagnostics.includes('semantic terminal missing from client output'));
+});
+
+test('Gemini SSE keeps explicit candidate identities isolated', () => {
+  const bytes = [
+    frame('message', { candidates: [{ index: 0, content: { parts: [{ text: 'zero' }] } }] }),
+    frame('message', { candidates: [{ index: 1, content: { parts: [{ text: 'one' }] } }] }),
+    frame('message', { candidates: [{ index: 0, content: { parts: [{ text: 'zero-two' }] } }] }),
+    frame('message', { candidates: [{ index: 1, finishReason: 'STOP' }] }),
+  ].join('');
+  const parsed = parseClientBody('gemini', bytes, 'text/event-stream');
+
+  assert.equal(parsed.semantic.text, 'one');
+  assert.deepEqual(parsed.semantic.candidates, [
+    { index: 0, content: { parts: [{ text: 'zero' }, { text: 'zero-two' }] } },
+    { index: 1, content: { parts: [{ text: 'one' }] } },
+  ]);
+
+  const check = (text) => assertClientResult({
+    status: 200,
+    headers: { 'content-type': 'text/event-stream' },
+    bodyText: bytes,
+    observation: parsed,
+    error: null,
+    aborted: false,
+    truncated: false,
+    complete: true,
+    response_ended: true,
+  }, {
+    transport: 'complete',
+    status: 200,
+    body_must: { text },
+    semantic_terminal_required: true,
+  }, 'gemini', { parseClientBody, findSemanticTerminal });
+  assert.equal(check('one').ok, true);
+  assert.equal(check('zero').ok, false);
+});
+
+test('Gemini SSE leaves ambiguous indexless text unassigned in multi-candidate streams', () => {
+  const bytes = [
+    frame('message', { candidates: [{ index: 0, content: { parts: [{ text: 'zero' }] } }] }),
+    frame('message', { candidates: [{ content: { parts: [{ text: 'ambiguous' }] } }] }),
+    frame('message', { candidates: [{ index: 1, finishReason: 'STOP' }] }),
+  ].join('');
+  const parsed = parseClientBody('gemini', bytes, 'text/event-stream');
+
+  assert.equal(parsed.semantic.text, undefined);
+  assert.equal(parsed.semantic.finishReason, 'STOP');
+  assert.equal(parsed.frames[1].data.candidates[0].content.parts[0].text, 'ambiguous');
+  assert.deepEqual(parsed.semantic.candidates, [
+    { index: 0, content: { parts: [{ text: 'zero' }] } },
+    { content: { parts: [{ text: 'ambiguous' }] } },
+  ]);
+
+  const result = assertClientResult({
+    status: 200,
+    headers: { 'content-type': 'text/event-stream' },
+    bodyText: bytes,
+    observation: parsed,
+    error: null,
+    aborted: false,
+    truncated: false,
+    complete: true,
+    response_ended: true,
+  }, {
+    transport: 'complete',
+    status: 200,
+    body_must: { text: 'ambiguous', finishReason: 'STOP' },
+    semantic_terminal_required: true,
+  }, 'gemini', { parseClientBody, findSemanticTerminal });
+  assert.equal(result.ok, false);
+  assert.ok(result.diagnostics.includes('client body_must text missing'));
+});
+
+test('Gemini SSE preserves ordered parts, signatures, tools, unknown fields, and usage', () => {
+  const firstParts = [
+    { text: 'analysis', thought: true, thoughtSignature: 'sig-1' },
+    { text: 'ok', signature: 'sig-2' },
+    { functionCall: { name: 'echo', args: { text: 'ping' } }, extra: { kept: true } },
+    { unknownPart: 'kept', nested: { value: 1 } },
+  ];
+  const bytes = [
+    frame('message', { candidates: [{ content: { role: 'model', parts: firstParts } }] }),
+    frame('message', { candidates: [{ content: { parts: [{ text: 'done' }] } }] }),
+    frame('message', { candidates: [{ finishReason: 'STOP' }] }),
+    frame('message', { usageMetadata: { promptTokenCount: 7 } }),
+    frame('message', { usageMetadata: { candidatesTokenCount: 2 } }),
+  ].join('');
+  const frames = parseSse(bytes);
+  const before = structuredClone(frames);
+  const semantic = deriveSemanticObservation('gemini', frames);
+
+  assert.deepEqual(frames, before);
+  assert.equal(semantic.text, 'okdone');
+  assert.deepEqual(semantic.candidates[0].content.parts, [...firstParts, { text: 'done' }]);
+  assert.deepEqual(semantic.usageMetadata, { promptTokenCount: 7, candidatesTokenCount: 2 });
+  assert.deepEqual(extractToolCalls('gemini', { bodyText: bytes, headers: { 'content-type': 'text/event-stream' } }), [{
+    id: undefined,
+    name: 'echo',
+    type: 'functionCall',
+    arguments: { text: 'ping' },
+  }]);
+});
+
+test('Gemini chat provider content fixtures require the exact text-part array', () => {
+  for (const name of ['gemini-to-chat-json.json', 'gemini-to-chat-sse.json']) {
+    const fixture = JSON.parse(readFileSync(fixturePath(name), 'utf8'));
+    assert.deepEqual(fixture.expected_provider.body_must['messages.0.content'], [{ type: 'text', text: 'hello' }]);
+    const capture = [{
+      attempt_kind: 'business',
+      method: 'POST',
+      path: '/v1/chat/completions',
+      headers: { authorization: 'Bearer fake-loopback-token' },
+      body: {
+        model: 'chat-model',
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }],
+        ...(name.endsWith('-sse.json') ? { stream: true } : {}),
+      },
+    }];
+    assert.deepEqual(assertProviderCaptures(capture, 0, fixture.expected_provider, { providerProtocol: 'openai_chat' }), { ok: true, diagnostics: [] });
+    for (const [label, content] of [
+      ['wrong text', [{ type: 'text', text: 'bye' }]],
+      ['missing text', [{ type: 'text' }]],
+      ['extra part', [{ type: 'text', text: 'hello' }, { type: 'text', text: 'extra' }]],
+      ['type change', ['hello']],
+    ]) {
+      const changed = structuredClone(capture);
+      changed[0].body.messages[0].content = content;
+      const result = assertProviderCaptures(changed, 0, fixture.expected_provider, { providerProtocol: 'openai_chat' });
+      assert.equal(result.ok, false, `${name}: ${label}`);
+      assert.ok(result.diagnostics.includes('provider body_must messages.0.content mismatch'), `${name}: ${label}`);
+    }
+  }
 });
 
 test('semantic observations match fixture expectations through the real assertion layer', async (t) => {

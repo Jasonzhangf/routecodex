@@ -47,12 +47,24 @@ pub(crate) fn apply_v3_memory_raw_capture_json_payload(
     manifest: &V3Config05ManifestPublished,
     request_id: &str,
 ) {
-    if !manifest.memory_raw_capture.enabled {
+    apply_v3_memory_raw_capture_json_payload_with_config(
+        payload,
+        &manifest.memory_raw_capture,
+        request_id,
+    );
+}
+
+pub(crate) fn apply_v3_memory_raw_capture_json_payload_with_config(
+    payload: &mut serde_json::Value,
+    memory_raw_capture: &routecodex_v3_config::V3MemoryRawCaptureManifest,
+    request_id: &str,
+) {
+    if !memory_raw_capture.enabled {
         return;
     }
     let host_id = routecodex_v3_agent_memory::stable_host_id(&format!(
         "{}{}",
-        manifest.memory_raw_capture.host_id_prefix, request_id
+        memory_raw_capture.host_id_prefix, request_id
     ));
     let report =
         match routecodex_v3_agent_memory::capture_responses_json(payload, &host_id, request_id) {
@@ -66,7 +78,7 @@ pub(crate) fn apply_v3_memory_raw_capture_json_payload(
         routecodex_v3_agent_memory::strip_memory_envelope_from_responses_payload(payload, &report);
         for captured in &report.captured {
             if let Err(error) = routecodex_v3_agent_memory::publish_l3_entry(
-                &manifest.memory_raw_capture.project_root,
+                &memory_raw_capture.project_root,
                 captured,
             ) {
                 eprintln!("memory l3 publication diagnostic request_id={request_id}: {error}");

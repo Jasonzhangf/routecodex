@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import {
   CELL_MODES,
   CELL_TRANSPORTS,
@@ -14,7 +15,7 @@ const SCRIPT_SET = new Set(SCRIPT_MODES);
 const CLIENT_TRANSPORT_SET = new Set(CLIENT_TRANSPORTS);
 const ID_PATTERN = /^[a-z0-9-]+$/;
 const PROVIDER_ID_PATTERN = /^[A-Za-z0-9_.-]+$/;
-const RUNTIME_SETUP_KEYS = new Set(['provider_id', 'model', 'wire_model', 'candidate_ids', 'all_candidates_fail']);
+const RUNTIME_SETUP_KEYS = new Set(['provider_id', 'model', 'wire_model', 'candidate_ids', 'all_candidates_fail', 'attempt_store']);
 
 export function validateCase(relative, value) {
   const findings = [];
@@ -224,6 +225,23 @@ function validateRuntimeSetup(relative, setup, findings) {
   if (setup.all_candidates_fail !== undefined && typeof setup.all_candidates_fail !== 'boolean') {
     fail('runtime_setup.all_candidates_fail must be boolean when present');
   }
+  if (setup.attempt_store !== undefined) {
+    const store = setup.attempt_store;
+    if (!isObject(store)) {
+      fail('runtime_setup.attempt_store must be an object');
+      return;
+    }
+    const keys = ['request_max_attempts', 'attempt_max_bytes', 'attempt_max_frames', 'request_max_bytes', 'process_max_bytes', 'residence_timeout_ms'];
+    for (const [key, value] of Object.entries(store)) {
+      if (!keys.includes(key)) fail(`runtime_setup.attempt_store.${key} is not a supported field`);
+      if (!Number.isInteger(value) || value < 1) fail(`runtime_setup.attempt_store.${key} must be a positive integer`);
+    }
+    for (const [lower, upper] of [['attempt_max_bytes', 'request_max_bytes'], ['request_max_bytes', 'process_max_bytes']]) {
+      if (store[lower] !== undefined && store[upper] !== undefined && store[lower] > store[upper]) {
+        fail(`runtime_setup.attempt_store.${lower} must not exceed ${upper}`);
+      }
+    }
+  }
 }
 
 function validateTurns(relative, value, findings) {
@@ -290,24 +308,47 @@ function validateToolFollowup(relative, value, findings) {
     || followup.assert_declared_tool_binding_only === true
     || followup.assert_tool_executed_once === true;
   if (!hasToolFlag) fail('tool_followup must declare at least one tool assertion flag');
-  if (followup.assert_tool_executed_once === true && followup.consumer !== 'echo') {
-    fail('tool_followup.assert_tool_executed_once requires the actual echo consumer');
+  const executingConsumers = new Set(['echo', 'echo-line-result', 'local-namespace-mock', 'unknown-tool-correction']);
+  if (followup.assert_tool_executed_once === true && !executingConsumers.has(followup.consumer)) {
+    fail('tool_followup.assert_tool_executed_once requires an executing consumer (echo, echo-line-result, local-namespace-mock or unknown-tool-correction)');
+  }
+  if (followup.consumer === 'local-namespace-mock') {
+    const binding = followup.binding;
+    if (!isObject(binding) || binding.namespace !== 'collaboration' || binding.name !== 'spawn_agent' || binding.type !== 'function') {
+      fail('tool_followup.consumer local-namespace-mock requires binding {namespace: collaboration, name: spawn_agent, type: function}');
+    }
+    if (followup.side_effect !== 'exclusive-local-file') {
+      fail('tool_followup.consumer local-namespace-mock requires side_effect exclusive-local-file');
+    }
+    const firstRequest = value.turns?.[0]?.client_request ?? value.client_request;
+    const tools = firstRequest?.body?.tools;
+    const declared = Array.isArray(tools)
+      && (tools.find((tool) => tool.type === 'namespace' && tool.name === 'collaboration')
+        ?.tools ?? []).some((tool) => tool.type === 'function' && tool.name === 'spawn_agent');
+    if (!declared) {
+      fail('tool_followup.consumer local-namespace-mock requires the originating collaboration.spawn_agent declaration');
+    }
   }
   if (!Array.isArray(value.turns) || value.turns.length < 2) {
     fail('tool_followup requires at least two turns');
+    return;
+  }
+  if (followup.consumer === 'echo-line-result') {
+    validateEchoLineResultFollowup(relative, value, followup, findings);
     return;
   }
   // Search only the scripted request/turn history. Including tool_followup
   // would make its own input/expected_output trivially self-match.
   const corpus = `${JSON.stringify(value.client_request)}\n${JSON.stringify(value.turns)}`;
   if (followup.expected_output !== undefined) {
-    const needle = typeof followup.expected_output === 'string' ? followup.expected_output : JSON.stringify(followup.expected_output);
+    const needle = historyNeedle(followup.expected_output);
     if (needle && !corpus.includes(needle)) fail(`tool_followup.expected_output not present in scripted history: ${needle}`);
   }
   if (isObject(followup.input)) {
     for (const [key, expected] of Object.entries(followup.input)) {
-      if (typeof expected === 'string' && !corpus.includes(expected)) {
-        fail(`tool_followup.input.${key} not present in scripted history: ${expected}`);
+      const needle = historyNeedle(expected);
+      if (typeof expected === 'string' && !corpus.includes(needle)) {
+        fail(`tool_followup.input.${key} not present in scripted history: ${needle}`);
       }
     }
   }
@@ -315,6 +356,61 @@ function validateToolFollowup(relative, value, findings) {
   if (!isObject(followupTurn) || !isObject(followupTurn.client_request)) {
     fail('tool_followup requires a final follow-up turn with client_request');
   }
+}
+
+// The echo-line-result consumer is a pure local test function bound to the
+// declared `echo` tool. Its declared result is a fixed structured business
+// value, so the paired Gemini functionResponse must carry exactly that object.
+function validateEchoLineResultFollowup(relative, value, followup, findings) {
+  const fail = (message) => findings.push(`${relative}: ${message}`);
+  // The paired response is compared structurally, never through a history
+  // substring. The template's own business fields are not a source of truth.
+  const expected = followup.expected_output;
+  if (followup.side_effect !== 'none') {
+    fail('tool_followup.consumer echo-line-result requires side_effect none');
+  }
+  if (!isObject(followup.input) || typeof followup.input.message !== 'string') {
+    fail('tool_followup.consumer echo-line-result requires a string input.message');
+  }
+  const expectedOk = isObject(expected)
+    && Object.keys(expected).length === 2
+    && typeof expected.output === 'string'
+    && expected.exitCode === 0;
+  if (!expectedOk) {
+    fail('tool_followup.consumer echo-line-result requires expected_output {output: string, exitCode: 0}');
+  }
+  if (followup.assert_no_synthesized_tool_result !== true
+    || followup.assert_declared_tool_binding_only !== true
+    || followup.assert_tool_executed_once !== true) {
+    fail('tool_followup.consumer echo-line-result requires all three tool assertion flags');
+  }
+  if (value.cell?.entry_protocol !== 'gemini') {
+    fail('tool_followup.consumer echo-line-result requires the gemini entry protocol');
+  }
+  const firstRequest = value.turns?.[0]?.client_request ?? value.client_request;
+  const declared = (firstRequest?.body?.tools ?? []).some((tool) => Array.isArray(tool.functionDeclarations)
+    && tool.functionDeclarations.some((declaration) => declaration.name === 'echo'));
+  if (!declared) {
+    fail('tool_followup.consumer echo-line-result requires the originating echo declaration');
+  }
+  // Locate the paired functionResponse by structure, then compare the complete
+  // response object. A JSON history substring must not stand in for this.
+  const finalTurn = value.turns[value.turns.length - 1];
+  const contents = finalTurn?.client_request?.body?.contents;
+  const response = Array.isArray(contents)
+    ? contents.flatMap((entry) => entry?.parts ?? []).map((part) => part?.functionResponse).find((entry) => isObject(entry) && entry.name === 'echo')?.response
+    : undefined;
+  if (!isObject(response) || !isDeepStrictEqual(response, expected)) {
+    fail('tool_followup.consumer echo-line-result requires the paired functionResponse.response to equal expected_output');
+  }
+}
+
+// The history is compared as JSON text, so a value is present when its
+// JSON-escaped form appears. This keeps newline-bearing echo outputs (for
+// example "native-tool-result\n") exact instead of comparing a raw newline
+// against the escaped `\n` the JSON text actually stores.
+function historyNeedle(value) {
+  return typeof value === 'string' ? JSON.stringify(value).slice(1, -1) : JSON.stringify(value);
 }
 
 function isObject(value) {

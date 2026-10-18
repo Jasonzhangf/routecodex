@@ -1,6 +1,121 @@
 use super::*;
 
 #[test]
+fn gemini_table_consumer_generation_config_scalars_follow_field_map() {
+    let temperature = crate::protocol_tables::map_field(
+        "gemini",
+        "temperature",
+        crate::protocol_tables::V3TableDirection::Outbound,
+    )
+    .unwrap()
+    .expect("Gemini temperature field must be declared");
+    let max_output_tokens = crate::protocol_tables::map_field(
+        "gemini",
+        "max_completion_tokens",
+        crate::protocol_tables::V3TableDirection::Outbound,
+    )
+    .unwrap()
+    .expect("Gemini max-output field must be declared");
+
+    let mut generation_config = Map::new();
+    generation_config.insert(temperature.to_string(), json!(0.25));
+    generation_config.insert(max_output_tokens.to_string(), json!(0));
+    generation_config.insert("topK".to_string(), json!(40));
+    generation_config.insert(
+        "nativeResidual".to_string(),
+        json!({"nested": ["preserved"]}),
+    );
+    let payload = json!({
+        "contents": [{"role": "user", "parts": [{"text": "sample"}]}],
+        "generationConfig": generation_config
+    });
+    let canonical = crate::hub_v1::build_v3_chat_canonical_request_from_gemini_payload(&payload)
+        .expect("Gemini generationConfig must canonicalize through the production builder");
+    assert_eq!(canonical["temperature"], json!(0.25));
+    assert_eq!(canonical["max_completion_tokens"], json!(0));
+    assert_eq!(canonical["top_k"], json!(40));
+
+    let generation = canonical
+        .pointer("/routecodex_chat_extension/gemini_native_fields/0/fields/generationConfig")
+        .expect("unmapped generationConfig members must remain in the request residual");
+    assert!(generation.get(temperature).is_none());
+    assert!(generation.get(max_output_tokens).is_none());
+    assert_eq!(
+        generation["nativeResidual"],
+        json!({"nested": ["preserved"]})
+    );
+
+    let projected =
+        project_outbound_payload_for_target_protocol(&canonical, V3OutboundTargetProtocol::Gemini)
+            .expect("Gemini native restore must consume the declared scalar fields");
+    assert_eq!(projected["generationConfig"][temperature], json!(0.25));
+    assert_eq!(projected["generationConfig"][max_output_tokens], json!(0));
+    assert_eq!(
+        projected["generationConfig"]["nativeResidual"],
+        json!({"nested": ["preserved"]})
+    );
+}
+
+#[test]
+fn gemini_table_consumer_tool_choice_aliases_follow_tool_choice_map() {
+    let expected_any = crate::protocol_tables::map_value(
+        crate::protocol_tables::V3TableKind::ToolChoice,
+        "gemini",
+        "required",
+        crate::protocol_tables::V3TableDirection::Outbound,
+    )
+    .unwrap()
+    .expect("Gemini required tool choice must be declared");
+
+    for value in ["required", "any", "tool", "function"] {
+        let payload = json!({
+            "model": "gemini-test",
+            "contents": [{"role": "user", "parts": [{"text": "go"}]}],
+            "tool_choice": value
+        });
+        let projected = project_outbound_payload_for_target_protocol(
+            &payload,
+            V3OutboundTargetProtocol::Gemini,
+        )
+        .unwrap_or_else(|error| panic!("Gemini tool_choice alias {value} must project: {error}"));
+        assert_eq!(
+            projected.pointer("/toolConfig/functionCallingConfig/mode"),
+            Some(&json!(expected_any)),
+            "Gemini tool_choice alias {value} must use the table declaration"
+        );
+    }
+
+    let expected_inbound = crate::protocol_tables::map_value(
+        crate::protocol_tables::V3TableKind::ToolChoice,
+        "gemini",
+        "ANY",
+        crate::protocol_tables::V3TableDirection::Inbound,
+    )
+    .unwrap()
+    .expect("Gemini inbound ANY must be declared");
+    let canonical = crate::hub_v1::build_v3_chat_canonical_request_from_gemini_payload(&json!({
+        "contents": [{"role": "user", "parts": [{"text": "go"}]}],
+        "toolConfig": {"functionCallingConfig": {"mode": "ANY"}}
+    }))
+    .expect("Gemini inbound ANY must pass through the production builder");
+    assert_eq!(canonical["tool_choice"], json!(expected_inbound));
+
+    for value in ["any", "tool", "function"] {
+        assert_eq!(
+            crate::protocol_tables::map_value(
+                crate::protocol_tables::V3TableKind::ToolChoice,
+                "gemini",
+                value,
+                crate::protocol_tables::V3TableDirection::Inbound,
+            )
+            .unwrap(),
+            None,
+            "Gemini inbound aliases must not be invented: {value}"
+        );
+    }
+}
+
+#[test]
 fn gemini_history_projects_only_each_calls_original_signature() {
     let mut request = json!({"messages":[{"role":"assistant","content":"","tool_calls":[
         {"id":"signed","type":"function","thought_signature":"opaque/function/+==","function":{"name":"function","arguments":"{\"left\":19,\"right\":23}"}},
