@@ -182,21 +182,21 @@ pub(crate) fn project_v3_anthropic_relay_runtime_failure_with_trace(
             V3ProviderCompatErrorClassification::RequestPayloadInvalid => {
                 super::provider_request_payload_source("ProviderReqCompat06ProviderCompat", &error)
             }
-            V3ProviderCompatErrorClassification::Other => Ok(build_v3_error_01_source_raised(
+            V3ProviderCompatErrorClassification::Other => crate::shared::direct_plain_error(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3HubRuntime",
                 "anthropic_relay_runtime_error",
                 error.to_string(),
-            )),
+            ),
         },
-        V3AnthropicRelayRuntimeError::ExecutionControlRequest(message) => Ok(
-            build_v3_error_01_source_raised(
+        V3AnthropicRelayRuntimeError::ExecutionControlRequest(message) => {
+            Ok(build_v3_error_01_source_raised(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3ProviderReqOutbound09TransportRequest",
                 "anthropic_relay_request_execution_control_error",
                 message,
-            ),
-        ),
+            ))
+        }
         V3AnthropicRelayRuntimeError::ExecutionControlResponse(message) => {
             Ok(build_v3_error_01_source_raised(
                 V3ErrorSourceKind::RuntimeFailure,
@@ -942,6 +942,74 @@ mod tests {
             vec!["ProviderRespCompat02ProviderCompat"],
             Vec::new(),
         );
+
+        assert_eq!(output.status, 599);
+        assert_eq!(
+            output.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
+        );
+        assert!(output.client_response.is_null());
+        assert!(output.error_chain.is_none());
+        assert!(!output.node_trace.contains(&"V3Error06ClientProjected"));
+        assert_eq!(output.diagnostic_source, Some(diagnostic_source));
+        assert_eq!(output.diagnostic_cause, Some(diagnostic_cause));
+    }
+
+    #[test]
+    fn other_provider_compat_uses_canonical_plain_error_source() {
+        let error = V3ProviderCompatError::other(
+            "response",
+            "compat:passthrough".to_string(),
+            "provider response compat failed".to_string(),
+        );
+        let expected = crate::shared::direct_plain_error(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3HubRuntime",
+            "anthropic_relay_runtime_error",
+            error.to_string(),
+        )
+        .expect("plain Err01 must execute through the canonical Error graph");
+        let output = project_v3_anthropic_relay_runtime_failure(
+            V3AnthropicRelayRuntimeError::ProviderCompat(error),
+        );
+
+        assert_eq!(output.diagnostic_source, Some(expected));
+        assert!(output.diagnostic_cause.is_none());
+        assert_eq!(
+            output.error_chain,
+            Some(routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS.to_vec())
+        );
+        assert!(output.node_trace.contains(&"V3Error06ClientProjected"));
+    }
+
+    #[test]
+    fn other_provider_compat_source_fault_short_circuits_anthropic_projection() {
+        let error = V3ProviderCompatError::other(
+            "response",
+            "compat:passthrough".to_string(),
+            "provider response compat failed".to_string(),
+        );
+        let source = crate::shared::direct_plain_error(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3HubRuntime",
+            "anthropic_relay_runtime_error",
+            error.to_string(),
+        )
+        .expect("plain Err01 must execute through the canonical Error graph");
+        let fault = crate::provider_failure_runtime_policy::finish_v3_relay_error_projection(
+            source.clone(),
+            Ok(None),
+        )
+        .expect_err("missing terminal Error06 must produce a typed SDK fault");
+        let diagnostic_source = fault.policy_failure.clone();
+        let diagnostic_cause = fault
+            .original_source
+            .clone()
+            .expect("the source fault preserves the canonical plain source");
+        assert_eq!(diagnostic_cause, source);
+
+        let output =
+            error_output_from_projection(Err(fault), vec!["ProviderRespCompat02ProviderCompat"]);
 
         assert_eq!(output.status, 599);
         assert_eq!(
