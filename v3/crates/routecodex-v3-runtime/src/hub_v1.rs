@@ -35,7 +35,7 @@ pub(crate) use provider_compat_shared::{
     build_v3_provider_transport_request_from_parts, is_v3_gpt_canonical_model,
     is_v3_retain_response_cipher, provider_protocol_compat_id,
     provider_wire_protocol_for_provider_type, provider_wire_protocol_for_selected_candidate,
-    V3ProviderWireTransportContext,
+    v3_provider_profile_requires_upstream_sse, V3ProviderWireTransportContext,
 };
 mod relay_runtime_shared;
 pub(crate) use relay_runtime_shared::{

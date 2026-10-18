@@ -518,6 +518,8 @@ features:
     - zen_tcm_incompatible_executor_preserved
     - zen_tcm_original_executor_file_write_history_roundtrip
     - zen_tcm_direct_shell_file_write_history_roundtrip
+    - zen_tcm_free_tier_forces_upstream_stream_and_keeps_client_json
+    - zen_tcm_provider_403_never_projects_an_error_payload_to_the_client
   custom_tool_function_black_box_regression:
     command: npm run test:v3-custom-tool-function-compat-blackbox
     test_ids:
@@ -1262,6 +1264,7 @@ features:
   - docs/goals/v3-responses-direct-mvp-test-design.md
   required_unit:
   - OpenAI Chat selected Target headers reach generic HTTP wire sends; configured Authorization headers fail config validation and cannot replace the resolved auth handle
+  - An explicit upstream-SSE provider contract forces the OpenAI Chat provider body to stream=true with the SSE transport intent for a JSON client, while a provider without that contract keeps stream=false with the JSON intent
   - Provider request projections redact configured header values while HTTP sends preserve the configured values
   - A provider HTTP error remains a typed attempt failure and does not become a successful client payload or trigger an unconfigured fallback
   - Provider wire preserves the complete client history byte-for-byte, including historical tool-output images and reasoning encrypted content; only the selected wire model binding and current-turn validation
@@ -1270,6 +1273,7 @@ features:
   - Provider wire records malformed current-turn data:image input failure internally before transport and never projects a model-client error; valid current images remain normal payload
   - Provider transport resolves env and token-file auth only at send boundary
   - Provider raw response preserves JSON bytes and validated SSE event bytes
+  - A JSON client on a provider carrying the upstream-SSE contract receives a buffered JSON client body from the committed upstream SSE replay, while a provider without that contract keeps the previous pass-through behavior
   - Provider HTTP transport accepts application/json raw response bodies for SSE-intent requests while preserving request-side Accept/stream SSE intent
   - Provider HTTP transport rejects text/event-stream raw responses for JSON-intent requests instead of silently switching provider response kind
   - Provider transport dispatches by selected provider_type; Anthropic targets use /v1/messages, x-api-key, anthropic-version, Anthropic wire, and Responses client projection
@@ -1297,9 +1301,11 @@ features:
   - auth secret values never enter manifest, Debug, Error, Provider wire Debug, transport request Debug, or client payload
   required_gates:
   - npm run test:v3-opencode-zen-provider-headers
+  - npm run test:v3-opencode-zen-tcm-bridge-blackbox
   - npm run test:v3-provider-responses
   - npm run test:v3-provider-adaptive-concurrency
   - npm run test:v3-responses-direct-blackbox
+  - npm run test:v3-anthropic-relay-runtime-integration
   - npm run test:v3-provider-health-contract
   - npm run test:v3-provider-sse-header-timeout
   - npm run verify:v3-module-boundaries

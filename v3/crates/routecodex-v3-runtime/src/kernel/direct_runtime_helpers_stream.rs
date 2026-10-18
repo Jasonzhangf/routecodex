@@ -592,7 +592,7 @@ fn direct_sse_output_text_key(event: &serde_json::Value) -> (usize, usize) {
     )
 }
 
-fn parse_direct_sse_json_frames(frame: &[u8]) -> Vec<serde_json::Value> {
+pub(crate) fn parse_direct_sse_json_frames(frame: &[u8]) -> Vec<serde_json::Value> {
     let Ok(text) = std::str::from_utf8(frame) else {
         return Vec::new();
     };
