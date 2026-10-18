@@ -74,38 +74,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
             + 'a,
     >,
 > {
-    Box::pin(execute_v3_responses_relay_runtime_unboxed(
-        manifest,
-        input,
-        transport,
-        server_tool_state,
-        provider_health,
-        retry_policy,
-        allow_exhaustion_rescue_probe,
-        provider_failure_event_sink,
-        route_selection_event_sink,
-        initial_selected_target,
-        initial_expanded,
-        initial_request_local_excluded_candidates,
-        initial_relay_seeds,
-    ))
-}
-
-async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
-    manifest: &V3Config05ManifestPublished,
-    input: V3ResponsesRelayRuntimeInput,
-    transport: &T,
-    server_tool_state: Option<V3ResponsesRelayServerToolExecution<'_>>,
-    provider_health: V3ProviderFailureRuntimeHealth,
-    retry_policy: V3ResponsesRelayRetryPolicy,
-    allow_exhaustion_rescue_probe: bool,
-    provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
-    route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
-    initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
-    initial_expanded: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
-    initial_request_local_excluded_candidates: BTreeSet<String>,
-    initial_relay_seeds: V3ResponsesRelayRuntimeSeeds,
-) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
+    Box::pin(async move {
     let observability_accumulator = initial_relay_seeds
         .observability_accumulator
         .unwrap_or_else(V3RuntimeObservabilityAccumulator::start);
@@ -135,7 +104,8 @@ async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
         .is_some_and(|value| !value.is_null())
     {
         return Err(V3ResponsesRelayRuntimeError::ClientInboundCanonical(
-            "Responses continuation is retired: previous_response_id is unsupported".to_string(),
+                "Responses continuation is retired: previous_response_id is unsupported"
+                    .to_string(),
         ));
     }
     apply_v3_responses_relay_web_search_control_completion(
@@ -182,11 +152,13 @@ async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
     );
     let deterministic_sample = v3_relay_provider_target_selection_sample(&input.request_id);
     let resolve_mode = match initial_expanded.as_ref() {
-        Some(expanded) => crate::operation_runner::V3ResolveTargetExecutionMode::CapturedHandoff {
+            Some(expanded) => {
+                crate::operation_runner::V3ResolveTargetExecutionMode::CapturedHandoff {
             opaque_hit: expanded.route.clone(),
             route_policy_pending: route_policy_pending.clone(),
             route_policy_scope: route_policy_scope.clone(),
-        },
+                }
+            }
         None => crate::operation_runner::V3ResolveTargetExecutionMode::RelayFresh {
             manifest: std::sync::Arc::new(manifest.clone()),
             server_id: input.server_id.clone(),
@@ -203,7 +175,10 @@ async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
         )
         .map_err(|error| match error {
             crate::operation_runner::V3ResolveTargetOperatorError::Typed(source) => {
-                V3ResponsesRelayRuntimeError::Target(format!("{}: {}", source.code, source.message))
+                    V3ResponsesRelayRuntimeError::Target(format!(
+                        "{}: {}",
+                        source.code, source.message
+                    ))
             }
             crate::operation_runner::V3ResolveTargetOperatorError::Runner(error) => {
                 V3ResponsesRelayRuntimeError::Target(error.to_string())
@@ -215,7 +190,8 @@ async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
         None => V3PlanExecutionTargetSource::OpaqueHit(resolved_target.opaque_hit),
     };
     let mut failed_candidates = initial_request_local_excluded_candidates;
-    let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
+        let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> =
+            None;
     let mut initial_selected_target = initial_selected_target;
     macro_rules! handle_error_before_resp03 {
         ($expr:expr) => {
@@ -294,7 +270,8 @@ async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
     let mut req02 = req02;
     req02.previous.payload.0 = std::sync::Arc::new(execution_planned_request);
     let request_outcome = {
-        compile_v3_hub_relay_request_hooks().run_from_normalized(req02, &request_hook_profile)?
+            compile_v3_hub_relay_request_hooks()
+                .run_from_normalized(req02, &request_hook_profile)?
     };
     trace.push("V3HubReqChatProcess04Governed");
     let request_web_search_state = request_outcome.web_search_state().cloned();
@@ -304,12 +281,15 @@ async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
     )?;
     let provider_semantic_body = std::sync::Arc::clone(request_outcome.payload_arc());
     let anthropic_response_projection_context =
-        V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&provider_semantic_body)
+            V3AnthropicResponsesProjectionContext::from_chat_canonical_request(
+                &provider_semantic_body,
+            )
             .map_err(|error| {
                 V3ResponsesRelayRuntimeError::ProviderWireEncoding(error.to_string())
             })?;
     let request_tool_thinking_enabled = request_outcome.tool_thinking_enabled();
-    let request_tool_thinking_turn_context = request_outcome.tool_thinking_turn_context().clone();
+        let request_tool_thinking_turn_context =
+            request_outcome.tool_thinking_turn_context().clone();
     let req04 = request_outcome.into_governed();
     let mut req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
         req04,
@@ -318,14 +298,19 @@ async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
     trace.push("V3HubReqExecution05Planned");
     let mut pending_provider_action_recovery = None;
     let mut _provider_action_permit: Option<V3ProviderActionPermit> = None;
-    let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> = None;
+        let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> =
+            None;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut last_external_http = None;
     let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
     let request_execution_control = match initial_relay_seeds.request_execution_control {
         Some(control) => control,
-        None => crate::nodes::V3RequestExecutionControl::from_manifest(manifest, &input.server_id)
-            .map_err(|error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string()))?,
+            None => {
+                crate::nodes::V3RequestExecutionControl::from_manifest(manifest, &input.server_id)
+                    .map_err(|error| {
+                    V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string())
+                })?
+            }
     };
     let attempt_budget = request_execution_control.attempt_budget();
     let mut provider_send_attempts = attempt_budget.transport_attempts();
@@ -430,9 +415,12 @@ async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
                     &allowed_execution_modes,
                     protocol_decision.mode,
                 )
-                .map_err(|source| V3ResponsesRelayRuntimeError::ExecutionControl(
-                    format!("{}: {}", source.code, source.message)
+                    .map_err(|source| {
+                        V3ResponsesRelayRuntimeError::ExecutionControl(format!(
+                            "{}: {}",
+                            source.code, source.message
                 ))
+                    })
             );
             let mut handoff_trace = trace.clone();
             handoff_trace.push("V3Target10ConcreteProviderSelected");
@@ -482,10 +470,14 @@ async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
             V3HubTargetResolution::Routed,
             selected.candidate.clone(),
         );
-        let req07 =
-            build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_wire_protocol);
-        let mut selected_observability =
-            build_v3_relay_observability_from_selected(&selected, client_response_transport_intent);
+            let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
+                req06,
+                provider_wire_protocol,
+            );
+            let mut selected_observability = build_v3_relay_observability_from_selected(
+                &selected,
+                client_response_transport_intent,
+            );
         selected_observability.attempts = Some(
             observability_accumulator
                 .attempts()
@@ -614,7 +606,8 @@ async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
                     trace.push("V3ProviderActionGateAdmission");
                 }
                 V3ProviderActionRecoveryTransition::Superseded(ticket) => {
-                    pending_provider_action_recovery = Some(handle_error_before_resp03!(ticket
+                        pending_provider_action_recovery =
+                            Some(handle_error_before_resp03!(ticket
                         .recovery_witness()
                         .map_err(V3ResponsesRelayRuntimeError::ProviderHealth)));
                     retry_selected = Some(selected);
@@ -622,7 +615,8 @@ async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
                     continue;
                 }
                 V3ProviderActionRecoveryTransition::ReleasedBySuccess(ticket) => {
-                    pending_provider_action_recovery = Some(handle_error_before_resp03!(ticket
+                        pending_provider_action_recovery =
+                            Some(handle_error_before_resp03!(ticket
                         .recovery_witness()
                         .map_err(V3ResponsesRelayRuntimeError::ProviderHealth)));
                     retry_selected = Some(selected);
@@ -637,9 +631,10 @@ async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
                 }
             }
         }
-        provider_send_attempts = handle_error_before_resp03!(attempt_budget
-            .admit_transport_attempt()
-            .map_err(|error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string())));
+            provider_send_attempts =
+                handle_error_before_resp03!(attempt_budget.admit_transport_attempt().map_err(
+                    |error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string())
+                ));
         handle_error_before_resp03!(runtime_timing
             .start_external()
             .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
@@ -797,7 +792,9 @@ async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
                             V3ProviderError::ResponseBody {
                                 request_id: input.request_id.clone(),
                                 provider_id: selected_target_provider_id.clone(),
-                                reason: format!("provider JSON response decode failed: {error}"),
+                                    reason: format!(
+                                        "provider JSON response decode failed: {error}"
+                                    ),
                             },
                             &selected_target_provider_id,
                             Some(selected_observability.clone()),
@@ -861,7 +858,9 @@ async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
                 ) {
                     let failure =
                         handle_error_before_resp03!(provider_response_stream_relay_failure(
-                            crate::hub_v1::empty_provider_attempt_failure(hook_provider_protocol),
+                                crate::hub_v1::empty_provider_attempt_failure(
+                                    hook_provider_protocol
+                                ),
                             &input.request_id,
                             &selected_target_provider_id,
                             Some(selected_observability.clone()),
@@ -878,7 +877,8 @@ async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
                                 retry_selected: &mut retry_selected,
                                 pending_recovery: &mut pending_provider_action_recovery,
                                 provider_failure_events: &mut provider_failure_events,
-                                provider_failure_event_sink: provider_failure_event_sink.as_ref(),
+                                    provider_failure_event_sink: provider_failure_event_sink
+                                        .as_ref(),
                                 selected_observability: &selected_observability,
                                 trace: &mut trace,
                                 last_external_http: &mut last_external_http,
@@ -924,7 +924,9 @@ async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
                                 .candidate
                                 .compatibility_profile
                                 .as_deref(),
-                            web_search_execution_mode: selected.candidate.web_search_execution_mode,
+                                web_search_execution_mode: selected
+                                    .candidate
+                                    .web_search_execution_mode,
                             web_search_center_state: request_web_search_state,
                             retain_response_cipher: is_v3_retain_response_cipher(
                                 selected.route.target_plan.len(),
@@ -952,8 +954,8 @@ async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
                                         retry_selected: &mut retry_selected,
                                         pending_recovery: &mut pending_provider_action_recovery,
                                         provider_failure_events: &mut provider_failure_events,
-                                        provider_failure_event_sink: provider_failure_event_sink
-                                            .as_ref(),
+                                            provider_failure_event_sink:
+                                                provider_failure_event_sink.as_ref(),
                                         selected_observability: &selected_observability,
                                         trace: &mut trace,
                                         last_external_http: &mut last_external_http,
@@ -997,7 +999,9 @@ async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
                         &captured,
                     )?;
                     if let Some(execution) = server_tool_state.as_ref() {
-                        if execution.commit_effects && execution.scope.has_client_session_scope() {
+                            if execution.commit_effects
+                                && execution.scope.has_client_session_scope()
+                            {
                             execution.control.web_search_store_for_scope(
                                 &execution.scope,
                                 captured,
@@ -1036,7 +1040,8 @@ async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
                 observability.provider_id = Some(provider_id);
                 observability.transport =
                     v3_transport_intent_label(client_response_transport_intent).to_string();
-                let response_status = read_v3_runtime_response_status(&finalized_provider_value);
+                    let response_status =
+                        read_v3_runtime_response_status(&finalized_provider_value);
                 observability.finish_reason =
                     read_v3_runtime_finish_reason(&finalized_provider_value)
                         .or_else(|| read_v3_runtime_finish_reason(&provider_value))
@@ -1047,7 +1052,8 @@ async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
                             )
                         });
                 observability.response_status = response_status;
-                observability.usage = extract_v3_runtime_usage_summary(&finalized_provider_value);
+                    observability.usage =
+                        extract_v3_runtime_usage_summary(&finalized_provider_value);
                 // Resp03 response-side tool projection.
                 observability.timing = Some(handle_error_before_resp03!(runtime_timing
                     .finish_runtime()
@@ -1112,13 +1118,14 @@ async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
                 let provider_value = match provider_value_result {
                     Ok(value) => value,
                     Err(error) => {
-                        let failure =
-                            handle_error_before_resp03!(provider_response_stream_relay_failure(
+                            let failure = handle_error_before_resp03!(
+                                provider_response_stream_relay_failure(
                                 error,
                                 &input.request_id,
                                 &selected_target_provider_id,
                                 Some(selected_observability.clone()),
-                            ));
+                                )
+                            );
                         let residence_deadline_error = failure.policy_error_message.contains(
                             "provider SSE attempt exceeded the request residence deadline",
                         );
@@ -1198,7 +1205,9 @@ async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
                                 .candidate
                                 .compatibility_profile
                                 .as_deref(),
-                            web_search_execution_mode: selected.candidate.web_search_execution_mode,
+                                web_search_execution_mode: selected
+                                    .candidate
+                                    .web_search_execution_mode,
                             // web_search 当前轮拦截直接使用 Req04
                             // 激活的 LocalToolSurfaceActive state（request_web_search_state），
                             // 不依赖其他控制面状态。
@@ -1241,8 +1250,8 @@ async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
                                         retry_selected: &mut retry_selected,
                                         pending_recovery: &mut pending_provider_action_recovery,
                                         provider_failure_events: &mut provider_failure_events,
-                                        provider_failure_event_sink: provider_failure_event_sink
-                                            .as_ref(),
+                                            provider_failure_event_sink:
+                                                provider_failure_event_sink.as_ref(),
                                         selected_observability: &selected_observability,
                                         trace: &mut trace,
                                         last_external_http: &mut last_external_http,
@@ -1289,7 +1298,9 @@ async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
                         &captured,
                     )?;
                     if let Some(execution) = server_tool_state.as_ref() {
-                        if execution.commit_effects && execution.scope.has_client_session_scope() {
+                            if execution.commit_effects
+                                && execution.scope.has_client_session_scope()
+                            {
                             execution.control.web_search_store_for_scope(
                                 &execution.scope,
                                 captured,
@@ -1334,7 +1345,8 @@ async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
                 observability.provider_id = Some(provider_id);
                 observability.transport =
                     v3_transport_intent_label(client_response_transport_intent).to_string();
-                let response_status = read_v3_runtime_response_status(&finalized_provider_value);
+                    let response_status =
+                        read_v3_runtime_response_status(&finalized_provider_value);
                 observability.finish_reason =
                     read_v3_runtime_finish_reason(&finalized_provider_value)
                         .or_else(|| read_v3_runtime_finish_reason(&provider_value))
@@ -1350,7 +1362,8 @@ async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
                         .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
                 }
                 observability.response_status = response_status;
-                observability.usage = extract_v3_runtime_usage_summary(&finalized_provider_value)
+                    observability.usage =
+                        extract_v3_runtime_usage_summary(&finalized_provider_value)
                     .or_else(|| extract_v3_runtime_usage_summary(&provider_value))
                     .or_else(|| {
                         stream_observation
@@ -1400,6 +1413,7 @@ async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
             }
         }
     }
+    })
 }
 
 #[derive(Debug, Default)]

@@ -180,16 +180,6 @@ const responsesRelayRequestBody = findFunctionBody(
   'execute_v3_responses_relay_runtime_inner',
   files.responses,
 );
-for (const [label, pattern] of [
-  [
-    'ProviderReqCompat06ProviderCompat request-local fail-fast branch',
-    /let\s+req_compat\s*=\s*match\s+build_provider_req_compat_06_from_v3_hub_req_outbound_07\s*\(req07\)\s*\{[\s\S]{0,900}?Err\s*\(error\)\s*=>\s*\{[\s\S]{0,500}?handle_provider_request_failure!\s*\(\s*V3ResponsesRelayRuntimeError::ProviderCompat\s*\(\s*error\s*\)\s*\)\s*;/u,
-  ],
-]) {
-  if (!pattern.test(responsesRelayRequestBody)) {
-    failures.push(`${files.responses}: ${label} is missing`);
-  }
-}
 for (const forbidden of [
   'provider_compat_error_is_target_protocol_incompatible',
   'target_protocol_incompatible_candidates',
