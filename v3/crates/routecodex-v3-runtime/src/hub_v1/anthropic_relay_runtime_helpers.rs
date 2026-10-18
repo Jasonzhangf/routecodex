@@ -758,4 +758,60 @@ mod tests {
         assert_eq!(diagnostic_cause, source);
         assert_eq!(output.provider_failure_attempts, attempts);
     }
+
+    #[test]
+    fn local_error_sdk_fault_survives_consumer() {
+        let source = routecodex_v3_error::build_v3_error_01_source_raised(
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+            "V3Error06ClientProjected",
+            "local_error_projection_nonterminal",
+            "local error SDK completed without a terminal client projection",
+        );
+        let runner_error = crate::operation_runner::run_v3_error_02_to_05_decision_operators(
+            Value::Null,
+            source.clone(),
+            routecodex_v3_error::V3ErrorActionScope::None,
+            0,
+            false,
+            false,
+            None,
+        )
+        .expect_err("a non-object Error02 source projection must expose the real SDK fault");
+        let fault = crate::provider_failure_runtime_policy::finish_v3_relay_error_projection(
+            source.clone(),
+            Err(runner_error),
+        )
+        .expect_err("an SDK fault must remain a typed relay error projection fault");
+        let diagnostic_source = fault.policy_failure.clone();
+        let original_source = fault
+            .original_source
+            .clone()
+            .expect("the real source must remain the fault cause");
+        let trace = vec!["V3Error05ExecutionDecision"];
+
+        let output = error_output_from_projection(Err(fault), trace.clone());
+
+        assert_eq!(output.status, 599);
+        assert_eq!(
+            output.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
+        );
+        assert!(output.client_response.is_null());
+        assert!(matches!(
+            &output.client_body,
+            V3AnthropicRelayClientBody::Json
+        ));
+        assert!(output.error_chain.is_none());
+        assert_eq!(output.node_trace, trace);
+        assert!(!output.node_trace.contains(&"V3Error06ClientProjected"));
+        assert_eq!(output.diagnostic_source, Some(diagnostic_source.clone()));
+        assert_eq!(output.diagnostic_cause, Some(original_source.clone()));
+        assert_eq!(original_source, source);
+        assert_eq!(
+            diagnostic_source.source_kind,
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure
+        );
+        assert_eq!(diagnostic_source.code, "relay_error_operator_sdk_failure");
+        assert_eq!(original_source.code, "local_error_projection_nonterminal");
+    }
 }
