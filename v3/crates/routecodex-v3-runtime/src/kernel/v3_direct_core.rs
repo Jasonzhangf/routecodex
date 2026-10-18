@@ -385,8 +385,9 @@ where
             {
                 Ok(value) => value,
                 Err(source) => {
-                    return error_output(
+                    return direct_runtime_helpers_stream::source_failure_output(
                         source,
+                        last_external_http.clone(),
                         trace,
                         &crate::hooks::register_responses_direct_hooks(),
                     )
@@ -398,8 +399,9 @@ where
         let transport_request = match C::run_provider_transport(wire) {
             Ok(value) => value,
             Err(source) => {
-                return error_output(
+                return direct_runtime_helpers_stream::source_failure_output(
                     source,
+                    last_external_http.clone(),
                     trace,
                     &crate::hooks::register_responses_direct_hooks(),
                 )
@@ -936,7 +938,15 @@ where
         .await
         {
             Ok(projection) => projection,
-            Err(source) => {
+            Err(Err(fault)) => {
+                return direct_runtime_helpers_stream::source_failure_output(
+                    Err(fault),
+                    last_external_http.clone(),
+                    trace,
+                    &crate::hooks::register_responses_direct_hooks(),
+                );
+            }
+            Err(Ok(source)) => {
                 if let Err(error) = runtime_timing.finish_external() {
                     return error_output(
                         runtime_source("V3RuntimeTimingExternal", error),

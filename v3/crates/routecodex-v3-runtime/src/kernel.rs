@@ -722,7 +722,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         {
             Ok(value) => value,
             Err(source) => {
-                return error_output(source, trace, &hook_registry);
+                return direct_runtime_helpers_stream::source_failure_output(
+                    source,
+                    last_external_http.clone(),
+                    trace,
+                    &hook_registry,
+                );
             }
         };
         trace.push("V3Provider12ResponsesWirePayload");
@@ -731,7 +736,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         let transport_request = match hook_registry.run_provider_transport(wire) {
             Ok(value) => value,
             Err(source) => {
-                return error_output(source, trace, &hook_registry);
+                return direct_runtime_helpers_stream::source_failure_output(
+                    source,
+                    last_external_http.clone(),
+                    trace,
+                    &hook_registry,
+                );
             }
         };
         let handoff_scope = match (
@@ -1035,7 +1045,15 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             .await
         {
             Ok(projection) => projection,
-            Err(source) => {
+            Err(Err(fault)) => {
+                return direct_runtime_helpers_stream::source_failure_output(
+                    Err(fault),
+                    last_external_http.clone(),
+                    trace,
+                    &hook_registry,
+                )
+            }
+            Err(Ok(source)) => {
                 let transport_source = source.clone();
                 if provider_response_is_stream {
                     if let Err(error) = runtime_timing.finish_external() {

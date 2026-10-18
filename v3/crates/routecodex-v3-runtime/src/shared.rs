@@ -29,6 +29,14 @@ use std::sync::{Arc, Mutex};
 
 pub(crate) use crate::shared_direct_thinking_compat::project_v3_thinking_tag_text;
 
+pub(crate) type V3DirectSourceResult<T> = Result<
+    T,
+    Result<
+        V3Error01SourceRaised,
+        crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+    >,
+>;
+
 /// Direct SSE 首语义帧与帧间超时：provider 返回 200 后挂起时 fail-fast。
 /// 未配置时使用 30s compatibility default；慢 provider 可显式覆盖该预算。
 /// 超时归一化为 transport Error01 进入错误链（reselect / Error06 终态投影），

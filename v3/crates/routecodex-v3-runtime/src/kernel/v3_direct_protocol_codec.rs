@@ -17,6 +17,7 @@ use crate::{
     direct_response_hooks::V3DirectResponseCompatContext,
     hooks::build_v3_provider_error_source,
     nodes::{V3Req04StandardizedResponses, V3ResponsesDirect11Policy},
+    shared::V3DirectSourceResult,
 };
 use routecodex_v3_error::{
     build_v3_error_01_source_raised_internal, V3Error01SourceRaised, V3ErrorSourceKind,
@@ -34,9 +35,8 @@ use std::pin::Pin;
 
 pub(crate) type V3DirectResponseProjectionFuture = Pin<
     Box<
-        dyn Future<
-                Output = Result<crate::shared::V3ProviderResponseProjection, V3Error01SourceRaised>,
-            > + Send,
+        dyn Future<Output = V3DirectSourceResult<crate::shared::V3ProviderResponseProjection>>
+            + Send,
     >,
 >;
 
@@ -99,14 +99,11 @@ pub trait V3DirectProtocolCodec {
         policy: &Self::Policy,
         request_key_catalog: &V3DirectRequestKeyHookCatalog,
         drop_context: &crate::projection_drop_log::V3ProjectionDropContext,
-    ) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised>;
+    ) -> V3DirectSourceResult<V3Provider12ResponsesWirePayload>;
 
     fn run_provider_transport(
         wire: V3Provider12ResponsesWirePayload,
-    ) -> Result<
-        routecodex_v3_provider_responses::V3Transport13ResponsesHttpRequest,
-        V3Error01SourceRaised,
-    >;
+    ) -> V3DirectSourceResult<routecodex_v3_provider_responses::V3Transport13ResponsesHttpRequest>;
 
     fn provider_transport_handoff_scope(
         standardized: &Self::Standardized,
@@ -262,7 +259,7 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
         policy: &Self::Policy,
         request_key_catalog: &V3DirectRequestKeyHookCatalog,
         drop_context: &crate::projection_drop_log::V3ProjectionDropContext,
-    ) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
+    ) -> V3DirectSourceResult<V3Provider12ResponsesWirePayload> {
         crate::hooks::responses_direct_request_projection_hook_with_key_catalog_and_drop_context(
             policy,
             request_key_catalog,
@@ -272,10 +269,8 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
 
     fn run_provider_transport(
         wire: V3Provider12ResponsesWirePayload,
-    ) -> Result<
-        routecodex_v3_provider_responses::V3Transport13ResponsesHttpRequest,
-        V3Error01SourceRaised,
-    > {
+    ) -> V3DirectSourceResult<routecodex_v3_provider_responses::V3Transport13ResponsesHttpRequest>
+    {
         crate::hooks::responses_direct_provider_transport_hook(wire)
     }
 
@@ -438,7 +433,7 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
         policy: &Self::Policy,
         request_key_catalog: &V3DirectRequestKeyHookCatalog,
         drop_context: &crate::projection_drop_log::V3ProjectionDropContext,
-    ) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
+    ) -> V3DirectSourceResult<V3Provider12ResponsesWirePayload> {
         crate::hooks::chat_direct_request_projection_hook_with_key_catalog_and_drop_context(
             policy,
             request_key_catalog,
@@ -448,10 +443,8 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
 
     fn run_provider_transport(
         wire: V3Provider12ResponsesWirePayload,
-    ) -> Result<
-        routecodex_v3_provider_responses::V3Transport13ResponsesHttpRequest,
-        V3Error01SourceRaised,
-    > {
+    ) -> V3DirectSourceResult<routecodex_v3_provider_responses::V3Transport13ResponsesHttpRequest>
+    {
         crate::hooks::chat_direct_provider_transport_hook(wire)
     }
 

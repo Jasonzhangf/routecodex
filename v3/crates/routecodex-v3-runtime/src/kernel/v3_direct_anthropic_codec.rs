@@ -5,10 +5,9 @@ use crate::kernel::direct_request_key_hooks::{
 };
 use crate::kernel::V3DirectProtocolCodec;
 use crate::nodes::V3Server03HttpRequestRaw;
-use routecodex_v3_error::{
-    build_v3_error_01_source_raised_internal, V3Error01SourceRaised, V3ErrorSourceKind,
-    V3InternalErrorCode,
-};
+use crate::operation_runner::V3Err01SourceInput;
+use crate::provider_failure_runtime_policy::raise_v3_source_via_err01;
+use routecodex_v3_error::{V3Error01SourceRaised, V3ErrorSourceKind, V3InternalErrorCode};
 use routecodex_v3_provider_responses::{
     build_v3_provider_12_responses_wire_payload,
     v3_provider_auth_secret_handle_from_declaration_fields, V3Provider12ResponsesWirePayload,
@@ -127,25 +126,26 @@ impl V3DirectProtocolCodec for V3AnthropicDirectCodec {
         policy: &Self::Policy,
         request_key_catalog: &V3DirectRequestKeyHookCatalog,
         _drop_context: &crate::projection_drop_log::V3ProjectionDropContext,
-    ) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
+    ) -> crate::shared::V3DirectSourceResult<V3Provider12ResponsesWirePayload> {
         project_anthropic_direct_request(policy, request_key_catalog)
     }
 
     fn run_provider_transport(
         wire: V3Provider12ResponsesWirePayload,
-    ) -> Result<V3Transport13ResponsesHttpRequest, V3Error01SourceRaised> {
+    ) -> crate::shared::V3DirectSourceResult<V3Transport13ResponsesHttpRequest> {
         crate::hub_v1::build_v3_provider_transport_request_for_protocol(
             crate::hub_v1::V3HubProviderWireProtocol::Anthropic,
             wire,
         )
         .map_err(|error| {
-            build_v3_error_01_source_raised_internal(
+            raise_v3_source_via_err01(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3Transport13ResponsesHttpRequest",
                 "anthropic_provider_transport_error",
                 error,
-                V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+                V3Err01SourceInput::Internal(V3InternalErrorCode::V3Provider12ResponsesWirePayload),
             )
+            .map(|(_, source)| source)
         })
     }
 
@@ -186,13 +186,16 @@ impl V3DirectProtocolCodec for V3AnthropicDirectCodec {
             Ok(plan) => plan,
             Err(error) => {
                 return Box::pin(async move {
-                    Err(build_v3_error_01_source_raised_internal(
+                    Err(raise_v3_source_via_err01(
                         V3ErrorSourceKind::RuntimeFailure,
                         "V3AnthropicDirectResponseProjection",
                         "anthropic_direct_response_compat_plan_failed",
                         error,
-                        V3InternalErrorCode::V3Provider12ResponsesWirePayload,
-                    ))
+                        V3Err01SourceInput::Internal(
+                            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+                        ),
+                    )
+                    .map(|(_, source)| source))
                 });
             }
         };
@@ -207,7 +210,7 @@ impl V3DirectProtocolCodec for V3AnthropicDirectCodec {
                 toolreason_client_projection,
                 observation_session_id.as_deref(),
             )
-            .await
+            .await.map_err(Ok)
         })
     }
 
@@ -269,7 +272,7 @@ fn merge_anthropic_client_headers(
 fn project_anthropic_direct_request(
     policy: &V3AnthropicDirect11Policy,
     request_key_catalog: &V3DirectRequestKeyHookCatalog,
-) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
+) -> crate::shared::V3DirectSourceResult<V3Provider12ResponsesWirePayload> {
     let candidate = &policy.target.candidate;
     let request_body = crate::selected_provider_model_binding::bind_v3_selected_provider_model(
         policy.request_body.clone(),
@@ -277,13 +280,14 @@ fn project_anthropic_direct_request(
     )
     .map(crate::selected_provider_model_binding::V3SelectedProviderModelBinding::into_payload)
     .map_err(|reason| {
-        build_v3_error_01_source_raised_internal(
+        raise_v3_source_via_err01(
             V3ErrorSourceKind::RuntimeFailure,
             "V3AnthropicDirect11Policy",
             "selected_provider_model_binding_failed",
             reason,
-            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+            V3Err01SourceInput::Internal(V3InternalErrorCode::V3Provider12ResponsesWirePayload),
         )
+        .map(|(_, source)| source)
     })?;
     let mut catalog = *request_key_catalog;
     let request_body = apply_v3_direct_request_key_hook(
@@ -292,13 +296,14 @@ fn project_anthropic_direct_request(
         &mut catalog,
     )
     .map_err(|error| {
-        build_v3_error_01_source_raised_internal(
+        raise_v3_source_via_err01(
             V3ErrorSourceKind::RuntimeFailure,
             "V3DirectRequestKeyHook",
             "anthropic_direct_request_key_hook_failed",
             error,
-            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+            V3Err01SourceInput::Internal(V3InternalErrorCode::V3Provider12ResponsesWirePayload),
         )
+        .map(|(_, source)| source)
     })?;
     let profile = crate::hub_v1::V3ProviderCompatProfileId::from_config(
         candidate.compatibility_profile.as_deref(),
@@ -310,13 +315,14 @@ fn project_anthropic_direct_request(
         &profile,
     )
     .map_err(|error| {
-        build_v3_error_01_source_raised_internal(
+        raise_v3_source_via_err01(
             V3ErrorSourceKind::RuntimeFailure,
             "V3AnthropicDirect11Policy",
             "anthropic_direct_provider_compat_failed",
             error.to_string(),
-            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+            V3Err01SourceInput::Internal(V3InternalErrorCode::V3Provider12ResponsesWirePayload),
         )
+        .map(|(_, source)| source)
     })?;
     let secret = v3_provider_auth_secret_handle_from_declaration_fields(
         candidate.oauth_declaration.as_ref(),
@@ -328,13 +334,14 @@ fn project_anthropic_direct_request(
         &candidate.auth_alias,
     )
     .map_err(|reason| {
-        build_v3_error_01_source_raised_internal(
+        raise_v3_source_via_err01(
             V3ErrorSourceKind::RuntimeFailure,
             "V3Provider12ResponsesWirePayload",
             "provider_auth_handle_missing",
             reason,
-            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+            V3Err01SourceInput::Internal(V3InternalErrorCode::V3Provider12ResponsesWirePayload),
         )
+        .map(|(_, source)| source)
     })?;
     let mut headers = candidate.headers.clone();
     merge_anthropic_client_headers(&mut headers, &policy.client_headers);
@@ -361,13 +368,14 @@ fn project_anthropic_direct_request(
     };
     build_v3_provider_12_responses_wire_payload(policy.request_id.clone(), target, request_body)
         .map_err(|error| {
-            build_v3_error_01_source_raised_internal(
+            raise_v3_source_via_err01(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3Provider12ResponsesWirePayload",
                 "anthropic_direct_provider_wire_build_failed",
                 error.to_string(),
-                V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+                V3Err01SourceInput::Internal(V3InternalErrorCode::V3Provider12ResponsesWirePayload),
             )
+            .map(|(_, source)| source)
         })
 }
 

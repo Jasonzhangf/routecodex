@@ -9,10 +9,12 @@ use crate::nodes::{
     build_v3_responses_direct_11_policy_from_v3_target_10, V3ChatDirect11Policy,
     V3Req04StandardizedResponses, V3ResponsesDirect11Policy,
 };
+use crate::operation_runner::V3Err01SourceInput;
 use crate::projection_drop_log::V3ProjectionDropContext;
+use crate::provider_failure_runtime_policy::raise_v3_source_via_err01;
 use crate::shared::{
     project_provider_raw_to_client_payload_with_plan_and_projection_and_observation_context,
-    V3ProviderAttemptBody, V3ProviderResponseProjection,
+    V3DirectSourceResult, V3ProviderAttemptBody, V3ProviderResponseProjection,
 };
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
@@ -35,16 +37,17 @@ fn apply_v3_direct_request_key_hook_with_catalog(
     body: Value,
     protocol: V3DirectRequestProtocol,
     catalog: &V3DirectRequestKeyHookCatalog,
-) -> Result<Value, V3Error01SourceRaised> {
+) -> V3DirectSourceResult<Value> {
     let mut catalog = *catalog;
     apply_v3_direct_request_key_hook(body, protocol, &mut catalog).map_err(|error| {
-        build_v3_error_01_source_raised_internal(
+        raise_v3_source_via_err01(
             V3ErrorSourceKind::RuntimeFailure,
             "V3DirectRequestKeyHook",
             "direct_request_key_hook_failed",
             error,
-            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+            V3Err01SourceInput::Internal(V3InternalErrorCode::V3Provider12ResponsesWirePayload),
         )
+        .map(|(_, source)| source)
     })
 }
 
@@ -72,14 +75,11 @@ type RouteHook = fn(
 type RequestProjectionHook = fn(
     &V3ResponsesDirect11Policy,
     &V3DirectRequestKeyHookCatalog,
-) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised>;
-type ProviderTransportHook = fn(
-    V3Provider12ResponsesWirePayload,
-)
-    -> Result<V3Transport13ResponsesHttpRequest, V3Error01SourceRaised>;
-type ResponseProjectionFuture = Pin<
-    Box<dyn Future<Output = Result<V3ProviderResponseProjection, V3Error01SourceRaised>> + Send>,
->;
+) -> V3DirectSourceResult<V3Provider12ResponsesWirePayload>;
+type ProviderTransportHook =
+    fn(V3Provider12ResponsesWirePayload) -> V3DirectSourceResult<V3Transport13ResponsesHttpRequest>;
+type ResponseProjectionFuture =
+    Pin<Box<dyn Future<Output = V3DirectSourceResult<V3ProviderResponseProjection>> + Send>>;
 type ContextualResponseProjectionHook =
     fn(V3ProviderResp14Raw, V3DirectResponseCompatContext) -> ResponseProjectionFuture;
 type ErrorHook = fn(
@@ -135,7 +135,7 @@ impl V3HookRegistry {
     pub fn run_request_projection(
         &self,
         policy: &V3ResponsesDirect11Policy,
-    ) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
+    ) -> V3DirectSourceResult<V3Provider12ResponsesWirePayload> {
         (self.request_projection)(policy, &self.request_key_catalog)
     }
 
@@ -144,7 +144,7 @@ impl V3HookRegistry {
         &self,
         policy: &V3ResponsesDirect11Policy,
         drop_context: &V3ProjectionDropContext,
-    ) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
+    ) -> V3DirectSourceResult<V3Provider12ResponsesWirePayload> {
         responses_direct_request_projection_hook_with_key_catalog_and_drop_context(
             policy,
             &self.request_key_catalog,
@@ -163,7 +163,7 @@ impl V3HookRegistry {
     pub fn run_provider_transport(
         &self,
         wire: V3Provider12ResponsesWirePayload,
-    ) -> Result<V3Transport13ResponsesHttpRequest, V3Error01SourceRaised> {
+    ) -> V3DirectSourceResult<V3Transport13ResponsesHttpRequest> {
         (self.provider_transport)(wire)
     }
 
@@ -171,7 +171,7 @@ impl V3HookRegistry {
         &self,
         raw: V3ProviderResp14Raw,
         context: V3DirectResponseCompatContext,
-    ) -> Result<V3ProviderResponseProjection, V3Error01SourceRaised> {
+    ) -> V3DirectSourceResult<V3ProviderResponseProjection> {
         (self.contextual_response_projection)(raw, context).await
     }
 
@@ -381,7 +381,7 @@ fn responses_direct_route_hook(
 
 pub(crate) fn responses_direct_request_projection_hook(
     policy: &V3ResponsesDirect11Policy,
-) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
+) -> V3DirectSourceResult<V3Provider12ResponsesWirePayload> {
     let catalog = default_v3_direct_request_key_hook_catalog();
     responses_direct_request_projection_hook_with_key_catalog(policy, &catalog)
 }
@@ -389,7 +389,7 @@ pub(crate) fn responses_direct_request_projection_hook(
 pub(crate) fn responses_direct_request_projection_hook_with_key_catalog(
     policy: &V3ResponsesDirect11Policy,
     key_catalog: &V3DirectRequestKeyHookCatalog,
-) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
+) -> V3DirectSourceResult<V3Provider12ResponsesWirePayload> {
     responses_direct_request_projection_hook_with_key_catalog_and_drop_context(
         policy,
         key_catalog,
@@ -401,17 +401,18 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
     policy: &V3ResponsesDirect11Policy,
     key_catalog: &V3DirectRequestKeyHookCatalog,
     drop_context: &V3ProjectionDropContext,
-) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
+) -> V3DirectSourceResult<V3Provider12ResponsesWirePayload> {
     let candidate = &policy.target.candidate;
     let provider_protocol = crate::hub_v1::provider_wire_protocol_for_selected_candidate(candidate)
         .map_err(|error| {
-            build_v3_error_01_source_raised_internal(
+            raise_v3_source_via_err01(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3ResponsesDirect11Policy",
                 "responses_provider_protocol_resolution_failed",
                 error,
-                V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+                V3Err01SourceInput::Internal(V3InternalErrorCode::V3Provider12ResponsesWirePayload),
             )
+            .map(|(_, source)| source)
         })?;
     // A Responses provider entry must always use the Responses wire protocol,
     // even if a forwarder/compat target initially resolves it to OpenAI Chat.
@@ -427,13 +428,14 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
     )
     .map(crate::selected_provider_model_binding::V3SelectedProviderModelBinding::into_payload)
     .map_err(|reason| {
-        build_v3_error_01_source_raised_internal(
+        raise_v3_source_via_err01(
             V3ErrorSourceKind::RuntimeFailure,
             "V3ResponsesDirect11Policy",
             "selected_provider_model_binding_failed",
             reason,
-            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+            V3Err01SourceInput::Internal(V3InternalErrorCode::V3Provider12ResponsesWirePayload),
         )
+        .map(|(_, source)| source)
     })?;
     let mut request_body = match provider_protocol {
         crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat => {
@@ -448,25 +450,29 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
                     )
                 })
                 .map_err(|error| {
-                    build_v3_error_01_source_raised_internal(
+                    raise_v3_source_via_err01(
                         V3ErrorSourceKind::RuntimeFailure,
                         "V3ResponsesDirect11Policy",
                         "responses_openai_chat_wire_projection_failed",
                         error,
-                        V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+                        V3Err01SourceInput::Internal(
+                            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+                        ),
                     )
+                    .map(|(_, source)| source)
                 })?;
             drop_context.restamp_and_emit(&mut projection_drops);
             wire_body
         }
         crate::hub_v1::V3HubProviderWireProtocol::Anthropic => {
-            return Err(build_v3_error_01_source_raised_internal(
+            return Err(raise_v3_source_via_err01(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3ResponsesDirect11Policy",
                 "responses_direct_cross_protocol_projection_unsupported",
                 "Responses direct does not have a response-side Anthropic projection contract",
-                V3InternalErrorCode::V3Provider12ResponsesWirePayload,
-            ));
+                V3Err01SourceInput::Internal(V3InternalErrorCode::V3Provider12ResponsesWirePayload),
+            )
+            .map(|(_, source)| source));
         }
         crate::hub_v1::V3HubProviderWireProtocol::Responses
             if request_body.get("messages").is_some() =>
@@ -480,13 +486,16 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
                         .any(|capability| capability == "web_search"),
                 )
                 .map_err(|error| {
-                    build_v3_error_01_source_raised_internal(
+                    raise_v3_source_via_err01(
                         V3ErrorSourceKind::RuntimeFailure,
                         "V3ResponsesDirect11Policy",
                         "responses_provider_request_projection_failed",
                         error,
-                        V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+                        V3Err01SourceInput::Internal(
+                            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+                        ),
                     )
+                    .map(|(_, source)| source)
                 })?;
             drop_context.restamp_and_emit(&mut projection_drops);
             wire_body
@@ -496,13 +505,16 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
     if provider_protocol == crate::hub_v1::V3HubProviderWireProtocol::Responses {
         crate::hub_v1::normalize_v3_openai_responses_provider_request_payload(&mut request_body)
             .map_err(|error| {
-                build_v3_error_01_source_raised_internal(
+                raise_v3_source_via_err01(
                     V3ErrorSourceKind::RuntimeFailure,
                     "V3ResponsesDirect11Policy",
                     "responses_provider_request_projection_failed",
                     error,
-                    V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+                    V3Err01SourceInput::Internal(
+                        V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+                    ),
                 )
+                .map(|(_, source)| source)
             })?;
         crate::hub_v1::project_openai_responses_hosted_web_search_for_selected_target(
             &mut request_body,
@@ -516,22 +528,24 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
         crate::hub_v1::V3HubProviderWireProtocol::Responses => V3DirectRequestProtocol::Responses,
         crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat => V3DirectRequestProtocol::OpenAiChat,
         crate::hub_v1::V3HubProviderWireProtocol::Anthropic => {
-            return Err(build_v3_error_01_source_raised_internal(
+            return Err(raise_v3_source_via_err01(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3ResponsesDirect11Policy",
                 "responses_direct_request_key_protocol_unsupported",
                 "Responses direct request key hooks do not support Anthropic projection",
-                V3InternalErrorCode::V3Provider12ResponsesWirePayload,
-            ));
+                V3Err01SourceInput::Internal(V3InternalErrorCode::V3Provider12ResponsesWirePayload),
+            )
+            .map(|(_, source)| source));
         }
         _ => {
-            return Err(build_v3_error_01_source_raised_internal(
+            return Err(raise_v3_source_via_err01(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3ResponsesDirect11Policy",
                 "responses_direct_request_key_protocol_unsupported",
                 "Responses direct request key hooks require a registered provider protocol",
-                V3InternalErrorCode::V3Provider12ResponsesWirePayload,
-            ));
+                V3Err01SourceInput::Internal(V3InternalErrorCode::V3Provider12ResponsesWirePayload),
+            )
+            .map(|(_, source)| source));
         }
     };
     request_body = apply_v3_direct_request_key_hook_with_catalog(
@@ -555,13 +569,14 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
             Ok(registry)
         })
         .map_err(|error| {
-            build_v3_error_01_source_raised_internal(
+            raise_v3_source_via_err01(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3ResponsesDirect11Policy",
                 "namespace_projection_failed",
                 error,
-                V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+                V3Err01SourceInput::Internal(V3InternalErrorCode::V3Provider12ResponsesWirePayload),
             )
+            .map(|(_, source)| source)
         })?;
     let (compat_body, custom_tool_function_binding) =
         crate::hub_v1::apply_v3_provider_req_compat_to_provider_payload(
@@ -571,13 +586,14 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
             &profile,
         )
         .map_err(|error| {
-            build_v3_error_01_source_raised_internal(
+            raise_v3_source_via_err01(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3ResponsesDirect11Policy",
                 "responses_direct_provider_compat_failed",
                 format!("{}", error),
-                V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+                V3Err01SourceInput::Internal(V3InternalErrorCode::V3Provider12ResponsesWirePayload),
             )
+            .map(|(_, source)| source)
         })?;
     request_body = compat_body;
     let secret = v3_provider_auth_secret_handle_from_declaration_fields(
@@ -590,13 +606,14 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
         &candidate.auth_alias,
     )
     .map_err(|reason| {
-        build_v3_error_01_source_raised_internal(
+        raise_v3_source_via_err01(
             V3ErrorSourceKind::RuntimeFailure,
             "V3Provider12ResponsesWirePayload",
             "provider_auth_handle_missing",
             reason,
-            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+            V3Err01SourceInput::Internal(V3InternalErrorCode::V3Provider12ResponsesWirePayload),
         )
+        .map(|(_, source)| source)
     })?;
     routecodex_v3_provider_responses::wire::build_v3_provider_12_responses_wire_payload_with_registry(
         policy.request_id.clone(),
@@ -626,33 +643,38 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
     )
     .map(|wire| wire.with_custom_tool_function_binding(custom_tool_function_binding))
     .map_err(provider_error_source("V3Provider12ResponsesWirePayload"))
+    .map_err(Ok)
 }
 
 pub(crate) fn responses_direct_provider_transport_hook(
     wire: V3Provider12ResponsesWirePayload,
-) -> Result<V3Transport13ResponsesHttpRequest, V3Error01SourceRaised> {
+) -> V3DirectSourceResult<V3Transport13ResponsesHttpRequest> {
     let provider_protocol = crate::hub_v1::provider_wire_protocol_for_provider_type(
         wire.target().provider_id.as_str(),
         wire.target().provider_type.as_str(),
     )
     .map_err(|error| {
-        build_v3_error_01_source_raised_internal(
+        raise_v3_source_via_err01(
             V3ErrorSourceKind::RuntimeFailure,
             "V3Transport13ResponsesHttpRequest",
             "responses_provider_protocol_resolution_failed",
             error,
-            V3InternalErrorCode::V3Transport13ResponsesHttpRequest,
+            V3Err01SourceInput::Internal(V3InternalErrorCode::V3Transport13ResponsesHttpRequest),
         )
+        .map(|(_, source)| source)
     })?;
     crate::hub_v1::build_v3_provider_transport_request_for_protocol(provider_protocol, wire)
         .map_err(|error| {
-            build_v3_error_01_source_raised_internal(
+            raise_v3_source_via_err01(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3Transport13ResponsesHttpRequest",
                 "responses_provider_transport_error",
                 error,
-                V3InternalErrorCode::V3Transport13ResponsesHttpRequest,
+                V3Err01SourceInput::Internal(
+                    V3InternalErrorCode::V3Transport13ResponsesHttpRequest,
+                ),
             )
+            .map(|(_, source)| source)
         })
 }
 
@@ -663,13 +685,16 @@ pub(crate) fn responses_direct_response_projection_hook_with_context(
     Box::pin(async move {
         let request_id = raw.request_id().to_owned();
         let plan = context.compile_plan().map_err(|error| {
-            build_v3_error_01_source_raised_internal(
+            raise_v3_source_via_err01(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3DirectResp14ProviderCompat",
                 "direct_response_compat_plan_compile_failed",
                 error,
-                V3InternalErrorCode::V3DirectResp14ProviderProjectionPrepared,
+                V3Err01SourceInput::Internal(
+                    V3InternalErrorCode::V3DirectResp14ProviderProjectionPrepared,
+                ),
             )
+            .map(|(_, source)| source)
         })?;
         let mut projection = project_provider_raw_to_client_payload_with_plan_and_projection_and_observation_context(
             raw,
@@ -678,7 +703,7 @@ pub(crate) fn responses_direct_response_projection_hook_with_context(
             context.toolreason_client_projection,
             context.toolreason_observation_session_id.as_deref(),
         )
-        .await?;
+        .await.map_err(Ok)?;
         if let V3ProviderAttemptBody::Json(payload) = &mut projection.attempt_payload.body {
             crate::hub_v1::restore_v3_responses_namespace_identities(
                 payload,
@@ -718,13 +743,16 @@ pub(crate) fn chat_direct_response_projection_hook(
     Box::pin(async move {
         let request_id = raw.request_id().to_owned();
         let plan = context.compile_plan().map_err(|error| {
-            build_v3_error_01_source_raised_internal(
+            raise_v3_source_via_err01(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3DirectResp14ProviderCompat",
                 "direct_response_compat_plan_compile_failed",
                 error,
-                V3InternalErrorCode::V3DirectResp14ProviderProjectionPrepared,
+                V3Err01SourceInput::Internal(
+                    V3InternalErrorCode::V3DirectResp14ProviderProjectionPrepared,
+                ),
             )
+            .map(|(_, source)| source)
         })?;
         let mut projection = project_provider_raw_to_client_payload_with_plan_and_projection_and_observation_context(
             raw,
@@ -733,7 +761,7 @@ pub(crate) fn chat_direct_response_projection_hook(
             context.toolreason_client_projection,
             context.toolreason_observation_session_id.as_deref(),
         )
-        .await?;
+        .await.map_err(Ok)?;
         if context.tool_thinking_enabled {
             if let V3ProviderAttemptBody::Json(payload) = &mut projection.attempt_payload.body {
                 crate::hub_v1::map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_and_context(
@@ -768,7 +796,7 @@ fn provider_error_source(
 
 pub(crate) fn chat_direct_request_projection_hook(
     policy: &V3ChatDirect11Policy,
-) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
+) -> V3DirectSourceResult<V3Provider12ResponsesWirePayload> {
     let catalog = default_v3_direct_request_key_hook_catalog();
     chat_direct_request_projection_hook_with_key_catalog(policy, &catalog)
 }
@@ -776,7 +804,7 @@ pub(crate) fn chat_direct_request_projection_hook(
 pub(crate) fn chat_direct_request_projection_hook_with_key_catalog(
     policy: &V3ChatDirect11Policy,
     key_catalog: &V3DirectRequestKeyHookCatalog,
-) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
+) -> V3DirectSourceResult<V3Provider12ResponsesWirePayload> {
     chat_direct_request_projection_hook_with_key_catalog_and_drop_context(
         policy,
         key_catalog,
@@ -788,7 +816,7 @@ pub(crate) fn chat_direct_request_projection_hook_with_key_catalog_and_drop_cont
     policy: &V3ChatDirect11Policy,
     key_catalog: &V3DirectRequestKeyHookCatalog,
     drop_context: &V3ProjectionDropContext,
-) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
+) -> V3DirectSourceResult<V3Provider12ResponsesWirePayload> {
     let candidate = &policy.target.candidate;
     let request_body = crate::selected_provider_model_binding::bind_v3_selected_provider_model(
         policy.request_body.clone(),
@@ -796,13 +824,14 @@ pub(crate) fn chat_direct_request_projection_hook_with_key_catalog_and_drop_cont
     )
     .map(crate::selected_provider_model_binding::V3SelectedProviderModelBinding::into_payload)
     .map_err(|reason| {
-        build_v3_error_01_source_raised_internal(
+        raise_v3_source_via_err01(
             V3ErrorSourceKind::RuntimeFailure,
             "V3ChatDirect11Policy",
             "selected_provider_model_binding_failed",
             reason,
-            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+            V3Err01SourceInput::Internal(V3InternalErrorCode::V3Provider12ResponsesWirePayload),
         )
+        .map(|(_, source)| source)
     })?;
     let hosted_web_search_declared = request_body
         .get("tools")
@@ -832,13 +861,14 @@ pub(crate) fn chat_direct_request_projection_hook_with_key_catalog_and_drop_cont
         )
     };
     let (mut wire_body, mut projection_drops) = projected.map_err(|error| {
-        build_v3_error_01_source_raised_internal(
+        raise_v3_source_via_err01(
             V3ErrorSourceKind::RuntimeFailure,
             "V3ChatDirect11Policy",
             "chat_wire_projection_failed",
             error,
-            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+            V3Err01SourceInput::Internal(V3InternalErrorCode::V3Provider12ResponsesWirePayload),
         )
+        .map(|(_, source)| source)
     })?;
     drop_context.restamp_and_emit(&mut projection_drops);
     wire_body = apply_v3_direct_request_key_hook_with_catalog(
@@ -863,13 +893,14 @@ pub(crate) fn chat_direct_request_projection_hook_with_key_catalog_and_drop_cont
         &profile,
     )
     .map_err(|error| {
-        build_v3_error_01_source_raised_internal(
+        raise_v3_source_via_err01(
             V3ErrorSourceKind::RuntimeFailure,
             "V3ChatDirect11Policy",
             "chat_direct_provider_compat_failed",
             error.to_string(),
-            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+            V3Err01SourceInput::Internal(V3InternalErrorCode::V3Provider12ResponsesWirePayload),
         )
+        .map(|(_, source)| source)
     })?;
     wire_body = compat_body;
     let secret = v3_provider_auth_secret_handle_from_declaration_fields(
@@ -882,13 +913,14 @@ pub(crate) fn chat_direct_request_projection_hook_with_key_catalog_and_drop_cont
         &candidate.auth_alias,
     )
     .map_err(|reason| {
-        build_v3_error_01_source_raised_internal(
+        raise_v3_source_via_err01(
             V3ErrorSourceKind::RuntimeFailure,
             "V3Provider12ResponsesWirePayload",
             "provider_auth_handle_missing",
             reason,
-            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+            V3Err01SourceInput::Internal(V3InternalErrorCode::V3Provider12ResponsesWirePayload),
         )
+        .map(|(_, source)| source)
     })?;
     build_v3_provider_12_responses_wire_payload(
         policy.request_id.clone(),
@@ -916,23 +948,27 @@ pub(crate) fn chat_direct_request_projection_hook_with_key_catalog_and_drop_cont
         wire_body,
     )
     .map_err(provider_error_source("V3Provider12ResponsesWirePayload"))
+    .map_err(Ok)
 }
 
 pub(crate) fn chat_direct_provider_transport_hook(
     wire: V3Provider12ResponsesWirePayload,
-) -> Result<V3Transport13ResponsesHttpRequest, V3Error01SourceRaised> {
+) -> V3DirectSourceResult<V3Transport13ResponsesHttpRequest> {
     crate::hub_v1::build_v3_provider_transport_request_for_protocol(
         crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
         wire,
     )
     .map_err(|error| {
-        build_v3_error_01_source_raised_internal(
+        raise_v3_source_via_err01(
             V3ErrorSourceKind::RuntimeFailure,
             "V3Transport13ResponsesHttpRequest",
             "chat_provider_transport_error",
             error,
-            internal_error_code_for_stage("V3Transport13ResponsesHttpRequest"),
+            V3Err01SourceInput::Internal(internal_error_code_for_stage(
+                "V3Transport13ResponsesHttpRequest",
+            )),
         )
+        .map(|(_, source)| source)
     })
 }
 

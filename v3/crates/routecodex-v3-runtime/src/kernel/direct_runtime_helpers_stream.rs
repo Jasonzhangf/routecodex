@@ -958,6 +958,28 @@ mod request_invalid_compat_tests {
     }
 }
 
+pub(crate) fn source_failure_output(
+    source: Result<
+        V3Error01SourceRaised,
+        crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+    >,
+    last_external_http: Option<V3ExternalHttpWitness>,
+    node_trace: Vec<&'static str>,
+    hook_registry: &V3HookRegistry,
+) -> V3ResponsesDirectRuntimeOutput {
+    match source {
+        Ok(source) => error_output(source, node_trace, hook_registry),
+        Err(fault) => {
+            let mut output = operator_fault_output(fault, node_trace, hook_registry);
+            output.terminal_disposition = Some(match last_external_http {
+                Some(witness) => V3ProviderTerminalDisposition::ExternalHttp(witness),
+                None => V3ProviderTerminalDisposition::NoResponse,
+            });
+            output
+        }
+    }
+}
+
 pub(crate) fn error_output(
     source: V3Error01SourceRaised,
     node_trace: Vec<&'static str>,
@@ -1358,6 +1380,49 @@ fn sdk_runtime_fault_output_with_observability_and_snapshots(
 #[cfg(test)]
 mod target_exhaustion_disposition_tests {
     use super::*;
+
+    #[test]
+    fn seeded_direct_source_fault_retains_prior_http_witness_and_original_cause() {
+        let original = build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3Provider12ResponsesWirePayload",
+            "request_projection_failed",
+            "seeded Direct origin",
+        );
+        let policy_failure = build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3Error01SourceRaised",
+            "err01_source_operator_sdk_failure",
+            "seeded SDK fault carrier, not a public rejection input",
+        );
+        let witness = V3ExternalHttpWitness::new(
+            429,
+            vec![("content-type".into(), b"application/json".to_vec())],
+            br#"{"error":"prior attempt limited"}"#.to_vec(),
+        );
+        let output = source_failure_output(
+            Err(
+                crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault {
+                    policy_failure: policy_failure.clone(),
+                    original_source: Some(original.clone()),
+                },
+            ),
+            Some(witness.clone()),
+            vec!["V3Provider12ResponsesWirePayload"],
+            &crate::hooks::register_responses_direct_hooks(),
+        );
+        assert_eq!(output.diagnostic_source, Some(policy_failure));
+        assert_eq!(output.diagnostic_cause, Some(original));
+        assert_eq!(
+            output.terminal_disposition,
+            Some(V3ProviderTerminalDisposition::ExternalHttp(witness))
+        );
+        assert!(output.error_chain.is_none());
+        assert!(matches!(
+            output.client_payload.body,
+            V3ClientBody::Json(serde_json::Value::Null)
+        ));
+    }
 
     #[test]
     fn direct_target_exhaustion_reaches_transport_disconnect_witness() {

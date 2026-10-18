@@ -185,7 +185,13 @@ fn direct_policy_failure(
 ) -> DirectPolicyFailure {
     DirectPolicyFailure {
         original_source: original_source.clone(),
-        policy_failure: runtime_source(source_stage, error),
+        // A policy failure is the diagnostic leaf, not another Source01 run.
+        policy_failure: build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            source_stage,
+            "v3_route_target_runtime_failure",
+            error.to_string(),
+        ),
     }
 }
 
@@ -598,13 +604,11 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         (Some(expanded), _) => Some(&expanded.candidates),
         (None, true) => None,
         (None, false) => {
-            return Err(DirectPolicyFailure {
-                original_source: source,
-                policy_failure: runtime_source(
-                    "V3Target09CandidateSetExpanded",
-                    "routed candidate set missing",
-                ),
-            })
+            return Err(direct_policy_failure(
+                &source,
+                "V3Target09CandidateSetExpanded",
+                "routed candidate set missing",
+            ))
         }
     };
     let request_local_excluded = BTreeSet::from([failed_key.clone()]);
@@ -750,25 +754,21 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         decision.action,
         V3Error05ExecutionAction::WaitThenRetrySame { .. }
     ) {
-        return Err(DirectPolicyFailure {
-            original_source: source,
-            policy_failure: runtime_source(
-                "V3Error05ExecutionDecision",
-                "retry_same is not a production provider failure action",
-            ),
-        });
+        return Err(direct_policy_failure(
+            &source,
+            "V3Error05ExecutionDecision",
+            "retry_same is not a production provider failure action",
+        ));
     }
     if !matches!(decision.action, V3Error05ExecutionAction::ProjectTerminal) {
-        return Err(DirectPolicyFailure {
-            original_source: source,
-            policy_failure: runtime_source(
-                "V3Error05ExecutionDecision",
-                format!(
-                    "provider failure produced invalid Error05 action {:?}",
-                    decision.action
-                ),
+        return Err(direct_policy_failure(
+            &source,
+            "V3Error05ExecutionDecision",
+            format!(
+                "provider failure produced invalid Error05 action {:?}",
+                decision.action
             ),
-        });
+        ));
     }
     if context.provider_pinned && health_record.state == "cooldown" {
         context
