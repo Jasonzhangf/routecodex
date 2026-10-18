@@ -8,9 +8,8 @@ use std::sync::OnceLock;
 const RESPONSE_GRAPH_JSON: &str = include_str!(
     "../../../../../docs/architecture/dagpipe/v3.operation_runner.response.graph.json"
 );
-const ERROR_GRAPH_JSON: &str = include_str!(
-    "../../../../../docs/architecture/dagpipe/v3.operation_runner.error.graph.json"
-);
+const ERROR_GRAPH_JSON: &str =
+    include_str!("../../../../../docs/architecture/dagpipe/v3.operation_runner.error.graph.json");
 
 #[derive(Clone, Copy)]
 pub(crate) enum V3OperationGraph {
