@@ -454,12 +454,12 @@ impl V3ProviderFailureRuntimeHealth {
             raise_v3_source_via_err01(
                 V3ErrorSourceKind::ProviderFailure,
                 source_stage,
-                code,
+                code.clone(),
                 message,
                 V3Err01SourceInput::External(V3ExternalErrorLink {
                     kind: V3ExternalErrorKind::Provider,
                     status: Some(status),
-                    code: error_type.map(str::to_string),
+                    code: Some(code),
                     provider_id: Some(provider_id.to_string()),
                     upstream_request_id: None,
                     message: Some(message.to_string()),

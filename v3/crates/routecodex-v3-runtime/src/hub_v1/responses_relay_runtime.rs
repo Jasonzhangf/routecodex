@@ -1264,7 +1264,7 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
         assert_eq!(output.error_operator_fault, Some(fault));
         assert!(
             output.terminal_projection.is_none(),
-            "synthetic Source01 fault must not become a client projection"
+            "seeded operator fault must not become a client projection"
         );
         assert!(failed_candidates.is_empty());
         assert!(same_candidate_retries.is_empty());
