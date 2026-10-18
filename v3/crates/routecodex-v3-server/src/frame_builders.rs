@@ -368,8 +368,14 @@ pub(crate) fn responses_direct_output_response_with_console_for_protocol(
     keepalive_interval: Option<Duration>,
     protocol: V3SseClientProtocol,
 ) -> Response<Body> {
-    if !frame.error_chain.is_empty() {
-        return model_no_response_output(frame.content_type == "text/event-stream");
+    if !frame.error_chain.is_empty() || frame.diagnostic_source.is_some() || frame.status >= 400 {
+        let mut response = Response::new(Body::empty());
+        response.extensions_mut().insert(V3ModelClientNoResponse {
+            streaming: frame.content_type == "text/event-stream",
+            diagnostic_source: frame.diagnostic_source,
+            diagnostic_cause: frame.diagnostic_cause,
+        });
+        return response;
     }
     let mut builder = Response::builder()
         .status(StatusCode::from_u16(frame.status).expect("typed V3 status"))
@@ -964,6 +970,8 @@ pub(crate) fn build_v3_server_16_http_frame_from_v3_resp_15(
         },
         error_chain,
         error_body,
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace,
         observability: None,
         stream_observation: None,
@@ -982,6 +990,8 @@ pub(crate) fn build_v3_server_16_http_frame_from_v3_error_06(
         error_node: projected.chain[5],
         error_chain: projected.chain.to_vec(),
         error_body: Some(body),
+        diagnostic_source: Some(projected.diagnostic_source),
+        diagnostic_cause: None,
         node_trace: vec!["V3Error06ClientProjected", "V3Server16HttpFrame"],
         observability: None,
         stream_observation: None,
@@ -1004,6 +1014,8 @@ pub(crate) fn build_v3_server_16_http_frame_from_v3_foundation_output(
         error_node: output.error_node,
         error_chain: output.error_chain,
         error_body,
+        diagnostic_source: output.diagnostic_source,
+        diagnostic_cause: output.diagnostic_cause,
         node_trace: output.node_trace,
         observability: None,
         stream_observation: None,
